@@ -1,0 +1,32 @@
+# Runtime config ConfigMap (Plan 11 / D-E1).
+#
+# Mounted at /etc/tide/config.yaml in the controller Deployment (see
+# templates/deployment.yaml — volumes[].configMap.name: tide-config). The
+# manager binary parses this file via internal/config.Load (CTRL-04 / Plan 04).
+# Values are sourced from Helm values.yaml; the `optional: true` on the
+# volume mount means the dev-loop deployment (kubectl apply -k config/default)
+# falls back to internal/config built-in defaults when this ConfigMap is absent.
+#
+# The ConfigMap name matches the volume's configMap.name reference produced by
+# helmify ("tide-config", not release-prefixed) so the helmify-emitted
+# Deployment template and this hand-authored ConfigMap reference each other
+# without an additional helmify rewrite step.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tide-config
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    plannerConcurrency: {{ .Values.plannerConcurrency | default 16 }}
+    executorConcurrency: {{ .Values.executorConcurrency | default 4 }}
+    maxConcurrentReconciles:
+      project: {{ .Values.maxConcurrentReconciles.project | default 1 }}
+      milestone: {{ .Values.maxConcurrentReconciles.milestone | default 1 }}
+      phase: {{ .Values.maxConcurrentReconciles.phase | default 2 }}
+      plan: {{ .Values.maxConcurrentReconciles.plan | default 4 }}
+      wave: {{ .Values.maxConcurrentReconciles.wave | default 8 }}
+      task: {{ .Values.maxConcurrentReconciles.task | default 16 }}
+    leaderElection:
+      enabled: {{ .Values.leaderElection.enabled | default true }}

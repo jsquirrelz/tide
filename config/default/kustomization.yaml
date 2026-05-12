@@ -14,8 +14,13 @@ namePrefix: tide-
 #  pairs:
 #    someName: someValue
 
+# CRDs are installed as a dedicated subchart (charts/tide-crds/) per D-E1 for safe
+# `helm upgrade`. Removing ../crd from this overlay keeps the controller chart
+# (charts/tide/, helmified from config/default) and CRD chart cleanly split. The
+# install/uninstall Makefile targets continue to apply config/crd directly via
+# kustomize for the dev-loop (kubectl apply); `make deploy` should be preceded by
+# `make install` to install the CRDs first.
 resources:
-- ../crd
 - ../rbac
 - ../manager
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in

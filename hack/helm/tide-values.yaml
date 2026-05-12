@@ -1,0 +1,96 @@
+# TIDE controller chart values (Phase 1 surface — D-E1).
+#
+# This file is the canonical, hand-maintained values.yaml for charts/tide/. The
+# `make helm-controller` target generates charts/tide/ via helmify, then copies
+# THIS file over the helmify-emitted charts/tide/values.yaml. Helmify cannot
+# infer (a) ghcr.io/jsquirrelz/* image registry, (b) the Phase 1 tunables
+# (plannerConcurrency, executorConcurrency, maxConcurrentReconciles), or (c)
+# leaderElection block — those are project-level decisions that live here,
+# version-controlled separately from helmify's regenerated output.
+#
+# Phase 5 will extend this with dashboard.enabled, prometheus.serviceMonitor.enabled,
+# and additional OSS-distribution flags (D-E2). The structure below — helmify-emitted
+# controllerManager.* keys plus hand-augmented top-level Phase 1 tunables — is the
+# Phase 5-compatible foundation.
+
+# Image refs (D-A2: ghcr.io/jsquirrelz/* registry).
+controllerManager:
+  manager:
+    args:
+    - --metrics-bind-address=:8443
+    - --config=/etc/tide/config.yaml
+    - --watch-namespace=$(WATCH_NAMESPACE)
+    - --leader-elect
+    - --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+    env:
+      # watchNamespace = "" means watch ALL namespaces (cluster-scoped install posture,
+      # AUTH-02). Set this to a specific namespace for per-namespace install — the
+      # cmd/manager/main.go --watch-namespace flag wires it through to the Manager's
+      # cache.ByObject namespace filter.
+      watchNamespace: ""
+    image:
+      repository: ghcr.io/jsquirrelz/tide-controller
+      tag: v0.1.0-dev
+      pullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: 500m
+        memory: 128Mi
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  replicas: 1
+  serviceAccount:
+    annotations: {}
+kubernetesClusterDomain: cluster.local
+metricsService:
+  ports:
+  - name: https
+    port: 8443
+    protocol: TCP
+    targetPort: 8443
+  type: ClusterIP
+webhookService:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  type: ClusterIP
+
+# Phase 1 runtime tunables (D-E1) — rendered into the tide-config ConfigMap which is
+# mounted at /etc/tide/config.yaml and parsed by internal/config.Load (CTRL-04 / Plan 04).
+#
+# Two distinct parallelism budgets per Pitfall 6: planning fans out wide (Milestone/
+# Phase/Plan reconciles), execution fans out narrow (Wave/Task reconciles). The
+# crosspool analyzer (cmd/tide-lint) prevents the two budgets from being unified at
+# compile time; this values surface keeps them separately tunable at deploy time.
+plannerConcurrency: 16
+executorConcurrency: 4
+
+# Per-Kind controller-runtime MaxConcurrentReconciles. Values match the Plan 04
+# defaults — see internal/config/defaults.go. Project/Milestone are singletons-per-
+# parent in the common case (1 is enough); Wave/Task fan out wider.
+maxConcurrentReconciles:
+  project: 1
+  milestone: 1
+  phase: 2
+  plan: 4
+  wave: 8
+  task: 16
+
+# CTRL-03 leader election. Enabled by default; the controller's
+# --leader-elect arg is appended in controllerManager.manager.args above.
+leaderElection:
+  enabled: true
+  # leaseDuration / renewDeadline / retryPeriod use controller-runtime defaults
+  # when omitted. Override here for clusters with custom timing requirements.

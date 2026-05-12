@@ -1,0 +1,15 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "tide.fullname" . }}-serving-cert
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+  - '{{ include "tide.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc'
+  - '{{ include "tide.fullname" . }}-webhook-service.{{ .Release.Namespace }}.svc.{{
+    .Values.kubernetesClusterDomain }}'
+  issuerRef:
+    kind: Issuer
+    name: '{{ include "tide.fullname" . }}-selfsigned-issuer'
+  secretName: webhook-server-cert

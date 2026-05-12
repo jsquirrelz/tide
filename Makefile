@@ -206,10 +206,13 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELMIFY ?= $(LOCALBIN)/helmify
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
 CONTROLLER_TOOLS_VERSION ?= v0.20.1
+# HELMIFY_VERSION pinned (Plan 11 / revision Info 11) for reproducible chart generation across executor runs and CI.
+HELMIFY_VERSION ?= v0.4.17
 
 #ENVTEST_VERSION is the version of controller-runtime release branch to fetch the envtest setup script (i.e. release-0.20)
 ENVTEST_VERSION ?= $(shell v='$(call gomodver,sigs.k8s.io/controller-runtime)'; \
@@ -254,6 +257,11 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 		$(GOLANGCI_LINT) custom --destination $(LOCALBIN) --name golangci-lint-custom && \
 		mv -f $(LOCALBIN)/golangci-lint-custom $(GOLANGCI_LINT); \
 	} || true
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary (pinned to HELMIFY_VERSION).
+$(HELMIFY): $(LOCALBIN)
+	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
@@ -357,3 +365,33 @@ verify-rbac-marker-discipline: ## Assert no wildcard kubebuilder:rbac markers in
 		exit 1; \
 	fi
 	@echo "OK: no RBAC wildcard markers"
+
+##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
+
+# Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:
+#   charts/tide/      — controller (Deployment, RBAC, ServiceAccount, webhook configs, …)
+#   charts/tide-crds/ — CRDs as a dedicated subchart for safe `helm upgrade` (REQ-DIST-01).
+# Phase 5 inherits this scaffold and adds dashboard templates + ServiceMonitor + LICENSE
+# headers; Phase 1 commits to the helmify-driven posture so no structural rework is needed
+# at distribution time.
+.PHONY: helm helm-controller helm-crds
+
+helm: helm-controller helm-crds ## Generate both Helm charts (controller + CRD subchart).
+
+helm-controller: manifests kustomize helmify ## Generate charts/tide/ (controller-only chart) via helmify, then augment.
+	@echo "generating charts/tide/ via helmify (controller-only)..."
+	@mkdir -p charts/tide
+	@"$(KUSTOMIZE)" build config/default | "$(HELMIFY)" charts/tide
+	@# Helmify regenerates values.yaml + Chart.yaml + deployment.yaml on every
+	@# run, wiping out project-specific augmentations (ghcr image refs, Phase 1
+	@# tunables, deduplicated webhook ports, hand-authored ConfigMap). The
+	@# augment script re-applies them from hack/helm/ so `make helm` is
+	@# idempotent and reproducible. See hack/helm/augment-tide-chart.sh for the
+	@# canonical override sources.
+	@bash hack/helm/augment-tide-chart.sh
+
+helm-crds: manifests kustomize helmify ## Generate charts/tide-crds/ (CRD subchart) via helmify, then augment.
+	@echo "generating charts/tide-crds/ via helmify (CRD subchart)..."
+	@mkdir -p charts/tide-crds
+	@"$(KUSTOMIZE)" build config/crd | "$(HELMIFY)" charts/tide-crds
+	@bash hack/helm/augment-tide-crds-chart.sh

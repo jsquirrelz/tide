@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tide.fullname" . }}-project-admin-role
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - tideproject.k8s
+  resources:
+  - projects
+  verbs:
+  - '*'
+- apiGroups:
+  - tideproject.k8s
+  resources:
+  - projects/status
+  verbs:
+  - get

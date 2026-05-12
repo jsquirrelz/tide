@@ -1,0 +1,12 @@
+apiVersion: v2
+name: tide
+description: |
+  TIDE — Topologically-Indexed Dependency Execution. A Kubernetes-native
+  orchestrator that runs hierarchical agentic coding work as a
+  topologically-sorted DAG of subagent dispatches. This chart installs the
+  controller (Deployment, RBAC, ServiceAccount, ConfigMap, webhook configs).
+  The CRDs ship as a dedicated subchart (tide-crds) so `helm upgrade` can
+  safely roll the controller without touching CRD storage (D-E1 / REQ-DIST-01).
+type: application
+version: 0.1.0-dev
+appVersion: "0.1.0-dev"

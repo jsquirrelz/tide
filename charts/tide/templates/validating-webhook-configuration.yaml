@@ -1,0 +1,49 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "tide.fullname" . }}-validating-webhook-configuration
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "tide.fullname" . }}-serving-cert
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "tide.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-tideproject-k8s-v1alpha1-plan
+  failurePolicy: Fail
+  name: vplan-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - tideproject.k8s
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - plans
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "tide.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
+      path: /validate-tideproject-k8s-v1alpha1-wave
+  failurePolicy: Fail
+  name: vwave-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - tideproject.k8s
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - waves
+  sideEffects: None
