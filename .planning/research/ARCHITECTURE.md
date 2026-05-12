@@ -226,7 +226,7 @@ mgr.Start(ctx)
 1. **etcd 1.5 MiB hard ceiling per object.** A real project's full hierarchy (one Project containing 10 Milestones × 5 Phases × 3 Plans × 30 Tasks = 4,500 Task records) embedded inline blows the limit. Splitting per Kind keeps each object small. [See etcd system limits.](https://etcd.io/docs/v3.6/dev-guide/limit/)
 2. **Watches and rate-limiting are per-Kind.** You want different reconcile concurrency for Task (high fanout, cheap reconcile) vs Project (low fanout, expensive reconcile with git push). Inline embedding collapses both into one watch.
 3. **Dashboard rendering is faster with `kubectl get plans -l project=foo` than walking nested structs.**
-4. **Label-selector queries** (label every child with `tide.io/project`, `tide.io/milestone`, `tide.io/phase`, `tide.io/plan`) make ad-hoc inspection by humans and the dashboard tractable.
+4. **Label-selector queries** (label every child with `tideproject.k8s/project`, `tideproject.k8s/milestone`, `tideproject.k8s/phase`, `tideproject.k8s/plan`) make ad-hoc inspection by humans and the dashboard tractable.
 
 `Wave` deserves its own Kind (not embedded in `Plan`) because:
 - Wave status (which wave is running, which tasks failed) is what the dashboard polls most.
@@ -262,10 +262,10 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
                 Name:      taskName(plan.Name, n.ID),
                 Namespace: plan.Namespace,
                 Labels: map[string]string{
-                    "tide.io/project":   plan.Labels["tide.io/project"],
-                    "tide.io/milestone": plan.Labels["tide.io/milestone"],
-                    "tide.io/phase":     plan.Labels["tide.io/phase"],
-                    "tide.io/plan":      plan.Name,
+                    "tideproject.k8s/project":   plan.Labels["tideproject.k8s/project"],
+                    "tideproject.k8s/milestone": plan.Labels["tideproject.k8s/milestone"],
+                    "tideproject.k8s/phase":     plan.Labels["tideproject.k8s/phase"],
+                    "tideproject.k8s/plan":      plan.Name,
                 },
                 OwnerReferences: []metav1.OwnerReference{
                     *metav1.NewControllerRef(&plan, tidev1alpha1.GroupVersion.WithKind("Plan")),
@@ -350,7 +350,7 @@ executorPool.DispatchWave(ctx, taskWaves[wave.Status.Index])
 - **Pro:** Trivial to implement (buffered channel). Zero etcd writes for capacity tracking. Restart-safe because on controller restart, the reconciler reads which Pods are currently Running and pre-charges the semaphore.
 - **Pro:** Independent budgets give the operator the two knobs the spec demands without inventing a scheduling subsystem.
 - **Con:** Multi-replica orchestrator (HA) means coordinating semaphore state. **For v1, run single-replica with leader election** ([standard controller-runtime pattern](https://book.kubebuilder.io/reference/good-practices)). HA-multi-replica with shared budget tracking is a v2 problem; one human watching one run does not need it.
-- **Con:** On controller crash, in-flight Jobs are owned by K8s, not the controller. Restart pre-charges the semaphore from `kubectl get jobs -l tide.io/role=planner --field-selector=status.active=1` — this read is what makes resumption work without persisting the semaphore.
+- **Con:** On controller crash, in-flight Jobs are owned by K8s, not the controller. Restart pre-charges the semaphore from `kubectl get jobs -l tideproject.k8s/role=planner --field-selector=status.active=1` — this read is what makes resumption work without persisting the semaphore.
 
 **Example:**
 ```go
@@ -373,7 +373,7 @@ func (p *Pool) Release() { <-p.sem }
 // Pre-charge on startup
 func (p *Pool) PreCharge(ctx context.Context, c client.Client, role string) error {
     var jobs batchv1.JobList
-    _ = c.List(ctx, &jobs, client.MatchingLabels{"tide.io/role": role})
+    _ = c.List(ctx, &jobs, client.MatchingLabels{"tideproject.k8s/role": role})
     for _, j := range jobs.Items {
         if j.Status.Active > 0 { p.sem <- struct{}{} }
     }
@@ -484,7 +484,7 @@ Tools (git CLI, language runtimes, kubectl-for-CRD-introspection if needed) are 
 - `tide project apply -f project.yaml` → `kubectl apply` equivalent for Project CRD
 - `tide project tail <name>` → watches `Project`, `Milestone`, `Phase`, `Plan`, `Wave`, `Task` events; renders a live tree like `kubectl get` but tree-shaped
 - `tide wave inspect <plan>` → prints the wave schedule and per-task status
-- `tide resume <project>` → `kubectl annotate project <p> tide.io/resume=$(date +%s)` (the annotation change re-triggers reconcile; resumption logic lives in the controller, not the CLI)
+- `tide resume <project>` → `kubectl annotate project <p> tideproject.k8s/resume=$(date +%s)` (the annotation change re-triggers reconcile; resumption logic lives in the controller, not the CLI)
 - `tide artifact get <ref>` → reads artifact off the PVC via a short-lived pod (`kubectl debug`-style) or via a dedicated read-only Service exposed by the dashboard
 
 No local cache. All state is read from the cluster on every command. This matches the "artifacts as source of truth, CRDs as cache" principle — adding a CLI-local cache would invert the hierarchy.

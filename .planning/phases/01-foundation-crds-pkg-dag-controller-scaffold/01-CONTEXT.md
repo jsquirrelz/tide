@@ -18,6 +18,7 @@ Phase 1 does not dispatch subagents, does not push to git, does not start the da
 ### Module identity & artifact paths
 - **D-A1:** Go module path is `github.com/jsquirrelz/tide`. Every internal import resolves under this prefix. Module name in `go.mod` matches.
 - **D-A2:** Container images publish to `ghcr.io/jsquirrelz/` — the controller image is `ghcr.io/jsquirrelz/tide-controller`, dashboard image (Phase 4) will be `ghcr.io/jsquirrelz/tide-dashboard`, future tide-lint analyzer image (if shipped) follows the same pattern. GHCR is free for OSS and avoids Docker Hub's anonymous-pull rate limits.
+- **D-A3:** Kubernetes API group / kubebuilder `--domain` is `tideproject.k8s` — a deliberately made-up string with a non-existent TLD (`.k8s` will never be a real TLD because of the Kubernetes trademark). Every CRD's `apiVersion` is `tideproject.k8s/v1alpha1`; every finalizer is `tideproject.k8s/<kind>-cleanup`; every label key and annotation is `tideproject.k8s/<key>`; every kubebuilder RBAC marker uses `groups=tideproject.k8s`. **Never use `tide.io`** (real registered domain not owned by this project) **or any placeholder** like `tide.local`, `example.com`, `my.domain`, etc. Collision risk is zero because the TLD cannot be registered; placeholder risk is zero because the value is deliberately chosen and committed to v1alpha1.
 
 ### Wave CRD shape
 - **D-B1:** `WaveReconciler` is the sole producer of `Wave` objects. On `Plan` reaching ready state, the reconciler runs `pkg/dag.ComputeWaves` over the Plan's Tasks and creates one `Wave` per layer with owner-ref back to the Plan. Wave names are deterministic — `tide-wave-{plan-uid}-{index}` — so re-derivation on every reconcile is idempotent. **No human or other controller creates `Wave` objects; the admission webhook rejects any client-applied `Wave`.**
@@ -46,7 +47,7 @@ Phase 1 does not dispatch subagents, does not push to git, does not start the da
 ### Claude's Discretion
 - Webhook certificate strategy for Phase 1 (envtest-only context — likely kubebuilder's auto-generated dev certs are sufficient; cert-manager integration ships when the chart matures in Phase 5).
 - Conversion-webhook scaffold shape — pick whatever kubebuilder v4.14 emits by default for a single-version CRD's hub/spoke registration; no need to add v1beta1 stubs until v1beta1 is real work.
-- Finalizer name convention — pick a `tide.io/<kind>-cleanup` form and apply uniformly.
+- Finalizer name convention — pick a `tideproject.k8s/<kind>-cleanup` form and apply uniformly.
 - Repo top-level layout details (`cmd/manager/main.go` vs `cmd/tide-controller/main.go` etc.) — follow kubebuilder v4.14 scaffold defaults except where the architecture doc's `Recommended Project Structure §` overrides.
 - Status condition vocabulary — pick a small canonical set (`Pending`, `Ready`, `Reconciling`, `Failed`) and apply uniformly across all six CRDs; document in the package.
 - Helm chart `Chart.yaml` `appVersion` / `version` initial values, image tag scheme (likely `v0.1.0-dev` pending first real release tag).

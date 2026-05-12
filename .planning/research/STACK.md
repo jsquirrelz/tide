@@ -67,7 +67,7 @@ Verified against current upstream releases as of May 2026. Where Context7 was un
 
 ```bash
 # Scaffold the project (do this once; do not redo)
-kubebuilder init --domain tide.io --repo github.com/<org>/tide
+kubebuilder init --domain tideproject.k8s --repo github.com/<org>/tide
 kubebuilder create api --group orchestration --version v1alpha1 --kind Project
 kubebuilder create api --group orchestration --version v1alpha1 --kind Milestone
 kubebuilder create api --group orchestration --version v1alpha1 --kind Phase

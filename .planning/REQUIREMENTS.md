@@ -6,7 +6,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### CRDs & Schema
 
-- [ ] **CRD-01**: TIDE defines six CRDs (`Project`, `Milestone`, `Phase`, `Plan`, `Task`, `Wave`) in `apiVersion: tide.io/v1alpha1`, each with separate `Spec` (intent) and `Status` (observed) sections
+- [ ] **CRD-01**: TIDE defines six CRDs (`Project`, `Milestone`, `Phase`, `Plan`, `Task`, `Wave`) in `apiVersion: tideproject.k8s/v1alpha1`, each with separate `Spec` (intent) and `Status` (observed) sections
 - [ ] **CRD-02**: Each CRD declares owner-reference cascade to its parent in the hierarchy with `BlockOwnerDeletion: true`, scoped same-namespace
 - [ ] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
 - [ ] **CRD-04**: A validating admission webhook handles the cross-object invariants CEL can't express (notably cycle detection across the declared task DAG)

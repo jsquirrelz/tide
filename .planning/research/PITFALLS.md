@@ -306,7 +306,7 @@ Watches are eventually consistent. The informer cache is a *snapshot*. Two recon
 - `Job` names are randomized (sign that they're not idempotent)
 - Two Jobs found for the same Task UID in a debug session
 - Doubled token spend on a single run
-- `kubectl get jobs -l tide.io/task=<uid>` returns >1 active job
+- `kubectl get jobs -l tideproject.k8s/task=<uid>` returns >1 active job
 
 **Phase to address:**
 Phase 2 (subagent dispatch). Idempotent dispatch is the first thing to get right; retrofitting it later is much harder.
@@ -413,7 +413,7 @@ The controller needs to manage CRDs in the project's namespace. Initially the RB
 RBAC files are tedious. Wildcards are easy. The first time something doesn't work, "give it cluster-admin and verify the rest works" is the fast debug path that often becomes the permanent fix.
 
 **How to avoid:**
-- Use kubebuilder RBAC markers per controller (`+kubebuilder:rbac:groups=tide.io,resources=tasks,verbs=get;list;watch;update;patch`). Never wildcards.
+- Use kubebuilder RBAC markers per controller (`+kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;update;patch`). Never wildcards.
 - Strictly enumerate verbs and resources. `verbs=*` and `resources=*` rejected at PR review.
 - Project-namespace-scoped: most permissions are Role + RoleBinding in the project's namespace, not ClusterRole. The only ClusterRole TIDE needs is for cluster-scoped resources it watches (and ideally there are none).
 - The Helm chart installs the minimum RBAC needed for the feature flags enabled. Optional features (e.g. cluster-wide dashboards) require *opting in* to additional permissions.
@@ -436,7 +436,7 @@ Phase 1 (controller scaffold). Kubebuilder markers on every controller from the 
 **Severity:** Catastrophic (post-v1; planning matters now)
 
 **What goes wrong:**
-v1.0 ships with CRD `tasks.tide.io/v1`. v1.1 adds a required field; existing Task resources in clusters that upgraded fail validation; clusters refuse to upgrade; users must `kubectl delete` Tasks before upgrading, losing run state. Or: a field is renamed without a conversion webhook; old objects in etcd cannot be deserialized; the controller crashloops on startup; only a full wipe and reinstall recovers.
+v1.0 ships with CRD `tasks.tideproject.k8s/v1`. v1.1 adds a required field; existing Task resources in clusters that upgraded fail validation; clusters refuse to upgrade; users must `kubectl delete` Tasks before upgrading, losing run state. Or: a field is renamed without a conversion webhook; old objects in etcd cannot be deserialized; the controller crashloops on startup; only a full wipe and reinstall recovers.
 
 Helm makes this worse: "CRDs are never installed on upgrade or rollback" by default — Helm v3 doesn't update CRDs to prevent accidental data loss, which causes version skew ([Helm CRD installation upgrades guide 2026](https://oneuptime.com/blog/post/2026-01-17-helm-crd-installation-upgrades/view)).
 
@@ -587,7 +587,7 @@ Phase 2 (Subagent interface). The stub impl ships with the interface, before the
 **Severity:** Serious
 
 **What goes wrong:**
-Project CRDs have finalizers (`tide.io/cleanup-jobs`). The controller crashes during a `Project` deletion; the finalizer is not removed. The Project is stuck in `Terminating` forever; its namespace is stuck in `Terminating` forever; users can't redeploy; the only fix is `kubectl patch ... --type=merge -p '{"metadata":{"finalizers":null}}'`. This is a documented K8s pain point ([Kubernetes Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/), [Jorijn: namespace stuck in Terminating](https://jorijn.com/en/knowledge-base/kubernetes/troubleshooting/kubernetes-namespace-stuck-terminating/)).
+Project CRDs have finalizers (`tideproject.k8s/cleanup-jobs`). The controller crashes during a `Project` deletion; the finalizer is not removed. The Project is stuck in `Terminating` forever; its namespace is stuck in `Terminating` forever; users can't redeploy; the only fix is `kubectl patch ... --type=merge -p '{"metadata":{"finalizers":null}}'`. This is a documented K8s pain point ([Kubernetes Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/), [Jorijn: namespace stuck in Terminating](https://jorijn.com/en/knowledge-base/kubernetes/troubleshooting/kubernetes-namespace-stuck-terminating/)).
 
 **Why it happens:**
 Finalizers are the right tool for cleanup; their failure modes are easy to underestimate. A finalizer that depends on an external system (git remote, LLM provider) inherits that system's downtime as deletion downtime.

@@ -40,7 +40,7 @@
 ### Claude's Discretion
 - Webhook certificate strategy for Phase 1 (envtest-only — kubebuilder's auto-generated dev certs sufficient; cert-manager integration ships Phase 5)
 - Conversion-webhook scaffold shape — pick whatever kubebuilder v4.14 emits for a single-version CRD's hub/spoke registration; no v1beta1 stubs until real
-- Finalizer name convention — pick a `tide.io/<kind>-cleanup` form and apply uniformly
+- Finalizer name convention — pick a `tideproject.k8s/<kind>-cleanup` form and apply uniformly
 - Repo top-level layout details (`cmd/manager/main.go` vs `cmd/tide-controller/main.go`) — follow kubebuilder v4.14 scaffold defaults except where Recommended Project Structure overrides
 - Status condition vocabulary — pick a small canonical set (`Pending`, `Ready`, `Reconciling`, `Failed`) and apply uniformly across all six CRDs
 - Helm `Chart.yaml` `appVersion` / `version` initial values, image tag scheme (likely `v0.1.0-dev` pending first real release tag)
@@ -64,7 +64,7 @@
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| CRD-01 | Six CRDs in `apiVersion: tide.io/v1alpha1` with Spec/Status separation | §CRD Schema Shape; §kubebuilder Scaffolding Sequence |
+| CRD-01 | Six CRDs in `apiVersion: tideproject.k8s/v1alpha1` with Spec/Status separation | §CRD Schema Shape; §kubebuilder Scaffolding Sequence |
 | CRD-02 | Owner-reference cascade with `BlockOwnerDeletion: true`, scoped same-namespace | §Owner-Ref Helper; cites ARCHITECTURE.md Pattern 2 |
 | CRD-03 | CEL validation rules for invariants CEL can express | §CEL Validation Markers Per Kind |
 | CRD-04 | Validating admission webhook scaffold (no-op in P1) | §Webhook Scaffolding |
@@ -146,7 +146,7 @@ The exact command sequence to produce the v1alpha1 scaffold. Run **once**; do no
 ```bash
 # 1. Initialize the project (sets go.mod, Makefile, Dockerfile, config/, hack/, etc.)
 kubebuilder init \
-  --domain tide.io \
+  --domain tideproject.k8s \
   --repo github.com/jsquirrelz/tide \
   --owner "TIDE Authors" \
   --license apache2 \
@@ -202,7 +202,7 @@ make manifests   # CRD YAML in config/crd/bases/, RBAC YAML in config/rbac/, web
 
 ## CRD Schema Shape (six Kinds)
 
-All six CRDs live in `api/v1alpha1/`. Group: `tide.io`. Version: `v1alpha1`. Scope: **Namespaced** for all six.
+All six CRDs live in `api/v1alpha1/`. Group: `tideproject.k8s`. Version: `v1alpha1`. Scope: **Namespaced** for all six.
 
 ### Status Condition Vocabulary (apply uniformly across all six)
 
@@ -539,7 +539,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
     }
 
     // 2. Finalizer: if being deleted, run bounded-deadline cleanup, then remove finalizer.
-    finalizerName := "tide.io/project-cleanup"
+    finalizerName := "tideproject.k8s/project-cleanup"
     if !project.DeletionTimestamp.IsZero() {
         return r.handleDeletion(ctx, &project, finalizerName)
     }
@@ -627,7 +627,7 @@ func main() {
     mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
         Scheme:                 scheme,
         LeaderElection:         true,
-        LeaderElectionID:       "tide-controller-leader.tide.io",
+        LeaderElectionID:       "tide-controller-leader.tideproject.k8s",
         HealthProbeBindAddress: ":8081",
         Metrics: metricsserver.Options{BindAddress: ":8080"},
         WebhookServer: webhook.NewServer(webhook.Options{Port: 9443}),
@@ -639,10 +639,10 @@ func main() {
     executorPool := pool.New(cfg.ExecutorConcurrency, "executor")
 
     // 2. Pre-charge from live Jobs per POOL-02.
-    if err := plannerPool.PreCharge(ctx, mgr.GetClient(), "tide.io/role=planner"); err != nil {
+    if err := plannerPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=planner"); err != nil {
         log.Error(err, "planner pool pre-charge")
     }
-    if err := executorPool.PreCharge(ctx, mgr.GetClient(), "tide.io/role=executor"); err != nil {
+    if err := executorPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=executor"); err != nil {
         log.Error(err, "executor pool pre-charge")
     }
 
@@ -795,7 +795,7 @@ func HandleDeletion(
 
 **Phase 1 cleanup is a no-op** for all six Kinds (no Jobs exist yet to clean up). The recipe ships; the cleanup function bodies grow with Phase 2's dispatch.
 
-**Finalizer name convention** (Claude's Discretion per CONTEXT.md): `tide.io/<kind>-cleanup` — e.g. `tide.io/project-cleanup`, `tide.io/wave-cleanup`.
+**Finalizer name convention** (Claude's Discretion per CONTEXT.md): `tideproject.k8s/<kind>-cleanup` — e.g. `tideproject.k8s/project-cleanup`, `tideproject.k8s/wave-cleanup`.
 
 **Bounded deadline:** Recommend 5 minutes for the cleanup timeout (matches Pitfall 21's documented industry pattern). Configurable per-Kind if cleanup grows expensive; Phase 1 uses a single constant.
 
@@ -1220,9 +1220,9 @@ If envtest webhook setup proves fiddly, the kubebuilder docs at https://book.kub
 Every reconciler declares its RBAC markers as Go comments above `Reconcile`:
 
 ```go
-// +kubebuilder:rbac:groups=tide.io,resources=projects,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=tide.io,resources=projects/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=tide.io,resources=projects/finalizers,verbs=update
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=projects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 func (r *ProjectReconciler) Reconcile(...) { ... }
 ```
@@ -1652,13 +1652,13 @@ Source: matches the spec's worked example in `README.md` Wave Computation sectio
 
 ```yaml
 # config/samples/tide_v1alpha1_task_delta.yaml
-apiVersion: tide.io/v1alpha1
+apiVersion: tideproject.k8s/v1alpha1
 kind: Task
 metadata:
   name: delta
   namespace: tide-samples
   labels:
-    tide.io/plan: sample-plan
+    tideproject.k8s/plan: sample-plan
 spec:
   planRef: sample-plan
   dependsOn:

@@ -33,7 +33,7 @@
 |--------|-------------|----------|
 | `github.com/justinsearles/tide` | Personal namespace; easy to move later | |
 | `github.com/tideproject/tide` (Recommended) | Project-namespaced GitHub org; signals OSS intent | |
-| `tide.io/tide` | Vanity path via meta-redirect; strongest OSS branding, non-trivial setup | |
+| `tideproject.k8s/tide` | Vanity path via meta-redirect; strongest OSS branding, non-trivial setup | |
 | (Other) `github.com/jsquirrelz/tide` | User's actual personal-namespace handle | ✓ |
 
 **User's choice:** `github.com/jsquirrelz/tide`
@@ -203,13 +203,42 @@
 
 ---
 
+## H. K8s API group / kubebuilder `--domain` (added post-planning, pre-execution)
+
+This area was not surfaced during the initial discuss-phase pass — the planner inherited an assumed default of `tide.io` from the research artifacts (which had been generated before the domain question was raised). Caught at execute-phase boot when reviewing Plan 01's `kubebuilder init --domain tide.io` invocation.
+
+### H1. The placeholder/registered-domain problem
+
+The user flagged that `tide.io` is a real registered domain not owned by this project — collision risk + false provenance for an OSS posture. Also rejected placeholders (`tide.local`, `example.com`, `my.domain`, etc.) on principle: "make a concrete decision and document it; no TBD."
+
+### H2. Candidate domain
+
+**First pass** — Claude proposed `tide.justinsearl.es` (subdomain of user's owned email domain) or registering a project domain (`tide.run`, `tideproject.dev`, etc.).
+
+**User counter-proposal:** `k8s.tide.ai`. Claude flagged `tide.ai` is `.ai` ccTLD (~$60-90/yr) and noted couldn't verify ownership from session context.
+
+**User decision:** `tide.ai` is taken and not owned. Reverted to the "made-up string" approach Claude had mentioned (K8s validates only DNS-1123 syntax; doesn't require domain ownership).
+
+### H3. Made-up string selection
+
+| Candidate | Description | Selected |
+|--------|-------------|----------|
+| `tide.tide` | Project-name as both subdomain and TLD; self-namespacing; can't be registered (`.tide` will never be a real TLD) | |
+| `tideproject.k8s` | `.k8s` will never be a real TLD (Kubernetes trademark blocks any application); more descriptive than `tide.tide`; slightly longer in every CRD/finalizer/label | ✓ |
+| `tide.local` | mDNS-conventional but collides with other `.local` operators in shared clusters — bad for OSS | |
+
+**User's choice:** `tideproject.k8s`
+**Notes:** Locked as D-A3 in CONTEXT.md. Rewrite landed across 15 files (103 occurrences of `tide.io` → `tideproject.k8s`) — CRDs, finalizers, label keys, RBAC markers, kubebuilder `--domain` flag, sample YAMLs. No code yet exists, so the rewrite is pre-execution; v1alpha1 schema commits with `tideproject.k8s` as its API group from day one.
+
+---
+
 ## Claude's Discretion
 
 The following items the user explicitly deferred to Claude's judgment during planning/execution:
 
 - Webhook certificate strategy in Phase 1 (envtest-only context — kubebuilder dev defaults likely fine)
 - Conversion-webhook scaffold internals (kubebuilder v4.14 default emission)
-- Finalizer name convention (`tide.io/<kind>-cleanup` pattern, applied uniformly)
+- Finalizer name convention (`tideproject.k8s/<kind>-cleanup` pattern, applied uniformly)
 - Repo top-level layout details beyond what the architecture doc specifies
 - Status condition vocabulary across the six CRDs (small canonical set)
 - `Chart.yaml` `appVersion` / `version` initial values, image tag scheme
