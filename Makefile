@@ -330,3 +330,30 @@ verify-no-blocking: ## Assert no time.Sleep or <-time.After in reconciler bodies
 		exit 1; \
 	fi
 	@echo "OK: no blocking I/O in reconcile bodies"
+
+##@ RBAC wildcard gates (AUTH-03 / Pitfall 15)
+
+.PHONY: verify-no-rbac-wildcards
+verify-no-rbac-wildcards: ## Assert no RBAC wildcards in config/rbac/ generated manifests (AUTH-03 / Pitfall 15).
+	@echo "verifying no RBAC wildcards in config/rbac/ (AUTH-03 / Pitfall 15)..."
+	@MATCHES=$$(grep -nrE 'verbs:.*"?\*"?|resources:.*"?\*"?' config/rbac/ 2>/dev/null || true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "AUTH-03 violation: RBAC wildcards detected:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no RBAC wildcards"
+
+.PHONY: verify-rbac-marker-discipline
+verify-rbac-marker-discipline: ## Assert no wildcard kubebuilder:rbac markers in source (AUTH-03 / Pitfall 15).
+	@echo "verifying no RBAC wildcards in source markers (AUTH-03 / Pitfall 15)..."
+	@# Scoped to *_controller.go (production reconciler files only). Test files
+	@# legitimately contain marker-shaped string literals as fixtures
+	@# (e.g. internal/controller/rbac_guard_test.go's TestRBACMarkerDiscipline*).
+	@MATCHES=$$(grep -nE 'kubebuilder:rbac.*verbs=\*|kubebuilder:rbac.*resources=\*' internal/controller/*_controller.go || true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "AUTH-03 violation: RBAC wildcard markers detected:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no RBAC wildcard markers"

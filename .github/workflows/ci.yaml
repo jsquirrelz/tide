@@ -49,6 +49,12 @@ jobs:
       - name: Verify no DB drivers (PERSIST-01)
         run: make verify-no-sqlite-dep
 
+      - name: Verify no RBAC wildcards (AUTH-03 / Pitfall 15)
+        run: make verify-no-rbac-wildcards
+
+      - name: Verify RBAC marker discipline (AUTH-03)
+        run: make verify-rbac-marker-discipline
+
       - name: Run custom analyzers (POOL-03 / Pitfall 6)
         run: make tide-lint
 
