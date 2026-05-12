@@ -42,7 +42,7 @@ Plans:
 - [x] 01-03-PLAN.md — POOL-03 custom analyzer + cmd/tide-lint + CI gate (Wave 1)
 - [x] 01-04-PLAN.md — internal helper packages (owner, finalizer, pool, config) + dispatch placeholder (Wave 1)
 - [x] 01-05-PLAN.md — CRD types (Spec/Status) + CEL markers + shared status conditions + PERSIST-02 gate (Wave 2)
-- [ ] 01-06-PLAN.md — Six reconcilers at Standard depth + envtest assertions + Pitfall 1 gate (Wave 2)
+- [x] 01-06-PLAN.md — Six reconcilers at Standard depth + envtest assertions + Pitfall 1 gate (Wave 2)
 - [ ] 01-07-PLAN.md — Plan + Wave webhook no-op bodies with Phase 2 wire-points + envtest assertions (Wave 2)
 - [ ] 01-08-PLAN.md — cmd/manager/main.go Manager wiring + leader-election envtest (Wave 3)
 - [ ] 01-09-PLAN.md — Per-Kind RBAC marker audit + AUTH-03 CI gate (Wave 3)

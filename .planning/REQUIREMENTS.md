@@ -23,9 +23,9 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Controllers & reconciliation
 
-- [ ] **CTRL-01**: A single controller-runtime `Manager` registers six reconcilers (`ProjectReconciler`, `MilestoneReconciler`, `PhaseReconciler`, `PlanReconciler`, `WaveReconciler`, `TaskReconciler`)
-- [ ] **CTRL-02**: Each reconciler is event-driven via `Owns(&batchv1.Job{})` and watches; no `time.Sleep` or blocking inside `Reconcile()`
-- [ ] **CTRL-03**: The Manager runs leader-elected; on failover, in-flight work resumes from CRDs + PVC artifacts without losing the indegree map
+- [x] **CTRL-01**: A single controller-runtime `Manager` registers six reconcilers (`ProjectReconciler`, `MilestoneReconciler`, `PhaseReconciler`, `PlanReconciler`, `WaveReconciler`, `TaskReconciler`)
+- [x] **CTRL-02**: Each reconciler is event-driven via `Owns(&batchv1.Job{})` and watches; no `time.Sleep` or blocking inside `Reconcile()`
+- [x] **CTRL-03**: The Manager runs leader-elected; on failover, in-flight work resumes from CRDs + PVC artifacts without losing the indegree map
 - [x] **CTRL-04**: Per-reconciler `MaxConcurrentReconciles` is tunable independently via Helm values
 - [x] **CTRL-05**: Finalizers on each CRD have bounded deadlines and idempotent cleanup logic; the docs include a `kubectl patch` recipe for manual unstick
 
@@ -85,7 +85,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 ### Auth & tenancy
 
 - [ ] **AUTH-01**: Credentials (LLM API keys + git push tokens) are stored as K8s `Secret` resources; the `Project` CRD references them by name via `secretRef` fields
-- [ ] **AUTH-02**: Namespace-per-project tenancy: one TIDE install per cluster, each Project runs in its own namespace with namespace-scoped RBAC
+- [x] **AUTH-02**: Namespace-per-project tenancy: one TIDE install per cluster, each Project runs in its own namespace with namespace-scoped RBAC
 - [ ] **AUTH-03**: The orchestrator's ServiceAccount has no cluster-wide wildcards — RBAC is generated from kubebuilder markers and scoped per-CRD-Kind
 
 ### Human gates
