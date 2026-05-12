@@ -10,7 +10,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 - [ ] **CRD-02**: Each CRD declares owner-reference cascade to its parent in the hierarchy with `BlockOwnerDeletion: true`, scoped same-namespace
 - [ ] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
 - [ ] **CRD-04**: A validating admission webhook handles the cross-object invariants CEL can't express (notably cycle detection across the declared task DAG)
-- [ ] **CRD-05**: Conversion-webhook scaffolding is in place from day one, even though only `v1alpha1` exists in v1
+- [x] **CRD-05**: Conversion-webhook scaffolding is in place from day one, even though only `v1alpha1` exists in v1
 - [ ] **CRD-06**: kubebuilder RBAC markers grant the orchestrator the minimum verbs per Kind — no wildcards anywhere
 
 ### Kahn-layered DAG library
@@ -135,9 +135,9 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Bootstrap & self-hosting
 
-- [ ] **BOOT-01**: M0 ("TIDE-on-host runs TIDE-on-self") is a roadmap-named milestone: the developer's host runs `get-shit-done` workflows that produce TIDE's CRDs, `pkg/dag`, controllers, harness, and dispatch — bounded scope, no in-cluster execution yet
+- [x] **BOOT-01**: M0 ("TIDE-on-host runs TIDE-on-self") is a roadmap-named milestone: the developer's host runs `get-shit-done` workflows that produce TIDE's CRDs, `pkg/dag`, controllers, harness, and dispatch — bounded scope, no in-cluster execution yet
 - [ ] **BOOT-02**: M_self ("TIDE-in-cluster authors same artifacts") is a roadmap-named milestone: a fresh `kind` cluster with a freshly Helm-installed TIDE runs a Project that authors a complete next-milestone artifact set on this repo
-- [ ] **BOOT-03**: M0 and M_self commit to the same `v1alpha1` CRD schema — no breaking schema changes across the bootstrap bridge
+- [x] **BOOT-03**: M0 and M_self commit to the same `v1alpha1` CRD schema — no breaking schema changes across the bootstrap bridge
 - [ ] **BOOT-04**: The v1 release acceptance test is: fresh kind cluster + `helm install tide` + `kubectl apply -f project.yaml` drives this repo's next milestone end-to-end, producing committed artifacts on a per-run branch and a clean status
 
 ## v1.x / Deferred Requirements

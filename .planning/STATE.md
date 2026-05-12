@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 1 plans ready; execution blocked on missing Go + kubebuilder toolchain
-last_updated: "2026-05-12T19:01:29.517Z"
-last_activity: 2026-05-12 — Roadmap created (5 phases, 82 v1 requirements mapped, granularity standard)
+status: executing
+stopped_at: Completed 01-01-PLAN.md (kubebuilder scaffold)
+last_updated: "2026-05-12T20:00:23.945Z"
+last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 1 — Foundation — CRDs, pkg/dag, Controller Scaffold
+**Current focus:** Phase 01 — Foundation — CRDs, pkg/dag, Controller Scaffold
 
 ## Current Position
 
-Phase: 1 of 5 (Foundation — CRDs, pkg/dag, Controller Scaffold)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-05-12 — Roadmap created (5 phases, 82 v1 requirements mapped, granularity standard)
+Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
+Plan: 2 of 11
+Status: Ready to execute
+Last activity: 2026-05-12
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P01 | 12min | 4 tasks | 80 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - Read-only web dashboard (all mutations via CLI/kubectl, single auth surface)
 - Apache 2.0 license
 - OpenTelemetry tracing with OpenInference conventions (hand-rolled `pkg/otelai`, no Go SDK exists)
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Use kubebuilder --domain k8s + --group tideproject to produce final API group tideproject.k8s (per D-A3); the plan body's --domain tideproject.k8s --group tide recipe would have produced tide.tideproject.k8s and was corrected
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: kubebuilder v4.14 places Plan conversion Hub() marker in api/v1alpha1/plan_conversion.go (separate from plan_webhook.go); CRD-05 satisfied across the file pair
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: controller-runtime v0.23.3 -> v0.24.1 upgrade required no cmd/main.go fixup; kubebuilder v4.14 already emits the v0.24 generics-based two-arg WebhookManagedBy form
 
 ### Pending Todos
 
@@ -86,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T19:01:29.507Z
-Stopped at: Phase 1 plans ready; execution blocked on missing Go + kubebuilder toolchain
-Resume file: .planning/phases/01-foundation-crds-pkg-dag-controller-scaffold/01-01-PLAN.md
+Last session: 2026-05-12T20:00:15.981Z
+Stopped at: Completed 01-01-PLAN.md (kubebuilder scaffold)
+Resume file: None
