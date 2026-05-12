@@ -11,7 +11,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 - [x] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
 - [x] **CRD-04**: A validating admission webhook handles the cross-object invariants CEL can't express (notably cycle detection across the declared task DAG)
 - [x] **CRD-05**: Conversion-webhook scaffolding is in place from day one, even though only `v1alpha1` exists in v1
-- [ ] **CRD-06**: kubebuilder RBAC markers grant the orchestrator the minimum verbs per Kind — no wildcards anywhere
+- [x] **CRD-06**: kubebuilder RBAC markers grant the orchestrator the minimum verbs per Kind — no wildcards anywhere
 
 ### Kahn-layered DAG library
 
@@ -86,7 +86,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 - [ ] **AUTH-01**: Credentials (LLM API keys + git push tokens) are stored as K8s `Secret` resources; the `Project` CRD references them by name via `secretRef` fields
 - [x] **AUTH-02**: Namespace-per-project tenancy: one TIDE install per cluster, each Project runs in its own namespace with namespace-scoped RBAC
-- [ ] **AUTH-03**: The orchestrator's ServiceAccount has no cluster-wide wildcards — RBAC is generated from kubebuilder markers and scoped per-CRD-Kind
+- [x] **AUTH-03**: The orchestrator's ServiceAccount has no cluster-wide wildcards — RBAC is generated from kubebuilder markers and scoped per-CRD-Kind
 
 ### Human gates
 
