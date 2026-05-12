@@ -59,6 +59,7 @@ type PlanStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
 
 // Plan is the Schema for the plans API
