@@ -128,7 +128,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Testing
 
-- [ ] **TEST-01**: Unit tests (no LLM, no K8s) cover `pkg/dag`, `pkg/dispatch` envelope encoding/decoding, harness redaction, idempotent Job name generation; run in <30s on CI
+- [x] **TEST-01**: Unit tests (no LLM, no K8s) cover `pkg/dag`, `pkg/dispatch` envelope encoding/decoding, harness redaction, idempotent Job name generation; run in <30s on CI
 - [ ] **TEST-02**: Integration tests use `envtest` + `kind` + `stub-subagent` to exercise full reconcile chains without LLM cost; run in <5 min
 - [ ] **TEST-03**: A nightly live E2E test exercises one real Claude-backed Project against a fixture repo, budget-capped per run
 - [ ] **TEST-04**: The `chaos-resume` test (kill orchestrator mid-wave) runs in the integration tier

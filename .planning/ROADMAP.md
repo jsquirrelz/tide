@@ -47,7 +47,7 @@ Plans:
 - [x] 01-08-PLAN.md — cmd/manager/main.go Manager wiring + leader-election envtest (Wave 3)
 - [x] 01-09-PLAN.md — Per-Kind RBAC marker audit + AUTH-03 CI gate (Wave 3)
 - [x] 01-10-PLAN.md — α…θ sample CRDs in config/samples/ (Wave 3)
-- [ ] 01-11-PLAN.md — Helm chart pair via helmify + final CI workflow with TEST-01 timing assertion (Wave 3)
+- [x] 01-11-PLAN.md — Helm chart pair via helmify + final CI workflow with TEST-01 timing assertion (Wave 3)
 
 ### Phase 2: Dispatch & Plan Validation — Innermost Reconcilers + Harness
 **Goal**: A working dogfood-critical pair — `TaskReconciler` + `WaveReconciler` — can dispatch a manually-applied Plan-with-tasks against a stub subagent image, honor wave boundaries with strict-by-default per-task indegree decrement, enforce per-Task and per-Project budget caps in the harness, validate plans at admission for cycles and file-touch consistency, and survive 429s from a fake provider via a token-bucket rate limiter. No LLM tokens are spent in this phase's tests.

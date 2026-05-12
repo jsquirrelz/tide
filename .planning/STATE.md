@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-09-PLAN.md (RBAC wildcard gates + programmatic guard test + AUTH-02 verification)
-last_updated: "2026-05-12T21:46:49.832Z"
+stopped_at: Completed 01-11-PLAN.md (Helm chart pair + finalized CI with TEST-01 timing assertion); Phase 1 complete
+last_updated: "2026-05-12T22:11:12.782Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -62,6 +62,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01 P07 | 8min | 2 tasks | 8 files |
 | Phase 01 P08 | 30min | 2 tasks | 5 files |
 | Phase 01 P09 | 5min | 2 tasks | 5 files |
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P11 | 19min | 2 tasks | 52 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Leader-election envtest asserts HolderIdentity *changes* across failover rather than matching a specific identity label — controller-runtime's HolderIdentity is hostname+uuid with neither component user-controllable, so the identity-changes assertion is the strongest CTRL-03 contract the envtest harness can express
 - [Phase 01]: Plan 09: Scoped verify-rbac-marker-discipline to internal/controller/*_controller.go (not *.go) per Plan 06 verify-no-blocking precedent — resolves self-contradiction between plan body's marker-grep scope and revision Warning 4's rbac_guard_test.go fixture file containing marker-shaped string literals
 - [Phase 01]: Plan 09: Same-line wildcard regex (verbs:.*"?\*"?) is intentionally permissive to multi-line kubebuilder-scaffolded admin role YAMLs (which carry verbs: ['*'] over two lines). Those roles are documented 'not used by the project tide itself' and the gate's contract is the orchestrator's own role.yaml from controller-gen's same-line marker output. Phase 11 may extend the regex or comment-out admin roles in kustomization.yaml
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Helm chart pair (controller + CRD subchart) via pinned helmify v0.4.17 + hack/helm augment layer for idempotent regeneration
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: test-only Makefile target separates go test from prep deps so TEST-01 30s budget measures actual test runtime
 
 ### Pending Todos
 
@@ -122,6 +125,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T21:46:49.822Z
-Stopped at: Completed 01-09-PLAN.md (RBAC wildcard gates + programmatic guard test + AUTH-02 verification)
+Last session: 2026-05-12T22:11:12.770Z
+Stopped at: Completed 01-11-PLAN.md (Helm chart pair + finalized CI with TEST-01 timing assertion); Phase 1 complete
 Resume file: None
