@@ -14,19 +14,18 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 <!-- Shipped and confirmed valuable. -->
 
-(None yet — ship to validate)
+- [x] **CRD set defining Project, Milestone, Phase, Plan, Task (and any orchestrator-internal Run/Wave bookkeeping)** — *Validated in Phase 1: Foundation*. Six CRDs in `v1alpha1` under group `tideproject.k8s` with Spec/Status separation, owner-ref cascade (`BlockOwnerDeletion: true`), CEL inline validation, and validating-admission + conversion-webhook scaffolding (firing as no-ops; Phase 2 wires cycle detection).
+- [x] **Layered Kahn algorithm in Go (pure-Go stdlib `pkg/dag`)** — *Validated in Phase 1: Foundation*. `ComputeWaves(nodes, edges) ([][]string, error)` + `CycleError` shape; α…θ regression fixture pins the spec's worked example; DAG-05 import firewall via `make verify-dag-imports` + `tools/analyzers/dagimports/` analyzer with 97% test coverage. Cycle detection is wired at the algorithm layer; Phase 2 wires it into the Plan admission webhook.
+- [x] **CRD-`status`-only persistence (no external DB, no SQLite for v1)** — *Validated in Phase 1: Foundation*. `make verify-no-sqlite-dep` greps go.mod for SQLite/Postgres/gorm; `make verify-no-aggregates` greps `api/v1alpha1/*_types.go` for `Schedule`/`Waves[]`/`IndegreeMap`. Both CI-gated; programmatic guard tests in `api/v1alpha1/aggregates_guard_test.go`.
+- [x] **Namespace-per-project tenancy with namespace-scoped RBAC** — *Validated in Phase 1: Foundation* (runtime portion). Every reconciler has `WatchNamespace string` field + `predicate.NewPredicateFuncs` + `WithEventFilter` in `SetupWithManager`; Manager binary has `--watch-namespace` flag. Per-namespace `RoleBinding` template lands in Phase 5's Helm chart per the AUTH-02 traceability split.
 
 ### Active
 
 <!-- Current scope. Building toward these. v1 = self-hosting MVP. -->
 
-- [ ] CRD set defining Project, Milestone, Phase, Plan, Task (and any orchestrator-internal Run/Wave bookkeeping)
-- [ ] Go controller (controller-runtime) reconciling each CRD level, watching status transitions, dispatching subagents
-- [ ] Layered Kahn algorithm in Go, runs on both the Planning DAG and the Execution DAG, cycle detection at validation time
+- [ ] Go controller (controller-runtime) reconciling each CRD level, watching status transitions, dispatching subagents — *Phase 1 scaffold landed (six reconcilers at Standard depth with owner refs + finalizers + status conditions; Dispatcher field nil-guarded); Phase 2 wires dispatch*
 - [ ] Pluggable Subagent interface — `Pod-per-task Job + typed result envelope on artifact PVC + exit code` is the contract; at least one concrete implementation (Claude Code or direct Anthropic SDK in-container)
 - [ ] Artifact persistence: shared PVC during a run; orchestrator pushes to the target repo's git remote at each level boundary
-- [ ] CRD-`status`-only persistence — per-task CRD with small status block, in-process indegree cache, no external DB and no SQLite for v1
-- [ ] Namespace-per-project tenancy — one TIDE install per cluster, projects isolated by namespace, RBAC scoped accordingly
 - [ ] Credentials via K8s `Secret` references on the `Project` CRD (LLM API keys + git push creds)
 - [ ] Strict-by-default failure profile at wave boundaries (failed task → dependents never dispatch; non-dependents continue)
 - [ ] Thin `tide` CLI wrapping the common ops (apply a project, tail a run, inspect a wave, resume)
@@ -77,14 +76,14 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Go + controller-runtime + kubebuilder | K8s ecosystem default; idiomatic CRDs/controllers; best contributor pool for an OSS K8s operator | — Pending |
+| Go + controller-runtime + kubebuilder | K8s ecosystem default; idiomatic CRDs/controllers; best contributor pool for an OSS K8s operator | ✓ Validated in Phase 1 — Go 1.26 + controller-runtime v0.24.1 + kubebuilder v4.14.0 pinned and shipping |
 | v1 = self-hosting MVP (TIDE drives its own next milestone) | Dogfood test proves paradigm and implementation simultaneously; bounded scope that's still real work | — Pending |
 | Pluggable Subagent interface from day one | Spec is provider-agnostic; OSS posture demands no vendor lock-in; defining the contract early prevents Anthropic-specific code leaking into the orchestrator | — Pending |
 | Pod-per-task K8s Job + result envelope on PVC + log streaming | Simplest contract that's K8s-native and matches how Claude Code already runs; streaming gRPC sidecar deferred to v2 behind the same interface | — Pending |
 | Reimplement GSD paradigm in Go (not vendor Markdown) | TIDE is the production K8s generalization of the paradigm, not a port; vendoring workflows would couple TIDE to a single bootstrap host | — Pending |
 | Artifacts on PVC during run; git push at level boundaries | Lower-latency than per-artifact commits; matches reviewable level-boundary cadence; one cred surface (git remote) | — Pending |
-| CRD-`status`-only persistence for v1 | Technically sufficient at v1 scale; aligns with spec's "DB is cache, not truth"; defers operational burden until proven needed | — Pending |
-| Namespace-per-project tenancy | Right tradeoff for OSS posture without v1 scope creep into full multi-tenancy | — Pending |
+| CRD-`status`-only persistence for v1 | Technically sufficient at v1 scale; aligns with spec's "DB is cache, not truth"; defers operational burden until proven needed | ✓ Validated in Phase 1 — `make verify-no-sqlite-dep` + `make verify-no-aggregates` CI-gated |
+| Namespace-per-project tenancy | Right tradeoff for OSS posture without v1 scope creep into full multi-tenancy | ✓ Validated in Phase 1 (runtime) — runtime predicate + `--watch-namespace` flag; per-namespace RoleBinding template deferred to Phase 5 Helm chart |
 | K8s Secrets referenced by Project CRD for creds | Standard K8s, no extra deps; ESO/Vault integrations land later without breaking the contract | — Pending |
 | Strict-by-default failure profile | Spec default; maximizes throughput on independent task failures; conservative profile becomes a per-Project setting later if needed | — Pending |
 | Read-only web dashboard for v1 | All mutations go through `kubectl` / `tide` CLI for a single auth surface; viewer-only keeps scope honest | — Pending |
@@ -109,4 +108,10 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-12 after initialization*
+*Last updated: 2026-05-12 after Phase 1 (Foundation — CRDs, pkg/dag, Controller Scaffold) completed.*
+
+## Current State
+
+Phase 1 complete (11/11 plans, 26/26 REQ-IDs, 5/5 success criteria, 0 gaps). Operator scaffold ready to receive Phase 2 dispatch logic without rewrites. Toolchain (Go 1.26.3, kubebuilder v4.14.0, controller-runtime v0.24.1) pinned and shipping. Two helmify-generated charts (`charts/tide/` + `charts/tide-crds/`) lint clean and reproducibly regenerable. K8s API group locked at `tideproject.k8s` (made-up TLD per D-A3; never `tide.io`).
+
+**Next:** Phase 2 — Dispatch & Plan Validation — Innermost Reconcilers + Harness (~21 requirements: SUB-01..05, HARN-01..06, PLAN-01..03, FAIL-01..04, PERSIST-03, ART-01, TEST-02).
