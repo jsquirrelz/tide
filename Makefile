@@ -313,3 +313,16 @@ verify-no-sqlite-dep: ## Assert go.mod has no DB driver dependencies (PERSIST-01
 		exit 1; \
 	fi
 	@echo "OK: no DB driver deps"
+
+##@ Reconcile-loop blocking-I/O gate (Pitfall 1)
+
+.PHONY: verify-no-blocking
+verify-no-blocking: ## Assert no time.Sleep or <-time.After in reconciler bodies (Pitfall 1).
+	@echo "verifying no time.Sleep or <-time.After in Reconcile bodies (Pitfall 1)..."
+	@MATCHES=$$(grep -nE 'time\.Sleep|<-time\.After' internal/controller/*_controller.go || true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "Pitfall 1 violation: blocking I/O in reconcile body:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no blocking I/O in reconcile bodies"
