@@ -7,7 +7,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 ### CRDs & Schema
 
 - [ ] **CRD-01**: TIDE defines six CRDs (`Project`, `Milestone`, `Phase`, `Plan`, `Task`, `Wave`) in `apiVersion: tideproject.k8s/v1alpha1`, each with separate `Spec` (intent) and `Status` (observed) sections
-- [ ] **CRD-02**: Each CRD declares owner-reference cascade to its parent in the hierarchy with `BlockOwnerDeletion: true`, scoped same-namespace
+- [x] **CRD-02**: Each CRD declares owner-reference cascade to its parent in the hierarchy with `BlockOwnerDeletion: true`, scoped same-namespace
 - [ ] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
 - [ ] **CRD-04**: A validating admission webhook handles the cross-object invariants CEL can't express (notably cycle detection across the declared task DAG)
 - [x] **CRD-05**: Conversion-webhook scaffolding is in place from day one, even though only `v1alpha1` exists in v1
@@ -26,13 +26,13 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 - [ ] **CTRL-01**: A single controller-runtime `Manager` registers six reconcilers (`ProjectReconciler`, `MilestoneReconciler`, `PhaseReconciler`, `PlanReconciler`, `WaveReconciler`, `TaskReconciler`)
 - [ ] **CTRL-02**: Each reconciler is event-driven via `Owns(&batchv1.Job{})` and watches; no `time.Sleep` or blocking inside `Reconcile()`
 - [ ] **CTRL-03**: The Manager runs leader-elected; on failover, in-flight work resumes from CRDs + PVC artifacts without losing the indegree map
-- [ ] **CTRL-04**: Per-reconciler `MaxConcurrentReconciles` is tunable independently via Helm values
-- [ ] **CTRL-05**: Finalizers on each CRD have bounded deadlines and idempotent cleanup logic; the docs include a `kubectl patch` recipe for manual unstick
+- [x] **CTRL-04**: Per-reconciler `MaxConcurrentReconciles` is tunable independently via Helm values
+- [x] **CTRL-05**: Finalizers on each CRD have bounded deadlines and idempotent cleanup logic; the docs include a `kubectl patch` recipe for manual unstick
 
 ### Parallelism budgets
 
-- [ ] **POOL-01**: The orchestrator process holds two `chan struct{}` semaphores — `plannerPool` and `executorPool` — sized from Helm values `plannerConcurrency` (default 16) and `executorConcurrency` (default 4)
-- [ ] **POOL-02**: On controller restart, both semaphores pre-charge from live Jobs (`kubectl get jobs --field-selector=status.active=1`) so resumption respects current load
+- [x] **POOL-01**: The orchestrator process holds two `chan struct{}` semaphores — `plannerPool` and `executorPool` — sized from Helm values `plannerConcurrency` (default 16) and `executorConcurrency` (default 4)
+- [x] **POOL-02**: On controller restart, both semaphores pre-charge from live Jobs (`kubectl get jobs --field-selector=status.active=1`) so resumption respects current load
 - [x] **POOL-03**: The two pools are never collapsed into a single worker pool — enforced by a custom go-analyzer lint rule rejecting any cross-pool wait
 
 ### Subagent dispatch

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md (POOL-03 crosspool analyzer + cmd/tide-lint + ci.yaml gate)
-last_updated: "2026-05-12T20:24:58.404Z"
+stopped_at: Completed 01-04-PLAN.md (internal/{owner,finalizer,pool,config} + dispatch placeholder)
+last_updated: "2026-05-12T20:38:53.999Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P01 | 12min | 4 tasks | 80 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P02 | 9min | 3 tasks | 14 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P03 | 4min | 2 tasks | 10 files |
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P04 | 10min | 4 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,10 @@ Recent decisions affecting current work:
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: POOL-03 crosspool analyzer uses identifier-based detection (case-insensitive substring on plannerPool/executorPool variable names) over *ast.SelectStmt comm clauses, NOT type-based detection against *pool.Pool, so the CI gate fires before internal/pool.Pool exists in Plan 04
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: cmd/tide-lint uses singlechecker.Main(crosspool.Analyzer) — designed to flip to multichecker.Main when a second analyzer lands (e.g. SUB-05 import-firewall in Phase 2+) with zero changes outside main.go
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Phase 1 ships two parallel CI workflow surfaces: kubebuilder-default lint.yml/test.yml/test-e2e.yml (generic Go + envtest + kind) plus new TIDE-specific ci.yaml (DAG-05 + POOL-03 + TEST-01 budget). Phase 11 consolidates them; do NOT clobber the lint:/test: Makefile targets in the meantime
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: internal/config uses *int raw-struct decode pattern to distinguish 'field omitted' (apply default) from 'field explicitly zero' (validation error) — prevents accidental disable-by-typo
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: gopkg.in/yaml.v3 promoted to direct go.mod dep via source import (not 'go get' which leaves indirect marker)
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Internal helper packages are CRD-agnostic — verified by go list -deps showing zero api/v1alpha1 imports; tests use corev1.ConfigMap as a stand-in
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: internal/dispatch.Dispatcher is interface{} placeholder reserving Phase 2 (REQ-SUB-01) namespace — reconciler structs declare Dispatcher field in Phase 1, real interface body lands in Phase 2
 
 ### Pending Todos
 
@@ -98,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T20:24:58.392Z
-Stopped at: Completed 01-03-PLAN.md (POOL-03 crosspool analyzer + cmd/tide-lint + ci.yaml gate)
+Last session: 2026-05-12T20:38:44.913Z
+Stopped at: Completed 01-04-PLAN.md (internal/{owner,finalizer,pool,config} + dispatch placeholder)
 Resume file: None
