@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-05-PLAN.md
-last_updated: "2026-05-12T20:51:12.522Z"
+stopped_at: Completed 01-10-PLAN.md (parallel with 01-06)
+last_updated: "2026-05-12T20:57:40.997Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -57,6 +57,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P03 | 4min | 2 tasks | 10 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P04 | 10min | 4 tasks | 9 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P05 | 7min | 2 tasks | 16 files |
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P10 | 2min | 1 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,7 @@ Recent decisions affecting current work:
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Scoped controller-gen paths (./api/... + ./internal/controller/... + ./internal/webhook/...) so Plan 02's analysistest testdata fixtures don't break code generation
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Wave.Spec pinned to exactly two fields (planRef + waveIndex) per D-B2; Makefile verify-no-aggregates regex enforces structurally (no Schedule/Waves []slice/IndegreeMap/CachedDag/DerivedDag tokens)
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Shared condition vocabulary in api/v1alpha1/shared_types.go: 4 condition types (Pending/Ready/Reconciling/Failed) + 4 reasons applied uniformly across all six Kinds
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: config/samples/ α…θ fixture: 14 hand-authored YAMLs (namespace + Project + Milestone + Phase + Plan + 8 Tasks) with dependsOn edges matching pkg/dag/kahn_test.go alphaThroughThetaFixture name-for-name; NO Wave sample (D-B1); file naming follows D-G2 tide_v1alpha1_<kind>[_<name>].yaml; kubebuilder stub set deleted wholesale
 
 ### Pending Todos
 
@@ -107,6 +109,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T20:51:03.541Z
-Stopped at: Completed 01-05-PLAN.md
+Last session: 2026-05-12T20:57:35.675Z
+Stopped at: Completed 01-10-PLAN.md (parallel with 01-06)
 Resume file: None
