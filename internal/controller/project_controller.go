@@ -74,6 +74,7 @@ type ProjectReconciler struct {
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile implements the six-step Standard-depth Reconcile pattern.
