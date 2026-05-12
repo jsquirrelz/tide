@@ -51,7 +51,9 @@ var _ = Describe("Milestone Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: tideprojectv1alpha1.MilestoneSpec{
+						ProjectRef: "test-project",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

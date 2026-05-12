@@ -51,7 +51,9 @@ var _ = Describe("Plan Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: tideprojectv1alpha1.PlanSpec{
+						PhaseRef: "test-phase",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

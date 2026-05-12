@@ -19,45 +19,130 @@ package controller
 import (
 	"context"
 
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/dispatch"
+	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/owner"
+	"github.com/jsquirrelz/tide/internal/pool"
 )
 
-// TaskReconciler reconciles a Task object
+const taskFinalizer = "tideproject.k8s/task-cleanup"
+
+// TaskReconciler reconciles a Task object at Standard depth (D-C1).
+// Task is owned by Plan; the parent ref is set via internal/owner.EnsureOwnerRef.
 type TaskReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	MaxConcurrentReconciles int
+
+	PlannerPool *pool.Pool
+	// ExecutorPool — Task reconcile dispatches executor-pool subagents in Phase 2.
+	ExecutorPool *pool.Pool
+
+	Dispatcher dispatch.Dispatcher
+
+	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
+	WatchNamespace string
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=plans,verbs=get;list;watch
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Task object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
+// Reconcile implements the six-step Standard-depth Reconcile pattern.
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	logger := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	// 1. Fetch.
+	var task tideprojectv1alpha1.Task
+	if err := r.Get(ctx, req.NamespacedName, &task); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// 2. Handle deletion with a bounded-deadline cleanup (CTRL-05, Pitfall 21).
+	if !task.DeletionTimestamp.IsZero() {
+		return finalizer.HandleDeletion(ctx, r.Client, &task, taskFinalizer,
+			func(_ context.Context) error {
+				logger.Info("task cleanup (no-op in Phase 1)", "name", task.Name)
+				return nil
+			}, finalizerCleanupTimeout)
+	}
+
+	// 3. Ensure finalizer is set on create.
+	if !controllerutil.ContainsFinalizer(&task, taskFinalizer) {
+		controllerutil.AddFinalizer(&task, taskFinalizer)
+		if err := r.Update(ctx, &task); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// 4. Ensure owner ref to parent Plan (CRD-02, Pitfall 23 prevention).
+	if task.Spec.PlanRef != "" {
+		var parent tideprojectv1alpha1.Plan
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &parent); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			return ctrl.Result{}, err
+		}
+		if err := owner.EnsureOwnerRef(&task, &parent, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Update(ctx, &task); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// 5. Phase 1: dispatcher seam nil-guarded for Phase 2 body fill (REQ-SUB-01).
+	if r.Dispatcher != nil {
+		// Phase 2 fills.
+	}
+
+	// 6. Update status conditions and persist via Status().Update.
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonInitialized,
+		Message:            "Task scaffolded; awaiting dispatch logic (Phase 2)",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Update(ctx, &task); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02 and a
+// namespace-filter predicate per AUTH-02.
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		if r.WatchNamespace == "" {
+			return true
+		}
+		return obj.GetNamespace() == r.WatchNamespace
+	})
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha1.Task{}).
+		Owns(&batchv1.Job{}).
+		WithEventFilter(nsPred).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("task").
 		Complete(r)
 }

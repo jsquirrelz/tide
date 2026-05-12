@@ -51,7 +51,10 @@ var _ = Describe("Task Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: tideprojectv1alpha1.TaskSpec{
+						PlanRef:      "test-plan",
+						FilesTouched: []string{"path/to/file.go"},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
