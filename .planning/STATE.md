@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-11-PLAN.md (Helm chart pair + finalized CI with TEST-01 timing assertion); Phase 1 complete
-last_updated: "2026-05-12T22:11:12.782Z"
+last_updated: "2026-05-12T22:25:31.826Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
@@ -25,8 +25,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 11 of 11
+Phase: 2
+Plan: Not started
 Status: Ready to execute
 Last activity: 2026-05-12
 
