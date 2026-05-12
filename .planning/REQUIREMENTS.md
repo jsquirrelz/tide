@@ -6,9 +6,9 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### CRDs & Schema
 
-- [ ] **CRD-01**: TIDE defines six CRDs (`Project`, `Milestone`, `Phase`, `Plan`, `Task`, `Wave`) in `apiVersion: tideproject.k8s/v1alpha1`, each with separate `Spec` (intent) and `Status` (observed) sections
+- [x] **CRD-01**: TIDE defines six CRDs (`Project`, `Milestone`, `Phase`, `Plan`, `Task`, `Wave`) in `apiVersion: tideproject.k8s/v1alpha1`, each with separate `Spec` (intent) and `Status` (observed) sections
 - [x] **CRD-02**: Each CRD declares owner-reference cascade to its parent in the hierarchy with `BlockOwnerDeletion: true`, scoped same-namespace
-- [ ] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
+- [x] **CRD-03**: CRDs ship with CEL validation rules for invariants expressible in CEL (non-empty fields, format constraints, range checks)
 - [ ] **CRD-04**: A validating admission webhook handles the cross-object invariants CEL can't express (notably cycle detection across the declared task DAG)
 - [x] **CRD-05**: Conversion-webhook scaffolding is in place from day one, even though only `v1alpha1` exists in v1
 - [ ] **CRD-06**: kubebuilder RBAC markers grant the orchestrator the minimum verbs per Kind — no wildcards anywhere
@@ -54,8 +54,8 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Persistence & resumption
 
-- [ ] **PERSIST-01**: All persistent state lives in CRD `.status` fields — no SQLite, no external database, no per-run state file
-- [ ] **PERSIST-02**: Per-Task CRDs hold small status blocks (`phase`, `completedAt`, `exitCode`, `attempt`); aggregate `Status.Waves` or `Status.Schedule` fields on parent CRDs are explicitly forbidden (review-blocked)
+- [x] **PERSIST-01**: All persistent state lives in CRD `.status` fields — no SQLite, no external database, no per-run state file
+- [x] **PERSIST-02**: Per-Task CRDs hold small status blocks (`phase`, `completedAt`, `exitCode`, `attempt`); aggregate `Status.Waves` or `Status.Schedule` fields on parent CRDs are explicitly forbidden (review-blocked)
 - [ ] **PERSIST-03**: Wave schedules are re-derived from the task DAG on every reconcile via `pkg/dag.ComputeWaves` — there is no cached schedule
 - [ ] **PERSIST-04**: A `chaos-resume` integration test kills the orchestrator pod mid-wave and verifies the new leader resumes with no lost or duplicated tasks, using only CRD status + PVC contents
 
