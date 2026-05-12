@@ -257,3 +257,16 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+##@ DAG Import Firewall (DAG-05)
+
+.PHONY: verify-dag-imports
+verify-dag-imports: ## Assert pkg/dag has no k8s.io/sigs.k8s.io/anthropics imports (DAG-05).
+	@echo "verifying pkg/dag has no forbidden imports (DAG-05)..."
+	@FORBIDDEN=$$(go list -deps ./pkg/dag/... 2>/dev/null | grep -E '^(k8s\.io/|sigs\.k8s\.io/|github\.com/anthropics/)' || true); \
+	if [ -n "$$FORBIDDEN" ]; then \
+		echo "DAG-05 violation: pkg/dag transitively depends on forbidden modules:"; \
+		echo "$$FORBIDDEN"; \
+		exit 1; \
+	fi
+	@echo "OK: pkg/dag imports are clean"
