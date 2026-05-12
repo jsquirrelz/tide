@@ -33,7 +33,8 @@ import (
 
 var (
 	// managerImage is the manager image to be built and loaded for testing.
-	managerImage = "example.com/tide:v0.0.1"
+	// Per D-A2 (CONTEXT.md): TIDE controller images publish to ghcr.io/jsquirrelz/.
+	managerImage = "ghcr.io/jsquirrelz/tide-controller:v0.0.1"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
