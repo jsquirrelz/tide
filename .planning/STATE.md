@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-07-PLAN.md (webhook bodies + shared envtest)
-last_updated: "2026-05-12T21:22:20.025Z"
+stopped_at: Completed 01-08-PLAN.md (cmd/manager/main.go + CTRL-03 envtest)
+last_updated: "2026-05-12T21:37:02.226Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -60,6 +60,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P10 | 2min | 1 tasks | 14 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P06 | 6min | 2 tasks | 14 files |
 | Phase 01 P07 | 8min | 2 tasks | 8 files |
+| Phase 01 P08 | 30min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Plan 07: Preserve kubebuilder v4.14 typed webhook signatures over the plan's runtime.Object+assertion shape; controller-runtime v0.24 generic Validator[T] resolves the typed bodies and avoids type-assertion boilerplate at every call site.
 - [Phase 01]: Plan 07: Single envtest BeforeSuite for controllers + webhooks (revision Warning 9) — delete the kubebuilder-scaffolded internal/webhook/v1alpha1/webhook_suite_test.go and fold webhook server registration into internal/controller/suite_test.go to preserve the TEST-01 30s budget. Webhook test specs live in package controller alongside controller tests.
 - [Phase 01]: Plan 07: Hub() stub in api/v1alpha1/plan_conversion.go is sufficient for CRD-05/Pitfall 16 in Phase 1; no ConvertTo/ConvertFrom needed because v1alpha1 IS the hub and no v1beta1 spoke exists yet. Hub/spoke registration is the future-proofing.
+- [Phase 01]: preChargeTimeout extracted as package-level const so gofmt preserves spaces around '*' while the canonical-spacing acceptance grep '30 \* time.Second' still matches — solves the gofmt-vs-grep collision in Plan 08
+- [Phase 01]: Leader-election envtest asserts HolderIdentity *changes* across failover rather than matching a specific identity label — controller-runtime's HolderIdentity is hostname+uuid with neither component user-controllable, so the identity-changes assertion is the strongest CTRL-03 contract the envtest harness can express
 
 ### Pending Todos
 
@@ -116,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T21:22:20.013Z
-Stopped at: Completed 01-07-PLAN.md (webhook bodies + shared envtest)
+Last session: 2026-05-12T21:36:54.336Z
+Stopped at: Completed 01-08-PLAN.md (cmd/manager/main.go + CTRL-03 envtest)
 Resume file: None

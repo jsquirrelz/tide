@@ -44,7 +44,7 @@ Plans:
 - [x] 01-05-PLAN.md — CRD types (Spec/Status) + CEL markers + shared status conditions + PERSIST-02 gate (Wave 2)
 - [x] 01-06-PLAN.md — Six reconcilers at Standard depth + envtest assertions + Pitfall 1 gate (Wave 2)
 - [x] 01-07-PLAN.md — Plan + Wave webhook no-op bodies with Phase 2 wire-points + envtest assertions (Wave 2)
-- [ ] 01-08-PLAN.md — cmd/manager/main.go Manager wiring + leader-election envtest (Wave 3)
+- [x] 01-08-PLAN.md — cmd/manager/main.go Manager wiring + leader-election envtest (Wave 3)
 - [ ] 01-09-PLAN.md — Per-Kind RBAC marker audit + AUTH-03 CI gate (Wave 3)
 - [x] 01-10-PLAN.md — α…θ sample CRDs in config/samples/ (Wave 3)
 - [ ] 01-11-PLAN.md — Helm chart pair via helmify + final CI workflow with TEST-01 timing assertion (Wave 3)
