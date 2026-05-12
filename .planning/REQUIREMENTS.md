@@ -230,7 +230,7 @@ Every v1 requirement maps to exactly one phase. 82/82 requirements mapped. No or
 | ART-06 | Phase 3 | Per-run branches `tide/run-<project>-<timestamp>`, `--force-with-lease`, never `main` — Pitfall 13 mitigation |
 | ART-07 | Phase 3 | `gitleaks` at every push, `tide_secret_leak_blocked_total` — Pitfall 18 (push side) mitigation |
 | AUTH-01 | Phase 3 | K8s Secret refs for LLM + git creds on Project CRD |
-| AUTH-02 | Phase 1 | Namespace-per-project tenancy with namespace-scoped RBAC |
+| AUTH-02 | Phase 1 + Phase 5 | Namespace-per-project tenancy. Phase 1 satisfies via runtime namespace-filter predicate (predicate.NewPredicateFuncs) in each reconcilers SetupWithManager (Plan 06; --watch-namespace flag on cmd/manager — Plan 08). controller-gen v0.24 emits ClusterRole for multi-namespace watch; the per-namespace RoleBinding YAML template ships in Phase 5 Helm chart. |
 | AUTH-03 | Phase 1 | No cluster-wide wildcards in orchestrator ServiceAccount — Pitfall 15 mitigation |
 | GATE-01 | Phase 4 | Per-level gate policy field on Project CRD |
 | GATE-02 | Phase 4 | Slack-tide between-wave checkpoints |
@@ -268,9 +268,9 @@ Every v1 requirement maps to exactly one phase. 82/82 requirements mapped. No or
 
 | Phase | Requirements | Count |
 |-------|--------------|-------|
-| Phase 1: Foundation — CRDs, pkg/dag, Controller Scaffold | CRD-01..06, DAG-01..05, CTRL-01..05, POOL-01..03, AUTH-02, AUTH-03, PERSIST-01, PERSIST-02, BOOT-01, BOOT-03, TEST-01 | 26 |
+| Phase 1: Foundation — CRDs, pkg/dag, Controller Scaffold | CRD-01..06, DAG-01..05, CTRL-01..05, POOL-01..03, AUTH-02 (runtime predicate), AUTH-03, PERSIST-01, PERSIST-02, BOOT-01, BOOT-03, TEST-01 | 26 |
 | Phase 2: Dispatch & Plan Validation — Innermost Reconcilers + Harness | SUB-01..05, HARN-01..06, PLAN-01..03, FAIL-01..04, PERSIST-03, ART-01, TEST-02 | 21 |
 | Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | ART-02..07, AUTH-01, PERSIST-04, TEST-03, TEST-04 | 10 |
 | Phase 4: Gates, Observability, Dashboard, CLI | GATE-01..03, OBS-01..06, CLI-01..04, DASH-01..05 | 18 |
-| Phase 5: Distribution & Self-Hosting Acceptance | DIST-01..05, BOOT-02, BOOT-04 | 7 |
+| Phase 5: Distribution & Self-Hosting Acceptance | DIST-01..05, BOOT-02, BOOT-04, AUTH-02 (per-namespace RoleBinding template) | 7 |
 | **Total** | | **82** |

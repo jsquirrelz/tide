@@ -34,7 +34,20 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A developer can start the Manager locally and confirm six reconcilers registered (`Project/Milestone/Phase/Plan/Wave/Task`), each event-driven via `Owns(&batchv1.Job{})` with no `time.Sleep` or blocking I/O inside `Reconcile()`, with leader election active, and per-reconciler `MaxConcurrentReconciles` tunable from Helm values
   4. A developer can inspect the running Manager's process state and see two distinct `chan struct{}` semaphores (`plannerPool` size 16 default, `executorPool` size 4 default), pre-charged on startup from any pre-existing live Jobs, and a custom go-analyzer lint rule rejecting any code path that waits on both pools — verifying the two pools cannot be silently unified
   5. A `kubectl describe sa tide-orchestrator` shows RBAC with no wildcards (per-CRD-Kind verb grants only), and a deliberate `kubectl delete project sample-project` cascades cleanly via owner references with `BlockOwnerDeletion: true` while finalizers run idempotent cleanup under a bounded deadline
-**Plans**: TBD
+**Plans:** 11 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — kubebuilder scaffold + module init + 6 CRD scaffolds + 2 webhook scaffolds (Wave 1)
+- [ ] 01-02-PLAN.md — pkg/dag pure-Go Kahn-layered library + α…θ regression fixture + DAG-05 import firewall (Wave 1)
+- [ ] 01-03-PLAN.md — POOL-03 custom analyzer + cmd/tide-lint + CI gate (Wave 1)
+- [ ] 01-04-PLAN.md — internal helper packages (owner, finalizer, pool, config) + dispatch placeholder (Wave 1)
+- [ ] 01-05-PLAN.md — CRD types (Spec/Status) + CEL markers + shared status conditions + PERSIST-02 gate (Wave 2)
+- [ ] 01-06-PLAN.md — Six reconcilers at Standard depth + envtest assertions + Pitfall 1 gate (Wave 2)
+- [ ] 01-07-PLAN.md — Plan + Wave webhook no-op bodies with Phase 2 wire-points + envtest assertions (Wave 2)
+- [ ] 01-08-PLAN.md — cmd/manager/main.go Manager wiring + leader-election envtest (Wave 3)
+- [ ] 01-09-PLAN.md — Per-Kind RBAC marker audit + AUTH-03 CI gate (Wave 3)
+- [ ] 01-10-PLAN.md — α…θ sample CRDs in config/samples/ (Wave 3)
+- [ ] 01-11-PLAN.md — Helm chart pair via helmify + final CI workflow with TEST-01 timing assertion (Wave 3)
 
 ### Phase 2: Dispatch & Plan Validation — Innermost Reconcilers + Harness
 **Goal**: A working dogfood-critical pair — `TaskReconciler` + `WaveReconciler` — can dispatch a manually-applied Plan-with-tasks against a stub subagent image, honor wave boundaries with strict-by-default per-task indegree decrement, enforce per-Task and per-Project budget caps in the harness, validate plans at admission for cycles and file-touch consistency, and survive 429s from a fake provider via a token-bucket rate limiter. No LLM tokens are spent in this phase's tests.
