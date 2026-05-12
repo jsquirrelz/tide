@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md (pkg/dag layered Kahn + DAG-05 firewall)
-last_updated: "2026-05-12T20:14:46.661Z"
+stopped_at: Completed 01-03-PLAN.md (POOL-03 crosspool analyzer + cmd/tide-lint + ci.yaml gate)
+last_updated: "2026-05-12T20:24:58.404Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 *Updated after each plan completion*
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P01 | 12min | 4 tasks | 80 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P02 | 9min | 3 tasks | 14 files |
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P03 | 4min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: pkg/dag is a leaf package: stdlib-only ComputeWaves with deterministic within-wave sort, CycleError naming involved nodes only (resolved islands excluded), and DependsOnNonexistent returning plain error not CycleError so webhook callers can errors.As distinguish
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: DAG-05 enforcement: make verify-dag-imports uses go list -deps for transitive coverage; the dagimports analysistest fixture (with empty k8s.io stub package) proves the rule fires programmatically without ever mutating real pkg/dag at test time
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Test naming dual surface: TestComputeWaves/<Name> subtests + mirror TestComputeWaves_<Name> functions delegating to one shared assertion helper, so both -run regex forms select cases without test-logic duplication
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: POOL-03 crosspool analyzer uses identifier-based detection (case-insensitive substring on plannerPool/executorPool variable names) over *ast.SelectStmt comm clauses, NOT type-based detection against *pool.Pool, so the CI gate fires before internal/pool.Pool exists in Plan 04
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: cmd/tide-lint uses singlechecker.Main(crosspool.Analyzer) — designed to flip to multichecker.Main when a second analyzer lands (e.g. SUB-05 import-firewall in Phase 2+) with zero changes outside main.go
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Phase 1 ships two parallel CI workflow surfaces: kubebuilder-default lint.yml/test.yml/test-e2e.yml (generic Go + envtest + kind) plus new TIDE-specific ci.yaml (DAG-05 + POOL-03 + TEST-01 budget). Phase 11 consolidates them; do NOT clobber the lint:/test: Makefile targets in the meantime
 
 ### Pending Todos
 
@@ -94,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T20:14:37.941Z
-Stopped at: Completed 01-02-PLAN.md (pkg/dag layered Kahn + DAG-05 firewall)
+Last session: 2026-05-12T20:24:58.392Z
+Stopped at: Completed 01-03-PLAN.md (POOL-03 crosspool analyzer + cmd/tide-lint + ci.yaml gate)
 Resume file: None

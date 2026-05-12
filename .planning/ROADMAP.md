@@ -39,7 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [x] 01-01-PLAN.md — kubebuilder scaffold + module init + 6 CRD scaffolds + 2 webhook scaffolds (Wave 1)
 - [x] 01-02-PLAN.md — pkg/dag pure-Go Kahn-layered library + α…θ regression fixture + DAG-05 import firewall (Wave 1)
-- [ ] 01-03-PLAN.md — POOL-03 custom analyzer + cmd/tide-lint + CI gate (Wave 1)
+- [x] 01-03-PLAN.md — POOL-03 custom analyzer + cmd/tide-lint + CI gate (Wave 1)
 - [ ] 01-04-PLAN.md — internal helper packages (owner, finalizer, pool, config) + dispatch placeholder (Wave 1)
 - [ ] 01-05-PLAN.md — CRD types (Spec/Status) + CEL markers + shared status conditions + PERSIST-02 gate (Wave 2)
 - [ ] 01-06-PLAN.md — Six reconcilers at Standard depth + envtest assertions + Pitfall 1 gate (Wave 2)

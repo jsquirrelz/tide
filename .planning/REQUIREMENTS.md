@@ -33,7 +33,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 - [ ] **POOL-01**: The orchestrator process holds two `chan struct{}` semaphores — `plannerPool` and `executorPool` — sized from Helm values `plannerConcurrency` (default 16) and `executorConcurrency` (default 4)
 - [ ] **POOL-02**: On controller restart, both semaphores pre-charge from live Jobs (`kubectl get jobs --field-selector=status.active=1`) so resumption respects current load
-- [ ] **POOL-03**: The two pools are never collapsed into a single worker pool — enforced by a custom go-analyzer lint rule rejecting any cross-pool wait
+- [x] **POOL-03**: The two pools are never collapsed into a single worker pool — enforced by a custom go-analyzer lint rule rejecting any cross-pool wait
 
 ### Subagent dispatch
 
