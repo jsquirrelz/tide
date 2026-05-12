@@ -1,0 +1,9 @@
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+  name: milestone-sample
+spec:
+  # TODO(user): Add fields here

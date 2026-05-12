@@ -18,3 +18,26 @@ resources:
 - metrics_auth_role.yaml
 - metrics_auth_role_binding.yaml
 - metrics_reader_role.yaml
+# For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
+# default, aiding admins in cluster management. Those roles are
+# not used by the tide itself. You can comment the following lines
+# if you do not want those helpers be installed with your Project.
+- wave_admin_role.yaml
+- wave_editor_role.yaml
+- wave_viewer_role.yaml
+- task_admin_role.yaml
+- task_editor_role.yaml
+- task_viewer_role.yaml
+- plan_admin_role.yaml
+- plan_editor_role.yaml
+- plan_viewer_role.yaml
+- phase_admin_role.yaml
+- phase_editor_role.yaml
+- phase_viewer_role.yaml
+- milestone_admin_role.yaml
+- milestone_editor_role.yaml
+- milestone_viewer_role.yaml
+- project_admin_role.yaml
+- project_editor_role.yaml
+- project_viewer_role.yaml
+

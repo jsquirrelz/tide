@@ -8,4 +8,59 @@ layout:
 - go.kubebuilder.io/v4
 projectName: tide
 repo: github.com/jsquirrelz/tide
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Project
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Milestone
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Phase
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Plan
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Task
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: k8s
+  group: tideproject
+  kind: Wave
+  path: github.com/jsquirrelz/tide/api/v1alpha1
+  version: v1alpha1
 version: "3"

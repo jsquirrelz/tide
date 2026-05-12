@@ -1,0 +1,9 @@
+## Append samples of your project ##
+resources:
+- tideproject_v1alpha1_project.yaml
+- tideproject_v1alpha1_milestone.yaml
+- tideproject_v1alpha1_phase.yaml
+- tideproject_v1alpha1_plan.yaml
+- tideproject_v1alpha1_task.yaml
+- tideproject_v1alpha1_wave.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
