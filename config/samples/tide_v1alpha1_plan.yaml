@@ -1,0 +1,13 @@
+# tide_v1alpha1_plan.yaml — single plan owned by sample-phase. The eight
+# Task siblings below all set spec.planRef: sample-plan to attach here.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Plan
+metadata:
+  name: sample-plan
+  namespace: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"
+spec:
+  phaseRef: sample-phase

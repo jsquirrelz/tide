@@ -1,0 +1,12 @@
+# tide_v1alpha1_phase.yaml — single phase owned by sample-milestone.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Phase
+metadata:
+  name: sample-phase
+  namespace: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"
+spec:
+  milestoneRef: sample-milestone

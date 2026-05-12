@@ -1,0 +1,16 @@
+# tide_v1alpha1_task_zeta.yaml — ζ (Wave 1, no dependencies).
+# Pinned to pkg/dag/kahn_test.go TestComputeWaves_AlphaThroughTheta fixture.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: zeta
+  namespace: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"
+    tideproject.k8s/plan: sample-plan
+spec:
+  planRef: sample-plan
+  filesTouched:
+    - pkg/example/zeta.go

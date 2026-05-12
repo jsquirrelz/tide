@@ -1,0 +1,11 @@
+# namespace.yaml — dedicated namespace for the α…θ worked-example fixture.
+# Per Plan 01-10, all sample CRDs live under `tide-samples` so they don't
+# pollute the default namespace during envtest/E2E runs.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"

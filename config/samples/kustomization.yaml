@@ -1,9 +1,37 @@
-## Append samples of your project ##
+# config/samples/kustomization.yaml — α…θ worked-example fixture.
+#
+# Resource order is the owner-ref dependency cascade:
+#   1. namespace.yaml         (creates tide-samples ns)
+#   2. tide_v1alpha1_project.yaml
+#   3. tide_v1alpha1_milestone.yaml   (refs sample-project)
+#   4. tide_v1alpha1_phase.yaml       (refs sample-milestone)
+#   5. tide_v1alpha1_plan.yaml        (refs sample-phase)
+#   6..13. tide_v1alpha1_task_<name>.yaml (each refs sample-plan)
+#
+# kustomize does not enforce strict apply order at build time, but listing
+# top-down approximates the cascade so `kubectl apply -k config/samples/`
+# resolves owner refs in dependency order on a real cluster.
+#
+# NOTE: per D-B1, there is NO `tide_v1alpha1_wave*.yaml` sample — Wave
+# resources are created by the WaveReconciler from a Plan + its Tasks; a
+# human applying a Wave directly is rejected by the admission webhook.
+#
+# The eight Task names + dependsOn edges mirror
+# pkg/dag/kahn_test.go TestComputeWaves_AlphaThroughTheta exactly so the
+# K8s integration story and the algorithm regression test share one fixture.
+
 resources:
-- tideproject_v1alpha1_project.yaml
-- tideproject_v1alpha1_milestone.yaml
-- tideproject_v1alpha1_phase.yaml
-- tideproject_v1alpha1_plan.yaml
-- tideproject_v1alpha1_task.yaml
-- tideproject_v1alpha1_wave.yaml
+  - namespace.yaml
+  - tide_v1alpha1_project.yaml
+  - tide_v1alpha1_milestone.yaml
+  - tide_v1alpha1_phase.yaml
+  - tide_v1alpha1_plan.yaml
+  - tide_v1alpha1_task_alpha.yaml
+  - tide_v1alpha1_task_beta.yaml
+  - tide_v1alpha1_task_gamma.yaml
+  - tide_v1alpha1_task_zeta.yaml
+  - tide_v1alpha1_task_delta.yaml
+  - tide_v1alpha1_task_eta.yaml
+  - tide_v1alpha1_task_epsilon.yaml
+  - tide_v1alpha1_task_theta.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

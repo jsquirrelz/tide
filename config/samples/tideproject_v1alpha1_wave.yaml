@@ -1,9 +1,0 @@
-apiVersion: tideproject.k8s/v1alpha1
-kind: Wave
-metadata:
-  labels:
-    app.kubernetes.io/name: tide
-    app.kubernetes.io/managed-by: kustomize
-  name: wave-sample
-spec:
-  # TODO(user): Add fields here

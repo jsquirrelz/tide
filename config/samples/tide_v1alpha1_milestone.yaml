@@ -1,0 +1,12 @@
+# tide_v1alpha1_milestone.yaml — single milestone owned by sample-project.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  name: sample-milestone
+  namespace: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"
+spec:
+  projectRef: sample-project

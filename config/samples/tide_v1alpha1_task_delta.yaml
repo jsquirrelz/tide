@@ -1,0 +1,19 @@
+# tide_v1alpha1_task_delta.yaml — δ (Wave 2, depends on α and β).
+# Edge set: α→δ, β→δ — matches pkg/dag/kahn_test.go alphaThroughThetaFixture.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: delta
+  namespace: tide-samples
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: kustomize
+    tideproject.k8s/sample: "true"
+    tideproject.k8s/plan: sample-plan
+spec:
+  planRef: sample-plan
+  dependsOn:
+    - alpha
+    - beta
+  filesTouched:
+    - pkg/example/delta.go
