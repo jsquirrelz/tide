@@ -18,6 +18,9 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,14 +29,20 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -63,12 +72,24 @@ var _ = BeforeSuite(func() {
 	err = tideprojectv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	// admissionregistration/v1 is required so envtest can install
+	// ValidatingWebhookConfiguration objects from config/webhook (Plan 07).
+	utilruntime.Must(admissionv1.AddToScheme(scheme.Scheme))
+
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		// WebhookInstallOptions installs the ValidatingWebhookConfiguration
+		// emitted by `make manifests` into the envtest apiserver and provisions
+		// self-signed certs for the webhook server. Plan 07 / revision Warning
+		// 9: webhook envtest folds into THIS shared BeforeSuite (single envtest
+		// cold-start; TEST-01 budget protection).
+		WebhookInstallOptions: envtest.WebhookInstallOptions{
+			Paths: []string{filepath.Join("..", "..", "config", "webhook")},
+		},
 	}
 
 	// Retrieve the first found binary directory to allow running tests from IDEs
@@ -84,6 +105,48 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	// Start a webhook server bound to the envtest-provisioned host/port/certDir
+	// so the cluster's ValidatingWebhookConfiguration (installed above) can
+	// reach the in-process webhook handlers. Plan 07 / revision Warning 9: this
+	// runs inside the controller suite — no second envtest cold-start.
+	webhookInstallOptions := &testEnv.WebhookInstallOptions
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Scheme:  scheme.Scheme,
+		Metrics: metricsserver.Options{BindAddress: "0"},
+		WebhookServer: webhook.NewServer(webhook.Options{
+			Host:    webhookInstallOptions.LocalServingHost,
+			Port:    webhookInstallOptions.LocalServingPort,
+			CertDir: webhookInstallOptions.LocalServingCertDir,
+		}),
+		LeaderElection: false,
+	})
+	Expect(err).NotTo(HaveOccurred())
+
+	// Register both Phase 1 no-op webhooks (Plan 07 Task 1).
+	Expect(webhookv1alpha1.SetupPlanWebhookWithManager(mgr)).To(Succeed())
+	Expect(webhookv1alpha1.SetupWaveWebhookWithManager(mgr)).To(Succeed())
+
+	// +kubebuilder:scaffold:webhook
+
+	go func() {
+		defer GinkgoRecover()
+		err := mgr.Start(ctx)
+		Expect(err).NotTo(HaveOccurred())
+	}()
+
+	// Wait for the webhook server to be reachable over TLS before any spec
+	// attempts to Create/Update objects (otherwise admission would fail with
+	// a connection refused).
+	dialer := &net.Dialer{Timeout: time.Second}
+	addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
+	Eventually(func() error {
+		conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // envtest uses self-signed cert
+		if err != nil {
+			return err
+		}
+		return conn.Close()
+	}, 30*time.Second, time.Second).Should(Succeed())
 })
 
 var _ = AfterSuite(func() {
