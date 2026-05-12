@@ -45,11 +45,24 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	# Scoped paths avoid descending into tools/analyzers/*/testdata fixtures (Plan 02 introduced
+	# a violation fixture under tools/analyzers/dagimports/testdata/src/violation/pkg/dag/ that
+	# imports k8s.io/apimachinery/pkg/runtime — needed for analysistest's GOPATH resolver but
+	# unresolvable to controller-gen's standard module resolution. The api/ + internal/controller/
+	# + internal/webhook/ triple is exhaustive: api/ carries the type markers, internal/controller/
+	# carries the +kubebuilder:rbac: markers, internal/webhook/ carries the +kubebuilder:webhook: markers.
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook \
+		paths="./api/..." \
+		paths="./internal/controller/..." \
+		paths="./internal/webhook/..." \
+		output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
+	# Scoped to ./api/... — DeepCopy methods only need to be generated for kubebuilder-tagged
+	# CRD types, which live exclusively under api/. Walking ./... would also descend into
+	# tools/analyzers/*/testdata fixtures, which deliberately host unresolvable imports.
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./api/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.

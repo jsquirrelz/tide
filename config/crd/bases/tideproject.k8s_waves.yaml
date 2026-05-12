@@ -39,25 +39,25 @@ spec:
           spec:
             description: spec defines the desired state of Wave
             properties:
-              foo:
-                description: foo is an example field of Wave. Edit wave_types.go to
-                  remove/update
+              planRef:
+                description: PlanRef is the name of the owning Plan (same namespace).
+                minLength: 1
                 type: string
+              waveIndex:
+                description: WaveIndex is the 0-indexed layer position from pkg/dag.ComputeWaves.
+                minimum: 0
+                type: integer
+            required:
+            - planRef
+            - waveIndex
             type: object
           status:
             description: status defines the observed state of Wave
             properties:
+              completedAt:
+                format: date-time
+                type: string
               conditions:
-                description: |-
-                  conditions represent the current state of the Wave resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +116,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              dispatchedAt:
+                format: date-time
+                type: string
+              phase:
+                type: string
+              taskRefs:
+                description: TaskRefs lists the Task names dispatched in this wave
+                  (observation only).
+                items:
+                  type: string
+                type: array
             type: object
         required:
         - spec

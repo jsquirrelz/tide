@@ -20,46 +20,42 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// WaveSpec defines the desired state of Wave
+// WaveSpec carries EXACTLY two fields per D-B1, D-B2. Anything else lives in Status.
 type WaveSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// PlanRef is the name of the owning Plan (same namespace).
+	// +kubebuilder:validation:MinLength=1
+	PlanRef string `json:"planRef"`
 
-	// foo is an example field of Wave. Edit wave_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// WaveIndex is the 0-indexed layer position from pkg/dag.ComputeWaves.
+	// +kubebuilder:validation:Minimum=0
+	WaveIndex int `json:"waveIndex"`
 }
 
 // WaveStatus defines the observed state of Wave.
+// Everything observed about this wave lives here, NOT in Spec.
 type WaveStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +optional
+	Phase string `json:"phase,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the Wave resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// TaskRefs lists the Task names dispatched in this wave (observation only).
+	// +optional
+	TaskRefs []string `json:"taskRefs,omitempty"`
+
+	// +optional
+	DispatchedAt *metav1.Time `json:"dispatchedAt,omitempty"`
+
+	// +optional
+	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced
 
 // Wave is the Schema for the waves API
 type Wave struct {

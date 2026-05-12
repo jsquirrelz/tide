@@ -39,25 +39,90 @@ spec:
           spec:
             description: spec defines the desired state of Project
             properties:
-              foo:
-                description: foo is an example field of Project. Edit project_types.go
-                  to remove/update
+              gates:
+                description: Gates declares per-level human gate policy (Phase 4).
+                properties:
+                  milestone:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  pauseBetweenWaves:
+                    type: boolean
+                  phase:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  plan:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  task:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                type: object
+              modelSelection:
+                description: ModelSelection picks per-level model identifiers (Phase
+                  2+).
+                properties:
+                  milestone:
+                    type: string
+                  phase:
+                    type: string
+                  plan:
+                    type: string
+                  task:
+                    type: string
+                type: object
+              secretRefs:
+                description: SecretRefs references K8s Secrets for credentials (AUTH-01
+                  — Phase 3).
+                properties:
+                  anthropicAPIKey:
+                    description: AnthropicAPIKey is the Secret name carrying the LLM
+                      API key.
+                    type: string
+                  gitCredentials:
+                    description: GitCredentials is the Secret name carrying git push
+                      credentials (PAT or SSH key).
+                    type: string
+                type: object
+              targetRepo:
+                description: TargetRepo is the URL of the repo this Project operates
+                  on.
+                minLength: 1
                 type: string
+            required:
+            - targetRepo
             type: object
+            x-kubernetes-validations:
+            - message: targetRepo must be a valid http(s) or SSH git URL
+              rule: self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')
           status:
             description: status defines the observed state of Project
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the Project resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Conditions follow the standard K8s convention.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +181,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              phase:
+                description: Phase is a high-level state label ("Pending", "Running",
+                  "Complete", "Failed").
+                type: string
             type: object
         required:
         - spec

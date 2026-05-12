@@ -20,38 +20,77 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// ProjectSpec defines the desired state of Project
-type ProjectSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of Project. Edit project_types.go to remove/update
+// SecretRefs declares the K8s Secret names that carry credentials.
+// Per AUTH-01, populated in Phase 3; Phase 1 ships the field shape only.
+type SecretRefs struct {
+	// AnthropicAPIKey is the Secret name carrying the LLM API key.
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	AnthropicAPIKey string `json:"anthropicAPIKey,omitempty"`
+	// GitCredentials is the Secret name carrying git push credentials (PAT or SSH key).
+	// +optional
+	GitCredentials string `json:"gitCredentials,omitempty"`
+}
+
+// ModelSelection picks per-level model identifiers.
+// Phase 1 ships the field shape; Phase 2+ consumes.
+type ModelSelection struct {
+	// +optional
+	Milestone string `json:"milestone,omitempty"`
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// +optional
+	Plan string `json:"plan,omitempty"`
+	// +optional
+	Task string `json:"task,omitempty"`
+}
+
+// GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+// Phase 1 ships the field shape; Phase 4 consumes.
+// +kubebuilder:validation:Enum=auto;approve;pause
+type GatePolicy string
+
+// Gates declares per-level gate policy. Phase 1 ships field; Phase 4 wires.
+type Gates struct {
+	// +optional
+	Milestone GatePolicy `json:"milestone,omitempty"`
+	// +optional
+	Phase GatePolicy `json:"phase,omitempty"`
+	// +optional
+	Plan GatePolicy `json:"plan,omitempty"`
+	// +optional
+	Task GatePolicy `json:"task,omitempty"`
+	// +optional
+	PauseBetweenWaves bool `json:"pauseBetweenWaves,omitempty"`
+}
+
+// ProjectSpec defines the desired state of Project.
+// +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')",message="targetRepo must be a valid http(s) or SSH git URL"
+type ProjectSpec struct {
+	// TargetRepo is the URL of the repo this Project operates on.
+	// +kubebuilder:validation:MinLength=1
+	TargetRepo string `json:"targetRepo"`
+
+	// SecretRefs references K8s Secrets for credentials (AUTH-01 — Phase 3).
+	// +optional
+	SecretRefs SecretRefs `json:"secretRefs,omitempty"`
+
+	// ModelSelection picks per-level model identifiers (Phase 2+).
+	// +optional
+	ModelSelection ModelSelection `json:"modelSelection,omitempty"`
+
+	// Gates declares per-level human gate policy (Phase 4).
+	// +optional
+	Gates Gates `json:"gates,omitempty"`
 }
 
 // ProjectStatus defines the observed state of Project.
+// PERSIST-02 / Pitfall 4: NO aggregate schedule fields here.
 type ProjectStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Phase is a high-level state label ("Pending", "Running", "Complete", "Failed").
+	// +optional
+	Phase string `json:"phase,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the Project resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// Conditions follow the standard K8s convention.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -60,6 +99,7 @@ type ProjectStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Namespaced
 
 // Project is the Schema for the projects API
 type Project struct {

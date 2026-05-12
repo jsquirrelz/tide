@@ -39,25 +39,39 @@ spec:
           spec:
             description: spec defines the desired state of Task
             properties:
-              foo:
-                description: foo is an example field of Task. Edit task_types.go to
-                  remove/update
+              dependsOn:
+                description: DependsOn lists sibling Task names in the same Plan (D-F1).
+                items:
+                  type: string
+                type: array
+              filesTouched:
+                description: FilesTouched declares the workspace paths this Task intends
+                  to write (D-F2).
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              planRef:
+                description: PlanRef is the name of the owning Plan (same namespace).
+                minLength: 1
                 type: string
+              promptRef:
+                description: PromptRef is the name of a ConfigMap carrying the prompt
+                  (optional).
+                type: string
+            required:
+            - filesTouched
+            - planRef
             type: object
           status:
             description: status defines the observed state of Task
             properties:
+              attempt:
+                type: integer
+              completedAt:
+                format: date-time
+                type: string
               conditions:
-                description: |-
-                  conditions represent the current state of the Task resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +130,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              exitCode:
+                type: integer
+              phase:
+                type: string
             type: object
         required:
         - spec
