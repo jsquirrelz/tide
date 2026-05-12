@@ -289,3 +289,27 @@ verify-dag-imports: ## Assert pkg/dag has no k8s.io/sigs.k8s.io/anthropics impor
 .PHONY: tide-lint
 tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 enforcement).
 	go run ./cmd/tide-lint ./...
+
+##@ PERSIST gates (PERSIST-01, PERSIST-02 / Pitfall 4)
+
+.PHONY: verify-no-aggregates
+verify-no-aggregates: ## Assert api/v1alpha1 declares no aggregate schedule fields (PERSIST-02 / Pitfall 4).
+	@echo "verifying no aggregate schedule fields on api/v1alpha1 types (PERSIST-02)..."
+	@MATCHES=$$(grep -nE 'Schedule|Waves *\[\]|IndegreeMap|CachedDag|DerivedDag' api/v1alpha1/*_types.go || true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "PERSIST-02 violation: aggregate schedule fields detected:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no aggregate schedule fields"
+
+.PHONY: verify-no-sqlite-dep
+verify-no-sqlite-dep: ## Assert go.mod has no DB driver dependencies (PERSIST-01).
+	@echo "verifying no DB driver deps in go.mod (PERSIST-01)..."
+	@MATCHES=$$(grep -nE 'database/sql|github.com/mattn/go-sqlite3|gorm\.io|github.com/jackc/pgx' go.mod || true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "PERSIST-01 violation: forbidden DB drivers in go.mod:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no DB driver deps"

@@ -28,7 +28,8 @@ type PlanSpec struct {
 }
 
 // PlanStatus defines the observed state of Plan.
-// PERSIST-02 enforced: NO Schedule, NO Waves []slice, NO IndegreeMap.
+// PERSIST-02 / Pitfall 4: no aggregate wave list, no cached dag, no indegree
+// map — see `make verify-no-aggregates` for the enforced field-name denylist.
 // Phase 2 adds ValidationState + CycleEdges fields. Phase 1 stays minimal.
 type PlanStatus struct {
 	// +optional

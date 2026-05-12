@@ -43,6 +43,12 @@ jobs:
       - name: Verify pkg/dag imports (DAG-05)
         run: make verify-dag-imports
 
+      - name: Verify no aggregate schedule fields (PERSIST-02)
+        run: make verify-no-aggregates
+
+      - name: Verify no DB drivers (PERSIST-01)
+        run: make verify-no-sqlite-dep
+
       - name: Run custom analyzers (POOL-03 / Pitfall 6)
         run: make tide-lint
 
