@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md (kubebuilder scaffold)
-last_updated: "2026-05-12T20:00:23.945Z"
+stopped_at: Completed 01-02-PLAN.md (pkg/dag layered Kahn + DAG-05 firewall)
+last_updated: "2026-05-12T20:14:46.661Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 11
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 01 (Foundation — CRDs, pkg/dag, Controller Scaffold) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P01 | 12min | 4 tasks | 80 files |
+| Phase 01-foundation-crds-pkg-dag-controller-scaffold P02 | 9min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,9 @@ Recent decisions affecting current work:
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Use kubebuilder --domain k8s + --group tideproject to produce final API group tideproject.k8s (per D-A3); the plan body's --domain tideproject.k8s --group tide recipe would have produced tide.tideproject.k8s and was corrected
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: kubebuilder v4.14 places Plan conversion Hub() marker in api/v1alpha1/plan_conversion.go (separate from plan_webhook.go); CRD-05 satisfied across the file pair
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: controller-runtime v0.23.3 -> v0.24.1 upgrade required no cmd/main.go fixup; kubebuilder v4.14 already emits the v0.24 generics-based two-arg WebhookManagedBy form
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: pkg/dag is a leaf package: stdlib-only ComputeWaves with deterministic within-wave sort, CycleError naming involved nodes only (resolved islands excluded), and DependsOnNonexistent returning plain error not CycleError so webhook callers can errors.As distinguish
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: DAG-05 enforcement: make verify-dag-imports uses go list -deps for transitive coverage; the dagimports analysistest fixture (with empty k8s.io stub package) proves the rule fires programmatically without ever mutating real pkg/dag at test time
+- [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Test naming dual surface: TestComputeWaves/<Name> subtests + mirror TestComputeWaves_<Name> functions delegating to one shared assertion helper, so both -run regex forms select cases without test-logic duplication
 
 ### Pending Todos
 
@@ -90,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-12T20:00:15.981Z
-Stopped at: Completed 01-01-PLAN.md (kubebuilder scaffold)
+Last session: 2026-05-12T20:14:37.941Z
+Stopped at: Completed 01-02-PLAN.md (pkg/dag layered Kahn + DAG-05 firewall)
 Resume file: None

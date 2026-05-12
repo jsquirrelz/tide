@@ -15,11 +15,11 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Kahn-layered DAG library
 
-- [ ] **DAG-01**: `pkg/dag` is a pure Go, stdlib-only package implementing Kahn's algorithm in layered form, returning waves as `[]Set[NodeID]`
-- [ ] **DAG-02**: `pkg/dag` detects cycles at the algorithm's termination condition and returns a `CycleError` naming the involved nodes
-- [ ] **DAG-03**: `pkg/dag` is consumed twice in TIDE — once for the Planning DAG, once for the Execution DAG — with typed-apart call sites at the package boundary so the two DAGs cannot accidentally cross-pollute
-- [ ] **DAG-04**: `pkg/dag` has unit tests pinning the spec's worked example (`Tasks: α,β,γ,δ,ε,ζ,η,θ` → `Waves: [{α,β,γ,ζ},{δ,η},{ε,θ}]`) as a regression fixture
-- [ ] **DAG-05**: `pkg/dag` has no imports from the K8s, controller-runtime, or Anthropic-SDK module trees
+- [x] **DAG-01**: `pkg/dag` is a pure Go, stdlib-only package implementing Kahn's algorithm in layered form, returning waves as `[]Set[NodeID]`
+- [x] **DAG-02**: `pkg/dag` detects cycles at the algorithm's termination condition and returns a `CycleError` naming the involved nodes
+- [x] **DAG-03**: `pkg/dag` is consumed twice in TIDE — once for the Planning DAG, once for the Execution DAG — with typed-apart call sites at the package boundary so the two DAGs cannot accidentally cross-pollute
+- [x] **DAG-04**: `pkg/dag` has unit tests pinning the spec's worked example (`Tasks: α,β,γ,δ,ε,ζ,η,θ` → `Waves: [{α,β,γ,ζ},{δ,η},{ε,θ}]`) as a regression fixture
+- [x] **DAG-05**: `pkg/dag` has no imports from the K8s, controller-runtime, or Anthropic-SDK module trees
 
 ### Controllers & reconciliation
 
