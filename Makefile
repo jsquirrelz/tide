@@ -270,3 +270,9 @@ verify-dag-imports: ## Assert pkg/dag has no k8s.io/sigs.k8s.io/anthropics impor
 		exit 1; \
 	fi
 	@echo "OK: pkg/dag imports are clean"
+
+##@ Custom Analyzers (POOL-03 / Pitfall 6)
+
+.PHONY: tide-lint
+tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 enforcement).
+	go run ./cmd/tide-lint ./...

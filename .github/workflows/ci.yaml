@@ -1,0 +1,63 @@
+# TIDE Phase 1 CI gates.
+#
+# This workflow is Phase 1's load-bearing PR gate: it enforces the
+# DAG-05 forbidden-import contract (via `make verify-dag-imports`),
+# the POOL-03 / Pitfall 6 cross-pool-wait contract (via
+# `make tide-lint`), and the TEST-01 <30s budget on unit tests for
+# pkg/dag + tools/analyzers. The existing kubebuilder-scaffolded
+# workflows (lint.yml, test.yml, test-e2e.yml) handle the broader
+# golangci-lint + envtest + kind suites; this file is the
+# TIDE-specific gate layer.
+#
+# Phase 11 will extend this workflow with additional gates
+# (`make verify-no-aggregates`, `make verify-no-rbac-wildcards`,
+# helmify validation). Phase 2 will add `make test` once dispatch
+# logic lands.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  test:
+    name: TIDE custom gates (DAG-05, POOL-03, TEST-01)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Verify pkg/dag imports (DAG-05)
+        run: make verify-dag-imports
+
+      - name: Run custom analyzers (POOL-03 / Pitfall 6)
+        run: make tide-lint
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Unit tests with TEST-01 <30s budget (pkg/dag + analyzers)
+        run: |
+          set -e
+          START=$(date +%s)
+          go test -timeout 30s ./pkg/dag/... ./tools/analyzers/...
+          END=$(date +%s)
+          DUR=$((END - START))
+          echo "Test duration: ${DUR}s"
+          if [ "$DUR" -gt 30 ]; then
+            echo "TEST-01 violation: test suite exceeded 30s budget"
+            exit 1
+          fi
