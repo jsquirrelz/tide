@@ -20,7 +20,9 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -34,12 +36,15 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
 )
@@ -49,13 +54,51 @@ import (
 // returns context.DeadlineExceeded and we log non-fatally and continue.
 const preChargeTimeout = 30 * time.Second
 
+// decodeSigningKeyFromEnv reads TIDE_SIGNING_KEY from the environment,
+// base64-decodes it, and verifies the key is at least 32 bytes long.
+// Fail-fast: returns an error (caller must os.Exit(1)) if the env var is
+// missing, malformed, or too short (HARN-03 requirement).
+//
+// The Secret data key is TIDE_SIGNING_KEY (env-friendly — no dashes) so
+// `envFrom: [{secretRef: {name: tide-signing-key}}]` on both the Manager
+// Deployment and the credproxy sidecar auto-populates this env var directly
+// (Blocker #1 fix — matches the Helm template data key in signing-secret.yaml).
+func decodeSigningKeyFromEnv() ([]byte, error) {
+	raw := os.Getenv("TIDE_SIGNING_KEY")
+	if raw == "" {
+		return nil, fmt.Errorf("TIDE_SIGNING_KEY env var is required (HARN-03)")
+	}
+	key, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("TIDE_SIGNING_KEY base64 decode: %w", err)
+	}
+	if len(key) < 32 {
+		return nil, fmt.Errorf("TIDE_SIGNING_KEY too short: %d bytes (need >= 32)", len(key))
+	}
+	return key, nil
+}
+
 func main() {
 	var configPath string
 	var leaderElect bool
 	var watchNamespace string
+	// Phase 2 flags (Plan 12 wiring).
+	var subagentImage string
+	var credproxyImage string
+	var defaultFileTouchMode string
+	var rateLimitDefaultRPM int
+	var rateLimitDefaultBurst int
+
 	flag.StringVar(&configPath, "config", "/etc/tide/config.yaml", "Path to runtime config YAML")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election (CTRL-03)")
 	flag.StringVar(&watchNamespace, "watch-namespace", "", "Restrict watches to this namespace (AUTH-02). Empty = all namespaces.")
+	// Phase 2 flags — bound from Helm values.yaml via the controller Deployment args.
+	flag.StringVar(&subagentImage, "subagent-image", "", "Image ref for the subagent container (images.stubSubagent in values.yaml)")
+	flag.StringVar(&credproxyImage, "credproxy-image", "", "Image ref for the tide-credproxy sidecar (images.credProxy in values.yaml)")
+	flag.StringVar(&defaultFileTouchMode, "default-file-touch-mode", "warn", "Cluster-level file-touch validation mode (planAdmission.fileTouchMode in values.yaml; warn|strict)")
+	flag.IntVar(&rateLimitDefaultRPM, "rate-limit-default-rpm", 60, "Default requests-per-minute rate limit (rateLimits.defaults.requestsPerMinute in values.yaml)")
+	flag.IntVar(&rateLimitDefaultBurst, "rate-limit-default-burst", 10, "Default burst size for rate-limit buckets (rateLimits.defaults.burst in values.yaml)")
+
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -117,7 +160,25 @@ func main() {
 		setupLog.Error(err, "executor pool pre-charge failed (non-fatal)")
 	}
 
-	// 6. Register all six reconcilers (CTRL-01).
+	// 6. Phase 2 component wiring (Plan 12).
+	//    a. HMAC signing key — fail-fast; running without it breaks HMAC validation (HARN-03).
+	signingKey, err := decodeSigningKeyFromEnv()
+	if err != nil {
+		setupLog.Error(err, "signing key required (HARN-03)")
+		os.Exit(1)
+	}
+	//    b. Budget store — in-process per-Secret-UID rate-limiter cache (D-D1).
+	budgetStore := budget.NewStore()
+	//    c. Rate-limit defaults from Helm values (rateLimits.defaults.* in values.yaml).
+	defaults := budget.Limits{
+		RequestsPerMinute: rateLimitDefaultRPM,
+		BurstSize:         rateLimitDefaultBurst,
+	}
+	//    d. EnvelopeOut reader — reads from the shared tide-projects PVC at /workspaces
+	//       (Blocker #2/#3 fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
+	envReader := &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"}
+
+	// 7. Register all six reconcilers (CTRL-01).
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
@@ -173,23 +234,46 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Task,
 		ExecutorPool:            executorPool,
 		WatchNamespace:          watchNamespace,
+		// Phase 2 fields (Plan 12 wiring).
+		Budget:         budgetStore,
+		Defaults:       defaults,
+		SigningKey:     signingKey,
+		SubagentImage:  subagentImage,
+		CredproxyImage: credproxyImage,
+		EnvReader:      envReader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
 	}
 
-	// 7. Register both webhooks (CRD-04, CRD-05).
-	// defaultFileTouchMode is the cluster-level file-touch validation mode (Plan 11 / D-E3).
-	// "warn" is the safe Helm-chart default — operators opt into "strict" via Project.Spec
-	// or Plan annotation. A future Helm value (e.g. --set planAdmission.fileTouchMode=strict)
-	// will plumb through config; for Phase 2 the cluster default is hard-coded to "warn".
-	const defaultFileTouchMode = "warn"
+	// 8. Register both webhooks (CRD-04, CRD-05).
+	// defaultFileTouchMode drives cluster-level file-touch validation (Plan 11 / D-E3).
+	// The Helm-chart default is "warn" (safe for fresh installs); operators opt in to
+	// "strict" via --set planAdmission.fileTouchMode=strict which is passed through
+	// the controller Deployment args to this --default-file-touch-mode flag.
 	if err := webhookv1alpha1.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Plan")
 		os.Exit(1)
 	}
 	if err := webhookv1alpha1.SetupWaveWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Wave")
+		os.Exit(1)
+	}
+
+	// 9. Register Phase 2 budget.PreCharge as a Manager Runnable (D-D1 / Pitfall C).
+	//    Runs after Manager.Start completes leader-election + cache sync so the
+	//    informer cache is warm when PreCharge calls client.List (plan comment: "uncached
+	//    client" note in precharge.go is addressed by calling via the manager's Runnable
+	//    path — the cache-backed client is warm by this point). Best-effort: errors are
+	//    logged but non-fatal per Pitfall C (timestamps are not persisted per-Job, so
+	//    a slight count over/under is accepted for v1).
+	if err := mgr.Add(ctrlmgr.RunnableFunc(func(ctx context.Context) error {
+		if err := budget.PreCharge(ctx, mgr.GetClient(), budgetStore, defaults, 60*time.Second); err != nil {
+			setupLog.Error(err, "budget pre-charge failed (non-fatal, Pitfall C)")
+		}
+		return nil
+	})); err != nil {
+		setupLog.Error(err, "unable to register budget pre-charge runnable")
 		os.Exit(1)
 	}
 

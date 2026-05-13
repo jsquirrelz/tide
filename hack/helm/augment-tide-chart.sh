@@ -100,4 +100,111 @@ data:
       enabled: {{ .Values.leaderElection.enabled | default true }}
 EOF
 
+# Phase 2 additions (Plan 12):
+# 5. signing-secret.yaml — HMAC signing key auto-generated on first install via Helm
+#    lookup + resource-policy: keep (D-C3 / Blocker #1 fix). Data key TIDE_SIGNING_KEY
+#    matches the env var name so envFrom: [{secretRef: ...}] auto-populates it on the
+#    Manager Deployment and credproxy sidecar (T-02-12-02/T-02-12-03 mitigations).
+cp "${HACK_DIR}/signing-secret.yaml" "${CHART_DIR}/templates/signing-secret.yaml"
+
+# 6. serviceaccount-subagent.yaml — NEW template for the tide-subagent ServiceAccount
+#    (Warning #9 fix — separate file from Phase 1's serviceaccount.yaml which is NOT
+#    modified). Zero RoleBindings on tide-subagent SA per D-A4 / T-02-12-04.
+cp "${HACK_DIR}/serviceaccount-subagent.yaml" "${CHART_DIR}/templates/serviceaccount-subagent.yaml"
+
+# 7. projects-pvc.yaml — Single shared tide-projects ReadWriteMany PVC (Blocker #2/#3
+#    fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
+#    resource-policy: keep preserves in-flight workspace state across helm uninstall.
+cp "${HACK_DIR}/projects-pvc.yaml" "${CHART_DIR}/templates/projects-pvc.yaml"
+
+# 8. Phase 2 Deployment augmentation: envFrom (TIDE_SIGNING_KEY secret), Phase 2 CLI
+#    args (--subagent-image, --credproxy-image, --default-file-touch-mode,
+#    --rate-limit-default-rpm, --rate-limit-default-burst), and the tide-projects PVC
+#    volume + volumeMount at /workspaces (no subPath).
+#    Idempotent: Python checks for the presence of the Phase 2 markers before inserting.
+if [ -f "${DEPLOY}" ]; then
+  python3 - "${DEPLOY}" <<'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+with open(path) as f:
+    content = f.read()
+
+# ── 8a: envFrom block ────────────────────────────────────────────────────────
+# Insert after the last `env:` list item in the manager container, just before
+# the `image:` line. Only if not already present.
+ENVFROM_MARKER = "envFrom:"
+ENVFROM_BLOCK = """        envFrom:
+        - secretRef:
+            name: {{ .Values.signingKey.secretName | default "tide-signing-key" }}
+"""
+if ENVFROM_MARKER not in content:
+    # Insert envFrom just before the `image:` line (first occurrence after `env:`).
+    content = re.sub(
+        r'(\n        image: )',
+        '\n' + ENVFROM_BLOCK.rstrip('\n') + r'\1',
+        content,
+        count=1,
+    )
+
+# ── 8b: Phase 2 CLI args ─────────────────────────────────────────────────────
+# Replace the helmify-generated `args: {{- toYaml ... }}` one-liner with a fully
+# templated args block that appends Phase 2 flags after the Phase 1 args list.
+# This avoids YAML structure issues from appending list items after a toYaml block.
+ARGS_MARKER = "# phase2-args-injected"
+PHASE2_ARGS_REPLACEMENT = """args:
+          {{- toYaml .Values.controllerManager.manager.args | nindent 10 }}
+          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default "latest" }}
+          - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default "latest" }}
+          - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
+          - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
+          - --rate-limit-default-burst={{ .Values.rateLimits.defaults.burst | default 10 }}
+          # phase2-args-injected"""
+if ARGS_MARKER not in content:
+    content = re.sub(
+        r'args: \{\{- toYaml \.Values\.controllerManager\.manager\.args \| nindent 8 \}\}',
+        PHASE2_ARGS_REPLACEMENT,
+        content,
+        count=1,
+    )
+
+# ── 8c: tide-projects volumeMount on manager container ───────────────────────
+# Insert inside the existing volumeMounts block, after the last listed mount.
+VMOUNT_MARKER = "# phase2-vmount-injected"
+VMOUNT_BLOCK = """        - mountPath: /workspaces
+          name: tide-projects
+          # phase2-vmount-injected
+"""
+if VMOUNT_MARKER not in content:
+    # Insert after the last volumeMounts entry (after the webhook-certs mount line).
+    content = re.sub(
+        r'(        - mountPath: /tmp/k8s-webhook-server/serving-certs\n          name: webhook-certs\n          readOnly: true\n)',
+        r'\1' + VMOUNT_BLOCK,
+        content,
+        count=1,
+    )
+
+# ── 8d: tide-projects volume sourced from PVC ────────────────────────────────
+VOLUME_MARKER = "# phase2-volume-injected"
+VOLUME_BLOCK = """      - name: tide-projects
+        persistentVolumeClaim:
+          claimName: {{ .Values.workspaces.pvc.name | default "tide-projects" }}
+      # phase2-volume-injected
+"""
+if VOLUME_MARKER not in content:
+    # Append after the last existing volume entry (after webhook-certs secret volume).
+    content = re.sub(
+        r'(\n      - name: webhook-certs\n        secret:\n          secretName: webhook-server-cert\n)',
+        r'\1' + VOLUME_BLOCK,
+        content,
+        count=1,
+    )
+
+with open(path, 'w') as f:
+    f.write(content)
+
+print("OK: deployment.yaml Phase 2 fields injected (idempotent)")
+PYEOF
+fi
+
 echo "OK: charts/tide/ augmented with project-specific values + ConfigMap template"

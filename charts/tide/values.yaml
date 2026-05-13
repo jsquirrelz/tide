@@ -94,3 +94,78 @@ leaderElection:
   enabled: true
   # leaseDuration / renewDeadline / retryPeriod use controller-runtime defaults
   # when omitted. Override here for clusters with custom timing requirements.
+
+# Phase 2 additions (Plan 12 wiring — D-C3, D-D1, D-D3, Blocker #1/#2/#3 fixes).
+
+# Plan admission file-touch validation mode (D-E3 / Plan 11 PlanCustomValidator).
+# "warn" is the safe Helm default — operators opt into "strict" via Project.Spec or
+# --set planAdmission.fileTouchMode=strict. Passed to the controller via
+# --default-file-touch-mode flag in the Deployment args.
+planAdmission:
+  fileTouchMode: warn
+
+# Default rate-limit parameters for provider credential Secrets (D-D3).
+# Applied when no Secret annotation or Project.Spec.Providers entry overrides them.
+# Passed to the controller via --rate-limit-default-rpm and --rate-limit-default-burst flags.
+rateLimits:
+  defaults:
+    requestsPerMinute: 60
+    tokensPerMinute: 100000  # informational v1 — not yet enforced at the bucket level
+    burst: 10
+
+# Phase 2 image refs for subagent + credproxy sidecar containers (D-A2).
+# Passed to the controller via --subagent-image and --credproxy-image flags in the
+# Deployment args. The controller injects these into TaskReconciler.SubagentImage +
+# TaskReconciler.CredproxyImage, which BuildJobSpec consumes (Plan 08 / Plan 09).
+images:
+  stubSubagent:
+    repository: ghcr.io/jsquirrelz/tide-stub-subagent
+    tag: v0.1.0-dev
+    pullPolicy: IfNotPresent
+  credProxy:
+    repository: ghcr.io/jsquirrelz/tide-credproxy
+    tag: v0.1.0-dev
+    pullPolicy: IfNotPresent
+  busybox:
+    repository: busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
+
+# HMAC signing-secret name (D-C3 / Blocker #1 fix).
+# The signing-secret.yaml Helm template creates a Secret with this name on first install
+# using Helm's `lookup` + `if not` guard (idempotent). resource-policy: keep annotation
+# preserves the Secret across helm upgrade/uninstall so in-flight tokens stay valid
+# (T-02-12-02 / T-02-12-03 mitigations).
+# The Secret's data key is TIDE_SIGNING_KEY (env-friendly) so envFrom: [{secretRef: ...}]
+# auto-populates the TIDE_SIGNING_KEY env var on the Manager Deployment and credproxy sidecar.
+signingKey:
+  secretName: tide-signing-key
+
+# Budget defaults (D-D2 / FAIL-04). Helm-driven hard caps applied to all Projects that
+# do not specify per-Project caps in Project.Spec.Budget.
+budget:
+  defaults:
+    absoluteCapCents: 10000      # $100.00 default absolute cap
+    rollingWindowCapCents: 5000  # $50.00 / 15-min rolling window default
+
+# Single shared RWX PVC for all Projects' workspaces (Blocker #2/#3 fix —
+# RESEARCH.md Open Question #2 RESOLVED with the single-shared-PVC + subPath architecture).
+#
+# Architecture: ONE chart-provisioned tide-projects PVC (ReadWriteMany), Helm-templated at
+# install time via charts/tide/templates/projects-pvc.yaml.
+#   - Manager Pod mounts PVC at /workspaces (no subPath) — reads /workspaces/{project-uid}/workspace/...
+#   - Task Pods mount PVC with subPath: {project-uid}/workspace → appearing as /workspace
+#   - Init Job (Plan 10) mounts PVC with subPath: {project-uid}/workspace and mkdirs the layout
+#
+# Trade-off: single shared PVC means per-Project quota story doesn't fall out of CSI;
+# quotas are Project.Spec.Budget-driven (FAIL-04) not storage-driven.
+# Phase 3 ART-02 evaluates per-Project PVCs if/when this becomes a real concern.
+#
+# storageClassName: "" uses the cluster-default StorageClass (suitable for kind/minikube/dev).
+# For production, set to a CSI driver that supports ReadWriteMany (e.g. nfs-csi, ceph-cephfs).
+workspaces:
+  pvc:
+    create: true
+    name: tide-projects
+    size: 10Gi
+    storageClassName: ""  # cluster default; set to a CSI RWX driver for production
