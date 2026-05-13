@@ -407,6 +407,12 @@ func applyController() {
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
 		"--set", "images.credProxy.tag=test",
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
+		// Override the chart's default accessModes [ReadWriteMany] to [ReadWriteOnce]
+		// because kind's default rancher.io/local-path provisioner only supports
+		// RWO/RWOPod. Single-node kind cluster doesn't need RWX semantics for these
+		// tests. See .planning/phases/02.2-.../02.2-01-VERIFICATION.md §"Fix
+		// landscape" Option A (chart-side override + test-side --set).
+		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
 		"--wait", "--replace", "--timeout", "5m",
 	)
 	start := time.Now()
