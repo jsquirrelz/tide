@@ -22,7 +22,14 @@ spec:
         kubectl.kubernetes.io/default-container: manager
     spec:
       containers:
-      - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
+      - args:
+          {{- toYaml .Values.controllerManager.manager.args | nindent 10 }}
+          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default "latest" }}
+          - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default "latest" }}
+          - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
+          - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
+          - --rate-limit-default-burst={{ .Values.rateLimits.defaults.burst | default 10 }}
+          # phase2-args-injected
         command:
         - /manager
         env:
@@ -30,6 +37,9 @@ spec:
           value: {{ quote .Values.controllerManager.manager.env.watchNamespace }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        envFrom:
+        - secretRef:
+            name: {{ .Values.signingKey.secretName | default "tide-signing-key" }}
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         livenessProbe:
@@ -66,6 +76,9 @@ spec:
         - mountPath: /tmp/k8s-webhook-server/serving-certs
           name: webhook-certs
           readOnly: true
+        - mountPath: /workspaces
+          name: tide-projects
+          # phase2-vmount-injected
       securityContext: {{- toYaml .Values.controllerManager.podSecurityContext | nindent
         8 }}
       serviceAccountName: {{ include "tide.fullname" . }}-controller-manager
@@ -78,3 +91,7 @@ spec:
       - name: webhook-certs
         secret:
           secretName: webhook-server-cert
+      - name: tide-projects
+        persistentVolumeClaim:
+          claimName: {{ .Values.workspaces.pvc.name | default "tide-projects" }}
+      # phase2-volume-injected

@@ -121,7 +121,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              cycleEdges:
+                description: |-
+                  CycleEdges holds the human-readable edge representations for any cycle detected
+                  during DAG validation (populated when ValidationState=CycleDetected, Phase 2+).
+                items:
+                  type: string
+                type: array
               phase:
+                type: string
+              validationState:
+                description: |-
+                  ValidationState records the result of the Plan admission webhook's DAG and
+                  file-touch validation (Phase 2+). Set by Plan 11's webhook after admission.
+                enum:
+                - Pending
+                - Validated
+                - CycleDetected
+                - FileTouchMismatch
                 type: string
             type: object
         required:

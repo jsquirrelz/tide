@@ -1,0 +1,22 @@
+{{- if .Values.workspaces.pvc.create }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.workspaces.pvc.name | default "tide-projects" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+  annotations:
+    # Don't delete on helm uninstall — protects in-flight workspace state (T-02-12-07).
+    # Operators must manually delete this PVC if they want to reclaim storage.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.workspaces.pvc.size | default "10Gi" }}
+  {{- with .Values.workspaces.pvc.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}
