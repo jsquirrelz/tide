@@ -33,11 +33,11 @@ func TestResolveFileTouchMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		plan         *tidev1alpha1.Plan
-		project      *tidev1alpha1.Project
-		clusterDef   string
-		wantMode     string
+		name       string
+		plan       *tidev1alpha1.Plan
+		project    *tidev1alpha1.Project
+		clusterDef string
+		wantMode   string
 	}{
 		{
 			name: "annotation strict wins over project default warn",
