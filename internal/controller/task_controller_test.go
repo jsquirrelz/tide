@@ -399,7 +399,10 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			exhaustedLimits := budget.Limits{RequestsPerMinute: 1, BurstSize: 1}
 			lim := exhaustedStore.ForSecret(secretUID, exhaustedLimits)
 			rsv := lim.Reserve()
-			_ = rsv // Reservation held — bucket is now empty.
+			// WR-10: Intentionally NOT cancelled — the reservation is held
+			// for the duration of the test so the bucket stays empty and
+			// the dispatch path is forced into the rate-limit gate.
+			_ = rsv
 
 			r := &TaskReconciler{
 				Client:         mgrClient,
@@ -479,6 +482,9 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// Exhaust burst tokens.
 			for i := 0; i < 3; i++ {
 				rsv := lim.Reserve()
+				// WR-10: Intentionally NOT cancelled — these reservations
+				// must permanently drain the burst so all 20 storm tasks
+				// hit the rate-limit gate on first reconcile.
 				_ = rsv
 			}
 

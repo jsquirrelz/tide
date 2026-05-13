@@ -104,9 +104,16 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 			// Create a very restrictive bucket (5 RPM, burst=2).
 			tightLimits := budget.Limits{RequestsPerMinute: 5, BurstSize: 2}
 			limiter := testBudgetStore.ForSecret(rateLimitSecretUID, tightLimits)
-			// Drain the burst tokens so the limiter is effectively exhausted.
+			// WR-07/WR-10: drain the burst tokens via Reserve() (deterministic)
+			// rather than Allow() (which depends on wall-clock elapsing being
+			// less than the refill interval — fine in practice but implicitly
+			// time-dependent under CI load). Each Reserve is intentionally NOT
+			// cancelled so the token is permanently consumed.
 			for i := 0; i < 10; i++ {
-				_ = limiter.Allow() // drain tokens; most will return false after burst=2
+				rsv := limiter.Reserve()
+				// Intentionally NOT cancelled — we want this reservation to
+				// permanently consume the token so the bucket stays drained.
+				_ = rsv
 			}
 
 			By("Creating a Project with the provider Secret")
