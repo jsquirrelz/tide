@@ -94,13 +94,16 @@ Plans:
 
 ### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Layer B integration test suite (`make test-int`) runs end-to-end on developer laptop — `tide-controller-manager` Deployment reaches Ready in kind via Helm install, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass.
+**Requirements**: No formal REQ-IDs — Phase 02.1 is debug + fix; spec is the ROADMAP goals (controller-manager-ready, webhook-endpoints-live, 7-specs-pass).
 **Depends on:** Phase 2
-**Plans:** 13/13 plans complete
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 02.1 to break down)
+- [ ] 02.1-01-PLAN.md — Baseline capture + lock D-01/D-02/D-03 decisions (Wave 1)
+- [ ] 02.1-02-PLAN.md — Helm-install BeforeSuite pivot + ensureSubagentSA helper (Wave 2)
+- [ ] 02.1-03-PLAN.md — Credproxy boot-banner for log-line spec (Wave 2)
+- [ ] 02.1-04-PLAN.md — CI integration + idempotency verification + phase closeout (Wave 3)
 
 ### Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption
 **Goal**: The full reconciler stack (Plan → Phase → Milestone → Project) drives planner-subagent dispatch to author `PLAN.md` / phase brief / `MILESTONE.md`, the orchestrator pushes artifacts at every level boundary via `pkg/git` (HTTPS+PAT default, host-agnostic, per-run branches, `--force-with-lease`, never `main`, gitleaks at every push), the stub-subagent is replaced by a real Claude-Code-backed image inside the same Subagent interface, and a chaos-resume test proves the orchestrator survives mid-wave pod kill using only CRD status + PVC contents.
