@@ -116,7 +116,7 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
-lint: golangci-lint verify-dag-imports verify-dispatch-imports ## Run golangci-lint linter + import firewalls
+lint: golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
@@ -313,10 +313,16 @@ verify-dispatch-imports: ## Assert pkg/dispatch has no k8s.io/sigs.k8s.io/anthro
 	fi
 	@echo "OK: pkg/dispatch imports are clean"
 
-##@ Custom Analyzers (POOL-03 / Pitfall 6)
+##@ Custom Analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14)
 
 .PHONY: tide-lint
-tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 enforcement).
+tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14 enforcement).
+	go run ./cmd/tide-lint ./...
+
+##@ Import firewall (SUB-05 / Pitfall 14 — Phase 2)
+
+.PHONY: verify-import-firewall
+verify-import-firewall: ## Run providerfirewall analyzer via tide-lint multichecker (SUB-05 / Pitfall 14). Fails on any LLM SDK import inside firewalled boundaries.
 	go run ./cmd/tide-lint ./...
 
 ##@ PERSIST gates (PERSIST-01, PERSIST-02 / Pitfall 4)
