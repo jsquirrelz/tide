@@ -14,3 +14,5 @@ spec:
   planRef: sample-plan
   filesTouched:
     - pkg/example/beta.go
+  declaredOutputPaths:
+    - artifacts/beta.json

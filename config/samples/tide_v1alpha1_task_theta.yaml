@@ -16,3 +16,5 @@ spec:
     - eta
   filesTouched:
     - pkg/example/theta.go
+  declaredOutputPaths:
+    - artifacts/theta.json

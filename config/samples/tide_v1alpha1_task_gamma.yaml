@@ -14,3 +14,5 @@ spec:
   planRef: sample-plan
   filesTouched:
     - pkg/example/gamma.go
+  declaredOutputPaths:
+    - artifacts/gamma.json

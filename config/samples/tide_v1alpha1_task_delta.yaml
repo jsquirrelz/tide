@@ -17,3 +17,5 @@ spec:
     - beta
   filesTouched:
     - pkg/example/delta.go
+  declaredOutputPaths:
+    - artifacts/delta.json

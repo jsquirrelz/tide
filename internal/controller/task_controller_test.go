@@ -52,8 +52,9 @@ var _ = Describe("Task Controller", func() {
 						Namespace: "default",
 					},
 					Spec: tideprojectv1alpha1.TaskSpec{
-						PlanRef:      "test-plan",
-						FilesTouched: []string{"path/to/file.go"},
+						PlanRef:             "test-plan",
+						FilesTouched:        []string{"path/to/file.go"},
+						DeclaredOutputPaths: []string{"artifacts/test.json"},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())

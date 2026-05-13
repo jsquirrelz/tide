@@ -63,6 +63,62 @@ type Gates struct {
 	PauseBetweenWaves bool `json:"pauseBetweenWaves,omitempty"`
 }
 
+// ProviderConfig configures one LLM provider (Phase 2+).
+type ProviderConfig struct {
+	// Name is the provider identifier (only "anthropic" is supported in v1).
+	// +kubebuilder:validation:Enum=anthropic
+	Name string `json:"name"`
+
+	// RequestsPerMinute optionally caps API requests per minute for this provider.
+	// +optional
+	RequestsPerMinute *int32 `json:"requestsPerMinute,omitempty"`
+
+	// TokensPerMinute optionally caps token throughput per minute for this provider.
+	// +optional
+	TokensPerMinute *int32 `json:"tokensPerMinute,omitempty"`
+}
+
+// BudgetConfig declares cost/token caps for the Project (Phase 2+).
+type BudgetConfig struct {
+	// AbsoluteCapCents is the hard spending limit in USD cents for the project lifetime.
+	// +kubebuilder:validation:Minimum=0
+	AbsoluteCapCents int64 `json:"absoluteCapCents"`
+
+	// RollingWindowCapCents optionally caps spending over the window defined by the
+	// BudgetStatus.WindowStart field.
+	// +optional
+	RollingWindowCapCents int64 `json:"rollingWindowCapCents,omitempty"`
+}
+
+// PlanAdmissionConfig controls file-touch policy during plan validation (Phase 2+).
+type PlanAdmissionConfig struct {
+	// FileTouchMode determines how file-touch mismatches are handled:
+	//   "strict" — reject plans whose file touches deviate from declarations.
+	//   "warn"   — admit but annotate the mismatch on Plan.Status.
+	// +kubebuilder:validation:Enum=strict;warn
+	// +optional
+	FileTouchMode string `json:"fileTouchMode,omitempty"`
+}
+
+// BudgetStatus records running spend tallies for the Project (Phase 2+).
+// PERSIST-02 / Pitfall 4: this is a TALLY object, not an aggregate schedule.
+// The PERSIST-02 denylist (enforced by `make verify-no-aggregates`) does not
+// apply to this struct — it carries only spend counters (tokensSpent,
+// costSpentCents, windowStart), not a derived execution plan.
+type BudgetStatus struct {
+	// TokensSpent is the cumulative token count spent since WindowStart.
+	// +optional
+	TokensSpent int64 `json:"tokensSpent,omitempty"`
+
+	// CostSpentCents is the cumulative cost in USD cents since WindowStart.
+	// +optional
+	CostSpentCents int64 `json:"costSpentCents,omitempty"`
+
+	// WindowStart marks the beginning of the current rolling budget window.
+	// +optional
+	WindowStart *metav1.Time `json:"windowStart,omitempty"`
+}
+
 // ProjectSpec defines the desired state of Project.
 // +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')",message="targetRepo must be a valid http(s) or SSH git URL"
 type ProjectSpec struct {
@@ -81,6 +137,29 @@ type ProjectSpec struct {
 	// Gates declares per-level human gate policy (Phase 4).
 	// +optional
 	Gates Gates `json:"gates,omitempty"`
+
+	// ProviderSecretRef is the name of the K8s Secret carrying provider credentials (Phase 2+).
+	// +optional
+	ProviderSecretRef string `json:"providerSecretRef,omitempty"`
+
+	// Providers lists per-provider configuration (rate limits, etc.) (Phase 2+).
+	// +optional
+	Providers []ProviderConfig `json:"providers,omitempty"`
+
+	// Budget declares cost/token caps for this project (Phase 2+).
+	// +optional
+	Budget BudgetConfig `json:"budget,omitempty"`
+
+	// PlanAdmission controls file-touch policy during plan validation (Phase 2+).
+	// +optional
+	PlanAdmission PlanAdmissionConfig `json:"planAdmission,omitempty"`
+
+	// MaxAttemptsPerTask caps the number of dispatch attempts per Task before
+	// the Task is marked failed (Phase 2+, consumed by TaskReconciler in Plan 09).
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
+	// +optional
+	MaxAttemptsPerTask int32 `json:"maxAttemptsPerTask,omitempty"`
 }
 
 // ProjectStatus defines the observed state of Project.
@@ -95,6 +174,11 @@ type ProjectStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Budget records running spend tallies (Phase 2+).
+	// PERSIST-02 / Pitfall 4: BudgetStatus is a tally object, not an aggregate schedule.
+	// +optional
+	Budget BudgetStatus `json:"budget,omitempty"`
 }
 
 // +kubebuilder:object:root=true

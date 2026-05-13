@@ -39,6 +39,25 @@ spec:
           spec:
             description: spec defines the desired state of Project
             properties:
+              budget:
+                description: Budget declares cost/token caps for this project (Phase
+                  2+).
+                properties:
+                  absoluteCapCents:
+                    description: AbsoluteCapCents is the hard spending limit in USD
+                      cents for the project lifetime.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  rollingWindowCapCents:
+                    description: |-
+                      RollingWindowCapCents optionally caps spending over the window defined by the
+                      BudgetStatus.WindowStart field.
+                    format: int64
+                    type: integer
+                required:
+                - absoluteCapCents
+                type: object
               gates:
                 description: Gates declares per-level human gate policy (Phase 4).
                 properties:
@@ -81,6 +100,14 @@ spec:
                     - pause
                     type: string
                 type: object
+              maxAttemptsPerTask:
+                description: |-
+                  MaxAttemptsPerTask caps the number of dispatch attempts per Task before
+                  the Task is marked failed (Phase 2+, consumed by TaskReconciler in Plan 09).
+                format: int32
+                maximum: 10
+                minimum: 1
+                type: integer
               modelSelection:
                 description: ModelSelection picks per-level model identifiers (Phase
                   2+).
@@ -94,6 +121,50 @@ spec:
                   task:
                     type: string
                 type: object
+              planAdmission:
+                description: PlanAdmission controls file-touch policy during plan
+                  validation (Phase 2+).
+                properties:
+                  fileTouchMode:
+                    description: |-
+                      FileTouchMode determines how file-touch mismatches are handled:
+                        "strict" — reject plans whose file touches deviate from declarations.
+                        "warn"   — admit but annotate the mismatch on Plan.Status.
+                    enum:
+                    - strict
+                    - warn
+                    type: string
+                type: object
+              providerSecretRef:
+                description: ProviderSecretRef is the name of the K8s Secret carrying
+                  provider credentials (Phase 2+).
+                type: string
+              providers:
+                description: Providers lists per-provider configuration (rate limits,
+                  etc.) (Phase 2+).
+                items:
+                  description: ProviderConfig configures one LLM provider (Phase 2+).
+                  properties:
+                    name:
+                      description: Name is the provider identifier (only "anthropic"
+                        is supported in v1).
+                      enum:
+                      - anthropic
+                      type: string
+                    requestsPerMinute:
+                      description: RequestsPerMinute optionally caps API requests
+                        per minute for this provider.
+                      format: int32
+                      type: integer
+                    tokensPerMinute:
+                      description: TokensPerMinute optionally caps token throughput
+                        per minute for this provider.
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
               secretRefs:
                 description: SecretRefs references K8s Secrets for credentials (AUTH-01
                   — Phase 3).
@@ -121,6 +192,27 @@ spec:
           status:
             description: status defines the observed state of Project
             properties:
+              budget:
+                description: |-
+                  Budget records running spend tallies (Phase 2+).
+                  PERSIST-02 / Pitfall 4: BudgetStatus is a tally object, not an aggregate schedule.
+                properties:
+                  costSpentCents:
+                    description: CostSpentCents is the cumulative cost in USD cents
+                      since WindowStart.
+                    format: int64
+                    type: integer
+                  tokensSpent:
+                    description: TokensSpent is the cumulative token count spent since
+                      WindowStart.
+                    format: int64
+                    type: integer
+                  windowStart:
+                    description: WindowStart marks the beginning of the current rolling
+                      budget window.
+                    format: date-time
+                    type: string
+                type: object
               conditions:
                 description: Conditions follow the standard K8s convention.
                 items:

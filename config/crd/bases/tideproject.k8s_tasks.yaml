@@ -39,11 +39,64 @@ spec:
           spec:
             description: spec defines the desired state of Task
             properties:
+              caps:
+                description: Caps optionally restricts subagent resource usage (Phase
+                  2+).
+                properties:
+                  inputTokens:
+                    description: InputTokens caps the number of input (prompt) tokens
+                      consumed per dispatch.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  iterations:
+                    description: Iterations caps the number of agentic iterations
+                      (tool-call loops).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  outputTokens:
+                    description: OutputTokens caps the number of output (completion)
+                      tokens produced per dispatch.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  wallClockSeconds:
+                    description: WallClockSeconds is the maximum wall-clock time for
+                      the subagent execution.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              declaredOutputPaths:
+                description: |-
+                  DeclaredOutputPaths declares the output artifact paths the subagent must produce
+                  (Phase 2+). Plan 06's harness output validator enforces against this set (HARN-05).
+                items:
+                  type: string
+                minItems: 1
+                type: array
               dependsOn:
                 description: DependsOn lists sibling Task names in the same Plan (D-F1).
                 items:
                   type: string
                 type: array
+              dev:
+                description: |-
+                  Dev carries dev/test-only overrides for the stub subagent (Phase 2+).
+                  Zero-value embed (not pointer) — field presence is governed by the TestMode
+                  enum constraint, mirroring the Gates pattern in shared_types.go.
+                properties:
+                  testMode:
+                    description: TestMode overrides the stub subagent's exit behaviour
+                      (used by integration tests).
+                    enum:
+                    - success
+                    - fail-exit-1
+                    - hang
+                    - exceed-output-paths
+                    type: string
+                type: object
               filesTouched:
                 description: FilesTouched declares the workspace paths this Task intends
                   to write (D-F2).
@@ -60,6 +113,7 @@ spec:
                   (optional).
                 type: string
             required:
+            - declaredOutputPaths
             - filesTouched
             - planRef
             type: object
