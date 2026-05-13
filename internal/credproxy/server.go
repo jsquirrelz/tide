@@ -20,11 +20,11 @@ import (
 // Token validation delegates to Verify (token.go); invalid tokens return
 // HTTP 401 with a structured body (T-02-05-01 / T-02-05-06).
 type Proxy struct {
-	SigningKey       []byte // from Secret tide-signing-key (envFrom)
-	ExpectedTaskUID  string // from env TIDE_TASK_UID
-	UpstreamBaseURL  string // "https://api.anthropic.com"
-	RealAPIKey       string // from envFrom secretRef <providerSecretRef>
-	ListenAddr       string // "127.0.0.1:8443"
+	SigningKey        []byte // from Secret tide-signing-key (envFrom)
+	ExpectedTaskUID   string // from env TIDE_TASK_UID
+	UpstreamBaseURL   string // "https://api.anthropic.com"
+	RealAPIKey        string // from envFrom secretRef <providerSecretRef>
+	ListenAddr        string // "127.0.0.1:8443"
 	CertFile, KeyFile string // /etc/tide/proxy/{cert.pem,key.pem}
 }
 
@@ -75,8 +75,8 @@ func (p *Proxy) Handler() http.Handler {
 // CertFile and KeyFile must point at the cert + key written by MintSelfSignedCert.
 func (p *Proxy) ListenAndServe(ctx context.Context) error {
 	srv := &http.Server{
-		Addr:    p.ListenAddr,
-		Handler: p.Handler(),
+		Addr:      p.ListenAddr,
+		Handler:   p.Handler(),
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 

@@ -10,11 +10,11 @@ import (
 // TestCheckCaps runs the full table of cap-enforcement cases as subtests.
 func TestCheckCaps(t *testing.T) {
 	tests := []struct {
-		name        string
-		caps        pkgdispatch.Caps
-		usage       pkgdispatch.Usage
-		wantNil     bool
-		wantReason  string
+		name       string
+		caps       pkgdispatch.Caps
+		usage      pkgdispatch.Usage
+		wantNil    bool
+		wantReason string
 	}{
 		{
 			name: "AllUnder",

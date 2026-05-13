@@ -76,8 +76,8 @@ func TestRollUpUsage_AccumulatesAcrossCalls(t *testing.T) {
 		t.Fatalf("Get after second RollUpUsage: %v", err)
 	}
 
-	wantTokens := int64(1000+500+800+200) // 2500
-	wantCents := int64(25 + 15)           // 40
+	wantTokens := int64(1000 + 500 + 800 + 200) // 2500
+	wantCents := int64(25 + 15)                 // 40
 
 	if final.Status.Budget.TokensSpent != wantTokens {
 		t.Errorf("TokensSpent: got %d; want %d", final.Status.Budget.TokensSpent, wantTokens)

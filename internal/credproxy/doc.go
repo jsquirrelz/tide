@@ -1,7 +1,7 @@
 // Package credproxy implements the TIDE signed-token credential proxy
 // (HARN-03 / D-C1, D-C2, D-C3).
 //
-// Architecture
+// # Architecture
 //
 // The credproxy runs as a Kubernetes 1.33 native sidecar (initContainer with
 // restartPolicy: Always — D-C1) inside every Task Job Pod. The subagent

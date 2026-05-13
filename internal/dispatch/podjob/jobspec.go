@@ -165,10 +165,20 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			{Name: "TIDE_TASK_UID", Value: string(opts.Task.UID)},
 			{Name: "TIDE_PROXY_LISTEN", Value: "0.0.0.0:8443"},
 		},
-		EnvFrom: []corev1.EnvFromSource{
-			{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "tide-signing-key"}}},
-			{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: opts.Project.Spec.ProviderSecretRef}}},
-		},
+		EnvFrom: func() []corev1.EnvFromSource {
+			// Always include the signing-key secret.
+			srcs := []corev1.EnvFromSource{
+				{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "tide-signing-key"}}},
+			}
+			// Only add the provider secret when a name is set — K8s rejects empty
+			// SecretRef.Name (Required value validation).
+			if opts.Project.Spec.ProviderSecretRef != "" {
+				srcs = append(srcs, corev1.EnvFromSource{
+					SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: opts.Project.Spec.ProviderSecretRef}},
+				})
+			}
+			return srcs
+		}(),
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      VolumeCertShared,
@@ -278,4 +288,3 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 	}
 }
-
