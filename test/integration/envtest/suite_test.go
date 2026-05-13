@@ -265,7 +265,7 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		Dispatcher:     &stubDispatcher{},
 		Budget:         testBudgetStore,
 		Defaults:       testBudgetDefaults,
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		SubagentImage:  testSubagentImage,
 		CredproxyImage: testCredproxyImage,
 		EnvReader:      envReader,
