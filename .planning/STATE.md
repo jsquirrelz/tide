@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-3)
-Plan: 3 of 4 (01 + 03 + 04 landed; 02 still gated)
-Status: Plan 02.2-04 metrics-bind-address flag definition verified at runtime; cascade-3 surfaced exactly as T-02.2-10 predicted — `flag provided but not defined: -webhook-cert-path`. Pod CrashLoopBackOff on next undefined chart arg. User to decide between continued tactical iteration (Plan 02.2-05 defines --webhook-cert-path) or comprehensive audit pivot (Option B from 02.2-03-VERIFICATION.md fix landscape).
-Last activity: 2026-05-13 -- Phase 02.2 partial (04 landed; gate BLOCKED on cascade-3; VERIFICATION artifact authored inline after executor API error recovery)
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-4 — STRUCTURALLY DIFFERENT)
+Plan: 4 of 5 (01 + 03 + 04 + 05 landed; 02 still gated)
+Status: Plan 02.2-05 --webhook-cert-path fix verified at runtime; flag-mismatch cascade chain TERMINATED (manager Pod Running 0 restarts, all 5 chart args satisfied, Layer B specs actually executing). Cascade-4 surfaced is a DIFFERENT class — Makefile:124 `timeout 300s go test` budget too tight for Layer A (~25s) + Layer B (7-spec end-to-end). Specs are running; `go test` gets SIGKILLed before Ginkgo flushes summary. Recommended fix: bump Makefile timeout to 600s (single-line edit, smallest surface). See 02.2-05-VERIFICATION.md §"Fix landscape" Option A.
+Last activity: 2026-05-13 -- Phase 02.2 partial (05 landed; flag-mismatch cascade terminated; cascade-4 is test-budget, NOT flag mismatch)
 
 Progress: [████████░░] 83%
 
