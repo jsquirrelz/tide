@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -429,39 +428,6 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
-// budgetBypassAnnotationKeys are the only annotations the Project reconciler
-// reacts to (D-D4 bypass-budget contract). Narrowing the AnnotationChanged
-// predicate to this set prevents unbounded reconcile churn from unrelated
-// label/annotation tooling — kubectl annotate add/remove, helm upgrade
-// re-stamping, monitoring annotators, etc. (WR-11).
-var budgetBypassAnnotationKeys = []string{
-	"tideproject.k8s/bypass-budget",
-	"tideproject.k8s/bypass-budget-until",
-}
-
-// bypassAnnotationChangedPredicate is true exactly when an Update event
-// changes the value of at least one annotation in budgetBypassAnnotationKeys.
-// Create/Delete events are forwarded (they affect the Project's lifecycle
-// regardless of bypass state); Generic events are dropped.
-var bypassAnnotationChangedPredicate = predicate.Funcs{
-	CreateFunc:  func(_ event.CreateEvent) bool { return true },
-	DeleteFunc:  func(_ event.DeleteEvent) bool { return true },
-	GenericFunc: func(_ event.GenericEvent) bool { return false },
-	UpdateFunc: func(e event.UpdateEvent) bool {
-		if e.ObjectOld == nil || e.ObjectNew == nil {
-			return false
-		}
-		oldAnn := e.ObjectOld.GetAnnotations()
-		newAnn := e.ObjectNew.GetAnnotations()
-		for _, k := range budgetBypassAnnotationKeys {
-			if oldAnn[k] != newAnn[k] {
-				return true
-			}
-		}
-		return false
-	},
-}
-
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02,
 // annotation-change predicate for bypass annotations (D-D4), and a
 // namespace-filter predicate per AUTH-02.
@@ -479,7 +445,7 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&tideprojectv1alpha1.Project{},
 			builder.WithPredicates(predicate.Or(
 				predicate.GenerationChangedPredicate{},
-				bypassAnnotationChangedPredicate,
+				predicate.AnnotationChangedPredicate{},
 			)),
 		).
 		Owns(&batchv1.Job{}).
