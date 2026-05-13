@@ -66,8 +66,8 @@ Plans:
 
 Plans:
 **Wave 1**
-- [ ] 02-01-PLAN.md — pkg/dispatch public envelope contract (EnvelopeIn/Out, Subagent interface, errors) + verify-dispatch-imports gate (Wave 1)
-- [ ] 02-03-PLAN.md — v1alpha1 schema additions (Project.Spec/Status, Task.Spec.Dev, Plan.Status, shared_types constants) + codegen (Wave 1)
+- [x] 02-01-PLAN.md — pkg/dispatch public envelope contract (EnvelopeIn/Out, Subagent interface, errors) + verify-dispatch-imports gate (Wave 1)
+- [x] 02-03-PLAN.md — v1alpha1 schema additions (Project.Spec/Status, Task.Spec.Dev, Plan.Status, shared_types constants) + codegen (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 02-02-PLAN.md — providerfirewall lint analyzer + cmd/tide-lint multichecker flip (SUB-05) (Wave 2)
