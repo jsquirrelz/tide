@@ -1,6 +1,7 @@
 package credproxy
 
 import (
+	"encoding/base64"
 	"errors"
 	"testing"
 	"time"
@@ -31,13 +32,19 @@ func TestSign_ErrorOnEmptyKey(t *testing.T) {
 	}
 }
 
-// TestVerify table-driven tests covering all sentinel-error paths.
+// verifyTests is the table of Verify test cases.
+// Note on ErrTaskUIDMismatch: since the taskUID is MAC-bound but not stored in
+// the token, a wrong-UID verify produces the same MAC failure as a tampered
+// token — both return ErrBadMAC. ErrTaskUIDMismatch is kept as a sentinel for
+// future token formats that embed the UID (or for callers that construct
+// test-only scenarios via wrapping). In this plan the wrong-UID path also
+// returns ErrBadMAC (see Verify docstring).
 var verifyTests = []struct {
-	name        string
-	setup       func(key []byte) string // returns token
-	uid         string
-	wantErr     error
-	wantNilErr  bool
+	name       string
+	setup      func(key []byte) string // returns token
+	uid        string
+	wantErr    error
+	wantNilErr bool
 }{
 	{
 		name: "ValidToken",
@@ -60,8 +67,9 @@ var verifyTests = []struct {
 			}
 			return tok
 		},
+		// Wrong UID → MAC mismatch → ErrBadMAC (taskUID is MAC-bound, not stored)
 		uid:     "task-uid-xyz",
-		wantErr: ErrTaskUIDMismatch,
+		wantErr: ErrBadMAC,
 	},
 	{
 		name: "TamperedMAC",
@@ -70,10 +78,11 @@ var verifyTests = []struct {
 			if err != nil {
 				panic(err)
 			}
-			// Flip the last byte of the base64 string (changes the MAC region)
-			b := []byte(tok)
-			b[len(b)-1] ^= 0xFF
-			return string(b)
+			// Decode, tamper the last byte (MAC region), re-encode.
+			// Flipping raw bytes ensures the base64 remains valid.
+			raw, _ := base64.RawURLEncoding.DecodeString(tok)
+			raw[len(raw)-1] ^= 0xFF
+			return base64.RawURLEncoding.EncodeToString(raw)
 		},
 		uid:     "task-uid-abc",
 		wantErr: ErrBadMAC,
@@ -134,21 +143,28 @@ func TestVerify_ValidToken(t *testing.T) {
 	}
 }
 
+// TestVerify_TaskUIDMismatch confirms that a token signed for task-uid-abc
+// fails verification when presented with task-uid-xyz. Since the taskUID is
+// MAC-bound but not stored in the 56-byte token, the verifier cannot
+// distinguish UID mismatch from a tampered token — both return ErrBadMAC.
+// ErrTaskUIDMismatch is reserved as a sentinel for future use.
 func TestVerify_TaskUIDMismatch(t *testing.T) {
 	key := []byte("12345678901234567890123456789012")
 	tok, _ := Sign(key, "task-uid-abc", 10*time.Minute)
 	err := Verify(key, tok, "task-uid-xyz")
-	if !errors.Is(err, ErrTaskUIDMismatch) {
-		t.Fatalf("expected ErrTaskUIDMismatch, got %v", err)
+	if !errors.Is(err, ErrBadMAC) {
+		t.Fatalf("expected ErrBadMAC (wrong UID → MAC mismatch), got %v", err)
 	}
 }
 
 func TestVerify_TamperedMAC(t *testing.T) {
 	key := []byte("12345678901234567890123456789012")
 	tok, _ := Sign(key, "task-uid-abc", 10*time.Minute)
-	b := []byte(tok)
-	b[len(b)-1] ^= 0xFF
-	err := Verify(key, string(b), "task-uid-abc")
+	// Decode, tamper the last MAC byte, re-encode so the base64 remains valid.
+	raw, _ := base64.RawURLEncoding.DecodeString(tok)
+	raw[len(raw)-1] ^= 0xFF
+	tampered := base64.RawURLEncoding.EncodeToString(raw)
+	err := Verify(key, tampered, "task-uid-abc")
 	if !errors.Is(err, ErrBadMAC) {
 		t.Fatalf("expected ErrBadMAC, got %v", err)
 	}
