@@ -115,6 +115,9 @@ var _ = BeforeSuite(func() {
 	By("Applying TIDE CRDs to kind cluster")
 	applyCRDs()
 
+	By("Installing cert-manager (required by config/default webhook certs)")
+	installCertManager()
+
 	By("Applying TIDE controller Deployment via kustomize")
 	applyController()
 
@@ -205,6 +208,47 @@ func applyCRDs() {
 
 	// Brief wait for CRDs to be established.
 	time.Sleep(2 * time.Second)
+}
+
+// certManagerVersion is the cert-manager release used in Layer B kind tests.
+// Pinned per STACK.md spirit (versions documented; no @sha pin yet for the
+// remote URL — see TODO). Override with TIDE_CERT_MANAGER_VERSION for
+// local testing.
+const certManagerVersion = "v1.16.2"
+
+// installCertManager installs cert-manager into the kind cluster so the
+// `config/default` overlay's webhook certificate Issuer + Certificate can
+// be reconciled. Without cert-manager, the manager Pod stays stuck on
+// `MountVolume.SetUp failed: secret "webhook-server-cert" not found`.
+func installCertManager() {
+	version := os.Getenv("TIDE_CERT_MANAGER_VERSION")
+	if version == "" {
+		version = certManagerVersion
+	}
+	url := fmt.Sprintf("https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml", version)
+
+	GinkgoWriter.Printf("Installing cert-manager %s from %s\n", version, url)
+	applyCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+		"apply", "-f", url, "--timeout=120s")
+	out, err := applyCmd.CombinedOutput()
+	if err != nil {
+		GinkgoWriter.Printf("Warning: cert-manager apply failed: %v\n%s\n", err, out)
+		return
+	}
+
+	// Wait for cert-manager Deployments to become Ready (webhook is the slowest).
+	for _, deploy := range []string{"cert-manager", "cert-manager-cainjector", "cert-manager-webhook"} {
+		waitCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+			"-n", "cert-manager",
+			"rollout", "status", "deployment/"+deploy,
+			"--timeout=120s")
+		out, err := waitCmd.CombinedOutput()
+		if err != nil {
+			GinkgoWriter.Printf("Warning: cert-manager %s not ready: %v\n%s\n", deploy, err, out)
+			return
+		}
+	}
+	GinkgoWriter.Println("cert-manager ready")
 }
 
 // applyController applies the TIDE controller via kubectl kustomize.
