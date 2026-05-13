@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-13T15:59:17.964Z"
-last_activity: 2026-05-13 -- Phase 02.2 execution started
+last_updated: "2026-05-13T16:35:00.000Z"
+last_activity: 2026-05-13 -- Phase 02.2 partial (01 landed; 02 gated out by BLOCKED runtime gate — new chart PVC RWX issue surfaced)
 progress:
   total_phases: 7
   completed_phases: 3
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 02.2
-Last activity: 2026-05-13 -- Phase 02.2 execution started
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED
+Plan: 1 of 2 (01 landed; 02 gated out)
+Status: Phase 02.2 Plan 01 source-shape fixes landed and verified at source; runtime verification BLOCKED on new out-of-scope chart PVC RWX vs kind local-path RWO mismatch (see 02.2-01-VERIFICATION.md §"Root-Cause Summary" options A–E)
+Last activity: 2026-05-13 -- Phase 02.2 partial (01 landed; 02 gated out by BLOCKED runtime gate — new chart PVC RWX issue surfaced)
 
 Progress: [████████░░] 83%
 
