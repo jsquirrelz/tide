@@ -65,18 +65,31 @@ Plans:
 **Plans:** 13 plans
 
 Plans:
+**Wave 1**
 - [ ] 02-01-PLAN.md — pkg/dispatch public envelope contract (EnvelopeIn/Out, Subagent interface, errors) + verify-dispatch-imports gate (Wave 1)
-- [ ] 02-02-PLAN.md — providerfirewall lint analyzer + cmd/tide-lint multichecker flip (SUB-05) (Wave 2)
 - [ ] 02-03-PLAN.md — v1alpha1 schema additions (Project.Spec/Status, Task.Spec.Dev, Plan.Status, shared_types constants) + codegen (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 02-02-PLAN.md — providerfirewall lint analyzer + cmd/tide-lint multichecker flip (SUB-05) (Wave 2)
 - [ ] 02-04-PLAN.md — cmd/stub-subagent Go binary + Dockerfile (Wave 2)
 - [ ] 02-05-PLAN.md — credential proxy (HMAC token + self-signed cert + HTTPS server + cmd/credproxy + Dockerfile) (Wave 2)
 - [ ] 02-06-PLAN.md — internal/harness package (caps + redact tail-keep buffer + outputs validate + envelope_io) (Wave 2)
 - [ ] 02-07-PLAN.md — internal/budget package (sync.Map rate bucket + PreCharge + cap check + tally + Prometheus counter) (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 02-08-PLAN.md — internal/dispatch.Dispatcher interface body + PodJobBackend + JobSpec (native sidecar) + JobName (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 02-09-PLAN.md — TaskReconciler dispatch body + WaveReconciler observational roll-up + PlanReconciler Wave materialization (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 02-10-PLAN.md — ProjectReconciler init Job (ART-01) + budget cap halt + bypass annotation watch (Wave 5)
 - [ ] 02-11-PLAN.md — Plan admission webhook body (cycle detection + file-touch reconciliation + strict/warn precedence) (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 02-12-PLAN.md — cmd/manager Phase 2 wiring + Helm chart signing-secret template + tide-subagent SA + values keys (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
 - [ ] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
 
 ### Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption
