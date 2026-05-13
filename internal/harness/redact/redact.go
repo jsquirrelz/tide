@@ -1,0 +1,86 @@
+package redact
+
+import (
+	"io"
+	"regexp"
+)
+
+// RedactingWriter wraps an io.Writer; bytes are redacted before forwarding.
+// Maintains a tail-keep buffer to handle pattern matches across Write calls
+// (Pitfall A defense — RESEARCH.md §"Pitfall A: Regex match straddling chunk
+// boundary in streaming redactor").
+//
+// Write semantics: per the io.Writer contract, Write returns (len(p), nil) on
+// success regardless of how many bytes are flushed to the underlying writer in
+// this call — some bytes are held in the tail-keep buffer and are not flushed
+// until the next Write or until Close is called.
+//
+// Close must be called once writing is complete to drain the remaining
+// tail-keep buffer through a final redaction pass. If the underlying writer
+// also implements io.Closer, its Close is propagated.
+type RedactingWriter struct {
+	dst      io.Writer
+	tail     []byte // last maxPatternLen bytes from previous Write, unredacted
+	patterns []*regexp.Regexp
+}
+
+// NewRedactingWriter returns a RedactingWriter that applies [SecretPatterns]
+// before forwarding bytes to dst.
+func NewRedactingWriter(dst io.Writer) *RedactingWriter {
+	return &RedactingWriter{dst: dst, patterns: SecretPatterns}
+}
+
+// Write redacts p and forwards as many safe bytes as possible to the
+// underlying writer. The last [maxPatternLen] bytes are held in a tail-keep
+// buffer so that a secret pattern split across two Write calls is still
+// detected on the second call.
+//
+// Returns (len(p), nil) on success; io.Writer contract is honoured even when
+// fewer bytes are flushed downstream in this call.
+func (w *RedactingWriter) Write(p []byte) (int, error) {
+	// Concatenate tail + p into a working buffer.
+	buf := make([]byte, 0, len(w.tail)+len(p))
+	buf = append(buf, w.tail...)
+	buf = append(buf, p...)
+
+	// Apply all secret patterns in sequence (in-place replacement).
+	for _, re := range w.patterns {
+		buf = re.ReplaceAll(buf, []byte("[REDACTED]"))
+	}
+
+	// Hold back the last maxPatternLen bytes as the next tail-keep so any
+	// pattern that straddles the boundary into the next Write is still caught.
+	if len(buf) > maxPatternLen {
+		flushUpTo := len(buf) - maxPatternLen
+		if _, err := w.dst.Write(buf[:flushUpTo]); err != nil {
+			return 0, err
+		}
+		w.tail = append(w.tail[:0], buf[flushUpTo:]...)
+	} else {
+		// Buffer is still within maxPatternLen — hold everything in tail.
+		w.tail = append(w.tail[:0], buf...)
+	}
+
+	// Always return the number of bytes from the caller's input (io.Writer contract).
+	return len(p), nil
+}
+
+// Close flushes the remaining tail-keep buffer through one final redaction
+// pass and writes the result to the underlying writer. If the underlying
+// writer also implements io.Closer, its Close is propagated.
+func (w *RedactingWriter) Close() error {
+	if len(w.tail) > 0 {
+		buf := w.tail
+		for _, re := range w.patterns {
+			buf = re.ReplaceAll(buf, []byte("[REDACTED]"))
+		}
+		if _, err := w.dst.Write(buf); err != nil {
+			return err
+		}
+		w.tail = w.tail[:0]
+	}
+	if c, ok := w.dst.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
