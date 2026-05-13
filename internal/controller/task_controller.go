@@ -251,6 +251,18 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	}
 
 	// Step 6: Rate-limit gate (Pattern 1 — no blocking per Pitfall 1, D-D3).
+	//
+	// CR-03: Once a token is reserved (d == 0), any subsequent error before the
+	// Job is successfully created must Cancel() the reservation. Otherwise the
+	// bucket drains permanently on transient errors (signing, marshal, patch,
+	// Create), and the controller silently throttles itself.
+	var heldReservation interface{ Cancel() }
+	committed := false
+	defer func() {
+		if !committed && heldReservation != nil {
+			heldReservation.Cancel()
+		}
+	}()
 	if project.Spec.ProviderSecretRef != "" {
 		var secret corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); err != nil {
@@ -278,6 +290,9 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 					}
 					return ctrl.Result{RequeueAfter: d}, nil
 				}
+				// d == 0: token consumed. Hold the reservation so any error
+				// before Job Create returns the token to the bucket.
+				heldReservation = rsv
 			}
 		}
 	}
@@ -366,6 +381,9 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		// AlreadyExists: idempotent success — watch-lag race (Pitfall F / SUB-03).
 		logger.Info("job already exists; treating as successful dispatch", "job", job.Name)
 	}
+	// CR-03: Job is committed (either created fresh or already exists). Mark
+	// committed so the deferred reservation cancel does not return the token.
+	committed = true
 
 	// Step 12: Patch Status.Phase=Running + Condition Running=True, Reason=Dispatched.
 	{
