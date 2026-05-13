@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -590,12 +591,24 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 		return 0, fmt.Errorf("list task jobs: %w", err)
 	}
 	maxAttempt := 0
+	logger := logf.FromContext(ctx)
 	for _, j := range jobList.Items {
-		if attempt, ok := j.Labels["tideproject.k8s/attempt"]; ok {
-			var n int
-			if _, err := fmt.Sscanf(attempt, "%d", &n); err == nil && n > maxAttempt {
-				maxAttempt = n
-			}
+		attempt, ok := j.Labels["tideproject.k8s/attempt"]
+		if !ok {
+			continue
+		}
+		// WR-03: strconv.Atoi rejects negative values, trailing garbage,
+		// hex, etc.; an explicit n<0 check guards against a label value of
+		// "-1" pulling the max-attempt tracking backwards. Malformed labels
+		// are logged at V(1) so a parse failure is observable instead of
+		// silently swallowed.
+		n, err := strconv.Atoi(attempt)
+		if err != nil || n < 0 {
+			logger.V(1).Info("ignoring malformed attempt label", "job", j.Name, "value", attempt)
+			continue
+		}
+		if n > maxAttempt {
+			maxAttempt = n
 		}
 	}
 	return maxAttempt + 1, nil
