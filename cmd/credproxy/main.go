@@ -122,6 +122,11 @@ func main() {
 		"taskUID", taskUID,
 	)
 
+	// Plaintext boot banner (intentional divergence from cmd/manager/main.go's
+	// structured-log-only convention). Operator-readable signal that the listener
+	// bound; the literal asserted by test/integration/kind/credproxy_test.go.
+	fmt.Fprintf(os.Stdout, "credproxy listening on %s\n", listenAddr)
+
 	// 6. Block on ListenAndServe; graceful shutdown when ctx is cancelled.
 	if err := p.ListenAndServe(ctx); err != nil {
 		log.Error(err, "credential proxy exited with error")
