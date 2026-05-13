@@ -97,12 +97,12 @@ Plans:
 **Goal:** Close Phase 02.1's BLOCKED runtime gate captured in `02.1-04-VERIFICATION.md` — `make test-int` clean run reaches 7/7 Layer B specs PASS in ≤ 300s go test wall-time AND `KEEP_KIND_CLUSTER=true make test-int` rerun reaches 7/7 PASS in ≤ 300s, both verified end-to-end on a developer laptop. Five tactical fixes: kindTestTimeout 4m→7m (defeat parent-context shadow-kill of helm --timeout 5m), cert-manager v1.16.2→v1.20.2 (explicit K8s 1.33 support), helm install --replace (idempotent rerun against existing release), robust AfterSuite cleanup with docker-rm fallback against zombie kind containers (kind issue #1116 / Docker 28→29 kill-event regression), and CI YAML drop the redundant outer DUR > 300 wall-time check (Makefile inner `timeout 300s` is the source of truth).
 **Requirements**: No formal REQ-IDs — Phase 02.2 is debug closeout for Phase 02.1's runtime gate; the de facto requirements are the 4 source-shape fixes + 1 micro-fix enumerated in 02.2-RESEARCH.md.
 **Depends on:** Phase 02
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 - [x] 02.2-01-PLAN.md — Source-shape fixes (kindTestTimeout 7m, cert-manager v1.20.2, cleanupKindCluster helper, helm --replace, CI YAML DUR-check drop) + end-to-end runtime verification (Wave 1)
 - [x] 02.2-03-PLAN.md — Chart PVC accessModes Helm values key (override-only; production default ReadWriteMany preserved) + test --set RWO override + runtime re-verification (Wave 2)
-- [ ] 02.2-04-PLAN.md — TACTICAL: define --metrics-bind-address flag in cmd/manager — close 02.2-03 BLOCKED gate + runtime re-verification + wire Plan 02.2-02 checkpoint (gated on Task 2 APPROVED) (Wave 3)
+- [x] 02.2-04-PLAN.md — TACTICAL: define --metrics-bind-address flag in cmd/manager — close 02.2-03 BLOCKED gate + runtime re-verification + wire Plan 02.2-02 checkpoint (gated on Task 2 APPROVED) (Wave 3)
 - [ ] 02.2-02-PLAN.md — ROADMAP/STATE closeout, gated on 02.2-04-VERIFICATION.md gate_decision=APPROVED (Wave 4)
 
 ### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
