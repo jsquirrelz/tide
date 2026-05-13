@@ -92,6 +92,16 @@ Plans:
 **Wave 7** *(blocked on Wave 6 completion)*
 - [x] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
 
+### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 2
+**Plans:** 13/13 plans complete
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 02.1 to break down)
+
 ### Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption
 **Goal**: The full reconciler stack (Plan → Phase → Milestone → Project) drives planner-subagent dispatch to author `PLAN.md` / phase brief / `MILESTONE.md`, the orchestrator pushes artifacts at every level boundary via `pkg/git` (HTTPS+PAT default, host-agnostic, per-run branches, `--force-with-lease`, never `main`, gitleaks at every push), the stub-subagent is replaced by a real Claude-Code-backed image inside the same Subagent interface, and a chaos-resume test proves the orchestrator survives mid-wave pod kill using only CRD status + PVC contents.
 **Depends on**: Phase 2
