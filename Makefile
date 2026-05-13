@@ -116,7 +116,7 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
-lint: golangci-lint ## Run golangci-lint linter
+lint: golangci-lint verify-dag-imports verify-dispatch-imports ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
@@ -299,6 +299,19 @@ verify-dag-imports: ## Assert pkg/dag has no k8s.io/sigs.k8s.io/anthropics impor
 		exit 1; \
 	fi
 	@echo "OK: pkg/dag imports are clean"
+
+##@ Dispatch Import Firewall (SUB-01 / DAG-05 mirror)
+
+.PHONY: verify-dispatch-imports
+verify-dispatch-imports: ## Assert pkg/dispatch has no k8s.io/sigs.k8s.io/anthropics imports (SUB-01).
+	@echo "verifying pkg/dispatch has no forbidden imports (SUB-01 / DAG-05-mirror)..."
+	@FORBIDDEN=$$(go list -deps ./pkg/dispatch/... 2>/dev/null | grep -v '^github\.com/jsquirrelz/tide/pkg/dispatch' | grep -E '^(k8s\.io/|sigs\.k8s\.io/|github\.com/anthropics/)' || true); \
+	if [ -n "$$FORBIDDEN" ]; then \
+		echo "SUB-01 / DAG-05-mirror violation: pkg/dispatch transitively depends on forbidden modules:"; \
+		echo "$$FORBIDDEN"; \
+		exit 1; \
+	fi
+	@echo "OK: pkg/dispatch imports are clean"
 
 ##@ Custom Analyzers (POOL-03 / Pitfall 6)
 
