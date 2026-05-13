@@ -744,6 +744,20 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			task.Status.Attempt = 0
 			Expect(k8sClient.Status().Patch(ctx, &task, patch)).To(Succeed())
 
+			// Wait for mgrClient cache to reflect the status reset before the
+			// next reconcileN — otherwise the reconciler reads the stale
+			// Phase="Running" from cache, enters reconcileDispatch Step 2
+			// (running-Job branch), and never reaches the max-attempts gate.
+			// Matches the cache-sync pattern in markTaskSucceeded.
+			Eventually(func() bool {
+				var t tideprojectv1alpha1.Task
+				if err := mgrClient.Get(context.Background(), name, &t); err != nil {
+					return false
+				}
+				return t.Status.Phase == "" && t.Status.Attempt == 0
+			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+				"timed out waiting for mgrClient cache to reflect Phase=\"\" / Attempt=0")
+
 			// Drive dispatch — attempt counter will be 2 > MaxAttemptsPerTask=1.
 			_, err := reconcileN(r, name, 3)
 			Expect(err).NotTo(HaveOccurred())
