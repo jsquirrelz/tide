@@ -39,7 +39,6 @@ metadata:
   namespace: tide-int-test
 spec:
   projectRef: wave-test-project
-  description: "Integration test milestone"
 
 ---
 # Phase
@@ -50,7 +49,6 @@ metadata:
   namespace: tide-int-test
 spec:
   milestoneRef: wave-test-milestone
-  description: "Integration test phase"
 
 ---
 # Plan

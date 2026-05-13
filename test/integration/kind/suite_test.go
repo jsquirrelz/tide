@@ -284,12 +284,33 @@ func applyController() {
 	}
 
 	if kustomizeBin != "" {
+		// Override the manager image to the kind-loaded `controller:test` tag.
+		// Without this, kustomize emits `controller:latest` which kind has no
+		// matching image for, and ImagePullBackOff blocks the Deployment from
+		// becoming Ready. Setting the image via `kustomize edit set image` in
+		// config/manager mirrors the production `make deploy` flow.
+		setImgCmd := exec.CommandContext(ctx, kustomizeBin, "edit", "set", "image", "controller=controller:test")
+		setImgCmd.Dir = filepath.Join("..", "..", "..", "config", "manager")
+		if out, setErr := setImgCmd.CombinedOutput(); setErr != nil {
+			GinkgoWriter.Printf("Warning: kustomize edit set image failed: %v\n%s\n", setErr, out)
+		}
+
 		buildCmd := exec.CommandContext(ctx, kustomizeBin, "build", configDefault)
 		manifest, buildErr := buildCmd.Output()
 		if buildErr != nil {
 			GinkgoWriter.Printf("kustomize build failed: %v\n", buildErr)
 			return
 		}
+
+		// Set imagePullPolicy: IfNotPresent so the kind-loaded `controller:test`
+		// image is used instead of attempting to pull from a remote registry.
+		// Manager.yaml has no explicit pullPolicy; the K8s default for non-:latest
+		// tags is IfNotPresent which is what we want, but stringify-and-patch
+		// makes the intent explicit and survives if someone retags to :latest.
+		manifest = []byte(strings.ReplaceAll(string(manifest),
+			"image: controller:test",
+			"image: controller:test\n        imagePullPolicy: IfNotPresent"))
+
 		applyCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 			"apply", "-f", "-", "--timeout=60s")
 		applyCmd.Stdin = strings.NewReader(string(manifest))
