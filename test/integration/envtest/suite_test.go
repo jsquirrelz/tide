@@ -199,16 +199,9 @@ var _ = BeforeSuite(func() {
 
 	mgrClient = mgr.GetClient()
 
-	// Register .spec.planRef field indexer. Used by TaskReconciler.listSiblingTasks
-	// and WaveReconciler.taskToWaveMapper via MatchingFields.
-	Expect(mgr.GetFieldIndexer().IndexField(context.Background(),
-		&tideprojectv1alpha1.Task{},
-		".spec.planRef",
-		func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha1.Task) //nolint:forcetypeassert
-			return []string{task.Spec.PlanRef}
-		},
-	)).To(Succeed())
+	// The .spec.planRef field indexer is registered by TaskReconciler.SetupWithManager
+	// (see internal/controller/task_controller.go); registering it here would cause an
+	// indexer conflict at BeforeSuite.
 
 	// Wire all six reconcilers with Phase 2 field injections.
 	Expect(newPhase2ReconcilersForTest(mgr)).To(Succeed())
