@@ -83,8 +83,8 @@ Plans:
 - [x] 02-09-PLAN.md — TaskReconciler dispatch body + WaveReconciler observational roll-up + PlanReconciler Wave materialization (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 02-10-PLAN.md — ProjectReconciler init Job (ART-01) + budget cap halt + bypass annotation watch (Wave 5)
-- [ ] 02-11-PLAN.md — Plan admission webhook body (cycle detection + file-touch reconciliation + strict/warn precedence) (Wave 5)
+- [x] 02-10-PLAN.md — ProjectReconciler init Job (ART-01) + budget cap halt + bypass annotation watch (Wave 5)
+- [x] 02-11-PLAN.md — Plan admission webhook body (cycle detection + file-touch reconciliation + strict/warn precedence) (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 02-12-PLAN.md — cmd/manager Phase 2 wiring + Helm chart signing-secret template + tide-subagent SA + values keys (Wave 6)
