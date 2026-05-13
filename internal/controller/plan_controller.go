@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -234,10 +235,10 @@ func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideproject
 				return fmt.Errorf("ensure owner ref wave %s: %w", waveName, err)
 			}
 			if err := r.Create(ctx, wave); err != nil {
-				if client.IgnoreNotFound(err) != nil {
+				if !apierrors.IsAlreadyExists(err) {
 					return fmt.Errorf("create wave %s: %w", waveName, err)
 				}
-				// Rare race: treat as success.
+				// AlreadyExists: idempotent success — watch-lag race (CR-01).
 			}
 			logger.Info("created wave", "wave", waveName, "index", i)
 		} else {
