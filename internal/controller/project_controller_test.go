@@ -244,11 +244,28 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			completedJob := buildSucceededInitJob(fetched, pvcName)
 			Expect(k8sClient.Create(ctx, completedJob)).To(Succeed())
 			// Patch Job status to Succeeded.
+			// K8s 1.36 requires: SuccessCriteriaMet=True before Complete=True,
+			// and startTime is required for finished jobs.
+			now := metav1.Now()
 			jobPatch := completedJob.DeepCopy()
 			jobPatch.Status = batchv1.JobStatus{
-				Succeeded: 1,
+				Succeeded:      1,
+				StartTime:      &now,
+				CompletionTime: &now,
 				Conditions: []batchv1.JobCondition{
-					{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+					{
+						Type:               batchv1.JobSuccessCriteriaMet,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      now,
+						LastTransitionTime: now,
+						Reason:             "CompletionsReached",
+					},
+					{
+						Type:               batchv1.JobComplete,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      now,
+						LastTransitionTime: now,
+					},
 				},
 			}
 			Expect(k8sClient.Status().Update(ctx, jobPatch)).To(Succeed())
@@ -300,11 +317,27 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			failedJob := buildFailedInitJob(fetched, pvcName)
 			Expect(k8sClient.Create(ctx, failedJob)).To(Succeed())
 			// Patch Job status to Failed.
+			// K8s 1.36 requires: FailureTarget=True before Failed=True, and startTime.
+			failNow := metav1.Now()
 			failPatch := failedJob.DeepCopy()
 			failPatch.Status = batchv1.JobStatus{
-				Failed: 3,
+				Failed:    3,
+				StartTime: &failNow,
 				Conditions: []batchv1.JobCondition{
-					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue},
+					{
+						Type:               batchv1.JobFailureTarget,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      failNow,
+						LastTransitionTime: failNow,
+						Reason:             "BackoffLimitExceeded",
+					},
+					{
+						Type:               batchv1.JobFailed,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      failNow,
+						LastTransitionTime: failNow,
+						Reason:             "BackoffLimitExceeded",
+					},
 				},
 			}
 			Expect(k8sClient.Status().Update(ctx, failPatch)).To(Succeed())
