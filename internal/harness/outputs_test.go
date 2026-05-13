@@ -115,6 +115,54 @@ func TestValidate_SkipsFilesModifiedBeforeRunStart(t *testing.T) {
 	}
 }
 
+// TestValidate_AcceptsWritesWhenWorkspaceRootIsSymlink is the CR-05
+// regression test: when the workspace root is under a symlink (e.g. macOS
+// /tmp → /private/tmp, or any K8s tmpfs mount), declared paths and walk
+// targets must resolve through the same prefix so files in scope are NOT
+// flagged as violations.
+//
+// Before the fix, declared paths that didn't pre-exist were stored as the
+// un-resolved abs form while walk targets were resolved via EvalSymlinks —
+// the asymmetric Rel() comparison returned a "../..." path and the file
+// was wrongly added to violations.
+func TestValidate_AcceptsWritesWhenWorkspaceRootIsSymlink(t *testing.T) {
+	// Build a workspace root that is a symlink. We allocate a real directory
+	// elsewhere and point a symlink at it. The Validate call uses the symlink
+	// path, which mirrors the production case where /tmp is a symlink to
+	// /private/tmp on macOS and tmpfs-backed mounts in K8s pods.
+	realRoot := t.TempDir()
+	parent := t.TempDir()
+	symlinkRoot := filepath.Join(parent, "ws")
+	if err := os.Symlink(realRoot, symlinkRoot); err != nil {
+		t.Skipf("Symlink creation not supported on this OS: %v", err)
+	}
+
+	// Declared path does NOT pre-exist — this is the path that historically
+	// triggered the false-positive. The harness/runtime would mkdir + write
+	// under it; here we simulate the same shape.
+	declaredRel := "artifacts/M-001/P-001/L-001"
+	declaredFull := filepath.Join(symlinkRoot, declaredRel)
+	if err := os.MkdirAll(declaredFull, 0o755); err != nil {
+		t.Fatalf("mkdir declared: %v", err)
+	}
+
+	runStart := time.Now()
+	time.Sleep(5 * time.Millisecond)
+
+	outFile := filepath.Join(declaredFull, "result.txt")
+	if err := os.WriteFile(outFile, []byte("ok"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	violations, err := Validate(symlinkRoot, runStart, []string{declaredRel})
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Errorf("expected no violations when workspace root is a symlink, got: %v", violations)
+	}
+}
+
 // TestValidate_RejectsSymlinkToOutOfScope is the load-bearing Pitfall-7 test.
 // A symlink inside the declared scope that resolves to a target outside the
 // declared scope must be flagged as a violation.

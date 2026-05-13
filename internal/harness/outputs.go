@@ -25,18 +25,15 @@ import (
 //     artifacts from prior Tasks).
 //   - directories are never flagged; only regular files are considered.
 func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]string, error) {
-	// Pre-resolve declared paths to their absolute, symlink-evaluated forms.
-	// Paths that don't exist yet are kept as the abs form (they'll be created
-	// by the runtime before Validate is called again, per D-G2 lazy mkdir).
+	// CR-05: Resolve declared paths and walk targets through the SAME prefix
+	// resolution so workspaces under symlinked roots (e.g. macOS /tmp →
+	// /private/tmp, K8s tmpfs mounts) don't false-positive. If the declared
+	// path itself doesn't exist yet, resolve as much of its existing prefix
+	// as possible and keep the un-resolved suffix.
 	declaredAbs := make([]string, 0, len(declared))
 	for _, d := range declared {
 		abs := filepath.Join(workspaceRoot, d)
-		if real, err := filepath.EvalSymlinks(abs); err == nil {
-			declaredAbs = append(declaredAbs, real)
-		} else {
-			// Path doesn't exist yet — keep the non-resolved absolute form.
-			declaredAbs = append(declaredAbs, abs)
-		}
+		declaredAbs = append(declaredAbs, resolveExistingPrefix(abs))
 	}
 
 	var violations []string
@@ -59,11 +56,12 @@ func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]st
 
 		// Resolve symlinks on the actual candidate path so a symlink that
 		// points outside the declared scope is treated as its real target.
+		// On failure (e.g. file removed mid-walk) fall back to the same
+		// prefix-resolution we used for declared paths so the comparison
+		// stays symmetric (CR-05).
 		real, resolveErr := filepath.EvalSymlinks(p)
 		if resolveErr != nil {
-			// File may have been removed between walk and resolution; use the
-			// un-resolved path (fall back to the walk path).
-			real = p
+			real = resolveExistingPrefix(p)
 		}
 
 		// Candidate is in-scope if it resolves under at least one declared path.
@@ -81,4 +79,31 @@ func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]st
 		return nil
 	})
 	return violations, err
+}
+
+// resolveExistingPrefix walks up the path until it finds an ancestor that
+// exists, calls [filepath.EvalSymlinks] on that ancestor, and re-joins the
+// non-existing suffix. This makes prefix-resolution symmetric between
+// declared paths (which may not exist yet at Validate-time) and walk
+// targets (which always exist), eliminating the false-positive that
+// triggers when the workspace root is under a symlink (e.g. macOS /tmp →
+// /private/tmp). If no ancestor resolves, the original path is returned.
+func resolveExistingPrefix(p string) string {
+	cur := p
+	suffix := ""
+	for {
+		if real, err := filepath.EvalSymlinks(cur); err == nil {
+			if suffix == "" {
+				return real
+			}
+			return filepath.Join(real, suffix)
+		}
+		next := filepath.Dir(cur)
+		if next == cur {
+			// Reached root without finding anything that resolves.
+			return p
+		}
+		suffix = filepath.Join(filepath.Base(cur), suffix)
+		cur = next
+	}
 }
