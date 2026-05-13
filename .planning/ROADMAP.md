@@ -62,7 +62,7 @@ Plans:
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — densest novel territory (per-Job mount scoping, signed-token proxy, harness budget enforcement, rate-bucket-aware dispatch, file-touch-derived-edges admission).
 
-**Plans:** 13 plans
+**Plans:** 9/13 plans executed
 
 Plans:
 **Wave 1**
@@ -80,7 +80,7 @@ Plans:
 - [x] 02-08-PLAN.md — internal/dispatch.Dispatcher interface body + PodJobBackend + JobSpec (native sidecar) + JobName (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
-- [ ] 02-09-PLAN.md — TaskReconciler dispatch body + WaveReconciler observational roll-up + PlanReconciler Wave materialization (Wave 4)
+- [x] 02-09-PLAN.md — TaskReconciler dispatch body + WaveReconciler observational roll-up + PlanReconciler Wave materialization (Wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [ ] 02-10-PLAN.md — ProjectReconciler init Job (ART-01) + budget cap halt + bypass annotation watch (Wave 5)
@@ -146,7 +146,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation — CRDs, pkg/dag, Controller Scaffold | 0/TBD | Not started | - |
-| 2. Dispatch & Plan Validation — Innermost Reconcilers + Harness | 0/TBD | Not started | - |
+| 2. Dispatch & Plan Validation — Innermost Reconcilers + Harness | 9/13 | In Progress|  |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |

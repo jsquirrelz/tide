@@ -39,7 +39,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 - [ ] **SUB-01**: `pkg/dispatch` defines a `Subagent` interface — `Run(ctx, EnvelopeIn) (EnvelopeOut, error)` — with envelope types serializable to `result.json`
 - [ ] **SUB-02**: `pkg/dispatch.PodJobBackend` is the v1 concrete impl: one K8s `Job` per Task, mounting the Project PVC + creds Secret, exit code = success/failure, agent writes `result.json` and any artifacts to a declared PVC path
-- [ ] **SUB-03**: Job dispatch is idempotent — deterministic Job names of the form `tide-task-{task-uid}-{attempt-n}` prevent duplicate dispatch on watch lag
+- [x] **SUB-03**: Job dispatch is idempotent — deterministic Job names of the form `tide-task-{task-uid}-{attempt-n}` prevent duplicate dispatch on watch lag
 - [ ] **SUB-04**: A `stub-subagent` image (canned envelope, no LLM call) is built and shipped alongside the real one for use in integration tests
 - [ ] **SUB-05**: A custom go-analyzer lint rule rejects imports from `github.com/anthropics/*` (or any LLM-provider SDK) inside `pkg/controller/...`, `pkg/dispatch/...`, or `pkg/dag/...` — the orchestrator is provider-firewalled
 
@@ -56,7 +56,7 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 - [x] **PERSIST-01**: All persistent state lives in CRD `.status` fields — no SQLite, no external database, no per-run state file
 - [x] **PERSIST-02**: Per-Task CRDs hold small status blocks (`phase`, `completedAt`, `exitCode`, `attempt`); aggregate `Status.Waves` or `Status.Schedule` fields on parent CRDs are explicitly forbidden (review-blocked)
-- [ ] **PERSIST-03**: Wave schedules are re-derived from the task DAG on every reconcile via `pkg/dag.ComputeWaves` — there is no cached schedule
+- [x] **PERSIST-03**: Wave schedules are re-derived from the task DAG on every reconcile via `pkg/dag.ComputeWaves` — there is no cached schedule
 - [ ] **PERSIST-04**: A `chaos-resume` integration test kills the orchestrator pod mid-wave and verifies the new leader resumes with no lost or duplicated tasks, using only CRD status + PVC contents
 
 ### Plan validation
@@ -67,9 +67,9 @@ Scope: the **Self-Hosting MVP**. A fresh `kind` cluster + Helm install + `kubect
 
 ### Failure semantics
 
-- [ ] **FAIL-01**: Wave-boundary failure handling follows the spec exactly: a failed Task → siblings in the same wave continue running; dependents in later waves never dispatch (their indegree never reaches zero); non-dependents in later waves dispatch normally under strict-by-default profile
-- [ ] **FAIL-02**: Indegree decrement is per-task (not per-wave) — siblings completing in the same wave each decrement their downstream successors independently
-- [ ] **FAIL-03**: A token-bucket rate limiter sits between the orchestrator and the LLM provider; 429 responses retry with exponential backoff and surface a `tide_provider_rate_limit_hits_total` Prometheus counter
+- [x] **FAIL-01**: Wave-boundary failure handling follows the spec exactly: a failed Task → siblings in the same wave continue running; dependents in later waves never dispatch (their indegree never reaches zero); non-dependents in later waves dispatch normally under strict-by-default profile
+- [x] **FAIL-02**: Indegree decrement is per-task (not per-wave) — siblings completing in the same wave each decrement their downstream successors independently
+- [x] **FAIL-03**: A token-bucket rate limiter sits between the orchestrator and the LLM provider; 429 responses retry with exponential backoff and surface a `tide_provider_rate_limit_hits_total` Prometheus counter
 - [ ] **FAIL-04**: Per-Project budget caps (rolling-window cost + absolute cost ceiling from Helm values) halt dispatch when exceeded and require a `tide approve --bypass-budget` to resume
 
 ### Artifacts & git
