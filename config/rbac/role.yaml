@@ -14,7 +14,9 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumeclaims
   - pods
+  - secrets
   verbs:
   - get
   - list
@@ -28,6 +30,8 @@ rules:
   - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - tideproject.k8s

@@ -112,6 +112,12 @@ type TaskStatus struct {
 	// +optional
 	ExitCode *int `json:"exitCode,omitempty"`
 
+	// StartedAt is the wall-clock time the reconciler dispatched the Job for this
+	// Task. Used by handleJobCompletion to anchor the output-path validation time
+	// window (Warning #5 / HARN-05).
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }

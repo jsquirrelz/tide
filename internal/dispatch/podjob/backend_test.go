@@ -101,9 +101,9 @@ func TestPodJobBackend_Run_CreatesJob(t *testing.T) {
 		Scheme:         s,
 		SubagentImage:  "test-subagent:latest",
 		CredproxyImage: "test-credproxy:latest",
-		SigningKey:      []byte("test-signing-key"),
-		EnvReader:       &fakeEnvReader{out: canned},
-		PVCName:         "tide-projects",
+		SigningKey:     []byte("test-signing-key"),
+		EnvReader:      &fakeEnvReader{out: canned},
+		PVCName:        "tide-projects",
 	}
 
 	in := pkgdispatch.EnvelopeIn{
@@ -188,9 +188,9 @@ func TestPodJobBackend_Run_IdempotentOnAlreadyExists(t *testing.T) {
 		Scheme:         s,
 		SubagentImage:  "test-subagent:latest",
 		CredproxyImage: "test-credproxy:latest",
-		SigningKey:      []byte("test-signing-key"),
-		EnvReader:       &fakeEnvReader{out: canned},
-		PVCName:         "tide-projects",
+		SigningKey:     []byte("test-signing-key"),
+		EnvReader:      &fakeEnvReader{out: canned},
+		PVCName:        "tide-projects",
 	}
 
 	in := pkgdispatch.EnvelopeIn{
@@ -254,9 +254,9 @@ func TestPodJobBackend_Run_PropagatesEnvelopeReadError(t *testing.T) {
 		Scheme:         s,
 		SubagentImage:  "test-subagent:latest",
 		CredproxyImage: "test-credproxy:latest",
-		SigningKey:      []byte("test-signing-key"),
-		EnvReader:       &fakeEnvReader{err: readErr},
-		PVCName:         "tide-projects",
+		SigningKey:     []byte("test-signing-key"),
+		EnvReader:      &fakeEnvReader{err: readErr},
+		PVCName:        "tide-projects",
 	}
 
 	in := pkgdispatch.EnvelopeIn{
@@ -319,9 +319,9 @@ func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 		Scheme:         s,
 		SubagentImage:  "test-subagent:latest",
 		CredproxyImage: "test-credproxy:latest",
-		SigningKey:      []byte("test-signing-key"),
-		EnvReader:       &fakeEnvReader{out: canned},
-		PVCName:         "tide-projects",
+		SigningKey:     []byte("test-signing-key"),
+		EnvReader:      &fakeEnvReader{out: canned},
+		PVCName:        "tide-projects",
 	}
 
 	in := pkgdispatch.EnvelopeIn{

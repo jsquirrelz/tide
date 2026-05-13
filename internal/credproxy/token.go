@@ -21,9 +21,9 @@ import (
 // replay is detected because the verifier's expectedTaskUID is injected via
 // the Pod's TIDE_TASK_UID env var (D-C3).
 const (
-	NonceLen = 16
+	NonceLen  = 16
 	ExpiryLen = 8
-	MacLen    = sha256.Size // 32
+	MacLen    = sha256.Size                   // 32
 	TokenLen  = NonceLen + ExpiryLen + MacLen // 56
 )
 

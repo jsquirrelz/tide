@@ -44,13 +44,13 @@ func buildTestOptions() BuildOptions {
 		Task:           task,
 		Project:        project,
 		Attempt:        1,
-		SignedToken:     "test-signed-token",
-		EnvelopeInJSON:  []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn"}`),
-		SubagentImage:   "ghcr.io/jsquirrelz/tide-stub-subagent:test",
-		CredproxyImage:  "ghcr.io/jsquirrelz/tide-credproxy:test",
-		SecretUID:       "secret-uid-test",
-		PVCName:         "tide-projects",
-		ProjectUID:      "project-uid-test",
+		SignedToken:    "test-signed-token",
+		EnvelopeInJSON: []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn"}`),
+		SubagentImage:  "ghcr.io/jsquirrelz/tide-stub-subagent:test",
+		CredproxyImage: "ghcr.io/jsquirrelz/tide-credproxy:test",
+		SecretUID:      "secret-uid-test",
+		PVCName:        "tide-projects",
+		ProjectUID:     "project-uid-test",
 	}
 }
 

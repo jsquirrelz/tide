@@ -16,10 +16,10 @@ import (
 
 func TestIsCapExceeded(t *testing.T) {
 	cases := []struct {
-		name     string
-		cap      int64
-		spent    int64
-		want     bool
+		name  string
+		cap   int64
+		spent int64
+		want  bool
 	}{
 		{"under cap", 10000, 5000, false},
 		{"at cap (not exceeded)", 10000, 10000, false},

@@ -42,7 +42,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -55,7 +57,59 @@ var (
 	testEnv   *envtest.Environment
 	cfg       *rest.Config
 	k8sClient client.Client
+	// mgrClient is the manager's cached client; it supports custom field indexers
+	// registered via mgr.GetFieldIndexer(). Use mgrClient in reconcilers that
+	// call MatchingFields on custom indexes (e.g., taskPlanRefIndexKey).
+	mgrClient client.Client
 )
+
+// Phase 2: shared test values for TaskReconciler field injection.
+var (
+	// testSigningKey is a 32-byte test signing key for HMAC token minting.
+	testSigningKey = []byte("tide-test-signing-key-32-bytes!!")
+
+	// testBudgetStore is the shared in-process Store used by dispatching tests.
+	testBudgetStore = budget.NewStore()
+
+	// testBudgetDefaults are the Helm-driven rate-limit defaults for tests.
+	testBudgetDefaults = budget.Limits{RequestsPerMinute: 120, BurstSize: 10}
+
+	// testSubagentImage and testCredproxyImage are placeholder images for tests.
+	testSubagentImage  = "tide-stub-subagent:test"
+	testCredproxyImage = "tide-credproxy:test"
+)
+
+// mapEnvReader is an in-memory EnvelopeReader implementation for tests.
+// It maps task UID → EnvelopeOut; tests pre-populate it before reconciling.
+type mapEnvReader struct {
+	byUID map[string]pkgdispatch.EnvelopeOut
+	errs  map[string]error
+}
+
+func newMapEnvReader() *mapEnvReader {
+	return &mapEnvReader{
+		byUID: make(map[string]pkgdispatch.EnvelopeOut),
+		errs:  make(map[string]error),
+	}
+}
+
+func (m *mapEnvReader) SetOut(taskUID string, out pkgdispatch.EnvelopeOut) {
+	m.byUID[taskUID] = out
+}
+
+func (m *mapEnvReader) SetErr(taskUID string, err error) {
+	m.errs[taskUID] = err
+}
+
+func (m *mapEnvReader) ReadOut(_ context.Context, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	if err, ok := m.errs[taskUID]; ok {
+		return pkgdispatch.EnvelopeOut{}, err
+	}
+	if out, ok := m.byUID[taskUID]; ok {
+		return out, nil
+	}
+	return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no envelope out for task UID %q", taskUID)
+}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -126,6 +180,22 @@ var _ = BeforeSuite(func() {
 	// Register both Phase 1 no-op webhooks (Plan 07 Task 1).
 	Expect(webhookv1alpha1.SetupPlanWebhookWithManager(mgr)).To(Succeed())
 	Expect(webhookv1alpha1.SetupWaveWebhookWithManager(mgr)).To(Succeed())
+
+	// mgrClient is the manager's cached client; supports custom field indexers.
+	mgrClient = mgr.GetClient()
+
+	// Phase 2: Register .spec.planRef field indexer.
+	// This is shared by TaskReconciler (listSiblingTasks) and WaveReconciler
+	// (taskToWaveMapper via field-indexed list). Registered once here per
+	// PATTERNS.md "Single envtest BeforeSuite".
+	Expect(mgr.GetFieldIndexer().IndexField(context.Background(),
+		&tideprojectv1alpha1.Task{},
+		taskPlanRefIndexKey,
+		func(obj client.Object) []string {
+			task := obj.(*tideprojectv1alpha1.Task) //nolint:forcetypeassert
+			return []string{task.Spec.PlanRef}
+		},
+	)).To(Succeed())
 
 	// +kubebuilder:scaffold:webhook
 

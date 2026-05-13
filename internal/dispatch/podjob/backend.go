@@ -62,8 +62,8 @@ func (r *FilesystemEnvelopeReader) ReadOut(_ context.Context, taskUID string) (p
 // Phase 2 executor path note: The TaskReconciler (Plan 09) does NOT call Run —
 // it calls BuildJobSpec + client.Create directly, then receives Owns-watch events on
 // Job terminal state. Run is exposed for:
-//   1. Unit/integration test fixtures that need a single call to drive a Job end-to-end.
-//   2. Phase 3+ planner-dispatch callers running in a goroutine outside Reconcile.
+//  1. Unit/integration test fixtures that need a single call to drive a Job end-to-end.
+//  2. Phase 3+ planner-dispatch callers running in a goroutine outside Reconcile.
 //
 // Calling Run from inside Reconcile() is forbidden (Pitfall 1 — blocks the
 // reconciler goroutine on long-running I/O).
@@ -72,8 +72,8 @@ type PodJobBackend struct {
 	Scheme         *runtime.Scheme
 	SubagentImage  string
 	CredproxyImage string
-	SigningKey      []byte
-	EnvReader       EnvelopeReader
+	SigningKey     []byte
+	EnvReader      EnvelopeReader
 	// PVCName is the name of the chart-provisioned shared PVC (default "tide-projects").
 	PVCName string
 }

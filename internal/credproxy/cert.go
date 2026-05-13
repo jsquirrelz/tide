@@ -46,16 +46,16 @@ func MintSelfSignedCert(dir string, validity time.Duration) error {
 	}
 
 	tmpl := x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "tide-credproxy"},
-		NotBefore:    time.Now().Add(-1 * time.Minute),
-		NotAfter:     time.Now().Add(validity),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: "tide-credproxy"},
+		NotBefore:             time.Now().Add(-1 * time.Minute),
+		NotAfter:              time.Now().Add(validity),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		IsCA:         true,
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.IPv6loopback},
+		IsCA:                  true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.IPv6loopback},
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
