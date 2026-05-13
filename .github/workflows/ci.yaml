@@ -195,20 +195,24 @@ jobs:
 
       # TEST-02: integration test suite (Layer A + Layer B).
       # Layer A (envtest) runs always; Layer B (kind) runs in CI.
-      # The `timeout 300s` inside `make test-int` enforces the budget.
-      # The outer `timeout-minutes: 6` is the CI fence.
+      #
+      # The `timeout 300s` inside `make test-int` (Makefile target test-int)
+      # enforces the 300s budget on the `go test` invocation ONLY (not on
+      # test-int-kind-prep image builds + kind cluster create + kind load,
+      # which are unbounded by design — cold-cache prep cost can reach
+      # ~880s on a clean GitHub Actions runner). If go test wall-time
+      # exceeds 300s, `timeout 300s` exits 124 and the step fails. No
+      # separate DUR > 300 wall-time check is needed — Phase 02.2 dropped
+      # the redundant outer assertion that conflated prep wall with test
+      # wall (see .planning/phases/02.2-.../02.2-RESEARCH.md §"Pattern 3"
+      # and .planning/phases/02.1-.../02.1-04-VERIFICATION.md §Section 4).
+      #
+      # The outer `timeout-minutes: 6` is the genuine ceiling on the
+      # entire job (prep + go test).
       - name: Integration test suite (TEST-02 — make test-int)
         run: |
           set -e
-          START=$(date +%s)
           time make test-int
-          END=$(date +%s)
-          DUR=$((END - START))
-          echo "Integration test duration: ${DUR}s"
-          if [ "$DUR" -gt 300 ]; then
-            echo "TEST-02 violation: integration suite exceeded 300s budget (${DUR}s)"
-            exit 1
-          fi
 
       # On failure: collect Ginkgo output + kind cluster events for debugging.
       - name: Collect kind cluster logs on failure

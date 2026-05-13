@@ -56,7 +56,21 @@ import (
 const (
 	kindClusterName = "tide-test"
 	kindNamespace   = "tide-int-test"
-	kindTestTimeout = 4 * time.Minute
+
+	// kindTestTimeout bounds the BeforeSuite + spec execution context.
+	// It MUST exceed:
+	//   (a) pre-helm setup cost (~50s — kind connect + CRDs + cert-manager)
+	//   (b) helm install --wait --timeout 5m budget (applyController()'s
+	//       explicit --timeout)
+	//   (c) waitForControllerReady fallback (~5s, no-op when helm --wait
+	//       succeeds)
+	//   (d) variance margin (60s — slow CI runners, image-pull stalls)
+	//
+	// 7m = 50s + 300s + 5s + 60s + slack. Going below ~6m25s shadow-kills
+	// the helm subprocess before its own --timeout fires (see
+	// .planning/phases/02.1-.../02.1-04-VERIFICATION.md §"Root-cause
+	// analysis" for the failure mode this constant closes — Phase 02.2).
+	kindTestTimeout = 7 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
 	// Deployment installs into (config/default Kustomize manifest target).
@@ -136,12 +150,58 @@ var _ = AfterSuite(func() {
 	}
 
 	By("Deleting kind cluster " + kindClusterName)
-	cmd := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		GinkgoWriter.Printf("Warning: failed to delete kind cluster: %v\n%s\n", err, output)
-	}
+	cleanupKindCluster()
 })
+
+// cleanupKindCluster performs robust kind cluster cleanup with a docker-rm
+// fallback for the zombie-container case (kind delete cluster fails when
+// docker rm -f cannot kill a control-plane container that's stuck in a
+// non-responsive state — see kind issue #1116 and moby/moby#51845 for the
+// Docker 28→29 kill-event regression).
+//
+// Cleanup is best-effort; failure here does not fail the test suite — the
+// next make test-int-kind-prep run will detect any residual state and
+// attempt a fresh cluster create.
+//
+// Uses plain exec.Command() (no ctx) because the outer test ctx was
+// cancelled at the top of AfterSuite — passing it to exec.CommandContext
+// would immediately abort cleanup (Phase 02.2 RESEARCH Pitfall 7).
+//
+// Source of the failure mode:
+// .planning/phases/02.1-.../02.1-04-VERIFICATION.md §"Failure Detail".
+func cleanupKindCluster() {
+	// Attempt 1: kind delete (happy path).
+	cmd := exec.Command("kind", "delete", "cluster", "--name", kindClusterName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		GinkgoWriter.Printf("Warning: kind delete cluster failed: %v\n%s\n", err, out)
+	}
+
+	// Verify no residual containers regardless of kind's exit code; kind
+	// has been observed to exit 0 but leave containers in a stuck state
+	// (Docker daemon kill-event race — moby/moby#51845). The label
+	// `io.x-k8s.kind.cluster=<name>` is kind's documented internal
+	// convention (kind pkg/cluster/internal/providers/docker) and survives
+	// a future multi-node cluster.yaml change.
+	listCmd := exec.Command("docker", "ps", "-aq",
+		"--filter", fmt.Sprintf("label=io.x-k8s.kind.cluster=%s", kindClusterName))
+	idsOut, listErr := listCmd.Output()
+	if listErr != nil {
+		GinkgoWriter.Printf("Warning: docker ps fallback failed: %v\n", listErr)
+		return
+	}
+	ids := strings.Fields(strings.TrimSpace(string(idsOut)))
+	if len(ids) == 0 {
+		return // success: kind delete cleaned up properly
+	}
+
+	GinkgoWriter.Printf("Residual kind containers detected after delete: %v; force-removing\n", ids)
+	rmArgs := append([]string{"rm", "-f", "-v"}, ids...)
+	rmCmd := exec.Command("docker", rmArgs...)
+	if rmOut, rmErr := rmCmd.CombinedOutput(); rmErr != nil {
+		GinkgoWriter.Printf("Warning: docker rm -f fallback failed: %v\n%s\n", rmErr, rmOut)
+	}
+}
 
 // ensureKindCluster creates the kind cluster if it does not already exist.
 func ensureKindCluster() {
@@ -214,7 +274,16 @@ func applyCRDs() {
 // Pinned per STACK.md spirit (versions documented; no @sha pin yet for the
 // remote URL — see TODO). Override with TIDE_CERT_MANAGER_VERSION for
 // local testing.
-const certManagerVersion = "v1.16.2"
+//
+// v1.20.2 adds explicit K8s 1.33 support (matches kindest/node:v1.33.7
+// pinned by cluster.yaml); chart-side usage of cert-manager.io/v1 Issuer +
+// Certificate is unchanged (both chart Certificate resources specify
+// issuerRef.kind: Issuer + group: cert-manager.io explicitly, so the
+// v1.20 issuerRef-defaults revert is non-impacting). See
+// cert-manager.io/docs/releases/release-notes/release-notes-1.20/ for
+// the v1.20 changelog; risk surface for the bump is documented in
+// .planning/phases/02.2-.../02.2-RESEARCH.md §"Pattern 4" (Phase 02.2).
+const certManagerVersion = "v1.20.2"
 
 // installCertManager installs cert-manager into the kind cluster so the
 // `config/default` overlay's webhook certificate Issuer + Certificate can
@@ -322,6 +391,11 @@ func applyController() {
 	// builds + tags it as `controller:test`. images.stubSubagent + credProxy
 	// keep their chart-default repositories — only .tag and .pullPolicy
 	// need override.
+	// --replace makes KEEP_KIND_CLUSTER=true reruns against an existing
+	// `tide` release in `tide-system` idempotent — without it, helm errors
+	// with "cannot re-use a name that is still in use" on second install.
+	// Source: .planning/phases/02.1-.../02.1-02-SUMMARY.md §"Issues
+	// Encountered" — Phase 02.2 collateral fix.
 	helmCmd := exec.CommandContext(ctx, "helm",
 		"install", "tide", chartDir,
 		"--create-namespace", "-n", kindControllerNamespace,
@@ -333,7 +407,7 @@ func applyController() {
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
 		"--set", "images.credProxy.tag=test",
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
-		"--wait", "--timeout", "5m",
+		"--wait", "--replace", "--timeout", "5m",
 	)
 	start := time.Now()
 	out, err := helmCmd.CombinedOutput()
