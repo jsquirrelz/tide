@@ -169,3 +169,4 @@ workspaces:
     name: tide-projects
     size: 10Gi
     storageClassName: ""  # cluster default; set to a CSI RWX driver for production
+    accessModes: [ReadWriteMany]  # production-default; matches the chart's single-shared-RWX-PVC architecture (see comment above). Override via `--set workspaces.pvc.accessModes={RWO-mode}` for single-node kind/minikube test clusters whose default provisioner (rancher.io/local-path) only supports the non-shared access modes.
