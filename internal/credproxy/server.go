@@ -29,6 +29,37 @@ type Proxy struct {
 	CertFile, KeyFile string // /etc/tide/proxy/{cert.pem,key.pem}
 }
 
+// allowedRoutes is the defense-in-depth allowlist of (method, path-prefix)
+// tuples that the proxy forwards to the upstream (CR-04). Any request whose
+// (method, path) is not in this set is rejected with 403, preventing a
+// compromised subagent from reaching arbitrary Anthropic API endpoints
+// (e.g. /v1/files/*, admin/billing surfaces) using the real org-level key.
+//
+// Keep this list narrow: only the SDK surface the subagent legitimately
+// uses (currently the Messages API surface). Phase 3+ may expand this if
+// the executor SDK genuinely requires more endpoints.
+var allowedRoutes = []struct {
+	method string
+	prefix string
+}{
+	{http.MethodPost, "/v1/messages"},
+	{http.MethodPost, "/v1/messages/count_tokens"},
+}
+
+// isAllowedRoute returns true iff (method, path) matches at least one
+// allowedRoutes entry.
+func isAllowedRoute(method, path string) bool {
+	for _, route := range allowedRoutes {
+		if method != route.method {
+			continue
+		}
+		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // Handler returns an http.Handler that validates incoming bearer tokens and
 // forwards approved requests to the upstream with the real API key injected.
 //
@@ -69,6 +100,14 @@ func (p *Proxy) Handler() (http.Handler, error) {
 
 		if err := Verify(p.SigningKey, token, p.ExpectedTaskUID); err != nil {
 			http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		// CR-04: Defense-in-depth — even a valid token may only reach the
+		// narrow SDK surface the subagent legitimately uses. Reject any
+		// (method, path) outside the allowlist with 403.
+		if !isAllowedRoute(r.Method, r.URL.Path) {
+			http.Error(w, "forbidden: route not allowed", http.StatusForbidden)
 			return
 		}
 

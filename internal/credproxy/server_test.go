@@ -166,3 +166,100 @@ func TestProxyHandler_FallsBackToXAPIKeyHeader(t *testing.T) {
 		t.Fatalf("expected 200 (x-api-key fallback), got %d", resp.StatusCode)
 	}
 }
+
+// TestProxyHandler_RejectsUnlistedRouteWith403 asserts that a request with a
+// valid signed token but a route NOT in the allowlist (e.g. /v1/files) is
+// rejected with 403 — defense-in-depth against a compromised subagent
+// reaching arbitrary Anthropic API endpoints (CR-04).
+func TestProxyHandler_RejectsUnlistedRouteWith403(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-abc"
+
+	// Upstream should NOT be hit — set a flag to detect leaks.
+	upstreamHit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	token, err := Sign(key, taskUID, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	// /v1/files is NOT in the allowlist.
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/files", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for unlisted route, got %d", resp.StatusCode)
+	}
+	if upstreamHit {
+		t.Error("upstream was hit despite 403 — allowlist failed open")
+	}
+}
+
+// TestProxyHandler_RejectsWrongMethodWith403 asserts that even an allowlisted
+// path is rejected if the method doesn't match (e.g. GET /v1/messages).
+func TestProxyHandler_RejectsWrongMethodWith403(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-abc"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	token, err := Sign(key, taskUID, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for GET on POST-only route, got %d", resp.StatusCode)
+	}
+}
