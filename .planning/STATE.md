@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-13T15:57:11.199Z"
-last_activity: 2026-05-13 -- Phase 02.2 planning complete
+last_updated: "2026-05-13T15:59:17.964Z"
+last_activity: 2026-05-13 -- Phase 02.2 execution started
 progress:
   total_phases: 7
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 02.1 — debug-fix-the-layer-b-kind-integration-test-suite-so-make-te
+**Current focus:** Phase 02.2 — layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi
 
 ## Current Position
 
-Phase: 02.1 (debug-fix-the-layer-b-kind-integration-test-suite-so-make-te) — EXECUTING
-Plan: 1 of 4
-Status: Ready to execute
-Last activity: 2026-05-13 -- Phase 02.2 planning complete
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 02.2
+Last activity: 2026-05-13 -- Phase 02.2 execution started
 
 Progress: [████████░░] 83%
 
