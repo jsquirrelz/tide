@@ -22,13 +22,531 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
+
+// newTestProjectReconciler returns a ProjectReconciler wired to the shared
+// envtest k8sClient with a stub Dispatcher so the seam body executes.
+// stubDispatcher is defined in task_controller_test.go (same package).
+func newTestProjectReconciler() *ProjectReconciler {
+	return &ProjectReconciler{
+		Client:                  k8sClient,
+		Scheme:                  k8sClient.Scheme(),
+		Dispatcher:              &stubDispatcher{},
+		MaxConcurrentReconciles: 1,
+	}
+}
+
+// makeTestBoundPVC creates a bound PVC named pvcName in namespace ns.
+func makeTestBoundPVC(ctx context.Context, name, ns string) {
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, pvc)).To(Succeed())
+	// Patch the PVC status to Bound so the reconciler proceeds.
+	pvcPatch := pvc.DeepCopy()
+	pvcPatch.Status.Phase = corev1.ClaimBound
+	Expect(k8sClient.Status().Update(ctx, pvcPatch)).To(Succeed())
+}
+
+var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), func() {
+	ctx := context.Background()
+
+	Describe("Init Job lifecycle", func() {
+		It("TestProjectReconciler_CreatesInitJobOnFirstReconcile", func() {
+			ns := "default"
+			pvcName := "tide-projects-create-init"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-create-init-job",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add the finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 2: execute seam body — should create the init Job.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Re-fetch project to get the UID.
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			expectedJobName := "tide-init-" + string(fetched.UID)
+			var job batchv1.Job
+			Eventually(func() error {
+				return k8sClient.Get(ctx, types.NamespacedName{Name: expectedJobName, Namespace: ns}, &job)
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed(), "init Job should be created")
+
+			// Verify busybox mkdir command.
+			Expect(job.Spec.Template.Spec.Containers).To(HaveLen(1))
+			Expect(job.Spec.Template.Spec.Containers[0].Command).To(ContainElements(
+				"sh", "-c",
+			))
+			// Command should contain mkdir -p
+			cmdJoined := ""
+			for _, c := range job.Spec.Template.Spec.Containers[0].Command {
+				cmdJoined += c + " "
+			}
+			Expect(cmdJoined).To(ContainSubstring("mkdir -p"))
+
+			// Verify shared PVC subPath wiring (Blocker #2/#3).
+			foundPVC := false
+			for _, v := range job.Spec.Template.Spec.Volumes {
+				if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName == pvcName {
+					foundPVC = true
+					break
+				}
+			}
+			Expect(foundPVC).To(BeTrue(), "init Job should mount the shared PVC %s", pvcName)
+
+			foundSubPath := false
+			expectedSubPath := string(fetched.UID) + "/workspace"
+			for _, vm := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+				if vm.SubPath == expectedSubPath {
+					foundSubPath = true
+					break
+				}
+			}
+			Expect(foundSubPath).To(BeTrue(),
+				"init Job volumeMount should have SubPath=%s (Blocker #2/#3)", expectedSubPath)
+		})
+
+		It("TestProjectReconciler_InitJobIdempotent", func() {
+			ns := "default"
+			pvcName := "tide-projects-idempotent"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-init-idempotent",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 2: creates init Job.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 3: should be idempotent — AlreadyExists handled gracefully.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Re-fetch project to get UID.
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			jobName := "tide-init-" + string(fetched.UID)
+			var jobList batchv1.JobList
+			Expect(k8sClient.List(ctx, &jobList, client.InNamespace(ns))).To(Succeed())
+			count := 0
+			for _, j := range jobList.Items {
+				if j.Name == jobName {
+					count++
+				}
+			}
+			Expect(count).To(Equal(1), "exactly one init Job should exist after multiple reconciles")
+		})
+
+		It("TestProjectReconciler_OnInitJobSuccess_SetsPhaseInitialized", func() {
+			ns := "default"
+			pvcName := "tide-projects-success"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-init-success",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Pre-create a Succeeded init Job.
+			completedJob := buildSucceededInitJob(fetched, pvcName)
+			Expect(k8sClient.Create(ctx, completedJob)).To(Succeed())
+			// Patch Job status to Succeeded.
+			jobPatch := completedJob.DeepCopy()
+			jobPatch.Status = batchv1.JobStatus{
+				Succeeded: 1,
+				Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, jobPatch)).To(Succeed())
+
+			// Reconcile 2: seam body sees Succeeded Job and sets Initialized.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("Initialized"),
+				"Phase should be Initialized after init Job success")
+		})
+
+		It("TestProjectReconciler_OnInitJobFailure_SetsPhaseInitFailed", func() {
+			ns := "default"
+			pvcName := "tide-projects-initfail"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-init-fail",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Pre-create a Failed init Job.
+			failedJob := buildFailedInitJob(fetched, pvcName)
+			Expect(k8sClient.Create(ctx, failedJob)).To(Succeed())
+			// Patch Job status to Failed.
+			failPatch := failedJob.DeepCopy()
+			failPatch.Status = batchv1.JobStatus{
+				Failed: 3,
+				Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, failPatch)).To(Succeed())
+
+			// Reconcile 2: seam body sees Failed Job and sets InitFailed.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("InitFailed"),
+				"Phase should be InitFailed after init Job failure")
+		})
+	})
+
+	Describe("Budget gate", func() {
+		It("TestProjectReconciler_BudgetCapExceeded_SetsBudgetExceeded", func() {
+			ns := "default"
+			pvcName := "tide-projects-budget-cap"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-budget-exceeded",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha1.BudgetConfig{
+						AbsoluteCapCents: 100,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			// Patch status to exceed the cap.
+			statusPatch := fetched.DeepCopy()
+			statusPatch.Status.Budget.CostSpentCents = 200 // exceeds cap of 100
+			Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 2: seam body — budget cap should be detected and phase set.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("BudgetExceeded"),
+				"Phase should be BudgetExceeded when cap is exceeded")
+		})
+
+		It("TestProjectReconciler_BypassAnnotation_ClearsBudgetExceeded", func() {
+			ns := "default"
+			pvcName := "tide-projects-bypass-oneshot"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bypass-oneshot",
+					Namespace: ns,
+					Annotations: map[string]string{
+						"tideproject.k8s/bypass-budget": "true",
+					},
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha1.BudgetConfig{
+						AbsoluteCapCents: 100,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Patch status to BudgetExceeded with overspend.
+			statusPatch := fetched.DeepCopy()
+			statusPatch.Status.Phase = "BudgetExceeded"
+			statusPatch.Status.Budget.CostSpentCents = 200
+			Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 2: bypass should clear BudgetExceeded.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).NotTo(Equal("BudgetExceeded"),
+				"Phase should be cleared from BudgetExceeded when one-shot bypass annotation is present")
+			// One-shot bypass annotation should be consumed.
+			Expect(fetched.Annotations).NotTo(HaveKey("tideproject.k8s/bypass-budget"),
+				"one-shot bypass annotation should be consumed after bypass")
+		})
+
+		It("TestProjectReconciler_BypassUntilAnnotation_TTLHonored", func() {
+			ns := "default"
+			pvcName := "tide-projects-bypass-ttl"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			futureTime := time.Now().Add(time.Hour).Format(time.RFC3339)
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bypass-ttl",
+					Namespace: ns,
+					Annotations: map[string]string{
+						"tideproject.k8s/bypass-budget-until": futureTime,
+					},
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha1.BudgetConfig{
+						AbsoluteCapCents: 100,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Patch status to BudgetExceeded with overspend.
+			statusPatch := fetched.DeepCopy()
+			statusPatch.Status.Phase = "BudgetExceeded"
+			statusPatch.Status.Budget.CostSpentCents = 200
+			Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			// Reconcile 2: future TTL bypass should clear BudgetExceeded.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).NotTo(Equal("BudgetExceeded"),
+				"future TTL bypass should clear BudgetExceeded")
+
+			// Now update to past TTL — should re-enter BudgetExceeded on next reconcile.
+			pastTime := time.Now().Add(-time.Hour).Format(time.RFC3339)
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			metaPatch := fetched.DeepCopy()
+			metaPatch.Annotations["tideproject.k8s/bypass-budget-until"] = pastTime
+			Expect(k8sClient.Update(ctx, metaPatch)).To(Succeed())
+
+			// Reset status so reconciler can re-set BudgetExceeded.
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			resetPatch := fetched.DeepCopy()
+			resetPatch.Status.Budget.CostSpentCents = 200
+			resetPatch.Status.Phase = "Pending"
+			Expect(k8sClient.Status().Update(ctx, resetPatch)).To(Succeed())
+
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("BudgetExceeded"),
+				"expired TTL bypass should not prevent BudgetExceeded phase from being re-set")
+		})
+	})
+
+	Describe("Shared PVC guard", func() {
+		It("TestProjectReconciler_NoSharedPVC_RequeuesAfter30s", func() {
+			ns := "default"
+			// Deliberately do NOT create the shared PVC for this test.
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-no-pvc",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			// Use a name that cannot exist.
+			reconciler.SharedPVCName = "tide-projects-nonexistent-12345"
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Reconcile 2: seam body — missing PVC should trigger RequeueAfter:30s.
+			result, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+				"should requeue after 30s when shared PVC is missing (Pitfall 1 — non-blocking)")
+
+			// No init Job should have been created.
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			var jobList batchv1.JobList
+			Expect(k8sClient.List(ctx, &jobList, client.InNamespace(ns))).To(Succeed())
+			for _, j := range jobList.Items {
+				Expect(j.Name).NotTo(HavePrefix("tide-init-"+string(fetched.UID)),
+					"no init Job should be created when shared PVC is missing")
+			}
+		})
+	})
+})
 
 var _ = Describe("Project Controller", func() {
 	Context("When reconciling a resource", func() {
@@ -145,3 +663,63 @@ var _ = Describe("Project Controller", func() {
 		})
 	})
 })
+
+// buildSucceededInitJob builds a pre-created init Job for testing — Spec only,
+// caller patches Status separately since envtest requires separate status updates.
+func buildSucceededInitJob(project *tideprojectv1alpha1.Project, _ string) *batchv1.Job {
+	backoffLimit := int32(2)
+	ttl := int32(300)
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-init-" + string(project.UID),
+			Namespace: project.Namespace,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:    "init",
+							Image:   "busybox:1.36",
+							Command: []string{"sh", "-c", "mkdir -p /workspace/repo /workspace/artifacts /workspace/envelopes"},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// buildFailedInitJob builds a pre-created init Job for testing — Spec only.
+func buildFailedInitJob(project *tideprojectv1alpha1.Project, _ string) *batchv1.Job {
+	backoffLimit := int32(2)
+	ttl := int32(300)
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-init-" + string(project.UID),
+			Namespace: project.Namespace,
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:    "init",
+							Image:   "busybox:1.36",
+							Command: []string{"sh", "-c", "exit 1"},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// Ensure ctrl is used to avoid unused import errors.
+var _ ctrl.Result
