@@ -115,6 +115,27 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+##@ Integration tests (TEST-02 — Phase 2)
+
+.PHONY: test-int test-int-fast test-int-kind-prep
+
+test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Timeout 300s (TEST-02 budget). Requires Docker + kind.
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		timeout 300s go test ./test/integration/... -v -timeout=5m -ginkgo.v
+
+test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s.
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test ./test/integration/envtest/... -v -timeout=2m -ginkgo.v --ginkgo.label-filter='envtest'
+
+test-int-kind-prep: ## Build stub-subagent + credproxy Docker images and load them into the tide-test kind cluster.
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-credproxy:test -f images/credproxy/Dockerfile .
+	@if ! $(KIND) get clusters 2>/dev/null | grep -q "^tide-test$$"; then \
+		$(KIND) create cluster --name tide-test --config test/integration/kind/cluster.yaml; \
+	fi
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-stub-subagent:test --name tide-test
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-credproxy:test --name tide-test
+
 .PHONY: lint
 lint: golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
