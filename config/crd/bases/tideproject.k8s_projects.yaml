@@ -53,6 +53,14 @@ spec:
                     description: |-
                       RollingWindowCapCents optionally caps spending over the window defined by the
                       BudgetStatus.WindowStart field.
+
+                      DEFERRED (WR-02): As of Phase 2 only AbsoluteCapCents is enforced.
+                      WindowStart is set on first roll-up and never reset, so the rolling cap
+                      behaves identically to an absolute cap. A future phase will add
+                      window-boundary reset logic in ProjectReconciler that compares
+                      (now - WindowStart) against the configured window and zeros the tally
+                      when crossed; until then this field is documentation-only and should
+                      not be relied on for cost control.
                     format: int64
                     type: integer
                 required:

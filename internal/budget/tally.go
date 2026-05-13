@@ -19,9 +19,15 @@ import (
 // EnvelopeOut — one Status write per Task completion (D-D2). Churn is
 // proportional to throughput, not to reconcile frequency.
 //
-// WindowStart is set to time.Now() on the first call (zero value). Once set, it
-// is preserved — the window resets on the next billing-period boundary, which
-// Plan 10's ProjectReconciler handles separately.
+// WindowStart is set to time.Now() on the first call (zero value). Once set
+// it is preserved.
+//
+// WR-02: Phase 2 has no rolling-window reset path; only AbsoluteCapCents is
+// enforced (see IsCapExceeded). A future ProjectReconciler change will
+// compare (now - WindowStart) against BudgetConfig.RollingWindowCapCents'
+// window and zero the tally on boundary crossings. Until then,
+// BudgetConfig.RollingWindowCapCents is documentation-only and the tally
+// accumulates forever (see project_types.go BudgetConfig docstring).
 //
 // Returns nil on success. Wraps client.Status().Patch errors with context.
 func RollUpUsage(ctx context.Context, c client.Client, project *tidev1alpha1.Project, usage pkgdispatch.Usage) error {
