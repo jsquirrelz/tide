@@ -118,11 +118,27 @@ func waitForCacheSync(name, namespace string, obj client.Object) {
 }
 
 // makeTask creates a Task in the test namespace and returns its NamespacedName.
-func makeTask(name, planRef string, dependsOn []string) *tideprojectv1alpha1.Task {
+//
+// Dispatch tests share the envtest "default" namespace with project/plan/wave
+// suites, so multiple Projects coexist while the suite runs. TaskReconciler's
+// resolveProject prefers the "tideproject.k8s/project" label (stamped by
+// PlanReconciler.stampTaskLabels in production) and only falls back to a
+// namespace-wide List when the label is absent — and that fallback returns
+// projectList.Items[0], which is order-dependent and leaks state across specs.
+//
+// Tests bypass PlanReconciler, so we stamp the production label here. The
+// stable lookup makes the dispatch suite deterministic regardless of Ginkgo's
+// randomized spec order.
+func makeTask(name, planRef string, dependsOn []string, projectName ...string) *tideprojectv1alpha1.Task {
+	labels := map[string]string{}
+	if len(projectName) > 0 && projectName[0] != "" {
+		labels["tideproject.k8s/project"] = projectName[0]
+	}
 	t := &tideprojectv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
+			Labels:    labels,
 		},
 		Spec: tideprojectv1alpha1.TaskSpec{
 			PlanRef:             planRef,
@@ -194,7 +210,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskAlpha, planRef, nil)
+			makeTask(taskAlpha, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskAlpha)
@@ -228,8 +244,8 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
-			makeTask(taskB, planRef, []string{taskA}) // B depends on A (not Succeeded)
+			makeTask(taskA, planRef, nil, projectName)
+			makeTask(taskB, planRef, []string{taskA}, projectName) // B depends on A (not Succeeded)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -271,8 +287,8 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
-			makeTask(taskB, planRef, []string{taskA})
+			makeTask(taskA, planRef, nil, projectName)
+			makeTask(taskB, planRef, []string{taskA}, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -309,7 +325,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -364,7 +380,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
 
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -440,7 +456,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
 
 			for i := 0; i < taskCount; i++ {
-				makeTask(fmt.Sprintf("task-storm-%d", i), planRef, nil)
+				makeTask(fmt.Sprintf("task-storm-%d", i), planRef, nil, projectName)
 			}
 		})
 		AfterEach(func() {
@@ -541,7 +557,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 			// Set Project.Status.Phase=BudgetExceeded.
 			var p tideprojectv1alpha1.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
@@ -619,7 +635,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 				return updated.Status.Phase
 			}, 5*time.Second, 50*time.Millisecond).Should(Equal("BudgetExceeded"))
 
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -647,7 +663,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -696,7 +712,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -774,7 +790,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
@@ -863,7 +879,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 		BeforeEach(func() {
 			makeProjectForTask(projectName)
-			makeTask(taskA, planRef, nil)
+			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
 			cleanupTask(taskA)
