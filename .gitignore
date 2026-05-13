@@ -10,6 +10,7 @@ Dockerfile.cross
 # Root-level binaries from accidental `go build ./cmd/<name>` invocations
 /tide-lint
 /manager
+/credproxy
 
 # Test binary, built with `go test -c`
 *.test

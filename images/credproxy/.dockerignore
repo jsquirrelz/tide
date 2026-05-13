@@ -1,0 +1,32 @@
+# Excludes for the credproxy Docker build context (invoked from repo root).
+# Only cmd/credproxy/ and internal/credproxy/ are COPY'd by the Dockerfile;
+# everything else is here for safety in case a broader COPY is added.
+.git/
+.github/
+.planning/
+.claude/
+tools/
+test/
+charts/
+hack/
+config/
+api/
+internal/controller/
+internal/webhook/
+internal/pool/
+internal/owner/
+internal/finalizer/
+internal/config/
+internal/dispatch/
+internal/harness/
+internal/budget/
+pkg/
+cmd/manager/
+cmd/tide-lint/
+cmd/stub-subagent/
+*.md
+*.sum
+cover.out
+bin/
+web/
+dashboard/
