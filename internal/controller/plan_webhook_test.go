@@ -222,26 +222,25 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		Expect(k8sClient.Create(ctx, taskBeta)).To(Succeed())
 		Expect(k8sClient.Create(ctx, taskGamma)).To(Succeed())
 
-		// Update the Plan to trigger ValidateUpdate with cyclic Tasks now visible.
-		// The webhook should reject this with a structured error containing cycle node names.
-		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
-			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
-				return err
-			}
-			if fresh.Annotations == nil {
-				fresh.Annotations = map[string]string{}
-			}
-			fresh.Annotations["test-trigger"] = "cyclic-validate"
-			err := k8sClient.Update(ctx, fresh)
-			if err == nil {
-				return nil // didn't fail — try again after cache catches up
-			}
-			return nil // update eventually rejected
-		}, "10s", "100ms").Should(Succeed()) // we just need the cache to pick up tasks
+		// WR-05: Deterministically wait for the .spec.planRef field-indexer
+		// cache to surface all three Tasks before triggering the update. The
+		// old test used Or(rejection, Succeed()), which let a real regression
+		// (silently admitting a cyclic Plan) pass CI. The cache-warmup poll
+		// uses the same indexer mgrClient that the webhook itself uses, so
+		// once Eventually returns the cyclic graph IS visible to the webhook
+		// and rejection becomes deterministic.
+		Eventually(func() int {
+			var taskList tideprojectv1alpha1.TaskList
+			_ = mgrClient.List(ctx, &taskList,
+				client.InNamespace(namespace),
+				client.MatchingFields{".spec.planRef": plan.Name},
+			)
+			return len(taskList.Items)
+		}, "15s", "200ms").Should(BeNumerically(">=", 3),
+			"waiting for the .spec.planRef indexer to surface all cyclic Tasks before triggering update")
 
-		// Now assert that once Tasks are visible, updating the Plan is rejected.
-		// Wait a moment for the informer cache to catch up.
+		// Now trigger an update; since Tasks are guaranteed visible, the
+		// webhook MUST reject (no Pitfall B fall-through).
 		Eventually(func() error {
 			fresh := &tideprojectv1alpha1.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
@@ -250,20 +249,12 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 			if fresh.Annotations == nil {
 				fresh.Annotations = map[string]string{}
 			}
-			fresh.Annotations["test-trigger"] = "cyclic-validate-2"
+			fresh.Annotations["test-trigger"] = "cyclic-validate-deterministic"
 			return k8sClient.Update(ctx, fresh)
-		}, "15s", "500ms").Should(Or(
-			// Either the update is rejected with a cycle error,
-			Satisfy(func(err error) bool {
-				if err == nil {
-					return false
-				}
-				return apierrors.IsForbidden(err) || apierrors.IsInvalid(err) || isWebhookRejection(err)
-			}),
-			// or it succeeds (Tasks not yet in cache — Pitfall B fall-through).
-			// The test documents both outcomes as valid.
-			Succeed(),
-		))
+		}, "15s", "500ms").Should(Satisfy(func(err error) bool {
+			return err != nil && isWebhookRejection(err)
+		}),
+			"cyclic Plan update must be rejected once Tasks are indexed (WR-05)")
 	})
 
 	// -------------------------------------------------------------------------
@@ -283,8 +274,20 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		Expect(k8sClient.Create(ctx, taskAlpha)).To(Succeed())
 		Expect(k8sClient.Create(ctx, taskBeta)).To(Succeed())
 
-		// Update Plan to trigger re-validation with Tasks visible.
-		// Strict mode: should be rejected with a file-touch mismatch error.
+		// WR-05: Deterministically wait for both Tasks to surface in the
+		// field-indexer cache before triggering the update so the webhook
+		// must reject (instead of falling through to Pitfall B warn).
+		Eventually(func() int {
+			var taskList tideprojectv1alpha1.TaskList
+			_ = mgrClient.List(ctx, &taskList,
+				client.InNamespace(namespace),
+				client.MatchingFields{".spec.planRef": plan.Name},
+			)
+			return len(taskList.Items)
+		}, "15s", "200ms").Should(BeNumerically(">=", 2),
+			"waiting for the .spec.planRef indexer to surface both overlapping Tasks before triggering update")
+
+		// Strict mode: with both Tasks indexed, the update MUST be rejected.
 		Eventually(func() error {
 			fresh := &tideprojectv1alpha1.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
@@ -293,17 +296,12 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 			if fresh.Annotations == nil {
 				fresh.Annotations = map[string]string{}
 			}
-			fresh.Annotations["test-trigger"] = "strict-validate"
+			fresh.Annotations["test-trigger"] = "strict-validate-deterministic"
 			return k8sClient.Update(ctx, fresh)
-		}, "15s", "500ms").Should(Or(
-			Satisfy(func(err error) bool {
-				if err == nil {
-					return false
-				}
-				return apierrors.IsForbidden(err) || apierrors.IsInvalid(err) || isWebhookRejection(err)
-			}),
-			Succeed(), // Pitfall B: Tasks not yet in cache → warning path
-		))
+		}, "15s", "500ms").Should(Satisfy(func(err error) bool {
+			return err != nil && isWebhookRejection(err)
+		}),
+			"strict-mode file-touch mismatch must be rejected once Tasks are indexed (WR-05)")
 	})
 
 	It("TestPlanWebhook_FileTouchWarnMode_ReturnsWarnings — warn mode admits with warnings", func() {

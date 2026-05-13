@@ -110,17 +110,28 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				return len(taskList.Items)
 			}, "10s", "200ms").Should(BeNumerically(">=", 2))
 
-			// Force a Plan update to trigger webhook validation with the Tasks visible.
-			freshPlan := &tideprojectv1alpha1.Plan{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan)).To(Succeed())
-			freshPlan.Annotations = map[string]string{"tide-test/trigger": "cycle-test"}
-			err := k8sClient.Update(ctx, freshPlan)
-			if err != nil {
-				// If the update was rejected (cyclic plan), expect an API error.
-				Expect(apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) || isForbiddenOrBadRequest(err)).To(BeTrue(),
-					"Expected cycle rejection; got: %v", err)
-			}
-			// If it passed (Tasks not visible yet), the warning path was hit — also acceptable per Pitfall B.
+			// WR-05: With both cyclic Tasks deterministically indexed, the
+			// webhook MUST reject the Plan update. The old test allowed
+			// "either reject OR succeed" via Pitfall B fall-through, which
+			// hid real regressions (the webhook could silently admit a
+			// cyclic Plan and the test still passed). Wait the update out
+			// with Eventually so a slow webhook is permitted, but a final
+			// nil-error counts as a regression.
+			Eventually(func() error {
+				freshPlan := &tideprojectv1alpha1.Plan{}
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan); err != nil {
+					return err
+				}
+				if freshPlan.Annotations == nil {
+					freshPlan.Annotations = map[string]string{}
+				}
+				freshPlan.Annotations["tide-test/trigger"] = "cycle-test-deterministic"
+				return k8sClient.Update(ctx, freshPlan)
+			}, "15s", "500ms").Should(Satisfy(func(err error) bool {
+				return err != nil &&
+					(apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) || isForbiddenOrBadRequest(err))
+			}),
+				"cyclic Plan update must be rejected once Tasks are indexed (WR-05)")
 		})
 	})
 
@@ -228,13 +239,25 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				return len(taskList.Items)
 			}, "10s", "200ms").Should(BeNumerically(">=", 2))
 
-			// Trigger re-validation via update.
-			freshPlan := &tideprojectv1alpha1.Plan{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan)).To(Succeed())
-			freshPlan.Labels = map[string]string{"tide-test/trigger": "strict-mode"}
-			// In strict mode with shared file paths, the webhook should reject.
-			// If tasks aren't visible yet (Pitfall B), it may pass with a warning.
-			_ = k8sClient.Update(ctx, freshPlan) // may succeed or fail — both are valid depending on cache state
+			// WR-05: With both overlapping Tasks indexed, strict-mode MUST
+			// reject the Plan update. The old test discarded the update
+			// result ("_ = Update(...)") so the Pitfall B fall-through and a
+			// real strict-mode regression were indistinguishable.
+			Eventually(func() error {
+				freshPlan := &tideprojectv1alpha1.Plan{}
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan); err != nil {
+					return err
+				}
+				if freshPlan.Labels == nil {
+					freshPlan.Labels = map[string]string{}
+				}
+				freshPlan.Labels["tide-test/trigger"] = "strict-mode-deterministic"
+				return k8sClient.Update(ctx, freshPlan)
+			}, "15s", "500ms").Should(Satisfy(func(err error) bool {
+				return err != nil &&
+					(apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) || isForbiddenOrBadRequest(err))
+			}),
+				"strict-mode file-touch mismatch must be rejected once Tasks are indexed (WR-05)")
 		})
 	})
 
