@@ -158,6 +158,11 @@ jobs:
     timeout-minutes: 6
     permissions:
       contents: read
+    env:
+      # Phase 02.1 / WR-09 / D-03 source: .planning/phases/02.1-debug-fix-the-layer-b-kind-integration-test-suite-so-make-te/02.1-BASELINE.md §Decision Log §D-03.
+      # D-03 prescribes: KEEP TIDE_REQUIRE_CONTROLLER default (unset = soft-skip)
+      # for dev runs; CI MUST set =1 so install failures fail the CI build loudly.
+      TIDE_REQUIRE_CONTROLLER: "1"
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -176,6 +181,11 @@ jobs:
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
           kind version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
 
       # Pre-fetch manifests + envtest binaries before the timed test-int step.
       - name: Prepare manifests and envtest binaries
