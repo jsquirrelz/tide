@@ -77,7 +77,7 @@ Plans:
 - [x] 02-07-PLAN.md — internal/budget package (sync.Map rate bucket + PreCharge + cap check + tally + Prometheus counter) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 02-08-PLAN.md — internal/dispatch.Dispatcher interface body + PodJobBackend + JobSpec (native sidecar) + JobName (Wave 3)
+- [x] 02-08-PLAN.md — internal/dispatch.Dispatcher interface body + PodJobBackend + JobSpec (native sidecar) + JobName (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 02-09-PLAN.md — TaskReconciler dispatch body + WaveReconciler observational roll-up + PlanReconciler Wave materialization (Wave 4)
