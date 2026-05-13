@@ -54,9 +54,17 @@ import (
 )
 
 const (
-	kindClusterName  = "tide-test"
-	kindNamespace    = "tide-int-test"
-	kindTestTimeout  = 4 * time.Minute
+	kindClusterName = "tide-test"
+	kindNamespace   = "tide-int-test"
+	kindTestTimeout = 4 * time.Minute
+
+	// kindControllerNamespace is the namespace the tide-controller-manager
+	// Deployment installs into (config/default Kustomize manifest target).
+	// WR-09: split from kindNamespace (which is the *test fixture*
+	// namespace) so a future config/default change doesn't silently break
+	// the readiness check.
+	kindControllerNamespace  = "tide-system"
+	kindControllerDeployment = "tide-controller-manager"
 )
 
 var (
@@ -239,17 +247,30 @@ func applyController() {
 	}
 }
 
-// waitForControllerReady waits up to 90s for the tide-controller-manager
-// Deployment to have at least 1 ready replica. Skips silently if not deployed.
+// waitForControllerReady waits up to 90s for the controller Deployment to
+// have at least 1 ready replica. Skips silently if not deployed.
+//
+// WR-09: emits the CRDs-only fallback via stdout (Fprintln on GinkgoWriter
+// plus an env-var-gated hard fail) so the CI signal is not invisible. Set
+// TIDE_REQUIRE_CONTROLLER=1 to fail the suite if the Deployment is absent
+// — opt-in so dev-machine runs that only want CRD-level coverage still
+// pass.
 func waitForControllerReady() {
 	// If no Deployment was installed (CRDs-only mode), skip wait.
 	checkCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
-		"get", "deployment", "tide-controller-manager",
-		"-n", "tide-system", "--ignore-not-found=true",
+		"get", "deployment", kindControllerDeployment,
+		"-n", kindControllerNamespace, "--ignore-not-found=true",
 		"--output=name")
 	out, err := checkCmd.Output()
 	if err != nil || strings.TrimSpace(string(out)) == "" {
-		GinkgoWriter.Println("tide-controller-manager Deployment not found; running in CRDs-only mode")
+		msg := fmt.Sprintf("%s Deployment not found in namespace %q; running in CRDs-only mode",
+			kindControllerDeployment, kindControllerNamespace)
+		// GinkgoWriter for the Gingko log, stdout for `go test -v` visibility.
+		GinkgoWriter.Println(msg)
+		fmt.Fprintln(os.Stdout, "WARN(kind suite): "+msg)
+		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
+			Fail(msg + " (TIDE_REQUIRE_CONTROLLER=1)")
+		}
 		return
 	}
 
@@ -258,18 +279,20 @@ func waitForControllerReady() {
 	for time.Now().Before(deadline) {
 		ready, _ := isDeploymentReady()
 		if ready {
-			GinkgoWriter.Println("tide-controller-manager is ready")
+			GinkgoWriter.Printf("%s is ready in namespace %q\n",
+				kindControllerDeployment, kindControllerNamespace)
 			return
 		}
 		time.Sleep(2 * time.Second)
 	}
-	GinkgoWriter.Println("Warning: tide-controller-manager not ready after 90s; tests may fail")
+	GinkgoWriter.Printf("Warning: %s not ready in namespace %q after 90s; tests may fail\n",
+		kindControllerDeployment, kindControllerNamespace)
 }
 
 func isDeploymentReady() (bool, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
-		"get", "deployment", "tide-controller-manager",
-		"-n", "tide-system",
+		"get", "deployment", kindControllerDeployment,
+		"-n", kindControllerNamespace,
 		"-o", "jsonpath={.status.readyReplicas}")
 	out, err := cmd.Output()
 	if err != nil {
