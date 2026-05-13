@@ -3,6 +3,7 @@ package credproxy
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -39,8 +40,14 @@ type Proxy struct {
 // On Verify success: Authorization + x-api-key rewritten to RealAPIKey;
 // Host set to upstream.Host; all other headers (including anthropic-version)
 // pass through unchanged.
-func (p *Proxy) Handler() http.Handler {
-	upstream, _ := url.Parse(p.UpstreamBaseURL)
+func (p *Proxy) Handler() (http.Handler, error) {
+	upstream, err := url.Parse(p.UpstreamBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("credproxy: invalid upstream URL %q: %w", p.UpstreamBaseURL, err)
+	}
+	if upstream == nil || upstream.Host == "" {
+		return nil, fmt.Errorf("credproxy: invalid upstream URL %q: missing host", p.UpstreamBaseURL)
+	}
 	rp := httputil.NewSingleHostReverseProxy(upstream)
 	origDirector := rp.Director
 	rp.Director = func(req *http.Request) {
@@ -66,7 +73,7 @@ func (p *Proxy) Handler() http.Handler {
 		}
 
 		rp.ServeHTTP(w, r)
-	})
+	}), nil
 }
 
 // ListenAndServe starts the TLS server and blocks until ctx is cancelled, at
@@ -74,9 +81,13 @@ func (p *Proxy) Handler() http.Handler {
 //
 // CertFile and KeyFile must point at the cert + key written by MintSelfSignedCert.
 func (p *Proxy) ListenAndServe(ctx context.Context) error {
+	handler, err := p.Handler()
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:      p.ListenAddr,
-		Handler:   p.Handler(),
+		Handler:   handler,
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 

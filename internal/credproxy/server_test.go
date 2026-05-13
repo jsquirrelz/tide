@@ -38,7 +38,11 @@ func TestProxyHandler_RejectsBadBearerWith401(t *testing.T) {
 	key := []byte("12345678901234567890123456789012")
 	p, _ := buildTestProxy(t, key, "task-uid-abc")
 
-	srv := httptest.NewServer(p.Handler())
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	srv := httptest.NewServer(h)
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", nil)
@@ -85,7 +89,11 @@ func TestProxyHandler_AcceptsValidBearerAndRewritesHeaders(t *testing.T) {
 		RealAPIKey:      "sk-real-key",
 		ListenAddr:      "127.0.0.1:0",
 	}
-	srv := httptest.NewServer(p.Handler())
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
 	defer srv.Close()
 
 	// Sign a valid token.
@@ -132,7 +140,11 @@ func TestProxyHandler_FallsBackToXAPIKeyHeader(t *testing.T) {
 		RealAPIKey:      "sk-real-key",
 		ListenAddr:      "127.0.0.1:0",
 	}
-	srv := httptest.NewServer(p.Handler())
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
 	defer srv.Close()
 
 	token, err := Sign(key, taskUID, 10*time.Minute)
