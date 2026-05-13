@@ -108,10 +108,10 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-12 after Phase 1 (Foundation — CRDs, pkg/dag, Controller Scaffold) completed.*
+*Last updated: 2026-05-13 after Phase 2 (Dispatch & Plan Validation — Innermost Reconcilers + Harness) completed.*
 
 ## Current State
 
-Phase 1 complete (11/11 plans, 26/26 REQ-IDs, 5/5 success criteria, 0 gaps). Operator scaffold ready to receive Phase 2 dispatch logic without rewrites. Toolchain (Go 1.26.3, kubebuilder v4.14.0, controller-runtime v0.24.1) pinned and shipping. Two helmify-generated charts (`charts/tide/` + `charts/tide-crds/`) lint clean and reproducibly regenerable. K8s API group locked at `tideproject.k8s` (made-up TLD per D-A3; never `tide.io`).
+Phase 2 complete (13/13 plans, 21/21 REQ-IDs, 5/5 success criteria implemented). Dogfood-critical pair (TaskReconciler + WaveReconciler) dispatches via `internal/dispatch/podjob.PodJobBackend` against a stub-subagent image; harness enforces caps + redacts secrets + validates output paths; budget rate-limiter absorbs 429 storms; Plan admission webhook rejects cycles and surfaces file-touch mismatches. Helm chart pair gains signing-secret (auto-rotation-safe), `tide-subagent` zero-verb SA, shared RWX `tide-projects` PVC. Layer A envtest tier is 18/18 deterministic green; Layer B kind tier ships test files + CI gate but real run on developer laptops still has environment-setup gaps (cert-manager + image-load + manifest plumbing) — Phase 2.1 (URGENT, INSERTED) is the dedicated debug-and-fix slice. Code review found 5 Critical + 11 Warning; 14 fixed inline (1 deferred, 1 reverted-and-recorded). Phase 1 invariants preserved: K8s API group `tideproject.k8s`; no LLM-SDK imports under firewalled boundaries (providerfirewall analyzer now CI-gated alongside crosspool); CRD-`.status`-only persistence; toolchain pins untouched.
 
-**Next:** Phase 2 — Dispatch & Plan Validation — Innermost Reconcilers + Harness (~21 requirements: SUB-01..05, HARN-01..06, PLAN-01..03, FAIL-01..04, PERSIST-03, ART-01, TEST-02).
+**Next:** Phase 2.1 — Debug + fix the Layer B kind integration test suite so `make test-int` runs end-to-end on a developer laptop (URGENT insertion; the dedicated gap-closure pass before Phase 3 picks up the up-stack reconcilers).
