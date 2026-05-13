@@ -118,7 +118,7 @@ var _ = BeforeSuite(func() {
 	By("Installing cert-manager (required by config/default webhook certs)")
 	installCertManager()
 
-	By("Applying TIDE controller Deployment via kustomize")
+	By("Applying TIDE controller Deployment via helm")
 	applyController()
 
 	By("Waiting for controller-manager Deployment to become ready")
@@ -251,10 +251,30 @@ func installCertManager() {
 	GinkgoWriter.Println("cert-manager ready")
 }
 
-// applyController applies the TIDE controller via kubectl kustomize.
-// Falls back to skipping if config/default is not present or kustomize fails.
+// applyController installs the TIDE controller via helm.
+// Helm is the canonical install path (BOOT-04) AND it provides the
+// chart-only resources (signing-key Secret, projects PVC, subagent SA,
+// Deployment args) that kustomize omits. helm install --wait blocks until
+// every chart resource is Ready, replacing the bespoke waitForControllerReady
+// poll (which is kept as a fallback but expected to no-op).
+//
+// Phase 02.1 D-02 (02.1-BASELINE.md): the install path PIVOTS from
+// `kustomize build config/default | kubectl apply -f -` to `helm install
+// tide ./charts/tide --create-namespace -n tide-system ...`. The chart
+// provides four pieces the kustomize overlay omits and the controller's
+// Phase 2 wiring requires: tide-signing-key Secret, tide-projects PVC,
+// tide-subagent ServiceAccount, and the --subagent-image / --credproxy-image
+// / --default-file-touch-mode Deployment args. Without them the manager
+// Pod CrashLoopBackOffs on startup with
+// `TIDE_SIGNING_KEY env var is required (HARN-03)` before any spec runs.
+//
+// The WR-09 contract (D-03) is preserved: when helm is missing or the
+// install fails, soft-skip with a GinkgoWriter warning by default;
+// hard Fail only when TIDE_REQUIRE_CONTROLLER=1.
 func applyController() {
-	// Create the namespace first.
+	// Pre-create the test-fixture namespace (separate from tide-system which
+	// helm creates via --create-namespace). Test fixtures applied to
+	// kindNamespace later in test bodies would fail without this.
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 		"create", "namespace", kindNamespace, "--dry-run=client", "-o", "yaml")
 	nsYAML, err := cmd.Output()
@@ -265,66 +285,67 @@ func applyController() {
 		_, _ = applyCmd.CombinedOutput()
 	}
 
-	configDefault := filepath.Join("..", "..", "..", "config", "default")
-	if _, err := os.Stat(configDefault); os.IsNotExist(err) {
-		GinkgoWriter.Println("config/default not found; skipping controller Deployment install")
+	// Ensure the tide-subagent ServiceAccount exists in the test-fixture
+	// namespace (wave_test.go fixtures apply Tasks here; jobspec.go:43 sets
+	// ServiceAccountName: tide-subagent on every Pod, so the SA must exist
+	// in any namespace where Tasks run — chart only templates it in
+	// tide-system / .Release.Namespace).
+	ensureSubagentSA(kindNamespace)
+
+	// Resolve helm: system dep per STACK.md (not project-local). No
+	// bin/-fallback — helm is on $PATH or we soft-skip per WR-09.
+	if _, lookErr := exec.LookPath("helm"); lookErr != nil {
+		GinkgoWriter.Println("helm not in PATH; falling back to CRDs-only mode")
 		return
 	}
 
-	// Resolve kustomize: prefer PATH, fall back to project-local bin/kustomize
-	// (which kubebuilder/Makefile installs into bin/ for the rest of the build).
-	// Resolve to absolute path so the binary can still be found when we set
-	// the child process's Dir (kustomize edit set image runs in config/manager).
-	kustomizeBin := ""
-	if path, lookErr := exec.LookPath("kustomize"); lookErr == nil {
-		kustomizeBin = path
-	} else {
-		localBin := filepath.Join("..", "..", "..", "bin", "kustomize")
-		if abs, absErr := filepath.Abs(localBin); absErr == nil {
-			if _, statErr := os.Stat(abs); statErr == nil {
-				kustomizeBin = abs
-			}
+	// Resolve chart dir to an absolute path so helm respects it regardless
+	// of the test process's working directory.
+	chartDirRel := filepath.Join("..", "..", "..", "charts", "tide")
+	chartDir, absErr := filepath.Abs(chartDirRel)
+	if absErr != nil {
+		GinkgoWriter.Printf("failed to resolve chart dir: %v\n", absErr)
+		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
+			Fail(fmt.Sprintf("failed to resolve chart dir (TIDE_REQUIRE_CONTROLLER=1): %v", absErr))
 		}
+		return
+	}
+	if _, statErr := os.Stat(chartDir); os.IsNotExist(statErr) {
+		GinkgoWriter.Println("charts/tide not present; falling back to CRDs-only mode")
+		return
 	}
 
-	if kustomizeBin != "" {
-		// Override the manager image to the kind-loaded `controller:test` tag.
-		// Without this, kustomize emits `controller:latest` which kind has no
-		// matching image for, and ImagePullBackOff blocks the Deployment from
-		// becoming Ready. Setting the image via `kustomize edit set image` in
-		// config/manager mirrors the production `make deploy` flow.
-		setImgCmd := exec.CommandContext(ctx, kustomizeBin, "edit", "set", "image", "controller=controller:test")
-		setImgCmd.Dir = filepath.Join("..", "..", "..", "config", "manager")
-		if out, setErr := setImgCmd.CombinedOutput(); setErr != nil {
-			GinkgoWriter.Printf("Warning: kustomize edit set image failed: %v\n%s\n", setErr, out)
+	// helm install --set values map the kind-loaded image tags + IfNotPresent
+	// policy onto the chart's default values (which point at the production
+	// ghcr.io/jsquirrelz/* registry with the chart-default tag). The manager
+	// image repository overrides to plain "controller" because Makefile:133
+	// builds + tags it as `controller:test`. images.stubSubagent + credProxy
+	// keep their chart-default repositories — only .tag and .pullPolicy
+	// need override.
+	helmCmd := exec.CommandContext(ctx, "helm",
+		"install", "tide", chartDir,
+		"--create-namespace", "-n", kindControllerNamespace,
+		"--kubeconfig", kubeconfigPath,
+		"--set", "controllerManager.manager.image.repository=controller",
+		"--set", "controllerManager.manager.image.tag=test",
+		"--set", "controllerManager.manager.image.pullPolicy=IfNotPresent",
+		"--set", "images.stubSubagent.tag=test",
+		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
+		"--set", "images.credProxy.tag=test",
+		"--set", "images.credProxy.pullPolicy=IfNotPresent",
+		"--wait", "--timeout", "5m",
+	)
+	start := time.Now()
+	out, err := helmCmd.CombinedOutput()
+	elapsed := time.Since(start)
+	if err != nil {
+		GinkgoWriter.Printf("helm install failed after %s: %v\n%s\n", elapsed, err, out)
+		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
+			Fail(fmt.Sprintf("helm install failed (TIDE_REQUIRE_CONTROLLER=1): %v", err))
 		}
-
-		buildCmd := exec.CommandContext(ctx, kustomizeBin, "build", configDefault)
-		manifest, buildErr := buildCmd.Output()
-		if buildErr != nil {
-			GinkgoWriter.Printf("kustomize build failed: %v\n", buildErr)
-			return
-		}
-
-		// Set imagePullPolicy: IfNotPresent so the kind-loaded `controller:test`
-		// image is used instead of attempting to pull from a remote registry.
-		// Manager.yaml has no explicit pullPolicy; the K8s default for non-:latest
-		// tags is IfNotPresent which is what we want, but stringify-and-patch
-		// makes the intent explicit and survives if someone retags to :latest.
-		manifest = []byte(strings.ReplaceAll(string(manifest),
-			"image: controller:test",
-			"image: controller:test\n        imagePullPolicy: IfNotPresent"))
-
-		applyCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
-			"apply", "-f", "-", "--timeout=60s")
-		applyCmd.Stdin = strings.NewReader(string(manifest))
-		out, applyErr := applyCmd.CombinedOutput()
-		if applyErr != nil {
-			GinkgoWriter.Printf("Warning: controller install failed (tests may still work with CRDs only): %v\n%s\n", applyErr, out)
-		}
-	} else {
-		GinkgoWriter.Println("kustomize not found (PATH and bin/kustomize); skipping controller Deployment install")
+		return
 	}
+	GinkgoWriter.Printf("helm install completed in %s\n%s\n", elapsed, out)
 }
 
 // waitForControllerReady waits up to 90s for the controller Deployment to
@@ -391,6 +412,38 @@ func applyYAML(yaml string) error {
 		return fmt.Errorf("kubectl apply failed: %w\n%s", err, out)
 	}
 	return nil
+}
+
+// ensureSubagentSA creates the tide-subagent ServiceAccount in the given
+// namespace. Every Task Job's PodSpec references this SA by name
+// (internal/dispatch/podjob/jobspec.go:43 — ServiceAccountSubagent =
+// "tide-subagent"); without it Pod creation fails with
+// `serviceaccount "tide-subagent" not found`.
+//
+// The chart templates this SA only in .Release.Namespace (= tide-system,
+// see charts/tide/templates/serviceaccount-subagent.yaml), but tests apply
+// Tasks into per-test namespaces (tide-int-test, failure-test, caps-test,
+// output-test, credproxy-test). This helper re-creates the SA in any
+// namespace before Tasks are applied — wired into createNamespace() in
+// failure_test.go so every test-fixture namespace gets it automatically.
+//
+// D-A4: no Role, no RoleBinding — subagent pods have zero K8s API verbs.
+// The function intentionally does NOT accept any RBAC parameters
+// (T-02.1-02-03 mitigation). Re-applying the SA is idempotent — kubectl
+// apply tolerates "already exists" and the error from applyYAML is
+// intentionally discarded (best-effort).
+//
+// Source of truth for the SA shape:
+// charts/tide/templates/serviceaccount-subagent.yaml — Phase 02.1 D-02.
+func ensureSubagentSA(ns string) {
+	saYAML := fmt.Sprintf(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: %s
+automountServiceAccountToken: true
+`, ns)
+	_ = applyYAML(saYAML)
 }
 
 // applyFile applies a YAML file to the kind cluster.
