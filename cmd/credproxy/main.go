@@ -27,7 +27,11 @@ limitations under the License.
 // Required environment variables:
 //
 //	TIDE_TASK_UID      — the UID of the Task CRD this Pod runs for.
-//	TIDE_SIGNING_KEY   — base64-encoded HMAC signing secret from tide-signing-key Secret.
+//	TIDE_SIGNING_KEY   — HMAC signing secret from tide-signing-key Secret (the
+//	                     env var is already plaintext at this point: K8s
+//	                     base64-decodes `data:` values on its way to envFrom,
+//	                     and the Helm template renders the data key as
+//	                     `randAlphaNum 64 | b64enc`).
 //	ANTHROPIC_API_KEY  — the real LLM API key from the Project's providerSecretRef.
 //
 // The subagent container receives only a short-lived signed token as its
@@ -37,7 +41,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"os"
@@ -76,13 +79,17 @@ func main() {
 
 	// 1. Read required environment variables; fail-fast on missing.
 	taskUID := requireEnv(log, "TIDE_TASK_UID")
-	signingKeyB64 := requireEnv(log, "TIDE_SIGNING_KEY")
+	signingKeyRaw := requireEnv(log, "TIDE_SIGNING_KEY")
 	realAPIKey := requireEnv(log, "ANTHROPIC_API_KEY")
 
-	// 2. Decode TIDE_SIGNING_KEY from base64 (set via envFrom: secretRef).
-	signingKey, err := base64.StdEncoding.DecodeString(signingKeyB64)
-	if err != nil {
-		log.Error(err, "failed to base64-decode TIDE_SIGNING_KEY")
+	// 2. TIDE_SIGNING_KEY is the plaintext 64-char alphanum produced by the
+	// Helm `randAlphaNum 64 | b64enc` template — K8s base64-decodes Secret
+	// `data:` once on its way to envFrom, so by the time we see it the value
+	// is already the signing key bytes (WR-04). A second DecodeString here
+	// would silently truncate the key on the first non-base64 character.
+	signingKey := []byte(signingKeyRaw)
+	if len(signingKey) < 32 {
+		log.Error(nil, "TIDE_SIGNING_KEY too short", "len", len(signingKey), "min", 32)
 		os.Exit(1)
 	}
 

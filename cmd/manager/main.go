@@ -20,7 +20,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"flag"
 	"fmt"
 	"os"
@@ -54,10 +53,19 @@ import (
 // returns context.DeadlineExceeded and we log non-fatally and continue.
 const preChargeTimeout = 30 * time.Second
 
-// decodeSigningKeyFromEnv reads TIDE_SIGNING_KEY from the environment,
-// base64-decodes it, and verifies the key is at least 32 bytes long.
+// decodeSigningKeyFromEnv reads TIDE_SIGNING_KEY from the environment and
+// returns the raw bytes after verifying the key is at least 32 bytes long.
 // Fail-fast: returns an error (caller must os.Exit(1)) if the env var is
-// missing, malformed, or too short (HARN-03 requirement).
+// missing or too short (HARN-03 requirement).
+//
+// WR-04: the Helm template renders the data key as
+// `randAlphaNum 64 | b64enc | quote`. K8s base64-decodes Secret `data:`
+// values once on its way to envFrom, so by the time this binary sees
+// TIDE_SIGNING_KEY the value is the plaintext 64-char alphanum string —
+// already the signing key bytes. An additional base64.DecodeString
+// (previously here) would treat the alphanum as base64 and produce a
+// truncated, partly-random byte slice whose length and entropy were
+// undefined. Use the env value directly.
 //
 // The Secret data key is TIDE_SIGNING_KEY (env-friendly — no dashes) so
 // `envFrom: [{secretRef: {name: tide-signing-key}}]` on both the Manager
@@ -68,10 +76,7 @@ func decodeSigningKeyFromEnv() ([]byte, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("TIDE_SIGNING_KEY env var is required (HARN-03)")
 	}
-	key, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("TIDE_SIGNING_KEY base64 decode: %w", err)
-	}
+	key := []byte(raw)
 	if len(key) < 32 {
 		return nil, fmt.Errorf("TIDE_SIGNING_KEY too short: %d bytes (need >= 32)", len(key))
 	}
