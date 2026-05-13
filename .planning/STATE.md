@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 02.2
-Last activity: 2026-05-13 -- Phase 02.2 execution started
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED
+Plan: 2 of 3 (01 + 03 landed; 02 still gated)
+Status: Plan 02.2-03 chart PVC fix verified at runtime; new pre-existing manager-args mismatch unmasked (`--metrics-bind-address` defined in chart values.yaml but not in cmd/manager/main.go); see 02.2-03-VERIFICATION.md §"Root-Cause Summary" options A-D
+Last activity: 2026-05-13 -- Phase 02.2 partial (03 landed; gate BLOCKED on new chart/binary flag mismatch — second cascading blocker)
 
 Progress: [████████░░] 83%
 
