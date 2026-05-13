@@ -6,6 +6,7 @@ package budget
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -136,7 +137,9 @@ func TestRollUpUsage_PreservesExistingWindowStart(t *testing.T) {
 	// Compare with second-level truncation since metav1.Time is serialized to
 	// JSON as RFC3339 (second precision) and the fake client round-trips through
 	// JSON encoding, stripping sub-second precision and the monotonic clock reading.
-	if !updated.Status.Budget.WindowStart.Time.Truncate(1000000000).Equal(existingTime.Time.Truncate(1000000000)) {
+	// WR-08: time.Second is the self-documenting form of the previous magic
+	// `Truncate(1000000000)` (1e9 ns).
+	if !updated.Status.Budget.WindowStart.Time.Truncate(time.Second).Equal(existingTime.Time.Truncate(time.Second)) {
 		t.Errorf("WindowStart changed: got %v; want %v", updated.Status.Budget.WindowStart, existingTime)
 	}
 }
