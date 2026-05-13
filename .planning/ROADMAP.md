@@ -87,7 +87,7 @@ Plans:
 - [x] 02-11-PLAN.md — Plan admission webhook body (cycle detection + file-touch reconciliation + strict/warn precedence) (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 02-12-PLAN.md — cmd/manager Phase 2 wiring + Helm chart signing-secret template + tide-subagent SA + values keys (Wave 6)
+- [x] 02-12-PLAN.md — cmd/manager Phase 2 wiring + Helm chart signing-secret template + tide-subagent SA + values keys (Wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 - [ ] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
