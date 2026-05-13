@@ -273,13 +273,17 @@ func applyController() {
 
 	// Resolve kustomize: prefer PATH, fall back to project-local bin/kustomize
 	// (which kubebuilder/Makefile installs into bin/ for the rest of the build).
+	// Resolve to absolute path so the binary can still be found when we set
+	// the child process's Dir (kustomize edit set image runs in config/manager).
 	kustomizeBin := ""
 	if path, lookErr := exec.LookPath("kustomize"); lookErr == nil {
 		kustomizeBin = path
 	} else {
 		localBin := filepath.Join("..", "..", "..", "bin", "kustomize")
-		if _, statErr := os.Stat(localBin); statErr == nil {
-			kustomizeBin = localBin
+		if abs, absErr := filepath.Abs(localBin); absErr == nil {
+			if _, statErr := os.Stat(abs); statErr == nil {
+				kustomizeBin = abs
+			}
 		}
 	}
 
