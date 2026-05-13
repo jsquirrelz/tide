@@ -188,6 +188,13 @@ spec:
                 type: integer
               phase:
                 type: string
+              startedAt:
+                description: |-
+                  StartedAt is the wall-clock time the reconciler dispatched the Job for this
+                  Task. Used by handleJobCompletion to anchor the output-path validation time
+                  window (Warning #5 / HARN-05).
+                format: date-time
+                type: string
             type: object
         required:
         - spec
