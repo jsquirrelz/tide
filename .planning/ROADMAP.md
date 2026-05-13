@@ -92,6 +92,16 @@ Plans:
 **Wave 7** *(blocked on Wave 6 completion)*
 - [x] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
 
+### Phase 02.2: Layer B kind test timing fixes — bump kindTestTimeout from 4min to 6min so helm --timeout 5m can complete; robust AfterSuite cleanup that handles zombie kind containers when BeforeSuite half-installs; re-scope make test-int wall-time goal to bound only the go test invocation (not test-int-kind-prep image builds + cluster create); optional cert-manager v1.16.2 to v1.20 bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md. (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 02
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 02.2 to break down)
+
 ### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
 
 **Goal:** Layer B integration test suite (`make test-int`) runs end-to-end on developer laptop — `tide-controller-manager` Deployment reaches Ready in kind via Helm install, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass.

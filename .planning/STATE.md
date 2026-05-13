@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
+milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-13T10:07:09.905Z"
+last_updated: "2026-05-13T15:27:26.689Z"
 last_activity: 2026-05-13 -- Phase 02.1 execution started
 progress:
-  total_phases: 6
-  completed_phases: 2
+  total_phases: 7
+  completed_phases: 3
   total_plans: 28
-  completed_plans: 24
-  percent: 86
+  completed_plans: 28
+  percent: 100
 ---
 
 # Project State
@@ -70,6 +70,7 @@ Progress: [████████░░] 83%
 ### Roadmap Evolution
 
 - Phase 02.1 inserted after Phase 2: Layer B kind integration tests: ship test files in Phase 2, debug/fix in 2.1 to make make test-int green on dev laptop (URGENT)
+- Phase 02.2 inserted after Phase 02: Layer B kind test timing fixes — closes Phase 02.1 BLOCKED runtime gate (kindTestTimeout vs helm timeout mismatch; AfterSuite zombie-container cleanup; make test-int wall-time scope; optional cert-manager bump) (URGENT)
 
 ### Decisions
 
