@@ -68,9 +68,9 @@ const (
 )
 
 var (
-	k8sClient    client.Client
-	ctx          context.Context
-	cancel       context.CancelFunc
+	k8sClient      client.Client
+	ctx            context.Context
+	cancel         context.CancelFunc
 	kubeconfigPath string
 )
 
@@ -227,9 +227,20 @@ func applyController() {
 		return
 	}
 
-	// Use kustomize if available.
-	if _, lookErr := exec.LookPath("kustomize"); lookErr == nil {
-		buildCmd := exec.CommandContext(ctx, "kustomize", "build", configDefault)
+	// Resolve kustomize: prefer PATH, fall back to project-local bin/kustomize
+	// (which kubebuilder/Makefile installs into bin/ for the rest of the build).
+	kustomizeBin := ""
+	if path, lookErr := exec.LookPath("kustomize"); lookErr == nil {
+		kustomizeBin = path
+	} else {
+		localBin := filepath.Join("..", "..", "..", "bin", "kustomize")
+		if _, statErr := os.Stat(localBin); statErr == nil {
+			kustomizeBin = localBin
+		}
+	}
+
+	if kustomizeBin != "" {
+		buildCmd := exec.CommandContext(ctx, kustomizeBin, "build", configDefault)
 		manifest, buildErr := buildCmd.Output()
 		if buildErr != nil {
 			GinkgoWriter.Printf("kustomize build failed: %v\n", buildErr)
@@ -243,7 +254,7 @@ func applyController() {
 			GinkgoWriter.Printf("Warning: controller install failed (tests may still work with CRDs only): %v\n%s\n", applyErr, out)
 		}
 	} else {
-		GinkgoWriter.Println("kustomize not found; skipping controller Deployment install")
+		GinkgoWriter.Println("kustomize not found (PATH and bin/kustomize); skipping controller Deployment install")
 	}
 }
 
