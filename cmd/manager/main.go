@@ -179,7 +179,12 @@ func main() {
 	}
 
 	// 7. Register both webhooks (CRD-04, CRD-05).
-	if err := webhookv1alpha1.SetupPlanWebhookWithManager(mgr); err != nil {
+	// defaultFileTouchMode is the cluster-level file-touch validation mode (Plan 11 / D-E3).
+	// "warn" is the safe Helm-chart default — operators opt into "strict" via Project.Spec
+	// or Plan annotation. A future Helm value (e.g. --set planAdmission.fileTouchMode=strict)
+	// will plumb through config; for Phase 2 the cluster default is hard-coded to "warn".
+	const defaultFileTouchMode = "warn"
+	if err := webhookv1alpha1.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Plan")
 		os.Exit(1)
 	}

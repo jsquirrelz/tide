@@ -177,8 +177,10 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	// Register both Phase 1 no-op webhooks (Plan 07 Task 1).
-	Expect(webhookv1alpha1.SetupPlanWebhookWithManager(mgr)).To(Succeed())
+	// Register webhooks (Plan 07 Task 1 scaffolding; Plan 11 fills the body).
+	// SetupPlanWebhookWithManager now accepts the cluster-default file-touch mode
+	// (Phase 2 — Plan 11). Pass "warn" as the cluster default per the Helm chart default.
+	Expect(webhookv1alpha1.SetupPlanWebhookWithManager(mgr, "warn")).To(Succeed())
 	Expect(webhookv1alpha1.SetupWaveWebhookWithManager(mgr)).To(Succeed())
 
 	// mgrClient is the manager's cached client; supports custom field indexers.
