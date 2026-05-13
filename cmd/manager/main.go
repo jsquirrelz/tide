@@ -87,6 +87,7 @@ func main() {
 	var configPath string
 	var leaderElect bool
 	var watchNamespace string
+	var metricsAddr string
 	// Phase 2 flags (Plan 12 wiring).
 	var subagentImage string
 	var credproxyImage string
@@ -97,6 +98,7 @@ func main() {
 	flag.StringVar(&configPath, "config", "/etc/tide/config.yaml", "Path to runtime config YAML")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election (CTRL-03)")
 	flag.StringVar(&watchNamespace, "watch-namespace", "", "Restrict watches to this namespace (AUTH-02). Empty = all namespaces.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Bind address for the metrics endpoint (controllerManager.manager.args in values.yaml)")
 	// Phase 2 flags — bound from Helm values.yaml via the controller Deployment args.
 	flag.StringVar(&subagentImage, "subagent-image", "", "Image ref for the subagent container (images.stubSubagent in values.yaml)")
 	flag.StringVar(&credproxyImage, "credproxy-image", "", "Image ref for the tide-credproxy sidecar (images.credProxy in values.yaml)")
@@ -133,7 +135,7 @@ func main() {
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "tide-controller-leader.tideproject.k8s",
 		HealthProbeBindAddress: ":8081",
-		Metrics:                metricsserver.Options{BindAddress: ":8080"},
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		WebhookServer:          webhook.NewServer(webhook.Options{Port: 9443}),
 	})
 	if err != nil {
