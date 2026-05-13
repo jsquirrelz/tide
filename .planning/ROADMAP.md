@@ -70,11 +70,11 @@ Plans:
 - [x] 02-03-PLAN.md — v1alpha1 schema additions (Project.Spec/Status, Task.Spec.Dev, Plan.Status, shared_types constants) + codegen (Wave 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 02-02-PLAN.md — providerfirewall lint analyzer + cmd/tide-lint multichecker flip (SUB-05) (Wave 2)
-- [ ] 02-04-PLAN.md — cmd/stub-subagent Go binary + Dockerfile (Wave 2)
-- [ ] 02-05-PLAN.md — credential proxy (HMAC token + self-signed cert + HTTPS server + cmd/credproxy + Dockerfile) (Wave 2)
-- [ ] 02-06-PLAN.md — internal/harness package (caps + redact tail-keep buffer + outputs validate + envelope_io) (Wave 2)
-- [ ] 02-07-PLAN.md — internal/budget package (sync.Map rate bucket + PreCharge + cap check + tally + Prometheus counter) (Wave 2)
+- [x] 02-02-PLAN.md — providerfirewall lint analyzer + cmd/tide-lint multichecker flip (SUB-05) (Wave 2)
+- [x] 02-04-PLAN.md — cmd/stub-subagent Go binary + Dockerfile (Wave 2)
+- [x] 02-05-PLAN.md — credential proxy (HMAC token + self-signed cert + HTTPS server + cmd/credproxy + Dockerfile) (Wave 2)
+- [x] 02-06-PLAN.md — internal/harness package (caps + redact tail-keep buffer + outputs validate + envelope_io) (Wave 2)
+- [x] 02-07-PLAN.md — internal/budget package (sync.Map rate bucket + PreCharge + cap check + tally + Prometheus counter) (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 02-08-PLAN.md — internal/dispatch.Dispatcher interface body + PodJobBackend + JobSpec (native sidecar) + JobName (Wave 3)
