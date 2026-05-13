@@ -16,3 +16,5 @@ spec:
     - delta
   filesTouched:
     - pkg/example/epsilon.go
+  declaredOutputPaths:
+    - artifacts/epsilon.json

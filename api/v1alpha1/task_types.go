@@ -20,6 +20,47 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Caps declares resource caps applied to the subagent pod executing a Task (Phase 2+).
+//
+// Design note: api/v1alpha1.Caps and pkg/dispatch.Caps are intentionally two
+// separate types that serve different layers — this struct is CEL-validated at
+// the CRD admission boundary, while pkg/dispatch.Caps is the Go-only public API
+// used by the dispatcher. Plan 09's TaskReconciler.buildEnvelopeIn translates
+// one to the other at dispatch time, keeping the CRD schema and the dispatch
+// interface decoupled.
+type Caps struct {
+	// WallClockSeconds is the maximum wall-clock time for the subagent execution.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	WallClockSeconds int32 `json:"wallClockSeconds,omitempty"`
+
+	// Iterations caps the number of agentic iterations (tool-call loops).
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	Iterations int32 `json:"iterations,omitempty"`
+
+	// InputTokens caps the number of input (prompt) tokens consumed per dispatch.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	InputTokens int64 `json:"inputTokens,omitempty"`
+
+	// OutputTokens caps the number of output (completion) tokens produced per dispatch.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+}
+
+// TaskDev carries developer/test-only overrides for the stub subagent (Phase 2+).
+// This field mirrors the pkg/dispatch.Dev contract: keep rigidly scoped to
+// dev/test namespaces — a future CEL rule can enforce the restriction (see
+// Pitfall 9 / T-02-03-03).
+type TaskDev struct {
+	// TestMode overrides the stub subagent's exit behaviour (used by integration tests).
+	// +kubebuilder:validation:Enum=success;fail-exit-1;hang;exceed-output-paths
+	// +optional
+	TestMode string `json:"testMode,omitempty"`
+}
+
 // TaskSpec carries the executor envelope per D-F1, D-F2.
 type TaskSpec struct {
 	// PlanRef is the name of the owning Plan (same namespace).
@@ -37,6 +78,21 @@ type TaskSpec struct {
 	// PromptRef is the name of a ConfigMap carrying the prompt (optional).
 	// +optional
 	PromptRef string `json:"promptRef,omitempty"`
+
+	// DeclaredOutputPaths declares the output artifact paths the subagent must produce
+	// (Phase 2+). Plan 06's harness output validator enforces against this set (HARN-05).
+	// +kubebuilder:validation:MinItems=1
+	DeclaredOutputPaths []string `json:"declaredOutputPaths"`
+
+	// Caps optionally restricts subagent resource usage (Phase 2+).
+	// +optional
+	Caps *Caps `json:"caps,omitempty"`
+
+	// Dev carries dev/test-only overrides for the stub subagent (Phase 2+).
+	// Zero-value embed (not pointer) — field presence is governed by the TestMode
+	// enum constraint, mirroring the Gates pattern in shared_types.go.
+	// +optional
+	Dev TaskDev `json:"dev,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task.

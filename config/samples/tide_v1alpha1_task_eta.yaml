@@ -17,3 +17,5 @@ spec:
     - zeta
   filesTouched:
     - pkg/example/eta.go
+  declaredOutputPaths:
+    - artifacts/eta.json

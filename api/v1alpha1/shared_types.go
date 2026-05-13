@@ -38,3 +38,35 @@ const (
 	ReasonFinalizerTimedOut      = "FinalizerTimedOut"
 	ReasonSubagentDispatchFailed = "SubagentDispatchFailed"
 )
+
+// Phase 2 condition and reason constants — dispatch, validation, budget, and
+// rate-limiting vocabulary used by the innermost reconcilers and the Plan
+// admission webhook (Plans 07, 09, 10, 11).
+const (
+	// ConditionValidated — Plan admission webhook has accepted the Plan's DAG
+	// and file-touch declarations (Plan 11 sets; Plan 09 reads).
+	ConditionValidated = "Validated"
+	// ConditionBudgetExceeded — Project absolute cost cap has been hit
+	// (Plan 10 sets; TaskReconciler halts on this condition).
+	ConditionBudgetExceeded = "BudgetExceeded"
+	// ConditionRunning — task/wave/plan is actively executing.
+	ConditionRunning = "Running"
+	// ConditionSucceeded — task/wave/plan reached terminal success.
+	ConditionSucceeded = "Succeeded"
+
+	// ReasonCycleDetected — Plan DAG contains a dependency cycle; set on
+	// Plan.Status.ValidationState=CycleDetected by the admission webhook.
+	ReasonCycleDetected = "CycleDetected"
+	// ReasonFileTouchMismatch — Task declares file touches not matching
+	// PlanAdmission.FileTouchMode expectations.
+	ReasonFileTouchMismatch = "FileTouchMismatch"
+	// ReasonCapHit — a Task or Project cap (tokens, iterations, wall-clock) was
+	// reached; TaskReconciler marks the Task failed with this reason.
+	ReasonCapHit = "CapHit"
+	// ReasonRateLimitHit — the provider rate-limiter was saturated; dispatcher
+	// retries with backoff, eventually failing with this reason.
+	ReasonRateLimitHit = "RateLimitHit"
+	// ReasonBypassApplied — a gate bypass was explicitly applied by an operator;
+	// used in Conditions.Message to surface the override.
+	ReasonBypassApplied = "BypassApplied"
+)

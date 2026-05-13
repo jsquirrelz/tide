@@ -14,3 +14,5 @@ spec:
   planRef: sample-plan
   filesTouched:
     - pkg/example/alpha.go
+  declaredOutputPaths:
+    - artifacts/alpha.json

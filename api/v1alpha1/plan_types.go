@@ -39,6 +39,17 @@ type PlanStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ValidationState records the result of the Plan admission webhook's DAG and
+	// file-touch validation (Phase 2+). Set by Plan 11's webhook after admission.
+	// +kubebuilder:validation:Enum=Pending;Validated;CycleDetected;FileTouchMismatch
+	// +optional
+	ValidationState string `json:"validationState,omitempty"`
+
+	// CycleEdges holds the human-readable edge representations for any cycle detected
+	// during DAG validation (populated when ValidationState=CycleDetected, Phase 2+).
+	// +optional
+	CycleEdges []string `json:"cycleEdges,omitempty"`
 }
 
 // +kubebuilder:object:root=true
