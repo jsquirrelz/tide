@@ -90,7 +90,7 @@ Plans:
 - [x] 02-12-PLAN.md — cmd/manager Phase 2 wiring + Helm chart signing-secret template + tide-subagent SA + values keys (Wave 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
+- [x] 02-13-PLAN.md — Integration test tier (envtest Layer A + kind Layer B + cluster.yaml + Make targets + CI gate) (Wave 7)
 
 ### Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption
 **Goal**: The full reconciler stack (Plan → Phase → Milestone → Project) drives planner-subagent dispatch to author `PLAN.md` / phase brief / `MILESTONE.md`, the orchestrator pushes artifacts at every level boundary via `pkg/git` (HTTPS+PAT default, host-agnostic, per-run branches, `--force-with-lease`, never `main`, gitleaks at every push), the stub-subagent is replaced by a real Claude-Code-backed image inside the same Subagent interface, and a chaos-resume test proves the orchestrator survives mid-wave pod kill using only CRD status + PVC contents.
