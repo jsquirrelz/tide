@@ -166,7 +166,7 @@ The pitfalls are implementation-level: regex matches straddling chunk boundaries
 | Outbound LLM HTTPS proxy | Per-Pod sidecar (`tide-credproxy`) | — | Real ANTHROPIC_API_KEY injected via envFrom on sidecar only |
 | Wall-clock + iteration + token cap enforcement | Per-Pod subagent (`internal/harness`) | K8s (Job.spec.activeDeadlineSeconds defense-in-depth) | HARN-02 |
 | Secret redaction (stdout, result.json, artifacts) | Per-Pod subagent (`internal/harness.RedactingWriter`) | — | HARN-04; never leaves the pod un-redacted |
-| Output-path validation | Per-Pod subagent (post-Job harness validator) | — | HARN-05; `filepath.EvalSymlinks` + `filepath.Rel` |
+| Output-path validation | Per-Pod subagent (post-Job harness validator) | Phase 2: controller-side post-Job validator (Plan 09 `handleJobCompletion` invokes `outputs.Validate` against shared PVC) | HARN-05; `filepath.EvalSymlinks` + `filepath.Rel`. **Phase 2 deviation:** harness library ships in `internal/harness/outputs.go` but is called from the controller side because the harness is not yet the Task container's entrypoint (Plan 04 stub runs directly). Phase 3 swaps in Claude Code as the harness-wrapped runtime, at which point validation moves into the Pod. |
 | PVC bootstrap (init Job, mkdir) | Orchestrator (ProjectReconciler spawns one-shot Job) | Per-Project PVC (durable) | D-G1; `tide-init-{project-uid}` busybox Job |
 | Lazy artifact subdir creation | Per-Pod harness (`mkdir -p` ancestors at write time) | — | D-G2 |
 
@@ -2007,14 +2007,15 @@ CONTEXT decisions are locked, but each carries implementation-level foot-guns th
 
 **Missing dependencies with fallback:** none — all dependencies are available in the project's pinned toolchain.
 
-## Open Questions / Claude's Discretion
+## Open Questions / Claude's Discretion (RESOLVED)
 
-These are items the research can't pin definitively; the planner must decide:
+These items were unpinned at research time; the planner has now decided. RESOLVED markers below capture the resolution per question.
 
 1. **Plan webhook mode lookup: walk owner refs or cache in annotation?**
    - Walking refs (Plan → Phase → Milestone → Project): 3 Gets per webhook call, simple, always current.
    - Caching in annotation (`tideproject.k8s/file-touch-mode-resolved=<mode>`): 0 Gets at webhook time, slight lag on first admission, requires PlanReconciler to manage the annotation.
    - **Recommendation:** annotation cache. Phase 1 PlanReconciler is already running; adding "compute and patch mode annotation" to its reconcile body is cheap.
+   - **RESOLVED:** Annotation-cache approach adopted. Plan 11 wires the PlanReconciler to compute + patch `tideproject.k8s/file-touch-mode-resolved=<mode>` on the Plan; webhook reads the annotation (0 Gets at admission time).
 
 2. **Manager pod's PVC access for writing EnvelopeIn JSON.**
    - The Manager pod needs to write `/workspace/envelopes/{task-uid}/in.json` to each Project's PVC. Two paths:
@@ -2022,30 +2023,39 @@ These are items the research can't pin definitively; the planner must decide:
      - (b) Spawn a one-shot "envelope-write" Job before the Task Job that writes the JSON from a ConfigMap or stdin — adds a Job per dispatch.
      - (c) The Manager pod is a long-running orchestrator; its `Deployment` declares a `volumeMounts` with subPath, OR it uses a separate "envelope-writer" pod spec.
    - **Recommendation:** option (c) with a shared mount root `/workspaces/` where each Project's PVC mounts as `/workspaces/{project-uid}/`. Manager pod's PVC list is updated dynamically by Manager-side reconciliation (claim Subresource exec into the controller pod is not supported; the alternative is using the `csi` driver's RWX support to mount a single parent volume containing all projects). For v1 simplicity, defer to a single shared PVC architecture where each Project has a top-level subdir within one cluster-wide PVC. Planner picks. **Note this is a real architecture decision and may bubble up to CONTEXT for re-confirmation if the implementation cost is non-trivial.**
+   - **RESOLVED:** Use single shared `tide-projects` PVC + `subPath: {project-uid}/workspace` pattern for Phase 2; per-Project PVC pattern deferred to Phase 3 RWX driver matrix (ART-02) when persistent multi-Project isolation matters. All Task Pods and the Manager Pod mount the same chart-provisioned PVC; Manager mounts at `/workspaces` (root), Tasks mount at `/workspace` via subPath. EnvelopeOut path on Manager side: `/workspaces/{project-uid}/workspace/envelopes/{task-uid}/out.json`.
 
 3. **`activeDeadlineSeconds` grace constant.**
    - CONTEXT D-discretion says `EnvelopeIn.caps.wallClockSeconds + 30s`. Planner picks. **Recommendation:** 60s. The 30s value in CONTEXT covers SIGTERM→SIGKILL escalation (10s default `terminationGracePeriodSeconds`) plus harness's "drain output and write EnvelopeOut" cleanup. 60s adds margin for slow PVC writes.
+   - **RESOLVED:** 60s grace. Plan 08 `jobspec.go` sets `ActiveDeadlineSeconds = Caps.WallClockSeconds + 60`; constant `DefaultWallClockGraceSeconds = 60`.
 
 4. **`RequeueAfter` constants when bucket is empty.**
    - `Limiter.Reserve().Delay()` returns the exact wait time; use that directly rather than a fixed constant. If `Delay()` exceeds 30s, cap at 30s and the next reconcile re-Reserves.
+   - **RESOLVED:** Use `rsv.Delay()` directly; cap at 30s. Plan 09 step 6 implements `if d > 30*time.Second { d = 30 * time.Second }`.
 
 5. **Exact Helm value paths.**
    - Proposed in "K8s Resource Schemas" §. Planner finalizes during helmify regen testing.
+   - **RESOLVED:** Plan 12 finalizes Helm value paths: `planAdmission.fileTouchMode`, `rateLimits.defaults.{requestsPerMinute, tokensPerMinute, burst}`, `images.{stubSubagent,credProxy,busybox}`, `signingKey.secretName`, `budget.defaults.{absoluteCapCents, rollingWindowCapCents}`.
 
 6. **Stub-subagent's `hang` mode behavior.**
    - Sleep `caps.wallClockSeconds + 60s`? Or `time.Sleep(time.Hour)` and rely on harness SIGTERM? **Recommendation:** the latter — `time.Sleep(time.Hour)` makes the test deterministic (harness always wins the race) regardless of cap value.
+   - **RESOLVED:** `time.Sleep(time.Hour)` with SIGTERM handler that exits 0 on signal. Plan 04 stub-subagent `hang` mode implements this.
 
 7. **Prometheus counter registration timing.**
    - `tide_provider_rate_limit_hits_total` must be registered before first Reconcile call. Controller-runtime exposes the global registry via `metrics.Registry` in `sigs.k8s.io/controller-runtime/pkg/metrics`. Registration in `init()` blocks is the idiomatic path. Planner picks the metric labels: `{project, secret_uid}` is the natural set, but `secret_uid` is unbounded → bound to a hash prefix or omit. **Recommendation:** labels `{project}` only; the per-Secret-UID dimension lives in the in-memory bucket store, not in metrics. (Pitfall 17 cardinality discipline.)
+   - **RESOLVED:** Counter registered in `internal/budget/metrics.go` `init()` block via `metrics.Registry.MustRegister(...)`. Labels: `{project}` only. Plan 07 ships the metric; Plan 09 step 6 increments it on rate-limit hits.
 
 8. **Field indexer for `.spec.planRef` on Tasks.**
    - Required for fast `List(Tasks, MatchingFields{".spec.planRef": ...})` at webhook + reconcile time. Wire in `TaskReconciler.SetupWithManager` via `mgr.GetFieldIndexer().IndexField(...)`. Planner picks exact field path.
+   - **RESOLVED:** Field path `.spec.planRef`. Plan 09 wires `mgr.GetFieldIndexer().IndexField(&tidev1alpha1.Task{}, ".spec.planRef", ...)` in `TaskReconciler.SetupWithManager`; the indexer extractor returns `[]string{task.Spec.PlanRef}`. Webhook + reconcile both read via `MatchingFields{".spec.planRef": planName}`.
 
 9. **Pre-charge window duration.**
    - CONTEXT D-D1 says "default 60s". Anthropic's rate limits are per-minute, so 60s aligns. Planner confirms in Helm value.
+   - **RESOLVED:** 60s pre-charge window. Plan 07 `precharge.go` passes `60 * time.Second` to `PreCharge`; Plan 12 cmd/manager wiring uses the same constant.
 
 10. **Test image registry path.**
     - `ghcr.io/jsquirrelz/tide-stub-subagent:test` is what Layer B will `kind load`. The release flow tags as `v0.1.0-dev` for non-test use. Planner picks the tag scheme.
+    - **RESOLVED:** Two tag scheme: `:test` for Layer B kind loads (built fresh per CI run via `make test-int-kind-prep`), `:v0.1.0-dev` for non-test/release artifacts. Same scheme for `tide-credproxy`. Plan 04 + Plan 05 Dockerfiles produce both via Plan 13's prep step.
 
 ## Sources
 
