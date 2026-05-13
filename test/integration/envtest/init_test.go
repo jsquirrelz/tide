@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -73,6 +74,12 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 				return string(p.UID)
 			}, "5s", "100ms").ShouldNot(BeEmpty())
 
+			// Reconcile #1 adds the finalizer and returns; the finalizer Update
+			// keeps Generation unchanged so the controller-runtime predicate
+			// (GenerationChangedPredicate) filters it out. Kick the reconciler
+			// via annotation so the seam body runs (see kickProjectReconcile doc).
+			kickProjectReconcile(ctx, projectName, initNamespace, "init-create")
+
 			// Wait for the init Job to be created.
 			Eventually(func() int {
 				jobs := &batchv1.JobList{}
@@ -113,6 +120,8 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			// Kick reconcile past the finalizer-add early return.
+			kickProjectReconcile(ctx, projectName, initNamespace, "init-idempotent-create")
 
 			// Wait for at least one Job to be created.
 			Eventually(func() int {
@@ -184,34 +193,65 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			// Kick reconcile past the finalizer-add early return.
+			kickProjectReconcile(ctx, projectName, initNamespace, "init-complete-create")
 
-			// Wait for init Job to be created.
-			var jobName string
-			Eventually(func() bool {
-				jobs := &batchv1.JobList{}
-				_ = k8sClient.List(ctx, jobs, client.InNamespace(initNamespace))
-				for _, j := range jobs.Items {
-					if len(j.Name) >= 9 && j.Name[:9] == "tide-init" {
-						jobName = j.Name
-						return true
-					}
+			// Resolve THIS project's init Job by deterministic name (tide-init-{UID}).
+			// Listing all "tide-init*" jobs can grab a stale Job from a sibling spec
+			// when Ginkgo's --randomize-all puts the completion spec late in the
+			// run order; AfterEach deletes happen between specs but ResourceVersion
+			// lag can still surface a stale entry to the cache-backed test client.
+			var fetched tideprojectv1alpha1.Project
+			Eventually(func() string {
+				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: initNamespace}, &fetched); err != nil {
+					return ""
 				}
-				return false
-			}, "20s", "500ms").Should(BeTrue(), "init Job should be created")
+				return string(fetched.UID)
+			}, "5s", "100ms").ShouldNot(BeEmpty(), "Project must have a UID before resolving its init Job")
+			jobName := "tide-init-" + string(fetched.UID)
+
+			// Wait for the specific init Job to be created.
+			Eventually(func() error {
+				return k8sClient.Get(ctx, client.ObjectKey{Name: jobName, Namespace: initNamespace}, &batchv1.Job{})
+			}, "20s", "500ms").Should(Succeed(), "init Job %s should be created", jobName)
 
 			// Patch the Job status to Complete.
+			// K8s 1.33+ requires SuccessCriteriaMet=True before Complete=True,
+			// plus startTime and completionTime on finished Jobs (see
+			// internal/controller/project_controller_test.go line 246-269).
 			Eventually(func() error {
 				j := &batchv1.Job{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: jobName, Namespace: initNamespace}, j); err != nil {
 					return err
 				}
-				j.Status.Conditions = append(j.Status.Conditions, batchv1.JobCondition{
-					Type:   batchv1.JobComplete,
-					Status: "True",
-				})
-				j.Status.Succeeded = 1
+				now := metav1.Now()
+				j.Status = batchv1.JobStatus{
+					Succeeded:      1,
+					StartTime:      &now,
+					CompletionTime: &now,
+					Conditions: []batchv1.JobCondition{
+						{
+							Type:               batchv1.JobSuccessCriteriaMet,
+							Status:             corev1.ConditionTrue,
+							LastProbeTime:      now,
+							LastTransitionTime: now,
+							Reason:             "CompletionsReached",
+						},
+						{
+							Type:               batchv1.JobComplete,
+							Status:             corev1.ConditionTrue,
+							LastProbeTime:      now,
+							LastTransitionTime: now,
+						},
+					},
+				}
 				return k8sClient.Status().Update(ctx, j)
 			}, "10s", "200ms").Should(Succeed())
+
+			// Owns(&batchv1.Job{}) should requeue the Project on Job status changes,
+			// but be defensive: also kick the Project annotation so the seam body
+			// re-runs even if the owned-Job event was racy.
+			kickProjectReconcile(ctx, projectName, initNamespace, "init-complete-job-done")
 
 			// The Project.Status.Phase should become Initialized.
 			Eventually(func() string {

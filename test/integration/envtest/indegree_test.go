@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -32,8 +33,34 @@ import (
 
 const indegreeNamespace = "default"
 
+// indegreeTestProject is the Project resolved by TaskReconciler.resolveProject in
+// the indegree-namespace test specs. PlanReconciler stamps the
+// tideproject.k8s/project label on Tasks in production; integration tests bypass
+// PlanReconciler so makeTask stamps the label explicitly (per resolved debug
+// session wave5-controller-suite-flakes — same shape of bug surfaced here).
+const indegreeTestProject = "indegree-test-project"
+
 var _ = Describe("Task indegree and dependency semantics", Label("envtest"), func() {
 	ctx := context.Background()
+
+	BeforeEach(func() {
+		// TaskReconciler.resolveProject requires a Project in the same namespace.
+		// In production, PlanReconciler stamps the project label; tests bypass it.
+		makeBoundPVC(ctx, "tide-projects", indegreeNamespace)
+		project := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      indegreeTestProject,
+				Namespace: indegreeNamespace,
+			},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/indegree-test.git",
+			},
+		}
+		// Idempotent across nested It blocks under flake-retry; ignore AlreadyExists.
+		if err := k8sClient.Create(ctx, project); err != nil {
+			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
+		}
+	})
 
 	AfterEach(func() {
 		tasks := &tideprojectv1alpha1.TaskList{}
@@ -50,6 +77,16 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 		_ = k8sClient.List(ctx, waves, client.InNamespace(indegreeNamespace))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
+		}
+		projects := &tideprojectv1alpha1.ProjectList{}
+		_ = k8sClient.List(ctx, projects, client.InNamespace(indegreeNamespace))
+		for i := range projects.Items {
+			_ = k8sClient.Delete(ctx, &projects.Items[i])
+		}
+		pvcs := &corev1.PersistentVolumeClaimList{}
+		_ = k8sClient.List(ctx, pvcs, client.InNamespace(indegreeNamespace))
+		for i := range pvcs.Items {
+			_ = k8sClient.Delete(ctx, &pvcs.Items[i])
 		}
 	})
 
@@ -279,12 +316,17 @@ func makeTask(ctx context.Context, name, planRef string, dependsOn, files []stri
 }
 
 // makeTaskWithWaveLabel creates a Task with an optional wave-index label.
-// Pass waveIndex=-1 to skip the label.
+// Pass waveIndex=-1 to skip the label. The tideproject.k8s/project label is
+// always stamped (PlanReconciler does this in production; tests bypass it)
+// so TaskReconciler.resolveProject's fast path works deterministically even
+// when other suites leave stray Projects in the shared 'default' namespace.
 func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn, files []string, waveIndex int) *tideprojectv1alpha1.Task {
 	if files == nil {
 		files = []string{name + ".go"}
 	}
-	labels := map[string]string{}
+	labels := map[string]string{
+		"tideproject.k8s/project": indegreeTestProject,
+	}
 	if waveIndex >= 0 {
 		labels["tideproject.k8s/wave-index"] = fmt.Sprintf("%d", waveIndex)
 	}
