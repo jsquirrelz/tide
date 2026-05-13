@@ -1,30 +1,33 @@
 // Command tide-lint runs TIDE's custom go/analysis Passes against the
-// module. Phase 1 ships exactly one analyzer — crosspool (POOL-03 /
-// Pitfall 6 prevention, see tools/analyzers/crosspool). Phase 2+ may
-// register additional analyzers; when that happens, swap
-// singlechecker.Main for multichecker.Main and pass all Analyzers.
+// module. Phase 1 shipped crosspool (POOL-03 / Pitfall 6 prevention).
+// Phase 2 added providerfirewall.Analyzer (SUB-05 / Pitfall 14 prevention);
+// this is the multichecker form. New analyzers register by appending to
+// multichecker.Main(...).
 //
 // Invocation:
 //
 //	go run ./cmd/tide-lint ./...
-//	make tide-lint            # convenience target wiring the same call
+//	make tide-lint            # convenience target (Phase 1 back-compat)
+//	make verify-import-firewall  # SUB-05-named alias for CI gating
 //
 // CI gate: .github/workflows/ci.yaml runs `make tide-lint` and fails
-// the PR on any reported diagnostic.
+// the PR on any reported diagnostic. `make verify-import-firewall`
+// is the dedicated Phase 2 alias that also invokes this binary.
 //
-// Why singlechecker (not unitchecker): singlechecker is the standalone
-// "run this one analyzer over a module" entrypoint that accepts
-// package patterns like ./... directly; unitchecker is the
-// go-vet integration shape (invoked as `go vet -vettool=tide-lint`).
-// Phase 1's use case is a top-level CI gate, which is singlechecker.
+// Why multichecker (not singlechecker): multichecker accepts multiple
+// Analyzer registrations in a single invocation; singlechecker is
+// single-analyzer only. Phase 1 used singlechecker; Phase 2 flipped
+// to multichecker to add the providerfirewall SUB-05 gate alongside
+// the existing crosspool POOL-03 gate without a second binary.
 package main
 
 import (
-	"golang.org/x/tools/go/analysis/singlechecker"
+	"golang.org/x/tools/go/analysis/multichecker"
 
 	"github.com/jsquirrelz/tide/tools/analyzers/crosspool"
+	"github.com/jsquirrelz/tide/tools/analyzers/providerfirewall"
 )
 
 func main() {
-	singlechecker.Main(crosspool.Analyzer)
+	multichecker.Main(crosspool.Analyzer, providerfirewall.Analyzer)
 }
