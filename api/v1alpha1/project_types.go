@@ -162,6 +162,20 @@ type ProjectSpec struct {
 	MaxAttemptsPerTask int32 `json:"maxAttemptsPerTask,omitempty"`
 }
 
+// Project Phase constants for Project.Status.Phase (Plan 10 — init Job + budget gate).
+const (
+	// PhasePending is the initial phase before any reconcile has run.
+	PhasePending = "Pending"
+	// PhaseInitialized is set when the init Job completes successfully.
+	PhaseInitialized = "Initialized"
+	// PhaseInitFailed is set when the init Job exits non-zero.
+	PhaseInitFailed = "InitFailed"
+	// PhaseBudgetExceeded is set when the project's absolute cost cap is exceeded.
+	PhaseBudgetExceeded = "BudgetExceeded"
+	// PhaseRunning is set when dispatch is actively proceeding.
+	PhaseRunning = "Running"
+)
+
 // ProjectStatus defines the observed state of Project.
 // PERSIST-02 / Pitfall 4: NO aggregate schedule fields here.
 type ProjectStatus struct {
