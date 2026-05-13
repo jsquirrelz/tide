@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED
-Plan: 2 of 3 (01 + 03 landed; 02 still gated)
-Status: Plan 02.2-03 chart PVC fix verified at runtime; new pre-existing manager-args mismatch unmasked (`--metrics-bind-address` defined in chart values.yaml but not in cmd/manager/main.go); see 02.2-03-VERIFICATION.md §"Root-Cause Summary" options A-D
-Last activity: 2026-05-13 -- Phase 02.2 partial (03 landed; gate BLOCKED on new chart/binary flag mismatch — second cascading blocker)
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-3)
+Plan: 3 of 4 (01 + 03 + 04 landed; 02 still gated)
+Status: Plan 02.2-04 metrics-bind-address flag definition verified at runtime; cascade-3 surfaced exactly as T-02.2-10 predicted — `flag provided but not defined: -webhook-cert-path`. Pod CrashLoopBackOff on next undefined chart arg. User to decide between continued tactical iteration (Plan 02.2-05 defines --webhook-cert-path) or comprehensive audit pivot (Option B from 02.2-03-VERIFICATION.md fix landscape).
+Last activity: 2026-05-13 -- Phase 02.2 partial (04 landed; gate BLOCKED on cascade-3; VERIFICATION artifact authored inline after executor API error recovery)
 
 Progress: [████████░░] 83%
 
