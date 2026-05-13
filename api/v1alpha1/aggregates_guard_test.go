@@ -84,6 +84,119 @@ type PlanStatus struct {
 	}
 }
 
+// TestAggregatesGuard_PreservesPhase1Denylist asserts that the Phase 2 schema
+// additions (BudgetConfig, BudgetStatus, ProviderConfig, PlanAdmissionConfig,
+// Caps, TaskDev, ValidationState, etc.) do NOT introduce any of the PERSIST-02
+// / Pitfall 4 forbidden tokens into *_types.go files.  The check walks the
+// real api/v1alpha1/*_types.go tree programmatically — same corpus that
+// `make verify-no-aggregates` inspects.
+func TestAggregatesGuard_PreservesPhase1Denylist(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	// Locate the api/v1alpha1 directory by walking up to go.mod, then descending.
+	root := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Skipf("go.mod not found from %s; cannot locate repo root", cwd)
+		}
+		root = parent
+	}
+	typesDir := filepath.Join(root, "api", "v1alpha1")
+	re := regexp.MustCompile(aggregatesPattern)
+
+	var violations []string
+	err = filepath.Walk(typesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), "_types.go") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if re.Match(data) {
+			violations = append(violations, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", typesDir, err)
+	}
+	if len(violations) > 0 {
+		t.Errorf("PERSIST-02 denylist matched in Phase 2 *_types.go files (forbidden aggregate tokens present):\n%s",
+			strings.Join(violations, "\n"))
+	}
+}
+
+// TestAggregatesGuard_BudgetStatusIsNotAggregate is a positive-shape assertion:
+// it verifies that (a) the BudgetStatus struct was added to project_types.go and
+// (b) the BudgetStatus struct body does NOT contain any PERSIST-02 forbidden
+// tokens — confirming it is a tally object, not an aggregate schedule.
+func TestAggregatesGuard_BudgetStatusIsNotAggregate(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	root := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Skipf("go.mod not found from %s; cannot locate repo root", cwd)
+		}
+		root = parent
+	}
+
+	projectTypesPath := filepath.Join(root, "api", "v1alpha1", "project_types.go")
+	data, err := os.ReadFile(projectTypesPath)
+	if err != nil {
+		t.Fatalf("read project_types.go: %v", err)
+	}
+	content := string(data)
+
+	// Positive assertion: BudgetStatus must be present.
+	if !strings.Contains(content, "BudgetStatus") {
+		t.Fatalf("BudgetStatus not found in project_types.go; Phase 2 addition is missing")
+	}
+
+	// Extract the BudgetStatus struct body between "type BudgetStatus struct {" and its closing "}".
+	startMarker := "type BudgetStatus struct {"
+	startIdx := strings.Index(content, startMarker)
+	if startIdx < 0 {
+		t.Fatalf("type BudgetStatus struct { not found in project_types.go")
+	}
+	// Find the matching closing brace.
+	bodyStart := startIdx + len(startMarker)
+	depth := 1
+	closeIdx := bodyStart
+	for closeIdx < len(content) && depth > 0 {
+		switch content[closeIdx] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		closeIdx++
+	}
+	structBody := content[bodyStart:closeIdx]
+
+	re := regexp.MustCompile(aggregatesPattern)
+	if re.MatchString(structBody) {
+		t.Errorf("BudgetStatus struct body contains PERSIST-02 forbidden token(s):\n%s\n\n"+
+			"BudgetStatus must be a tally object — it must not contain schedule/wave/indegree fields.", structBody)
+	}
+}
+
 // TestMakeVerifyNoAggregatesPassesOnRealTypes runs the actual Makefile target
 // against the real api/v1alpha1/*_types.go files and asserts exit 0. This is
 // the integration-level check — the real types files must satisfy the rule.
