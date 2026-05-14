@@ -526,6 +526,127 @@ automountServiceAccountToken: true
 	_ = applyYAML(saYAML)
 }
 
+// applyHierarchy creates the full Namespace+Secret+Project+Milestone+Phase+Plan+Task
+// hierarchy required by the task controller's resolveProject dispatch path.
+//
+// Purpose: the cascade-5 debug investigation (.planning/debug/credproxy-dispatch-guard.md
+// §Reasoning Checkpoint) established that task_controller.go:217 (Step 3 of
+// reconcileDispatch) calls resolveProject(ctx, task), which returns "no project found
+// in namespace <ns>" when only a Plan+Task pair exists — exactly what the original
+// credproxy_test.go inline fixture provided. This helper creates the FULL hierarchy
+// mirroring test/integration/kind/testdata/three-task-wave.yaml field-for-field, closing
+// the cascade-5 harness-bug (T-02.2-17 mitigation).
+//
+// The helper parameterizes: ns (Namespace + resource namespace), planName, taskName.
+// It does NOT parameterize:
+//   - Project name: derived deterministically as ns+"-project" (e.g., "credproxy-test-project")
+//   - Milestone name: derived as ns+"-milestone"
+//   - Phase name: derived as ns+"-phase"
+//   - Budget: fixed at 100000 absoluteCapCents ($1000 — no budget cap during tests)
+//   - Secret name: fixed at "tide-provider-secret" (matching three-task-wave.yaml)
+//
+// Signature is exactly 4-arg per T-02.2-20 acceptance (no struct-options, no builder
+// pattern in v1). Future tests requiring richer parameterization extend the signature
+// in a follow-up plan rather than copy-paste-mutating the helper.
+//
+// The helper calls createNamespace(ns) (which also calls ensureSubagentSA(ns)) as
+// its first step; callers must NOT call createNamespace themselves before calling
+// applyHierarchy to avoid double-create noise.
+//
+// API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule — never tide.io).
+func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
+	// Step 1: Create Namespace + tide-subagent SA (createNamespace calls ensureSubagentSA).
+	createNamespace(ns)
+
+	// Step 2: Derive deterministic names for the hierarchy parents.
+	projectName := ns + "-project"
+	milestoneName := ns + "-milestone"
+	phaseName := ns + "-phase"
+
+	// Step 3: Construct the full hierarchy as a single multi-doc YAML, mirroring
+	// testdata/three-task-wave.yaml field-for-field (T-02.2-17 mitigation).
+	// Secret + Project + Milestone + Phase + Plan + Task (Namespace already created above).
+	hierarchyYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: %s
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  targetRepo: "https://github.com/example/%s.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  projectRef: %s
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Phase
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  milestoneRef: %s
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Plan
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    tideproject.k8s/project: %s
+spec:
+  phaseRef: %s
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    tideproject.k8s/project: %s
+    tideproject.k8s/wave-index: "0"
+spec:
+  planRef: %s
+  filesTouched:
+    - %s.go
+  declaredOutputPaths:
+    - %s.go
+  dev:
+    testMode: success
+`,
+		// Secret namespace
+		ns,
+		// Project: name, namespace, targetRepo ns
+		projectName, ns, ns,
+		// Milestone: name, namespace, projectRef
+		milestoneName, ns, projectName,
+		// Phase: name, namespace, milestoneRef
+		phaseName, ns, milestoneName,
+		// Plan: name, namespace, label project, phaseRef
+		planName, ns, projectName, phaseName,
+		// Task: name, namespace, label project, planRef, filesTouched, declaredOutputPaths
+		taskName, ns, projectName, planName, taskName, taskName,
+	)
+
+	// Step 4: Apply the hierarchy via the existing applyYAML primitive.
+	return applyYAML(hierarchyYAML)
+}
+
 // applyFile applies a YAML file to the kind cluster.
 func applyFile(path string) error {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,

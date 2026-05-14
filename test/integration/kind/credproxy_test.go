@@ -40,7 +40,6 @@ package kind_integration
 // the two-tier coverage architecture per the plan spec (Warning #8).
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -73,33 +72,7 @@ var _ = Describe("Credproxy sidecar topology and startup signal (AC5 / HARN-03)"
 	// and the TCP probe on :8443 succeeds.
 	It("HARN-03: credproxy sidecar container starts and becomes Ready", func() {
 		By("Creating a Plan with a Task using testMode=success (spawns a Job with credproxy sidecar)")
-		createNamespace(credproxyNS)
-
-		credproxyPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha1
-kind: Plan
-metadata:
-  name: credproxy-plan
-  namespace: %s
-spec:
-  phaseRef: credproxy-phase
----
-apiVersion: tideproject.k8s/v1alpha1
-kind: Task
-metadata:
-  name: credproxy-task
-  namespace: %s
-  labels:
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: credproxy-plan
-  filesTouched: ["credproxy.go"]
-  declaredOutputPaths: ["credproxy.go"]
-  dev:
-    testMode: success
-`, credproxyNS, credproxyNS)
-
-		Expect(applyYAML(credproxyPlanYAML)).To(Succeed())
+		Expect(applyHierarchy(ctx, credproxyNS, "credproxy-plan", "credproxy-task")).To(Succeed())
 
 		// Wait for the task to be created.
 		Eventually(func() error {
@@ -152,33 +125,7 @@ spec:
 	// HARN-03: credproxy emits its startup log line.
 	It("HARN-03: credproxy container log contains 'credproxy listening on 127.0.0.1:8443'", func() {
 		By("Dispatching a Task and checking credproxy container logs")
-		createNamespace(credproxyNS)
-
-		logPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha1
-kind: Plan
-metadata:
-  name: credproxy-log-plan
-  namespace: %s
-spec:
-  phaseRef: credproxy-log-phase
----
-apiVersion: tideproject.k8s/v1alpha1
-kind: Task
-metadata:
-  name: credproxy-log-task
-  namespace: %s
-  labels:
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: credproxy-log-plan
-  filesTouched: ["credproxy-log.go"]
-  declaredOutputPaths: ["credproxy-log.go"]
-  dev:
-    testMode: success
-`, credproxyNS, credproxyNS)
-
-		Expect(applyYAML(logPlanYAML)).To(Succeed())
+		Expect(applyHierarchy(ctx, credproxyNS, "credproxy-log-plan", "credproxy-log-task")).To(Succeed())
 
 		// Wait for a Pod.
 		Eventually(func() bool {
