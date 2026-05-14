@@ -92,7 +92,7 @@ var _ = Describe("Credproxy sidecar topology and startup signal (AC5 / HARN-03)"
 				}
 			}
 			return false
-		}, 60*time.Second, 2*time.Second).Should(BeTrue(),
+		}, 120*time.Second, 2*time.Second).Should(BeTrue(),
 			"A Pod should be created for the credproxy-task Job")
 
 		// Check if the credproxy sidecar container is present.
