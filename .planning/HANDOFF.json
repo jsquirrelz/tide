@@ -1,0 +1,47 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-05-14T20:56:05.144Z",
+  "phase": "02.2",
+  "phase_name": "layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi",
+  "phase_dir": ".planning/phases/02.2-layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi",
+  "plan": 10,
+  "task": 3,
+  "total_tasks": 3,
+  "status": "paused",
+  "gate_decision": "BLOCKED",
+  "gate_reason": "cascade-9 surfaced with 3 sub-classes: (A) Job activeDeadlineSeconds=60 too tight for credproxy initContainer under kind — DeadlineExceeded before main container starts; (B) Layer A envtest 'Wave roll-up: Succeeded' spec-flake — reconcileDispatch error-requeue competes with 20s assertion window; (C) wall-time 1486s vs 600s Makefile budget (2.5× overrun) — cascade effect of Ginkgo 5m-per-spec panic firing on multiple specs after AC1 failure. **CASCADE-8 IS STRUCTURALLY CLOSED** — dispatch_active: true; Jobs created for alpha+beta Tasks; 17/18 Layer A specs PASS — the Dispatcher wiring fix landed and proved the dispatch architecture works end-to-end.",
+  "completed_tasks_this_session": [
+    {"id": "02.2-06", "name": "Makefile timeout 300s→600s (cascade-4 closure)", "status": "done", "wave": 5, "gate": "BLOCKED on cascade-5 harness-bug"},
+    {"id": "02.2-07", "name": "applyHierarchy helper + credproxy fixture refactor (cascade-5 closure, Option B)", "status": "done", "wave": 6, "gate": "BLOCKED on cascade-6 spec-flake"},
+    {"id": "02.2-08", "name": "Eventually timeout bumps (cascade-6 closure)", "status": "done", "wave": 7, "gate": "BLOCKED on cascade-7 harness-bug ×3 fixtures"},
+    {"id": "02.2-09", "name": "createProjectHierarchy helper + 3 fixture call sites (cascade-7 closure)", "status": "done", "wave": 8, "gate": "BLOCKED on cascade-8 production-wiring-gap; merge required SHA-cherry-pick recovery due to cwd-drift"},
+    {"id": "02.2-10", "name": "Wire PodJobBackend in cmd/manager/main.go (cascade-8 closure, Option δ)", "status": "done", "wave": 9, "gate": "BLOCKED on cascade-9 (3 sub-classes A/B/C); CASCADE-8 STRUCTURALLY CLOSED — dispatch_active: true confirmed"}
+  ],
+  "remaining_tasks": [
+    {"id": "02.2-11", "name": "Cascade-9 closure (3 sub-fixes bundled)", "status": "not_started", "wave": 10, "fix_shape": "T1-A: bump Job activeDeadlineSeconds 60s→~300s in internal/dispatch/podjob/ BuildJobSpec; T1-B: stabilize AC1 Layer A envtest spec (bump 20s Eventually or wait-for-stabilization); T1-C: bump Makefile timeout 600s→1800s OR rely on A+B closure dropping wall under 600s; T2: runtime re-verify expecting 7/7 specs PASS now that dispatch is live; T3: gated rewire of 02.2-02-PLAN.md (FIRST APPROVED-eligible candidate)"},
+    {"id": "02.2-02", "name": "ROADMAP/STATE closeout (gated; still references 02.2-01-VERIFICATION.md at 31 paths)", "status": "gated", "wave": 11, "depends_on": "Will rewire to 02.2-NN where NN is the first plan recording gate_decision: APPROVED (likely 02.2-11)"}
+  ],
+  "blockers": [
+    {"description": "cascade-9 sub-class A: Job activeDeadlineSeconds=60 too tight for credproxy initContainer under kind (DeadlineExceeded before main container starts)", "type": "technical", "workaround": "Plan 02.2-11 T1-A: bump activeDeadlineSeconds to ~300s in podjob.BuildJobSpec or controller default"},
+    {"description": "cascade-9 sub-class B: Layer A envtest 'Wave roll-up: Succeeded' spec-flake (17/18 Layer A pass; this 1 is the outlier — reconcileDispatch error-requeue races the spec's 20s Eventually)", "type": "technical", "workaround": "Plan 02.2-11 T1-B: either bump Eventually budget, add wait-for-stabilization helper, or fix the upstream requeue trigger"},
+    {"description": "cascade-9 sub-class C: total wall 1486s vs 600s Makefile budget (2.5× overrun)", "type": "technical", "workaround": "Plan 02.2-11 T1-C: belt-and-suspenders bump 600s→1800s; if A+B alone bring wall under 600s, this becomes optional"},
+    {"description": "Plan 02.2-02 closeout still gated on 02.2-01-VERIFICATION.md (BLOCKED); 9 consecutive Task-3-non-fires across the cascade chain", "type": "technical", "workaround": "Plan 02.2-NN with gate_decision: APPROVED fires its Task 3 to rewire depends_on + 31 references in one pass"},
+    {"description": "Worktree residual directories: .claude/worktrees/agent-* with permission-denied removal; git worktree list registry is clean", "type": "external", "workaround": "Cosmetic only; manual rm -rf if needed"}
+  ],
+  "human_actions_pending": [
+    {"action": "Decide Plan 02.2-11 scope: bundle A+B+C in one plan, or split into separate plans", "context": "All 3 sub-classes are part of the cascade-9 surfacing; bundling matches prior precedent (02.2-08 bundled 2 Eventually bumps; 02.2-09 bundled 3 call sites)", "blocking": false},
+    {"action": "Optional: investigate cascade-9-deferred follow-up (Status.ValidationState webhook never sets gate)", "context": "From cascade-8 debug investigation §'Secondary risk surfaced'. NOT blocking HARN-03 per debug evidence (TaskReconciler.reconcileDispatch doesn't depend on ValidationState). Would surface when PlanReconciler.reconcileWaveMaterialization needs to fire — likely a Phase 03+ concern", "blocking": false}
+  ],
+  "decisions": [
+    {"decision": "Plan 02.2-06 scope: Option A (single-line Makefile timeout bump 300s→600s)", "rationale": "User chose Option A; smallest surface; smallest-surface-honors-chart-FIXED-contract principle", "phase": "02.2"},
+    {"decision": "Plan 02.2-07 scope: Option B (full-hierarchy fixture)", "rationale": "Debug investigation (credproxy-dispatch-guard) corrected the gate from Wave-Ready (hypothesized in 02.2-06-VERIFICATION) to resolveProject Project-lookup; Option B mirrors testdata/three-task-wave.yaml; zero production-code change", "phase": "02.2"},
+    {"decision": "Plan 02.2-08 scope: bundle both Eventually timeout bumps", "rationale": "Both are spec-flake same-class; identifying by surrounding context (lambda body) per T-02.2-22 mitigation", "phase": "02.2"},
+    {"decision": "Plan 02.2-09 scope: extend with createProjectHierarchy helper to caps/output/failure", "rationale": "Plan 02.2-07's applyHierarchy was correct but apply-scope was incomplete; 3 additional fixtures needed the same fix; new helper avoids touching applyHierarchy and prevents throwaway Plan+Task CRDs", "phase": "02.2"},
+    {"decision": "Plan 02.2-10 scope: Option δ (wire PodJobBackend in cmd/manager/main.go)", "rationale": "Debug investigation (credproxy-backoff-suppression) rejected all 5 originally-hypothesized fix options (α/β-1/β-2/β-3/γ); actual root cause was production-side Dispatcher field never assigned; broke Option-B-test-only contract deliberately because the fix only lives in production code", "phase": "02.2"},
+    {"decision": "Adopt Observe First / Execute Don't Ask / Verify Before Claiming + 10 session lessons in CLAUDE.md", "rationale": "User-requested retrospective and adoption from proventus CLAUDE.md; session lessons codify the cascade-9-iteration learnings (don't-predict-terminator, cwd-drift-pre-empt, state.begin-phase-resets-body, etc.)", "phase": "02.2"},
+    {"decision": "Cascade-8 closure is a milestone independent of cascade-9", "rationale": "dispatch_active: true is structural; cascade-9 sub-classes are tuning. The phase's character shifted from 'wire it up' to 'tune the live system' at Plan 02.2-10. Plan 02.2-11 is iteration N+1 in tuning, not in wiring", "phase": "02.2"}
+  ],
+  "uncommitted_files": ["CLAUDE.md (Working Rules + Operating Notes additions — being committed in this pause)"],
+  "next_action": "Run /gsd-resume-work to load STATE.md + handoff. Primary route is /gsd-plan-phase 02.2 --gaps to author Plan 02.2-11 with cascade-9 sub-class A/B/C scope. The fix shape is concrete from 02.2-10-VERIFICATION.md §Section 5. Alternative: /gsd-debug if any of the 3 sub-classes warrants investigation before authoring (sub-class B in particular — the AC1 envtest flake — may have a non-obvious upstream cause).",
+  "context_notes": "10-plan cascade chain in Phase 02.2 closed cascades 1-8 across diverse classes: PVC RWX/RWO, 2 binary flag defs, Makefile budget, 4 fixture harness-bugs (all same root: missing parent Project hierarchy in test fixtures), 2 Eventually timeout tightnesses, and finally the cascade-8 production-wiring-gap (Dispatcher field never assigned in cmd/manager/main.go). Cascade-8 was the architectural inflection point: the dispatch path went from gated-off to live. Two debug sessions corrected hypotheses (cascade-5 Wave Ready → resolveProject; cascade-8 backoff suppression → Dispatcher wiring gap). The 'tactical iteration over comprehensive audit' approach was validated repeatedly — no static audit pre-Phase-02.2 would have found these issues. Cwd-drift bit Plan 02.2-09's merge (recovered via SHA-cherry-pick); pre-empt check landed in Plan 02.2-10 and worked. Plan 02.2-11 should bundle cascade-9 sub-classes A/B/C and is structurally the FIRST APPROVED-eligible candidate (cascades 1-8 all closed; cascade-9 fixes are tuning, not wiring). If 02.2-11 records APPROVED, Plan 02.2-02 closeout finally fires after 10 plans of gated waiting."
+}
