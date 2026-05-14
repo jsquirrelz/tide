@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-05-14T20:02:44.223Z"
-last_activity: 2026-05-14 -- Phase 02.2 execution started
+stopped_at: Phase 02.2 plan 10/10 — MAJOR MILESTONE cascade-8 CLOSED (dispatch_active: true; Jobs created for alpha+beta Tasks); cascade-9 BLOCKED with 3 sub-classes (A: Job activeDeadlineSeconds=60 too tight for credproxy initContainer; B: Layer A envtest AC1 Wave-roll-up spec-flake; C: wall-time 1486s >> 600s budget)
+last_updated: "2026-05-14T20:50:00.000Z"
+last_activity: 2026-05-14 -- Plan 02.2-10 executed; **CASCADE-8 CLOSED** (Option δ Dispatcher wiring landed; dispatch path now LIVE; Jobs created end-to-end); cascade-9 BLOCKED with 3 sub-classes (A/B/C above); 17/18 Layer A specs PASS proving the dispatch architecture works
 progress:
   total_phases: 7
   completed_phases: 3
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — EXECUTING
-Plan: 1 of 10
-Status: Executing Phase 02.2
-Last activity: 2026-05-14 -- Phase 02.2 execution started
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-9 surfaced — multi-class: Job manifest tuning + envtest spec flake + wall-time overrun)
+Plan: 9 of 10 plans executed (01, 03, 04, 05, 06, 07, 08, 09, 10 landed with SUMMARY; 02 still gated). **CASCADE-8 CLOSED — major milestone after 10 plans.**
+Status: **Plan 02.2-10's Option δ Dispatcher wiring WORKED.** `cmd/manager/main.go` now constructs `*podjob.PodJobBackend{...}` and assigns it to both PlanReconciler and TaskReconciler. Runtime evidence proves dispatch is now LIVE: Jobs created in `tide-int-test` for alpha+beta Tasks; 17/18 Layer A envtest specs PASS (only AC1 Wave-roll-up flakes); Layer B BeforeSuite PASS. Cascade-8 production-wiring-gap is closed at the architectural level. However, cascade-9 surfaced with 3 distinct sub-classes that now require attention: (A) the per-Job `activeDeadlineSeconds: 60` (set somewhere in podjob.BuildJobSpec or as a controller default) is too tight for the credproxy initContainer to complete under kind — DeadlineExceeded before the main container starts; (B) the Layer A envtest "Wave roll-up: Succeeded" spec is flaky — reconcileDispatch's error-requeue competes with the spec's 20s assertion window; (C) total wall time was 1486s vs the 600s Makefile budget (set in Plan 02.2-06), 2.5× overrun — accumulated time from Ginkgo's 5m-per-spec panic cap firing on multiple specs after AC1's failure cascaded. Plan 02.2-11 target: bump activeDeadlineSeconds (sub-class A), wait-for-requeue-stabilization in AC1 spec (sub-class B), and bump Makefile timeout 600s→1800s OR fix the upstream panic cascade so wall stays under budget (sub-class C). See `02.2-10-VERIFICATION.md` §Section 5 for full evidence.
+Last activity: 2026-05-14 -- Plan 02.2-10 executed; CASCADE-8 CLOSED (dispatch_active: true); cascade-9 BLOCKED with 3 sub-classes
 
 Progress: [████████░░] 83%
 
