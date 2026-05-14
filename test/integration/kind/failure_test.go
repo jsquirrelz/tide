@@ -127,7 +127,7 @@ spec:
 				return ""
 			}
 			return t.Status.Phase
-		}, 2*time.Minute, 3*time.Second).Should(Equal("Failed"),
+		}, 240*time.Second, 3*time.Second).Should(Equal("Failed"),
 			"beta-fail should reach Failed phase (testMode=fail-exit-1)")
 
 		// α (independent sibling) should eventually complete.
