@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 9/9 (cascade-8 BLOCKED — production-side root cause surfaced: credproxy-task ResourceVersion conflict triggers controller-runtime exponential-backoff suppressing dispatch for 127s past the 120s pod-wait budget)
-last_updated: "2026-05-14T17:35:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-09 executed (cascade-7 CLOSED — createProjectHierarchy helper applied to caps/output/failure fixtures; zero no-project-found errors); cascade-8 BLOCKED with production-side root cause (PlanReconciler.stampTaskLabels concurrent-update race); orchestrator/user decision point: continue tactical timeout bumps (Plan 02.2-10 = 120s→240s) vs pivot to production-code fix (debounce concurrent status updates)
+stopped_at: Phase 2 context gathered
+last_updated: "2026-05-14T20:02:02.873Z"
+last_activity: 2026-05-14 -- Phase 02.2 planning complete
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 37
-  completed_plans: 35
+  total_plans: 38
+  completed_plans: 36
   percent: 95
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-8 surfaced — production-side root cause for the first time in this chain; structurally DIFFERENT from cascades 1–7 which were all test-side fixes)
 Plan: 8 of 9 plans executed (01, 03, 04, 05, 06, 07, 08, 09 landed with SUMMARY; 02 still gated). **DECISION POINT for user.**
-Status: Plan 02.2-09 createProjectHierarchy helper applied correctly to caps_test.go + output_test.go + failure_test.go — **cascade-7 CLOSED**. Manager logs confirm zero "no project found" errors for those 3 namespaces. However, cascade-8 surfaced with a production-side root cause: credproxy-task ResourceVersion conflict at plan-creation time triggers controller-runtime exponential-backoff which suppresses the task controller's reconcile for 127s — just past the 120s pod-wait budget. The task controller runs EXACTLY ONE reconcile attempt for credproxy-task at plan creation time, then exponential-backoff prevents re-queueing until after the 120s Eventually expires. **This is NOT a test fixture bug** — the hierarchy is correct, resolveProject succeeds, the dispatch decision is made. The blocker is the production-side concurrent-update race between TaskReconciler's status update and PlanReconciler.stampTaskLabels's label-stamp update. Plan 02.2-08 marginal flag (T-02.2-21, `credproxy_pod_wait_observed_seconds: 120` — full budget consumed) is now ACTIONABLE — repeated timeout bumps (60s→120s, now 120s→240s?) are tactically accommodating a production-side defect rather than fixing it. See `02.2-09-VERIFICATION.md` §Section 5 + §"Fix landscape" for full evidence and the two competing fix paths (tactical timeout bump vs production debounce).
-Last activity: 2026-05-14 -- Plan 02.2-09 executed; cascade-7 CLOSED; cascade-8 BLOCKED with production-side root cause
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 02.2 planning complete
 
 Progress: [████████░░] 83%
 
