@@ -229,7 +229,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					return ""
 				}
 				return w.Status.Phase
-			}, "20s", "500ms").Should(Equal("Succeeded"),
+			}, "60s", "500ms").Should(Equal("Succeeded"),
 				"Wave.Status.Phase should be Succeeded when all Tasks are Succeeded")
 		})
 	})

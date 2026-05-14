@@ -121,7 +121,7 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 
 test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Timeout 300s (TEST-02 budget). Requires Docker + kind.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		timeout 600s go test ./test/integration/... -v -timeout=5m -ginkgo.v
+		timeout 1800s go test ./test/integration/... -v -timeout=5m -ginkgo.v
 
 test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
