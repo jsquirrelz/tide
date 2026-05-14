@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 10/10 — MAJOR MILESTONE cascade-8 CLOSED (dispatch_active: true; Jobs created for alpha+beta Tasks); cascade-9 BLOCKED with 3 sub-classes (A: Job activeDeadlineSeconds=60 too tight for credproxy initContainer; B: Layer A envtest AC1 Wave-roll-up spec-flake; C: wall-time 1486s >> 600s budget)
-last_updated: "2026-05-14T20:50:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-10 executed; **CASCADE-8 CLOSED** (Option δ Dispatcher wiring landed; dispatch path now LIVE; Jobs created end-to-end); cascade-9 BLOCKED with 3 sub-classes (A/B/C above); 17/18 Layer A specs PASS proving the dispatch architecture works
+stopped_at: Phase 02.2 plan 11/11 — cascade-9 sub-classes A+B+C empirically CLOSED (deadline_exceeded_count=0; Layer A 18/18 PASS; wall 377s+354s — A+B alone met original 600s aspiration); cascade-10 BLOCKED as harness-bug (tide-projects PVC missing from test namespaces — only provisioned in tide-system by chart). 02.2-02 closeout still gated (9 consecutive Task-3-halts).
+last_updated: "2026-05-14T21:34:00.000Z"
+last_activity: 2026-05-14 -- Plan 02.2-11 executed; cascade-9 A+B+C CLOSED; cascade-10 surfaced as harness-bug (PVC namespace-scoping). Task 3 HALTED per BLOCKED gate; 02.2-02 closeout continues gated.
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 38
-  completed_plans: 36
+  total_plans: 39
+  completed_plans: 37
   percent: 95
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-9 surfaced — multi-class: Job manifest tuning + envtest spec flake + wall-time overrun)
-Plan: 9 of 10 plans executed (01, 03, 04, 05, 06, 07, 08, 09, 10 landed with SUMMARY; 02 still gated). **CASCADE-8 CLOSED — major milestone after 10 plans.**
-Status: **Plan 02.2-10's Option δ Dispatcher wiring WORKED.** `cmd/manager/main.go` now constructs `*podjob.PodJobBackend{...}` and assigns it to both PlanReconciler and TaskReconciler. Runtime evidence proves dispatch is now LIVE: Jobs created in `tide-int-test` for alpha+beta Tasks; 17/18 Layer A envtest specs PASS (only AC1 Wave-roll-up flakes); Layer B BeforeSuite PASS. Cascade-8 production-wiring-gap is closed at the architectural level. However, cascade-9 surfaced with 3 distinct sub-classes that now require attention: (A) the per-Job `activeDeadlineSeconds: 60` (set somewhere in podjob.BuildJobSpec or as a controller default) is too tight for the credproxy initContainer to complete under kind — DeadlineExceeded before the main container starts; (B) the Layer A envtest "Wave roll-up: Succeeded" spec is flaky — reconcileDispatch's error-requeue competes with the spec's 20s assertion window; (C) total wall time was 1486s vs the 600s Makefile budget (set in Plan 02.2-06), 2.5× overrun — accumulated time from Ginkgo's 5m-per-spec panic cap firing on multiple specs after AC1's failure cascaded. Plan 02.2-11 target: bump activeDeadlineSeconds (sub-class A), wait-for-requeue-stabilization in AC1 spec (sub-class B), and bump Makefile timeout 600s→1800s OR fix the upstream panic cascade so wall stays under budget (sub-class C). See `02.2-10-VERIFICATION.md` §Section 5 for full evidence.
-Last activity: 2026-05-14 -- Plan 02.2-10 executed; CASCADE-8 CLOSED (dispatch_active: true); cascade-9 BLOCKED with 3 sub-classes
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-10 surfaced — harness-bug class: tide-projects PVC namespace-scoping)
+Plan: 10 of 11 plans executed (01, 03, 04, 05, 06, 07, 08, 09, 10, 11 landed with SUMMARY; 02 still gated). **CASCADE-9 SUB-CLASSES A+B+C ALL EMPIRICALLY CLOSED — major milestone after 11 plans.**
+Status: **Plan 02.2-11's bundled cascade-9 closure WORKED at the test-harness level.** All 3 sub-fixes landed and verified: (A) `caps.wallClockSeconds: 120` on alpha/beta/gamma Tasks in `test/integration/kind/testdata/three-task-wave.yaml` → `deadline_exceeded_count: 0` in both clean + rerun (was the cascade-9A blocker in Plan 02.2-10); (B) `Eventually("60s", "500ms")` at `test/integration/envtest/indegree_test.go:232` SUB-02 Wave-roll-up spec → spec passes in 0.246s (99.6% headroom under 60s budget; was 17/18 in Plan 02.2-10, now 18/18 Layer A specs PASS); (C) Makefile `timeout 1800s` safety net → wall 377s clean + 354s rerun, BOTH UNDER the original 600s aspiration meaning A+B closure alone fixed the wall (the 1800s safety net is unused headroom — `wall_under_600s: true` annotation recorded). `dispatch_active: true` remained TRUE across both runs (cascade-8 closure preserved). However, cascade-10 surfaced as a NEW class (`harness-bug` per T-02.2-16 taxonomy): the `tide-projects` PVC is only provisioned by the chart in the `tide-system` namespace, but test fixture Pods land in `tide-int-test`/`caps-test`/`output-test`/`failure-test`/`credproxy-test` namespaces where the PVC does not exist. Pods get `FailedScheduling: persistentvolumeclaim "tide-projects" not found`. This is the FIRST cascade in Phase 02.2 surfaced AFTER the scheduler ran (cascades 1-9 all gated dispatch BEFORE the scheduler). Plan 02.2-12 target: per-namespace PVC declarations in test fixture YAMLs (Option A per 02.2-11-VERIFICATION.md §Section 5 Fix landscape). T-02.2-11 also surfaced a plan-time observation drift (Working Rule #1): plan body claimed 1 `"20s", "500ms"` occurrence; actual was 2 (SUB-02 line 232 + FAIL-02 line 289). Executor anchored edit via `.Should(Equal("Succeeded"))` context; FAIL-02 preserved verbatim. See `02.2-11-VERIFICATION.md` §Section 5 for full evidence.
+Last activity: 2026-05-14 -- Plan 02.2-11 executed; cascade-9 A+B+C CLOSED (deadline_exceeded_count=0; Layer A 18/18 PASS; wall under original 600s aspiration); cascade-10 BLOCKED as harness-bug; Task 3 HALTED (9th consecutive); 02.2-02 closeout still gated
 
 Progress: [████████░░] 83%
 
