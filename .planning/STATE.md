@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 8/8 (cascade-7 BLOCKED on harness-bug — caps_test.go + output_test.go + failure_test.go all call applyYAML without parent Project hierarchy; same class as cascade-5 but in 3 additional test files)
-last_updated: "2026-05-14T17:00:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-08 executed (cascade-6 CLOSED via Eventually timeout bumps); cascade-7 harness-bug surfaced (applyHierarchy scope was incomplete — only credproxy got the helper; caps/output/failure also need it); next target Plan 02.2-09 (apply hierarchy helper to remaining 3 test files)
+stopped_at: Phase 2 context gathered
+last_updated: "2026-05-14T17:33:42.165Z"
+last_activity: 2026-05-14 -- Phase 02.2 planning complete
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 36
-  completed_plans: 34
-  percent: 94
+  total_plans: 37
+  completed_plans: 35
+  percent: 95
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-7 surfaced — SAME CLASS as cascade-5, harness-bug, but in 3 additional fixture files)
 Plan: 7 of 8 plans executed (01, 03, 04, 05, 06, 07, 08 landed with SUMMARY; 02 still gated)
-Status: Plan 02.2-08 Eventually timeout bumps VERIFIED EFFECTIVE — credproxy_test.go pod-wait now 120s and failure_test.go AC3 phase-wait now 240s; cascade-6 (spec-flake) CLOSED. However, with timeouts now adequate enough that specs RUN to their assertion failures (instead of Ginkgo's inner -timeout=5m cap firing first), cascade-7 surfaced: `caps_test.go`, `output_test.go`, and `failure_test.go` ALL call `applyYAML` with inline Plan+Task fixtures WITHOUT parent Project hierarchy, hitting the same `resolveProject` "no project found" gate that Plan 02.2-07's applyHierarchy fixed for credproxy_test.go ONLY. **Cascade-7 is the same class as cascade-5 (harness-bug) — Plan 02.2-07's helper authoring was the right call, but Plan 02.2-07's apply scope was incomplete (only credproxy_test.go was refactored).** Recommended fix: apply `applyHierarchy` (or new `createProjectHierarchy` helper) to caps_test.go, output_test.go, and failure_test.go before their `applyYAML` calls. See `02.2-08-VERIFICATION.md` §"Section 5 Root-Cause Summary" and §"Fix landscape".
-Last activity: 2026-05-14 -- Plan 02.2-08 executed; cascade-6 CLOSED; cascade-7 (harness-bug, 3 fixture files) BLOCKED
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 02.2 planning complete
 
 Progress: [████████░░] 83%
 
