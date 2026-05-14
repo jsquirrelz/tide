@@ -186,6 +186,19 @@ func main() {
 	//    d. EnvelopeOut reader — reads from the shared tide-projects PVC at /workspaces
 	//       (Blocker #2/#3 fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
 	envReader := &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"}
+	//    e. Dispatcher — wires PodJobBackend into both Plan and Task reconcilers' Phase 2
+	//       dispatch paths (cascade-8 fix per .planning/debug/credproxy-backoff-suppression.md).
+	//       Without this, plan_controller.go:121 and task_controller.go:167 short-circuit
+	//       and no Job is ever created in production.
+	dispatcher := &podjob.PodJobBackend{
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		SubagentImage:  subagentImage,
+		CredproxyImage: credproxyImage,
+		SigningKey:     signingKey,
+		EnvReader:      envReader,
+		PVCName:        "tide-projects",
+	}
 
 	// 7. Register all six reconcilers (CTRL-01).
 	if err := (&controller.ProjectReconciler{
@@ -223,6 +236,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Plan,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
+		Dispatcher:              dispatcher,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)
@@ -250,6 +264,7 @@ func main() {
 		SubagentImage:  subagentImage,
 		CredproxyImage: credproxyImage,
 		EnvReader:      envReader,
+		Dispatcher:     dispatcher,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
