@@ -56,7 +56,7 @@ var _ = Describe("Wall-clock cap enforcement (AC5 / HARN-02)", Label("kind"), fu
 	// Test budget: 80s (within the ~180s Layer B target).
 	It("AC5: hang mode + wall-clock cap terminates subagent Job within cap window", func() {
 		By("Creating a Plan with a hanging Task (caps.WallClockSeconds=10)")
-		createNamespace(capsNS)
+		Expect(createProjectHierarchy(ctx, capsNS)).To(Succeed())
 
 		capPlanYAML := fmt.Sprintf(`
 apiVersion: tideproject.k8s/v1alpha1

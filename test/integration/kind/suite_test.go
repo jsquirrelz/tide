@@ -647,6 +647,97 @@ spec:
 	return applyYAML(hierarchyYAML)
 }
 
+// createProjectHierarchy creates the Namespace+Secret+Project+Milestone+Phase
+// hierarchy required by the task controller's resolveProject dispatch path,
+// WITHOUT a Plan or Task. The calling test supplies its own Plan and Task
+// via a follow-up applyYAML call.
+//
+// Purpose: Plan 02.2-07's applyHierarchy authored the full
+// Namespace+Secret+Project+Milestone+Phase+Plan+Task hierarchy and refactored
+// credproxy_test.go to call it. Three other Layer B fixture files
+// (caps_test.go, output_test.go, failure_test.go) have their OWN inline
+// Plan+Task YAML and only need the parent-Project hierarchy — they cannot
+// reuse applyHierarchy because applyHierarchy's Plan+Task would collide
+// with their own. This helper provides the parent-only variant
+// (T-02.2-24 mitigation: byte-identical Secret+Project+Milestone+Phase
+// fields to applyHierarchy; only the Plan+Task documents are omitted).
+//
+// Signature: (ctx context.Context, ns string) error — mirrors applyHierarchy's
+// signature shape but with only the namespace parameter (no planName/taskName
+// because the caller supplies those).
+//
+// Like applyHierarchy, this helper calls createNamespace(ns) (which also calls
+// ensureSubagentSA(ns)) as its first step; callers must NOT call
+// createNamespace themselves before calling createProjectHierarchy to avoid
+// double-create noise.
+//
+// API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule —
+// never tide.io).
+func createProjectHierarchy(ctx context.Context, ns string) error {
+	// Step 1: Create Namespace + tide-subagent SA.
+	createNamespace(ns)
+
+	// Step 2: Derive deterministic names for the hierarchy parents
+	// (same shape as applyHierarchy).
+	projectName := ns + "-project"
+	milestoneName := ns + "-milestone"
+	phaseName := ns + "-phase"
+
+	// Step 3: Construct the parent hierarchy as a single multi-doc YAML,
+	// mirroring applyHierarchy's Secret+Project+Milestone+Phase sections
+	// field-for-field (T-02.2-24 byte-identical mitigation). Plan and Task
+	// are intentionally omitted — the caller supplies those via its own
+	// applyYAML call.
+	hierarchyYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: %s
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  targetRepo: "https://github.com/example/%s.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  projectRef: %s
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Phase
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  milestoneRef: %s
+`,
+		// Secret namespace
+		ns,
+		// Project: name, namespace, targetRepo ns
+		projectName, ns, ns,
+		// Milestone: name, namespace, projectRef
+		milestoneName, ns, projectName,
+		// Phase: name, namespace, milestoneRef
+		phaseName, ns, milestoneName,
+	)
+
+	// Step 4: Apply the hierarchy via the existing applyYAML primitive.
+	return applyYAML(hierarchyYAML)
+}
+
 // applyFile applies a YAML file to the kind cluster.
 func applyFile(path string) error {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,

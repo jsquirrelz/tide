@@ -55,7 +55,7 @@ var _ = Describe("Output path violation detection (AC5 / HARN-05)", Label("kind"
 	// outside declared paths; the harness validator flags the violation.
 	It("AC5: exceed-output-paths mode causes Task to fail with output violation", func() {
 		By("Creating a Plan with a Task set to exceed output paths")
-		createNamespace(outputNS)
+		Expect(createProjectHierarchy(ctx, outputNS)).To(Succeed())
 
 		outputPlanYAML := fmt.Sprintf(`
 apiVersion: tideproject.k8s/v1alpha1
