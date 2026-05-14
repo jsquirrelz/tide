@@ -80,6 +80,8 @@ spec:
     - alpha.go
   dev:
     testMode: success
+  caps:
+    wallClockSeconds: 120
 
 ---
 # Task β — wave 0, no dependencies (independent sibling of α)
@@ -99,6 +101,8 @@ spec:
     - beta.go
   dev:
     testMode: success
+  caps:
+    wallClockSeconds: 120
 
 ---
 # Task γ — wave 1, depends on α and β
@@ -121,3 +125,5 @@ spec:
     - gamma.go
   dev:
     testMode: success
+  caps:
+    wallClockSeconds: 120
