@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 6/6 (cascade-5 BLOCKED on harness-bug — credproxy fixture lacks parent Wave hierarchy for task dispatch)
-last_updated: "2026-05-14T15:01:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-06 executed (cascade-4 CLOSED, 304s ≤ 600s budget); cascade-5 harness-bug BLOCKED; next target Plan 02.2-07 (testMode dispatch shortcut in task controller)
+stopped_at: Phase 2 context gathered
+last_updated: "2026-05-14T15:36:58.397Z"
+last_activity: 2026-05-14 -- Phase 02.2 planning complete
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 34
-  completed_plans: 32
+  total_plans: 35
+  completed_plans: 33
   percent: 94
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-5 surfaced — STRUCTURALLY DIFFERENT from cascade-4)
 Plan: 5 of 6 plans executed (01, 03, 04, 05, 06 landed with SUMMARY; 02 still gated on its checkpoint artifact)
-Status: Plan 02.2-06 Makefile timeout 300s→600s VERIFIED EFFECTIVE — clean run completed in 304s (cascade-4 test-budget CLOSED). However a new cascade-5 surfaced: 2 credproxy specs FAIL at `Eventually(60s).Should(Succeed())` waiting for `credproxy-task` Job creation. Root cause: credproxy_test.go fixture creates Plan+Task WITHOUT parent Milestone/Phase/Wave hierarchy; task controller's dispatch guard requires parent Wave Ready before Job creation. Cascade-5 classification: `harness-bug` (T-02.2-16 taxonomy). Recommended fix: implement `spec.dev.testMode` dispatch shortcut in `internal/controller/task_controller.go` to allow test fixtures to bypass parent-hierarchy requirement when `testMode: success` is set. See `02.2-06-VERIFICATION.md` §"Section 5 Root-Cause Summary" and §"Fix landscape".
-Last activity: 2026-05-14 -- Plan 02.2-06 executed; cascade-4 CLOSED; cascade-5 (harness-bug) BLOCKED
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 02.2 planning complete
 
 Progress: [████████░░] 83%
 
