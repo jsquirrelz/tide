@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 7/7 (cascade-6 BLOCKED on spec-flake — Eventually timeouts too tight in credproxy_test.go:95 and failure_test.go AC3)
-last_updated: "2026-05-14T16:30:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-07 executed (cascade-5 CLOSED — applyHierarchy helper worked, resolveProject succeeds, Job dispatch confirmed); cascade-6 (spec-flake) BLOCKED; next target Plan 02.2-08 (bump Eventually timeouts in credproxy_test.go and failure_test.go)
+stopped_at: Phase 2 context gathered
+last_updated: "2026-05-14T16:18:19.223Z"
+last_activity: 2026-05-14 -- Phase 02.2 planning complete
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 35
-  completed_plans: 33
+  total_plans: 36
+  completed_plans: 34
   percent: 94
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-6 surfaced — spec-flake class, distinct from cascade-5 harness-bug)
 Plan: 6 of 7 plans executed (01, 03, 04, 05, 06, 07 landed with SUMMARY; 02 still gated on its checkpoint artifact)
-Status: Plan 02.2-07's Option B fix (applyHierarchy full-hierarchy fixture) CONFIRMED EFFECTIVE — manager logs show no "no project found in namespace credproxy-test" error, indicating `resolveProject` at `task_controller.go:217` successfully resolves the credproxy-test Project AND the task controller dispatches a Job for `credproxy-task`. Cascade-5 (harness-bug) CLOSED. However, cascade-6 surfaced: two `Eventually` timeout budgets are too tight for the dispatch round-trip — `credproxy_test.go:95` (60s pod-wait, hit ResourceVersion conflict retry needing extra cycles) and `failure_test.go` AC3 (120s task-Failed-phase wait). Cascade-6 classification: `spec-flake` (T-02.2-16 taxonomy — fixable in test-only files). Recommended fix: bump credproxy_test.go pod-wait to 120s and failure_test.go AC3 wait to 240s. See `02.2-07-VERIFICATION.md` §"Section 5 Root-Cause Summary".
-Last activity: 2026-05-14 -- Plan 02.2-07 executed; cascade-5 CLOSED; cascade-6 (spec-flake) BLOCKED
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 02.2 planning complete
 
 Progress: [████████░░] 83%
 
