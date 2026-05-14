@@ -54,7 +54,7 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 	It("AC3: failed task β does not block independent sibling α; dependent γ never dispatches", func() {
 		By("Creating a plan with 3 tasks: α (independent), β (fail), γ (depends on β)")
 		ns := failNS
-		createNamespace(ns)
+		Expect(createProjectHierarchy(ctx, ns)).To(Succeed())
 
 		planYAML := fmt.Sprintf(`
 apiVersion: tideproject.k8s/v1alpha1
