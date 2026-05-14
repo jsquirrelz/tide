@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 2 context gathered
-last_updated: "2026-05-13T17:04:10.450Z"
-last_activity: 2026-05-13 -- Phase 02.2 execution started
+last_updated: "2026-05-14T14:36:09.413Z"
+last_activity: 2026-05-14 -- Phase 02.2 planning complete
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 31
-  completed_plans: 29
+  total_plans: 34
+  completed_plans: 32
   percent: 94
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-4 — STRUCTURALLY DIFFERENT)
 Plan: 4 of 5 (01 + 03 + 04 + 05 landed; 02 still gated)
-Status: Plan 02.2-05 --webhook-cert-path fix verified at runtime; flag-mismatch cascade chain TERMINATED (manager Pod Running 0 restarts, all 5 chart args satisfied, Layer B specs actually executing). Cascade-4 surfaced is a DIFFERENT class — Makefile:124 `timeout 300s go test` budget too tight for Layer A (~25s) + Layer B (7-spec end-to-end). Specs are running; `go test` gets SIGKILLed before Ginkgo flushes summary. Recommended fix: bump Makefile timeout to 600s (single-line edit, smallest surface). See 02.2-05-VERIFICATION.md §"Fix landscape" Option A.
-Last activity: 2026-05-13 -- Phase 02.2 partial (05 landed; flag-mismatch cascade terminated; cascade-4 is test-budget, NOT flag mismatch)
+Status: Ready to execute
+Last activity: 2026-05-14 -- Phase 02.2 planning complete
 
 Progress: [████████░░] 83%
 

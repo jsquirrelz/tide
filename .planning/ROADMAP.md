@@ -106,6 +106,9 @@ Plans:
 - [x] 02.2-05-PLAN.md — TACTICAL: define --webhook-cert-path flag + wire into webhook.Options.CertDir — close 02.2-04 BLOCKED gate (cascade-3) + runtime re-verification + wire Plan 02.2-02 checkpoint (gated on Task 2 APPROVED) (Wave 4)
 - [ ] 02.2-02-PLAN.md — ROADMAP/STATE closeout, gated on 02.2-05-VERIFICATION.md gate_decision=APPROVED (Wave 5)
 
+**Cross-cutting constraints:**
+- `go build ./cmd/manager/...` exits 0 after the flag addition
+
 ### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
 
 **Goal:** Layer B integration test suite (`make test-int`) runs end-to-end on developer laptop — `tide-controller-manager` Deployment reaches Ready in kind via Helm install, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass.
