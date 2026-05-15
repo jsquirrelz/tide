@@ -70,3 +70,24 @@ const (
 	// used in Conditions.Message to surface the override.
 	ReasonBypassApplied = "BypassApplied"
 )
+
+// Phase 3 condition vocabulary additions — up-stack reconcilers + push Job
+// signaling (Plans 03-04, 03-05, 03-06, 03-07, 03-08). All three are set/
+// cleared by Phase 3 reconcilers; the existing Pending/Ready/Reconciling/
+// Failed/Validated/Running/Succeeded vocabulary remains the cross-Kind base.
+const (
+	// ConditionCloned — Project's per-run branch has been cloned + worktrees
+	// initialized by the clone Job (Phase 3 D-B6 / ProjectReconciler extension).
+	ConditionCloned = "Cloned"
+
+	// ConditionAuthoringPlanner — a planner Job (Milestone/Phase/Plan) has been
+	// dispatched and is still running. Cleared when the Job reaches a terminal
+	// state and the child CRDs (Phase 3 D-A1 envelope childCRDs) have been
+	// materialized. Reflects the "planning fans out wide" phase of dispatch.
+	ConditionAuthoringPlanner = "AuthoringPlanner"
+
+	// ConditionPushLeaseFailed — push Job rejected by --force-with-lease
+	// (Phase 3 D-B6). Cleared by either a successful subsequent push or the
+	// tideproject.k8s/bypass-push-lease=true annotation.
+	ConditionPushLeaseFailed = "PushLeaseFailed"
+)

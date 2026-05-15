@@ -298,3 +298,185 @@ func TestStub_UnknownTestMode(t *testing.T) {
 		t.Errorf("unknown testMode: want exit 2, got %d", code)
 	}
 }
+
+// Phase 3 Plan 02 Task 2: wait-for-signal dispatch mode tests (D-D3).
+//
+// The signal path under test is computed against the package-level
+// workspaceRoot var, which defaults to "/workspace" but is overridable for
+// tests via t.TempDir(). Polling cadence is 500ms per CONTEXT.md D-D3 and
+// RESEARCH §"Open Questions Q4 RESOLVED" — locked at 500ms unless test
+// wall-clock budget pressure surfaces.
+
+// withWorkspaceRoot swaps the package-level workspaceRoot for the duration of
+// the test, restoring on Cleanup. Avoids leaking state between table cases.
+func withWorkspaceRoot(t *testing.T, root string) {
+	t.Helper()
+	saved := workspaceRoot
+	workspaceRoot = root
+	t.Cleanup(func() {
+		workspaceRoot = saved
+	})
+}
+
+// TestWaitForSignal_SignalAlreadyPresent verifies that when the release file
+// is already present at dispatch start, the stub writes the canned success
+// envelope and exits 0 within a short window.
+func TestWaitForSignal_SignalAlreadyPresent(t *testing.T) {
+	dir := t.TempDir()
+	withWorkspaceRoot(t, dir)
+
+	// Pre-create the signal file at <root>/envelopes/<task-uid>/release.
+	taskUID := "test-uid-1234"
+	signalDir := filepath.Join(dir, "envelopes", taskUID)
+	if err := os.MkdirAll(signalDir, 0o755); err != nil {
+		t.Fatalf("mkdir signal dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(signalDir, "release"), nil, 0o644); err != nil {
+		t.Fatalf("write release file: %v", err)
+	}
+
+	// Envelope is laid out in a parallel directory to keep in.json/out.json
+	// distinct from the signal directory (avoids accidental overlap).
+	envDir := filepath.Join(dir, "envelope-io")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope-io: %v", err)
+	}
+	artifactDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	inPath := makeEnvelope(t, envDir, "wait-for-signal", []string{artifactDir})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	code := run(ctx, inPath, os.Stdout, os.Stderr)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("wait-for-signal (already present): want exit 0, got %d", code)
+	}
+	// Stub polls every 500ms; with a pre-existing signal we expect the first
+	// tick (~500ms) to detect it. Allow generous slack for slow CI.
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("wait-for-signal: detection took %v, want < 1.5s", elapsed)
+	}
+
+	// out.json should exist and look like a success envelope.
+	out := readOutEnvelope(t, envDir)
+	if out.ExitCode != 0 {
+		t.Errorf("out.ExitCode = %d, want 0", out.ExitCode)
+	}
+	if out.Result != "success" {
+		t.Errorf("out.Result = %q, want %q", out.Result, "success")
+	}
+}
+
+// TestWaitForSignal_SignalAbsentContextCancel verifies that if the signal file
+// never appears and the context cancels, the stub returns 0 cleanly and never
+// writes out.json.
+func TestWaitForSignal_SignalAbsentContextCancel(t *testing.T) {
+	dir := t.TempDir()
+	withWorkspaceRoot(t, dir)
+
+	envDir := filepath.Join(dir, "envelope-io")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope-io: %v", err)
+	}
+	inPath := makeEnvelope(t, envDir, "wait-for-signal", []string{})
+
+	// Short timeout — no signal file will appear; ctx cancels.
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, inPath, os.Stdout, os.Stderr)
+	}()
+
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Errorf("wait-for-signal ctx-cancel: want exit 0, got %d", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("wait-for-signal: run() did not return after context cancellation")
+	}
+
+	// out.json should NOT exist — stub never writes it on ctx-cancel path.
+	outPath := filepath.Join(envDir, "out.json")
+	if _, err := os.Stat(outPath); err == nil {
+		t.Errorf("wait-for-signal ctx-cancel: out.json should not be written")
+	}
+}
+
+// TestWaitForSignal_SignalMidPoll verifies the stub detects a signal file that
+// appears mid-poll and emits the success envelope.
+func TestWaitForSignal_SignalMidPoll(t *testing.T) {
+	dir := t.TempDir()
+	withWorkspaceRoot(t, dir)
+
+	taskUID := "test-uid-1234"
+	signalDir := filepath.Join(dir, "envelopes", taskUID)
+	if err := os.MkdirAll(signalDir, 0o755); err != nil {
+		t.Fatalf("mkdir signal dir: %v", err)
+	}
+	signalPath := filepath.Join(signalDir, "release")
+
+	envDir := filepath.Join(dir, "envelope-io")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope-io: %v", err)
+	}
+	artifactDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifacts: %v", err)
+	}
+	inPath := makeEnvelope(t, envDir, "wait-for-signal", []string{artifactDir})
+
+	// Signal appears 600ms after dispatch — well after the first 500ms tick
+	// but before any reasonable test timeout.
+	timer := time.AfterFunc(600*time.Millisecond, func() {
+		_ = os.WriteFile(signalPath, nil, 0o644)
+	})
+	defer timer.Stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	code := run(ctx, inPath, os.Stdout, os.Stderr)
+	elapsed := time.Since(start)
+
+	if code != 0 {
+		t.Fatalf("wait-for-signal (mid-poll): want exit 0, got %d", code)
+	}
+	if elapsed < 600*time.Millisecond {
+		t.Errorf("wait-for-signal mid-poll: returned in %v (before signal write at 600ms) — should have polled and waited",
+			elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("wait-for-signal mid-poll: detection took %v, want < 2s", elapsed)
+	}
+
+	out := readOutEnvelope(t, envDir)
+	if out.ExitCode != 0 {
+		t.Errorf("out.ExitCode = %d, want 0", out.ExitCode)
+	}
+	if out.Result != "success" {
+		t.Errorf("out.Result = %q, want %q", out.Result, "success")
+	}
+}
+
+// TestDispatch_UnknownTestModeStillRejected is a regression check: adding
+// wait-for-signal must not relax the unknown-mode rejection path.
+func TestDispatch_UnknownTestModeStillRejected(t *testing.T) {
+	dir := t.TempDir()
+	inPath := makeEnvelope(t, dir, "totally-bogus-mode", []string{})
+
+	ctx := context.Background()
+	code := run(ctx, inPath, os.Stdout, os.Stderr)
+	if code != 2 {
+		t.Errorf("unknown testMode after wait-for-signal addition: want exit 2, got %d", code)
+	}
+}

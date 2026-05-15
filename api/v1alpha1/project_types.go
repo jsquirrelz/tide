@@ -108,6 +108,116 @@ type PlanAdmissionConfig struct {
 	FileTouchMode string `json:"fileTouchMode,omitempty"`
 }
 
+// SubagentConfig declares per-Project provider+model selection (Phase 3 D-C2).
+//
+// Resolution chain at dispatch time (in each reconciler before calling
+// Dispatcher.Run): Spec.Subagent.Levels.{level}.{image,model} → Spec.Subagent.{image,model}
+// → Helm-chart default. Vendor + model are orthogonal axes — Image picks the
+// vendor (via the container image's bundled Subagent impl); Model picks the
+// model identifier passed to that vendor's CLI/SDK.
+type SubagentConfig struct {
+	// Image is the default subagent image reference for all levels.
+	// Example: "ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0".
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// Model is the default model identifier for all levels.
+	// Example: "claude-sonnet-4-6" (anthropic), "o1-mini" (openai).
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Levels carries per-level overrides; any subset is valid.
+	// +optional
+	Levels LevelOverrides `json:"levels,omitempty"`
+}
+
+// LevelOverrides carries per-level provider/model overrides (Phase 3 D-C2).
+// Each pointer is nil when no override is set for that level.
+type LevelOverrides struct {
+	// Milestone optionally overrides settings for the milestone planner.
+	// +optional
+	Milestone *LevelConfig `json:"milestone,omitempty"`
+
+	// Phase optionally overrides settings for the phase planner.
+	// +optional
+	Phase *LevelConfig `json:"phase,omitempty"`
+
+	// Plan optionally overrides settings for the plan planner.
+	// +optional
+	Plan *LevelConfig `json:"plan,omitempty"`
+
+	// Task optionally overrides settings for the task executor.
+	// +optional
+	Task *LevelConfig `json:"task,omitempty"`
+}
+
+// LevelConfig declares the per-level subagent override (Phase 3 D-C2).
+type LevelConfig struct {
+	// Model identifier for this level (e.g., "claude-haiku-4-5").
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Params carries per-vendor tuning passthrough (temperature, thinking
+	// budget, etc.). Validation lives in the provider's Subagent impl.
+	// +optional
+	Params map[string]string `json:"params,omitempty"`
+
+	// Image override is schema-present-but-not-enforced in v1.0 (deferred
+	// to v1.x per CONTEXT.md "Deferred Ideas" — per-level cross-vendor
+	// image overrides). Set this in v1.0 only if the consumer is prepared
+	// to ignore it.
+	// +optional
+	Image string `json:"image,omitempty"`
+}
+
+// GitConfig declares the per-Project git target + creds (Phase 3 D-B6).
+// HTTPS+PAT is the primary v1.0 path; SSH is documented with host-key caveats
+// per REQUIREMENTS.md ART-05 but defaults to HTTPS+PAT.
+type GitConfig struct {
+	// RepoURL is the HTTPS URL of the target repo, e.g.,
+	// "https://github.com/owner/repo.git". CEL pattern below catches non-HTTP
+	// URLs at admission time.
+	// +kubebuilder:validation:Pattern=`^https?://.+`
+	RepoURL string `json:"repoURL"`
+
+	// CredsSecretRef is the K8s Secret name (same-namespace) carrying the
+	// HTTPS PAT in data key GIT_PAT. Cross-namespace Secret refs are NOT
+	// permitted in v1.0 (threat-mitigation deferred to push Job — plan 03-06).
+	CredsSecretRef string `json:"credsSecretRef"`
+
+	// LeaksConfigRef is an optional ConfigMap name carrying gitleaks rule
+	// overrides (D-B3). Default gitleaks rules are embedded in the push image
+	// when this is empty.
+	// +optional
+	LeaksConfigRef string `json:"leaksConfigRef,omitempty"`
+}
+
+// GitStatus records the per-Project git push state (Phase 3 D-B6).
+//
+// One branch per Project lifetime: BranchName is fixed at Project creation
+// as "tide/run-<project-name>-<unix-epoch>" (Unix epoch keeps refnames
+// colon-free per RFC 3987 refname rules). LastPushedSHA + LeaseFailureCount
+// drive the --force-with-lease push contract: each push uses lastPushedSHA
+// as the lease, increments leaseFailureCount on rejection, and resets to 0
+// on success.
+type GitStatus struct {
+	// BranchName is the lifetime branch fixed at Project creation.
+	// Format: "tide/run-<project>-<unix-epoch>".
+	// +optional
+	BranchName string `json:"branchName,omitempty"`
+
+	// LastPushedSHA is the head SHA recorded on the most recent successful push.
+	// Used as the lease for subsequent `git push --force-with-lease`.
+	// +optional
+	LastPushedSHA string `json:"lastPushedSHA,omitempty"`
+
+	// LeaseFailureCount tallies consecutive push lease rejections; reset to 0
+	// on successful push. Reconciler halts (Phase=PushLeaseFailed) when this
+	// count exceeds the configured retry budget.
+	// +optional
+	LeaseFailureCount int32 `json:"leaseFailureCount,omitempty"`
+}
+
 // BudgetStatus records running spend tallies for the Project (Phase 2+).
 // PERSIST-02 / Pitfall 4: this is a TALLY object, not an aggregate schedule.
 // The PERSIST-02 denylist (enforced by `make verify-no-aggregates`) does not
@@ -168,6 +278,17 @@ type ProjectSpec struct {
 	// +kubebuilder:validation:Maximum=10
 	// +optional
 	MaxAttemptsPerTask int32 `json:"maxAttemptsPerTask,omitempty"`
+
+	// Subagent declares provider+model selection for planner/executor dispatch
+	// (Phase 3 D-C2). When empty, Helm-chart defaults apply.
+	// +optional
+	Subagent SubagentConfig `json:"subagent,omitempty"`
+
+	// Git declares the per-Project target repo + creds for artifact push
+	// (Phase 3 D-B6). Required for any Project whose lifecycle reaches push;
+	// optional in v1.0 only for purely transient/test Projects.
+	// +optional
+	Git GitConfig `json:"git,omitempty"`
 }
 
 // Project Phase constants for Project.Status.Phase (Plan 10 — init Job + budget gate).
@@ -182,6 +303,13 @@ const (
 	PhaseBudgetExceeded = "BudgetExceeded"
 	// PhaseRunning is set when dispatch is actively proceeding.
 	PhaseRunning = "Running"
+	// PhasePushLeaseFailed is set when a push Job rejects due to --force-with-lease
+	// mismatch (Phase 3 D-B6). Recovery: kubectl annotate project
+	// tideproject.k8s/bypass-push-lease=true (mirrors D-D4 bypass-budget pattern).
+	PhasePushLeaseFailed = "PushLeaseFailed"
+	// PhaseComplete is the terminal success phase — set when all Milestones
+	// reach Succeeded and the final push Job lands (Phase 3 D-B2 #4).
+	PhaseComplete = "Complete"
 )
 
 // ProjectStatus defines the observed state of Project.
@@ -201,6 +329,12 @@ type ProjectStatus struct {
 	// PERSIST-02 / Pitfall 4: BudgetStatus is a tally object, not an aggregate schedule.
 	// +optional
 	Budget BudgetStatus `json:"budget,omitempty"`
+
+	// Git records per-Project push state — branch name, last pushed SHA, and
+	// lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
+	// per-project tally object, NOT an aggregate schedule.
+	// +optional
+	Git GitStatus `json:"git,omitempty"`
 }
 
 // +kubebuilder:object:root=true

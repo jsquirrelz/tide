@@ -23,6 +23,9 @@
 //	fail-exit-1         — writes failure out.json; exit 1.
 //	hang                — loops until SIGTERM/context cancellation; exit 0.
 //	exceed-output-paths — writes /workspace/escape/leak.txt + failure out.json; exit 1.
+//	wait-for-signal     — polls /workspace/envelopes/{task-uid}/release every
+//	                      500ms (Phase 3 D-D3); on signal-file appearance writes
+//	                      canned success out.json; on ctx cancel returns 0.
 //	(empty)             — treated as "success".
 //
 // Real Claude-backed subagent images MUST ignore the Dev field entirely
@@ -43,6 +46,17 @@ import (
 
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
+
+// workspaceRoot is the PVC mount point under which envelope/signal files
+// live. Production stub pods mount this at the canonical "/workspace" path
+// (Phase 2 D-G2 layout); tests override it via withWorkspaceRoot in
+// main_test.go to redirect signal polling into a tempdir.
+var workspaceRoot = "/workspace"
+
+// wait-for-signal polling cadence (D-D3) is locked at 500ms per CONTEXT.md /
+// RESEARCH §"Open Questions Q4 RESOLVED". The literal is inlined at
+// time.NewTicker call sites so the plan-acceptance grep
+// (`time\.NewTicker\(500\s*\*\s*time\.Millisecond\)`) catches drift.
 
 func main() {
 	fs := flag.NewFlagSet("stub-subagent", flag.ExitOnError)
@@ -109,6 +123,9 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 
 	case "exceed-output-paths":
 		return dispatchExceedOutputPaths(env, outPath, stderr)
+
+	case "wait-for-signal":
+		return dispatchWaitForSignal(ctx, env, outPath, stderr)
 
 	default:
 		fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode)
@@ -278,4 +295,32 @@ func dispatchExceedOutputPaths(env pkgdispatch.EnvelopeIn, outPath string, stder
 		return 2
 	}
 	return 1
+}
+
+// dispatchWaitForSignal handles testMode == "wait-for-signal" (Phase 3 D-D3).
+// Polls <workspaceRoot>/envelopes/{TaskUID}/release every signalPollInterval
+// (500ms). On signal-file appearance, delegates to dispatchSuccess to write
+// the canned success envelope at outPath and exits 0. On context cancellation
+// (e.g., the orchestrator pod being killed mid-wave during chaos-resume),
+// returns 0 without writing out.json — matches dispatchHang's ctx-cancel
+// contract so the new leader observes the Task as still Running.
+//
+// Used by the chaos-resume Layer B integration test (plan 03-10) to pin
+// Tasks at Running long enough for pod-kill + leader-handoff to observe,
+// then release them post-restart by touching the signal file.
+func dispatchWaitForSignal(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
+	signalPath := filepath.Join(workspaceRoot, "envelopes", env.TaskUID, "release")
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-ticker.C:
+			if _, err := os.Stat(signalPath); err == nil {
+				// Signal arrived — emit canned success envelope.
+				return dispatchSuccess(ctx, env, outPath, stderr)
+			}
+		}
+	}
 }
