@@ -16,12 +16,20 @@
 // path the CRDs use (CRD-05 scaffold).
 //
 // Per SUB-01 / DAG-05-mirror, this package MUST NOT import:
-//   - k8s.io/*            (any)
-//   - sigs.k8s.io/*       (any)
-//   - github.com/anthropics/* (any)
+//   - sigs.k8s.io/controller-runtime/* (manager/client/reconcile/...)
+//   - github.com/anthropics/* (any LLM SDK)
 //   - any internal/ package
+//
+// The package IS permitted to import k8s.io/apimachinery/pkg/runtime for
+// runtime.RawExtension (Phase 3 D-A1: ChildCRDSpec.Spec uses RawExtension as
+// the typed-but-deferred-decode escape hatch that keeps pkg/dispatch free of
+// api/v1alpha1 imports, which would invert the dependency arrow). The
+// required transitive closure of apimachinery (sigs.k8s.io/json,
+// sigs.k8s.io/structured-merge-diff, k8s.io/kube-openapi, k8s.io/klog) rides
+// along with that decision and is allowlisted.
 //
 // Enforced by the `make verify-dispatch-imports` Makefile target (SUB-01 /
 // DAG-05 mirror), which uses `go list -deps ./pkg/dispatch/...` to check
-// transitive imports.
+// transitive imports and strips the allowlisted apimachinery closure before
+// failing on any remaining k8s.io/sigs.k8s.io/anthropics import.
 package dispatch
