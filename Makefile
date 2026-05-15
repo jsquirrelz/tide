@@ -331,9 +331,25 @@ verify-dag-imports: ## Assert pkg/dag has no k8s.io/sigs.k8s.io/anthropics impor
 ##@ Dispatch Import Firewall (SUB-01 / DAG-05 mirror)
 
 .PHONY: verify-dispatch-imports
-verify-dispatch-imports: ## Assert pkg/dispatch has no k8s.io/sigs.k8s.io/anthropics imports (SUB-01).
+verify-dispatch-imports: ## Assert pkg/dispatch has no controller-runtime/anthropics/internal imports (SUB-01).
 	@echo "verifying pkg/dispatch has no forbidden imports (SUB-01 / DAG-05-mirror)..."
-	@FORBIDDEN=$$(go list -deps ./pkg/dispatch/... 2>/dev/null | grep -v '^github\.com/jsquirrelz/tide/pkg/dispatch' | grep -E '^(k8s\.io/|sigs\.k8s\.io/|github\.com/anthropics/)' || true); \
+	@# Narrow firewall (Phase 3 D-A1 / D-C3 + plan 03-01): pkg/dispatch is
+	@# permitted to import k8s.io/apimachinery/pkg/runtime (for ChildCRDSpec's
+	@# runtime.RawExtension — typed-but-deferred-decode escape hatch that keeps
+	@# pkg/dispatch from importing api/v1alpha1) and its required transitive
+	@# closure (sigs.k8s.io/json, sigs.k8s.io/structured-merge-diff,
+	@# k8s.io/kube-openapi, k8s.io/klog). Other k8s.io/* and sigs.k8s.io/*
+	@# packages (notably sigs.k8s.io/controller-runtime — manager/client/etc.)
+	@# remain forbidden; LLM SDKs (github.com/anthropics/*) remain forbidden.
+	@FORBIDDEN=$$(go list -deps ./pkg/dispatch/... 2>/dev/null \
+		| grep -v '^github\.com/jsquirrelz/tide/pkg/dispatch' \
+		| grep -E '^(k8s\.io/|sigs\.k8s\.io/|github\.com/anthropics/)' \
+		| grep -v '^k8s\.io/apimachinery/' \
+		| grep -v '^k8s\.io/klog/' \
+		| grep -v '^k8s\.io/kube-openapi/' \
+		| grep -v '^sigs\.k8s\.io/json' \
+		| grep -v '^sigs\.k8s\.io/structured-merge-diff/' \
+		|| true); \
 	if [ -n "$$FORBIDDEN" ]; then \
 		echo "SUB-01 / DAG-05-mirror violation: pkg/dispatch transitively depends on forbidden modules:"; \
 		echo "$$FORBIDDEN"; \

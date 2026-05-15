@@ -72,6 +72,17 @@ type EnvelopeIn struct {
 	// forwarding API requests (D-C3).
 	SignedToken string `json:"signedToken"`
 
+	// Provider selects the LLM vendor + model + per-vendor tuning knobs the
+	// subagent image should use to satisfy this dispatch (D-C3). Value type
+	// (not pointer): every dispatch declares a provider. The dispatching
+	// reconciler resolves Project.Spec.subagent.levels.{level}.{vendor,model,
+	// params} → Project-level defaults → Helm-chart defaults and stamps the
+	// resolved triple here. The provider implementation in
+	// internal/subagent/{vendor}/ rejects an envelope whose Provider.Vendor
+	// does not match its compiled-in sentinel — fail-fast defense against
+	// image-tag-vs-envelope drift.
+	Provider ProviderSpec `json:"provider"`
+
 	// Dev carries test-fixture-only metadata injected by integration tests.
 	// Real Claude-backed subagent images MUST ignore this struct entirely
 	// (RESEARCH.md Pitfall 9 / D-F1). The field is omitted from JSON when nil
@@ -116,6 +127,37 @@ type EnvelopeOut struct {
 
 	// CompletedAt is the wall-clock time the harness wrote this envelope.
 	CompletedAt time.Time `json:"completedAt"`
+
+	// ChildCRDs is the slice of typed child-CRD declarations a planner
+	// subagent emits for the orchestrator to materialize server-side (D-A1).
+	// MilestoneReconciler reads Phase entries here; PhaseReconciler reads
+	// Plan entries; PlanReconciler reads Task + Wave entries; TaskReconciler
+	// (executor level) emits no ChildCRDs. Omitted from JSON when empty so
+	// executor-level EnvelopeOut documents stay small. Consumers MUST
+	// validate ChildCRDSpec.Kind against an allowlist before server-side
+	// create — threat T-308 mitigation lives at the consumer site (plan
+	// 03-08), not in this type.
+	ChildCRDs []ChildCRDSpec `json:"childCRDs,omitempty"`
+
+	// Git carries git-side output a push Job or a harness produces, in
+	// particular the HeadSHA the per-Project run branch was advanced to at
+	// this dispatch's level boundary. Pointer + omitempty so dispatches that
+	// don't touch git (e.g. planner Jobs whose output is consumed only via
+	// child-CRD materialization) don't serialize a "git: null" placeholder.
+	Git *GitOutput `json:"git,omitempty"`
+}
+
+// GitOutput carries git-side output fields a dispatch produces, populated by
+// the push Job at level-boundary push success and by executor harnesses
+// committing per-Task worktree changes (D-B4 / D-B6). HeadSHA is the SHA the
+// per-run branch was advanced to; ProjectReconciler patches
+// Project.Status.git.lastPushedSHA from this value to enable the next push's
+// --force-with-lease check (Pitfall 13 mitigation).
+type GitOutput struct {
+	// HeadSHA is the 40-character hex SHA the per-run branch points to after
+	// this dispatch's level-boundary push completed. Required when Git is
+	// non-nil.
+	HeadSHA string `json:"headSHA"`
 }
 
 // Caps carries per-task resource limits (HARN-02). The orchestrator derives
@@ -157,6 +199,21 @@ type Usage struct {
 
 	// Iterations is the actual number of agent loop iterations completed.
 	Iterations int `json:"iterations"`
+
+	// CacheReadTokens is the count of input tokens served from the provider's
+	// prompt cache (D-C5). The Anthropic stream-json
+	// usage.cache_read_input_tokens field maps directly here. Surfacing this
+	// separately lets Project.Status.budget (Phase 2 D-D2) show the cached
+	// vs uncached input mix instead of hiding cache hits inside InputTokens.
+	CacheReadTokens int64 `json:"cacheReadTokens"`
+
+	// CacheCreationTokens is the count of input tokens spent populating the
+	// provider's prompt cache during this dispatch (D-C5). The Anthropic
+	// stream-json usage.cache_creation_input_tokens field maps directly here.
+	// Cache creation is billed at a higher rate than cache reads; separating
+	// the two prevents budget rollups from understating real spend on
+	// cache-warmup turns.
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
 }
 
 // Dev carries test-fixture-only metadata for the stub-subagent image. Real

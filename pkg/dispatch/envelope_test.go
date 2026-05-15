@@ -1,11 +1,14 @@
 package dispatch
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // assertRoundTripIn is a shared helper called by both the table-driven tests
@@ -58,6 +61,21 @@ func assertRoundTripIn(t *testing.T, in EnvelopeIn) {
 	if in.SignedToken != got.SignedToken {
 		t.Errorf("SignedToken: got %q, want %q", got.SignedToken, in.SignedToken)
 	}
+	// Provider value comparison (D-C3 — value type, not pointer).
+	if in.Provider.Vendor != got.Provider.Vendor {
+		t.Errorf("Provider.Vendor: got %q, want %q", got.Provider.Vendor, in.Provider.Vendor)
+	}
+	if in.Provider.Model != got.Provider.Model {
+		t.Errorf("Provider.Model: got %q, want %q", got.Provider.Model, in.Provider.Model)
+	}
+	if len(in.Provider.Params) != len(got.Provider.Params) {
+		t.Errorf("Provider.Params length: got %d, want %d", len(got.Provider.Params), len(in.Provider.Params))
+	}
+	for k, v := range in.Provider.Params {
+		if got.Provider.Params[k] != v {
+			t.Errorf("Provider.Params[%q]: got %q, want %q", k, got.Provider.Params[k], v)
+		}
+	}
 	// Dev pointer comparison.
 	if in.Dev == nil && got.Dev != nil {
 		t.Errorf("Dev: got %+v, want nil", got.Dev)
@@ -109,6 +127,35 @@ func assertRoundTripOut(t *testing.T, out EnvelopeOut) {
 	if out.CompletedAt.UnixNano() != got.CompletedAt.UnixNano() {
 		t.Errorf("CompletedAt: got %v, want %v", got.CompletedAt, out.CompletedAt)
 	}
+	// ChildCRDs slice comparison (D-A1).
+	if len(out.ChildCRDs) != len(got.ChildCRDs) {
+		t.Errorf("ChildCRDs length: got %d, want %d", len(got.ChildCRDs), len(out.ChildCRDs))
+	}
+	for i := range out.ChildCRDs {
+		if i >= len(got.ChildCRDs) {
+			break
+		}
+		if out.ChildCRDs[i].Kind != got.ChildCRDs[i].Kind {
+			t.Errorf("ChildCRDs[%d].Kind: got %q, want %q", i, got.ChildCRDs[i].Kind, out.ChildCRDs[i].Kind)
+		}
+		if out.ChildCRDs[i].Name != got.ChildCRDs[i].Name {
+			t.Errorf("ChildCRDs[%d].Name: got %q, want %q", i, got.ChildCRDs[i].Name, out.ChildCRDs[i].Name)
+		}
+		if !bytes.Equal(bytes.TrimSpace(out.ChildCRDs[i].Spec.Raw), bytes.TrimSpace(got.ChildCRDs[i].Spec.Raw)) {
+			t.Errorf("ChildCRDs[%d].Spec.Raw: got %s, want %s", i,
+				string(got.ChildCRDs[i].Spec.Raw), string(out.ChildCRDs[i].Spec.Raw))
+		}
+	}
+	// Git pointer comparison.
+	if out.Git == nil && got.Git != nil {
+		t.Errorf("Git: got %+v, want nil", got.Git)
+	}
+	if out.Git != nil && got.Git == nil {
+		t.Errorf("Git: got nil, want %+v", out.Git)
+	}
+	if out.Git != nil && got.Git != nil && out.Git.HeadSHA != got.Git.HeadSHA {
+		t.Errorf("Git.HeadSHA: got %q, want %q", got.Git.HeadSHA, out.Git.HeadSHA)
+	}
 }
 
 // stringSlicesEqual compares two string slices treating nil and empty as equal.
@@ -148,6 +195,11 @@ func fullyPopulatedEnvelopeIn() EnvelopeIn {
 		},
 		ProxyEndpoint: "https://127.0.0.1:8443",
 		SignedToken:   "hmac-token-base64==",
+		Provider: ProviderSpec{
+			Vendor: "anthropic",
+			Model:  "claude-sonnet-4-6",
+			Params: map[string]string{"thinking-budget": "4096"},
+		},
 		Dev: &Dev{
 			TestMode: "success",
 		},
@@ -164,13 +216,23 @@ func fullyPopulatedEnvelopeOut() EnvelopeOut {
 		Result:     "task completed",
 		Reason:     "",
 		Usage: Usage{
-			InputTokens:        12345,
-			OutputTokens:       678,
-			EstimatedCostCents: 3,
-			Iterations:         5,
+			InputTokens:          12345,
+			OutputTokens:         678,
+			EstimatedCostCents:   3,
+			Iterations:           5,
+			CacheReadTokens:      100,
+			CacheCreationTokens:  50,
 		},
 		Artifacts:   []string{"/workspace/artifacts/P-001/L-001/result.json"},
 		CompletedAt: time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC),
+		ChildCRDs: []ChildCRDSpec{
+			{
+				Kind: "Phase",
+				Name: "phase-foo",
+				Spec: runtime.RawExtension{Raw: []byte(`{"projectRef":"p1"}`)},
+			},
+		},
+		Git: &GitOutput{HeadSHA: "abc123def456"},
 	}
 }
 
@@ -346,5 +408,149 @@ func TestEnvelopeOut_SubtestTable(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			assertRoundTripOut(t, c.out)
 		})
+	}
+}
+
+// --- Phase 3 envelope-schema-bump tests (plan 03-01 Task 2) ---
+
+// TestEnvelopeIn_PlannerLevel_RoundTrip is plan-03-01 Task 2 Test 1: an
+// EnvelopeIn with Role="planner", Level="milestone", Provider populated
+// round-trips through json and ValidateAPIVersionKind still passes for the
+// canonical apiVersion+kind pair (preserves Phase 2 D-A3 envelope rejection
+// contract).
+func TestEnvelopeIn_PlannerLevel_RoundTrip(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.Role = "planner"
+	in.Level = "milestone"
+	in.Provider = ProviderSpec{
+		Vendor: "anthropic",
+		Model:  "claude-opus-4-7",
+		Params: map[string]string{"thinking-budget": "16384"},
+	}
+	assertRoundTripIn(t, in)
+
+	if err := ValidateAPIVersionKind(in.APIVersion, in.Kind, KindTaskEnvelopeIn); err != nil {
+		t.Errorf("ValidateAPIVersionKind: unexpected error %v", err)
+	}
+}
+
+// TestEnvelopeIn_UnknownAPIVersion_StillRejected is plan-03-01 Task 2 Test 2:
+// the Phase 2 D-A3 schema-rejection contract is preserved across the Phase 3
+// schema bump — an unknown apiVersion (tideproject.k8s/v9999) is still
+// rejected by ValidateAPIVersionKind even though the body carries Phase 3
+// fields.
+func TestEnvelopeIn_UnknownAPIVersion_StillRejected(t *testing.T) {
+	err := ValidateAPIVersionKind("tideproject.k8s/v9999", KindTaskEnvelopeIn, KindTaskEnvelopeIn)
+	if err == nil {
+		t.Fatal("expected error for unknown apiVersion, got nil")
+	}
+	var target *UnknownAPIVersionError
+	if !errors.As(err, &target) {
+		t.Fatalf("expected *UnknownAPIVersionError, got %T: %v", err, err)
+	}
+	if target.APIVersion != "tideproject.k8s/v9999" {
+		t.Errorf("UnknownAPIVersionError.APIVersion = %q, want %q",
+			target.APIVersion, "tideproject.k8s/v9999")
+	}
+}
+
+// TestEnvelopeOut_ChildCRDs_RoundTrip is plan-03-01 Task 2 Test 3: an
+// EnvelopeOut with a populated ChildCRDs slice (Phase materialization shape)
+// round-trips through json; the raw spec bytes survive the round-trip
+// per D-A1.
+func TestEnvelopeOut_ChildCRDs_RoundTrip(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.ChildCRDs = []ChildCRDSpec{
+		{
+			Kind: "Phase",
+			Name: "phase-foo",
+			Spec: runtime.RawExtension{Raw: []byte(`{}`)},
+		},
+	}
+	assertRoundTripOut(t, out)
+}
+
+// TestEnvelopeOut_OmitsChildCRDsWhenEmpty asserts that the serialized JSON
+// does NOT contain "childCRDs" when the slice is nil (omitempty contract —
+// executor-level EnvelopeOut never materializes child CRDs and should not
+// carry the field). Companion to plan-03-01 Task 2 Test 3.
+func TestEnvelopeOut_OmitsChildCRDsWhenEmpty(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.ChildCRDs = nil
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"childCRDs"`) {
+		t.Errorf(`serialized JSON contains "childCRDs" key but slice was nil; got: %s`, string(data))
+	}
+}
+
+// TestEnvelopeOut_Git_RoundTrip is plan-03-01 Task 2 Test 4: an EnvelopeOut
+// with Git=&GitOutput{HeadSHA:...} round-trips; nil Git omits the "git" JSON
+// field per the *GitOutput + omitempty contract.
+func TestEnvelopeOut_Git_RoundTrip(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.Git = &GitOutput{HeadSHA: "abc123"}
+	assertRoundTripOut(t, out)
+
+	// Nil Git → no "git" key in JSON.
+	out.Git = nil
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"git"`) {
+		t.Errorf(`serialized JSON contains "git" key but Git was nil; got: %s`, string(data))
+	}
+}
+
+// TestUsage_CacheTokens is plan-03-01 Task 2 Test 5: Usage.CacheReadTokens
+// and Usage.CacheCreationTokens round-trip via JSON. Field tags MUST be
+// `cacheReadTokens` and `cacheCreationTokens` per D-C5 (maps to Anthropic
+// stream-json cache_read_input_tokens / cache_creation_input_tokens).
+func TestUsage_CacheTokens(t *testing.T) {
+	u := Usage{
+		InputTokens:         200,
+		OutputTokens:        50,
+		EstimatedCostCents:  1,
+		Iterations:          1,
+		CacheReadTokens:     100,
+		CacheCreationTokens: 50,
+	}
+	data, err := json.Marshal(u)
+	if err != nil {
+		t.Fatalf("json.Marshal(Usage): %v", err)
+	}
+	if !strings.Contains(string(data), `"cacheReadTokens":100`) {
+		t.Errorf(`serialized JSON missing "cacheReadTokens":100; got: %s`, string(data))
+	}
+	if !strings.Contains(string(data), `"cacheCreationTokens":50`) {
+		t.Errorf(`serialized JSON missing "cacheCreationTokens":50; got: %s`, string(data))
+	}
+	var got Usage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal(Usage): %v", err)
+	}
+	if got != u {
+		t.Errorf("Usage round-trip mismatch: got %+v, want %+v", got, u)
+	}
+}
+
+// TestEnvelopeIn_ProviderTag asserts that EnvelopeIn serializes the Provider
+// field under the canonical "provider" JSON key (D-C3 — value type, not
+// pointer; every dispatch carries a provider).
+func TestEnvelopeIn_ProviderTag(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"provider"`) {
+		t.Errorf(`serialized JSON missing "provider" key; got: %s`, string(data))
+	}
+	if !strings.Contains(string(data), `"vendor":"anthropic"`) {
+		t.Errorf(`serialized JSON missing "vendor":"anthropic"; got: %s`, string(data))
 	}
 }
