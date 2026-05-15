@@ -22,7 +22,7 @@
 //	success             — writes canned result.txt + out.json; exit 0.
 //	fail-exit-1         — writes failure out.json; exit 1.
 //	hang                — loops until SIGTERM/context cancellation; exit 0.
-//	exceed-output-paths — writes /workspace/escape/leak.txt + out.json; exit 0.
+//	exceed-output-paths — writes /workspace/escape/leak.txt + failure out.json; exit 1.
 //	(empty)             — treated as "success".
 //
 // Real Claude-backed subagent images MUST ignore the Dev field entirely
@@ -156,7 +156,16 @@ func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
+	writeTerminationMessage(data)
 	return nil
+}
+
+func writeTerminationMessage(data []byte) {
+	path := os.Getenv("TIDE_TERMINATION_MESSAGE_PATH")
+	if path == "" {
+		path = "/dev/termination-log"
+	}
+	_ = os.WriteFile(path, data, 0o644)
 }
 
 // dispatchSuccess handles testMode == "success" (or empty). It writes a canned
@@ -252,8 +261,8 @@ func dispatchExceedOutputPaths(env pkgdispatch.EnvelopeIn, outPath string, stder
 		APIVersion: pkgdispatch.APIVersionV1Alpha1,
 		Kind:       pkgdispatch.KindTaskEnvelopeOut,
 		TaskUID:    env.TaskUID,
-		ExitCode:   0,
-		Result:     "success",
+		ExitCode:   1,
+		Result:     "output-paths-violation",
 		Reason:     "stub testMode=exceed-output-paths",
 		Usage: pkgdispatch.Usage{
 			InputTokens:        100,
@@ -268,5 +277,5 @@ func dispatchExceedOutputPaths(env pkgdispatch.EnvelopeIn, outPath string, stder
 		fmt.Fprintf(stderr, "stub-subagent: write out.json: %v\n", err)
 		return 2
 	}
-	return 0
+	return 1
 }

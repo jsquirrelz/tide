@@ -204,8 +204,9 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	// 6. Build the main subagent container. The subagent receives only the signed token
 	// (not the raw provider secret) — D-C4 secret isolation contract.
 	subagent := corev1.Container{
-		Name:  ContainerNameSubagent,
-		Image: opts.SubagentImage,
+		Name:       ContainerNameSubagent,
+		Image:      opts.SubagentImage,
+		WorkingDir: "/workspace",
 		Env: []corev1.EnvVar{
 			{Name: "TIDE_TASK_UID", Value: string(opts.Task.UID)},
 			// D-C1: subagent points to the localhost credproxy — never reaches Anthropic directly.

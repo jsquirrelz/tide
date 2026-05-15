@@ -38,6 +38,7 @@ controllerManager:
       repository: ghcr.io/jsquirrelz/tide-controller
       tag: v0.1.0-dev
       pullPolicy: IfNotPresent
+    podAnnotations: {}
     resources:
       limits:
         cpu: 500m

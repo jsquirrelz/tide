@@ -154,15 +154,15 @@ spec:
 	})
 })
 
-// createNamespace creates a namespace in the kind cluster and ensures the
-// tide-subagent ServiceAccount exists inside it.
+// createNamespace creates a namespace in the kind cluster and ensures the Task
+// Job dependencies exist inside it.
 //
-// Every Task Job's PodSpec references the tide-subagent SA by name
-// (jobspec.go:43); without it Pod creation fails with
-// `serviceaccount "tide-subagent" not found`. The chart only templates
-// the SA in tide-system, so per-test namespaces (failure-test, caps-test,
-// output-test, credproxy-test) get it via this helper at namespace-create
-// time. See ensureSubagentSA in suite_test.go for the D-A4 rationale.
+// Every Task Job's PodSpec references tide-subagent, tide-projects, and
+// tide-signing-key by name in its own namespace; without them Pod creation,
+// scheduling, or credproxy startup fails. The chart templates these resources
+// only in tide-system, so per-test namespaces get them via this helper at
+// namespace-create time. See ensureSubagentSA in suite_test.go for the D-A4
+// rationale.
 //
 // Phase 02.1 D-02 (02.1-BASELINE.md).
 func createNamespace(ns string) {
@@ -174,6 +174,8 @@ metadata:
 `, ns)
 	_ = applyYAML(nsYAML)
 	ensureSubagentSA(ns)
+	ensureProjectsPVC(ns)
+	ensureSigningKeySecret(ns)
 }
 
 // makeKindTask creates a Task in the kind cluster.

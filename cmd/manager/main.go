@@ -183,9 +183,13 @@ func main() {
 		RequestsPerMinute: rateLimitDefaultRPM,
 		BurstSize:         rateLimitDefaultBurst,
 	}
-	//    d. EnvelopeOut reader — reads from the shared tide-projects PVC at /workspaces
-	//       (Blocker #2/#3 fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
-	envReader := &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"}
+	//    d. EnvelopeOut reader — prefer the completed subagent container's
+	//       termination message because Task PVCs are namespace-local; keep the
+	//       filesystem reader as a same-namespace/local-test fallback.
+	envReader := &podjob.PodStatusEnvelopeReader{
+		Client:   mgr.GetAPIReader(),
+		Fallback: &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"},
+	}
 	//    e. Dispatcher — wires PodJobBackend into both Plan and Task reconcilers' Phase 2
 	//       dispatch paths (cascade-8 fix per .planning/debug/credproxy-backoff-suppression.md).
 	//       Without this, plan_controller.go:121 and task_controller.go:167 short-circuit

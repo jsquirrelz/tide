@@ -16,6 +16,11 @@ endif
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
 
+# Integration test budget knobs. The outer timeout protects the shell command;
+# KIND_GO_TEST_TIMEOUT must exceed the kind suite's helm --wait window.
+INTEGRATION_TIMEOUT ?= 1800s
+KIND_GO_TEST_TIMEOUT ?= 20m
+
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
 SHELL = /usr/bin/env bash -o pipefail
@@ -119,9 +124,9 @@ cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 
 .PHONY: test-int test-int-fast test-int-kind-prep
 
-test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Timeout 300s (TEST-02 budget). Requires Docker + kind.
+test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Requires Docker + kind.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		timeout 1800s go test ./test/integration/... -v -timeout=5m -ginkgo.v
+		timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 
 test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \

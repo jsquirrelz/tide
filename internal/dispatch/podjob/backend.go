@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -24,9 +25,9 @@ import (
 // Injected into PodJobBackend for testability — production wiring uses
 // FilesystemEnvelopeReader.
 type EnvelopeReader interface {
-	// ReadOut reads /workspace/envelopes/{taskUID}/out.json for the given taskUID.
+	// ReadOut reads /workspaces/{projectUID}/workspace/envelopes/{taskUID}/out.json.
 	// Returns a wrapped error if the file does not exist or cannot be parsed.
-	ReadOut(ctx context.Context, taskUID string) (pkgdispatch.EnvelopeOut, error)
+	ReadOut(ctx context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error)
 }
 
 // FilesystemEnvelopeReader reads the EnvelopeOut JSON from the local filesystem.
@@ -41,9 +42,10 @@ type FilesystemEnvelopeReader struct {
 	WorkspaceRoot string
 }
 
-// ReadOut reads the EnvelopeOut from WorkspaceRoot/envelopes/{taskUID}/out.json.
-func (r *FilesystemEnvelopeReader) ReadOut(_ context.Context, taskUID string) (pkgdispatch.EnvelopeOut, error) {
-	path := filepath.Join(r.WorkspaceRoot, "envelopes", taskUID, "out.json")
+// ReadOut reads the EnvelopeOut from
+// WorkspaceRoot/{projectUID}/workspace/envelopes/{taskUID}/out.json.
+func (r *FilesystemEnvelopeReader) ReadOut(_ context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	path := filepath.Join(r.WorkspaceRoot, projectUID, "workspace", "envelopes", taskUID, "out.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("read envelope out %q: %w", path, err)
@@ -53,6 +55,43 @@ func (r *FilesystemEnvelopeReader) ReadOut(_ context.Context, taskUID string) (p
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("unmarshal envelope out %q: %w", path, err)
 	}
 	return out, nil
+}
+
+// PodStatusEnvelopeReader reads EnvelopeOut JSON from the completed subagent
+// container's termination message. This avoids assuming the manager can mount
+// the namespace-local PVC used by a Task Job.
+type PodStatusEnvelopeReader struct {
+	Client   client.Reader
+	Fallback EnvelopeReader
+}
+
+func (r *PodStatusEnvelopeReader) ReadOut(ctx context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	var pods corev1.PodList
+	if r.Client != nil {
+		if err := r.Client.List(ctx, &pods, client.MatchingLabels{"tideproject.k8s/task-uid": taskUID}); err != nil {
+			return pkgdispatch.EnvelopeOut{}, fmt.Errorf("list pods for task %s: %w", taskUID, err)
+		}
+		for _, pod := range pods.Items {
+			for _, status := range pod.Status.ContainerStatuses {
+				if status.Name != ContainerNameSubagent || status.State.Terminated == nil {
+					continue
+				}
+				msg := strings.TrimSpace(status.State.Terminated.Message)
+				if msg == "" {
+					continue
+				}
+				var out pkgdispatch.EnvelopeOut
+				if err := json.Unmarshal([]byte(msg), &out); err != nil {
+					return pkgdispatch.EnvelopeOut{}, fmt.Errorf("unmarshal termination envelope for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+				}
+				return out, nil
+			}
+		}
+	}
+	if r.Fallback != nil {
+		return r.Fallback.ReadOut(ctx, projectUID, taskUID)
+	}
+	return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no termination envelope found for task %s", taskUID)
 }
 
 // PodJobBackend satisfies internal/dispatch.Dispatcher. It creates one K8s Job per
@@ -192,7 +231,7 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 	}
 
 	// 9. Read EnvelopeOut from PVC via the injected reader.
-	out, err := b.EnvReader.ReadOut(ctx, in.TaskUID)
+	out, err := b.EnvReader.ReadOut(ctx, string(project.UID), in.TaskUID)
 	if err != nil {
 		return pkgdispatch.EnvelopeOut{}, err
 	}

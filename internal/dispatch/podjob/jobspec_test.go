@@ -305,6 +305,19 @@ func TestBuildJobSpec_VolumesIncludeProjectWorkspaceAndCertShared(t *testing.T) 
 	}
 }
 
+func TestBuildJobSpec_SubagentWorkingDirIsWorkspace(t *testing.T) {
+	opts := buildTestOptions()
+	job := BuildJobSpec(opts)
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		t.Fatal("no containers in pod spec")
+	}
+	subagent := containers[0]
+	if subagent.WorkingDir != "/workspace" {
+		t.Fatalf("subagent WorkingDir = %q, want /workspace", subagent.WorkingDir)
+	}
+}
+
 func TestBuildJobSpec_EnvelopeWriterCommand_DecodesB64ToInJson(t *testing.T) {
 	opts := buildTestOptions()
 	job := BuildJobSpec(opts)

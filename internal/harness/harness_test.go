@@ -212,3 +212,34 @@ func TestHarness_Run_OutputPathsViolation(t *testing.T) {
 		t.Errorf("ExitCode: got %d, want 1", out.ExitCode)
 	}
 }
+
+func TestValidateIgnoresWorkspaceEnvelopeTransportFiles(t *testing.T) {
+	ws := t.TempDir()
+	startedAt := time.Now()
+	time.Sleep(5 * time.Millisecond)
+
+	if err := os.MkdirAll(filepath.Join(ws, "alpha.go"), 0o755); err != nil {
+		t.Fatalf("mkdir declared output: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "alpha.go", "result.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write declared output: %v", err)
+	}
+	envelopeDir := filepath.Join(ws, "envelopes", "task-001")
+	if err := os.MkdirAll(envelopeDir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envelopeDir, "in.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write envelope in: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envelopeDir, "out.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write envelope out: %v", err)
+	}
+
+	violations, err := Validate(ws, startedAt, []string{"alpha.go"})
+	if err != nil {
+		t.Fatalf("Validate error: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("Validate violations = %v, want none", violations)
+	}
+}

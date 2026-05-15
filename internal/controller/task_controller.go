@@ -19,8 +19,11 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"strconv"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -108,6 +111,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=plans,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
@@ -426,7 +430,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	logger := logf.FromContext(ctx)
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
-	out, err := r.EnvReader.ReadOut(ctx, string(task.UID))
+	out, err := r.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
 	if err != nil {
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Failed"
@@ -448,7 +452,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Phase 3 moves validation into the Pod once the harness-wrapped runtime lands.
 	if out.Result != "output-paths-violation" && len(task.Spec.DeclaredOutputPaths) > 0 && task.Status.StartedAt != nil {
 		taskWorkspaceRoot := fmt.Sprintf("/workspaces/%s/workspace", string(project.UID))
-		violations, vErr := harness.Validate(taskWorkspaceRoot, task.Status.StartedAt.Time, task.Spec.DeclaredOutputPaths)
+		violations, skipped, vErr := validateControllerOutputPaths(taskWorkspaceRoot, task.Status.StartedAt.Time, task.Spec.DeclaredOutputPaths)
 		if vErr != nil {
 			patch := client.MergeFrom(task.DeepCopy())
 			task.Status.Phase = "Failed"
@@ -463,6 +467,9 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 				return ctrl.Result{}, patchErr
 			}
 			return ctrl.Result{}, nil
+		}
+		if skipped {
+			logger.V(1).Info("Skipped controller-side output validation; workspace root not visible", "task", task.Name, "workspaceRoot", taskWorkspaceRoot)
 		}
 		if len(violations) > 0 {
 			msg := buildViolationMessage(violations)
@@ -487,10 +494,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	patch := client.MergeFrom(task.DeepCopy())
 	if out.ExitCode != 0 || out.Result == "cap-hit" || out.Result == "output-paths-violation" {
 		task.Status.Phase = "Failed"
-		reason := out.Result
-		if reason == "" {
-			reason = "NonZeroExitCode"
-		}
+		reason := conditionReasonFromEnvelopeResult(out.Result, out.ExitCode)
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha1.ConditionFailed,
 			Status:             metav1.ConditionTrue,
@@ -767,6 +771,64 @@ func buildViolationMessage(violations []string) string {
 		msg += "\n  " + v
 	}
 	return msg + suffix
+}
+
+func validateControllerOutputPaths(workspaceRoot string, runStart time.Time, declared []string) ([]string, bool, error) {
+	violations, err := harness.Validate(workspaceRoot, runStart, declared)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return violations, false, nil
+}
+
+func conditionReasonFromEnvelopeResult(result string, exitCode int) string {
+	if result == "" {
+		if exitCode != 0 {
+			return "NonZeroExitCode"
+		}
+		return "JobComplete"
+	}
+
+	var b strings.Builder
+	capitalizeNext := true
+	wrote := false
+	for _, r := range result {
+		if isASCIIAlpha(r) || isASCIIDigit(r) {
+			if !wrote && !isASCIIAlpha(r) {
+				b.WriteString("Result")
+			}
+			if capitalizeNext && isASCIIAlpha(r) {
+				r = toASCIIUpper(r)
+			}
+			b.WriteRune(r)
+			wrote = true
+			capitalizeNext = false
+			continue
+		}
+		capitalizeNext = true
+	}
+	if !wrote {
+		return "EnvelopeResult"
+	}
+	return b.String()
+}
+
+func isASCIIAlpha(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+}
+
+func isASCIIDigit(r rune) bool {
+	return r >= '0' && r <= '9'
+}
+
+func toASCIIUpper(r rune) rune {
+	if r >= 'a' && r <= 'z' {
+		return r - ('a' - 'A')
+	}
+	return r
 }
 
 // isJobTerminal returns true if the Job has a Complete or Failed condition with Status=True.
