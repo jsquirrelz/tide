@@ -101,7 +101,7 @@ func (m *mapEnvReader) SetErr(taskUID string, err error) {
 	m.errs[taskUID] = err
 }
 
-func (m *mapEnvReader) ReadOut(_ context.Context, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+func (m *mapEnvReader) ReadOut(_ context.Context, _, taskUID string) (pkgdispatch.EnvelopeOut, error) {
 	if err, ok := m.errs[taskUID]; ok {
 		return pkgdispatch.EnvelopeOut{}, err
 	}

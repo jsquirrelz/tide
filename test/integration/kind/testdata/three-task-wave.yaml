@@ -6,6 +6,20 @@ metadata:
   name: tide-int-test
 
 ---
+# Workspace PVC used by Task Jobs in this namespace
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-int-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
 # Provider Secret (Anthropic API key placeholder — stub-subagent doesn't use it)
 apiVersion: v1
 kind: Secret

@@ -2,7 +2,10 @@ package podjob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -40,7 +43,7 @@ type fakeEnvReader struct {
 	err error
 }
 
-func (f *fakeEnvReader) ReadOut(_ context.Context, _ string) (pkgdispatch.EnvelopeOut, error) {
+func (f *fakeEnvReader) ReadOut(_ context.Context, _, _ string) (pkgdispatch.EnvelopeOut, error) {
 	return f.out, f.err
 }
 
@@ -75,6 +78,90 @@ func testProject(ns, name string, uid types.UID) *tidev1alpha1.Project {
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret",
 		},
+	}
+}
+
+func TestFilesystemEnvelopeReaderReadsProjectScopedWorkspacePath(t *testing.T) {
+	root := t.TempDir()
+	projectUID := "project-uid-alpha"
+	taskUID := "task-uid-alpha"
+	want := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    taskUID,
+		ExitCode:   0,
+		Result:     "success",
+	}
+	path := filepath.Join(root, projectUID, "workspace", "envelopes", taskUID, "out.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll envelope dir: %v", err)
+	}
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal EnvelopeOut: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write EnvelopeOut: %v", err)
+	}
+
+	reader := &FilesystemEnvelopeReader{WorkspaceRoot: root}
+	got, err := reader.ReadOut(context.Background(), projectUID, taskUID)
+	if err != nil {
+		t.Fatalf("ReadOut() error = %v", err)
+	}
+	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
+		t.Fatalf("ReadOut() = %+v, want %+v", got, want)
+	}
+}
+
+func TestPodStatusEnvelopeReaderReadsSubagentTerminationMessage(t *testing.T) {
+	taskUID := "task-uid-alpha"
+	want := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    taskUID,
+		ExitCode:   0,
+		Result:     "success",
+	}
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal EnvelopeOut: %v", err)
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "task-pod",
+			Namespace: "task-ns",
+			Labels: map[string]string{
+				"tideproject.k8s/task-uid": taskUID,
+			},
+		},
+		Status: corev1.PodStatus{
+			ContainerStatuses: []corev1.ContainerStatus{
+				{
+					Name: ContainerNameSubagent,
+					State: corev1.ContainerState{
+						Terminated: &corev1.ContainerStateTerminated{
+							Message: string(data),
+						},
+					},
+				},
+			},
+		},
+	}
+	reader := &PodStatusEnvelopeReader{
+		Client: fake.NewClientBuilder().
+			WithScheme(testScheme(t)).
+			WithObjects(pod).
+			Build(),
+	}
+
+	got, err := reader.ReadOut(context.Background(), "project-uid-alpha", taskUID)
+	if err != nil {
+		t.Fatalf("ReadOut() error = %v", err)
+	}
+	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
+		t.Fatalf("ReadOut() = %#v, want %#v", got, want)
 	}
 }
 

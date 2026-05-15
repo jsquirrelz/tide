@@ -354,12 +354,12 @@ func applyController() {
 		_, _ = applyCmd.CombinedOutput()
 	}
 
-	// Ensure the tide-subagent ServiceAccount exists in the test-fixture
-	// namespace (wave_test.go fixtures apply Tasks here; jobspec.go:43 sets
-	// ServiceAccountName: tide-subagent on every Pod, so the SA must exist
-	// in any namespace where Tasks run — chart only templates it in
-	// tide-system / .Release.Namespace).
+	// Ensure namespace-local resources exist in the test-fixture namespace
+	// (wave_test.go fixtures apply Tasks here). Every Task Job references
+	// tide-subagent and tide-projects by name in its own namespace, while the
+	// chart only templates them in tide-system / .Release.Namespace.
 	ensureSubagentSA(kindNamespace)
+	ensureProjectsPVC(kindNamespace)
 
 	// Resolve helm: system dep per STACK.md (not project-local). No
 	// bin/-fallback — helm is on $PATH or we soft-skip per WR-09.
@@ -391,13 +391,34 @@ func applyController() {
 	// builds + tags it as `controller:test`. images.stubSubagent + credProxy
 	// keep their chart-default repositories — only .tag and .pullPolicy
 	// need override.
-	// --replace makes KEEP_KIND_CLUSTER=true reruns against an existing
-	// `tide` release in `tide-system` idempotent — without it, helm errors
-	// with "cannot re-use a name that is still in use" on second install.
-	// Source: .planning/phases/02.1-.../02.1-02-SUMMARY.md §"Issues
-	// Encountered" — Phase 02.2 collateral fix.
-	helmCmd := exec.CommandContext(ctx, "helm",
-		"install", "tide", chartDir,
+	// Use upgrade --install so KEEP_KIND_CLUSTER=true reruns update the live
+	// release instead of continuing with a stale controller image. helm install
+	// --replace only works for deleted releases; it fails for a currently
+	// deployed release with "cannot re-use a name that is still in use".
+	rolloutNonce := fmt.Sprintf("%d", time.Now().UnixNano())
+	helmCmd := exec.CommandContext(ctx, "helm", helmControllerArgs(chartDir, rolloutNonce)...)
+	start := time.Now()
+	out, err := helmCmd.CombinedOutput()
+	elapsed := time.Since(start)
+	if err != nil {
+		GinkgoWriter.Printf("helm upgrade --install failed after %s: %v\n%s\n", elapsed, err, out)
+		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
+			Fail(fmt.Sprintf("helm upgrade --install failed (TIDE_REQUIRE_CONTROLLER=1): %v", err))
+		}
+		return
+	}
+	GinkgoWriter.Printf("helm upgrade --install completed in %s\n%s\n", elapsed, out)
+
+	// The chart creates tide-signing-key only in the controller namespace, but
+	// credproxy sidecars resolve envFrom secrets in the Task pod namespace.
+	// Mirror the same signing key into the shared fixture namespace after helm
+	// creates the source secret.
+	ensureSigningKeySecret(kindNamespace)
+}
+
+func helmControllerArgs(chartDir string, rolloutNonce string) []string {
+	return []string{
+		"upgrade", "--install", "tide", chartDir,
 		"--create-namespace", "-n", kindControllerNamespace,
 		"--kubeconfig", kubeconfigPath,
 		"--set", "controllerManager.manager.image.repository=controller",
@@ -407,25 +428,15 @@ func applyController() {
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
 		"--set", "images.credProxy.tag=test",
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
+		"--set-string", "controllerManager.manager.podAnnotations.tideproject\\.k8s/restart-nonce=" + rolloutNonce,
 		// Override the chart's default accessModes [ReadWriteMany] to [ReadWriteOnce]
 		// because kind's default rancher.io/local-path provisioner only supports
 		// RWO/RWOPod. Single-node kind cluster doesn't need RWX semantics for these
 		// tests. See .planning/phases/02.2-.../02.2-01-VERIFICATION.md §"Fix
 		// landscape" Option A (chart-side override + test-side --set).
 		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
-		"--wait", "--replace", "--timeout", "5m",
-	)
-	start := time.Now()
-	out, err := helmCmd.CombinedOutput()
-	elapsed := time.Since(start)
-	if err != nil {
-		GinkgoWriter.Printf("helm install failed after %s: %v\n%s\n", elapsed, err, out)
-		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
-			Fail(fmt.Sprintf("helm install failed (TIDE_REQUIRE_CONTROLLER=1): %v", err))
-		}
-		return
+		"--wait", "--timeout", "5m",
 	}
-	GinkgoWriter.Printf("helm install completed in %s\n%s\n", elapsed, out)
 }
 
 // waitForControllerReady waits up to 90s for the controller Deployment to
@@ -526,6 +537,80 @@ automountServiceAccountToken: true
 	_ = applyYAML(saYAML)
 }
 
+// ensureProjectsPVC creates the tide-projects PersistentVolumeClaim in the
+// given namespace. Every Task Job mounts this PVC by name in its own namespace
+// (internal/controller/task_controller.go passes "tide-projects" to
+// BuildJobSpec); without it, Pods stay Pending with
+// `persistentvolumeclaim "tide-projects" not found`.
+//
+// The chart templates this PVC only in .Release.Namespace (= tide-system, see
+// charts/tide/templates/projects-pvc.yaml), but Layer B applies Tasks into
+// per-test namespaces. For kind, a namespace-local 1Gi RWO claim matches the
+// helm test override for the single-node local-path provisioner.
+func ensureProjectsPVC(ns string) {
+	_ = applyYAML(projectsPVCYAML(ns))
+}
+
+func projectsPVCYAML(ns string) string {
+	return fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+`, ns)
+}
+
+// ensureSigningKeySecret mirrors the helm-created tide-signing-key Secret into
+// a Task namespace. Every credproxy sidecar references this Secret by name via
+// envFrom in its own Pod namespace; without the copy, Pods fail to start with
+// `secret "tide-signing-key" not found`.
+//
+// In CRDs-only mode there is no helm-created source secret, so this helper
+// degrades to a warning and leaves tests that need the controller to fail or
+// skip according to their existing requirements.
+func ensureSigningKeySecret(ns string) {
+	keyData, err := controllerSigningKeyData()
+	if err != nil {
+		GinkgoWriter.Printf("Warning: could not mirror tide-signing-key into namespace %q: %v\n", ns, err)
+		return
+	}
+	_ = applyYAML(signingKeySecretYAML(ns, keyData))
+}
+
+func controllerSigningKeyData() (string, error) {
+	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+		"get", "secret", "tide-signing-key",
+		"-n", kindControllerNamespace,
+		"-o", "jsonpath={.data.TIDE_SIGNING_KEY}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	keyData := strings.TrimSpace(string(out))
+	if keyData == "" {
+		return "", fmt.Errorf("secret %s/tide-signing-key has empty data.TIDE_SIGNING_KEY", kindControllerNamespace)
+	}
+	return keyData, nil
+}
+
+func signingKeySecretYAML(ns, keyData string) string {
+	return fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-signing-key
+  namespace: %s
+type: Opaque
+data:
+  TIDE_SIGNING_KEY: %s
+`, ns, keyData)
+}
+
 // applyHierarchy creates the full Namespace+Secret+Project+Milestone+Phase+Plan+Task
 // hierarchy required by the task controller's resolveProject dispatch path.
 //
@@ -549,13 +634,14 @@ automountServiceAccountToken: true
 // pattern in v1). Future tests requiring richer parameterization extend the signature
 // in a follow-up plan rather than copy-paste-mutating the helper.
 //
-// The helper calls createNamespace(ns) (which also calls ensureSubagentSA(ns)) as
-// its first step; callers must NOT call createNamespace themselves before calling
-// applyHierarchy to avoid double-create noise.
+// The helper calls createNamespace(ns) (which also creates namespace-local
+// tide-subagent and tide-projects resources) as its first step; callers must
+// NOT call createNamespace themselves before calling applyHierarchy to avoid
+// double-create noise.
 //
 // API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule — never tide.io).
 func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
-	// Step 1: Create Namespace + tide-subagent SA (createNamespace calls ensureSubagentSA).
+	// Step 1: Create Namespace + namespace-local Task Job dependencies.
 	createNamespace(ns)
 
 	// Step 2: Derive deterministic names for the hierarchy parents.
@@ -666,15 +752,15 @@ spec:
 // signature shape but with only the namespace parameter (no planName/taskName
 // because the caller supplies those).
 //
-// Like applyHierarchy, this helper calls createNamespace(ns) (which also calls
-// ensureSubagentSA(ns)) as its first step; callers must NOT call
-// createNamespace themselves before calling createProjectHierarchy to avoid
-// double-create noise.
+// Like applyHierarchy, this helper calls createNamespace(ns) (which also
+// creates namespace-local tide-subagent and tide-projects resources) as its
+// first step; callers must NOT call createNamespace themselves before calling
+// createProjectHierarchy to avoid double-create noise.
 //
 // API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule —
 // never tide.io).
 func createProjectHierarchy(ctx context.Context, ns string) error {
-	// Step 1: Create Namespace + tide-subagent SA.
+	// Step 1: Create Namespace + namespace-local Task Job dependencies.
 	createNamespace(ns)
 
 	// Step 2: Derive deterministic names for the hierarchy parents
@@ -751,6 +837,10 @@ func applyFile(path string) error {
 
 // deleteNamespace deletes a namespace from the kind cluster.
 func deleteNamespace(ns string) {
+	if os.Getenv("KEEP_KIND_NAMESPACES") == "true" {
+		GinkgoWriter.Printf("KEEP_KIND_NAMESPACES=true; keeping namespace %s for debug inspection\n", ns)
+		return
+	}
 	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", kubeconfigPath,
 		"delete", "namespace", ns, "--ignore-not-found=true", "--timeout=30s")
 	_, _ = cmd.CombinedOutput()

@@ -110,6 +110,35 @@ func TestStub_SuccessMode(t *testing.T) {
 	}
 }
 
+func TestWriteEnvelopeAlsoWritesTerminationMessage(t *testing.T) {
+	dir := t.TempDir()
+	terminationPath := filepath.Join(dir, "termination.log")
+	t.Setenv("TIDE_TERMINATION_MESSAGE_PATH", terminationPath)
+
+	want := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    "task-termination",
+		ExitCode:   0,
+		Result:     "success",
+	}
+	if err := writeEnvelope(filepath.Join(dir, "out.json"), want); err != nil {
+		t.Fatalf("writeEnvelope: %v", err)
+	}
+
+	data, err := os.ReadFile(terminationPath)
+	if err != nil {
+		t.Fatalf("read termination message: %v", err)
+	}
+	var got pkgdispatch.EnvelopeOut
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal termination message: %v", err)
+	}
+	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
+		t.Fatalf("termination message = %#v, want %#v", got, want)
+	}
+}
+
 func TestStub_SuccessMode_EmptyTestMode(t *testing.T) {
 	// Dev == nil (no testMode) should behave identically to "success"
 	dir := t.TempDir()
@@ -195,16 +224,16 @@ func TestStub_ExceedOutputPathsMode(t *testing.T) {
 
 	ctx := context.Background()
 	code := run(ctx, inPath, os.Stdout, os.Stderr)
-	if code != 0 {
-		t.Fatalf("exceed-output-paths mode: want exit 0, got %d", code)
+	if code != 1 {
+		t.Fatalf("exceed-output-paths mode: want exit 1, got %d", code)
 	}
 
 	out := readOutEnvelope(t, dir)
-	if out.ExitCode != 0 {
-		t.Errorf("ExitCode = %d, want 0", out.ExitCode)
+	if out.ExitCode != 1 {
+		t.Errorf("ExitCode = %d, want 1", out.ExitCode)
 	}
-	if out.Result != "success" {
-		t.Errorf("Result = %q, want %q", out.Result, "success")
+	if out.Result != "output-paths-violation" {
+		t.Errorf("Result = %q, want %q", out.Result, "output-paths-violation")
 	}
 
 	// Verify the leak file was written at /workspace/escape/leak.txt

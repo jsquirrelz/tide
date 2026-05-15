@@ -23,6 +23,8 @@ import (
 //     (creation is permitted; existence is not required at validation time).
 //   - files modified before runStart are skipped (they are pre-existing
 //     artifacts from prior Tasks).
+//   - the workspace-root envelopes directory is reserved for TIDE transport
+//     files and skipped; it is not user-declared output.
 //   - directories are never flagged; only regular files are considered.
 func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]string, error) {
 	// CR-05: Resolve declared paths and walk targets through the SAME prefix
@@ -41,8 +43,11 @@ func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]st
 		if err != nil {
 			return err
 		}
-		// Directories are never flagged.
 		if d.IsDir() {
+			rel, relErr := filepath.Rel(workspaceRoot, p)
+			if relErr == nil && rel == "envelopes" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		// Skip files modified before runStart (pre-existing artifacts).

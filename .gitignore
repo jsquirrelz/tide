@@ -33,3 +33,7 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Developer-local toolchain + AI session artifacts
+.claude/
+.tool-versions
