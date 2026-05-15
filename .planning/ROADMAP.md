@@ -139,7 +139,20 @@ Plans:
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — `go-git` vs shell-out tradeoffs for non-GitHub hosts; RWX PVC driver matrix testing; per-run branch + `--force-with-lease` integration design; TIDE-overwrites-human-commits coordination (Pitfall 13).
 
-**Plans**: TBD
+**Plans:** 11 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — pkg/dispatch envelope schema bump: Provider/Role/Level + ChildCRDSpec + cache tokens (Wave 1)
+- [ ] 03-02-PLAN.md — Project CRD Spec/Status extensions + stub-subagent wait-for-signal mode (Wave 1)
+- [ ] 03-03-PLAN.md — pkg/git package: Clone, Fetch, AddWorktree, AddPath, Commit, Push with ForceWithLease (Wave 2)
+- [ ] 03-04-PLAN.md — internal/gitleaks scanner + embedded default rules (Wave 2)
+- [ ] 03-05-PLAN.md — internal/subagent/common (stream reader + prompt templates) + internal/subagent/anthropic (Wave 2)
+- [ ] 03-06-PLAN.md — cmd/tide-push binary + Dockerfile + push_helpers (buildPushJob/buildCloneJob) + commit-message support (Wave 3)
+- [ ] 03-07-PLAN.md — cmd/claude-subagent shim + Dockerfile with @anthropic-ai/claude-code@2.1.142 + harness EnsureWorktree (D-B4) (Wave 3)
+- [ ] 03-08-PLAN.md — dispatch_helpers + Milestone/Phase/Plan reconciler bodies + ProjectReconciler clone+push extensions + buildCommitMessage (D-B2) (Wave 4)
+- [ ] 03-09-PLAN.md — cmd/manager wiring + Helm values + push-rbac + docs/git-hosts.md (Wave 5)
+- [ ] 03-10-PLAN.md — Layer B integration tests: chaos_resume + push_lease + up_stack_dispatch (Wave 6)
+- [ ] 03-11-PLAN.md — TEST-03 live nightly E2E (//go:build live-e2e + budget-capped fixture) + docs/live-e2e.md (Wave 6)
 
 ### Phase 4: Gates, Observability, Dashboard, CLI
 **Goal**: Per-level human gate policy is configurable on the Project CRD; structured JSON logs flow from orchestrator and subagent pods; Prometheus metrics expose bounded-cardinality counters/histograms; OpenTelemetry traces span the Milestone→Phase→Plan→Task subagent chain with hand-rolled OpenInference attributes; a read-only React-Flow dashboard renders the live Planning + Execution DAGs side-by-side; and a `tide` cobra CLI wraps the common ops (apply / watch / tail / approve / reject / cancel / resume / inspect-wave / artifact-get).

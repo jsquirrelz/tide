@@ -917,39 +917,33 @@ The following test files do NOT exist and must be created in Phase 3 Wave 0 (or 
 
 **If this table is empty:** All Phase 3 research is grounded in verified library docs + Phase 2 codebase precedents. Currently 1 assumption flagged for plan-phase confirmation.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-> These are questions CONTEXT.md doesn't pin that the planner needs to decide — flag for planner discretion or punt back to user.
+> These questions CONTEXT.md didn't pin have been resolved during plan authoring (2026-05-15). Each item below records the chosen resolution + the downstream plan that consumes it.
 
-1. **`internal/subagent/common/` API shape — prompt-template signature.**
-   - What we know: D-C5 + Claude's Discretion say compiled-in Go templates via `go:embed`, drop-in for next provider. STACK.md confirms "compiled-in Go templates (configurable per level via the Project CRD)".
-   - What's unclear: Function signature. Options: (a) `Render(level, role string, ctx TemplateContext) (string, error)` with a typed `TemplateContext` struct; (b) `template.New(...).ExecuteTemplate(io.Writer, name, data interface{})` raw; (c) interface `PromptLoader { Load(level, role string) (*template.Template, error) }` injected into the harness.
-   - Recommendation: **Planner's discretion.** Lean to (a) — typed context catches template/code drift at compile time. Templates live under `internal/subagent/common/templates/{level}_{role}.tmpl`.
+1. **`internal/subagent/common/` API shape — prompt-template signature. — RESOLVED**
+   - Resolution: **Option (c)** — package-level `LoadPromptTemplate(role, level string) (*template.Template, error)` returning a `*template.Template`. Templates live under `internal/subagent/common/templates/{level}_{role}.tmpl` and are loaded via `go:embed templates/*.tmpl`. The caller renders against a `pkgdispatch.EnvelopeIn` struct so template fields can reference `{{.Level}}`, `{{.TaskUID}}`, `{{.Provider.Model}}`. Rationale: simpler than (a)'s wrapper struct; drop-in for next provider (the future `internal/subagent/openai/` calls the same `common.LoadPromptTemplate`).
+   - Consumed in: **Plan 03-05** Task 1 (`internal/subagent/common/prompt_templates.go`).
 
-2. **Prompt-template content — what does a `milestone_planner.tmpl` actually say?**
-   - What we know: TIDE's spec (`README.md`) describes the five-level paradigm and the "two parallel outputs" pattern (Markdown + `EnvelopeOut.childCRDs`).
-   - What's unclear: Concrete prompt text. The CONTEXT.md "Claude's Discretion" item says "Researcher and planner draft initial templates referencing the README spec; user reviews drafts during plan-phase."
-   - Recommendation: **Punt to plan-phase.** The planner authors first-draft templates in their PLAN.md as artifact previews; the user reviews and locks in `/gsd-discuss-phase` or `/gsd-plan-check`. Templates can be iterated post-Phase-3 without schema changes.
+2. **Prompt-template content — `milestone_planner.tmpl` content. — RESOLVED (Claude's Discretion)**
+   - Resolution: **Punt to plan-phase author.** Plan 03-05 authors minimal v1 prompts (~10 lines each) referencing the README spec; iteration of prompt content does NOT require schema changes and is expected post-Phase-3 as the operator surfaces drift between author-intent and emitted artifacts.
+   - Consumed in: **Plan 03-05** Task 1 (`internal/subagent/common/templates/{milestone,phase,plan}_planner.tmpl` + `task_executor.tmpl`).
 
-3. **`Project.Spec.subagent.levels.{level}.params` validation — strict or permissive?**
-   - What we know: D-C3 says `Params map[string]string` is "intentionally untyped" with "validation lives in the provider's Subagent impl".
-   - What's unclear: Does `internal/subagent/anthropic/` REJECT unknown params at startup (fail-fast), or accept-and-ignore?
-   - Recommendation: **Planner's discretion.** Lean to **reject-unknown** for v1 (fail-fast catches typos) with a documented allow-list (`temperature`, `thinking_budget`, `top_p`, `top_k`). v1.x can add `Project.Spec.subagent.allowUnknownParams=true` for forward-compat with newer Anthropic features.
+3. **`Project.Spec.subagent.levels.{level}.params` validation — strict or permissive? — RESOLVED**
+   - Resolution: **Reject-unknown at subagent startup (fail-fast)** with a documented allow-list of `{temperature, thinking_budget, top_p, top_k}` for Anthropic. Sanity-check happens in `internal/subagent/anthropic/subagent.go` (vendor+params validation in `New(Options)` or at the top of `Run`). v1.x can introduce `Project.Spec.subagent.allowUnknownParams=true` if the allow-list becomes maintenance-heavy. Rationale: catches typos at apply time vs failing silently in production; matches `--bare` flag fail-fast posture.
+   - Consumed in: **Plan 03-05** Task 2 (`internal/subagent/anthropic/subagent.go` — params allow-list check next to the existing vendor-mismatch fail-fast).
 
-4. **Chaos-resume `wait-for-signal` polling cadence.**
-   - What we know: D-D3 says "polls `/workspace/envelopes/{task-uid}/release` every 500ms".
-   - What's unclear: Whether 500ms is right. Tighter (100ms) means faster test wall-clock; looser (2s) reduces CPU/file-stat churn.
-   - Recommendation: **Lock 500ms unless test wall-clock budget pressure surfaces.** Phase 02.2's lesson is "don't over-tune knobs that aren't observably broken."
+4. **Chaos-resume `wait-for-signal` polling cadence. — RESOLVED**
+   - Resolution: **Lock 500ms** per D-D3. No tuning unless test wall-clock budget pressure surfaces during Phase 3 verification. Phase 02.2 lesson: "Don't over-tune knobs that aren't observably broken."
+   - Consumed in: **Plan 03-07** stub-subagent `wait-for-signal` mode (the polling loop body in `cmd/stub-subagent/main.go`).
 
-5. **Push Job `gitleaks` exit-code semantics.**
-   - What we know: D-B3 says "On match: push Job exits non-zero with structured leak summary in stdout".
-   - What's unclear: Distinct exit codes for "push lease fail" (D-B6) vs "gitleaks block" (D-B3) vs "remote rejected" (network) vs "auth error" (bad PAT). Reconciler-side handling differs per case.
-   - Recommendation: **Planner picks the exit-code map.** Sketch: `0` success, `1` generic failure, `10` gitleaks block, `11` lease-fail, `12` auth-fail, `13` network/timeout. Each maps to a distinct `Project.Status.phase=...` condition.
+5. **Push Job `gitleaks` / push-failure exit-code semantics. — RESOLVED**
+   - Resolution: **Exit-code map locked**: `0` = success; `1` = generic failure (catch-all); `10` = gitleaks block (`reason=leak-detected`); `11` = lease-fail (`reason=lease-rejected`); `12` = auth-fail (`reason=auth-failed`); `13` = network/timeout (`reason=network-timeout`); `2` = invariant violation (`reason=invalid-branch` or `missing-creds`). Each exit code carries a structured `reason` field in the push-result envelope at `/workspace/envelopes/push/{project-uid}.json`. The ProjectReconciler in plan 03-08 maps `reason` to `Status.phase`: `leak-detected` → `Failed` + Condition; `lease-rejected` → `PushLeaseFailed` + Condition + LeaseFailureCount++; `auth-failed` and `network-timeout` → `Failed` with the reason surfaced.
+   - Consumed in: **Plan 03-06** Task 1 (exit code constants in `cmd/tide-push/main.go`) and **Plan 03-08** Task 3 (ProjectReconciler push-completion handler reads `reason` from the envelope).
 
-6. **`pkg/git.Fetch` — is it needed in Phase 3?**
-   - What we know: D-B1..B6 describes clone + commit + push lifecycle only.
-   - What's unclear: Does the orchestrator ever `Fetch` from the remote post-clone? Use case would be detecting external pushes (which feeds the `--force-with-lease` failure mode).
-   - Recommendation: **Skip in Phase 3.** Lease-check at push time is the detection mechanism per D-B6; Fetch is a v1.x convenience verb (e.g., for a future "tide refresh-remote" CLI). Phase 3 ships Clone + Push only.
+6. **`pkg/git.Fetch` — is it needed in Phase 3? — RESOLVED**
+   - Resolution: **Ship `Fetch` in `pkg/git` (it's already in 03-03's `files_modified`), but the orchestrator does NOT call it in Phase 3.** Lease check at push time (per D-B6) is the detection mechanism. `Fetch` exists for future v1.x usage (e.g., a `tide refresh-remote` CLI verb or a Phase 4 dashboard refresh action) and to keep the pkg/git API surface complete + tested in isolation. Including the symbol now means no API-break later when `Fetch` lights up.
+   - Consumed in: **Plan 03-03** Task 1 ships `Fetch` with unit tests; no Phase 3 caller wires it.
 
 ## Environment Availability
 
