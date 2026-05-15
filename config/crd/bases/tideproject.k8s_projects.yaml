@@ -108,6 +108,35 @@ spec:
                     - pause
                     type: string
                 type: object
+              git:
+                description: |-
+                  Git declares the per-Project target repo + creds for artifact push
+                  (Phase 3 D-B6). Required for any Project whose lifecycle reaches push;
+                  optional in v1.0 only for purely transient/test Projects.
+                properties:
+                  credsSecretRef:
+                    description: |-
+                      CredsSecretRef is the K8s Secret name (same-namespace) carrying the
+                      HTTPS PAT in data key GIT_PAT. Cross-namespace Secret refs are NOT
+                      permitted in v1.0 (threat-mitigation deferred to push Job — plan 03-06).
+                    type: string
+                  leaksConfigRef:
+                    description: |-
+                      LeaksConfigRef is an optional ConfigMap name carrying gitleaks rule
+                      overrides (D-B3). Default gitleaks rules are embedded in the push image
+                      when this is empty.
+                    type: string
+                  repoURL:
+                    description: |-
+                      RepoURL is the HTTPS URL of the target repo, e.g.,
+                      "https://github.com/owner/repo.git". CEL pattern below catches non-HTTP
+                      URLs at admission time.
+                    pattern: ^https?://.+
+                    type: string
+                required:
+                - credsSecretRef
+                - repoURL
+                type: object
               maxAttemptsPerTask:
                 description: |-
                   MaxAttemptsPerTask caps the number of dispatch attempts per Task before
@@ -184,6 +213,115 @@ spec:
                   gitCredentials:
                     description: GitCredentials is the Secret name carrying git push
                       credentials (PAT or SSH key).
+                    type: string
+                type: object
+              subagent:
+                description: |-
+                  Subagent declares provider+model selection for planner/executor dispatch
+                  (Phase 3 D-C2). When empty, Helm-chart defaults apply.
+                properties:
+                  image:
+                    description: |-
+                      Image is the default subagent image reference for all levels.
+                      Example: "ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0".
+                    type: string
+                  levels:
+                    description: Levels carries per-level overrides; any subset is
+                      valid.
+                    properties:
+                      milestone:
+                        description: Milestone optionally overrides settings for the
+                          milestone planner.
+                        properties:
+                          image:
+                            description: |-
+                              Image override is schema-present-but-not-enforced in v1.0 (deferred
+                              to v1.x per CONTEXT.md "Deferred Ideas" — per-level cross-vendor
+                              image overrides). Set this in v1.0 only if the consumer is prepared
+                              to ignore it.
+                            type: string
+                          model:
+                            description: Model identifier for this level (e.g., "claude-haiku-4-5").
+                            type: string
+                          params:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Params carries per-vendor tuning passthrough (temperature, thinking
+                              budget, etc.). Validation lives in the provider's Subagent impl.
+                            type: object
+                        type: object
+                      phase:
+                        description: Phase optionally overrides settings for the phase
+                          planner.
+                        properties:
+                          image:
+                            description: |-
+                              Image override is schema-present-but-not-enforced in v1.0 (deferred
+                              to v1.x per CONTEXT.md "Deferred Ideas" — per-level cross-vendor
+                              image overrides). Set this in v1.0 only if the consumer is prepared
+                              to ignore it.
+                            type: string
+                          model:
+                            description: Model identifier for this level (e.g., "claude-haiku-4-5").
+                            type: string
+                          params:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Params carries per-vendor tuning passthrough (temperature, thinking
+                              budget, etc.). Validation lives in the provider's Subagent impl.
+                            type: object
+                        type: object
+                      plan:
+                        description: Plan optionally overrides settings for the plan
+                          planner.
+                        properties:
+                          image:
+                            description: |-
+                              Image override is schema-present-but-not-enforced in v1.0 (deferred
+                              to v1.x per CONTEXT.md "Deferred Ideas" — per-level cross-vendor
+                              image overrides). Set this in v1.0 only if the consumer is prepared
+                              to ignore it.
+                            type: string
+                          model:
+                            description: Model identifier for this level (e.g., "claude-haiku-4-5").
+                            type: string
+                          params:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Params carries per-vendor tuning passthrough (temperature, thinking
+                              budget, etc.). Validation lives in the provider's Subagent impl.
+                            type: object
+                        type: object
+                      task:
+                        description: Task optionally overrides settings for the task
+                          executor.
+                        properties:
+                          image:
+                            description: |-
+                              Image override is schema-present-but-not-enforced in v1.0 (deferred
+                              to v1.x per CONTEXT.md "Deferred Ideas" — per-level cross-vendor
+                              image overrides). Set this in v1.0 only if the consumer is prepared
+                              to ignore it.
+                            type: string
+                          model:
+                            description: Model identifier for this level (e.g., "claude-haiku-4-5").
+                            type: string
+                          params:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              Params carries per-vendor tuning passthrough (temperature, thinking
+                              budget, etc.). Validation lives in the provider's Subagent impl.
+                            type: object
+                        type: object
+                    type: object
+                  model:
+                    description: |-
+                      Model is the default model identifier for all levels.
+                      Example: "claude-sonnet-4-6" (anthropic), "o1-mini" (openai).
                     type: string
                 type: object
               targetRepo:
@@ -281,6 +419,30 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              git:
+                description: |-
+                  Git records per-Project push state — branch name, last pushed SHA, and
+                  lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
+                  per-project tally object, NOT an aggregate schedule.
+                properties:
+                  branchName:
+                    description: |-
+                      BranchName is the lifetime branch fixed at Project creation.
+                      Format: "tide/run-<project>-<unix-epoch>".
+                    type: string
+                  lastPushedSHA:
+                    description: |-
+                      LastPushedSHA is the head SHA recorded on the most recent successful push.
+                      Used as the lease for subsequent `git push --force-with-lease`.
+                    type: string
+                  leaseFailureCount:
+                    description: |-
+                      LeaseFailureCount tallies consecutive push lease rejections; reset to 0
+                      on successful push. Reconciler halts (Phase=PushLeaseFailed) when this
+                      count exceeds the configured retry budget.
+                    format: int32
+                    type: integer
+                type: object
               phase:
                 description: Phase is a high-level state label ("Pending", "Running",
                   "Complete", "Failed").
