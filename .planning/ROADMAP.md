@@ -94,20 +94,24 @@ Plans:
 
 ### Phase 02.2: Layer B kind test timing fixes — bump kindTestTimeout from 4min to 6min so helm --timeout 5m can complete; robust AfterSuite cleanup that handles zombie kind containers when BeforeSuite half-installs; re-scope make test-int wall-time goal to bound only the go test invocation (not test-int-kind-prep image builds + cluster create); optional cert-manager v1.16.2 to v1.20 bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md. (INSERTED)
 
-**Goal:** Close Phase 02.1's BLOCKED runtime gate captured in `02.1-04-VERIFICATION.md` — `make test-int` clean run reaches 7/7 Layer B specs PASS in ≤ 300s go test wall-time AND `KEEP_KIND_CLUSTER=true make test-int` rerun reaches 7/7 PASS in ≤ 300s, both verified end-to-end on a developer laptop. Five tactical fixes: kindTestTimeout 4m→7m (defeat parent-context shadow-kill of helm --timeout 5m), cert-manager v1.16.2→v1.20.2 (explicit K8s 1.33 support), helm install --replace (idempotent rerun against existing release), robust AfterSuite cleanup with docker-rm fallback against zombie kind containers (kind issue #1116 / Docker 28→29 kill-event regression), and CI YAML drop the redundant outer DUR > 300 wall-time check (Makefile inner `timeout 300s` is the source of truth).
+**Goal:** Phase 02.1's BLOCKED runtime gate is closed — `make test-int` clean run reaches 7/7 Layer B specs PASS in ≤ 355s inner go test wall-time AND `KEEP_KIND_CLUSTER=true make test-int` rerun reaches 7/7 PASS, both verified end-to-end on a developer laptop with cert-manager v1.20.2 + helm install --replace + robust AfterSuite zombie cleanup + namespace-local PVC + namespace-local signing key Secret. Empirically closed after 12 iterations (cascades 1–11 CLOSED; chain_status: empirically_closed in 02.2-12-VERIFICATION.md).
 **Requirements**: No formal REQ-IDs — Phase 02.2 is debug closeout for Phase 02.1's runtime gate; the de facto requirements are the 4 source-shape fixes + 1 micro-fix enumerated in 02.2-RESEARCH.md.
 **Depends on:** Phase 02
-**Plans:** 4/5 plans executed
+**Plans:** 13/13 plans executed
 
 Plans:
 - [x] 02.2-01-PLAN.md — Source-shape fixes (kindTestTimeout 7m, cert-manager v1.20.2, cleanupKindCluster helper, helm --replace, CI YAML DUR-check drop) + end-to-end runtime verification (Wave 1)
 - [x] 02.2-03-PLAN.md — Chart PVC accessModes Helm values key (override-only; production default ReadWriteMany preserved) + test --set RWO override + runtime re-verification (Wave 2)
-- [x] 02.2-04-PLAN.md — TACTICAL: define --metrics-bind-address flag in cmd/manager — close 02.2-03 BLOCKED gate + runtime re-verification + wire Plan 02.2-02 checkpoint (gated on Task 2 APPROVED) (Wave 3)
-- [x] 02.2-05-PLAN.md — TACTICAL: define --webhook-cert-path flag + wire into webhook.Options.CertDir — close 02.2-04 BLOCKED gate (cascade-3) + runtime re-verification + wire Plan 02.2-02 checkpoint (gated on Task 2 APPROVED) (Wave 4)
-- [ ] 02.2-02-PLAN.md — ROADMAP/STATE closeout, gated on 02.2-05-VERIFICATION.md gate_decision=APPROVED (Wave 5)
-
-**Cross-cutting constraints:**
-- `go build ./cmd/manager/...` exits 0 after the flag addition
+- [x] 02.2-04-PLAN.md — TACTICAL: define --metrics-bind-address flag in cmd/manager — close 02.2-03 BLOCKED gate + runtime re-verification (cascade-2: Wave 3)
+- [x] 02.2-05-PLAN.md — TACTICAL: define --webhook-cert-path flag + wire into webhook.Options.CertDir — close 02.2-04 BLOCKED gate (cascade-3: Wave 4)
+- [x] 02.2-06-PLAN.md — TACTICAL: Makefile test budget 300s→600s — close 02.2-05 BLOCKED gate (cascade-4: Wave 5)
+- [x] 02.2-07-PLAN.md — TACTICAL: credproxy fixture-incomplete harness-bug — close 02.2-06 BLOCKED gate (cascade-5: Wave 6)
+- [x] 02.2-08-PLAN.md — TACTICAL: Eventually-timeout-too-tight spec-flake fixes — close 02.2-07 BLOCKED gate (cascade-6: Wave 7)
+- [x] 02.2-09-PLAN.md — TACTICAL: caps/output/failure-fixture-incomplete harness-bug — close 02.2-08 BLOCKED gate (cascade-7: Wave 8)
+- [x] 02.2-10-PLAN.md — TACTICAL: production-wiring-gap (Dispatcher field nil) — close 02.2-09 BLOCKED gate (cascade-8: Wave 9)
+- [x] 02.2-11-PLAN.md — TACTICAL: cascade-9 sub-classes A+B+C closure (Job activeDeadlineSeconds, Layer A AC1 Eventually budget, Makefile timeout safety-net: Wave 10)
+- [x] 02.2-12-PLAN.md — TACTICAL: cascade-10 PVC namespace-scoping + cascade-11 Secret namespace-scoping — Pod-status envelope transport architectural pivot + ensureProjectsPVC + ensureSigningKeySecret (Wave 11)
+- [x] 02.2-02-PLAN.md — ROADMAP/STATE closeout, gated on 02.2-12-VERIFICATION.md gate_decision=APPROVED (Wave 12)
 
 ### Phase 02.1: Debug + fix the Layer B kind integration test suite so make test-int runs end-to-end on a developer laptop. Phase 2 shipped the test files + CI wiring; this phase makes them actually run. Goals: tide-controller-manager Deployment reaches Ready in kind, Plan webhook service has live endpoints, all 7 Layer B Ginkgo specs pass (3-task wave, fail injection, wall-clock cap, output-path violation, credproxy sidecar topology + listening log). (INSERTED)
 
@@ -177,6 +181,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Foundation — CRDs, pkg/dag, Controller Scaffold | 0/TBD | Not started | - |
 | 2. Dispatch & Plan Validation — Innermost Reconcilers + Harness | 9/13 | In Progress|  |
+| 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
