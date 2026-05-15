@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 02.2 plan 11/11 — cascade-9 sub-classes A+B+C empirically CLOSED (deadline_exceeded_count=0; Layer A 18/18 PASS; wall 377s+354s — A+B alone met original 600s aspiration); cascade-10 BLOCKED as harness-bug (tide-projects PVC missing from test namespaces — only provisioned in tide-system by chart). 02.2-02 closeout still gated (9 consecutive Task-3-halts).
-last_updated: "2026-05-14T21:34:00.000Z"
-last_activity: 2026-05-14 -- Plan 02.2-11 executed; cascade-9 A+B+C CLOSED; cascade-10 surfaced as harness-bug (PVC namespace-scoping). Task 3 HALTED per BLOCKED gate; 02.2-02 closeout continues gated.
+stopped_at: Phase 02.2 COMPLETE — cascade chain empirically closed after 12 iterations; 02.2-12-VERIFICATION.md gate_decision=APPROVED; 7/7 Layer B PASS; inner wall 355s; 02.2-02 closeout executed.
+last_updated: "2026-05-14T22:00:00.000Z"
+last_activity: 2026-05-14 -- Phase 02.2 closeout (plan 02.2-02): ROADMAP + STATE updated; Phase 02.1 BLOCKED runtime gate confirmed closed (7/7 Layer B specs PASS, 18/18 Layer A PASS; gate_decision=APPROVED in 02.2-12-VERIFICATION.md).
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 39
-  completed_plans: 37
-  percent: 95
+  completed_plans: 39
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — BLOCKED (cascade-10 surfaced — harness-bug class: tide-projects PVC namespace-scoping)
-Plan: 10 of 11 plans executed (01, 03, 04, 05, 06, 07, 08, 09, 10, 11 landed with SUMMARY; 02 still gated). **CASCADE-9 SUB-CLASSES A+B+C ALL EMPIRICALLY CLOSED — major milestone after 11 plans.**
-Status: **Plan 02.2-11's bundled cascade-9 closure WORKED at the test-harness level.** All 3 sub-fixes landed and verified: (A) `caps.wallClockSeconds: 120` on alpha/beta/gamma Tasks in `test/integration/kind/testdata/three-task-wave.yaml` → `deadline_exceeded_count: 0` in both clean + rerun (was the cascade-9A blocker in Plan 02.2-10); (B) `Eventually("60s", "500ms")` at `test/integration/envtest/indegree_test.go:232` SUB-02 Wave-roll-up spec → spec passes in 0.246s (99.6% headroom under 60s budget; was 17/18 in Plan 02.2-10, now 18/18 Layer A specs PASS); (C) Makefile `timeout 1800s` safety net → wall 377s clean + 354s rerun, BOTH UNDER the original 600s aspiration meaning A+B closure alone fixed the wall (the 1800s safety net is unused headroom — `wall_under_600s: true` annotation recorded). `dispatch_active: true` remained TRUE across both runs (cascade-8 closure preserved). However, cascade-10 surfaced as a NEW class (`harness-bug` per T-02.2-16 taxonomy): the `tide-projects` PVC is only provisioned by the chart in the `tide-system` namespace, but test fixture Pods land in `tide-int-test`/`caps-test`/`output-test`/`failure-test`/`credproxy-test` namespaces where the PVC does not exist. Pods get `FailedScheduling: persistentvolumeclaim "tide-projects" not found`. This is the FIRST cascade in Phase 02.2 surfaced AFTER the scheduler ran (cascades 1-9 all gated dispatch BEFORE the scheduler). Plan 02.2-12 target: per-namespace PVC declarations in test fixture YAMLs (Option A per 02.2-11-VERIFICATION.md §Section 5 Fix landscape). T-02.2-11 also surfaced a plan-time observation drift (Working Rule #1): plan body claimed 1 `"20s", "500ms"` occurrence; actual was 2 (SUB-02 line 232 + FAIL-02 line 289). Executor anchored edit via `.Should(Equal("Succeeded"))` context; FAIL-02 preserved verbatim. See `02.2-11-VERIFICATION.md` §Section 5 for full evidence.
-Last activity: 2026-05-14 -- Plan 02.2-11 executed; cascade-9 A+B+C CLOSED (deadline_exceeded_count=0; Layer A 18/18 PASS; wall under original 600s aspiration); cascade-10 BLOCKED as harness-bug; Task 3 HALTED (9th consecutive); 02.2-02 closeout still gated
+Phase: 02.2 (layer-b-kind-test-timing-fixes-bump-kindtesttimeout-from-4mi) — COMPLETE
+Plan: 13/13 plans executed (01, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 02 all landed with SUMMARY). **CASCADE CHAIN EMPIRICALLY CLOSED after 12 iterations — Phase 02.1 BLOCKED runtime gate confirmed closed.**
+Status: **Phase 02.2 complete.** Plan 02.2-12 closed cascade-10 (PVC namespace-scoping, architectural pivot to Pod-status envelope transport via `PodStatusEnvelopeReader`) and cascade-11 (Secret namespace-scoping, `ensureSigningKeySecret` helper). Both fixes + all prior cascade closures verified in `02.2-12-VERIFICATION.md`: 7/7 Layer B PASS (clean + rerun), 18/18 Layer A PASS, inner wall 355.20s. gate_decision=APPROVED. Plan 02.2-02 (this closeout) fires the long-gated ROADMAP+STATE update (previously blocked by 9 consecutive Task-3-halts across BLOCKED gates). Next phase: Phase 3 (Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption) — TBD by user.
+Last activity: 2026-05-14 -- Phase 02.2 closeout (02.2-02): ROADMAP + STATE finalized; gate_decision=APPROVED in 02.2-12-VERIFICATION.md.
 
-Progress: [████████░░] 83%
+Progress: [██████████] 100% (Phase 02.2 scope)
 
 ## Performance Metrics
 
@@ -71,6 +71,7 @@ Progress: [████████░░] 83%
 
 - Phase 02.1 inserted after Phase 2: Layer B kind integration tests: ship test files in Phase 2, debug/fix in 2.1 to make make test-int green on dev laptop (URGENT)
 - Phase 02.2 inserted after Phase 02: Layer B kind test timing fixes — closes Phase 02.1 BLOCKED runtime gate (kindTestTimeout vs helm timeout mismatch; AfterSuite zombie-container cleanup; make test-int wall-time scope; optional cert-manager bump) (URGENT)
+- Phase 02.2 COMPLETED 2026-05-14: Closed Phase 02.1's BLOCKED runtime gate. 12 tactical iterations, 11 cascades closed. Five original fixes landed (kindTestTimeout 4m→7m; cert-manager v1.16.2→v1.20.2; helm install --replace; cleanupKindCluster() zombie-container fallback; CI YAML DUR-check drop). Seven additional harness/production-wiring fixes surfaced and closed across cascades 2–11: --metrics-bind-address flag, --webhook-cert-path flag, Makefile 300s→600s→1800s budget, credproxy/caps/output/failure fixture helpers, Dispatcher field nil production wiring, Job activeDeadlineSeconds + Layer A Eventually budgets + Makefile timeout, PVC namespace-scoping architectural pivot (PodStatusEnvelopeReader), Secret namespace-scoping (ensureSigningKeySecret). End-to-end runtime verification PASSED: 7/7 Layer B specs PASS (clean + rerun), 18/18 Layer A PASS; inner wall 355.20s; chain_status: empirically_closed. Captured in 02.2-12-VERIFICATION.md.
 
 ### Decisions
 
@@ -114,6 +115,14 @@ Recent decisions affecting current work:
 - [Phase 01]: Plan 09: Same-line wildcard regex (verbs:.*"?\*"?) is intentionally permissive to multi-line kubebuilder-scaffolded admin role YAMLs (which carry verbs: ['*'] over two lines). Those roles are documented 'not used by the project tide itself' and the gate's contract is the orchestrator's own role.yaml from controller-gen's same-line marker output. Phase 11 may extend the regex or comment-out admin roles in kustomization.yaml
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: Helm chart pair (controller + CRD subchart) via pinned helmify v0.4.17 + hack/helm augment layer for idempotent regeneration
 - [Phase 01-foundation-crds-pkg-dag-controller-scaffold]: test-only Makefile target separates go test from prep deps so TEST-01 30s budget measures actual test runtime
+- [Phase 02.2]: kindTestTimeout = 7m (NOT 6m floor): RESEARCH §"Pattern 1" budget arithmetic — 50s pre-helm setup + 300s helm --timeout 5m + 5s waitForControllerReady + 60s+ variance margin. 7m gives 2m margin above helm's 5m, survives slow CI runners. 6m floor leaves only 60s margin and re-introduces shadow-kill risk.
+- [Phase 02.2]: AfterSuite zombie cleanup pattern = kind delete → docker ps -aq --filter label=io.x-k8s.kind.cluster=<name> → docker rm -f -v fallback. Best-effort (GinkgoWriter.Printf warnings, NOT Fail()). KEEP_KIND_CLUSTER=true short-circuit MUST precede the cleanup helper (T-02.2-02 mitigation). Plain exec.Command() (not exec.CommandContext) because outer ctx is cancelled by AfterSuite entry (Pitfall 7).
+- [Phase 02.2]: Test wall-time budget scope = go test only (not full make test-int chain). Makefile's existing inner `timeout 300s go test` is the source of truth; CI's outer DUR > 300 check measured the wrong span (includes ~880s cold-cache test-int-kind-prep). Dropped the CI outer check; rely on `timeout 300s` exit 124 propagating through `time make test-int`. Final budget: INTEGRATION_TIMEOUT=1800s outer, KIND_GO_TEST_TIMEOUT=20m inner go test, budget raised from 300s to 600s to 1800s across cascades 4/9C.
+- [Phase 02.2]: cert-manager v1.20.2 bump verified non-breaking for TIDE — chart uses cert-manager.io/v1 Issuer + Certificate (stable since 1.x); both Certificate templates already specify issuerRef.kind: Issuer explicitly (v1.20 issuerRef-defaults revert is non-impacting per RESEARCH Pattern 4 + Pitfall 4).
+- [Phase 02.2]: helm install --replace flag added to applyController() helm args for KEEP_KIND_CLUSTER=true rerun idempotency (Q1 micro-fix from RESEARCH §"Open Questions Surfaced"). Resolves "cannot re-use a name that is still in use" failure mode when rerun encounters an existing tide release in tide-system.
+- [Phase 02.2]: PVC namespace-scoping architectural pivot (cascade-10) — manager-side PVC mount removed; EnvelopeReader is now PodStatusEnvelopeReader which reads EnvelopeOut from the subagent container's terminationMessagePath via Pod.status.containerStatuses[].state.terminated.message. Manager no longer requires cross-namespace PVC visibility. Pod-side PVC remains namespace-local provisioned by ensureProjectsPVC(ns) per test namespace; testdata/three-task-wave.yaml declares it inline for kubectl apply -f self-containedness.
+- [Phase 02.2]: Secret namespace-scoping (cascade-11) — ensureSigningKeySecret(ns) mirrors tide-system/tide-signing-key into target namespace via kubectl get secret -o jsonpath + base64-identical data. controllerSigningKeyData() centralizes the read; createNamespace(ns) + applyController() both call it. CRDs-only mode degrades to GinkgoWriter warning (not Fail()).
+- [Phase 02.2]: 02.2-12-VERIFICATION.md records chain_status: empirically_closed — 7/7 Layer B PASS (clean + rerun), 18/18 Layer A PASS, inner wall 355.20s, pvc_not_found_event_count=0, signing_key_not_found_event_count=0, deadline_exceeded_count=0.
 
 ### Pending Todos
 
@@ -131,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:22:40.587Z
-Stopped at: Phase 2 context gathered
+Last session: 2026-05-14T22:00:00.000Z
+Stopped at: Phase 02.2 complete — closed Phase 02.1 BLOCKED gate (7/7 Layer B PASS; 18/18 Layer A PASS; gate_decision=APPROVED in 02.2-12-VERIFICATION.md; ROADMAP+STATE finalized)
 Resume file: None
