@@ -1,0 +1,13 @@
+.git/
+.planning/
+.github/
+api/
+pkg/dag/
+tools/
+test/
+charts/
+config/
+hack/
+web/
+*.md
+*.txt

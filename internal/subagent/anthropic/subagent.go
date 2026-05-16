@@ -99,6 +99,23 @@ func New(opts Options) *Anthropic {
 	}
 }
 
+// NewWithExec is the exported test seam: same defaults as [New] but takes an
+// execFunc override so external packages (e.g. cmd/claude-subagent_test) can
+// inject a fake exec without touching the unexported execFunc field. If
+// execFunc is nil, defaults to exec.CommandContext (equivalent to [New]).
+//
+// Production code MUST use [New]. NewWithExec exists solely so the
+// cmd/claude-subagent shim's tests can replicate the fake-`bash -c cat`
+// fixture pattern from internal/subagent/anthropic/subagent_test.go without
+// the shim having to live inside the anthropic package itself.
+func NewWithExec(opts Options, execFunc func(ctx context.Context, name string, args ...string) *exec.Cmd) *Anthropic {
+	a := New(opts)
+	if execFunc != nil {
+		a.execFunc = execFunc
+	}
+	return a
+}
+
 // Run satisfies pkg/dispatch.Subagent.Run. The dispatch flow:
 //
 //  1. Fail-fast vendor check: refuse if in.Provider.Vendor != "anthropic".
