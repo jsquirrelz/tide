@@ -151,8 +151,8 @@ Plans:
 - [x] 03-07-PLAN.md — cmd/claude-subagent shim + Dockerfile with @anthropic-ai/claude-code@2.1.142 + harness EnsureWorktree (D-B4) (Wave 3)
 - [x] 03-08-PLAN.md — dispatch_helpers + Milestone/Phase/Plan reconciler bodies + ProjectReconciler clone+push extensions + buildCommitMessage (D-B2) (Wave 4)
 - [x] 03-09-PLAN.md — cmd/manager wiring + Helm values + push-rbac + docs/git-hosts.md (Wave 5)
-- [ ] 03-10-PLAN.md — Layer B integration tests: chaos_resume + push_lease + up_stack_dispatch (Wave 6)
-- [ ] 03-11-PLAN.md — TEST-03 live nightly E2E (//go:build live-e2e + budget-capped fixture) + docs/live-e2e.md (Wave 6)
+- [x] 03-10-PLAN.md — Layer B integration tests: chaos_resume + push_lease + up_stack_dispatch (Wave 6)
+- [x] 03-11-PLAN.md — TEST-03 live nightly E2E (//go:build live-e2e + budget-capped fixture) + docs/live-e2e.md (Wave 6)
 
 ### Phase 4: Gates, Observability, Dashboard, CLI
 **Goal**: Per-level human gate policy is configurable on the Project CRD; structured JSON logs flow from orchestrator and subagent pods; Prometheus metrics expose bounded-cardinality counters/histograms; OpenTelemetry traces span the Milestone→Phase→Plan→Task subagent chain with hand-rolled OpenInference attributes; a read-only React-Flow dashboard renders the live Planning + Execution DAGs side-by-side; and a `tide` cobra CLI wraps the common ops (apply / watch / tail / approve / reject / cancel / resume / inspect-wave / artifact-get).
