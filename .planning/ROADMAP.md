@@ -150,7 +150,7 @@ Plans:
 - [x] 03-06-PLAN.md — cmd/tide-push binary + Dockerfile + push_helpers (buildPushJob/buildCloneJob) + commit-message support (Wave 3)
 - [x] 03-07-PLAN.md — cmd/claude-subagent shim + Dockerfile with @anthropic-ai/claude-code@2.1.142 + harness EnsureWorktree (D-B4) (Wave 3)
 - [x] 03-08-PLAN.md — dispatch_helpers + Milestone/Phase/Plan reconciler bodies + ProjectReconciler clone+push extensions + buildCommitMessage (D-B2) (Wave 4)
-- [ ] 03-09-PLAN.md — cmd/manager wiring + Helm values + push-rbac + docs/git-hosts.md (Wave 5)
+- [x] 03-09-PLAN.md — cmd/manager wiring + Helm values + push-rbac + docs/git-hosts.md (Wave 5)
 - [ ] 03-10-PLAN.md — Layer B integration tests: chaos_resume + push_lease + up_stack_dispatch (Wave 6)
 - [ ] 03-11-PLAN.md — TEST-03 live nightly E2E (//go:build live-e2e + budget-capped fixture) + docs/live-e2e.md (Wave 6)
 
