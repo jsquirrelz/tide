@@ -13,12 +13,26 @@ import (
 
 const (
 	// sk-ant-* (Anthropic API key) — matches gitleaks rule "anthropic-api-key".
+	// The upstream regex (gitleaks v8.30.1 default_rules.toml) is:
+	//   \b(sk-ant-api03-[a-zA-Z0-9_\-]{93}AA)(?:[\x60'"\s;]|\\[nr]|$)
+	// → prefix "sk-ant-api03-", 93 chars from [a-zA-Z0-9_-], literal "AA",
+	// then a closing delimiter (here a trailing space + newline).
+	// The 93-char body is a deterministic pseudo-random mix from
+	// [a-zA-Z0-9_-]. It is intentionally chosen to avoid the gitleaks v8
+	// global stopwords ("abcdefghijklmnopqrstuvwxyz" and a uuid literal)
+	// so the finding is not allow-listed.
 	anthropicKeyDiff = "Some context line\n" +
-		"+ANTHROPIC_API_KEY=sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n" +
+		"+ANTHROPIC_API_KEY=sk-ant-api03-odJFCrnl2edlBDdz1C5Jau2RJtBRnlWmTSHf6pWkLUyifDLkDmWJ6UuVTAIjvFu7WICPhDeOZIiBOB-Y6sHrFH2ZUCr-lAA \n" +
 		"Other line\n"
 
 	// AKIA-style AWS access key — matches gitleaks rule "aws-access-token".
-	awsKeyDiff = "+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n"
+	// The upstream regex is \b((?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16})\b
+	// with entropy >= 3 AND an allowlist for `.+EXAMPLE$`. So the canonical
+	// AWS doc example "AKIAIOSFODNN7EXAMPLE" is intentionally allow-listed
+	// to avoid false positives on docs. The fixture below uses a fresh
+	// 16-char tail from [A-Z2-7] with sufficient Shannon entropy that
+	// does NOT end in EXAMPLE.
+	awsKeyDiff = "+AWS_ACCESS_KEY_ID=AKIAJ3K7H2RAQGVF6XBP\n"
 
 	// No secrets — must return zero findings.
 	cleanDiff = "+func main() {\n" +
