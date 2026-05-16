@@ -1,6 +1,6 @@
-// Command claude-subagent — Phase 3 real-Claude swap of cmd/stub-subagent.
-// Thin shim: load EnvelopeIn → anthropic.Run → write EnvelopeOut.
-// Real Claude images MUST ignore env.Dev (PATTERNS.md line 442 / D-F1).
+// Command claude-subagent — Phase 3 real-Claude swap of stub-subagent. Thin
+// shim: load EnvelopeIn → anthropic.Run → write EnvelopeOut. Ignores the
+// envelope's Dev struct (PATTERNS.md line 442 / D-F1).
 package main
 
 import (
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,19 +21,14 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
-// anthropicRunner is the test-seam surface (matches pkg/dispatch.Subagent).
 type anthropicRunner interface {
 	Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdispatch.EnvelopeOut, error)
 }
 
-// newSubagent is the constructor seam — tests override it to inject a
-// fake-exec anthropic Subagent via the package's NewWithExec helper.
 var newSubagent = func(claudeBinary, workspaceRoot string) anthropicRunner {
-	return anthropic.New(anthropic.Options{
-		ClaudeBinary:  claudeBinary,
-		WorkspaceRoot: workspaceRoot,
-	})
+	return anthropic.New(anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: workspaceRoot})
 }
+var ensureWorktreeFunc = harness.EnsureWorktree
 
 func main() {
 	fs := flag.NewFlagSet("claude-subagent", flag.ExitOnError)
@@ -46,31 +42,20 @@ func main() {
 	os.Exit(run(ctx, *envelopePath, *workspaceRoot, os.Stdout, os.Stderr))
 }
 
-// run is the testable entry point. It does NOT branch on the envelope's
-// Dev.TestMode field — that behavior is stub-only (PATTERNS.md line 442).
+// run is the testable entry point. Does NOT branch on env.Dev.TestMode.
 func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr io.Writer) int {
 	outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
 	env, err := harness.ReadEnvelopeIn(envelopePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "claude-subagent: %v\n", err)
-		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
-			APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
-			ExitCode: 2, Result: "invalid-envelope", Reason: err.Error(),
-			CompletedAt: time.Now().UTC(),
-		})
-		return 2
+		return failOut(stderr, outPath, "", err, 2, "invalid-envelope")
 	}
-	sa := newSubagent("claude", workspaceRoot)
-	out, runErr := sa.Run(ctx, env)
+	if err := ensureWorktreeFunc(env, workspaceRoot, readBranch(envelopePath)); err != nil {
+		return failOut(stderr, outPath, env.TaskUID, err, 1, "worktree-setup-failed")
+	}
+	out, runErr := newSubagent("claude", workspaceRoot).Run(ctx, env)
 	if runErr != nil {
-		// Wrap dispatch-level error (vendor mismatch, template load, parse) as
-		// failure EnvelopeOut so the controller surfaces a structured Reason.
-		out = pkgdispatch.EnvelopeOut{
-			APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
-			TaskUID: env.TaskUID, ExitCode: 1, Result: "subagent-error", Reason: runErr.Error(),
-			CompletedAt: time.Now().UTC(),
-		}
 		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
+		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err)
@@ -79,8 +64,28 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	return out.ExitCode
 }
 
-// writeEnvelope persists EnvelopeOut to PVC and the K8s termination-message
-// path (Phase 02.2 cascade-10 PodStatusEnvelopeReader fallback).
+func readBranch(envelopePath string) string {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(envelopePath), "branch.txt"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(string(data), "\r\n")
+}
+
+func failEnvelope(taskUID string, err error, exitCode int, result string) pkgdispatch.EnvelopeOut {
+	return pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID: taskUID, ExitCode: exitCode, Result: result, Reason: err.Error(),
+		CompletedAt: time.Now().UTC(),
+	}
+}
+
+func failOut(stderr io.Writer, outPath, taskUID string, err error, exitCode int, result string) int {
+	fmt.Fprintf(stderr, "claude-subagent: %v\n", err)
+	_ = writeEnvelope(outPath, failEnvelope(taskUID, err, exitCode, result))
+	return exitCode
+}
+
 func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := harness.WriteEnvelopeOut(path, out); err != nil {
 		return err

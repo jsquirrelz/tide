@@ -193,6 +193,62 @@ func TestClaudeSubagentMain_VendorMismatch(t *testing.T) {
 	}
 }
 
+// TestClaudeSubagentMain_InvokesEnsureWorktreeBeforeRun asserts the shim
+// calls EnsureWorktree BEFORE the subagent's Run() — order matters because
+// the subagent's prompt assumes the worktree dir already exists. We assert
+// via a recorded call order: ensureWorktreeFunc bumps a counter to 1; the
+// fake newSubagent sees counter==1 when its Run is invoked. (Plan 03-07
+// Task 3 Test 5 — cross-file integration; ties Task 3 to Task 1's shim.)
+func TestClaudeSubagentMain_InvokesEnsureWorktreeBeforeRun(t *testing.T) {
+	tmp := t.TempDir()
+	fixturePath := writeFixture(t, tmp, fixtureStreamJSON)
+	// Mark the order seen at each call site.
+	var order []string
+	origEW := ensureWorktreeFunc
+	t.Cleanup(func() { ensureWorktreeFunc = origEW })
+	ensureWorktreeFunc = func(in pkgdispatch.EnvelopeIn, workspaceRoot, branch string) error {
+		order = append(order, "ensure-worktree")
+		return nil
+	}
+	origSA := newSubagent
+	t.Cleanup(func() { newSubagent = origSA })
+	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+		return anthropic.NewWithExec(
+			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
+			func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				order = append(order, "subagent-run")
+				return exec.CommandContext(ctx, "bash", "-c", "cat "+fixturePath)
+			},
+		)
+	}
+
+	envelopePath := filepath.Join(tmp, "envelopes", "t-order", "in.json")
+	env := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "t-order",
+		Role:       "executor",
+		Level:      "task",
+		Provider:   pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+	}
+	writeEnvelopeInFile(t, envelopePath, env)
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), envelopePath, tmp, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code: got %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if len(order) < 2 {
+		t.Fatalf("expected ≥2 ordered calls; got %v", order)
+	}
+	if order[0] != "ensure-worktree" {
+		t.Errorf("call order: got %v, want ensure-worktree first", order)
+	}
+	if order[1] != "subagent-run" {
+		t.Errorf("call order: got %v, want subagent-run second", order)
+	}
+}
+
 // TestClaudeSubagentMain_IgnoresDevTestMode asserts that even when env.Dev is
 // populated, the shim does NOT switch on Dev.TestMode — it always goes
 // through anthropic.New().Run(). Behavior is identical to the happy-path.
