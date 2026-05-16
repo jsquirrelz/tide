@@ -246,6 +246,110 @@ func TestBuildCloneJobName(t *testing.T) {
 	}
 }
 
+// ---------- buildCommitMessage tests (D-B2 / W11) ----------
+
+// TestBuildCommitMessage_AllFourShapes asserts all four D-B2 boundary
+// commit message strings are produced verbatim with the locked-in
+// "+ executed" suffix only on the Plan boundary.
+func TestBuildCommitMessage_AllFourShapes(t *testing.T) {
+	tests := []struct {
+		name     string
+		boundary string
+		argName  string
+		want     string
+	}{
+		{
+			name:     "Plan boundary — only one with '+ executed' suffix",
+			boundary: "plan",
+			argName:  "03-foo",
+			want:     "tide: plan 03-foo authored + executed",
+		},
+		{
+			name:     "Phase boundary",
+			boundary: "phase",
+			argName:  "02-bar",
+			want:     "tide: phase 02-bar authored",
+		},
+		{
+			name:     "Milestone boundary",
+			boundary: "milestone",
+			argName:  "M-001",
+			want:     "tide: milestone M-001 authored",
+		},
+		{
+			name:     "Project boundary — no name suffix",
+			boundary: "project",
+			argName:  "",
+			want:     "tide: project complete",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildCommitMessage(tt.boundary, tt.argName)
+			if err != nil {
+				t.Fatalf("buildCommitMessage(%q, %q): %v", tt.boundary, tt.argName, err)
+			}
+			if got != tt.want {
+				t.Errorf("buildCommitMessage(%q, %q) = %q, want %q", tt.boundary, tt.argName, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildCommitMessage_RejectsUnknownBoundary asserts unknown boundary
+// names error out (e.g., "wave" — Tasks ship in their parent Plan's commit).
+func TestBuildCommitMessage_RejectsUnknownBoundary(t *testing.T) {
+	_, err := buildCommitMessage("wave", "w1")
+	if err == nil {
+		t.Fatal("buildCommitMessage accepted unknown boundary; expected error")
+	}
+}
+
+// TestBuildCommitMessage_RejectsEmptyNameWhenRequired asserts the Plan,
+// Phase, and Milestone boundaries reject empty names. Only "project"
+// allows an empty name.
+func TestBuildCommitMessage_RejectsEmptyNameWhenRequired(t *testing.T) {
+	for _, boundary := range []string{"plan", "phase", "milestone"} {
+		_, err := buildCommitMessage(boundary, "")
+		if err == nil {
+			t.Errorf("buildCommitMessage(%q, \"\") accepted empty name; expected error", boundary)
+		}
+	}
+}
+
+// TestBuildPushJobWithArtifacts asserts opts.ArtifactPaths is CSV-joined
+// into a single --artifact-paths=<csv> arg (NOT repeated flags).
+func TestBuildPushJobWithArtifacts(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := PushOptions{
+		TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+		Branch:        "tide/run-demo-1747200000",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/M-001/P-003/L-005/PLAN.md", "artifacts/M-001/P-003/L-005/SUMMARY.md"},
+	}
+	job := buildPushJob(project, "tide-projects", opts, scheme)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	joined := strings.Join(args, " ")
+
+	wants := []string{
+		"--commit-message=tide: plan 03-foo authored + executed",
+		"--artifact-paths=artifacts/M-001/P-003/L-005/PLAN.md,artifacts/M-001/P-003/L-005/SUMMARY.md",
+	}
+	for _, w := range wants {
+		found := false
+		for _, a := range args {
+			if a == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Args missing %q (got: %s)", w, joined)
+		}
+	}
+}
+
 // ---------- Test 8: buildCloneJob args ----------
 
 func TestBuildCloneJobArgs(t *testing.T) {

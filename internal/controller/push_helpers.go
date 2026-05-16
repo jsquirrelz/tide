@@ -306,6 +306,58 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 	return job
 }
 
+// buildCommitMessage returns the W11 / D-B2 boundary commit-message
+// string for the given level boundary. Plan 03-08 locks in the four
+// shapes:
+//
+//   - "plan":      "tide: plan <name> authored + executed"  ← only one
+//                                                             with "+ executed"
+//                                                             suffix (Tasks
+//                                                             have already
+//                                                             executed by
+//                                                             the time Plan
+//                                                             boundary fires).
+//   - "phase":     "tide: phase <name> authored"
+//   - "milestone": "tide: milestone <name> authored"
+//   - "project":   "tide: project complete"                 ← no name suffix;
+//                                                             final commit.
+//
+// Returns an error for unknown boundary names (e.g., "wave" — Tasks
+// ship in their parent Plan's commit) or for an empty name when one
+// of the three name-required boundaries (plan/phase/milestone) is
+// requested. "project" allows empty name (the name is ignored).
+//
+// The ProjectReconciler (plan 03-08) is the sole caller; it computes
+// the message string once per level boundary and threads it through
+// PushOptions.CommitMessage into the push Job's --commit-message arg.
+// The push Job binary (cmd/tide-push) consumes the arg and writes the
+// commit verbatim.
+func buildCommitMessage(boundary, name string) (string, error) {
+	switch boundary {
+	case "plan":
+		if name == "" {
+			return "", fmt.Errorf("buildCommitMessage: plan boundary requires non-empty name (D-B2 #1)")
+		}
+		return fmt.Sprintf("tide: plan %s authored + executed", name), nil
+	case "phase":
+		if name == "" {
+			return "", fmt.Errorf("buildCommitMessage: phase boundary requires non-empty name (D-B2 #2)")
+		}
+		return fmt.Sprintf("tide: phase %s authored", name), nil
+	case "milestone":
+		if name == "" {
+			return "", fmt.Errorf("buildCommitMessage: milestone boundary requires non-empty name (D-B2 #3)")
+		}
+		return fmt.Sprintf("tide: milestone %s authored", name), nil
+	case "project":
+		// Project boundary is the final commit; name is ignored
+		// because the project is the implicit scope.
+		return "tide: project complete", nil
+	default:
+		return "", fmt.Errorf("buildCommitMessage: unknown boundary %q (allowed: plan, phase, milestone, project)", boundary)
+	}
+}
+
 // joinCSV joins paths with commas. Tide-push's --artifact-paths flag
 // parses CSV; keep the join shape consistent with the parser there.
 func joinCSV(paths []string) string {
