@@ -6,81 +6,107 @@ you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 */
 
 package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
 
-var _ = Describe("Phase Controller", func() {
-	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase3"), func() {
+	const projectName = "test-proj-ph"
+	const milestoneName = "test-ms-ph"
+	const phaseName = "test-phase-1"
+	ctx := context.Background()
 
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+	BeforeEach(func() {
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent: tideprojectv1alpha1.SubagentConfig{
+					Model: "claude-sonnet-4-6",
+				},
+				Git: tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+			},
 		}
-		phase := &tideprojectv1alpha1.Phase{}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(milestoneName, "default", &tideprojectv1alpha1.Milestone{})
+	})
 
-		BeforeEach(func() {
-			By("creating the custom resource for the Kind Phase")
-			err := k8sClient.Get(ctx, typeNamespacedName, phase)
-			if err != nil && errors.IsNotFound(err) {
-				resource := &tideprojectv1alpha1.Phase{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
-					},
-					Spec: tideprojectv1alpha1.PhaseSpec{
-						MilestoneRef: "test-milestone",
-					},
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
-			}
-		})
+	AfterEach(func() {
+		ph := &tideprojectv1alpha1.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha1.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		proj := &tideprojectv1alpha1.Project{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
+			proj.Finalizers = nil
+			_ = k8sClient.Update(ctx, proj)
+			_ = k8sClient.Delete(ctx, proj)
+		}
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs)
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			_ = k8sClient.Delete(ctx, &j)
+		}
+	})
 
-		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &tideprojectv1alpha1.Phase{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+	It("Test 4: dispatches planner Job tide-phase-<uid>-1 and patches Status.Phase=Running", func() {
+		phase := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName},
+		}
+		Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
-			By("Cleanup the specific resource instance Phase")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
-		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &PhaseReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+		r := &PhaseReconciler{
+			Client:        mgrClient,
+			Scheme:        k8sClient.Scheme(),
+			Dispatcher:    &stubDispatcher{},
+			PlannerPool:   newPlannerPoolForTest(),
+			EnvReader:     newMapEnvReader(),
+			SubagentImage: testSubagentImage,
+		}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
-		})
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var got tideprojectv1alpha1.Phase
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
+			expectedJobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
+			var job batchv1.Job
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: expectedJobName, Namespace: "default"}, &job)).To(Succeed())
+			g.Expect(got.Status.Phase).To(Equal("Running"))
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 })

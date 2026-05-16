@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,10 +35,12 @@ import (
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	"github.com/jsquirrelz/tide/pkg/dag"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 const planFinalizer = "tideproject.k8s/plan-cleanup"
@@ -50,11 +53,20 @@ type PlanReconciler struct {
 
 	MaxConcurrentReconciles int
 
-	// PlannerPool — Plan reconcile dispatches planner-pool subagents in Phase 2.
+	// PlannerPool — Plan reconcile dispatches planner-pool subagents.
 	PlannerPool  *pool.Pool
 	ExecutorPool *pool.Pool
 
 	Dispatcher dispatch.Dispatcher
+
+	// EnvReader reads EnvelopeOut from PVC after planner Job completes (Phase 3).
+	EnvReader podjob.EnvelopeReader
+
+	// SubagentImage is the planner subagent container image (Phase 3).
+	SubagentImage string
+
+	// HelmProviderDefaults carry Helm-chart provider/model defaults (Phase 3).
+	HelmProviderDefaults ProviderDefaults
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
@@ -117,8 +129,18 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	// 5. Phase 2 Wave materialization body inside the Dispatcher seam (REQ-SUB-01).
+	// 5. Dispatcher seam (REQ-SUB-01). Phase 3 splits this:
+	// 5a. Planner dispatch — fires when Plan has no Tasks yet (D-A2).
+	// 5b. Wave materialization — Phase 2 logic; runs once Tasks exist and
+	//     admission webhook stamps Validated.
 	if r.Dispatcher != nil {
+		res, dispatched, err := r.reconcilePlannerDispatch(ctx, &plan)
+		if err != nil {
+			return res, err
+		}
+		if dispatched {
+			return res, nil
+		}
 		return r.reconcileWaveMaterialization(ctx, &plan)
 	}
 
@@ -135,6 +157,218 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// reconcilePlannerDispatch is the Phase 3 planner-dispatch step (D-A2)
+// that runs BEFORE reconcileWaveMaterialization.
+//
+// Returns (result, dispatched, error):
+//   - dispatched=true → the planner-dispatch branch took the reconcile and
+//     reconcileWaveMaterialization MUST NOT run on this pass.
+//   - dispatched=false → no planner work needed (Tasks already exist or no
+//     Project resolvable); the caller should run reconcileWaveMaterialization.
+//
+// Dispatch is triggered when the Plan has no Tasks AND has not yet reached
+// a terminal state. The planner Job has deterministic name
+// tide-plan-<plan-uid>-1 (D-B5 dedup). On Job completion, child Task CRDs
+// are server-side-created from EnvelopeOut.ChildCRDs; Wave creation is left
+// to reconcileWaveMaterialization (Phase 2 path) which fires once the
+// admission webhook stamps ValidationState="Validated" on the Plan.
+func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, bool, error) {
+	// If Tasks already exist for this Plan, skip planner dispatch — the
+	// Phase 2 Wave path runs.
+	var taskList tideprojectv1alpha1.TaskList
+	if err := r.List(ctx, &taskList,
+		client.InNamespace(plan.Namespace),
+		client.MatchingFields{taskPlanRefIndexKey: plan.Name},
+	); err != nil {
+		return ctrl.Result{}, false, fmt.Errorf("list tasks for plan %s: %w", plan.Name, err)
+	}
+	if len(taskList.Items) > 0 {
+		return ctrl.Result{}, false, nil
+	}
+
+	// Terminal short-circuit.
+	if plan.Status.Phase == "Succeeded" || plan.Status.Phase == "Failed" {
+		return ctrl.Result{}, true, nil
+	}
+
+	jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+
+	// On Running: check Job terminal state.
+	if plan.Status.Phase == "Running" {
+		var job batchv1.Job
+		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: jobName}, &job); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, true, err
+			}
+			return ctrl.Result{}, true, nil
+		}
+		if isJobTerminal(&job) {
+			res, err := r.handlePlannerJobCompletion(ctx, plan, &job)
+			return res, true, err
+		}
+		return ctrl.Result{}, true, nil
+	}
+
+	// Acquire plannerPool (POOL-01) before Job creation (D-A4).
+	if r.PlannerPool != nil {
+		if err := r.PlannerPool.Acquire(ctx); err != nil {
+			return ctrl.Result{}, true, err
+		}
+		defer r.PlannerPool.Release()
+	}
+
+	project := r.resolveProjectForPlan(ctx, plan)
+	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 20}
+	_, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, 1, "", caps, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	if err != nil {
+		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
+	}
+	_ = envInJSON
+
+	job := r.buildPlanPlannerJob(plan, jobName)
+	if err := owner.EnsureOwnerRef(job, plan, r.Scheme); err != nil {
+		return ctrl.Result{}, true, fmt.Errorf("ensure owner ref on planner job: %w", err)
+	}
+	if err := r.Create(ctx, job); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, true, fmt.Errorf("create planner job: %w", err)
+		}
+		// AlreadyExists: idempotent success.
+	}
+
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "Running"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionAuthoringPlanner,
+		Status:             metav1.ConditionTrue,
+		Reason:             "PlannerDispatched",
+		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, true, err
+	}
+
+	return ctrl.Result{}, true, nil
+}
+
+// handlePlannerJobCompletion materializes Task child CRDs from
+// EnvelopeOut.ChildCRDs and clears the Running phase so the Phase 2 Wave
+// path can pick up on the next reconcile.
+//
+// Note: This does NOT create Waves — the existing reconcileWaveMaterialization
+// handles that once the admission webhook stamps ValidationState=Validated.
+func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha1.Plan, _ *batchv1.Job) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+	project := r.resolveProjectForPlan(ctx, plan)
+	projectUID := ""
+	if project != nil {
+		projectUID = string(project.UID)
+	}
+
+	if r.EnvReader == nil {
+		logger.Info("no env reader; clearing Running phase to let Wave path proceed")
+		patch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.Phase = ""
+		_ = r.Status().Patch(ctx, plan, patch)
+		return ctrl.Result{}, nil
+	}
+
+	envOut, err := r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
+	if err != nil {
+		patch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.Phase = "Failed"
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha1.ConditionFailed,
+			Status:             metav1.ConditionTrue,
+			Reason:             "EnvelopeReadFailed",
+			Message:            err.Error(),
+			LastTransitionTime: metav1.Now(),
+		})
+		if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
+			return ctrl.Result{}, pErr
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if len(envOut.ChildCRDs) > 0 {
+		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, plan, envOut.ChildCRDs); mErr != nil {
+			patch := client.MergeFrom(plan.DeepCopy())
+			plan.Status.Phase = "Failed"
+			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionFailed,
+				Status:             metav1.ConditionTrue,
+				Reason:             "ChildCRDMaterializationFailed",
+				Message:            mErr.Error(),
+				LastTransitionTime: metav1.Now(),
+			})
+			if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
+				return ctrl.Result{}, pErr
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = ""
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// resolveProjectForPlan walks Plan → Phase → Milestone → Project.
+func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tideprojectv1alpha1.Plan) *tideprojectv1alpha1.Project {
+	if plan.Spec.PhaseRef == "" {
+		return nil
+	}
+	var ph tideprojectv1alpha1.Phase
+	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &ph); err != nil {
+		return nil
+	}
+	if ph.Spec.MilestoneRef == "" {
+		return nil
+	}
+	var ms tideprojectv1alpha1.Milestone
+	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
+		return nil
+	}
+	if ms.Spec.ProjectRef == "" {
+		return nil
+	}
+	var p tideprojectv1alpha1.Project
+	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
+		return nil
+	}
+	return &p
+}
+
+func (r *PlanReconciler) buildPlanPlannerJob(plan *tideprojectv1alpha1.Plan, jobName string) *batchv1.Job {
+	backoffLimit := int32(0)
+	ttl := int32(300)
+	image := r.SubagentImage
+	if image == "" {
+		image = "ghcr.io/jsquirrelz/tide-stub-subagent:test"
+	}
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: plan.Namespace,
+			Labels: map[string]string{
+				"tideproject.k8s/plan-uid": string(plan.UID),
+				"tideproject.k8s/level":    "plan",
+				"tideproject.k8s/role":     "planner",
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: batchv1Template(jobName, image),
+		},
+	}
 }
 
 // reconcileWaveMaterialization implements the Wave materialization body inside the
@@ -327,6 +561,7 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha1.Plan{}).
 		Owns(&tideprojectv1alpha1.Wave{}).
+		Owns(&tideprojectv1alpha1.Task{}).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("plan").
