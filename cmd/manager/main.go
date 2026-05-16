@@ -108,6 +108,23 @@ func main() {
 	flag.IntVar(&rateLimitDefaultRPM, "rate-limit-default-rpm", 60, "Default requests-per-minute rate limit (rateLimits.defaults.requestsPerMinute in values.yaml)")
 	flag.IntVar(&rateLimitDefaultBurst, "rate-limit-default-burst", 10, "Default burst size for rate-limit buckets (rateLimits.defaults.burst in values.yaml)")
 
+	// Phase 3 plan 03-09 — Helm env-var wiring. Set by the controller Deployment
+	// env block from charts/tide/values.yaml. Helpers in cmd/manager/env.go.
+	//
+	//   TIDE_PUSH_IMAGE              → ProjectReconciler.TidePushImage
+	//   CLAUDE_SUBAGENT_IMAGE        → ProviderDefaults.Image (D-C2 last fallback)
+	//   TIDE_DEFAULT_MODEL_MILESTONE → ProviderDefaults.Models["milestone"]  D-C4
+	//   TIDE_DEFAULT_MODEL_PHASE     → ProviderDefaults.Models["phase"]      D-C4
+	//   TIDE_DEFAULT_MODEL_PLAN      → ProviderDefaults.Models["plan"]       D-C4
+	//   TIDE_DEFAULT_MODEL_TASK      → ProviderDefaults.Models["task"]       D-C4
+	//   TIDE_LEADER_LEASE_SECONDS    → ctrl.Options.LeaseDuration            D-D1
+	//   TIDE_LEADER_RENEW_SECONDS    → ctrl.Options.RenewDeadline            D-D1
+	//   TIDE_LEADER_RETRY_SECONDS    → ctrl.Options.RetryPeriod              D-D1
+	tidePushImage := envOrDefault("TIDE_PUSH_IMAGE", "ghcr.io/jsquirrelz/tide-push:v0.1.0-dev")
+	claudeSubagentImage := envOrDefault("CLAUDE_SUBAGENT_IMAGE", "ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0-dev")
+	helmProviderDefaults := tideHelmProviderDefaults(claudeSubagentImage)
+	leaderLease, leaderRenew, leaderRetry := resolveLeaderElectionTiming()
+
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -132,10 +149,16 @@ func main() {
 	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
 
 	// 3. Construct the Manager (CTRL-01, CTRL-03).
+	//    Phase 3 D-D1: leader-election timings come from Helm via the env-var
+	//    helpers above (lease > renew > retry invariant enforced by
+	//    resolveLeaderElectionTiming defaults; controller-runtime validates).
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "tide-controller-leader.tideproject.k8s",
+		LeaseDuration:          &leaderLease,
+		RenewDeadline:          &leaderRenew,
+		RetryPeriod:            &leaderRetry,
 		HealthProbeBindAddress: ":8081",
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		WebhookServer:          webhook.NewServer(webhook.Options{Port: 9443, CertDir: webhookCertPath}),
@@ -205,11 +228,14 @@ func main() {
 	}
 
 	// 7. Register all six reconcilers (CTRL-01).
+	//    Phase 3 plan 03-09: TidePushImage (Project) + HelmProviderDefaults
+	//    (Milestone/Phase/Plan) are wired from Helm env vars (D-C4 / D-B5).
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project,
 		WatchNamespace:          watchNamespace,
+		TidePushImage:           tidePushImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
@@ -220,6 +246,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Milestone,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
+		HelmProviderDefaults:    helmProviderDefaults,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -230,6 +257,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Phase,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
+		HelmProviderDefaults:    helmProviderDefaults,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -241,6 +269,7 @@ func main() {
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
 		Dispatcher:              dispatcher,
+		HelmProviderDefaults:    helmProviderDefaults,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)

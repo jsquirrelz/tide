@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-push
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+# Phase 3 plan 03-09 (D-B1 + T-304 mitigation):
+# tide-push is a DISTINCT identity from tide-subagent (Phase 2 D-A4 zero-verb SA).
+# This SA runs the per-Project tide-push Job that mounts Project.Spec.git.credsSecretRef
+# via envFrom; it is the only K8s identity in the cluster that needs to read git PAT
+# Secrets, and it reads no other Kubernetes objects.
+#
+# Cross-namespace caveat (documented in values.yaml + docs/git-hosts.md):
+# This SA is created in .Release.Namespace (tide-system by default). Push Jobs are
+# dispatched into the Project's namespace; the Job pod's serviceAccountName: tide-push
+# refers to an SA in its OWN namespace. v1.0 deployment expects operators to either
+# (a) co-locate Projects with the controller in tide-system, or
+# (b) replicate this SA + Role + RoleBinding into each Project namespace (e.g. via a
+# templated kustomize overlay or a small Helm sub-chart per Project namespace).
+# This caveat is the explicit reason we ship per-namespace Role (not ClusterRole) —
+# preserving namespace boundary > convenience.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-push
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+rules:
+  # Single rule: secrets get. No list/watch/create/update/patch/delete.
+  # No wildcards. No other apiGroups. No other resources.
+  #
+  # T-304 mitigation: a compromised push Job pod cannot enumerate Secrets,
+  # cannot read Secrets in other namespaces, cannot mutate any K8s object.
+  # The PAT is consumed via envFrom -> SecretRef -> environment, which K8s
+  # resolves at Pod admission. resourceNames: would tighten this further but
+  # is install-time-unknown (chart doesn't know individual Project Secret names)
+  # — the namespace boundary on the Role is the v1.0 enforcement seam.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-push
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: tide-push
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-push

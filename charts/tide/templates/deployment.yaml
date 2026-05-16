@@ -40,6 +40,29 @@ spec:
           value: {{ quote .Values.controllerManager.manager.env.watchNamespace }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        # Phase 3 plan 03-09 (D-B1 / D-C2 / D-C4 / D-D1): Helm env-var wiring.
+        # Read by cmd/manager/main.go via env.go helpers; flow through to
+        # ProjectReconciler.TidePushImage, ProviderDefaults.{Image,Models},
+        # and ctrl.Options.{LeaseDuration,RenewDeadline,RetryPeriod}.
+        - name: TIDE_PUSH_IMAGE
+          value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default "latest" }}"
+        - name: CLAUDE_SUBAGENT_IMAGE
+          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default "latest" }}"
+        - name: TIDE_DEFAULT_MODEL_MILESTONE
+          value: "{{ .Values.subagent.levels.milestone.model | default "claude-opus-4-7" }}"
+        - name: TIDE_DEFAULT_MODEL_PHASE
+          value: "{{ .Values.subagent.levels.phase.model | default "claude-sonnet-4-6" }}"
+        - name: TIDE_DEFAULT_MODEL_PLAN
+          value: "{{ .Values.subagent.levels.plan.model | default "claude-sonnet-4-6" }}"
+        - name: TIDE_DEFAULT_MODEL_TASK
+          value: "{{ .Values.subagent.levels.task.model | default "claude-haiku-4-5" }}"
+        - name: TIDE_LEADER_LEASE_SECONDS
+          value: "{{ .Values.leaderElection.leaseDurationSeconds | default 15 }}"
+        - name: TIDE_LEADER_RENEW_SECONDS
+          value: "{{ .Values.leaderElection.renewDeadlineSeconds | default 10 }}"
+        - name: TIDE_LEADER_RETRY_SECONDS
+          value: "{{ .Values.leaderElection.retryPeriodSeconds | default 2 }}"
+        # phase3-env-injected
         envFrom:
         - secretRef:
             name: {{ .Values.signingKey.secretName | default "tide-signing-key" }}

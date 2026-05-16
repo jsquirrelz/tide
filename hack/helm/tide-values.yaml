@@ -90,10 +90,17 @@ maxConcurrentReconciles:
 
 # CTRL-03 leader election. Enabled by default; the controller's
 # --leader-elect arg is appended in controllerManager.manager.args above.
+#
+# Phase 3 plan 03-09 (D-D1 chaos-resume tuning): leaseDurationSeconds,
+# renewDeadlineSeconds, and retryPeriodSeconds flow through to
+# controller-runtime via TIDE_LEADER_{LEASE,RENEW,RETRY}_SECONDS env vars on
+# the manager Deployment. Defaults give a single-pod restart ≤25s failover
+# ceiling. Invariant: lease > renew > retry (controller-runtime validates).
 leaderElection:
   enabled: true
-  # leaseDuration / renewDeadline / retryPeriod use controller-runtime defaults
-  # when omitted. Override here for clusters with custom timing requirements.
+  leaseDurationSeconds: 15
+  renewDeadlineSeconds: 10
+  retryPeriodSeconds: 2
 
 # Phase 2 additions (Plan 12 wiring — D-C3, D-D1, D-D3, Blocker #1/#2/#3 fixes).
 
@@ -117,6 +124,15 @@ rateLimits:
 # Passed to the controller via --subagent-image and --credproxy-image flags in the
 # Deployment args. The controller injects these into TaskReconciler.SubagentImage +
 # TaskReconciler.CredproxyImage, which BuildJobSpec consumes (Plan 08 / Plan 09).
+#
+# Phase 3 plan 03-09 additions: claudeSubagent (D-C2 real-Claude image, swaps
+# in alongside stubSubagent; both images stay buildable so chaos-resume and
+# kind smoke tests keep working with the stub) and tidePush (D-B1 dedicated
+# push-Job image — orchestrator-side gitleaks + go-git push-with-lease).
+#
+# Production reproducibility: tags are mutable in the OCI spec; pin by
+# `@sha256:<digest>` in production overrides (`--set images.tidePush.tag=...`
+# with the digest, or set repository: ghcr.io/.../tide-push@sha256:...).
 images:
   stubSubagent:
     repository: ghcr.io/jsquirrelz/tide-stub-subagent
@@ -130,6 +146,62 @@ images:
     repository: busybox
     tag: "1.36"
     pullPolicy: IfNotPresent
+  # Phase 3 plan 03-09 (D-B1): dedicated tide-push image. Orchestrator-side
+  # push Job per level boundary; gitleaks + go-git + --force-with-lease.
+  # Wired to controller via TIDE_PUSH_IMAGE env var on manager Deployment.
+  tidePush:
+    repository: ghcr.io/jsquirrelz/tide-push
+    tag: v0.1.0-dev
+    pullPolicy: IfNotPresent
+  # Phase 3 plan 03-09 (D-C2 swap-in): real Claude-Code-backed subagent image.
+  # Used as the default fallback when Project.Spec.subagent.image is empty;
+  # individual Projects can pin a different vendor image per Project (D-C2).
+  # Wired to controller via CLAUDE_SUBAGENT_IMAGE env var on manager Deployment.
+  # In production, prefer pinning by @sha256 digest — tag-based pulls of "v0.1.0-dev"
+  # are not reproducible across pulls.
+  claudeSubagent:
+    repository: ghcr.io/jsquirrelz/tide-claude-subagent
+    tag: v0.1.0-dev
+    pullPolicy: IfNotPresent
+
+# Phase 3 plan 03-09 (D-C4): per-level subagent defaults. Resolution chain at
+# dispatch time (in MilestoneReconciler / PhaseReconciler / PlanReconciler before
+# calling Dispatcher.Run):
+#
+#   project.Spec.subagent.levels.<level>.{image,model}  ← per-level override
+#   project.Spec.subagent.{image,model}                 ← per-Project default
+#   subagent.defaults.{image,model}                     ← Helm chart default (this block)
+#   subagent.levels.<level>.model                       ← Helm per-level default (this block)
+#
+# Per-level model defaults (D-C4) match the phase-brief lock-in:
+#   milestone → claude-opus-4-7    (heavy planning, lowest fan-out)
+#   phase     → claude-sonnet-4-6
+#   plan      → claude-sonnet-4-6
+#   task      → claude-haiku-4-5   (highest fan-out, cost-bounded)
+#
+# Per-level models flow through the manager Deployment env block as
+# TIDE_DEFAULT_MODEL_{MILESTONE,PHASE,PLAN,TASK}.
+subagent:
+  defaults:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent
+    model: claude-sonnet-4-6
+  levels:
+    milestone:
+      model: claude-opus-4-7
+    phase:
+      model: claude-sonnet-4-6
+    plan:
+      model: claude-sonnet-4-6
+    task:
+      model: claude-haiku-4-5
+
+# Phase 3 plan 03-09 (D-B3): optional cluster-wide gitleaks override.
+# Empty (default) → push Job uses the compiled-in gitleaks v8 ruleset.
+# Per-Project overrides are still supported via Project.Spec.git.leaksConfigRef
+# (D-B3 — ConfigMap mounted into push Job at /etc/tide/gitleaks-config.toml).
+# This top-level key is the cluster-wide fallback (v1.0 deferred; reserved for v1.x).
+gitleaks:
+  configMapName: ""
 
 # HMAC signing-secret name (D-C3 / Blocker #1 fix).
 # The signing-secret.yaml Helm template creates a Secret with this name on first install

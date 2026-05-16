@@ -112,6 +112,12 @@ cp "${HACK_DIR}/signing-secret.yaml" "${CHART_DIR}/templates/signing-secret.yaml
 #    modified). Zero RoleBindings on tide-subagent SA per D-A4 / T-02-12-04.
 cp "${HACK_DIR}/serviceaccount-subagent.yaml" "${CHART_DIR}/templates/serviceaccount-subagent.yaml"
 
+# 6a. push-rbac.yaml — NEW template for the tide-push ServiceAccount + Role +
+#     RoleBinding (Phase 3 plan 03-09 / D-B1 / T-304 mitigation). Dedicated SA,
+#     distinct from tide-subagent, scoped to `secrets get` only in the controller
+#     namespace. Documents cross-namespace caveat in its own comment block.
+cp "${HACK_DIR}/push-rbac.yaml" "${CHART_DIR}/templates/push-rbac.yaml"
+
 # 7. projects-pvc.yaml — Single shared tide-projects ReadWriteMany PVC (Blocker #2/#3
 #    fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
 #    resource-policy: keep preserves in-flight workspace state across helm uninstall.
@@ -200,10 +206,47 @@ if VOLUME_MARKER not in content:
         count=1,
     )
 
+# ── 8e: Phase 3 plan 03-09 env-var injection ────────────────────────────────
+# Adds TIDE_PUSH_IMAGE, CLAUDE_SUBAGENT_IMAGE, TIDE_DEFAULT_MODEL_*, and
+# TIDE_LEADER_*_SECONDS env vars on the manager container. Read by
+# cmd/manager/main.go via env.go helpers (D-C4 per-level models, D-D1
+# leader-election tuning, D-B1 push image wiring).
+ENV3_MARKER = "# phase3-env-injected"
+ENV3_BLOCK = """        - name: TIDE_PUSH_IMAGE
+          value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default \"latest\" }}"
+        - name: CLAUDE_SUBAGENT_IMAGE
+          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default \"latest\" }}"
+        - name: TIDE_DEFAULT_MODEL_MILESTONE
+          value: "{{ .Values.subagent.levels.milestone.model | default \"claude-opus-4-7\" }}"
+        - name: TIDE_DEFAULT_MODEL_PHASE
+          value: "{{ .Values.subagent.levels.phase.model | default \"claude-sonnet-4-6\" }}"
+        - name: TIDE_DEFAULT_MODEL_PLAN
+          value: "{{ .Values.subagent.levels.plan.model | default \"claude-sonnet-4-6\" }}"
+        - name: TIDE_DEFAULT_MODEL_TASK
+          value: "{{ .Values.subagent.levels.task.model | default \"claude-haiku-4-5\" }}"
+        - name: TIDE_LEADER_LEASE_SECONDS
+          value: "{{ .Values.leaderElection.leaseDurationSeconds | default 15 }}"
+        - name: TIDE_LEADER_RENEW_SECONDS
+          value: "{{ .Values.leaderElection.renewDeadlineSeconds | default 10 }}"
+        - name: TIDE_LEADER_RETRY_SECONDS
+          value: "{{ .Values.leaderElection.retryPeriodSeconds | default 2 }}"
+        # phase3-env-injected
+"""
+if ENV3_MARKER not in content:
+    # Insert just before `envFrom:` on the manager container (the same anchor
+    # used by the Phase 2 envFrom block). Pattern: lines containing exactly
+    # 8-space-indented `envFrom:`.
+    content = re.sub(
+        r'(\n        envFrom:\n)',
+        '\n' + ENV3_BLOCK + r'\1',
+        content,
+        count=1,
+    )
+
 with open(path, 'w') as f:
     f.write(content)
 
-print("OK: deployment.yaml Phase 2 fields injected (idempotent)")
+print("OK: deployment.yaml Phase 2 + Phase 3 fields injected (idempotent)")
 PYEOF
 fi
 
