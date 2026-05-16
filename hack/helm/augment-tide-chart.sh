@@ -112,6 +112,12 @@ cp "${HACK_DIR}/signing-secret.yaml" "${CHART_DIR}/templates/signing-secret.yaml
 #    modified). Zero RoleBindings on tide-subagent SA per D-A4 / T-02-12-04.
 cp "${HACK_DIR}/serviceaccount-subagent.yaml" "${CHART_DIR}/templates/serviceaccount-subagent.yaml"
 
+# 6a. push-rbac.yaml — NEW template for the tide-push ServiceAccount + Role +
+#     RoleBinding (Phase 3 plan 03-09 / D-B1 / T-304 mitigation). Dedicated SA,
+#     distinct from tide-subagent, scoped to `secrets get` only in the controller
+#     namespace. Documents cross-namespace caveat in its own comment block.
+cp "${HACK_DIR}/push-rbac.yaml" "${CHART_DIR}/templates/push-rbac.yaml"
+
 # 7. projects-pvc.yaml — Single shared tide-projects ReadWriteMany PVC (Blocker #2/#3
 #    fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
 #    resource-policy: keep preserves in-flight workspace state across helm uninstall.
