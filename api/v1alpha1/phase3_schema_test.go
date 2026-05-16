@@ -129,12 +129,15 @@ func TestProjectSpecHasSubagentField(t *testing.T) {
 	}
 }
 
-// TestProjectSpecHasGitField verifies Git GitConfig is wired into ProjectSpec.
+// TestProjectSpecHasGitField verifies Git *GitConfig is wired into ProjectSpec.
+// Pointer (not value) so omitempty fully elides absent GitConfig — value-type
+// would serialize as `git: {repoURL: ""}` and trip RepoURL's pattern validator
+// on Phase 2 test fixtures.
 func TestProjectSpecHasGitField(t *testing.T) {
 	src := readProjectTypes(t)
-	re := regexp.MustCompile(`Git\s+GitConfig`)
+	re := regexp.MustCompile(`Git\s+\*GitConfig`)
 	if !re.MatchString(src) {
-		t.Errorf("ProjectSpec missing `Git GitConfig` field wiring")
+		t.Errorf("ProjectSpec missing `Git *GitConfig` field wiring (pointer required)")
 	}
 }
 
