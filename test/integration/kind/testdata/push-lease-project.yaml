@@ -1,0 +1,65 @@
+---
+# push-lease-project.yaml — Layer B fixture for plan 03-10's push_lease_test.go.
+#
+# Verifies the ProjectReconciler's push-lifecycle contract (D-B6):
+#   1. First push omits lease (no Status.Git.LastPushedSHA → tide-push --last-pushed-sha=)
+#   2. Subsequent push carries lease (Status.Git.LastPushedSHA populated)
+#   3. Push Job failure → Status.Phase=PushLeaseFailed + LeaseFailureCount++
+#   4. bypass-push-lease annotation clears PushLeaseFailed
+#
+# No real `git push` is exercised — the test mocks Job outcomes by patching
+# Job.Status directly. The git remote URL `https://example.invalid` and
+# placeholder PAT are intentional (never contacted). Threat T-310 mitigated.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: push-lease-test
+---
+# Per-namespace workspace PVC (mirrors Phase 02.2 cascade-10 pattern).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: push-lease-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Provider Secret (Anthropic API key placeholder — unused by push Job).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: push-lease-test
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
+# Git creds Secret referenced by Project.Spec.Git.CredsSecretRef. Push Job
+# would consume GIT_PAT via envFrom, but the test never invokes a real push.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: push-lease-creds
+  namespace: push-lease-test
+type: Opaque
+stringData:
+  GIT_PAT: dummy-pat-never-used-real-remote-is-example-invalid
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: push-lease
+  namespace: push-lease-test
+spec:
+  targetRepo: "https://example.invalid/owner/push-lease-repo.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000  # $1000 — no budget cap during tests
+  git:
+    repoURL: "https://example.invalid/owner/push-lease-repo.git"
+    credsSecretRef: "push-lease-creds"

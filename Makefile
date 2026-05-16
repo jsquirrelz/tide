@@ -132,15 +132,20 @@ test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integrati
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test ./test/integration/envtest/... -v -timeout=2m -ginkgo.v --ginkgo.label-filter='envtest'
 
-test-int-kind-prep: ## Build manager + stub-subagent + credproxy Docker images and load them into the tide-test kind cluster.
+test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Docker images and load them into the tide-test kind cluster.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-credproxy:test -f images/credproxy/Dockerfile .
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-push:test -f images/tide-push/Dockerfile .
 	$(CONTAINER_TOOL) build -t controller:test -f Dockerfile .
 	@if ! $(KIND) get clusters 2>/dev/null | grep -q "^tide-test$$"; then \
 		$(KIND) create cluster --name tide-test --config test/integration/kind/cluster.yaml; \
 	fi
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-stub-subagent:test --name tide-test
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-credproxy:test --name tide-test
+	# Phase 3 plan 03-10: preload tide-push (push_lease_test.go's mocked push Jobs
+	# still reference the image; preload avoids ImagePullBackoff stalls).
+	# Equivalent literal command at make-time: kind load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
 
 .PHONY: lint

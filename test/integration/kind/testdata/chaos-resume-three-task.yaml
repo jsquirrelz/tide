@@ -1,0 +1,160 @@
+---
+# chaos-resume-three-task.yaml — D-D2 mixed-state 3-task fixture for plan 03-10.
+#
+# Layer B fixture for the chaos-resume kind integration spec
+# (test/integration/kind/chaos_resume_test.go). Three Tasks in a single Plan:
+#
+#   T-α (alpha-chaos) — wave 0, no deps, testMode=success — reaches Succeeded
+#                       pre-kill. Pillar 3 anchor: completed-set must survive.
+#   T-β (beta-chaos)  — wave 0, no deps, testMode=wait-for-signal — pinned at
+#                       Running pre-kill, harness polls /workspace/envelopes/{β.UID}/release.
+#                       Pillar 1 anchor: in-flight Job UID must survive.
+#   T-γ (gamma-chaos) — wave 1, dependsOn=[alpha-chaos], testMode=wait-for-signal —
+#                       dispatches after α succeeds; reaches Running pre-kill.
+#                       Pillar 1 anchor: in-flight Job UID must survive.
+#
+# Apply, wait for pre-kill states, snapshot, `kubectl delete pod -l
+# control-plane=controller-manager`, wait for lease handoff (~15s default
+# Lease + 30s safety), snapshot post-restart, assert D-D4 pillars 1-5.
+#
+# No `git` block on the Project — chaos-resume is an internal-only spec; no
+# push happens (this rules out push-Job races confusing the assertion set).
+#
+# Fixture intentionally creates the FULL hierarchy (Project, Milestone,
+# Phase, Plan, Tasks) field-for-field with three-task-wave.yaml because
+# the TaskReconciler's resolveProject dispatch path requires it
+# (Phase 02.2 cascade-5 lesson — partial hierarchies do not dispatch).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaos-resume-test
+---
+# Per-namespace workspace PVC (Phase 02.2 cascade-10 namespace-scoping).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: chaos-resume-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Provider Secret. stub-subagent ignores ANTHROPIC_API_KEY; placeholder only.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: chaos-resume-test
+type: Opaque
+data:
+  # base64("test-api-key-stub-subagent-does-not-use-it")
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: chaos-resume-project
+  namespace: chaos-resume-test
+spec:
+  targetRepo: "https://github.com/example/chaos-resume.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000  # $1000 — no budget cap during tests
+  # Intentionally no `git` block: chaos-resume does NOT exercise push.
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  name: chaos-resume-milestone
+  namespace: chaos-resume-test
+spec:
+  projectRef: chaos-resume-project
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Phase
+metadata:
+  name: chaos-resume-phase
+  namespace: chaos-resume-test
+spec:
+  milestoneRef: chaos-resume-milestone
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Plan
+metadata:
+  name: chaos-resume-plan
+  namespace: chaos-resume-test
+  labels:
+    tideproject.k8s/project: chaos-resume-project
+spec:
+  phaseRef: chaos-resume-phase
+---
+# T-α (alpha-chaos): wave 0, fast success — anchor for Pillar 3 (completed-set).
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: alpha-chaos
+  namespace: chaos-resume-test
+  labels:
+    tideproject.k8s/project: chaos-resume-project
+    tideproject.k8s/wave-index: "0"
+spec:
+  planRef: chaos-resume-plan
+  filesTouched:
+    - alpha.go
+  declaredOutputPaths:
+    - alpha.go
+  dev:
+    testMode: success
+  caps:
+    wallClockSeconds: 60
+---
+# T-β (beta-chaos): wave 0, wait-for-signal — anchor for Pillar 1 (Job UID).
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: beta-chaos
+  namespace: chaos-resume-test
+  labels:
+    tideproject.k8s/project: chaos-resume-project
+    tideproject.k8s/wave-index: "0"
+spec:
+  planRef: chaos-resume-plan
+  filesTouched:
+    - beta.go
+  declaredOutputPaths:
+    - beta.go
+  dev:
+    # D-D3 — stub-subagent polls /workspace/envelopes/{TaskUID}/release every
+    # 500ms; test writes the release file post-kill to release the Task.
+    testMode: wait-for-signal
+  caps:
+    # Allow far more than the test wall-budget (~90s) so the harness keeps
+    # polling across the pod-kill window. activeDeadlineSeconds = caps + 60s.
+    wallClockSeconds: 300
+---
+# T-γ (gamma-chaos): wave 1, dependsOn=[alpha-chaos], wait-for-signal — second
+# in-flight anchor for Pillar 1 (Job UID) + post-release Pillar 4.
+apiVersion: tideproject.k8s/v1alpha1
+kind: Task
+metadata:
+  name: gamma-chaos
+  namespace: chaos-resume-test
+  labels:
+    tideproject.k8s/project: chaos-resume-project
+    tideproject.k8s/wave-index: "1"
+spec:
+  planRef: chaos-resume-plan
+  dependsOn:
+    - alpha-chaos
+  filesTouched:
+    - gamma.go
+  declaredOutputPaths:
+    - gamma.go
+  dev:
+    testMode: wait-for-signal
+  caps:
+    wallClockSeconds: 300

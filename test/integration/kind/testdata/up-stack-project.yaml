@@ -1,0 +1,67 @@
+---
+# up-stack-project.yaml — Layer B fixture for plan 03-10's up_stack_dispatch_test.go.
+#
+# Verifies the up-stack dispatch contract (D-A1, D-A2): applying a Milestone
+# CRD triggers MilestoneReconciler to dispatch a planner Job named
+# tide-milestone-<milestone-uid>-1, owned by the Milestone, with the
+# tideproject.k8s/level=milestone + role=planner labels.
+#
+# W13: ownerReferences are OMITTED from this YAML — the MilestoneReconciler
+# sets them via internal/owner.EnsureOwnerRef on first reconcile (against
+# the real Project UID). Asserting OwnerRefs land correctly IS the test.
+#
+# Out-of-scope: planner envelope round-trip (PodStatusEnvelopeReader + stub
+# canned Phase ChildCRDSpec emission). That path requires the stub to be
+# extended with a planner mode emitting EnvelopeOut.ChildCRDs — separate
+# follow-up work. This fixture covers the dispatch shape only, which is the
+# spec contract under test.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: up-stack-test
+---
+# Per-namespace workspace PVC.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: up-stack-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: up-stack-test
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: up-stack-project
+  namespace: up-stack-test
+spec:
+  targetRepo: "https://github.com/example/up-stack.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Milestone
+metadata:
+  name: m1
+  namespace: up-stack-test
+  # ownerReferences intentionally OMITTED — MilestoneReconciler.Reconcile sets
+  # them via internal/owner.EnsureOwnerRef once it observes the parent Project
+  # in step 4 of the Reconcile pattern. This is exactly the contract under test:
+  # apply the Milestone CRD and let the controller wire the parent ref.
+spec:
+  projectRef: up-stack-project
