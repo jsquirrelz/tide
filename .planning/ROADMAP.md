@@ -142,8 +142,8 @@ Plans:
 **Plans:** 11 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — pkg/dispatch envelope schema bump: Provider/Role/Level + ChildCRDSpec + cache tokens (Wave 1)
-- [ ] 03-02-PLAN.md — Project CRD Spec/Status extensions + stub-subagent wait-for-signal mode (Wave 1)
+- [x] 03-01-PLAN.md — pkg/dispatch envelope schema bump: Provider/Role/Level + ChildCRDSpec + cache tokens (Wave 1)
+- [x] 03-02-PLAN.md — Project CRD Spec/Status extensions + stub-subagent wait-for-signal mode (Wave 1)
 - [ ] 03-03-PLAN.md — pkg/git package: Clone, Fetch, AddWorktree, AddPath, Commit, Push with ForceWithLease (Wave 2)
 - [ ] 03-04-PLAN.md — internal/gitleaks scanner + embedded default rules (Wave 2)
 - [ ] 03-05-PLAN.md — internal/subagent/common (stream reader + prompt templates) + internal/subagent/anthropic (Wave 2)
