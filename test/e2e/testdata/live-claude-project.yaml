@@ -1,0 +1,86 @@
+# test/e2e/testdata/live-claude-project.yaml — TEST-03 live nightly E2E fixture.
+#
+# Phase 3 plan 03-11 deliverable. Used only by test/e2e/live_claude_test.go
+# (build-tag-gated by `//go:build live-e2e`). Applied by the test code after
+# substituting `${ANTHROPIC_API_KEY}` with the value from the env at apply
+# time — see docs/live-e2e.md for the double-gate (env + build tag) protocol.
+#
+# Schema notes (kept in sync with api/v1alpha1/project_types.go):
+#   - Project.Spec.budget.absoluteCapCents is the on-CRD field (int64 cents).
+#     "$1.00 cap" => absoluteCapCents: 100 ($1.00 = 100 cents). Docs / prose
+#     use "$1.00 / usdCap=1.00" framing; this YAML uses the schema-correct
+#     cents field per Phase 2 D-D2.
+#   - Project.Spec.git is the per-project push target (Phase 3 D-B6).
+#   - Project.Spec.subagent.image pins the real claude-subagent image (D-C2).
+#   - llmCredsSecretRef => providerSecretRef (Phase 2 D-C1..C4 credproxy reads).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: live-claude-test
+  labels:
+    tideproject.k8s/live-e2e: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: anthropic-creds
+  namespace: live-claude-test
+type: Opaque
+stringData:
+  # ${ANTHROPIC_API_KEY} is substituted by the test code at apply time
+  # (os.Expand). Never commit a real key here. The push Job's gitleaks
+  # gate would reject this file too — defense in depth.
+  ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: live-claude-git-creds
+  namespace: live-claude-test
+type: Opaque
+stringData:
+  # For file:// fixture-repo URLs the push Job ignores GIT_PAT (no remote auth
+  # needed). Field present so Project.Spec.git.credsSecretRef resolves.
+  GIT_PAT: "${GIT_PAT_OR_DUMMY}"
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: live-claude
+  namespace: live-claude-test
+spec:
+  # Phase 2 D-A1: targetRepo is the read-only origin URL. For the live E2E
+  # we use the in-cluster fixture repo (a bare clone on the workspace PVC
+  # populated by the init Job from a tarball in test/e2e/testdata/fixture-repo.tar
+  # — see docs/live-e2e.md "Fixture Repo Pinning"). The plan-checker's manual
+  # live run substitutes a real fixture URL if the in-cluster shape isn't
+  # available; the schema validator just needs an http(s)/git@ URL.
+  targetRepo: "https://github.com/jsquirrelz/tide-live-e2e-fixture.git"
+
+  # Phase 2 D-C1..C4: credproxy reads provider creds (ANTHROPIC_API_KEY).
+  providerSecretRef: anthropic-creds
+
+  # Phase 3 D-B6: per-project git target for the push Job. file:// would be
+  # cleaner but the CRD's pattern validator requires http(s) — operators
+  # running the live E2E in nightly CI override this with a real test repo.
+  git:
+    repoURL: "https://github.com/jsquirrelz/tide-live-e2e-fixture.git"
+    credsSecretRef: live-claude-git-creds
+
+  # Phase 2 D-D2: budget cap. usdCap=$1.00 => absoluteCapCents=100 (cents).
+  # Any runaway dispatch fails the budget gate and halts the Project with
+  # Status.phase=BudgetExceeded — third safety net after the build-tag and
+  # env-var double gate (T-312 mitigation).
+  budget:
+    absoluteCapCents: 100
+
+  # Phase 3 D-C2: pin the real Claude image (NOT the stub). Override the
+  # Helm-chart default opus model with haiku for cost discipline — milestone
+  # planning on a <500 LOC fixture stays well under $1.00.
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0-dev
+    model: claude-haiku-4-5
+    levels:
+      milestone:
+        model: claude-haiku-4-5
