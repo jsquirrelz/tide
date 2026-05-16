@@ -18,8 +18,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,26 +34,46 @@ import (
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 const milestoneFinalizer = "tideproject.k8s/milestone-cleanup"
 
 // MilestoneReconciler reconciles a Milestone object at Standard depth (D-C1).
-// Milestone is owned by Project; the parent ref is set via internal/owner.EnsureOwnerRef.
+// Milestone is owned by Project; the parent ref is set via
+// internal/owner.EnsureOwnerRef.
+//
+// Phase 3 fills the body (plan 03-08) — dispatches a planner Job and on
+// completion materializes Phase child CRDs from EnvelopeOut.ChildCRDs.
 type MilestoneReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 
 	MaxConcurrentReconciles int
 
-	// PlannerPool — Milestone reconcile dispatches planner-pool subagents in Phase 2.
+	// PlannerPool is the planner-pool semaphore (Phase 1 POOL-01, default
+	// size 16). MilestoneReconciler acquires plannerPool before creating
+	// the planner Job (D-A4). POOL-03 cross-pool wait analyzer prohibits
+	// acquiring both pools in the same code path; up-stack reconcilers
+	// acquire plannerPool only.
 	PlannerPool  *pool.Pool
 	ExecutorPool *pool.Pool
 
 	Dispatcher dispatch.Dispatcher
+
+	// EnvReader reads the EnvelopeOut from the per-Project PVC after the
+	// planner Job completes (Phase 2 D-A2 path).
+	EnvReader podjob.EnvelopeReader
+
+	// SubagentImage is the image ref for the planner subagent container.
+	SubagentImage string
+
+	// HelmProviderDefaults carry Helm-chart provider/model defaults.
+	HelmProviderDefaults ProviderDefaults
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
@@ -61,6 +83,7 @@ type MilestoneReconciler struct {
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=milestones/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=milestones/finalizers,verbs=update
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects,verbs=get;list;watch
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=phases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -78,7 +101,7 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if !milestone.DeletionTimestamp.IsZero() {
 		return finalizer.HandleDeletion(ctx, r.Client, &milestone, milestoneFinalizer,
 			func(_ context.Context) error {
-				logger.Info("milestone cleanup (no-op in Phase 1)", "name", milestone.Name)
+				logger.Info("milestone cleanup", "name", milestone.Name)
 				return nil
 			}, finalizerCleanupTimeout)
 	}
@@ -97,7 +120,6 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		var parent tideprojectv1alpha1.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: milestone.Namespace, Name: milestone.Spec.ProjectRef}, &parent); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				// Parent not found yet — requeue and wait for it.
 				return ctrl.Result{Requeue: true}, nil
 			}
 			return ctrl.Result{}, err
@@ -110,9 +132,9 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
-	// 5. Phase 1: dispatcher seam nil-guarded for Phase 2 body fill (REQ-SUB-01).
+	// 5. Phase 3: planner dispatch body (REQ-SUB-01, D-A2).
 	if r.Dispatcher != nil {
-		// Phase 2 fills.
+		return r.reconcilePlannerDispatch(ctx, &milestone)
 	}
 
 	// 6. Update status conditions and persist via Status().Update.
@@ -130,7 +152,185 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	return ctrl.Result{}, nil
 }
 
-// SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02 and a
+// reconcilePlannerDispatch is the Phase 3 planner dispatch body.
+//
+// Mirrors task_controller.go:reconcileDispatch (Phase 2) at the milestone
+// level: dispatches a planner Job named tide-milestone-<uid>-<attempt>,
+// patches Status.Phase=Running with Condition AuthoringPlanner=True, then
+// on Job terminal state calls handleJobCompletion to materialize Phase
+// child CRDs from EnvelopeOut.ChildCRDs.
+func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *tideprojectv1alpha1.Milestone) (ctrl.Result, error) {
+	// Step 1: Terminal short-circuit.
+	if ms.Status.Phase == "Succeeded" || ms.Status.Phase == "Failed" {
+		return ctrl.Result{}, nil
+	}
+
+	jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
+
+	// Step 2: On Running — check Job terminal state.
+	if ms.Status.Phase == "Running" {
+		var job batchv1.Job
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: jobName}, &job); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		if isJobTerminal(&job) {
+			return r.handleJobCompletion(ctx, ms, &job)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).
+	if r.PlannerPool != nil {
+		if err := r.PlannerPool.Acquire(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		defer r.PlannerPool.Release()
+	}
+
+	// Step 4: Resolve project for provider config.
+	var project *tideprojectv1alpha1.Project
+	if ms.Spec.ProjectRef != "" {
+		var p tideprojectv1alpha1.Project
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
+			project = &p
+		}
+	}
+
+	// Step 5: Build planner envelope.
+	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 20}
+	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, 1, "", caps, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
+	}
+	_ = envInJSON
+
+	// Step 6: Build + Create planner Job (deterministic name = D-B5 dedup key).
+	job := r.buildPlannerJob(ms, jobName)
+	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure owner ref on planner job: %w", err)
+	}
+	if err := r.Create(ctx, job); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, fmt.Errorf("create planner job: %w", err)
+		}
+		// AlreadyExists: idempotent success.
+	}
+
+	// Step 7: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
+	patch := client.MergeFrom(ms.DeepCopy())
+	ms.Status.Phase = "Running"
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionAuthoringPlanner,
+		Status:             metav1.ConditionTrue,
+		Reason:             "PlannerDispatched",
+		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// handleJobCompletion reads EnvelopeOut, materializes Phase child CRDs,
+// and patches Milestone.Status.Phase to a terminal state.
+func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, _ *batchv1.Job) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	var project *tideprojectv1alpha1.Project
+	if ms.Spec.ProjectRef != "" {
+		var p tideprojectv1alpha1.Project
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
+			project = &p
+		}
+	}
+	projectUID := ""
+	if project != nil {
+		projectUID = string(project.UID)
+	}
+
+	if r.EnvReader == nil {
+		logger.Info("no env reader; marking Milestone Succeeded without ChildCRD materialization")
+		return r.patchMilestoneSucceeded(ctx, ms)
+	}
+
+	envOut, err := r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
+	if err != nil {
+		return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", err.Error())
+	}
+
+	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
+	if len(envOut.ChildCRDs) > 0 {
+		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ms, envOut.ChildCRDs); mErr != nil {
+			return r.patchMilestoneFailed(ctx, ms, "ChildCRDMaterializationFailed", mErr.Error())
+		}
+	}
+
+	return r.patchMilestoneSucceeded(ctx, ms)
+}
+
+func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha1.Milestone) (ctrl.Result, error) {
+	patch := client.MergeFrom(ms.DeepCopy())
+	ms.Status.Phase = "Succeeded"
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             "PlannerComplete",
+		Message:            "Milestone planner completed; Phase children materialized",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha1.Milestone, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(ms.DeepCopy())
+	ms.Status.Phase = "Failed"
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+func (r *MilestoneReconciler) buildPlannerJob(ms *tideprojectv1alpha1.Milestone, jobName string) *batchv1.Job {
+	backoffLimit := int32(0)
+	ttl := int32(300)
+	image := r.SubagentImage
+	if image == "" {
+		image = "ghcr.io/jsquirrelz/tide-stub-subagent:test"
+	}
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: ms.Namespace,
+			Labels: map[string]string{
+				"tideproject.k8s/milestone-uid": string(ms.UID),
+				"tideproject.k8s/level":         "milestone",
+				"tideproject.k8s/role":          "planner",
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: batchv1Template(jobName, image),
+		},
+	}
+}
+
+// SetupWithManager wires Owns(&Job{}) and Owns(&Phase{}) per D-A2, plus a
 // namespace-filter predicate per AUTH-02.
 func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
@@ -142,6 +342,7 @@ func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha1.Milestone{}).
 		Owns(&batchv1.Job{}).
+		Owns(&tideprojectv1alpha1.Phase{}).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("milestone").

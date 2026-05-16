@@ -22,7 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
@@ -68,10 +67,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			SubagentImage: testSubagentImage,
 		}
 
-		for i := 0; i < 5; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: planName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Verify the planner Job exists.
 		Eventually(func(g Gomega) {
@@ -104,10 +100,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			SubagentImage: testSubagentImage,
 		}
 
-		for i := 0; i < 5; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: planName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Wave materialization should have created Waves (3 from α…θ fixture).
 		Eventually(func(g Gomega) {

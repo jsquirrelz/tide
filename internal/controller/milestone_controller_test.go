@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -24,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -37,28 +39,56 @@ func newPlannerPoolForTest() *pool.Pool {
 	return pool.New(16, "planner")
 }
 
+// reconcileWithRetry drives a Reconcile call N times, retrying on 409 Conflict.
+type reconcilerFunc func(context.Context, reconcile.Request) (ctrl.Result, error)
+
+func reconcileWithRetry(r reconcilerFunc, name types.NamespacedName, n int) error {
+	for i := 0; i < n; i++ {
+		for attempt := 0; attempt < 5; attempt++ {
+			_, err := r(context.Background(), reconcile.Request{NamespacedName: name})
+			if err == nil {
+				break
+			}
+			if strings.Contains(err.Error(), "the object has been modified") || strings.Contains(err.Error(), "Conflict") {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // makeFakeJobTerminal patches a Job to a terminal state (Complete or Failed)
 // for envtest. envtest doesn't run real Jobs, so we set status conditions
-// directly.
+// directly. status.startTime is required for finished jobs.
 func makeFakeJobTerminal(ctx context.Context, c client.Client, name, namespace string, succeeded bool) error {
 	var job batchv1.Job
 	if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &job); err != nil {
 		return err
 	}
+	now := metav1.Now()
+	job.Status.StartTime = &now
+	job.Status.CompletionTime = &now
 	job.Status.Conditions = []batchv1.JobCondition{}
 	if succeeded {
 		job.Status.Succeeded = 1
-		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
-			Type:               batchv1.JobComplete,
-			Status:             corev1.ConditionTrue,
-			LastTransitionTime: metav1.Now(),
-		})
+		job.Status.Conditions = append(job.Status.Conditions,
+			batchv1.JobCondition{
+				Type:               batchv1.JobSuccessCriteriaMet,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+			},
+			batchv1.JobCondition{
+				Type:               batchv1.JobComplete,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+			})
 	} else {
 		job.Status.Failed = 1
 		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
 			Type:               batchv1.JobFailed,
 			Status:             corev1.ConditionTrue,
-			LastTransitionTime: metav1.Now(),
+			LastTransitionTime: now,
 		})
 	}
 	return c.Status().Update(ctx, &job)
@@ -78,9 +108,14 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-opus-4-7",
 				},
+				Git: tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
 	})
 
 	AfterEach(func() {
@@ -133,10 +168,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}
 
 		// Reconcile a few times — first for finalizer ensure, then for owner ref, then for dispatch.
-		for i := 0; i < 5; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: milestoneName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Verify Job exists with the deterministic name.
 		Eventually(func(g Gomega) {
@@ -173,10 +205,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}
 
 		// Drive initial reconciles to create the Job.
-		for i := 0; i < 5; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: milestoneName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Fetch Milestone UID for envelope setup.
 		var got tideprojectv1alpha1.Milestone
@@ -197,10 +226,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
 
 		// Reconcile to trigger handleJobCompletion.
-		for i := 0; i < 3; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: milestoneName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 3)).To(Succeed())
 
 		// Verify child Phase created.
 		Eventually(func(g Gomega) {
@@ -235,10 +261,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			SubagentImage: testSubagentImage,
 		}
 
-		for i := 0; i < 5; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: milestoneName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
 
 		var got tideprojectv1alpha1.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)).To(Succeed())
@@ -255,10 +278,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
 
-		for i := 0; i < 3; i++ {
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: milestoneName, Namespace: "default"}})
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 3)).To(Succeed())
 
 		Eventually(func(g Gomega) {
 			var msAfter tideprojectv1alpha1.Milestone
