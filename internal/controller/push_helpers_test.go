@@ -39,7 +39,7 @@ func fixtureProject() *tideprojectv1alpha1.Project {
 		},
 		Spec: tideprojectv1alpha1.ProjectSpec{
 			TargetRepo: "https://github.com/example/demo.git",
-			Git: tideprojectv1alpha1.GitConfig{
+			Git: &tideprojectv1alpha1.GitConfig{
 				RepoURL:        "https://github.com/example/demo.git",
 				CredsSecretRef: "demo-git-creds",
 			},

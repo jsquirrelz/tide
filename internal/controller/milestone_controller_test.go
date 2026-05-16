@@ -108,7 +108,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-opus-4-7",
 				},
-				Git: tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},

@@ -78,7 +78,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
 			Spec: tideprojectv1alpha1.ProjectSpec{
 				TargetRepo: "https://github.com/example/test.git",
-				Git: tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
@@ -137,7 +137,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
 			Spec: tideprojectv1alpha1.ProjectSpec{
 				TargetRepo: "https://github.com/example/test.git",
-				Git: tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},

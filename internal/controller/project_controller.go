@@ -363,7 +363,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	if cloneErr != nil && !apierrors.IsNotFound(cloneErr) {
 		return ctrl.Result{}, cloneErr
 	}
-	if apierrors.IsNotFound(cloneErr) && project.Spec.Git.RepoURL != "" {
+	if apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
 		cloneJob := buildCloneJob(project, pvcName, CloneOptions{TidePushImage: r.TidePushImage}, r.Scheme)
 		if cErr := r.Create(ctx, cloneJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
@@ -382,7 +382,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	// a follow-up plan); for now, the controller stamps the push Job
 	// when Status.Phase=Complete via the buildPushJob path so the
 	// grep contract + state machine shape is provable.
-	if project.Status.Phase == tideprojectv1alpha1.PhaseComplete && project.Spec.Git.RepoURL != "" {
+	if project.Status.Phase == tideprojectv1alpha1.PhaseComplete && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
 		pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
 		var existingPush batchv1.Job
 		pErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &existingPush)

@@ -39,7 +39,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-sonnet-4-6",
 				},
-				Git: tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},

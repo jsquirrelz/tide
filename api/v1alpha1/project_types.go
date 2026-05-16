@@ -287,8 +287,11 @@ type ProjectSpec struct {
 	// Git declares the per-Project target repo + creds for artifact push
 	// (Phase 3 D-B6). Required for any Project whose lifecycle reaches push;
 	// optional in v1.0 only for purely transient/test Projects.
+	// Pointer so omitempty fully elides the field when absent — value-type
+	// GitConfig{} would serialize as `git: {repoURL: ""}` and trip the
+	// RepoURL pattern validation on existing Phase 2 test fixtures.
 	// +optional
-	Git GitConfig `json:"git,omitempty"`
+	Git *GitConfig `json:"git,omitempty"`
 }
 
 // Project Phase constants for Project.Status.Phase (Plan 10 — init Job + budget gate).
