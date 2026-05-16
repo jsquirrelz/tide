@@ -148,6 +148,36 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Doc
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
 
+##@ Live nightly E2E (TEST-03 — Phase 3 plan 03-11)
+
+# test-e2e-live runs the live Claude nightly E2E spec under test/e2e/.
+# Cost-bearing: ~$0.20-$0.80 per run baseline. Skipped by `make test` /
+# `make test-int`; intended ONLY for nightly CI cron runs OR explicit
+# operator-driven debug runs.
+#
+# Double gate (with the in-test BeforeSuite Skip): fail-fast on missing
+# ANTHROPIC_API_KEY env, then go test invokes with `-tags=live_e2e` so
+# live_claude_test.go is compiled. The build tag uses an underscore (Go
+# build-constraint grammar requires identifier-shaped tags; hyphens are
+# illegal in `//go:build` lines) while the Makefile target name keeps
+# the operator-friendly hyphen (`test-e2e-live`).
+#
+# Budget cap (third safety net): test fixture sets Project.Spec.budget.
+# absoluteCapCents=100 (= $1.00). A runaway dispatch halts at the gate
+# with Status.phase=BudgetExceeded; the spec then fails its assertion
+# (costSpentCents < 100), surfacing the over-spend in CI.
+#
+# See docs/live-e2e.md for nightly CI recipe + fixture pinning + cost
+# baseline + troubleshooting.
+.PHONY: test-e2e-live
+test-e2e-live: ## Live nightly E2E (requires ANTHROPIC_API_KEY env) — incurs cost ~$0.20-$0.80 per run.
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+		echo "ERROR: ANTHROPIC_API_KEY env not set — refusing to run live E2E"; \
+		echo "       See docs/live-e2e.md for the nightly CI recipe."; \
+		exit 1; \
+	fi
+	go test -tags=live_e2e ./test/e2e/... -timeout=15m -v
+
 .PHONY: lint
 lint: golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
