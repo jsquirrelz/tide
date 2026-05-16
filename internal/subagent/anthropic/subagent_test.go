@@ -1,0 +1,237 @@
+package anthropic
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+)
+
+// fixtureStreamJSON is the canned stream-json content used by the happy-path
+// test. It mirrors RESEARCH Pattern 5: a system/init, one stream_event delta,
+// and a final result event with all 4 usage fields.
+const fixtureStreamJSON = `{"type":"system/init","session_id":"sess-1"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}
+{"type":"result","result":"hello world","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":30,"cache_creation_input_tokens":20},"total_cost_usd":0.001}
+`
+
+// TestRun_VendorMismatch asserts the Anthropic subagent refuses an envelope
+// whose Provider.Vendor is not "anthropic" — without exec'ing claude. This is
+// the fail-fast defense per pkg/dispatch/provider.go godoc: image-tag-vs-
+// envelope drift catches at startup instead of mid-flight.
+func TestRun_VendorMismatch(t *testing.T) {
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude", // would explode if ever exec'd
+		WorkspaceRoot: t.TempDir(),
+	})
+	in := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "uid-vendor-mismatch",
+		Role:       "executor",
+		Level:      "task",
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "openai",
+			Model:  "gpt-4",
+		},
+	}
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("expected vendor-mismatch error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "vendor") || !strings.Contains(msg, "anthropic") {
+		t.Errorf("error should mention vendor and anthropic; got %q", msg)
+	}
+}
+
+// TestRun_UnknownParam asserts Q3 RESOLVED params allow-list — unknown keys
+// (anything outside {temperature, thinking_budget, top_p, top_k}) cause a
+// fail-fast error before exec'ing claude. Matches 03-RESEARCH §"Open
+// Questions Q3 RESOLVED" — reject-unknown at subagent startup.
+func TestRun_UnknownParam(t *testing.T) {
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: t.TempDir(),
+	})
+	in := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "uid-bad-param",
+		Role:       "executor",
+		Level:      "task",
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "anthropic",
+			Model:  "claude-sonnet-4-6",
+			Params: map[string]string{
+				"unknown_key": "value",
+			},
+		},
+	}
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("expected unknown-param error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(strings.ToLower(msg), "unknown") && !strings.Contains(strings.ToLower(msg), "param") {
+		t.Errorf("error should mention 'unknown' or 'param'; got %q", msg)
+	}
+}
+
+// TestRun_AllowedParams asserts each key in the Q3 allow-list (temperature,
+// thinking_budget, top_p, top_k) passes the params check. This is a unit-test
+// negation of TestRun_UnknownParam: with only allowed keys, the params gate
+// must not fire. We use a fake exec that feeds the fixture stream-json so
+// the test runs end-to-end without claude on PATH.
+func TestRun_AllowedParams(t *testing.T) {
+	tmp := t.TempDir()
+	a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+	in := envelopeFixture("uid-allowed-params")
+	in.Provider.Params = map[string]string{
+		"temperature":     "0.7",
+		"thinking_budget": "20000",
+		"top_p":           "0.95",
+		"top_k":           "40",
+	}
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run with allowed params: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Errorf("ExitCode: got %d, want 0", out.ExitCode)
+	}
+}
+
+// TestRun_HappyPath asserts the end-to-end exec → stream-json parse →
+// EnvelopeOut path. Uses a fake exec that runs `bash -c 'cat <fixture>'`
+// so the test does not depend on the claude CLI being installed.
+// Validates that:
+//   - EnvelopeOut.Usage carries the parsed token tally for all 4 fields.
+//   - EnvelopeOut.Result carries the final assistant text.
+//   - events.jsonl is written under WorkspaceRoot/envelopes/{TaskUID}/.
+//   - EnvelopeOut.APIVersion / Kind / TaskUID are set per pkg/dispatch.
+func TestRun_HappyPath(t *testing.T) {
+	tmp := t.TempDir()
+	a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+	in := envelopeFixture("uid-happy-path")
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if out.APIVersion != pkgdispatch.APIVersionV1Alpha1 {
+		t.Errorf("APIVersion: got %q, want %q", out.APIVersion, pkgdispatch.APIVersionV1Alpha1)
+	}
+	if out.Kind != pkgdispatch.KindTaskEnvelopeOut {
+		t.Errorf("Kind: got %q, want %q", out.Kind, pkgdispatch.KindTaskEnvelopeOut)
+	}
+	if out.TaskUID != in.TaskUID {
+		t.Errorf("TaskUID: got %q, want %q", out.TaskUID, in.TaskUID)
+	}
+	if out.ExitCode != 0 {
+		t.Errorf("ExitCode: got %d, want 0", out.ExitCode)
+	}
+	if out.Result != "hello world" {
+		t.Errorf("Result: got %q, want %q", out.Result, "hello world")
+	}
+	if out.Usage.InputTokens != 100 || out.Usage.OutputTokens != 50 {
+		t.Errorf("Usage tokens: got %+v, want In=100 Out=50", out.Usage)
+	}
+	if out.Usage.CacheReadTokens != 30 || out.Usage.CacheCreationTokens != 20 {
+		t.Errorf("Usage cache tokens: got %+v, want CR=30 CC=20", out.Usage)
+	}
+
+	// events.jsonl must exist under WorkspaceRoot/envelopes/{TaskUID}/
+	eventsPath := filepath.Join(tmp, "envelopes", in.TaskUID, "events.jsonl")
+	data, rerr := os.ReadFile(eventsPath)
+	if rerr != nil {
+		t.Fatalf("events.jsonl not written at %s: %v", eventsPath, rerr)
+	}
+	if !strings.Contains(string(data), `"type":"result"`) {
+		t.Errorf("events.jsonl missing result event; got:\n%s", string(data))
+	}
+}
+
+// TestRun_ExecFailure asserts that when the underlying exec.Cmd exits
+// non-zero, Run() surfaces a non-zero ExitCode and a populated Reason in
+// EnvelopeOut. Dispatch-level success vs task-level failure are different
+// concerns (pkg/dispatch/subagent.go godoc) — we return (EnvelopeOut, nil)
+// for task failure, not (EnvelopeOut, err).
+func TestRun_ExecFailure(t *testing.T) {
+	tmp := t.TempDir()
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude", // unused — overridden below
+		WorkspaceRoot: tmp,
+	})
+	// Override execFunc to invoke `false` (always exits 1) — simulates a
+	// claude crash. The harness ParseStream still runs against empty stdout;
+	// the non-zero exit drives ExitCode/Reason.
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "false")
+	}
+
+	in := envelopeFixture("uid-exec-fail")
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		// Per pkg/dispatch contract, dispatch-level (network/I/O) failures
+		// return non-nil err. exec failing to start IS a dispatch-level fail,
+		// but exit 1 from the CLI is a task-level fail. `false` exits cleanly
+		// non-zero so we expect (out, nil) here with ExitCode != 0.
+		t.Fatalf("Run returned dispatch-level error for task-level fail: %v", err)
+	}
+	if out.ExitCode == 0 {
+		t.Error("expected ExitCode != 0, got 0")
+	}
+	if out.Reason == "" {
+		t.Error("expected non-empty Reason on exec failure")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Test helpers
+// ----------------------------------------------------------------------------
+
+// envelopeFixture returns a populated EnvelopeIn for tests that need a
+// well-formed input. Provider.Vendor is "anthropic" so the vendor fail-fast
+// does not fire.
+func envelopeFixture(uid string) pkgdispatch.EnvelopeIn {
+	return pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    uid,
+		Role:       "executor",
+		Level:      "task",
+		Prompt:     "fixture prompt",
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "anthropic",
+			Model:  "claude-sonnet-4-6",
+		},
+		ProxyEndpoint: "https://127.0.0.1:8443",
+		SignedToken:   "fixture-signed-token",
+	}
+}
+
+// newFakeExecAnthropic returns an *Anthropic whose execFunc invokes
+// `bash -c 'cat <fixture-file>'` so the test exercises the parse path
+// without needing the claude CLI on PATH. The fixture content is written to
+// a temp file under workspaceRoot.
+func newFakeExecAnthropic(t *testing.T, workspaceRoot, fixtureContent string) *Anthropic {
+	t.Helper()
+	fixturePath := filepath.Join(workspaceRoot, "fixture.jsonl")
+	if err := os.WriteFile(fixturePath, []byte(fixtureContent), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude", // overridden via execFunc
+		WorkspaceRoot: workspaceRoot,
+	})
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		// Ignore name/args — we replace them with a deterministic cat-the-fixture.
+		return exec.CommandContext(ctx, "bash", "-c", "cat "+fixturePath)
+	}
+	return a
+}
