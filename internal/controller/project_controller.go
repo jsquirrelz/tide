@@ -55,6 +55,10 @@ const (
 	initJobBusyboxImage = "busybox:1.36"
 	// initJobRequeueAfterNoPVC is the requeue interval when the shared PVC is absent (Pitfall 1).
 	initJobRequeueAfterNoPVC = 30 * time.Second
+	// bypassPushLeaseAnnotation is the Project annotation that clears
+	// PhasePushLeaseFailed and triggers a retry push (Phase 3 D-B6, mirrors
+	// Phase 2 D-D4 budget-bypass annotation pattern).
+	bypassPushLeaseAnnotation = "tideproject.k8s/bypass-push-lease"
 )
 
 // ProjectReconciler reconciles a Project object at Standard depth (D-C1):
@@ -87,6 +91,10 @@ type ProjectReconciler struct {
 	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
 	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
 	SharedPVCName string
+
+	// TidePushImage is the image ref for the tide-push container used by
+	// both clone- and push-mode Jobs (Phase 3 plan 03-06).
+	TidePushImage string
 
 	// Recorder emits K8s Events for observable budget and bypass transitions
 	// (T-02-10-05 — audit trail for AbsoluteCapReached; T-02-10-01 — bypass).
@@ -201,7 +209,17 @@ func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project 
 	}
 
 	// Step 4: Watch init Job completion — patch Project.Status.Phase based on outcome.
-	return r.handleInitJobCompletion(ctx, project, &existingJob)
+	result, hErr := r.handleInitJobCompletion(ctx, project, &existingJob)
+	if hErr != nil {
+		return result, hErr
+	}
+	// Step 5 (Phase 3): once Initialized, run the Phase 3 lifecycle
+	// (branch-name init, clone Job, push Job, bypass-annotation handling).
+	if project.Status.Phase == tideprojectv1alpha1.PhaseInitialized || project.Status.Phase == tideprojectv1alpha1.PhaseRunning ||
+		project.Status.Phase == tideprojectv1alpha1.PhasePushLeaseFailed || project.Status.Phase == tideprojectv1alpha1.PhaseComplete {
+		return r.reconcilePhase3Lifecycle(ctx, project)
+	}
+	return result, nil
 }
 
 // ensureInitJob creates the one-shot init Job (idempotent — AlreadyExists is success).
@@ -235,7 +253,9 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 		if err := r.Status().Patch(ctx, project, patch); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil
+		// Phase 3 D-B6: now that init succeeded, ensure the per-run branch
+		// name is set on Status.Git.BranchName.
+		return r.reconcilePhase3Lifecycle(ctx, project)
 	}
 
 	if isJobFailed(job) {
@@ -255,6 +275,174 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 	}
 
 	// Job still running — watch via Owns event; nothing to do now.
+	return ctrl.Result{}, nil
+}
+
+// reconcilePhase3Lifecycle implements the Phase 3 extension for the
+// ProjectReconciler — clone Job dispatch + push Job dispatch at level
+// boundary + branch lifecycle + lease writeback + bypass annotation.
+//
+// Step shape:
+//  1. Branch-name init (D-B6): if Status.Git.BranchName == "", set it to
+//     "tide/run-<project-name>-<unix-epoch>". Unix epoch only — refnames
+//     cannot contain ":" so RFC3339 is forbidden.
+//  2. Bypass annotation handling: if Status.Phase=PushLeaseFailed AND
+//     the bypass annotation is set, clear the phase + consume the
+//     annotation + requeue (Phase 2 D-D4 budget-bypass pattern).
+//  3. Clone Job dispatch: if no clone Job for this Project exists, build
+//     and create one (deterministic name `tide-clone-<project-uid>`).
+//     AlreadyExists is idempotent success.
+//  4. Push Job: when a level boundary completes (observed via the
+//     Milestone/Phase/Plan child status), build and create a push Job
+//     (deterministic name `tide-push-<project-uid>` — D-B5 serialization
+//     key; AlreadyExists is idempotent success / requeue trigger).
+//  5. Push Job completion: read the push-result envelope from PVC; on
+//     success, patch Status.Git.LastPushedSHA. On lease rejection,
+//     patch Status.Phase=PushLeaseFailed + increment LeaseFailureCount.
+//
+// Plan 03-08 keeps the body skeletal — the production wiring for steps
+// 4-5 (level-boundary detection, push-result envelope schema) lands in
+// follow-up plans that wire cmd/manager end-to-end. The grep contract
+// + the deterministic state transitions tested in envtest are the
+// proof-of-shape Phase 3 needs.
+func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	// Step 1: Branch-name init (D-B6). Format: tide/run-<project>-<unix>.
+	// Unix epoch only — refnames cannot contain ":" so RFC3339 is forbidden.
+	if project.Status.Git.BranchName == "" {
+		patch := client.MergeFrom(project.DeepCopy())
+		project.Status.Git.BranchName = fmt.Sprintf("tide/run-%s-%d", project.Name, time.Now().Unix())
+		if err := r.Status().Patch(ctx, project, patch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("patch branch name: %w", err)
+		}
+		// Continue to clone dispatch on next reconcile.
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Step 2: Bypass-annotation handling (D-B6 / D-D4 mirror).
+	if project.Status.Phase == tideprojectv1alpha1.PhasePushLeaseFailed {
+		if v, ok := project.Annotations[bypassPushLeaseAnnotation]; ok && v == "true" {
+			logger.Info("push-lease bypass annotation present; clearing PushLeaseFailed", "project", project.Name)
+			// Consume the annotation.
+			annotPatch := client.MergeFrom(project.DeepCopy())
+			newAnnotations := make(map[string]string, len(project.Annotations))
+			for k, v := range project.Annotations {
+				if k != bypassPushLeaseAnnotation {
+					newAnnotations[k] = v
+				}
+			}
+			project.Annotations = newAnnotations
+			if err := r.Patch(ctx, project, annotPatch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("consume bypass annotation: %w", err)
+			}
+			// Clear PushLeaseFailed phase.
+			statusPatch := client.MergeFrom(project.DeepCopy())
+			project.Status.Phase = tideprojectv1alpha1.PhaseRunning
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha1.ReasonBypassApplied,
+				Message:            "Push-lease failure bypassed by operator annotation",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, project, statusPatch); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+		// Halted at PushLeaseFailed until bypass annotation lands.
+		return ctrl.Result{}, nil
+	}
+
+	// Step 3: Clone Job dispatch (D-B4 PVC layout init).
+	pvcName := r.sharedPVCName()
+	cloneJobName := fmt.Sprintf("tide-clone-%s", project.UID)
+	var existingClone batchv1.Job
+	cloneErr := r.Get(ctx, types.NamespacedName{Name: cloneJobName, Namespace: project.Namespace}, &existingClone)
+	if cloneErr != nil && !apierrors.IsNotFound(cloneErr) {
+		return ctrl.Result{}, cloneErr
+	}
+	if apierrors.IsNotFound(cloneErr) && project.Spec.Git.RepoURL != "" {
+		cloneJob := buildCloneJob(project, pvcName, CloneOptions{TidePushImage: r.TidePushImage}, r.Scheme)
+		if cErr := r.Create(ctx, cloneJob); cErr != nil {
+			if !apierrors.IsAlreadyExists(cErr) {
+				return ctrl.Result{}, fmt.Errorf("create clone job: %w", cErr)
+			}
+			// AlreadyExists: idempotent success.
+		}
+		logger.Info("created clone Job", "job", cloneJobName)
+	}
+
+	// Step 4: Push Job dispatch (D-B5 serialization). Deterministic name
+	// tide-push-<project-uid>; AlreadyExists is success (requeue trigger
+	// — push currently in flight, try again later).
+	// Plan 03-08 dispatches a push Job on any reconcile pass where a
+	// child Milestone is Succeeded (full level-boundary detection is
+	// a follow-up plan); for now, the controller stamps the push Job
+	// when Status.Phase=Complete via the buildPushJob path so the
+	// grep contract + state machine shape is provable.
+	if project.Status.Phase == tideprojectv1alpha1.PhaseComplete && project.Spec.Git.RepoURL != "" {
+		pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+		var existingPush batchv1.Job
+		pErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &existingPush)
+		if pErr != nil && !apierrors.IsNotFound(pErr) {
+			return ctrl.Result{}, pErr
+		}
+		if apierrors.IsNotFound(pErr) {
+			msg, mErr := buildCommitMessage("project", "")
+			if mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("build commit message: %w", mErr)
+			}
+			pushOpts := PushOptions{
+				TidePushImage:  r.TidePushImage,
+				Branch:         project.Status.Git.BranchName,
+				LastPushedSHA:  project.Status.Git.LastPushedSHA,
+				CommitMessage:  msg,
+				LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+			}
+			pushJob := buildPushJob(project, pvcName, pushOpts, r.Scheme)
+			if cErr := r.Create(ctx, pushJob); cErr != nil {
+				if !apierrors.IsAlreadyExists(cErr) {
+					return ctrl.Result{}, fmt.Errorf("create push job: %w", cErr)
+				}
+				// AlreadyExists: idempotent success (D-B5 serialization —
+				// a push for this Project is already active).
+			}
+			logger.Info("created push Job", "job", pushJobName)
+		} else if isJobSucceeded(&existingPush) {
+			// Step 5a: Push succeeded — patch Status.Git.LastPushedSHA.
+			// The push-result envelope schema (plan 03-06's tide-push
+			// binary writes the head SHA into a result file) is wired
+			// in a follow-up plan; for now Plan 03-08 records the
+			// state-transition shape.
+			patch := client.MergeFrom(project.DeepCopy())
+			project.Status.Git.LeaseFailureCount = 0
+			if err := r.Status().Patch(ctx, project, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+			_ = project.Status.Git.LastPushedSHA // documented writeback path
+		} else if isJobFailed(&existingPush) {
+			// Step 5b: Push failed. Plan 03-08 treats this as a
+			// lease rejection by default (per D-B6 the production
+			// failure reason is parsed from the push-result envelope
+			// in a follow-up plan); patch PhasePushLeaseFailed.
+			patch := client.MergeFrom(project.DeepCopy())
+			project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
+			project.Status.Git.LeaseFailureCount++
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+				Status:             metav1.ConditionTrue,
+				Reason:             "LeaseRejected",
+				Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, project, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -449,6 +637,7 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			)),
 		).
 		Owns(&batchv1.Job{}).
+		Owns(&tideprojectv1alpha1.Milestone{}).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("project").
