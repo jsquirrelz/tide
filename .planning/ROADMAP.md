@@ -144,9 +144,9 @@ Plans:
 Plans:
 - [x] 03-01-PLAN.md — pkg/dispatch envelope schema bump: Provider/Role/Level + ChildCRDSpec + cache tokens (Wave 1)
 - [x] 03-02-PLAN.md — Project CRD Spec/Status extensions + stub-subagent wait-for-signal mode (Wave 1)
-- [ ] 03-03-PLAN.md — pkg/git package: Clone, Fetch, AddWorktree, AddPath, Commit, Push with ForceWithLease (Wave 2)
-- [ ] 03-04-PLAN.md — internal/gitleaks scanner + embedded default rules (Wave 2)
-- [ ] 03-05-PLAN.md — internal/subagent/common (stream reader + prompt templates) + internal/subagent/anthropic (Wave 2)
+- [x] 03-03-PLAN.md — pkg/git package: Clone, Fetch, AddWorktree, AddPath, Commit, Push with ForceWithLease (Wave 2)
+- [x] 03-04-PLAN.md — internal/gitleaks scanner + embedded default rules (Wave 2)
+- [x] 03-05-PLAN.md — internal/subagent/common (stream reader + prompt templates) + internal/subagent/anthropic (Wave 2)
 - [ ] 03-06-PLAN.md — cmd/tide-push binary + Dockerfile + push_helpers (buildPushJob/buildCloneJob) + commit-message support (Wave 3)
 - [ ] 03-07-PLAN.md — cmd/claude-subagent shim + Dockerfile with @anthropic-ai/claude-code@2.1.142 + harness EnsureWorktree (D-B4) (Wave 3)
 - [ ] 03-08-PLAN.md — dispatch_helpers + Milestone/Phase/Plan reconciler bodies + ProjectReconciler clone+push extensions + buildCommitMessage (D-B2) (Wave 4)
