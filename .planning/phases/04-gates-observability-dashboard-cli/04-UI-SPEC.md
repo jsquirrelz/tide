@@ -1,10 +1,11 @@
 ---
 phase: 04
 slug: gates-observability-dashboard-cli
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-05-16
+reviewed_at: 2026-05-17
 ---
 
 # Phase 04 — UI Design Contract
@@ -871,14 +872,14 @@ The following are explicitly **NOT** in v1.0 — copied from CONTEXT.md `<deferr
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS — TIDE vocabulary used sparingly + specifically; locked copy strings for all states; voice consistent (terse, declarative, em-dashes); destructive actions clearly labeled
-- [ ] Dimension 2 Visuals: PASS — 15 components inventoried with one-paragraph contracts; layout/interaction specs prescribe pixel-level behavior; @xyflow/react v12 idioms verified against current spec
-- [ ] Dimension 3 Color: PASS — 60/30/10 split declared with dark+light variants; accent reserved-for list is explicit (6 surfaces, never "all interactive"); destructive is a second semantic color with its own reserved list; WCAG AA contrast verified
-- [ ] Dimension 4 Typography: PASS — 3 sizes + 1 mono variant, 2 weights (400 + 600), system font stack only (zero web font bytes), density rationale documented
-- [ ] Dimension 5 Spacing: PASS — 8-point scale (4, 8, 12, 16, 24, 32, 48, 64), three documented exceptions with rationale, arbitrary values forbidden by lint
-- [ ] Dimension 6 Registry Safety: PASS — no shadcn, no third-party registries; all dependencies pinned and listed; bundle gates enforced in CI
+- [x] Dimension 1 Copywriting: PASS — TIDE vocabulary used sparingly + specifically; locked copy strings for all states; voice consistent (terse, declarative, em-dashes); destructive actions clearly labeled
+- [x] Dimension 2 Visuals: PASS — 15 components inventoried with one-paragraph contracts; layout/interaction specs prescribe pixel-level behavior; @xyflow/react v12 idioms verified against current spec
+- [x] Dimension 3 Color: PASS — 60/30/10 split declared with dark+light variants; accent reserved-for list is explicit (6 surfaces, never "all interactive"); destructive is a second semantic color with its own reserved list; WCAG AA contrast verified
+- [x] Dimension 4 Typography: PASS — 3 sizes + 1 mono variant, 2 weights (400 + 600), system font stack only (zero web font bytes), density rationale documented
+- [x] Dimension 5 Spacing: PASS — 8-point scale (4, 8, 12, 16, 24, 32, 48, 64), three documented exceptions with rationale, arbitrary values forbidden by lint
+- [x] Dimension 6 Registry Safety: PASS — no shadcn, no third-party registries; all dependencies pinned and listed; bundle gates enforced in CI
 
-**Approval:** pending (will be set to `approved YYYY-MM-DD` by gsd-ui-checker)
+**Approval:** approved 2026-05-17
 
 ---
 
