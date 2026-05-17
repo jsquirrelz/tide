@@ -1287,7 +1287,7 @@ All major claims in this RESEARCH.md are either verified against current sources
 
 All other claims are VERIFIED or CITED — no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the dashboard image ship as the SAME image as the controller-manager (shared go.mod), or as a separate image?**
    - Recommendation: SEPARATE image (`ghcr.io/jsquirrelz/tide-dashboard`). Same go.mod (D-X2 already locks this), but separate `cmd/dashboard/Dockerfile` and `go build` target. Reasons: (a) dashboard SA has different RBAC than controller; mixing in one Pod would over-grant; (b) dashboard can scale independently from controller; (c) embed.FS bundle keeps dashboard image self-contained for simpler upgrade story.
