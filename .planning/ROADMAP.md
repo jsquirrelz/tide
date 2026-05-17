@@ -165,9 +165,26 @@ Plans:
   4. A user can open the dashboard at `https://tide-dashboard.<cluster>/` and see live Planning + Execution DAGs rendered side-by-side via React Flow v12 + dagre + Tailwind v4, with per-task status badges, status updates streaming over Server-Sent Events, click-through to opt-in `pods/log` WebSocket streams via the apiserver proxy — and verify the dashboard exposes zero mutation endpoints (all state changes route through `kubectl` or `tide` CLI) and runs in its own Deployment with its own read-only ServiceAccount distinct from the orchestrator's
   5. A user can run `tide apply -f project.yaml`, `tide watch <project>`, `tide tail <task>`, `tide approve <project>`, `tide inspect-wave <plan>`, and `tide artifact-get <ref>` from a single stateless cobra-based CLI (no local cache) talking to the K8s API — and confirm `tide tail` streams pod logs via the `pods/log` subresource without any local caching
 
+**Plans:** 14 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — internal/metrics registry + Phase4 API constants + cmd/manager metrics blank import (Wave 1)
+- [ ] 04-02-PLAN.md — metriccardinality lint analyzer + cmd/tide-lint multichecker registration (Wave 1)
+- [ ] 04-03-PLAN.md — pkg/otelai OpenInference helpers + internal/otelinit TracerProvider + cmd/manager OTel wiring (Wave 1)
+- [ ] 04-04-PLAN.md — internal/gates package (policy + annotation + boundary shared seam) (Wave 2)
+- [ ] 04-05-PLAN.md — Gate-policy hooks in Milestone/Phase/Plan/Task + PauseBetweenWaves + AnnotationChangedPredicate (Wave 2)
+- [ ] 04-06-PLAN.md — W-1 exit-10/exit-11 split + counter + W-2 mid-stack boundary push triggers (Wave 2)
+- [ ] 04-07-PLAN.md — cmd/tide skeleton + read-only verbs (apply/watch/inspect-wave/artifact-get/describe-budget) (Wave 3)
+- [ ] 04-08-PLAN.md — cmd/tide annotation-writer verbs (approve/reject/cancel/resume) + tail (Wave 3)
+- [ ] 04-09-PLAN.md — .goreleaser.yaml + Krew manifest + release.yaml workflow + docs/cli.md (Wave 3)
+- [ ] 04-10-PLAN.md — cmd/dashboard skeleton + chi router + Hub + projects API + zero-mutation guard (Wave 4)
+- [ ] 04-11-PLAN.md — Dashboard SSE handlers (events + pod-log) + informer-bridge (Wave 4)
+- [ ] 04-12-PLAN.md — dashboard/web scaffold + design tokens + 10 chrome/primitive components (Wave 5)
+- [ ] 04-13-PLAN.md — DAG views + custom nodes + drawer + log streamer + SSE hooks + bundle gate (Wave 5)
+- [ ] 04-14-PLAN.md — Helm chart additions (dashboard-deployment + RBAC + ServiceMonitor) + E2E smoke (Wave 6)
+
 **Research flag**: Recommend `/gsd:research-phase` during planning — React Flow vs htmx is contributor-pool-shaping; two-DAG view UX needs prototyping; SSE-through-ingress concerns; observability data volume (Pitfall 17); dashboard websocket leak prevention (Pitfall 22).
 
-**Plans**: TBD
 **UI hint**: yes
 
 ### Phase 5: Distribution & Self-Hosting Acceptance
