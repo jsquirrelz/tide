@@ -161,10 +161,12 @@ func TestApplyRequiresFFlag(t *testing.T) {
 	}
 }
 
-func TestStubVerbsReturnNotImplemented(t *testing.T) {
-	// The five plan-04-08 verbs (tail, approve, reject, cancel, resume) are
-	// stubs that return an error citing the future plan. Verifies that
-	// `tide --help` listings are honest about implementation state.
+// TestStubVerbsRequireArgs replaces the plan 04-07-era stub assertion. The
+// plan-04-08 write-back verbs (approve / reject / cancel / resume / tail) are
+// now real subcommands — they no longer return "not yet implemented" errors.
+// Instead, each rejects an invocation without the required <project> / <task>
+// arg via cobra's Args: ExactArgs(1) guard.
+func TestStubVerbsRequireArgs(t *testing.T) {
 	for _, verb := range []string{"tail", "approve", "reject", "cancel", "resume"} {
 		root := newTestRoot(t)
 		var out bytes.Buffer
@@ -173,11 +175,7 @@ func TestStubVerbsReturnNotImplemented(t *testing.T) {
 		root.SetArgs([]string{verb})
 		err := root.Execute()
 		if err == nil {
-			t.Errorf("expected stub verb %q to return error; got nil", verb)
-			continue
-		}
-		if !strings.Contains(err.Error(), "04-08") {
-			t.Errorf("stub %q error %q does not cite plan 04-08", verb, err.Error())
+			t.Errorf("expected %q (no args) to return error; got nil", verb)
 		}
 	}
 }
