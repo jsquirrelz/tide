@@ -91,3 +91,32 @@ const (
 	// tideproject.k8s/bypass-push-lease=true annotation.
 	ConditionPushLeaseFailed = "PushLeaseFailed"
 )
+
+// Phase 4 condition + reason vocabulary additions — gate-policy seam at every
+// level boundary (plans 04-04, 04-05, 04-06). All four up-stack reconcilers
+// (Milestone/Phase/Plan/Task) set ConditionWaveOrLevelPaused with one of the
+// four Reasons below when the gate-policy hook trips; the annotation-driven
+// approve/reject path (D-G3 / D-G4) flips the Reason in place rather than
+// adding new condition types.
+const (
+	// ConditionWaveOrLevelPaused — set when a reconciler observes a gate-policy
+	// value of "approve" or "pause" at a level boundary, OR when the Plan-level
+	// Spec.Gates.PauseBetweenWaves check trips between consecutive waves
+	// (D-G2). Cleared by the matching approve / resume annotation (D-G3 / D-G4).
+	ConditionWaveOrLevelPaused = "WaveOrLevelPaused"
+
+	// ReasonAwaitingApproval — gate=approve at this boundary and no
+	// tideproject.k8s/approve-* annotation has been observed yet (D-G2).
+	ReasonAwaitingApproval = "AwaitingApproval"
+	// ReasonPausedAtBoundary — gate=pause OR PauseBetweenWaves=true halts the
+	// dispatch without polling for an approval annotation; requires explicit
+	// `tide resume` (D-G2).
+	ReasonPausedAtBoundary = "PausedAtBoundary"
+	// ReasonRejectedByUser — `tide reject` set the tideproject.k8s/reject
+	// annotation; reconciler halts dispatch and leaves resources in place
+	// for human inspection (D-G4).
+	ReasonRejectedByUser = "RejectedByUser"
+	// ReasonResumedByUser — `tide resume` cleared the reject annotation and
+	// reconciliation has re-entered the normal advance path (D-G4).
+	ReasonResumedByUser = "ResumedByUser"
+)

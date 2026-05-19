@@ -44,6 +44,12 @@ import (
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	// Phase 4 D-O2: blank-import the central metric registry so its init()
+	// registers all 7 Phase 4 counters/histograms on
+	// sigs.k8s.io/controller-runtime/pkg/metrics.Registry at Manager start.
+	// The registry is then surfaced via the existing --metrics-bind-address
+	// flag (default :8443). See internal/metrics/doc.go for the inventory.
+	_ "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
 )

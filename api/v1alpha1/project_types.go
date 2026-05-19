@@ -310,6 +310,13 @@ const (
 	// mismatch (Phase 3 D-B6). Recovery: kubectl annotate project
 	// tideproject.k8s/bypass-push-lease=true (mirrors D-D4 bypass-budget pattern).
 	PhasePushLeaseFailed = "PushLeaseFailed"
+	// PhasePushLeakBlocked is set when a push Job exits with code 10 (gitleaks
+	// finding — envelope.reason=leak-detected). Distinct from PhasePushLeaseFailed
+	// (exit-11) so the project_controller switch can fire
+	// tide_secret_leak_blocked_total only on the leak-class outcome (Phase 4 D-W1).
+	// Recovery: operator inspects the diff and either drops the leaked secret
+	// artifact or rotates the leaked credential, then clears the phase.
+	PhasePushLeakBlocked = "PushLeakBlocked"
 	// PhaseComplete is the terminal success phase — set when all Milestones
 	// reach Succeeded and the final push Job lands (Phase 3 D-B2 #4).
 	PhaseComplete = "Complete"
