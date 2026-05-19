@@ -392,10 +392,10 @@ verify-dispatch-imports: ## Assert pkg/dispatch has no controller-runtime/anthro
 	fi
 	@echo "OK: pkg/dispatch imports are clean"
 
-##@ Custom Analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14)
+##@ Custom Analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14 + OBS-02 / Pitfall 17)
 
 .PHONY: tide-lint
-tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14 enforcement).
+tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 14 + OBS-02 / Pitfall 17 enforcement).
 	go run ./cmd/tide-lint ./...
 
 ##@ Import firewall (SUB-05 / Pitfall 14 — Phase 2)

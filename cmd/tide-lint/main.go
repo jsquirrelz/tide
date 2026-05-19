@@ -1,8 +1,9 @@
 // Command tide-lint runs TIDE's custom go/analysis Passes against the
 // module. Phase 1 shipped crosspool (POOL-03 / Pitfall 6 prevention).
 // Phase 2 added providerfirewall.Analyzer (SUB-05 / Pitfall 14 prevention);
-// this is the multichecker form. New analyzers register by appending to
-// multichecker.Main(...).
+// this is the multichecker form. Phase 4 added metriccardinality.Analyzer
+// (OBS-02 / Pitfall 17 / D-X4 prevention). New analyzers register by
+// appending to multichecker.Main(...).
 //
 // Invocation:
 //
@@ -25,9 +26,14 @@ import (
 	"golang.org/x/tools/go/analysis/multichecker"
 
 	"github.com/jsquirrelz/tide/tools/analyzers/crosspool"
+	"github.com/jsquirrelz/tide/tools/analyzers/metriccardinality"
 	"github.com/jsquirrelz/tide/tools/analyzers/providerfirewall"
 )
 
 func main() {
-	multichecker.Main(crosspool.Analyzer, providerfirewall.Analyzer)
+	multichecker.Main(
+		crosspool.Analyzer,
+		providerfirewall.Analyzer,
+		metriccardinality.Analyzer,
+	)
 }
