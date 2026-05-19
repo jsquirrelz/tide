@@ -27,16 +27,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	"github.com/jsquirrelz/tide/pkg/dag"
@@ -311,9 +315,78 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		}
 	}
 
+	// Plan 04-05: gate-policy hook (level=plan). Lands BEFORE clearing the
+	// Running phase so the gate stays the "exit gate" of the planner cycle.
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchPlanFailed(ctx, plan, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+	}
+	if project != nil {
+		policy := gates.EvaluatePolicy(project.Spec.Gates, "plan")
+		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+			if !gates.CheckApprove(plan, "plan") {
+				return r.patchPlanAwaitingApproval(ctx, plan, policy)
+			}
+			newAnno := gates.ConsumeApprove(plan, "plan")
+			patch := client.MergeFrom(plan.DeepCopy())
+			plan.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, plan, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = ""
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Message:            "Plan resumed from gate boundary",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
+// Used by the Plan 04-05 gate-policy hook (reject short-circuit).
+func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "Failed"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchPlanAwaitingApproval parks the Plan at Status.Phase=AwaitingApproval
+// per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue).
+func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *tideprojectv1alpha1.Plan, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+	message := "Plan awaiting operator approve annotation (tideproject.k8s/approve-plan=true)"
+	if policy == gates.PolicyPause {
+		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		message = "Plan paused at boundary; requires explicit resume"
+	}
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "AwaitingApproval"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
 	if err := r.Status().Patch(ctx, plan, patch); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -437,6 +510,167 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		return ctrl.Result{}, err
 	}
 
+	// Plan 04-05 Task 2: PauseBetweenWaves hook. After labels are stamped, check
+	// whether the wave boundary requires operator approval before wave N+1 can
+	// dispatch. The actual block on Task dispatch lands via the
+	// tideproject.k8s/wave-paused label that TaskReconciler honors.
+	return r.maybePauseForWaveApprove(ctx, plan, taskList.Items, layers)
+}
+
+// planWaveApprovedLabelPrefix is stamped on the Plan itself by
+// maybePauseForWaveApprove when an approve-wave-N annotation is consumed.
+// Its presence signals "this wave has been approved" so subsequent
+// reconciles do not re-pause at the same boundary while wave N tasks are
+// still mid-flight (Plan 04-05 — wave-approval is persistent until all
+// tasks in the wave complete).
+const planWaveApprovedLabelPrefix = "tideproject.k8s/wave-approved-"
+
+// maybePauseForWaveApprove implements the PauseBetweenWaves boundary check
+// per Plan 04-05 (D-G3). When `Project.Spec.Gates.PauseBetweenWaves` is true,
+// the function:
+//
+//  1. Determines the smallest wave index N where wave N-1 is fully Succeeded
+//     but at least one task in wave N has not yet Succeeded.
+//  2. If the Plan already carries label tideproject.k8s/wave-approved-<N>
+//     (set on a prior reconcile after annotation consume), skip pausing —
+//     this wave is mid-flight and the operator already approved it.
+//  3. If gates.CheckWaveApprove(plan, N) is true: consume the annotation (one-
+//     shot, T-04-G2 mitigation), stamp the persistent wave-approved-<N> label
+//     on the Plan, clear the wave-paused labels for wave N, and flip the
+//     Condition to False (Reason=ResumedByUser).
+//  4. Otherwise (no approval, no prior approval label): stamp the
+//     tideproject.k8s/wave-paused: "<N>" label on every Task in wave N (the
+//     block the TaskReconciler honors) and set Plan's Condition
+//     WaveOrLevelPaused True (Reason=PausedAtBoundary, Message referencing N).
+//
+// When PauseBetweenWaves is false the function is a no-op (today's behavior).
+func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tideprojectv1alpha1.Plan, tasks []tideprojectv1alpha1.Task, layers [][]dag.NodeID) (ctrl.Result, error) {
+	project := r.resolveProjectForPlan(ctx, plan)
+	if project == nil || !project.Spec.Gates.PauseBetweenWaves {
+		return ctrl.Result{}, nil
+	}
+
+	// Index tasks by name for status lookup.
+	taskByName := make(map[string]*tideprojectv1alpha1.Task, len(tasks))
+	for i := range tasks {
+		taskByName[tasks[i].Name] = &tasks[i]
+	}
+
+	// Find pending boundary: smallest N where wave N-1 is fully Succeeded AND
+	// wave N has at least one non-Succeeded task.
+	pendingWave := -1
+	for n := 1; n < len(layers); n++ {
+		prevAllSucceeded := true
+		for _, name := range layers[n-1] {
+			t := taskByName[name]
+			if t == nil || t.Status.Phase != "Succeeded" {
+				prevAllSucceeded = false
+				break
+			}
+		}
+		if !prevAllSucceeded {
+			continue
+		}
+		anyPending := false
+		for _, name := range layers[n] {
+			t := taskByName[name]
+			if t == nil || t.Status.Phase != "Succeeded" {
+				anyPending = true
+				break
+			}
+		}
+		if anyPending {
+			pendingWave = n
+			break
+		}
+	}
+
+	if pendingWave < 0 {
+		return ctrl.Result{}, nil
+	}
+
+	approvedLabelKey := fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, pendingWave)
+
+	// Prior-approval short-circuit: if we already marked this wave approved,
+	// skip — tasks are mid-flight and we must not re-pause.
+	if plan.Labels[approvedLabelKey] == "true" {
+		return ctrl.Result{}, nil
+	}
+
+	if gates.CheckWaveApprove(plan, pendingWave) {
+		// Consume the annotation (one-shot, T-04-G2) AND stamp the persistent
+		// wave-approved label on the Plan in a single Patch.
+		newAnno := gates.ConsumeWaveApprove(plan, pendingWave)
+		patch := client.MergeFrom(plan.DeepCopy())
+		plan.SetAnnotations(newAnno)
+		if plan.Labels == nil {
+			plan.Labels = map[string]string{}
+		}
+		plan.Labels[approvedLabelKey] = "true"
+		if err := r.Patch(ctx, plan, patch); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Remove wave-paused labels from tasks in this wave (unblock TaskReconciler).
+		for _, name := range layers[pendingWave] {
+			t := taskByName[name]
+			if t == nil || t.Labels == nil {
+				continue
+			}
+			if _, has := t.Labels["tideproject.k8s/wave-paused"]; !has {
+				continue
+			}
+			tPatch := client.MergeFrom(t.DeepCopy())
+			delete(t.Labels, "tideproject.k8s/wave-paused")
+			if err := r.Patch(ctx, t, tPatch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("clear wave-paused on task %s: %w", t.Name, err)
+			}
+		}
+		// Flip Plan Condition to False (resumed).
+		statusPatch := client.MergeFrom(plan.DeepCopy())
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+			Status:             metav1.ConditionFalse,
+			Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+			Message:            fmt.Sprintf("Wave %d approved; dispatch proceeding", pendingWave),
+			LastTransitionTime: metav1.Now(),
+		})
+		if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Stamp wave-paused label on every task in this wave (block dispatch).
+	waveLabel := fmt.Sprintf("%d", pendingWave)
+	for _, name := range layers[pendingWave] {
+		t := taskByName[name]
+		if t == nil {
+			continue
+		}
+		if t.Labels["tideproject.k8s/wave-paused"] == waveLabel {
+			continue
+		}
+		tPatch := client.MergeFrom(t.DeepCopy())
+		if t.Labels == nil {
+			t.Labels = map[string]string{}
+		}
+		t.Labels["tideproject.k8s/wave-paused"] = waveLabel
+		if err := r.Patch(ctx, t, tPatch); err != nil {
+			return ctrl.Result{}, fmt.Errorf("stamp wave-paused on task %s: %w", t.Name, err)
+		}
+	}
+
+	statusPatch := client.MergeFrom(plan.DeepCopy())
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonPausedAtBoundary,
+		Message:            fmt.Sprintf("Awaiting approval for wave %d (annotate %s%d=true on this Plan)", pendingWave, gates.AnnotationApproveWavePrefix, pendingWave),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -550,7 +784,11 @@ func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideproje
 
 // SetupWithManager wires the watch with a namespace-filter predicate per AUTH-02.
 // Note: WaveReconciler handles Wave→Plan re-enqueue; PlanReconciler uses Owns(&Wave{})
-// so it is notified when owned Waves are created/updated.
+// so it is notified when owned Waves are created/updated. Plan 04-05 also wires
+// AnnotationChangedPredicate via a self-Watches handler so approve-plan /
+// approve-wave-N annotation writes trigger reconciliation (T-04-G4 mitigation).
+// The self-Watches pattern avoids filtering finalizer/owner-ref Update events
+// at the For() level.
 func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -558,10 +796,18 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return obj.GetNamespace() == r.WatchNamespace
 	})
+	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha1.Plan{}).
 		Owns(&tideprojectv1alpha1.Wave{}).
 		Owns(&tideprojectv1alpha1.Task{}).
+		Watches(
+			&tideprojectv1alpha1.Plan{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+			}),
+			builder.WithPredicates(annotationOnly),
+		).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("plan").

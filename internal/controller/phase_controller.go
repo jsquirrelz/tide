@@ -26,16 +26,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -235,6 +239,25 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		}
 	}
 
+	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchPhaseFailed(ctx, ph, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+	}
+	if project != nil {
+		policy := gates.EvaluatePolicy(project.Spec.Gates, "phase")
+		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+			if !gates.CheckApprove(ph, "phase") {
+				return r.patchPhaseAwaitingApproval(ctx, ph, policy)
+			}
+			newAnno := gates.ConsumeApprove(ph, "phase")
+			patch := client.MergeFrom(ph.DeepCopy())
+			ph.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, ph, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	return r.patchPhaseSucceeded(ctx, ph)
 }
 
@@ -246,6 +269,37 @@ func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideproje
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerComplete",
 		Message:            "Phase planner completed; Plan children materialized",
+		LastTransitionTime: metav1.Now(),
+	})
+	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Message:            "Phase resumed from gate boundary",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ph, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchPhaseAwaitingApproval parks the Phase at Status.Phase=AwaitingApproval
+// per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue).
+func (r *PhaseReconciler) patchPhaseAwaitingApproval(ctx context.Context, ph *tideprojectv1alpha1.Phase, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+	message := "Phase awaiting operator approve annotation (tideproject.k8s/approve-phase=true)"
+	if policy == gates.PolicyPause {
+		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		message = "Phase paused at boundary; requires explicit resume"
+	}
+	patch := client.MergeFrom(ph.DeepCopy())
+	ph.Status.Phase = "AwaitingApproval"
+	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
 		LastTransitionTime: metav1.Now(),
 	})
 	if err := r.Status().Patch(ctx, ph, patch); err != nil {
@@ -314,7 +368,11 @@ func (r *PhaseReconciler) buildPlannerJob(ph *tideprojectv1alpha1.Phase, jobName
 	}
 }
 
-// SetupWithManager wires Owns(&Job{}) and Owns(&Plan{}) per D-A2.
+// SetupWithManager wires Owns(&Job{}) and Owns(&Plan{}) per D-A2. Plan 04-05
+// adds AnnotationChangedPredicate via a self-Watches handler so approve/reject
+// annotations trigger reconciliation (T-04-G4 mitigation — no polling). The
+// self-Watches pattern avoids filtering finalizer/owner-ref Update events at
+// the For() level (a GenerationChangedPredicate-based Or would do that).
 func (r *PhaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -322,10 +380,18 @@ func (r *PhaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return obj.GetNamespace() == r.WatchNamespace
 	})
+	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha1.Phase{}).
 		Owns(&batchv1.Job{}).
 		Owns(&tideprojectv1alpha1.Plan{}).
+		Watches(
+			&tideprojectv1alpha1.Phase{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+			}),
+			builder.WithPredicates(annotationOnly),
+		).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("phase").
