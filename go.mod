@@ -11,6 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/viper v1.21.0
 	github.com/zricethezav/gitleaks/v8 v8.30.1
+	go.opentelemetry.io/otel v1.43.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/time v0.14.0
 	golang.org/x/tools v0.45.0
