@@ -212,6 +212,16 @@ release-snapshot: ## Dry-run goreleaser locally (no tag, no upload). Plan 04-09 
 		docker run --rm -v "$(PWD)":/work -w /work goreleaser/goreleaser:latest release --snapshot --skip publish --clean; \
 	fi
 
+.PHONY: dashboard-build
+dashboard-build: ## Build the dashboard backend binary (Phase 4 D-D2; embeds the SPA at cmd/dashboard/embed/dist).
+	go build -o bin/dashboard ./cmd/dashboard
+
+.PHONY: dashboard-frontend
+dashboard-frontend: ## Build the React SPA bundle and copy into cmd/dashboard/embed/dist (Phase 4 D-D5).
+	cd dashboard/web && npm ci && npm run build
+	rm -rf cmd/dashboard/embed/dist
+	cp -r dashboard/web/dist cmd/dashboard/embed/
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/

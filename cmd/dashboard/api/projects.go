@@ -1,0 +1,301 @@
+/*
+Copyright 2026 TIDE Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+// Package api implements the dashboard backend's REST handlers (Phase 4
+// D-D2 — read-only). All handlers are HTTP GET; DASH-05's
+// TestZeroMutationRoutes (cmd/dashboard/router_test.go) walks the chi
+// route tree and fails the build on any non-GET registration.
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+)
+
+// ProjectsHandler serves GET /api/v1/projects + GET /api/v1/projects/{name}.
+// Per D-D2 the Client is the dashboard's read-only controller-runtime
+// client (informer-cache-backed); no Create/Update/Patch/Delete calls
+// anywhere in this package — the threat model (T-04-D2) is mitigated by
+// not having the verbs in the code path.
+type ProjectsHandler struct {
+	Client client.Client
+	Log    logr.Logger
+}
+
+// projectSummary is the JSON shape returned by the List handler — one
+// entry per Project. Stripped down from the full CRD to bound response
+// size and avoid surfacing transient fields (managedFields, etc.) the
+// dashboard never needs.
+type projectSummary struct {
+	Name                  string        `json:"name"`
+	Namespace             string        `json:"namespace"`
+	Phase                 string        `json:"phase"`
+	ActiveMilestoneCount  int           `json:"activeMilestoneCount"`
+	Budget                budgetSummary `json:"budget"`
+}
+
+// budgetSummary captures the three Budget fields the dashboard's status
+// pills render (D-UI-SPEC budget chip). The full BudgetConfig +
+// BudgetStatus pair is exposed but bounded; `withinBudget` is the
+// derived predicate the UI uses.
+type budgetSummary struct {
+	CapCents     int64 `json:"capCents"`
+	CurrentSpend int64 `json:"currentSpend"`
+	WithinBudget bool  `json:"withinBudget"`
+}
+
+// projectDetail extends projectSummary with the planning-DAG children.
+// The dashboard's PlanningDAGView (D-UI-SPEC §3) renders ProjectNode →
+// MilestoneNode → PhaseNode → PlanNode from this single payload — one
+// API round-trip per Project navigation event.
+type projectDetail struct {
+	projectSummary
+	Milestones []childRef `json:"milestones"`
+	Phases     []childRef `json:"phases"`
+	Plans      []childRef `json:"plans"`
+}
+
+// childRef is the minimal subset of a child CRD the Planning DAG needs:
+// the name, status.phase for the status badge, and the parent ref so
+// the dagre layout can wire up the edges client-side.
+type childRef struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Phase     string `json:"phase"`
+	Parent    string `json:"parent"`
+}
+
+// errorBody is the JSON shape returned on every non-2xx response.
+type errorBody struct {
+	Error string `json:"error"`
+}
+
+// List implements GET /api/v1/projects[?namespace=foo]. Returns a JSON
+// array of projectSummary; empty array (NOT 404) when no projects exist.
+// Optional `namespace` query param filters; absent = all namespaces.
+func (h *ProjectsHandler) List(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	namespace := r.URL.Query().Get("namespace")
+
+	var opts []client.ListOption
+	if namespace != "" {
+		opts = append(opts, client.InNamespace(namespace))
+	}
+
+	var projects tidev1alpha1.ProjectList
+	if err := h.Client.List(ctx, &projects, opts...); err != nil {
+		h.Log.Error(err, "list projects failed")
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list projects: %s", err.Error()))
+		return
+	}
+
+	// Pre-allocate so an empty result still serializes as `[]`, not
+	// `null` — D-UI-SPEC empty-state contract relies on the empty-array
+	// distinction client-side.
+	summaries := make([]projectSummary, 0, len(projects.Items))
+	for i := range projects.Items {
+		p := &projects.Items[i]
+		count, cerr := h.countActiveMilestones(ctx, p)
+		if cerr != nil {
+			// Log but don't fail the list — surface the partial result
+			// with active-count of 0 rather than 500 the whole call.
+			h.Log.Error(cerr, "count active milestones failed (returning 0)", "project", p.Name)
+		}
+		summaries = append(summaries, summarize(p, count))
+	}
+
+	writeJSON(w, http.StatusOK, summaries)
+}
+
+// Get implements GET /api/v1/projects/{name}[?namespace=foo]. Returns a
+// projectDetail with embedded Milestone/Phase/Plan children for the
+// PlanningDAGView render. 404 with JSON body when the project doesn't
+// exist; 500 with JSON body on apiserver errors.
+func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	name := chi.URLParam(r, "name")
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	var p tidev1alpha1.Project
+	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
+			return
+		}
+		h.Log.Error(err, "get project failed", "name", name, "namespace", namespace)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
+		return
+	}
+
+	count, _ := h.countActiveMilestones(ctx, &p)
+
+	detail := projectDetail{
+		projectSummary: summarize(&p, count),
+	}
+
+	// Milestones — filtered by Spec.ProjectRef == p.Name.
+	var ms tidev1alpha1.MilestoneList
+	if err := h.Client.List(ctx, &ms, client.InNamespace(p.Namespace)); err != nil {
+		h.Log.Error(err, "list milestones failed", "project", p.Name)
+	}
+	detail.Milestones = make([]childRef, 0, len(ms.Items))
+	milestoneNames := make(map[string]bool, len(ms.Items))
+	for i := range ms.Items {
+		m := &ms.Items[i]
+		if m.Spec.ProjectRef != p.Name {
+			continue
+		}
+		milestoneNames[m.Name] = true
+		detail.Milestones = append(detail.Milestones, childRef{
+			Name:      m.Name,
+			Namespace: m.Namespace,
+			Phase:     m.Status.Phase,
+			Parent:    p.Name,
+		})
+	}
+
+	// Phases — owned by Milestones via Spec.MilestoneRef.
+	var phs tidev1alpha1.PhaseList
+	if err := h.Client.List(ctx, &phs, client.InNamespace(p.Namespace)); err != nil {
+		h.Log.Error(err, "list phases failed", "project", p.Name)
+	}
+	detail.Phases = make([]childRef, 0, len(phs.Items))
+	phaseNames := make(map[string]bool, len(phs.Items))
+	for i := range phs.Items {
+		ph := &phs.Items[i]
+		if !milestoneNames[ph.Spec.MilestoneRef] {
+			continue
+		}
+		phaseNames[ph.Name] = true
+		detail.Phases = append(detail.Phases, childRef{
+			Name:      ph.Name,
+			Namespace: ph.Namespace,
+			Phase:     ph.Status.Phase,
+			Parent:    ph.Spec.MilestoneRef,
+		})
+	}
+
+	// Plans — owned by Phases via Spec.PhaseRef.
+	var pls tidev1alpha1.PlanList
+	if err := h.Client.List(ctx, &pls, client.InNamespace(p.Namespace)); err != nil {
+		h.Log.Error(err, "list plans failed", "project", p.Name)
+	}
+	detail.Plans = make([]childRef, 0, len(pls.Items))
+	for i := range pls.Items {
+		pl := &pls.Items[i]
+		if !phaseNames[pl.Spec.PhaseRef] {
+			continue
+		}
+		detail.Plans = append(detail.Plans, childRef{
+			Name:      pl.Name,
+			Namespace: pl.Namespace,
+			Phase:     pl.Status.Phase,
+			Parent:    pl.Spec.PhaseRef,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// countActiveMilestones counts milestones owned by `p` whose Status.Phase
+// is neither "Succeeded" nor "Failed" — the dashboard's "active count"
+// metric. Surfaces apiserver List errors so the caller can decide
+// whether to 500 the request or partial-result with count=0.
+func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1alpha1.Project) (int, error) {
+	var ms tidev1alpha1.MilestoneList
+	if err := h.Client.List(ctx, &ms, client.InNamespace(p.Namespace)); err != nil {
+		return 0, err
+	}
+	count := 0
+	for i := range ms.Items {
+		m := &ms.Items[i]
+		if m.Spec.ProjectRef != p.Name {
+			continue
+		}
+		if m.Status.Phase != "Succeeded" && m.Status.Phase != "Failed" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// summarize collapses a Project CRD into the projectSummary JSON shape.
+// withinBudget is the derived predicate the UI's budget pill renders:
+// false iff a positive AbsoluteCapCents is configured AND CostSpentCents
+// has met or exceeded it. Zero cap = no enforcement = always within.
+func summarize(p *tidev1alpha1.Project, activeMilestoneCount int) projectSummary {
+	cap := p.Spec.Budget.AbsoluteCapCents
+	spent := p.Status.Budget.CostSpentCents
+	within := true
+	if cap > 0 {
+		within = spent < cap
+	}
+	return projectSummary{
+		Name:                 p.Name,
+		Namespace:            p.Namespace,
+		Phase:                p.Status.Phase,
+		ActiveMilestoneCount: activeMilestoneCount,
+		Budget: budgetSummary{
+			CapCents:     cap,
+			CurrentSpend: spent,
+			WithinBudget: within,
+		},
+	}
+}
+
+// writeJSON serializes `v` as JSON with the application/json content type
+// and the given status code. Encoder.Encode is used (not Marshal) so the
+// Go stdlib's HTML escape applies — `<` `>` `&` are escaped as `<`
+// etc. on the way out. T-04-D1 XSS mitigation: any Project name with
+// a literal `<script>` segment is rendered as escaped Unicode, never as
+// a tag.
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	// Encoder.SetEscapeHTML defaults to true; do NOT disable.
+	if err := enc.Encode(v); err != nil {
+		// At this point status code is already flushed; best we can do
+		// is log via the package-level error path — but the handler's
+		// logger isn't reachable here. Fall through; client sees a
+		// truncated response, which the SSE/EventSource layer will
+		// surface to operators via the connection-status pill.
+		_ = err
+	}
+}
+
+// writeError writes a JSON error body with the given status code.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, errorBody{Error: msg})
+}
+
+// ErrInvalidNamespace is returned by handlers that detect a malformed
+// namespace query param. Reserved for future input-validation needs;
+// today's handlers tolerate any string and let the apiserver reject.
+var ErrInvalidNamespace = errors.New("invalid namespace query parameter")
