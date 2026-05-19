@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr/testr"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -280,13 +281,16 @@ func TestInformerBridgePublishesMilestoneCreateWithProjectKey(t *testing.T) {
 }
 
 // testInformerScheme returns a runtime.Scheme populated with all v1alpha1
-// types — same shape as the controller's scheme but bare so this test
-// stays fast.
+// types + corev1 (needed by logs_sse_test.go for Pod registration). Same
+// shape as the controller's scheme but bare so this test stays fast.
 func testInformerScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
 	if err := tidev1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("AddToScheme: %v", err)
+		t.Fatalf("AddToScheme(v1alpha1): %v", err)
+	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme(corev1): %v", err)
 	}
 	return s
 }
