@@ -200,6 +200,10 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/manager
 
+.PHONY: tide-cli
+tide-cli: ## Build the operator-facing tide CLI binary (Phase 4 D-C1..C4).
+	go build -o bin/tide ./cmd/tide
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
