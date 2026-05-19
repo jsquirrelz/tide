@@ -208,6 +208,16 @@ func (h *Hub) Unsubscribe(sub *Subscriber) {
 	close(sub.events)
 }
 
+// SubscriberCount returns the current number of subscribers attached to
+// `project`. Used by SSE handler tests (plan 04-11) to verify
+// disconnect-cleanup behavior — the canonical T-04-D3 fan-out-leak
+// assertion. Concurrent-safe.
+func (h *Hub) SubscriberCount(project string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.subs[project])
+}
+
 // tryEnqueueOrDropOldest implements the non-blocking enqueue with
 // drop-oldest semantics from RESEARCH §778. When the channel is full,
 // drain one element (the oldest queued) and retry the send. The retry
