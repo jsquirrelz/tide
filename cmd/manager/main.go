@@ -50,6 +50,12 @@ import (
 	// The registry is then surfaced via the existing --metrics-bind-address
 	// flag (default :8443). See internal/metrics/doc.go for the inventory.
 	_ "github.com/jsquirrelz/tide/internal/metrics"
+	// Phase 4 D-O3: OTel TracerProvider lifecycle. NewTracerProvider returns
+	// a no-op TP when OTEL_EXPORTER_OTLP_ENDPOINT is unset so `kind` clusters
+	// without a collector still work; otherwise constructs the real SDK TP
+	// with the OTLP gRPC exporter. The deferred Shutdown flushes the batch
+	// span processor before the binary exits.
+	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
 )
@@ -137,6 +143,38 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog := ctrl.Log.WithName("setup")
+
+	// Establish the manager's parent context early — used by both OTel
+	// init below and mgr.Start at the bottom. ctrl.SetupSignalHandler
+	// returns a context that is cancelled on SIGINT/SIGTERM so the
+	// manager (and the batch span processor) shut down cleanly.
+	signalCtx := ctrl.SetupSignalHandler()
+
+	// Phase 4 D-O3: OTel TracerProvider boot. Returns a no-op TP when
+	// OTEL_EXPORTER_OTLP_ENDPOINT is unset so `kind` clusters work
+	// without an OTLP collector; otherwise builds the real SDK TP
+	// with an OTLP gRPC exporter. NewTracerProvider also calls
+	// otel.SetTracerProvider so reconciler code using otel.Tracer(...)
+	// resolves to the right TP. Pitfall 24: provider.go does NOT pass
+	// WithSampler — OTEL_TRACES_SAMPLER env var governs.
+	tp, otelShutdown, err := otelinit.NewTracerProvider(signalCtx)
+	if err != nil {
+		setupLog.Error(err, "otel init failed")
+		os.Exit(1)
+	}
+	_ = tp // captured by the global otel handle; named here only so it
+	// remains visible if a future caller wants to thread it explicitly.
+	defer func() {
+		// Bounded shutdown — the batch processor flushes outstanding
+		// spans to the collector before the process exits. Use
+		// context.Background() because signalCtx is already cancelled
+		// when this defer runs.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "otel shutdown failed")
+		}
+	}()
 
 	// 1. Load runtime config (CTRL-04).
 	cfg, err := config.Load(configPath)
@@ -341,7 +379,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(signalCtx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
