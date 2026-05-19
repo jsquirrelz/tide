@@ -53,6 +53,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -61,6 +62,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
@@ -99,7 +101,8 @@ func main() {
 	// 2. Construct the controller-runtime Manager. LeaderElection: false
 	//    — the dashboard is a stateless read replica (D-D2). The
 	//    informer cache is the dashboard's only data source.
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restCfg := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme:                 scheme,
 		LeaderElection:         false,
 		HealthProbeBindAddress: probeAddr,
@@ -107,6 +110,16 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
+		os.Exit(1)
+	}
+
+	// 2a. Build a typed kubernetes.Interface using the same rest.Config.
+	//     Used by the LogsHandler (plan 04-11 Task 2) to call the
+	//     pods/log subresource — controller-runtime's client.Client
+	//     doesn't expose subresource streams.
+	clientset, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		setupLog.Error(err, "unable to build typed kubernetes clientset")
 		os.Exit(1)
 	}
 
@@ -130,10 +143,11 @@ func main() {
 	//    (RegisterRoutes in router.go) so the route table is identical
 	//    between production and TestZeroMutationRoutes.
 	router := RegisterRoutes(Dependencies{
-		Client: mgr.GetClient(),
-		Hub:    pubsubHub,
-		Log:    setupLog.WithName("router"),
-		SPAFS:  spaFS,
+		Client:    mgr.GetClient(),
+		Hub:       pubsubHub,
+		Clientset: clientset,
+		Log:       setupLog.WithName("router"),
+		SPAFS:     spaFS,
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the
@@ -168,7 +182,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 7. Register the manager-port healthz that gates on informer-cache
+	// 7. Wire the informer cache watch events into the Hub. The bridge
+	//    is registered as another manager.Runnable so it ties into the
+	//    manager lifecycle — Start() runs after the cache is up; ctx
+	//    cancellation on shutdown propagates through.
+	if err := mgr.Add(ctrlmgr.RunnableFunc(func(ctx context.Context) error {
+		return dashboardapi.BridgeInformerToHub(ctx, mgr.GetCache(), mgr.GetClient(), pubsubHub, setupLog.WithName("informer-bridge"))
+	})); err != nil {
+		setupLog.Error(err, "unable to add informer bridge runnable")
+		os.Exit(1)
+	}
+
+	// 8. Register the manager-port healthz that gates on informer-cache
 	//    sync (per the truth spec line 25). The Helm chart's
 	//    readinessProbe targets this so kubelet only routes traffic to
 	//    the Pod once the cache is hot.

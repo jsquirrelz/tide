@@ -31,6 +31,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-logr/logr"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
@@ -47,11 +48,17 @@ type Dependencies struct {
 	// dashboard's source of truth for all reads.
 	Client client.Client
 
-	// Hub is the in-process Project-keyed SSE fan-out (Task 2).
-	// Plan 04-11 wires the SSE handlers to this hub; plan 04-10 keeps the
-	// field present so RegisterRoutes can pass it through and main.go can
-	// thread the constructed Hub end-to-end.
+	// Hub is the in-process Project-keyed SSE fan-out.
+	// Plan 04-11's EventsHandler subscribes to this hub; tests pass nil to
+	// skip the events-SSE route registration.
 	Hub *hub.Hub
+
+	// Clientset is the typed kubernetes.Interface used by the LogsHandler
+	// (plan 04-11 Task 2) for the pods/log subresource — controller-runtime's
+	// client.Client doesn't expose subresource streams, so the dashboard
+	// needs a separate clientset alongside it. Tests pass nil to skip
+	// the /tasks/{name}/log route registration.
+	Clientset kubernetes.Interface
 
 	// Log is the structured logger; the chi middleware chain uses it for
 	// access logging and panics flow through Recoverer for 500s.
@@ -69,15 +76,19 @@ type Dependencies struct {
 // the resulting route tree at test time and fails the build on any
 // non-GET method.
 //
-// Route table (Wave 4 inventory):
+// Route table (Wave 5 inventory):
 //
 //   GET /healthz                              — process liveness
 //   GET /readyz                               — process readiness
-//   GET /api/v1/projects                      — list (this plan)
-//   GET /api/v1/projects/{name}               — single (this plan)
-//   GET /api/v1/projects/{name}/events        — SSE (plan 04-11)
+//   GET /api/v1/projects                      — list
+//   GET /api/v1/projects/{name}               — single
+//   GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
 //   GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
 //   GET /*                                    — SPA fallback (embed.FS)
+//
+// EventsHandler is registered only when deps.Hub is non-nil; LogsHandler
+// only when deps.Clientset is non-nil. Tests pass nil for both to walk
+// just the synchronous route shape.
 func RegisterRoutes(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -96,20 +107,29 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	r.Get("/healthz", processHealthzHandler)
 	r.Get("/readyz", processReadyzHandler)
 
-	// API surface — DASH-05: GET-only. The two SSE endpoints (events,
-	// log) land in plan 04-11; their routes are deliberately deferred
-	// here so this plan's TestZeroMutationRoutes can't accidentally
-	// pass with handlers that haven't been audited yet.
+	// API surface — DASH-05: GET-only. Plan 04-11 added the project-scoped
+	// SSE events endpoint and the per-task pod-log SSE endpoint.
 	ph := &dashboardapi.ProjectsHandler{
 		Client: deps.Client,
 		Log:    deps.Log,
 	}
+	var eh *dashboardapi.EventsHandler
+	if deps.Hub != nil {
+		eh = dashboardapi.NewEventsHandler(deps.Hub, deps.Log)
+	}
+	var lh *dashboardapi.LogsHandler
+	if deps.Clientset != nil {
+		lh = dashboardapi.NewLogsHandler(deps.Client, deps.Clientset, deps.Log)
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
-		// Plan 04-11 lands:
-		//   r.Get("/projects/{name}/events", eventsSSEHandler)
-		//   r.Get("/tasks/{name}/log",       taskLogSSEHandler)
+		if eh != nil {
+			r.Get("/projects/{name}/events", eh.ServeHTTP)
+		}
+		if lh != nil {
+			r.Get("/tasks/{name}/log", lh.ServeHTTP)
+		}
 	})
 
 	// SPA fallback (D-X2 single-image deploy). Serves the embedded
