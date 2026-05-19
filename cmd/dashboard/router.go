@@ -69,15 +69,18 @@ type Dependencies struct {
 // the resulting route tree at test time and fails the build on any
 // non-GET method.
 //
-// Route table (Wave 4 inventory):
+// Route table (Wave 5 inventory):
 //
 //   GET /healthz                              — process liveness
 //   GET /readyz                               — process readiness
-//   GET /api/v1/projects                      — list (this plan)
-//   GET /api/v1/projects/{name}               — single (this plan)
-//   GET /api/v1/projects/{name}/events        — SSE (plan 04-11)
-//   GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
+//   GET /api/v1/projects                      — list
+//   GET /api/v1/projects/{name}               — single
+//   GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
+//   GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11 Task 2)
 //   GET /*                                    — SPA fallback (embed.FS)
+//
+// EventsHandler is registered only when deps.Hub is non-nil; tests pass
+// nil to walk just the synchronous route shape.
 func RegisterRoutes(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -96,20 +99,24 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	r.Get("/healthz", processHealthzHandler)
 	r.Get("/readyz", processReadyzHandler)
 
-	// API surface — DASH-05: GET-only. The two SSE endpoints (events,
-	// log) land in plan 04-11; their routes are deliberately deferred
-	// here so this plan's TestZeroMutationRoutes can't accidentally
-	// pass with handlers that haven't been audited yet.
+	// API surface — DASH-05: GET-only. Plan 04-11 added the SSE events
+	// endpoint; pod-log SSE lands in plan 04-11 Task 2.
 	ph := &dashboardapi.ProjectsHandler{
 		Client: deps.Client,
 		Log:    deps.Log,
 	}
+	var eh *dashboardapi.EventsHandler
+	if deps.Hub != nil {
+		eh = dashboardapi.NewEventsHandler(deps.Hub, deps.Log)
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
-		// Plan 04-11 lands:
-		//   r.Get("/projects/{name}/events", eventsSSEHandler)
-		//   r.Get("/tasks/{name}/log",       taskLogSSEHandler)
+		if eh != nil {
+			r.Get("/projects/{name}/events", eh.ServeHTTP)
+		}
+		// Plan 04-11 Task 2 lands:
+		//   r.Get("/tasks/{name}/log", logsSSEHandler.ServeHTTP)
 	})
 
 	// SPA fallback (D-X2 single-image deploy). Serves the embedded

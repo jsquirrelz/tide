@@ -61,6 +61,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
@@ -168,7 +169,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 7. Register the manager-port healthz that gates on informer-cache
+	// 7. Wire the informer cache watch events into the Hub. The bridge
+	//    is registered as another manager.Runnable so it ties into the
+	//    manager lifecycle — Start() runs after the cache is up; ctx
+	//    cancellation on shutdown propagates through.
+	if err := mgr.Add(ctrlmgr.RunnableFunc(func(ctx context.Context) error {
+		return dashboardapi.BridgeInformerToHub(ctx, mgr.GetCache(), mgr.GetClient(), pubsubHub, setupLog.WithName("informer-bridge"))
+	})); err != nil {
+		setupLog.Error(err, "unable to add informer bridge runnable")
+		os.Exit(1)
+	}
+
+	// 8. Register the manager-port healthz that gates on informer-cache
 	//    sync (per the truth spec line 25). The Helm chart's
 	//    readinessProbe targets this so kubelet only routes traffic to
 	//    the Pod once the cache is hot.
