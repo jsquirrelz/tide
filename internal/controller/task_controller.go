@@ -945,17 +945,29 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return obj.GetNamespace() == r.WatchNamespace
 	})
+	// Plan 04-05: AnnotationChangedPredicate is wired via a self-Watches with
+	// a permissive mapper instead of as a For()-level predicate. This is
+	// deliberate: a For()-level GenerationChangedPredicate Or
+	// AnnotationChangedPredicate filters out the post-finalizer Update event
+	// (finalizer is metadata; Generation does not bump; annotations are
+	// unchanged), stalling dispatch in integration tests where the manager's
+	// auto-reconcile is the only driver. The self-Watches re-enqueues the
+	// Task on annotation changes without filtering Spec/finalizer/owner-ref
+	// updates from the default For() event stream.
+	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Task{},
-			builder.WithPredicates(predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				predicate.AnnotationChangedPredicate{},
-			)),
-		).
+		For(&tideprojectv1alpha1.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(
 			&tideprojectv1alpha1.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.siblingsToTaskMapper),
+		).
+		Watches(
+			&tideprojectv1alpha1.Task{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+			}),
+			builder.WithPredicates(annotationOnly),
 		).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).

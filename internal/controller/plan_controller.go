@@ -31,8 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -783,8 +785,10 @@ func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideproje
 // SetupWithManager wires the watch with a namespace-filter predicate per AUTH-02.
 // Note: WaveReconciler handles Wave→Plan re-enqueue; PlanReconciler uses Owns(&Wave{})
 // so it is notified when owned Waves are created/updated. Plan 04-05 also wires
-// AnnotationChangedPredicate so approve-plan / approve-wave-N annotation writes
-// trigger reconciliation (T-04-G4 mitigation).
+// AnnotationChangedPredicate via a self-Watches handler so approve-plan /
+// approve-wave-N annotation writes trigger reconciliation (T-04-G4 mitigation).
+// The self-Watches pattern avoids filtering finalizer/owner-ref Update events
+// at the For() level.
 func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -792,15 +796,18 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return obj.GetNamespace() == r.WatchNamespace
 	})
+	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Plan{},
-			builder.WithPredicates(predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				predicate.AnnotationChangedPredicate{},
-			)),
-		).
+		For(&tideprojectv1alpha1.Plan{}).
 		Owns(&tideprojectv1alpha1.Wave{}).
 		Owns(&tideprojectv1alpha1.Task{}).
+		Watches(
+			&tideprojectv1alpha1.Plan{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+			}),
+			builder.WithPredicates(annotationOnly),
+		).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("plan").

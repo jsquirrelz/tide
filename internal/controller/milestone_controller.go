@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -394,8 +396,12 @@ func (r *MilestoneReconciler) buildPlannerJob(ms *tideprojectv1alpha1.Milestone,
 
 // SetupWithManager wires Owns(&Job{}) and Owns(&Phase{}) per D-A2, plus a
 // namespace-filter predicate per AUTH-02. Plan 04-05: also wires
-// AnnotationChangedPredicate so operator approve/reject annotation writes
-// trigger reconciliation without polling (T-04-G4 mitigation).
+// AnnotationChangedPredicate via a self-Watches handler so operator
+// approve/reject annotation writes trigger reconciliation without polling
+// (T-04-G4 mitigation). Wired as a Watches with AnnotationChangedPredicate
+// instead of a For()-level predicate so the post-finalizer Update event
+// (no Generation bump, no annotation change) is not filtered, which would
+// stall dispatch under the manager's auto-reconcile.
 func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -403,15 +409,18 @@ func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return obj.GetNamespace() == r.WatchNamespace
 	})
+	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Milestone{},
-			builder.WithPredicates(predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				predicate.AnnotationChangedPredicate{},
-			)),
-		).
+		For(&tideprojectv1alpha1.Milestone{}).
 		Owns(&batchv1.Job{}).
 		Owns(&tideprojectv1alpha1.Phase{}).
+		Watches(
+			&tideprojectv1alpha1.Milestone{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+			}),
+			builder.WithPredicates(annotationOnly),
+		).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("milestone").
