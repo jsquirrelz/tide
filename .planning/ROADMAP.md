@@ -178,7 +178,7 @@ Plans:
 - [x] 04-08-PLAN.md — cmd/tide annotation-writer verbs (approve/reject/cancel/resume) + tail (Wave 4)
 - [x] 04-09-PLAN.md — .goreleaser.yaml + Krew manifest + release.yaml workflow + docs/cli.md (Wave 4)
 - [x] 04-10-PLAN.md — cmd/dashboard skeleton + chi router + Hub + projects API + zero-mutation guard (Wave 4)
-- [ ] 04-11-PLAN.md — Dashboard SSE handlers (events + pod-log) + informer-bridge (Wave 5)
+- [x] 04-11-PLAN.md — Dashboard SSE handlers (events + pod-log) + informer-bridge (Wave 5)
 - [ ] 04-12-PLAN.md — dashboard/web scaffold + design tokens + chrome components (Wave 6)
 - [ ] 04-15-PLAN.md — Status/primitive components (StatusBadge, ProjectPicker, ClipboardCopyAction, WaveBackground) (Wave 7)
 - [ ] 04-13-PLAN.md — DAG views + 5 custom nodes + TaskDetailDrawer + dagre layout (Wave 8)
