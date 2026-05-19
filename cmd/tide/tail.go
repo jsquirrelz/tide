@@ -47,6 +47,13 @@ func tailRun(ctx context.Context, k client.Client, cs kubernetes.Interface, ns, 
 	return errors.New("tailRun: not yet implemented (RED stub)")
 }
 
+// pickContainer resolves the container the operator wants to tail. Explicit
+// --container wins; otherwise the first non-credproxy / non-init-* container
+// (the subagent main container, by convention).
+func pickContainer(containers []corev1.Container, explicit string) string {
+	return "RED-STUB"
+}
+
 func newTailCmd() *cobra.Command {
 	var opt tailOptions
 	c := &cobra.Command{
