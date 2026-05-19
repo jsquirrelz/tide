@@ -54,11 +54,14 @@ func TestNoOpFallbackWhenEndpointEmpty(t *testing.T) {
 		t.Fatal("NewTracerProvider returned nil shutdown")
 	}
 
-	// Concrete type must be *noop.TracerProvider — the only branch in
-	// provider.go that exists when the endpoint is empty.
+	// Concrete type must be noop.TracerProvider (struct VALUE, not pointer
+	// — the OTel Go SDK v1.43 noop package returns a struct value from
+	// NewTracerProvider, not a pointer). The only branch in provider.go
+	// that exists when the endpoint is empty constructs via tracenoop.New,
+	// so this assertion proves the no-op path was taken.
 	got := reflect.TypeOf(tp).String()
-	if got != "*noop.TracerProvider" {
-		t.Errorf("tp concrete type = %q, want %q", got, "*noop.TracerProvider")
+	if got != "noop.TracerProvider" {
+		t.Errorf("tp concrete type = %q, want %q", got, "noop.TracerProvider")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
@@ -86,7 +89,7 @@ func TestRealSDKWhenEndpointSet(t *testing.T) {
 
 	// Concrete type must be the SDK TracerProvider, NOT noop.
 	got := reflect.TypeOf(tp).String()
-	if got == "*noop.TracerProvider" {
+	if got == "noop.TracerProvider" {
 		t.Errorf("tp = %q, want SDK TracerProvider when endpoint set", got)
 	}
 
