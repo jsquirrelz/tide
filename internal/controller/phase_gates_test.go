@@ -1,0 +1,278 @@
+/*
+Copyright 2026 TIDE Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/gates"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+)
+
+// gate-flow tests for PhaseReconciler (Plan 04-05 Task 1).
+var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Label("envtest", "phase4", "gates"), func() {
+	ctx := context.Background()
+
+	makeProjectAndMilestone := func(projectName, msName string, g tideprojectv1alpha1.Gates) {
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+				Gates: g,
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+	}
+
+	cleanup := func(projectName, msName, phaseName string) {
+		ph := &tideprojectv1alpha1.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha1.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		proj := &tideprojectv1alpha1.Project{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
+			proj.Finalizers = nil
+			_ = k8sClient.Update(ctx, proj)
+			_ = k8sClient.Delete(ctx, proj)
+		}
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			_ = k8sClient.Delete(ctx, &j)
+		}
+	}
+
+	driveToJobCompletion := func(phaseName string, r *PhaseReconciler, envReader *mapEnvReader) {
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
+		var got tideprojectv1alpha1.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
+		jobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
+		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:  string(got.UID),
+			ExitCode: 0,
+		})
+		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
+	}
+
+	Describe("Test 5a — gates.phase=approve: AwaitingApproval", func() {
+		const projectName, msName, phaseName = "gate-proj-ph1", "gate-ms-ph1", "gate-phase-1"
+
+		BeforeEach(func() {
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{Phase: gates.PolicyApprove})
+		})
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("patches Status.Phase=AwaitingApproval with WaveOrLevelPaused True", func() {
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+
+			envReader := newMapEnvReader()
+			r := &PhaseReconciler{
+				Client:        mgrClient,
+				Scheme:        k8sClient.Scheme(),
+				Dispatcher:    &stubDispatcher{},
+				PlannerPool:   newPlannerPoolForTest(),
+				EnvReader:     envReader,
+				SubagentImage: testSubagentImage,
+			}
+			driveToJobCompletion(phaseName, r, envReader)
+
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).To(Equal("AwaitingApproval"))
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonAwaitingApproval))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Describe("Test 5b — approve-phase annotation resumes Succeeded", func() {
+		const projectName, msName, phaseName = "gate-proj-ph2", "gate-ms-ph2", "gate-phase-2"
+
+		BeforeEach(func() {
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{Phase: gates.PolicyApprove})
+		})
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("consumes annotation and patches Status.Phase=Succeeded", func() {
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+
+			envReader := newMapEnvReader()
+			r := &PhaseReconciler{
+				Client:        mgrClient,
+				Scheme:        k8sClient.Scheme(),
+				Dispatcher:    &stubDispatcher{},
+				PlannerPool:   newPlannerPoolForTest(),
+				EnvReader:     envReader,
+				SubagentImage: testSubagentImage,
+			}
+			driveToJobCompletion(phaseName, r, envReader)
+
+			Eventually(func() string {
+				var after tideprojectv1alpha1.Phase
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after); err != nil {
+					return ""
+				}
+				return after.Status.Phase
+			}, 5*time.Second, 100*time.Millisecond).Should(Equal("AwaitingApproval"))
+
+			var current tideprojectv1alpha1.Phase
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &current)).To(Succeed())
+			patch := client.MergeFrom(current.DeepCopy())
+			if current.Annotations == nil {
+				current.Annotations = map[string]string{}
+			}
+			current.Annotations[gates.AnnotationApprovePrefix+"phase"] = "true"
+			Expect(k8sClient.Patch(ctx, &current, patch)).To(Succeed())
+
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).To(Equal("Succeeded"))
+				_, has := after.Annotations[gates.AnnotationApprovePrefix+"phase"]
+				g.Expect(has).To(BeFalse())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Describe("Test 5c — reject annotation on Project: short-circuits Phase to Failed", func() {
+		const projectName, msName, phaseName = "gate-proj-ph3", "gate-ms-ph3", "gate-phase-3"
+
+		BeforeEach(func() {
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{Phase: gates.PolicyAuto})
+			var proj tideprojectv1alpha1.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
+			patch := client.MergeFrom(proj.DeepCopy())
+			if proj.Annotations == nil {
+				proj.Annotations = map[string]string{}
+			}
+			proj.Annotations[gates.AnnotationReject] = "phase halt"
+			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return ""
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("phase halt"))
+		})
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("phase ends in Failed with Reason=RejectedByUser", func() {
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+
+			envReader := newMapEnvReader()
+			r := &PhaseReconciler{
+				Client:        mgrClient,
+				Scheme:        k8sClient.Scheme(),
+				Dispatcher:    &stubDispatcher{},
+				PlannerPool:   newPlannerPoolForTest(),
+				EnvReader:     envReader,
+				SubagentImage: testSubagentImage,
+			}
+			driveToJobCompletion(phaseName, r, envReader)
+
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).To(Equal("Failed"))
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
+				g.Expect(c.Message).To(ContainSubstring("phase halt"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Describe("Test 5d — gates.phase=auto (default): Succeeded immediately", func() {
+		const projectName, msName, phaseName = "gate-proj-ph4", "gate-ms-ph4", "gate-phase-4"
+
+		BeforeEach(func() {
+			// Empty Gates → default for phase is "auto" per gates.EvaluatePolicy.
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{})
+		})
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("Phase reaches Succeeded immediately when phase gate is auto/empty", func() {
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+
+			envReader := newMapEnvReader()
+			r := &PhaseReconciler{
+				Client:        mgrClient,
+				Scheme:        k8sClient.Scheme(),
+				Dispatcher:    &stubDispatcher{},
+				PlannerPool:   newPlannerPoolForTest(),
+				EnvReader:     envReader,
+				SubagentImage: testSubagentImage,
+			}
+			driveToJobCompletion(phaseName, r, envReader)
+
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).To(Equal("Succeeded"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+})
