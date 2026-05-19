@@ -17,8 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -34,50 +32,10 @@ func registerSubcommands(root *cobra.Command) {
 	root.AddCommand(newArtifactGetCmd())
 	root.AddCommand(newDescribeBudgetCmd())
 
-	// Stubs for plan 04-08. The stub set MUST appear in `tide --help`
-	// so operators see the eventual verb surface; the RunE returns an
-	// error citing 04-08 for honest implementation-state signaling.
-	for _, stub := range plan0408Stubs() {
-		root.AddCommand(stub)
-	}
-}
-
-// plan0408Stubs returns one *cobra.Command per write-back verb landing in
-// plan 04-08 (tail, approve, reject, cancel, resume). Each shares the same
-// "not yet implemented — landing in plan 04-08" surface so the stub-test in
-// cmd_test.go can assert error wording uniformly.
-func plan0408Stubs() []*cobra.Command {
-	defs := []struct {
-		use   string
-		short string
-	}{
-		{"tail <task>", "Stream pod logs for a Task (plan 04-08)"},
-		{"approve <project>", "Clear a level- or wave-pause annotation (plan 04-08)"},
-		{"reject <project>", "Halt a Project (plan 04-08)"},
-		{"cancel <project>", "Destructively cancel a Project (plan 04-08)"},
-		{"resume <project>", "Clear a reject annotation (plan 04-08)"},
-	}
-	out := make([]*cobra.Command, 0, len(defs))
-	for _, d := range defs {
-		d := d
-		out = append(out, &cobra.Command{
-			Use:   d.use,
-			Short: d.short,
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return fmt.Errorf("%q: not yet implemented — landing in plan 04-08", firstWord(d.use))
-			},
-		})
-	}
-	return out
-}
-
-// firstWord returns the leading word of a Use string (e.g. "tail <task>" ->
-// "tail"). Cobra resolves the verb name from this leading token.
-func firstWord(s string) string {
-	for i, r := range s {
-		if r == ' ' {
-			return s[:i]
-		}
-	}
-	return s
+	// Plan 04-08 — real write-back verbs (approve / reject / cancel / resume / tail).
+	root.AddCommand(newApproveCmd())
+	root.AddCommand(newRejectCmd())
+	root.AddCommand(newCancelCmd())
+	root.AddCommand(newResumeCmd())
+	root.AddCommand(newTailCmd())
 }
