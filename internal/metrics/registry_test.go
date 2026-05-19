@@ -42,7 +42,26 @@ import (
 // variable `tidemetrics.ProviderRateLimitHitsTotal` re-exports it for
 // callers, but the registration stays in internal/budget per plan 04-01
 // Task 2 action.)
+//
+// Note on Prometheus vector metric semantics: an unobserved *CounterVec /
+// *HistogramVec emits NO metric family from Gather() until at least one
+// child is created via WithLabelValues. testutil.CollectAndCount handles
+// this correctly because it walks the descriptor (Desc) chain rather than
+// the gathered families — descriptors are registered at MustRegister time,
+// before any observation. This is also why the analyzer of plan 04-02 walks
+// AST (registration sites) rather than the runtime registry: registration
+// commits the contract, observation surfaces the data.
 func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
+	// Seed one observation for each so they emit a family on Gather().
+	// Using a sentinel project label keeps these out of any real bucket.
+	tidemetrics.WavesDispatchedTotal.WithLabelValues("__seed__", "ph", "pl").Add(0)
+	tidemetrics.TasksCompletedTotal.WithLabelValues("__seed__", "ph", "pl").Add(0)
+	tidemetrics.TasksFailedTotal.WithLabelValues("__seed__", "ph", "pl", "exit-1").Add(0)
+	tidemetrics.DispatchLatency.WithLabelValues("__seed__")
+	tidemetrics.SecretLeakBlockedTotal.WithLabelValues("__seed__", "ph", "pl").Add(0)
+	tidemetrics.PushJobsTotal.WithLabelValues("__seed__", "success").Add(0)
+	tidemetrics.BudgetOverrunsTotal.WithLabelValues("__seed__").Add(0)
+
 	families, err := crmetrics.Registry.Gather()
 	if err != nil {
 		t.Fatalf("Registry.Gather: %v", err)
