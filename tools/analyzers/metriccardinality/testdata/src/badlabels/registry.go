@@ -2,10 +2,10 @@
 // metriccardinality analyzer must flag every prometheus.New*Vec call whose
 // label slice contains the literal "task" — one violation per constructor
 // (CounterVec / HistogramVec / GaugeVec / SummaryVec), each carrying a
-// // want directive on the offending label line.
+// diagnostic-expectation marker on the offending label line.
 //
 // The analyzer reports the diagnostic at the position of the "task" literal
-// itself (not the call expression), so the // want directive sits on the
+// itself (not the call expression), so the expectation marker sits on the
 // line that contains "task".
 package badlabels
 
