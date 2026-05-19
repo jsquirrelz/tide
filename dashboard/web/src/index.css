@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/* ----------------------------------------------------------------------------
+ * TIDE Dashboard — Design Tokens
+ *
+ * Single source of truth for color, spacing, typography. Locked by UI-SPEC.
+ * Dark theme is the default (operator dashboards default to dark — Argo CD,
+ * k9s, Lens, Octant, KubeShark, Headlamp all follow this convention).
+ *
+ * Light theme is opt-in via `<html class="light-theme">` (toggle persisted to
+ * localStorage by the header gear-icon dropdown).
+ *
+ * Accent (--color-accent) is RESERVED FOR (UI-SPEC §Color, 6-item explicit list):
+ *   1. Primary CTA button background
+ *   2. Selected-node ring
+ *   3. Currently-active wave-band edge highlight
+ *   4. SSE-connected status dot
+ *   5. Focus ring outline on keyboard focus
+ *   6. Connection-status pill background (state=connected only)
+ * Buttons, links, hovered nodes, drawer headers, badges, the resizable-divider
+ * grip — none of these use accent.
+ * --------------------------------------------------------------------------*/
+
+@theme {
+  /* 60/30/10 color split — dark default per UI-SPEC §Color */
+  --color-surface-base: #0b0f14;
+  --color-surface-raised: #161b22;
+  --color-surface-overlay: #1f2937;
+  --color-accent: #06b6d4;
+
+  /* Foregrounds */
+  --color-text-primary: #e6edf3;
+  --color-text-muted: #8b949e;
+
+  /* Borders */
+  --color-border-subtle: #30363d;
+  --color-border-strong: #484f58;
+
+  /* Destructive — second semantic color (UI-SPEC §Color) */
+  --color-destructive: #f85149;
+  --color-destructive-muted: #3c1a1b;
+
+  /* Status families (UI-SPEC §Status Vocabulary) */
+  --color-status-pending: #8b949e;
+  --color-status-running: #06b6d4;
+  --color-status-success: #3fb950;
+  --color-status-warning: #d29922;
+  --color-status-error: #f85149;
+  --color-status-blocked: #a371f7;
+
+  /* Spacing — 8-point base scale (UI-SPEC §Spacing Scale). Tailwind v4 reads
+   * `--spacing` to drive arbitrary scale lookups (e.g. p-3 → calc(--spacing * 3))
+   * but we ALSO declare named token values so docs/lint can pin against
+   * forbidden-arbitrary-value enforcement. */
+  --spacing: 4px;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+
+  /* Typography — UI-SPEC §Typography: 3 sizes + 1 mono variant, 2 weights
+   * (400 regular, 600 semibold). System font stack only (zero web font bytes
+   * per UI-SPEC §Stack & Bundle Targets). */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-label: 12px;
+  --text-label--line-height: 1.4;
+  --text-heading: 18px;
+  --text-heading--line-height: 1.3;
+  --text-mono: 13px;
+  --text-mono--line-height: 1.4;
+}
+
+/* ----------------------------------------------------------------------------
+ * Light-theme overrides — only the deltas from dark are listed (UI-SPEC §Color).
+ * Applied by setting `document.documentElement.className = 'light-theme'`.
+ * --------------------------------------------------------------------------*/
+.light-theme {
+  --color-surface-base: #ffffff;
+  --color-surface-raised: #f6f8fa;
+  --color-surface-overlay: #e5e7eb;
+  --color-accent: #0891b2;
+  --color-text-primary: #0f172a;
+  --color-text-muted: #4b5563;
+  --color-border-subtle: #d1d5db;
+  --color-border-strong: #9ca3af;
+  --color-destructive: #dc2626;
+
+  --color-status-pending: #6b7280;
+  --color-status-running: #0891b2;
+  --color-status-success: #16a34a;
+  --color-status-warning: #ca8a04;
+  --color-status-error: #dc2626;
+  --color-status-blocked: #9333ea;
+}
+
+/* ----------------------------------------------------------------------------
+ * Base reset — keep minimal. Tailwind's preflight handles the bulk; we layer
+ * the design-token-driven body shell on top.
+ * --------------------------------------------------------------------------*/
+body {
+  background: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  margin: 0;
+  min-height: 100vh;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono);
+  line-height: var(--text-mono--line-height);
+}
+
+/* Focus ring — UI-SPEC §Accessibility: 2px solid accent, 2px offset, never
+ * removed. :focus-visible (not :focus) so mouse interaction doesn't show it. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Motion — UI-SPEC §Accessibility: prefers-reduced-motion disables all
+ * spin/pulse/slide animations. State changes still happen, they just don't
+ * animate. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
