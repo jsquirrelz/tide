@@ -204,6 +204,14 @@ run: manifests generate fmt vet ## Run a controller from your host.
 tide-cli: ## Build the operator-facing tide CLI binary (Phase 4 D-C1..C4).
 	go build -o bin/tide ./cmd/tide
 
+.PHONY: release-snapshot
+release-snapshot: ## Dry-run goreleaser locally (no tag, no upload). Plan 04-09 (D-C2).
+	@if command -v goreleaser >/dev/null 2>&1; then \
+		goreleaser release --snapshot --skip publish --clean; \
+	else \
+		docker run --rm -v "$(PWD)":/work -w /work goreleaser/goreleaser:latest release --snapshot --skip publish --clean; \
+	fi
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/

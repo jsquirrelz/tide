@@ -1,0 +1,114 @@
+# TIDE release pipeline — goreleaser v2.x.
+#
+# Phase 4 plan 04-09 (Wave 4). No tag is cut by this file landing — the
+# accompanying .github/workflows/release.yaml workflow is gated on `v*` tag
+# push, which Phase 5 performs. Local snapshot builds use:
+#
+#     make release-snapshot
+#
+# (resolves to `goreleaser release --snapshot --skip publish --clean`).
+#
+# Trust boundary notes (T-04-C2, T-04-Release-leak — plan 04-09 §threat_model):
+#   - `-s -w` strips debug symbols and source paths from binaries
+#     (no build-environment leakage).
+#   - No secrets are baked at build time; ANTHROPIC_API_KEY is runtime-only
+#     per CLAUDE.md.
+#   - SLSA provenance + cosign signatures are deferred to v1.x hardening
+#     per RESEARCH §A4. Documented in docs/cli.md.
+
+version: 2
+
+# Pre-build hooks: run `go mod tidy` to confirm the module graph is clean,
+# then build + run tide-lint to fail-fast if any custom analyzer flags a
+# diagnostic. The release should NEVER ship from a tree that fails tide-lint.
+before:
+  hooks:
+    - go mod tidy
+    - go build -o bin/tide-lint ./cmd/tide-lint
+    - make tide-lint
+
+builds:
+  - id: tide
+    main: ./cmd/tide
+    binary: tide
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # Drop windows/arm64 — not a K8s operator audience per 04-09-PLAN.md.
+    ignore:
+      - goos: windows
+        goarch: arm64
+    # Version injected into cmd/tide/main.go's `var version = "dev"`.
+    # `-s -w` strips debug + DWARF (smaller binaries, no source paths leaked).
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: tide
+    ids:
+      - tide
+    name_template: 'tide_{{.Version}}_{{.Os}}_{{.Arch}}'
+    # tar.gz for linux/darwin; zip for windows.
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  # Available for `goreleaser release --snapshot` dev-mode runs (no tag
+  # required). Resolves to e.g. `0.0.0-SNAPSHOT-deadbeef`.
+  version_template: '{{ incpatch .Version }}-SNAPSHOT-{{.ShortCommit}}'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+
+release:
+  github:
+    owner: jsquirrelz
+    name: tide
+  # v0.x tags marked prerelease automatically; v1.0.0+ become stable.
+  prerelease: auto
+  # Replace on retry (idempotent release jobs).
+  mode: replace
+  draft: false
+  name_template: 'TIDE {{ .Tag }}'
+  header: |
+    ## TIDE {{ .Tag }}
+
+    Kubernetes-native orchestrator for hierarchical agentic coding work.
+
+    ### Install
+
+    - Krew: `kubectl krew install tide`
+    - Manual: download the appropriate archive for your platform and place
+      the `tide` binary on your `$PATH`. To use as a kubectl plugin, rename
+      it to `kubectl-tide` (Krew does this automatically).
+    - Source: `go install github.com/jsquirrelz/tide/cmd/tide@{{ .Tag }}`
+
+    See `docs/cli.md` for verb reference.
+  footer: |
+    ---
+    **Supply-chain note:** v1.0 ships unsigned. SLSA provenance + cosign
+    signatures are deferred to v1.x. See `docs/cli.md` §Security.
