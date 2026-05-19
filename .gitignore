@@ -13,6 +13,9 @@ Dockerfile.cross
 /credproxy
 /tide
 
+# goreleaser snapshot/release build output (plan 04-09 — D-C2)
+/dist/
+
 # Test binary, built with `go test -c`
 *.test
 
