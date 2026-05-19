@@ -396,23 +396,20 @@ func copyIntoWorktree(src, dst string) error {
 	return nil
 }
 
+// terminationMessagePath is the K8s default container termination-message
+// path. Plan 04-06 W-1: tide-push writes the push-result envelope here so
+// the ProjectReconciler can read it from the Pod's
+// Status.ContainerStatuses[0].State.Terminated.Message without mounting
+// the PVC. K8s caps the file at 4096 bytes; the JSON envelope is well
+// under 1 KB so no truncation risk.
+const terminationMessagePath = "/dev/termination-log"
+
 // writePushEnvelope writes the push-result JSON to
-// <workspace>/envelopes/push/<project-uid>.json. Best-effort: write
-// failures are logged but do not change the exit code (the caller has
-// already decided what to return).
+// <workspace>/envelopes/push/<project-uid>.json AND to
+// /dev/termination-log (terminationMessagePath). Best-effort on both
+// writes: write failures are logged but do not change the exit code (the
+// caller has already decided what to return).
 func writePushEnvelope(cfg pushConfig, headSHA string, exit int, reason string) {
-	if cfg.ProjectUID == "" {
-		// Without ProjectUID we have nowhere to write — the calling
-		// reconciler set up the path, so an empty UID is a
-		// programmer error. Silent skip is the only safe option.
-		return
-	}
-	envDir := filepath.Join(cfg.Workspace, "envelopes", "push")
-	if err := os.MkdirAll(envDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "tide-push: mkdir envelope dir %s: %v\n", envDir, err)
-		return
-	}
-	envPath := filepath.Join(envDir, cfg.ProjectUID+".json")
 	pr := pushResult{
 		APIVersion: envelopeAPIVersion,
 		Kind:       envelopeKind,
@@ -427,6 +424,29 @@ func writePushEnvelope(cfg pushConfig, headSHA string, exit int, reason string) 
 		fmt.Fprintf(os.Stderr, "tide-push: marshal envelope: %v\n", err)
 		return
 	}
+
+	// W-1 surface: write to /dev/termination-log (K8s default
+	// terminationMessagePath) so the ProjectReconciler can read
+	// Reason without mounting the PVC. Best-effort — the file may
+	// not be writable in non-K8s test environments.
+	if err := os.WriteFile(terminationMessagePath, data, 0o644); err != nil {
+		// Not all environments have /dev/termination-log writable
+		// (host machine tests, etc.) — log at low signal.
+		fmt.Fprintf(os.Stderr, "tide-push: write terminationMessage (best-effort): %v\n", err)
+	}
+
+	// Also write to PVC envelope path (Phase 3 D-A2 contract) for
+	// downstream consumers that mount the PVC. Skip if ProjectUID
+	// is unset (no PVC path possible).
+	if cfg.ProjectUID == "" {
+		return
+	}
+	envDir := filepath.Join(cfg.Workspace, "envelopes", "push")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "tide-push: mkdir envelope dir %s: %v\n", envDir, err)
+		return
+	}
+	envPath := filepath.Join(envDir, cfg.ProjectUID+".json")
 	if err := os.WriteFile(envPath, data, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: write envelope %s: %v\n", envPath, err)
 	}

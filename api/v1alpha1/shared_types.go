@@ -90,6 +90,15 @@ const (
 	// (Phase 3 D-B6). Cleared by either a successful subsequent push or the
 	// tideproject.k8s/bypass-push-lease=true annotation.
 	ConditionPushLeaseFailed = "PushLeaseFailed"
+
+	// ConditionPushLeakBlocked — push Job blocked by gitleaks (exit code 10,
+	// envelope.reason=leak-detected). Phase 4 W-1 follow-up — distinct from
+	// ConditionPushLeaseFailed so the operator-visible reason is unambiguous
+	// (a secret was detected; no bypass annotation exists for this — the
+	// only path forward is removing the secret from the staged artifacts and
+	// re-running the boundary). Set by the ProjectReconciler push-result
+	// envelope handler (plan 04-06 task 1).
+	ConditionPushLeakBlocked = "PushLeakBlocked"
 )
 
 // Phase 4 condition + reason vocabulary additions — gate-policy seam at every

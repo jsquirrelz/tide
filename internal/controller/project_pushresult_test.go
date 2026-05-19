@@ -94,19 +94,31 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 		Expect(k8sClient.Status().Patch(ctx, pod, statusPatch)).To(Succeed())
 	}
 
-	// markJobFailed transitions a Job to JobFailed=True so isJobFailed() returns true.
+	// markJobFailed transitions a Job to JobFailed=True so isJobFailed()
+	// returns true. K8s 1.30+ enforces ordering: FailureTarget=true must be
+	// set before Failed=true; completionTime requires Complete=true. We omit
+	// completionTime on failure (Status.Failed counter is enough for
+	// isJobFailed).
 	markJobFailed := func(jobName, namespace string) {
 		var job batchv1.Job
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)).To(Succeed())
 		now := metav1.Now()
 		job.Status.StartTime = &now
-		job.Status.CompletionTime = &now
 		job.Status.Failed = 1
-		job.Status.Conditions = []batchv1.JobCondition{{
-			Type:               batchv1.JobFailed,
-			Status:             corev1.ConditionTrue,
-			LastTransitionTime: now,
-		}}
+		job.Status.Conditions = []batchv1.JobCondition{
+			{
+				Type:               batchv1.JobFailureTarget,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+				Reason:             "PodFailurePolicy",
+			},
+			{
+				Type:               batchv1.JobFailed,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+				Reason:             "PodFailurePolicy",
+			},
+		}
 		Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
 	}
 
