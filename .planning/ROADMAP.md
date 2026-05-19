@@ -170,8 +170,8 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — internal/metrics registry + Phase4 API constants + cmd/manager metrics blank import (Wave 1)
 - [x] 04-02-PLAN.md — metriccardinality lint analyzer + cmd/tide-lint multichecker registration (Wave 1)
-- [ ] 04-03-PLAN.md — pkg/otelai OpenInference helpers + internal/otelinit TracerProvider + cmd/manager OTel wiring (Wave 2)
-- [ ] 04-04-PLAN.md — internal/gates package (policy + annotation + boundary shared seam) (Wave 2)
+- [x] 04-03-PLAN.md — pkg/otelai OpenInference helpers + internal/otelinit TracerProvider + cmd/manager OTel wiring (Wave 2)
+- [x] 04-04-PLAN.md — internal/gates package (policy + annotation + boundary shared seam) (Wave 2)
 - [ ] 04-05-PLAN.md — Gate-policy hooks in Milestone/Phase/Plan/Task + PauseBetweenWaves + AnnotationChangedPredicate (Wave 3)
 - [ ] 04-07-PLAN.md — cmd/tide skeleton + read-only verbs (apply/watch/inspect-wave/artifact-get/describe-budget) (Wave 3)
 - [ ] 04-06-PLAN.md — W-1 exit-10/exit-11 split + counter + W-2 mid-stack boundary push triggers (Wave 4)
