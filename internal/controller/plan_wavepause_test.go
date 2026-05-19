@@ -36,9 +36,10 @@ import (
 var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Label("envtest", "phase4", "wavepause"), func() {
 	ctx := context.Background()
 
-	// makeProjectWithPause creates a Project with PauseBetweenWaves=true and an
-	// associated Plan + 2-wave Task DAG. Returns the Plan name.
-	makeProjectWithPause := func(projectName, planName string, pause bool) string {
+	// makeProjectWithPause creates a Project (with PauseBetweenWaves), the
+	// Milestone+Phase chain so resolveProjectForPlan succeeds, then a Plan with
+	// a 2-wave Task DAG. Returns the Plan name.
+	makeProjectWithPause := func(projectName, msName, phaseName, planName string, pause bool) string {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
 			Spec: tideprojectv1alpha1.ProjectSpec{
@@ -48,7 +49,19 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
-		makePlan(planName, "phase-wpause", "Validated")
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
+		makePlan(planName, phaseName, "Validated")
 		// 2-wave DAG: alpha (w0), beta (w0), gamma DependsOn alpha (w1).
 		makeTask(planName+"-alpha", planName, nil, projectName)
 		makeTask(planName+"-beta", planName, nil, projectName)
@@ -56,23 +69,37 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 		return planName
 	}
 
-	cleanupWavepauseFixture := func(projectName, planName string) {
+	cleanupWavepauseFixture := func(projectName, msName, phaseName, planName string) {
 		for _, suffix := range []string{"-alpha", "-beta", "-gamma"} {
 			cleanupTask(planName + suffix)
 		}
 		cleanupPlanFixture(planName, nil)
+		ph := &tideprojectv1alpha1.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha1.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
 		cleanupProject(projectName)
 	}
 
 	Describe("Test 1 — wave 0 Succeeded, gates.pauseBetweenWaves=true: Plan condition WaveOrLevelPaused True", func() {
 		const projectName = "wpause-proj-1"
+		const msName = "wpause-ms-1"
+		const phaseName = "wpause-ph-1"
 		const planName = "wpause-plan-1"
 
 		BeforeEach(func() {
-			makeProjectWithPause(projectName, planName, true)
+			makeProjectWithPause(projectName, msName, phaseName, planName, true)
 		})
 		AfterEach(func() {
-			cleanupWavepauseFixture(projectName, planName)
+			cleanupWavepauseFixture(projectName, msName, phaseName, planName)
 		})
 
 		It("Plan carries Condition WaveOrLevelPaused True with Reason=PausedAtBoundary and Message referencing wave 1", func() {
@@ -105,13 +132,15 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 
 	Describe("Test 2 — approve-wave-1 annotation: consume, clear condition, allow dispatch", func() {
 		const projectName = "wpause-proj-2"
+		const msName = "wpause-ms-2"
+		const phaseName = "wpause-ph-2"
 		const planName = "wpause-plan-2"
 
 		BeforeEach(func() {
-			makeProjectWithPause(projectName, planName, true)
+			makeProjectWithPause(projectName, msName, phaseName, planName, true)
 		})
 		AfterEach(func() {
-			cleanupWavepauseFixture(projectName, planName)
+			cleanupWavepauseFixture(projectName, msName, phaseName, planName)
 		})
 
 		It("ConsumeWaveApprove removes the annotation and the condition flips False", func() {
@@ -163,13 +192,15 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 
 	Describe("Test 3 — PauseBetweenWaves=false: no pause condition set", func() {
 		const projectName = "wpause-proj-3"
+		const msName = "wpause-ms-3"
+		const phaseName = "wpause-ph-3"
 		const planName = "wpause-plan-3"
 
 		BeforeEach(func() {
-			makeProjectWithPause(projectName, planName, false)
+			makeProjectWithPause(projectName, msName, phaseName, planName, false)
 		})
 		AfterEach(func() {
-			cleanupWavepauseFixture(projectName, planName)
+			cleanupWavepauseFixture(projectName, msName, phaseName, planName)
 		})
 
 		It("No WaveOrLevelPaused condition is set (today's behavior preserved)", func() {

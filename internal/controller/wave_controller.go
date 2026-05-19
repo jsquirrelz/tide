@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -252,6 +253,9 @@ func (r *WaveReconciler) taskToWaveMapper(ctx context.Context, obj client.Object
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02, a
 // namespace-filter predicate per AUTH-02, and a Task→Wave watch for D-B4.
+// Plan 04-05: also wires AnnotationChangedPredicate so wave-approve annotation
+// writes on the Wave (operator-driven D-G3 surface) trigger reconciliation
+// (T-04-G4 mitigation — no polling).
 func (r *WaveReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -260,7 +264,12 @@ func (r *WaveReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Wave{}).
+		For(&tideprojectv1alpha1.Wave{},
+			builder.WithPredicates(predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.AnnotationChangedPredicate{},
+			)),
+		).
 		Watches(
 			&tideprojectv1alpha1.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.taskToWaveMapper),

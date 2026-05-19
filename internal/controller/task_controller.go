@@ -271,6 +271,14 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		return ctrl.Result{}, nil
 	}
 
+	// Plan 04-05 Task 2: PauseBetweenWaves dispatch block. PlanReconciler
+	// stamps tideproject.k8s/wave-paused=<N> on tasks in a wave waiting for
+	// approve-wave-N on the parent Plan; until the label is cleared (by
+	// PlanReconciler on annotation consume), the Task stays AwaitingApproval.
+	if _, paused := task.Labels["tideproject.k8s/wave-paused"]; paused {
+		return r.patchTaskAwaitingApproval(ctx, task, gates.PolicyPause)
+	}
+
 	// Plan 04-05 gate-policy hook (level=task). The Task gate fires here —
 	// AFTER indegree compute (only ready-to-dispatch Tasks pause) and BEFORE
 	// rate-limit + token mint + Job dispatch. D-G1 default for Task is "auto"
