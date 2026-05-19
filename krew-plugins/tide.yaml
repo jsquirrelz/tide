@@ -1,0 +1,112 @@
+# TIDE Krew plugin manifest template (v1alpha2 — verified May 2026).
+#
+# Phase 4 plan 04-09 (Wave 4). This file lands the schema; krew-release-bot
+# (wired in Phase 5) fills `{{ .TagName }}` and `{{ .Sha256 }}` at release
+# time by reading the goreleaser-produced `checksums.txt`.
+#
+# Five platforms match the goreleaser archive matrix (.goreleaser.yaml):
+#   linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64.
+# windows/arm64 is intentionally omitted — not a K8s operator audience.
+#
+# Install path after `kubectl krew install tide`:
+#   ~/.krew/bin/kubectl-tide       (Krew renames `tide` → `kubectl-tide`)
+#
+# Pitfall 27 mitigation: cmd/tide/main.go uses `filepath.Base(os.Args[0])`
+# for the cobra root `Use:`, so `tide --help` and `kubectl tide --help`
+# both render the correct invocation name.
+#
+# Trust boundary (T-04-C2): Krew verifies each archive's sha256 against
+# the manifest at install time. If the sha mismatches, install fails.
+# v1.0 ships without cosign signatures (documented in docs/cli.md §Security).
+
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: tide
+spec:
+  version: "{{ .TagName }}"
+  homepage: https://github.com/jsquirrelz/tide
+  shortDescription: Manage TIDE Projects on Kubernetes
+  description: |
+    tide is the CLI for TIDE — a Kubernetes-native orchestrator for
+    hierarchical agentic coding work organized as a five-level paradigm
+    (Project → Milestone → Phase → Plan → Task) with topologically-derived
+    Waves.
+
+    Common verbs:
+      kubectl tide apply -f project.yaml      # apply a Project CRD
+      kubectl tide watch <project>             # live status (1s poll)
+      kubectl tide tail <task>                 # stream pod logs
+      kubectl tide approve <project>           # advance an awaiting-approval level
+      kubectl tide inspect-wave <project>      # tabular wave view
+      kubectl tide describe-budget <project>   # budget status
+
+    See https://github.com/jsquirrelz/tide/blob/main/docs/cli.md for the
+    full verb reference and dual-invocation (`tide` vs `kubectl tide`) notes.
+
+  caveats: |
+    After installation, generate completion scripts:
+
+      kubectl tide completion bash > /etc/bash_completion.d/kubectl-tide
+      kubectl tide completion zsh  > "${fpath[1]}/_kubectl-tide"
+      kubectl tide completion fish > ~/.config/fish/completions/kubectl-tide.fish
+
+    Pitfall 27: the completion script's leading binary name matches
+    `os.Args[0]`, so `kubectl tide completion bash` produces a script
+    wired to `kubectl-tide`, not `tide`.
+
+  platforms:
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/jsquirrelz/tide/releases/download/{{ .TagName }}/tide_{{ .TagName }}_linux_amd64.tar.gz
+      sha256: "{{ .Sha256 }}"
+      files:
+        - from: tide
+          to: .
+      bin: tide
+
+    - selector:
+        matchLabels:
+          os: linux
+          arch: arm64
+      uri: https://github.com/jsquirrelz/tide/releases/download/{{ .TagName }}/tide_{{ .TagName }}_linux_arm64.tar.gz
+      sha256: "{{ .Sha256 }}"
+      files:
+        - from: tide
+          to: .
+      bin: tide
+
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/jsquirrelz/tide/releases/download/{{ .TagName }}/tide_{{ .TagName }}_darwin_amd64.tar.gz
+      sha256: "{{ .Sha256 }}"
+      files:
+        - from: tide
+          to: .
+      bin: tide
+
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: arm64
+      uri: https://github.com/jsquirrelz/tide/releases/download/{{ .TagName }}/tide_{{ .TagName }}_darwin_arm64.tar.gz
+      sha256: "{{ .Sha256 }}"
+      files:
+        - from: tide
+          to: .
+      bin: tide
+
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      uri: https://github.com/jsquirrelz/tide/releases/download/{{ .TagName }}/tide_{{ .TagName }}_windows_amd64.zip
+      sha256: "{{ .Sha256 }}"
+      files:
+        - from: tide.exe
+          to: .
+      bin: tide.exe

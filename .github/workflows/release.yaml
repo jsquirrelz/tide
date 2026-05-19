@@ -1,0 +1,63 @@
+# TIDE release pipeline.
+#
+# Triggered ONLY on tag push matching `v*` (e.g. `v0.1.0`, `v1.0.0`).
+# NOT triggered on PR or branch push — release is an intentional human
+# action: push a `v*` tag, this workflow runs `goreleaser release --clean`,
+# multi-OS/arch tarballs + checksums.txt land in the GitHub Release.
+#
+# Phase 5 wires the krew-release-bot side (PR to krew-index) on top of the
+# checksums.txt produced here. See .planning/phases/04-.../04-09-PLAN.md.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions: {}
+
+jobs:
+  release:
+    name: Release (goreleaser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # `contents: write` is required for goreleaser to create the GitHub
+      # Release and upload archives + checksums.txt. No other scopes needed.
+      contents: write
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          # goreleaser needs full history to derive the changelog from
+          # commits since the previous tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # Fail-fast: validate .goreleaser.yaml BEFORE attempting a release.
+      # If `check` fails, no archives are produced and no Release is created
+      # — saves us from a half-published Release on config typos.
+      - name: Validate .goreleaser.yaml (goreleaser check)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check
+
+      # Build multi-OS/arch archives and publish the GitHub Release.
+      # `--clean` removes any pre-existing dist/ from a previous run.
+      - name: Release (goreleaser release --clean)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
