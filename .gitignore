@@ -11,6 +11,7 @@ Dockerfile.cross
 /tide-lint
 /manager
 /credproxy
+/tide
 
 # Test binary, built with `go test -c`
 *.test
