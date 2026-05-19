@@ -68,6 +68,10 @@ type PhaseReconciler struct {
 	// SubagentImage is the planner subagent container image.
 	SubagentImage string
 
+	// TidePushImage is the image ref for the tide-push container used by
+	// the W-2 boundary push trigger (plan 04-06).
+	TidePushImage string
+
 	// HelmProviderDefaults carry Helm-chart provider/model defaults.
 	HelmProviderDefaults ProviderDefaults
 
@@ -256,6 +260,11 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 				return ctrl.Result{}, err
 			}
 		}
+	}
+
+	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE patchSucceeded.
+	if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return r.patchPhaseSucceeded(ctx, ph)

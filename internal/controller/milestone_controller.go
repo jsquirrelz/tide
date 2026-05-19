@@ -76,6 +76,10 @@ type MilestoneReconciler struct {
 	// SubagentImage is the image ref for the planner subagent container.
 	SubagentImage string
 
+	// TidePushImage is the image ref for the tide-push container used by
+	// the W-2 boundary push trigger (plan 04-06).
+	TidePushImage string
+
 	// HelmProviderDefaults carry Helm-chart provider/model defaults.
 	HelmProviderDefaults ProviderDefaults
 
@@ -295,6 +299,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				return ctrl.Result{}, err
 			}
 		}
+	}
+
+	// Plan 04-06 W-2: boundary push trigger lands AFTER gate-policy passes
+	// (so paused/rejected levels do not push) and BEFORE patchSucceeded
+	// (so the operator-visible Status.Phase=Succeeded happens after dispatch).
+	if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	return r.patchMilestoneSucceeded(ctx, ms)

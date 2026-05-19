@@ -69,6 +69,10 @@ type PlanReconciler struct {
 	// SubagentImage is the planner subagent container image (Phase 3).
 	SubagentImage string
 
+	// TidePushImage is the image ref for the tide-push container used by
+	// the W-2 boundary push trigger (plan 04-06).
+	TidePushImage string
+
 	// HelmProviderDefaults carry Helm-chart provider/model defaults (Phase 3).
 	HelmProviderDefaults ProviderDefaults
 
@@ -333,6 +337,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				return ctrl.Result{}, err
 			}
 		}
+	}
+
+	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE clearing
+	// the Running phase. Plan boundary is the only D-B2 shape with the
+	// `+ executed` suffix (Tasks have already run by this seam).
+	if err := r.maybeTriggerBoundaryPush(ctx, plan, project); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.

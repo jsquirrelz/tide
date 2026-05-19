@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -41,9 +42,63 @@ import (
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 )
+
+// pushResultEnvelope mirrors the JSON envelope emitted by cmd/tide-push
+// (see cmd/tide-push/main.go pushResult). It is read from the push Pod's
+// Status.ContainerStatuses[0].State.Terminated.Message — K8s
+// terminationMessagePath default surface — so the ProjectReconciler can
+// classify the push outcome by Reason without mounting the PVC.
+//
+// Phase 4 W-1: the Reason field is the source of truth for the exit-10
+// vs exit-11 split. Plan 04-06 task 1 added this parsing.
+type pushResultEnvelope struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
+	ProjectUID string `json:"projectUID"`
+	Branch     string `json:"branch"`
+	HeadSHA    string `json:"headSHA"`
+	ExitCode   int    `json:"exitCode"`
+	Reason     string `json:"reason"`
+}
+
+// readPushEnvelope locates the first Pod belonging to the named push Job
+// (label `job-name=<pushJobName>`) and parses its container[0]
+// State.Terminated.Message as a pushResultEnvelope JSON document. Returns
+// (envelope, true) on a successful parse; (zero, false) when no pod or no
+// terminationMessage exists, or the body is unparseable.
+//
+// This is the operator-visible source of the push outcome's `reason` — the
+// W-1 exit-10 leak path depends on this surface returning
+// reason="leak-detected" so the leak-blocked metric fires.
+func (r *ProjectReconciler) readPushEnvelope(ctx context.Context, namespace, pushJobName string) (pushResultEnvelope, bool) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"job-name": pushJobName},
+	); err != nil {
+		return pushResultEnvelope{}, false
+	}
+	if len(pods.Items) == 0 {
+		return pushResultEnvelope{}, false
+	}
+	pod := &pods.Items[0]
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return pushResultEnvelope{}, false
+	}
+	term := pod.Status.ContainerStatuses[0].State.Terminated
+	if term == nil || term.Message == "" {
+		return pushResultEnvelope{}, false
+	}
+	var env pushResultEnvelope
+	if err := json.Unmarshal([]byte(term.Message), &env); err != nil {
+		return pushResultEnvelope{}, false
+	}
+	return env, true
+}
 
 const (
 	projectFinalizer = "tideproject.k8s/project-cleanup"
@@ -423,22 +478,82 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 			}
 			_ = project.Status.Git.LastPushedSHA // documented writeback path
 		} else if isJobFailed(&existingPush) {
-			// Step 5b: Push failed. Plan 03-08 treats this as a
-			// lease rejection by default (per D-B6 the production
-			// failure reason is parsed from the push-result envelope
-			// in a follow-up plan); patch PhasePushLeaseFailed.
-			patch := client.MergeFrom(project.DeepCopy())
-			project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
-			project.Status.Git.LeaseFailureCount++
-			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
-				Status:             metav1.ConditionTrue,
-				Reason:             "LeaseRejected",
-				Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, project, patch); err != nil {
-				return ctrl.Result{}, err
+			// Step 5b: Push failed. Plan 04-06 W-1: split exit-10 (leak)
+			// from exit-11 (lease) via the push-result envelope's Reason
+			// field (cmd/tide-push writes to /dev/termination-log).
+			env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
+			reason := ""
+			if haveEnv {
+				reason = env.Reason
+			}
+
+			switch reason {
+			case "leak-detected":
+				// W-1 path: gitleaks blocked the push. Patch
+				// PhasePushLeakBlocked + Condition PushLeakBlocked
+				// True, and increment the operator-alertable counter
+				// (label set: {project, phase, plan} = 3; phase/plan
+				// empty at the Project boundary — documented).
+				patch := client.MergeFrom(project.DeepCopy())
+				project.Status.Phase = tideprojectv1alpha1.PhasePushLeakBlocked
+				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionPushLeakBlocked,
+					Status:             metav1.ConditionTrue,
+					Reason:             "LeakDetected",
+					Message:            fmt.Sprintf("Push Job %s blocked by gitleaks: secret pattern detected in diff", pushJobName),
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, project, patch); err != nil {
+					return ctrl.Result{}, err
+				}
+				tidemetrics.SecretLeakBlockedTotal.WithLabelValues(project.Name, "", "").Inc()
+				tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "leak").Inc()
+
+			case "lease-rejected":
+				// Existing Phase 3 path — preserve today's behavior so
+				// the bypass-push-lease annotation recovery still works.
+				patch := client.MergeFrom(project.DeepCopy())
+				project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
+				project.Status.Git.LeaseFailureCount++
+				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+					Status:             metav1.ConditionTrue,
+					Reason:             "LeaseRejected",
+					Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, project, patch); err != nil {
+					return ctrl.Result{}, err
+				}
+				tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
+
+			default:
+				// Empty / unknown reason (or envelope read failed):
+				// fall back to PhasePushLeaseFailed so the existing
+				// recovery annotation tideproject.k8s/bypass-push-lease
+				// remains the operator-visible escape hatch (Plan 04-06
+				// task 1 explicit requirement).
+				patch := client.MergeFrom(project.DeepCopy())
+				project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
+				project.Status.Git.LeaseFailureCount++
+				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+					Status:             metav1.ConditionTrue,
+					Reason:             "LeaseRejected",
+					Message:            fmt.Sprintf("Push Job %s failed (reason=%q; defaulting to lease-failure semantics)", pushJobName, reason),
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, project, patch); err != nil {
+					return ctrl.Result{}, err
+				}
+				if !haveEnv {
+					// Observability surface: envelope-read failed, push outcome
+					// indeterminate. Record under outcome=internal so an alert
+					// can fire on a sustained envelope-read failure rate.
+					tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "internal").Inc()
+				} else {
+					tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
+				}
 			}
 		}
 	}

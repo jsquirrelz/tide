@@ -211,6 +211,16 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 								},
 							},
 							VolumeMounts: mounts,
+							// Phase 4 W-1: tide-push writes its push-result envelope
+							// to /dev/termination-log (K8s terminationMessagePath
+							// default surface). The ProjectReconciler reads this via
+							// the Pod's Status.ContainerStatuses[0].State.Terminated
+							// .Message to classify exit-10 (leak-detected) vs
+							// exit-11 (lease-rejected) without mounting the PVC.
+							// FallbackToLogsOnError handles the edge case where the
+							// container exited before writing the file.
+							TerminationMessagePath:   "/dev/termination-log",
+							TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 						},
 					},
 				},
