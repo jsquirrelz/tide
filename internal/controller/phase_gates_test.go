@@ -84,9 +84,12 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 	}
 
 	driveToJobCompletion := func(phaseName string, r *PhaseReconciler, envReader *mapEnvReader) {
+		waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
 		var got tideprojectv1alpha1.Phase
-		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 		jobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 			TaskUID:  string(got.UID),

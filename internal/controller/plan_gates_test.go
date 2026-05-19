@@ -100,9 +100,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 	}
 
 	driveToJobCompletion := func(planName string, r *PlanReconciler, envReader *mapEnvReader) {
+		waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
 		var got tideprojectv1alpha1.Plan
-		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 		jobName := fmt.Sprintf("tide-plan-%s-1", got.UID)
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 			TaskUID:  string(got.UID),

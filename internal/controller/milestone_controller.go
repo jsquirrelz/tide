@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -36,6 +37,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -270,6 +272,29 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		}
 	}
 
+	// Plan 04-05: gate-policy hook. Two checks land at the Succeeded seam:
+	//   (a) project-level reject short-circuit → patch Failed/RejectedByUser
+	//   (b) per-level gate policy (approve/pause) → park AwaitingApproval
+	//       unless the approve annotation is present (and consume it).
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+	}
+	if project != nil {
+		policy := gates.EvaluatePolicy(project.Spec.Gates, "milestone")
+		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+			if !gates.CheckApprove(ms, "milestone") {
+				return r.patchMilestoneAwaitingApproval(ctx, ms, policy)
+			}
+			// Approve annotation present: consume it (one-shot) before patching Succeeded.
+			newAnno := gates.ConsumeApprove(ms, "milestone")
+			patch := client.MergeFrom(ms.DeepCopy())
+			ms.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, ms, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	return r.patchMilestoneSucceeded(ctx, ms)
 }
 
@@ -281,6 +306,43 @@ func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *t
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerComplete",
 		Message:            "Milestone planner completed; Phase children materialized",
+		LastTransitionTime: metav1.Now(),
+	})
+	// Plan 04-05: when the level resumes from a prior approve-pause, clear the
+	// WaveOrLevelPaused Condition to False with Reason=ResumedByUser so the
+	// transition is visible to operators tailing conditions.
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Message:            "Milestone resumed from gate boundary",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchMilestoneAwaitingApproval parks the Milestone at Status.Phase=AwaitingApproval
+// with ConditionWaveOrLevelPaused True (Plan 04-05 D-G2/D-G3 surface). Returns
+// ctrl.Result{} with no requeue — only an AnnotationChangedPredicate-triggered
+// re-reconcile (via the approve annotation write) advances the level (T-04-G4
+// mitigation: no polling DoS).
+func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context, ms *tideprojectv1alpha1.Milestone, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+	message := "Milestone awaiting operator approve annotation (tideproject.k8s/approve-milestone=true)"
+	if policy == gates.PolicyPause {
+		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		message = "Milestone paused at boundary; requires explicit resume"
+	}
+	patch := client.MergeFrom(ms.DeepCopy())
+	ms.Status.Phase = "AwaitingApproval"
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
 		LastTransitionTime: metav1.Now(),
 	})
 	if err := r.Status().Patch(ctx, ms, patch); err != nil {
@@ -331,7 +393,9 @@ func (r *MilestoneReconciler) buildPlannerJob(ms *tideprojectv1alpha1.Milestone,
 }
 
 // SetupWithManager wires Owns(&Job{}) and Owns(&Phase{}) per D-A2, plus a
-// namespace-filter predicate per AUTH-02.
+// namespace-filter predicate per AUTH-02. Plan 04-05: also wires
+// AnnotationChangedPredicate so operator approve/reject annotation writes
+// trigger reconciliation without polling (T-04-G4 mitigation).
 func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -340,7 +404,12 @@ func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Milestone{}).
+		For(&tideprojectv1alpha1.Milestone{},
+			builder.WithPredicates(predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.AnnotationChangedPredicate{},
+			)),
+		).
 		Owns(&batchv1.Job{}).
 		Owns(&tideprojectv1alpha1.Phase{}).
 		WithEventFilter(nsPred).

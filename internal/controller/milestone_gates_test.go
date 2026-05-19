@@ -77,9 +77,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 	}
 
 	driveToJobCompletion := func(msName string, r *MilestoneReconciler, envReader *mapEnvReader) string {
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 		var got tideprojectv1alpha1.Milestone
-		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 			TaskUID:  string(got.UID),

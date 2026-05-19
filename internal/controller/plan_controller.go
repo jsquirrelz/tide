@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,6 +38,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	"github.com/jsquirrelz/tide/pkg/dag"
@@ -311,9 +313,78 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		}
 	}
 
+	// Plan 04-05: gate-policy hook (level=plan). Lands BEFORE clearing the
+	// Running phase so the gate stays the "exit gate" of the planner cycle.
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchPlanFailed(ctx, plan, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+	}
+	if project != nil {
+		policy := gates.EvaluatePolicy(project.Spec.Gates, "plan")
+		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+			if !gates.CheckApprove(plan, "plan") {
+				return r.patchPlanAwaitingApproval(ctx, plan, policy)
+			}
+			newAnno := gates.ConsumeApprove(plan, "plan")
+			patch := client.MergeFrom(plan.DeepCopy())
+			plan.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, plan, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+
 	// Clear Running phase so the Phase 2 Wave path takes over on next reconcile.
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = ""
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Message:            "Plan resumed from gate boundary",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
+// Used by the Plan 04-05 gate-policy hook (reject short-circuit).
+func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "Failed"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchPlanAwaitingApproval parks the Plan at Status.Phase=AwaitingApproval
+// per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue).
+func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *tideprojectv1alpha1.Plan, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+	message := "Plan awaiting operator approve annotation (tideproject.k8s/approve-plan=true)"
+	if policy == gates.PolicyPause {
+		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		message = "Plan paused at boundary; requires explicit resume"
+	}
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "AwaitingApproval"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
 	if err := r.Status().Patch(ctx, plan, patch); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -550,7 +621,9 @@ func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideproje
 
 // SetupWithManager wires the watch with a namespace-filter predicate per AUTH-02.
 // Note: WaveReconciler handles Wave→Plan re-enqueue; PlanReconciler uses Owns(&Wave{})
-// so it is notified when owned Waves are created/updated.
+// so it is notified when owned Waves are created/updated. Plan 04-05 also wires
+// AnnotationChangedPredicate so approve-plan / approve-wave-N annotation writes
+// trigger reconciliation (T-04-G4 mitigation).
 func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -559,7 +632,12 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Plan{}).
+		For(&tideprojectv1alpha1.Plan{},
+			builder.WithPredicates(predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.AnnotationChangedPredicate{},
+			)),
+		).
 		Owns(&tideprojectv1alpha1.Wave{}).
 		Owns(&tideprojectv1alpha1.Task{}).
 		WithEventFilter(nsPred).

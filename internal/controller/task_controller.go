@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -47,6 +48,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/harness"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
@@ -223,6 +225,14 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		return ctrl.Result{}, err
 	}
 
+	// Plan 04-05 reject short-circuit (D-G1 per-level policy enum, T-04-G1
+	// mitigation). Fires BEFORE budget/indegree/dispatch so a rejected Project
+	// halts even Pending tasks. Reject value carries the operator-supplied
+	// reason which surfaces on the Condition Message (D-G4).
+	if gates.CheckRejected(project) {
+		return r.patchTaskFailed(ctx, task, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+	}
+
 	// Step 4: Budget gate.
 	if project.Status.Phase == "BudgetExceeded" && !budget.IsBypassed(project, time.Now()) {
 		patch := client.MergeFrom(task.DeepCopy())
@@ -259,6 +269,24 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Plan 04-05 gate-policy hook (level=task). The Task gate fires here —
+	// AFTER indegree compute (only ready-to-dispatch Tasks pause) and BEFORE
+	// rate-limit + token mint + Job dispatch. D-G1 default for Task is "auto"
+	// (no-op); explicit "approve"/"pause" parks the Task at AwaitingApproval
+	// until an annotation arrives (T-04-G4 — no polling).
+	policy := gates.EvaluatePolicy(project.Spec.Gates, "task")
+	if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+		if !gates.CheckApprove(task, "task") {
+			return r.patchTaskAwaitingApproval(ctx, task, policy)
+		}
+		newAnno := gates.ConsumeApprove(task, "task")
+		patch := client.MergeFrom(task.DeepCopy())
+		task.SetAnnotations(newAnno)
+		if err := r.Patch(ctx, task, patch); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Step 6: Rate-limit gate (Pattern 1 — no blocking per Pitfall 1, D-D3).
@@ -421,6 +449,50 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		}
 	}
 
+	return ctrl.Result{}, nil
+}
+
+// patchTaskFailed patches Task.Status.Phase=Failed with the supplied reason
+// + message. Used by the Plan 04-05 gate-policy hook for the reject
+// short-circuit (operator wrote tideproject.k8s/reject on the parent Project).
+func (r *TaskReconciler) patchTaskFailed(ctx context.Context, task *tideprojectv1alpha1.Task, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(task.DeepCopy())
+	task.Status.Phase = "Failed"
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, task, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// patchTaskAwaitingApproval parks the Task at Status.Phase=AwaitingApproval
+// per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue; an
+// AnnotationChangedPredicate-driven re-reconcile is the only path forward).
+func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *tideprojectv1alpha1.Task, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+	message := "Task awaiting operator approve annotation (tideproject.k8s/approve-task=true)"
+	if policy == gates.PolicyPause {
+		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		message = "Task paused at boundary; requires explicit resume"
+	}
+	patch := client.MergeFrom(task.DeepCopy())
+	task.Status.Phase = "AwaitingApproval"
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, task, patch); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -866,7 +938,12 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Task{}).
+		For(&tideprojectv1alpha1.Task{},
+			builder.WithPredicates(predicate.Or(
+				predicate.GenerationChangedPredicate{},
+				predicate.AnnotationChangedPredicate{},
+			)),
+		).
 		Owns(&batchv1.Job{}).
 		Watches(
 			&tideprojectv1alpha1.Task{},
