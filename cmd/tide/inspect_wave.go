@@ -22,14 +22,24 @@ import (
 
 // newInspectWaveCmd is registered in Task 1 to make `tide --help` honest;
 // Task 2 fills in the tabwriter rendering against TaskList + label selectors.
+//
+// The positional argument is the Project name (the rendered column set is
+// "tasks belonging to <project>, optionally filtered by wave"). The Plan/
+// Project distinction in the verb name follows D-C3's "tide inspect-wave
+// <plan>" surface — in v1.0 the canonical label vocabulary
+// (tideproject.k8s/project) keys lookups on the Project name; a v1.x
+// extension may switch to <plan> selectors if multi-plan-per-project
+// emerges.
 func newInspectWaveCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "inspect-wave <plan>",
-		Short: "List Tasks in a Plan's wave with status/age/attempt/wave columns",
+	c := &cobra.Command{
+		Use:   "inspect-wave <project>",
+		Short: "List Tasks in a Project's wave with status/age/attempt/wave columns",
 		Long:  "tide inspect-wave renders the wave's task list in kubectl-aligned tabwriter columns (NAME, STATUS, AGE, ATTEMPT, SCHEDULED-IN-WAVE). Filter by --wave N. Honours -o json.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspectWave(cmd, args)
 		},
 	}
+	c.Flags().Int("wave", -1, "Filter to a specific wave index (default: show all waves)")
+	return c
 }

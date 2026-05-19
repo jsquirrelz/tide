@@ -14,30 +14,60 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package main — runners.go holds the RunE bodies for the three Task-2
-// subcommands (inspect-wave, artifact-get, describe-budget). Task 1 ships
-// minimal placeholder implementations so the binary builds and `tide --help`
-// lists every verb; Task 2 overwrites the bodies with the real renderers.
+// Package main — runners.go holds the cobra-side wiring (RunE bodies) for
+// the three Task-2 subcommands. The pure-Go renderers live in
+// inspect_wave_run.go, describe_budget_run.go, and artifact_get_run.go so
+// the in-memory client.Client fixtures from controller-runtime/pkg/client/fake
+// drive them directly without cobra plumbing.
 
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
-// Task-1 placeholder. Task 2 replaces with real tabwriter rendering.
+// runInspectWave is the cobra RunE adapter for `tide inspect-wave`.
+//
+// Adapter contract: resolve the namespace + K8s client, parse the --wave
+// flag, delegate to inspectWaveRun.
 func runInspectWave(cmd *cobra.Command, args []string) error {
-	return fmt.Errorf("inspect-wave: not yet implemented in Task 1 — Task 2 fills the renderer")
+	project := args[0]
+	wave, _ := cmd.Flags().GetInt("wave")
+	c, err := K8sClient()
+	if err != nil {
+		return err
+	}
+	ns, err := resolveNamespace()
+	if err != nil {
+		return err
+	}
+	if ns == "" {
+		ns = "default"
+	}
+	return inspectWaveRunWithErr(cmd.Context(), c, ns, project, wave, outputFormat, cmd.OutOrStdout(), cmd.ErrOrStderr())
 }
 
-// Task-1 placeholder. Task 2 replaces with real apiserver pod-exec proxy.
-func runArtifactGet(cmd *cobra.Command, args []string) error {
-	return fmt.Errorf("artifact-get: not yet implemented in Task 1 — Task 2 fills the renderer")
-}
-
-// Task-1 placeholder. Task 2 replaces with real Status.Budget render.
+// runDescribeBudget is the cobra RunE adapter for `tide describe-budget`.
 func runDescribeBudget(cmd *cobra.Command, args []string) error {
-	return fmt.Errorf("describe-budget: not yet implemented in Task 1 — Task 2 fills the renderer")
+	project := args[0]
+	c, err := K8sClient()
+	if err != nil {
+		return err
+	}
+	ns, err := resolveNamespace()
+	if err != nil {
+		return err
+	}
+	if ns == "" {
+		ns = "default"
+	}
+	return describeBudgetRun(cmd.Context(), c, ns, project, outputFormat, cmd.OutOrStdout())
+}
+
+// runArtifactGet is the cobra RunE adapter for `tide artifact-get`. v1.0
+// implementation is dry-run-only — the real apiserver pod-exec proxy lands
+// alongside the kind harness work in plan 04-14. Dry-run is exercised by
+// tests and documents the pod spec that WOULD be created.
+func runArtifactGet(cmd *cobra.Command, args []string) error {
+	return artifactGetDryRun(args[0], cmd.OutOrStdout())
 }
