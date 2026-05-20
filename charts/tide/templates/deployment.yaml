@@ -63,6 +63,19 @@ spec:
         - name: TIDE_LEADER_RETRY_SECONDS
           value: "{{ .Values.leaderElection.retryPeriodSeconds | default 2 }}"
         # phase3-env-injected
+        # Phase 4 plan 04-14 (D-O3): OTel env vars read by internal/otelinit.
+        # Empty OTEL_EXPORTER_OTLP_ENDPOINT → no-op TracerProvider (zero
+        # overhead, default posture for plain clusters). Sampler is env-driven
+        # to honor Pitfall 24 mitigation (no WithSampler in code).
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ quote .Values.otel.exporter.endpoint }}
+        - name: OTEL_TRACES_SAMPLER
+          value: {{ quote .Values.otel.tracesSampler }}
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: {{ quote .Values.otel.tracesSamplerArg }}
+        - name: OTEL_SERVICE_NAME
+          value: {{ quote .Values.otel.serviceName }}
+        # phase4-env-injected
         envFrom:
         - secretRef:
             name: {{ .Values.signingKey.secretName | default "tide-signing-key" }}

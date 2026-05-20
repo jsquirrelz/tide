@@ -1,0 +1,69 @@
+{{- if .Values.dashboard.enabled }}
+# Dashboard ServiceAccount + ClusterRole + ClusterRoleBinding
+# (Phase 4 D-D2 / T-04-D2 mitigation).
+#
+# READ-ONLY by construction. Verbs across every rule MUST be a subset of
+# {get, list, watch}. `make helm-rbac-assert` walks the rendered ClusterRole
+# at chart-render time and exits non-zero if any verb falls outside that
+# set — defense-in-depth against silent privilege escalation in PRs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "tide.fullname" . }}-dashboard
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "tide.fullname" . }}-dashboard-readonly
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+rules:
+# Six TIDE CRDs — full read access for the dashboard's informer cache
+# and REST handlers (cmd/dashboard/api/projects.go list + get).
+- apiGroups:
+  - tideproject.k8s
+  resources:
+  - projects
+  - milestones
+  - phases
+  - plans
+  - tasks
+  - waves
+  verbs:
+  - get
+  - list
+  - watch
+# pods + pods/log subresource — for tide-dashboard /api/v1/tasks/{name}/log
+# SSE log streaming (DASH-04 / Pitfall 22 mitigation lives in the handler).
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "tide.fullname" . }}-dashboard
+  labels:
+  {{- include "tide.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "tide.fullname" . }}-dashboard-readonly'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "tide.fullname" . }}-dashboard'
+  namespace: '{{ .Release.Namespace }}'
+{{- end }}

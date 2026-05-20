@@ -1,0 +1,37 @@
+{{- if .Values.prometheus.serviceMonitor.enabled }}
+# Prometheus ServiceMonitor (Phase 4 D-O6).
+#
+# DEFAULT OFF per CLAUDE.md anti-pattern:
+#   "Default the chart's ServiceMonitor to prometheus.enabled=false to avoid
+#    CRD-not-found on plain clusters."
+#
+# Enable explicitly: `--set prometheus.serviceMonitor.enabled=true`.
+# Requires the prometheus-operator CRDs (monitoring.coreos.com/v1) to be
+# pre-installed in the cluster.
+#
+# Scrapes the existing controller-manager metrics service (templates/
+# metrics-service.yaml, selector `control-plane: controller-manager`).
+# Uses the metrics-service's `https` port (8443) with `insecureSkipVerify`
+# against the self-signed webhook cert; v1.x will issue a proper CA bundle
+# via cert-manager.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "tide.fullname" . }}-metrics
+  labels:
+    control-plane: controller-manager
+  {{- include "tide.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  endpoints:
+  - port: https
+    path: /metrics
+    scheme: https
+    interval: {{ .Values.prometheus.serviceMonitor.interval | default "30s" }}
+    scrapeTimeout: {{ .Values.prometheus.serviceMonitor.scrapeTimeout | default "10s" }}
+    tlsConfig:
+      insecureSkipVerify: true  # self-signed webhook cert; v1.x adds proper CA
+      serverName: {{ include "tide.fullname" . }}-controller-manager-metrics-service.{{ .Release.Namespace }}.svc
+{{- end }}

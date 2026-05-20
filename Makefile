@@ -120,6 +120,24 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+##@ Phase 4 kind-harness E2E (plan 04-14)
+
+# test-e2e-kind builds the manager + dashboard + tide CLI binaries, spins up a
+# dedicated kind cluster (`tide-e2e-phase4`), helm-installs the chart with
+# dashboard.enabled=true, and runs the kind_e2e-tagged specs under test/e2e/.
+#
+# Separate from `test-e2e` because the two suites use different paradigms:
+#   - `test-e2e` (kubebuilder): kustomize-driven `make deploy` against `tide-test-e2e` cluster
+#   - `test-e2e-kind` (Phase 4): helm-driven chart install against `tide-e2e-phase4` cluster
+#
+# Both are tagged `kind`-test work; both honor SKIP_KIND_TESTS=true to short-
+# circuit on dev machines without container tooling. The full Phase 4 E2E gate
+# runs `test-e2e-kind`; the kubebuilder `test-e2e` continues to cover the
+# kustomize install path.
+.PHONY: test-e2e-kind
+test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-flow + tail cancellation).
+	go test -tags=kind_e2e -timeout=15m ./test/e2e/... -v -ginkgo.v
+
 ##@ Integration tests (TEST-02 — Phase 2)
 
 .PHONY: test-int test-int-fast test-int-kind-prep
@@ -489,6 +507,25 @@ verify-rbac-marker-discipline: ## Assert no wildcard kubebuilder:rbac markers in
 		exit 1; \
 	fi
 	@echo "OK: no RBAC wildcard markers"
+
+##@ Helm Chart Validation (Phase 4 plan 04-14 — D-X3 / T-04-D2)
+
+.PHONY: helm-lint-validate
+helm-lint-validate: ## Helm chart sanity: helm lint + helm template renders without error.
+	@helm lint charts/tide
+	@helm template charts/tide > /dev/null
+	@echo "PASS: helm lint + helm template render"
+
+.PHONY: helm-rbac-assert
+helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list, watch} (T-04-D2 mitigation).
+	@# Walk the rendered chart for any ClusterRole whose name contains "dashboard",
+	@# extract every rules[].verbs[] entry, and fail if any verb is not in
+	@# {get, list, watch}. The Phase 4 dashboard ClusterRole is the only
+	@# "dashboard"-named role in the chart (templates/dashboard-rbac.yaml).
+	@# Implementation uses python3 + PyYAML (already required by hack/helm/
+	@# augment-tide-chart.sh) so this target has zero new tool dependencies.
+	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
+	@python3 hack/helm/assert-dashboard-rbac.py /tmp/tide-helm-render.yaml
 
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 

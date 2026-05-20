@@ -221,6 +221,71 @@ budget:
     absoluteCapCents: 10000      # $100.00 default absolute cap
     rollingWindowCapCents: 5000  # $50.00 / 15-min rolling window default
 
+# Phase 4 additions (Plan 04-14 — D-X3 / D-D2 / D-O6 / D-O3).
+#
+# All three blocks are ADDITIVE. The Phase 1 surface above is unchanged
+# (CLAUDE.md "chart is FIXED contract — binary catches up to chart, never
+# reverse" anti-pattern). Phase 4 chart additions land here without touching
+# any pre-Phase-4 keys.
+
+# Read-only dashboard backend (Phase 4 D-D2). Ships as a separate
+# Deployment + Service + ServiceAccount + ClusterRole + ClusterRoleBinding
+# under templates/dashboard-{deployment,service,rbac}.yaml. The dashboard
+# ClusterRole is enforced read-only at chart-render time via
+# `make helm-rbac-assert` (T-04-D2 mitigation).
+#
+# Default ON because the dashboard is one of the four Phase 4 deliverables;
+# operators who want the controller-only install set
+# `--set dashboard.enabled=false`.
+dashboard:
+  enabled: true
+  image:
+    repository: ghcr.io/jsquirrelz/tide-dashboard
+    tag: ""             # default to .Chart.AppVersion
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+
+# Prometheus ServiceMonitor (Phase 4 D-O6).
+#
+# DEFAULT OFF per CLAUDE.md anti-pattern:
+#   "Default the chart's ServiceMonitor to prometheus.enabled=false to avoid
+#    CRD-not-found on plain clusters."
+#
+# Enable explicitly via `--set prometheus.serviceMonitor.enabled=true` once
+# the prometheus-operator CRDs (monitoring.coreos.com/v1) are installed.
+prometheus:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+
+# OpenTelemetry env-driven config (Phase 4 D-O3 / plan 04-03).
+#
+# Read by internal/otelinit at controller boot:
+#   - exporter.endpoint = ""  → no-op TracerProvider (zero overhead; default)
+#   - exporter.endpoint = "otel-collector:4317" → OTLP gRPC exporter
+#
+# Sampler is env-driven (NOT WithSampler in code, per Pitfall 24 mitigation):
+# OTEL_TRACES_SAMPLER + OTEL_TRACES_SAMPLER_ARG. Defaults trace 10% of root
+# spans (`parentbased_traceidratio` arg `0.1`).
+otel:
+  exporter:
+    endpoint: ""
+  tracesSampler: "parentbased_traceidratio"
+  tracesSamplerArg: "0.1"
+  serviceName: "tide-controller-manager"
+
 # Single shared RWX PVC for all Projects' workspaces (Blocker #2/#3 fix —
 # RESEARCH.md Open Question #2 RESOLVED with the single-shared-PVC + subPath architecture).
 #
