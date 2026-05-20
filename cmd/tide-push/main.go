@@ -43,6 +43,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -510,9 +511,26 @@ func classifyGitError(err error) int {
 // pkggit's error wrappers shouldn't include the PAT, but if a future
 // go-git version inlines the auth URL into error text the PAT must not
 // flow into our stderr.
+//
+// WR-09 fix: also strip the URL-encoded forms of the PAT. go-git may log
+// auth URLs with the PAT percent-encoded (e.g. `%2B` for `+`), so the
+// raw-substring redaction alone leaks via that path. We redact ALL of:
+//   - the raw PAT
+//   - url.QueryEscape(pat)  — percent-encoding for application/x-www-form-urlencoded
+//   - url.PathEscape(pat)   — percent-encoding for URL paths (treats / specially)
+// Duplicate-redact is safe because ReplaceAll is idempotent on its own
+// output: once a substring becomes `<redacted>` it no longer matches the
+// next variant.
 func redactPAT(msg, pat string) string {
 	if pat == "" {
 		return msg
 	}
-	return strings.ReplaceAll(msg, pat, "<redacted>")
+	msg = strings.ReplaceAll(msg, pat, "<redacted>")
+	if enc := url.QueryEscape(pat); enc != pat {
+		msg = strings.ReplaceAll(msg, enc, "<redacted>")
+	}
+	if enc := url.PathEscape(pat); enc != pat {
+		msg = strings.ReplaceAll(msg, enc, "<redacted>")
+	}
+	return msg
 }
