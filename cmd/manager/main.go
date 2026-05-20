@@ -420,14 +420,17 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Task,
 		ExecutorPool:            executorPool,
 		WatchNamespace:          watchNamespace,
-		// Phase 2 fields (Plan 12 wiring).
-		Budget:         budgetStore,
-		Defaults:       defaults,
-		SigningKey:     signingKey,
-		SubagentImage:  subagentImage,
-		CredproxyImage: credproxyImage,
-		EnvReader:      envReader,
-		Dispatcher:     dispatcher,
+		// Phase 04.1 P3.2 — dispatch-tier deps consolidated into a carrier struct.
+		// Mirrors HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
+		Deps: controller.TaskReconcilerDeps{
+			Dispatcher:     dispatcher,
+			Budget:         budgetStore,
+			Defaults:       defaults,
+			SigningKey:     signingKey,
+			SubagentImage:  subagentImage,
+			CredproxyImage: credproxyImage,
+			EnvReader:      envReader,
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)

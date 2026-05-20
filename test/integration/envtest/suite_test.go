@@ -274,15 +274,17 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	}
 
 	if err := (&controller.TaskReconciler{
-		Client:         mgrClient,
-		Scheme:         mgr.GetScheme(),
-		Dispatcher:     &stubDispatcher{},
-		Budget:         testBudgetStore,
-		Defaults:       testBudgetDefaults,
-		SigningKey:     testSigningKey,
-		SubagentImage:  testSubagentImage,
-		CredproxyImage: testCredproxyImage,
-		EnvReader:      envReader,
+		Client: mgrClient,
+		Scheme: mgr.GetScheme(),
+		Deps: controller.TaskReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			Budget:         testBudgetStore,
+			Defaults:       testBudgetDefaults,
+			SigningKey:     testSigningKey,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			EnvReader:      envReader,
+		},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("TaskReconciler: %w", err)
 	}

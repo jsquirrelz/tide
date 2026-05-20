@@ -77,13 +77,15 @@ func TestGateChecks_TerminalShortCircuit(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:         fakeClient,
-		Scheme:         s,
-		Budget:         budget.NewStore(),
-		Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-		SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
-		SubagentImage:  "tide-stub-subagent:test",
-		CredproxyImage: "tide-credproxy:test",
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:         budget.NewStore(),
+			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SubagentImage:  "tide-stub-subagent:test",
+			CredproxyImage: "tide-credproxy:test",
+		},
 	}
 
 	gate, err := r.gateChecks(context.Background(), task)
@@ -119,10 +121,12 @@ func TestGateChecks_FailedShortCircuit(t *testing.T) {
 		WithRuntimeObjects(task).
 		Build()
 	r := &TaskReconciler{
-		Client:  fakeClient,
-		Scheme:  s,
-		Budget:  budget.NewStore(),
-		Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:  budget.NewStore(),
+			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		},
 	}
 
 	gate, err := r.gateChecks(context.Background(), task)
@@ -152,10 +156,12 @@ func TestGateChecks_ParentUnresolved(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:  fakeClient,
-		Scheme:  s,
-		Budget:  budget.NewStore(),
-		Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:  budget.NewStore(),
+			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		},
 	}
 
 	gate, err := r.gateChecks(context.Background(), task)
@@ -189,10 +195,12 @@ func TestAcquireDispatchSlots_NoProviderSecret(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:  fakeClient,
-		Scheme:  s,
-		Budget:  budget.NewStore(),
-		Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:  budget.NewStore(),
+			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+		},
 	}
 
 	release, err := r.acquireDispatchSlots(context.Background(), task, project)
@@ -240,10 +248,12 @@ func TestAcquireDispatchSlots_RateLimitHit(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:  fakeClient,
-		Scheme:  s,
-		Budget:  exhaustedStore,
-		Defaults: exhaustedLimits,
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:  exhaustedStore,
+			Defaults: exhaustedLimits,
+		},
 	}
 
 	release, err := r.acquireDispatchSlots(context.Background(), task, project)
@@ -292,10 +302,12 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:  fakeClient,
-		Scheme:  s,
-		Budget:  store,
-		Defaults: limits,
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:  store,
+			Defaults: limits,
+		},
 	}
 
 	release, err := r.acquireDispatchSlots(context.Background(), task, project)
@@ -338,13 +350,15 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:         fakeClient,
-		Scheme:         s,
-		Budget:         budget.NewStore(),
-		Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-		SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
-		SubagentImage:  "tide-stub-subagent:test",
-		CredproxyImage: "tide-credproxy:test",
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:         budget.NewStore(),
+			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SubagentImage:  "tide-stub-subagent:test",
+			CredproxyImage: "tide-credproxy:test",
+		},
 	}
 
 	spec, err := r.prepareDispatch(context.Background(), task, project)
@@ -404,13 +418,15 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:         fakeClient,
-		Scheme:         s,
-		Budget:         budget.NewStore(),
-		Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-		SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
-		SubagentImage:  "tide-stub-subagent:test",
-		CredproxyImage: "tide-credproxy:test",
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:         budget.NewStore(),
+			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SubagentImage:  "tide-stub-subagent:test",
+			CredproxyImage: "tide-credproxy:test",
+		},
 	}
 
 	_, err := r.prepareDispatch(context.Background(), task, project)
@@ -471,17 +487,19 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 		WithStatusSubresource(&tideprojectv1alpha1.Task{}).
 		Build()
 	r := &TaskReconciler{
-		Client:         fakeClient,
-		Scheme:         s,
-		Budget:         budget.NewStore(),
-		Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-		SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
-		SubagentImage:  "tide-stub-subagent:test",
-		CredproxyImage: "tide-credproxy:test",
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:         budget.NewStore(),
+			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
+			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SubagentImage:  "tide-stub-subagent:test",
+			CredproxyImage: "tide-credproxy:test",
+		},
 	}
 
 	// Mint a valid signed token.
-	token, err := credproxy.Sign(r.SigningKey, string(taskUID), 5*time.Minute)
+	token, err := credproxy.Sign(r.Deps.SigningKey, string(taskUID), 5*time.Minute)
 	if err != nil {
 		t.Fatalf("credproxy.Sign: %v", err)
 	}
@@ -556,14 +574,16 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 		}).
 		Build()
 	r := &TaskReconciler{
-		Client:         fakeClient,
-		Scheme:         s,
-		Budget:         store,
-		Defaults:       limits,
-		SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
-		SubagentImage:  "tide-stub-subagent:test",
-		CredproxyImage: "tide-credproxy:test",
-		Dispatcher:     &stubDispatcher{},
+		Client: fakeClient,
+		Scheme: s,
+		Deps: TaskReconcilerDeps{
+			Budget:         store,
+			Defaults:       limits,
+			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SubagentImage:  "tide-stub-subagent:test",
+			CredproxyImage: "tide-credproxy:test",
+			Dispatcher:     &stubDispatcher{},
+		},
 	}
 
 	result, err := r.reconcileDispatch(context.Background(), task)
