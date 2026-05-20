@@ -19,8 +19,12 @@ describe("LoadingState (Test 11) — Loader2 with animate-spin", () => {
     (variant) => {
       render(<LoadingState variant={variant} />);
       const spinner = screen.getByTestId("loading-spinner");
-      // animate-spin class drives the lucide Loader2 rotation.
-      expect(spinner.className).toMatch(/animate-spin/);
+      // animate-spin class drives the lucide Loader2 rotation. Use
+      // getAttribute("class") because lucide-react renders an SVG, and
+      // SVGElement.className is an SVGAnimatedString object (not a
+      // string) in both jsdom and real browsers.
+      const cls = spinner.getAttribute("class") ?? "";
+      expect(cls).toMatch(/animate-spin/);
     },
   );
 
