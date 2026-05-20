@@ -224,14 +224,14 @@ Plans:
 
 (Waves 0-10; planner re-layered Kahn-style from the original 7-wave hint to honor file-overlap implicit dependencies.)
 
-**Plans:** 6/15 plans executed
+**Plans:** 7/15 plans executed
 
 Plans:
 - [x] 04.1-01-PLAN.md — Wave 0 tooling readiness gate (Wave 0)
 - [x] 04.1-02-PLAN.md — P1.1 wire ProjectReconciler.Dispatcher + manager-construction test (Wave 1)
 - [x] 04.1-03-PLAN.md — P1.3 shared DefaultCaps helper for 300s wall-clock floor (Wave 1)
 - [x] 04.1-04-PLAN.md — P1.4 remove first-Project fallback (3 sites) + ParentUnresolved condition (Wave 2)
-- [ ] 04.1-05-PLAN.md — P1.2 planner Job contract refactor via JobKind discriminator (Wave 3)
+- [x] 04.1-05-PLAN.md — P1.2 planner Job contract refactor via JobKind discriminator (Wave 3)
 - [x] 04.1-06-PLAN.md — P2.1-P2.4 CI/tooling hygiene bundle (Wave 3)
 - [ ] 04.1-07-PLAN.md — P3.1 TaskReconciler.reconcileDispatch decomposition (Wave 4)
 - [ ] 04.1-08-PLAN.md — P3.2 TaskReconcilerDeps carrier struct (Wave 5)
@@ -270,5 +270,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
-| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 6/15 | In Progress|  |
+| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 7/15 | In Progress|  |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
