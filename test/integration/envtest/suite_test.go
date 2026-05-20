@@ -196,6 +196,8 @@ var _ = BeforeSuite(func() {
 	// "warn" is the cluster default per the Helm chart default.
 	Expect(webhookv1alpha1.SetupPlanWebhookWithManager(mgr, "warn")).To(Succeed())
 	Expect(webhookv1alpha1.SetupWaveWebhookWithManager(mgr)).To(Succeed())
+	// Phase 04.1 P4.2 — Project AllowedRoutes denylist webhook.
+	Expect(webhookv1alpha1.SetupProjectWebhookWithManager(mgr)).To(Succeed())
 
 	mgrClient = mgr.GetClient()
 
