@@ -43,6 +43,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
+	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	// Phase 4 D-O2: blank-import the central metric registry so its init()
 	// registers all 7 Phase 4 counters/histograms on
@@ -93,6 +94,33 @@ func decodeSigningKeyFromEnv() ([]byte, error) {
 		return nil, fmt.Errorf("TIDE_SIGNING_KEY too short: %d bytes (need >= 32)", len(key))
 	}
 	return key, nil
+}
+
+// hmacSelfTest signs a probe token with the manager's in-process signing
+// key and verifies the round-trip via the same credproxy.Sign +
+// credproxy.Verify code path the dispatcher uses. Catches in-process key
+// corruption (e.g. the historical env-var-decode regression where the
+// Helm-rendered alphanum key was double-decoded as base64 and silently
+// truncated) at boot, before the first dispatch fails with a confusing
+// "auth" error per task.
+//
+// WR-11 scope note: this self-test cannot detect Manager↔credproxy chart
+// misconfiguration — credproxy runs as a sidecar of dispatched task Pods
+// and is not reachable at manager-startup. What it CAN prove is that the
+// key bytes the manager will hand to the dispatcher do round-trip
+// correctly through the canonical Sign/Verify pair. A future plan that
+// adds a reachable health endpoint on credproxy can extend this with a
+// real on-wire probe.
+func hmacSelfTest(signingKey []byte) error {
+	const probeTaskUID = "manager-startup-probe"
+	token, err := credproxy.Sign(signingKey, probeTaskUID, time.Minute)
+	if err != nil {
+		return fmt.Errorf("hmac self-test: Sign failed: %w", err)
+	}
+	if err := credproxy.Verify(signingKey, token, probeTaskUID); err != nil {
+		return fmt.Errorf("hmac self-test: Verify failed (signing-key integrity broken): %w", err)
+	}
+	return nil
 }
 
 func main() {
@@ -243,6 +271,18 @@ func main() {
 		setupLog.Error(err, "signing key required (HARN-03)")
 		os.Exit(1)
 	}
+	//    a.bis WR-11: Self-test the signing key by signing + verifying a probe
+	//    token through the same credproxy.Sign/Verify code path the dispatcher
+	//    uses. Catches in-process key corruption (e.g. the historical
+	//    double-base64-decode regression) at boot rather than after the first
+	//    dispatch lands and per-task auth errors start flooding the log.
+	//    Does NOT prove on-wire credproxy reachability — credproxy is a
+	//    per-Pod sidecar that does not exist at manager-startup time.
+	if err := hmacSelfTest(signingKey); err != nil {
+		setupLog.Error(err, "HMAC self-test failed at startup (WR-11)")
+		os.Exit(1)
+	}
+	setupLog.Info("HMAC self-test passed", "key-bytes", len(signingKey))
 	//    b. Budget store — in-process per-Secret-UID rate-limiter cache (D-D1).
 	budgetStore := budget.NewStore()
 	//    c. Rate-limit defaults from Helm values (rateLimits.defaults.* in values.yaml).
