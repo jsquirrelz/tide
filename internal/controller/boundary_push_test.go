@@ -103,6 +103,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				_ = k8sClient.Update(ctx, pl)
 				_ = k8sClient.Delete(ctx, pl)
 			}
+			// CR-03 fix: also clean up child Tasks created to satisfy BoundaryDetected.
+			tsk := &tideprojectv1alpha1.Task{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
+				tsk.Finalizers = nil
+				_ = k8sClient.Update(ctx, tsk)
+				_ = k8sClient.Delete(ctx, tsk)
+			}
 			proj := &tideprojectv1alpha1.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, proj); err == nil {
 				proj.Finalizers = nil
@@ -136,11 +143,83 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		return &got
 	}
 
+	// CR-03 fix: the boundary-push trigger is now gated by
+	// gates.BoundaryDetected which requires the parent's children to be
+	// Status.Phase=Succeeded *and* metav1.IsControlledBy(child, parent).
+	// makeSucceededChild creates a controller-owned child CRD of the given
+	// kind under the parent, patches its Status.Phase=Succeeded, and waits
+	// for the cache to observe both the create and the status patch so
+	// BoundaryDetected returns true on the next reconcile.
+	makeSucceededChildPhase := func(name, msName string, msParent client.Object) {
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		t := true
+		ph.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion:         "tideproject.k8s/v1alpha1",
+			Kind:               "Milestone",
+			Name:               msParent.GetName(),
+			UID:                msParent.GetUID(),
+			Controller:         &t,
+			BlockOwnerDeletion: &t,
+		}}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha1.Phase{})
+		var got tideprojectv1alpha1.Phase
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = "Succeeded"
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		Eventually(func() string {
+			var g tideprojectv1alpha1.Phase
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
+				return ""
+			}
+			return g.Status.Phase
+		}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+	}
+
+	makeSucceededChildPlan := func(name, phName string, phParent client.Object) {
+		pl := &tideprojectv1alpha1.Plan{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+		}
+		t := true
+		pl.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion:         "tideproject.k8s/v1alpha1",
+			Kind:               "Phase",
+			Name:               phParent.GetName(),
+			UID:                phParent.GetUID(),
+			Controller:         &t,
+			BlockOwnerDeletion: &t,
+		}}
+		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha1.Plan{})
+		var got tideprojectv1alpha1.Plan
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = "Succeeded"
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		Eventually(func() string {
+			var g tideprojectv1alpha1.Plan
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
+				return ""
+			}
+			return g.Status.Phase
+		}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+	}
+
+	// makeSucceededChildTask is NOT defined: plan_controller does not gate
+	// on BoundaryDetected (see fix-note in plan_controller.go), so Test 3
+	// does not need to pre-create a Succeeded child Task.
+
 	Describe("Test 1: Milestone boundary dispatches `tide: milestone <name> authored`", func() {
 		const projectName = "bp-proj-ms"
 		const msName = "bp-ms-1"
 		AfterEach(func() {
-			cleanupBP(projectName, msName)
+			// CR-03 fix: child Phase added to satisfy BoundaryDetected.
+			cleanupBP(projectName, msName, msName+"-child")
 		})
 
 		It("creates a tide-push-<project-uid> Job with the milestone D-B2 message", func() {
@@ -177,6 +256,11 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			plannerJobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 			Expect(makeFakeJobTerminal(ctx, mgrClient, plannerJobName, "default", true)).To(Succeed())
 
+			// CR-03 fix: create a Succeeded child Phase so gates.BoundaryDetected
+			// returns true (the boundary push trigger is now gated on all-children-
+			// Succeeded). Owner ref points at the Milestone we just fetched.
+			makeSucceededChildPhase(msName+"-child", msName, &got)
+
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
 
 			// Push Job named `tide-push-<project-uid>` should exist with
@@ -190,7 +274,8 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		const msName = "bp-ms-ph-parent"
 		const phaseName = "bp-ph-1"
 		AfterEach(func() {
-			cleanupBP(projectName, msName, phaseName)
+			// CR-03 fix: child Plan added to satisfy BoundaryDetected.
+			cleanupBP(projectName, msName, phaseName, phaseName+"-child")
 		})
 
 		It("creates a tide-push-<project-uid> Job with the phase D-B2 message", func() {
@@ -232,6 +317,9 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			plannerJobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
 			Expect(makeFakeJobTerminal(ctx, mgrClient, plannerJobName, "default", true)).To(Succeed())
 
+			// CR-03 fix: create a Succeeded child Plan so BoundaryDetected returns true.
+			makeSucceededChildPlan(phaseName+"-child", phaseName, &got)
+
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
 
 			expectPushJobWithMessage(proj.UID, "tide: phase "+phaseName+" authored")
@@ -247,6 +335,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			cleanupBP(projectName, msName, phaseName, planName)
 		})
 
+		// CR-03 note: plan_controller does NOT gate the boundary push on
+		// gates.BoundaryDetected (see fix-note in plan_controller.go) because
+		// the structural reconcile flow makes handlePlannerJobCompletion
+		// unreachable once children exist. This test therefore exercises the
+		// original semantic — push fires on planner-Job-terminal, no child
+		// Tasks pre-existing. The milestone + phase tests above DO pre-create
+		// Succeeded children to exercise the new BoundaryDetected gate.
 		It("creates a tide-push-<project-uid> Job with the plan D-B2 message (with '+ executed' suffix)", func() {
 			proj := makeProjectForBP(projectName, tideprojectv1alpha1.Gates{Plan: "auto"})
 			ms := &tideprojectv1alpha1.Milestone{
@@ -302,7 +397,8 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		const projectName = "bp-proj-idem"
 		const msName = "bp-ms-idem"
 		AfterEach(func() {
-			cleanupBP(projectName, msName)
+			// CR-03 fix: child Phase added to satisfy BoundaryDetected.
+			cleanupBP(projectName, msName, msName+"-child")
 		})
 
 		It("a second reconcile after the push Job already exists does not panic and does not duplicate", func() {
@@ -331,6 +427,9 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
 			Expect(makeFakeJobTerminal(ctx, mgrClient, fmt.Sprintf("tide-milestone-%s-1", got.UID), "default", true)).To(Succeed())
+
+			// CR-03 fix: create a Succeeded child Phase so BoundaryDetected returns true.
+			makeSucceededChildPhase(msName+"-child", msName, &got)
 
 			// First reconcile pass — push Job created.
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())

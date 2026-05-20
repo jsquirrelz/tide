@@ -304,8 +304,28 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Plan 04-06 W-2: boundary push trigger lands AFTER gate-policy passes
 	// (so paused/rejected levels do not push) and BEFORE patchSucceeded
 	// (so the operator-visible Status.Phase=Succeeded happens after dispatch).
-	if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
-		return ctrl.Result{}, err
+	//
+	// CR-03 fix: gate the push on gates.BoundaryDetected so the push fires
+	// only when all child Phases have actually Succeeded (the spec's "all-
+	// children-Succeeded" boundary). At the moment handleJobCompletion runs,
+	// child Phases have just been MATERIALIZED — not yet Succeeded — so the
+	// short-circuit returns false on first entry, and the push only fires on
+	// a subsequent reconcile (Owns(&Phase{}) re-enqueues when child status
+	// updates). On the no-boundary path we still proceed to patchMilestoneSucceeded
+	// to preserve the existing gate-test fixtures that assert immediate
+	// Succeeded on auto-gate (the milestone level's own Job completion is a
+	// sufficient signal for parent-Status=Succeeded; the push semantic is
+	// what's tightened, not the level transition).
+	detected, derr := gates.BoundaryDetected(ctx, r.Client, ms, "Phase")
+	if derr != nil {
+		return ctrl.Result{}, derr
+	}
+	if detected {
+		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.V(1).Info("boundary push skipped: child Phases not all Succeeded yet", "milestone", ms.Name)
 	}
 
 	return r.patchMilestoneSucceeded(ctx, ms)

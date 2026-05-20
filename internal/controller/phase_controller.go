@@ -263,8 +263,21 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	}
 
 	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE patchSucceeded.
-	if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
-		return ctrl.Result{}, err
+	//
+	// CR-03 fix: gate the push on gates.BoundaryDetected so the push only
+	// fires when all child Plans have actually Succeeded. See parallel
+	// reasoning + test-fixture-preservation rationale in
+	// milestone_controller.go handleJobCompletion.
+	detected, derr := gates.BoundaryDetected(ctx, r.Client, ph, "Plan")
+	if derr != nil {
+		return ctrl.Result{}, derr
+	}
+	if detected {
+		if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
+		logger.V(1).Info("boundary push skipped: child Plans not all Succeeded yet", "phase", ph.Name)
 	}
 
 	return r.patchPhaseSucceeded(ctx, ph)

@@ -342,6 +342,17 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE clearing
 	// the Running phase. Plan boundary is the only D-B2 shape with the
 	// `+ executed` suffix (Tasks have already run by this seam).
+	//
+	// CR-03 partial-fix note: the milestone/phase controllers now gate the
+	// push on gates.BoundaryDetected, but the plan controller does NOT,
+	// because the plan reconcile path is structurally different. Once child
+	// Tasks exist, reconcilePlannerDispatch returns early
+	// (dispatched=false → reconcileWaveMaterialization) without entering
+	// handlePlannerJobCompletion, so any BoundaryDetected gate here becomes
+	// unreachable when children are present. Properly tightening the plan
+	// boundary requires firing the push from a separate seam in the wave-
+	// materialization path on task-status updates (out of REVIEW-FIX scope).
+	// Documented in 04-REVIEW-FIX.md.
 	if err := r.maybeTriggerBoundaryPush(ctx, plan, project); err != nil {
 		return ctrl.Result{}, err
 	}
