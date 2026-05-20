@@ -238,24 +238,35 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	envReader := newMapEnvReader()
 
 	if err := (&controller.MilestoneReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		EnvReader: envReader,
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		EnvReader:      envReader,
+		Dispatcher:     &stubDispatcher{},
+		SubagentImage:  testSubagentImage,
+		CredproxyImage: testCredproxyImage,
+		SigningKey:      testSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("MilestoneReconciler: %w", err)
 	}
 
 	if err := (&controller.PhaseReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Dispatcher:     &stubDispatcher{},
+		SubagentImage:  testSubagentImage,
+		CredproxyImage: testCredproxyImage,
+		SigningKey:      testSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PhaseReconciler: %w", err)
 	}
 
 	if err := (&controller.PlanReconciler{
-		Client:     mgrClient,
-		Scheme:     mgr.GetScheme(),
-		Dispatcher: &stubDispatcher{},
+		Client:         mgrClient,
+		Scheme:         mgr.GetScheme(),
+		Dispatcher:     &stubDispatcher{},
+		SubagentImage:  testSubagentImage,
+		CredproxyImage: testCredproxyImage,
+		SigningKey:      testSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PlanReconciler: %w", err)
 	}

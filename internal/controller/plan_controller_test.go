@@ -110,7 +110,7 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 	}
 	p := &tideprojectv1alpha1.Plan{}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
-		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Dispatcher: &stubDispatcher{}}
+		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Dispatcher: &stubDispatcher{}, SigningKey: testSigningKey, CredproxyImage: testCredproxyImage}
 		_ = k8sClient.Delete(context.Background(), p)
 		for i := 0; i < 3; i++ {
 			_, _ = r.Reconcile(context.Background(), reconcile.Request{
@@ -123,11 +123,15 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 // newPlanReconciler builds a PlanReconciler wired for testing.
 // Uses mgrClient (the manager's cached client) so that MatchingFields queries against
 // the in-process .spec.planRef field indexer work correctly.
+// Phase 04.1 P1.2: CredproxyImage and SigningKey are required for reconcilePlannerDispatch.
 func newPlanReconciler() *PlanReconciler {
 	return &PlanReconciler{
-		Client:     mgrClient,
-		Scheme:     k8sClient.Scheme(),
-		Dispatcher: &stubDispatcher{},
+		Client:         mgrClient,
+		Scheme:         k8sClient.Scheme(),
+		Dispatcher:     &stubDispatcher{},
+		SubagentImage:  testSubagentImage,
+		CredproxyImage: testCredproxyImage,
+		SigningKey:      testSigningKey,
 	}
 }
 

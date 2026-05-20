@@ -111,12 +111,14 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -150,12 +152,14 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -225,12 +229,14 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -264,12 +270,14 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 

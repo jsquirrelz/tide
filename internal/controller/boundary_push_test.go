@@ -235,13 +235,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
@@ -297,13 +299,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
@@ -367,13 +371,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				EnvReader:     envReader,
-				PlannerPool:   newPlannerPoolForTest(),
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				PlannerPool:    newPlannerPoolForTest(),
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
@@ -413,13 +419,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
@@ -469,13 +477,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:        k8sClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 

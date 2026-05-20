@@ -132,12 +132,14 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(planName, r, envReader)
 
@@ -169,12 +171,14 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(planName, r, envReader)
 
@@ -241,12 +245,14 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				PlannerPool:   newPlannerPoolForTest(),
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(planName, r, envReader)
 

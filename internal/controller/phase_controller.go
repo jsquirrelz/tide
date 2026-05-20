@@ -19,8 +19,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
@@ -67,6 +70,14 @@ type PhaseReconciler struct {
 
 	// SubagentImage is the planner subagent container image.
 	SubagentImage string
+
+	// CredproxyImage is the image ref for the tide-credproxy sidecar.
+	// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
+	CredproxyImage string
+
+	// SigningKey is the HMAC signing key used to mint per-dispatch tokens
+	// for the credproxy sidecar (Phase 04.1 P1.2 fix).
+	SigningKey []byte
 
 	// TidePushImage is the image ref for the tide-push container used by
 	// the W-2 boundary push trigger (plan 04-06).
@@ -186,14 +197,62 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 
 	project := r.resolveProject(ctx, ph)
 
-	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 20}
-	_, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, 1, "", caps, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
+	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner).
+	attempt := 1 // phase planner dispatch is single-shot per ROADMAP scope
+
+	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
+	if plannerCaps.Iterations <= 0 {
+		plannerCaps.Iterations = 20
+	}
+	_, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", pkgdispatch.Caps{
+		WallClockSeconds: int(plannerCaps.WallClockSeconds),
+		Iterations:       int(plannerCaps.Iterations),
+	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}
-	_ = envInJSON
 
-	job := r.buildPlannerJob(ph, jobName)
+	// Mint a signed token for the credproxy sidecar.
+	token, err := credproxy.Sign(r.SigningKey, string(ph.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("mint planner signed token: %w", err)
+	}
+
+	var secretUID string
+	if project != nil && project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if sErr := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); sErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+
+	projectUID := ""
+	if project != nil {
+		projectUID = string(project.UID)
+	}
+
+	subagentImage := r.SubagentImage
+	if subagentImage == "" {
+		subagentImage = r.HelmProviderDefaults.Image
+	}
+
+	opts := podjob.BuildOptions{
+		Kind:           podjob.JobKindPlanner,
+		ParentObj:      ph,
+		Level:          "phase",
+		Attempt:        attempt,
+		Project:        project,
+		SignedToken:    token,
+		EnvelopeInJSON: envInJSON,
+		SubagentImage:  subagentImage,
+		CredproxyImage: r.CredproxyImage,
+		SecretUID:      secretUID,
+		PVCName:        "tide-projects",
+		ProjectUID:     projectUID,
+		Caps:           plannerCaps,
+	}
+	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ph, r.Scheme); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure owner ref on planner job: %w", err)
 	}
@@ -363,31 +422,6 @@ func (r *PhaseReconciler) resolveProject(ctx context.Context, ph *tideprojectv1a
 		return nil
 	}
 	return &p
-}
-
-func (r *PhaseReconciler) buildPlannerJob(ph *tideprojectv1alpha1.Phase, jobName string) *batchv1.Job {
-	backoffLimit := int32(0)
-	ttl := int32(300)
-	image := r.SubagentImage
-	if image == "" {
-		image = "ghcr.io/jsquirrelz/tide-stub-subagent:test"
-	}
-	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: ph.Namespace,
-			Labels: map[string]string{
-				"tideproject.k8s/phase-uid": string(ph.UID),
-				"tideproject.k8s/level":     "phase",
-				"tideproject.k8s/role":      "planner",
-			},
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit:            &backoffLimit,
-			TTLSecondsAfterFinished: &ttl,
-			Template:                batchv1Template(jobName, image),
-		},
-	}
 }
 
 // SetupWithManager wires Owns(&Job{}) and Owns(&Plan{}) per D-A2. Plan 04-05
