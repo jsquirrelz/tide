@@ -189,9 +189,63 @@ Plans:
 
 **UI hint**: yes
 
+### Phase 04.1: Pre-v1 audit fixes + cross-phase UAT closeout — fix the four P1 production-wiring defects surfaced by the 2026-05-20 merged audit (ProjectReconciler-unwired, skeletal planner Jobs, 300s↔60s caps deadline mismatch, first-Project-in-namespace fallback), close the four P2 CI/tooling-hygiene items (dead dagimports analyzer, two verify-* steps missing from ci.yaml, unguarded `go mod tidy` in test.yml + test-e2e.yml, missing live-e2e workflow), apply the P3 code-shape improvements (reconciler-hotspot extraction in `reconcileDispatch`, `TaskReconciler` deps carrier), implement the P4 improvements (budget rolling-window reset, configurable cred-proxy upstream allowlist, `PROD_OVERRIDE_REQUIRED` markers on dev image tag defaults, logging convention sweep), and burn down the 15 outstanding human-UAT items in 02-/03-/04-VERIFICATION.md against a real kind cluster (now agent-runnable via Docker + kind + Chrome DevTools MCP). Closes the gap between "audit reports the bug" and "Phase 5's v1 acceptance test can actually run." (INSERTED)
+
+**Goal:** Every finding in `docs/audit-report-2026-05-20-merged.md` is resolved in source AND verified, and the 15 cross-phase human-UAT items move from `status: human_needed` to `status: pass` (or generate fix plans if they actually fail under live cluster execution). Exit condition: a green Layer B `make test-int` rerun, a green `make test-e2e-kind`, a live dashboard smoke (Chrome DevTools MCP against `kubectl port-forward svc/tide-dashboard`), and `gsd-sdk query audit-uat` reporting `summary.total_items: 0`. With this phase clean, Phase 5's TIDE-on-TIDE acceptance test is a fair test of v1 distribution and not a debugging session for known defects.
+**Requirements**: No formal REQ-IDs — Phase 04.1 is debug + fix + verification closeout for the merged-audit findings.
+**Depends on:** Phase 4
+**Success Criteria** (what must be TRUE):
+  1. **P1.1** — `cmd/manager/main.go` constructs `ProjectReconciler` with `Dispatcher: dispatcher`; a manager-construction test fails if any required dependency is omitted (EnvReader clause dropped per locked decision — ProjectReconciler does not dispatch subagents)
+  2. **P1.2** — `internal/dispatch/podjob` factors `BuildJobSpec` accepting a `JobKind` discriminator; mounts the per-Project PVC, runs credproxy sidecar, mints a signed token with shared caps-defaulting; `internal/controller/planner_job_helpers.go` deleted; Milestone/Phase/Plan reconcilers stop discarding the serialized `EnvelopeIn`
+  3. **P1.3** — A single shared `podjob.DefaultCaps(caps)` helper applies the 300s wall-clock floor before BOTH token mint (`task_controller.go`) AND Job `activeDeadlineSeconds` derivation (`jobspec.go`); nil-caps test asserts both derive identical deadlines
+  4. **P1.4** — `TaskReconciler.resolveProject`, `PlanReconciler.resolveProjectName`, AND `PodJobBackend.Run` (3rd site missed by audit) no longer return `projectList.Items[0]`; on miss, caller sets `ParentUnresolved` condition and requeues
+  5. **P2.1–P2.4** — `dagimports.Analyzer` wired into `cmd/tide-lint`; `verify-dispatch-imports` + `verify-import-firewall` named in `ci.yaml`; `test.yml` + `test-e2e.yml` follow `go mod tidy` with `git diff --exit-code go.mod go.sum`; `.github/workflows/live-e2e.yml` exists with `workflow_dispatch:` ONLY (locked decision — no `schedule:` cron)
+  6. **P3.1** — `TaskReconciler.reconcileDispatch` decomposed into 4 named methods (gateChecks / acquireDispatchSlots / prepareDispatch / createDispatchJob), each ≤ 80 lines
+  7. **P3.2** — `TaskReconciler` dispatch-tier fields consolidated into `TaskReconcilerDeps` carrier mirroring `HelmProviderDefaults`
+  8. **P4.1** — `ProjectReconciler.MaybeResetWindow` zeros `CostSpentCents` + `TokensSpent` on `now.Sub(WindowStart) >= window`; new `RollingWindowDuration *metav1.Duration` field (locked decision — backward-compatible, omitempty, default 24h); WR-02 caveat removed
+  9. **P4.2** — cred-proxy allowlist driven by `Spec.Providers[*].AllowedRoutes` field with hardcoded safe defaults; webhook denylist rejects `/v1/admin` + `/v1/billing`; new routes addable without rebuilding credproxy image
+  10. **P4.3** — `// PROD_OVERRIDE_REQUIRED` comments on `TIDE_PUSH_IMAGE` + `CLAUDE_SUBAGENT_IMAGE` dev tag defaults
+  11. **P4.4** — Reconciler log strings under `internal/controller/` follow k8s conventions; `logcheck` linter tightened
+  12. **UAT closeout** — All 15 cross-phase `human_needed` UAT items flip to `pass` (Phase 03 items 3+4 stale-re-verified per locked decision — Phase 4 source already closed them)
+  13. `gsd-sdk query audit-uat` reports `summary.total_items: 0` before Phase 5 starts (or 1-2 with explicit caveats documented)
+
+**Planning hint — wave staggering** (planner re-layered Kahn-style):
+- **Wave 0:** Plan 01 — Tooling readiness gate (Docker + kind + helm + gsd-sdk + Chrome DevTools MCP probes)
+- **Wave 1:** Plans 02 + 03 — P1.1 wire ProjectReconciler.Dispatcher + P1.3 DefaultCaps helper (parallel; no file overlap)
+- **Wave 2:** Plan 04 — P1.4 ParentUnresolved (shares task_controller.go with Plan 03, so sequential)
+- **Wave 3:** Plans 05 + 06 — P1.2 planner Job contract + P2.1-P2.4 CI hygiene (parallel)
+- **Wave 4:** Plan 07 — P3.1 reconcileDispatch decomposition (depends on P1 fixes)
+- **Wave 5:** Plan 08 — P3.2 TaskReconcilerDeps carrier (shares task_controller.go with Plan 07, so sequential)
+- **Wave 6:** Plans 09 + 12 — P4.1 budget rolling-window + Phase 02 UAT runner (parallel; different file sets)
+- **Wave 7:** Plans 10 + 13 — P4.2 credproxy allowlist + Phase 03 UAT runner (parallel)
+- **Wave 8:** Plan 11 — P4.3 + P4.4 PROD_OVERRIDE + logging sweep (shares cmd/manager/main.go with Plan 10, so sequential)
+- **Wave 9:** Plan 14 — Phase 04 UAT runner (depends on Plans 10/11/12/13)
+- **Wave 10:** Plan 15 — Phase 04.1 closeout (depends on all UAT runners)
+
+(Waves 0-10; planner re-layered Kahn-style from the original 7-wave hint to honor file-overlap implicit dependencies.)
+
+**Plans:** 15 plans across 11 waves (0-10)
+
+Plans:
+- [ ] 04.1-01-PLAN.md — Wave 0 tooling readiness gate (Wave 0)
+- [ ] 04.1-02-PLAN.md — P1.1 wire ProjectReconciler.Dispatcher + manager-construction test (Wave 1)
+- [ ] 04.1-03-PLAN.md — P1.3 shared DefaultCaps helper for 300s wall-clock floor (Wave 1)
+- [ ] 04.1-04-PLAN.md — P1.4 remove first-Project fallback (3 sites) + ParentUnresolved condition (Wave 2)
+- [ ] 04.1-05-PLAN.md — P1.2 planner Job contract refactor via JobKind discriminator (Wave 3)
+- [ ] 04.1-06-PLAN.md — P2.1-P2.4 CI/tooling hygiene bundle (Wave 3)
+- [ ] 04.1-07-PLAN.md — P3.1 TaskReconciler.reconcileDispatch decomposition (Wave 4)
+- [ ] 04.1-08-PLAN.md — P3.2 TaskReconcilerDeps carrier struct (Wave 5)
+- [ ] 04.1-09-PLAN.md — P4.1 budget rolling-window reset + RollingWindowDuration field (Wave 6)
+- [ ] 04.1-10-PLAN.md — P4.2 cred-proxy upstream allowlist via Spec.Providers[*].AllowedRoutes (Wave 7)
+- [ ] 04.1-11-PLAN.md — P4.3 PROD_OVERRIDE markers + P4.4 logging convention sweep + logcheck tighten (Wave 8)
+- [ ] 04.1-12-PLAN.md — Phase 02 UAT runner — make test-int 6/6 items closed (Wave 6)
+- [ ] 04.1-13-PLAN.md — Phase 03 UAT runner — items 3+4 stale-flipped, 1+2+5 verified (Wave 6)
+- [ ] 04.1-14-PLAN.md — Phase 04 UAT runner — gate flow + dashboard + CLI (Wave 9)
+- [ ] 04.1-15-PLAN.md — Phase 04.1 closeout — ROADMAP + STATE update (Wave 10)
+
 ### Phase 5: Distribution & Self-Hosting Acceptance
 **Goal**: A Helm chart packages CRDs (dedicated subchart for safe upgrades), the controller Deployment, the dashboard Deployment, RBAC, and namespace setup; the release pipeline uses `helmify`; an Apache 2.0 LICENSE is at the repo root; documentation covers install / Project authoring with 3 sample CRDs / provider configuration / git remote configuration / failure recovery / RBAC reference / troubleshooting; an external-operator dry-run confirms clone-to-first-run under 30 minutes; and **the v1 acceptance test passes**: a fresh `kind` cluster + `helm install tide` + `kubectl apply -f project.yaml` drives this repo's next milestone end-to-end, producing committed artifacts on a per-run branch with a clean status. M_self consumes M0's artifacts against the same `v1alpha1` CRD schema with no breaking changes.
-**Depends on**: Phase 4
+**Depends on**: Phase 04.1
 **Requirements**: DIST-01, DIST-02, DIST-03, DIST-04, DIST-05, BOOT-02, BOOT-04
 **Success Criteria** (what must be TRUE):
   1. An external operator (running on a clean machine with no prior TIDE checkout) can `git clone` the repo, follow the README quickstart, run `kind create cluster` + `helm repo add tide ...` + `helm install tide tide/tide`, and have a working TIDE installation with CRDs registered, controller + dashboard Deployments healthy, and RBAC namespace-scoped — all in under 30 minutes
@@ -216,4 +270,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
+| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 0/15 | Not started | - |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
