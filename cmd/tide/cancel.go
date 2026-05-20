@@ -66,7 +66,14 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 	if err := c.Delete(ctx, &proj, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil {
 		return fmt.Errorf("delete project: %w", err)
 	}
-	fmt.Fprintf(errOut, "Project %s deleted. Children cascade via owner refs; PVC cleanup runs via finalizer.\n", projectName)
+	// WR-02 fix: do not advertise PVC cleanup that the finalizer does not
+	// perform. internal/controller/project_controller.go's finalizer callback
+	// is a no-op log — the per-Project subPath on the shared `tide-projects`
+	// PVC is NOT removed automatically. Operators must remove
+	// `/workspaces/<project.UID>/workspace` manually or via an external
+	// sweep Job.
+	fmt.Fprintf(errOut, "Project %s deleted. Children cascade via owner refs.\n", projectName)
+	fmt.Fprintf(errOut, "Note: the per-Project subPath on the shared tide-projects PVC is NOT cleaned automatically; remove %s/<project-uid>/workspace manually or via an external sweep Job.\n", "/workspaces")
 	return nil
 }
 
@@ -129,7 +136,8 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 		}
 	}
 	fmt.Fprintf(out, "  PropagationPolicy: Foreground\n")
-	fmt.Fprintf(out, "  PVC cleanup: via existing finalizer (CTRL-05, Phase 1)\n")
+	// WR-02 fix: finalizer is a no-op for PVC sweep; advertise honestly.
+	fmt.Fprintf(out, "  PVC cleanup: NOT automatic — operator must remove /workspaces/<project-uid>/workspace from the shared tide-projects PVC manually (or via an external sweep Job).\n")
 	return nil
 }
 
