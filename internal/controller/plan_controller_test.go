@@ -312,7 +312,18 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 		BeforeEach(func() {
 			makeProjectForTask("proj-labelstamp")
-			makePlan(planName, phaseRef, "Validated")
+			// Phase 04.1 P1.4: stamp the project label on the Plan so resolveProjectName
+			// finds it via the label fast-path (the old projectList.Items[0] fallback
+			// was removed). In production, PlanReconciler gets this label via owner-ref
+			// chain wiring; in unit tests we stamp it directly.
+			plan := makePlan(planName, phaseRef, "Validated")
+			var pp tideprojectv1alpha1.Plan
+			Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: plan.Name, Namespace: "default"}, &pp)).To(Succeed())
+			if pp.Labels == nil {
+				pp.Labels = map[string]string{}
+			}
+			pp.Labels["tideproject.k8s/project"] = "proj-labelstamp"
+			Expect(k8sClient.Update(context.Background(), &pp)).To(Succeed())
 			taskNames = alphaThroughThetaFixture(planName)
 		})
 		AfterEach(func() {
