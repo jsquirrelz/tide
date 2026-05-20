@@ -189,40 +189,92 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-// reconcileDispatch implements the 12-step dispatch body inside the
-// `if r.Dispatcher != nil` seam (step 5 of the six-step pattern).
-func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojectv1alpha1.Task) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+// taskGateResult carries the output of gateChecks: the resolved Project (needed
+// by prepareDispatch and createDispatchJob), a shouldHalt flag, and the
+// reconcile result to return when shouldHalt is true.
+//
+// Phase 04.1 P3.1 — introduced to allow gateChecks to return structured halt
+// context to the reconcileDispatch orchestrator without multi-return sprawl.
+type taskGateResult struct {
+	project    *tideprojectv1alpha1.Project
+	shouldHalt bool
+	result     ctrl.Result
+}
 
-	// Step 1: Terminal short-circuit.
-	if task.Status.Phase == "Succeeded" || task.Status.Phase == "Failed" {
-		return ctrl.Result{}, nil
+// taskDispatchSpec bundles the values computed by prepareDispatch that
+// createDispatchJob needs to build and submit the executor Job.
+//
+// Phase 04.1 P3.1 — extracted from reconcileDispatch steps 7-9.
+type taskDispatchSpec struct {
+	attempt    int
+	token      string
+	envInJSON  []byte
+	project    *tideprojectv1alpha1.Project
+}
+
+// reconcileDispatch is the 12-step dispatch flow decomposed into 4 named
+// methods per Phase 04.1 P3.1. Behavior is unchanged from the pre-extraction
+// version; tests in task_controller_test.go continue to pass without changes.
+func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojectv1alpha1.Task) (ctrl.Result, error) {
+	gate, err := r.gateChecks(ctx, task)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if gate.shouldHalt {
+		return gate.result, nil
 	}
 
-	// Step 2: On Running — if a Job for this Task is in terminal state, handle completion.
-	if task.Status.Phase == "Running" {
-		jobName := podjob.JobName(task.UID, task.Status.Attempt)
-		var job batchv1.Job
-		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: jobName}, &job); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, err
-			}
+	release, err := r.acquireDispatchSlots(ctx, task, gate.project)
+	if err != nil {
+		// rateLimitedError carries the requeue delay; translate to ctrl.Result.
+		var rlErr *rateLimitedError
+		if errors.As(err, &rlErr) {
+			return ctrl.Result{RequeueAfter: rlErr.delay}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			release()
+		}
+	}()
+
+	spec, err := r.prepareDispatch(ctx, task, gate.project)
+	if err != nil {
+		// maxAttemptsError: status patch already applied; clean halt (no requeue).
+		var maErr *maxAttemptsError
+		if errors.As(err, &maErr) {
 			return ctrl.Result{}, nil
 		}
-		if isJobTerminal(&job) {
-			project, err := r.resolveProject(ctx, task)
-			if errors.Is(err, ErrParentUnresolved) {
-				// Task is Running (Job just completed) but the Project has disappeared.
-				// Requeue to give label-stamping a chance; do not set the condition here
-				// because the Task was already dispatched (not awaiting stamp).
-				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-			}
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-			return r.handleJobCompletion(ctx, task, project)
-		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, err
+	}
+
+	result, err := r.createDispatchJob(ctx, task, spec)
+	if err == nil {
+		committed = true
+	}
+	return result, err
+}
+
+// gateChecks runs the dispatch gates: terminal-state short-circuit, Running
+// Job-completion branch, project resolution (Phase 04.1 P1.4 — owner-walk +
+// ParentUnresolved condition), reject check, budget cap check, indegree compute
+// (FAIL-01/FAIL-02 wave boundary contract), wave-pause check, and gate-policy
+// hook. Returns shouldHalt=true with the reconcile result populated when any
+// gate stops dispatch.
+//
+// Phase 04.1 P3.1 — extracted from reconcileDispatch steps 1-4 (plus the
+// Running-branch and gate-policy checks that logically belong to the gate layer).
+func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alpha1.Task) (taskGateResult, error) {
+	// Step 1: Terminal short-circuit.
+	if task.Status.Phase == "Succeeded" || task.Status.Phase == "Failed" {
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+	}
+
+	// Step 2: On Running — delegate to checkRunningState.
+	if task.Status.Phase == "Running" {
+		return r.checkRunningState(ctx, task)
 	}
 
 	// Step 3: Resolve Project.
@@ -240,12 +292,12 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			LastTransitionTime: metav1.Now(),
 		})
 		if perr := r.Status().Patch(ctx, task, patch); perr != nil {
-			return ctrl.Result{}, fmt.Errorf("patch parent-unresolved condition: %w", perr)
+			return taskGateResult{}, fmt.Errorf("patch parent-unresolved condition: %w", perr)
 		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
 	}
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("resolve project: %w", err)
+		return taskGateResult{}, fmt.Errorf("resolve project: %w", err)
 	}
 
 	// Plan 04-05 reject short-circuit (D-G1 per-level policy enum, T-04-G1
@@ -253,7 +305,8 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	// halts even Pending tasks. Reject value carries the operator-supplied
 	// reason which surfaces on the Condition Message (D-G4).
 	if gates.CheckRejected(project) {
-		return r.patchTaskFailed(ctx, task, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		result, err := r.patchTaskFailed(ctx, task, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 
 	// Step 4: Budget gate.
@@ -267,15 +320,26 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
-			return ctrl.Result{}, err
+			return taskGateResult{}, err
 		}
-		return ctrl.Result{}, nil
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
 
-	// Step 5: Indegree compute (D-B3). Re-computed every reconcile; never cached.
+	// Step 5: Indegree + wave-pause + gate-policy — delegate to checkReadinessGates.
+	return r.checkReadinessGates(ctx, task, project)
+}
+
+// checkReadinessGates runs the indegree compute (FAIL-01/FAIL-02), wave-pause
+// label check (Plan 04-05 PauseBetweenWaves), and gate-policy hook (D-G1
+// approve/pause). Returns shouldHalt=true if any gate blocks dispatch; returns
+// the resolved Project in taskGateResult.project when all gates pass.
+//
+// Phase 04.1 P3.1 — extracted from gateChecks (steps 5+) to keep gateChecks ≤ 80 lines.
+func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project) (taskGateResult, error) {
+	// Indegree compute (D-B3). Re-computed every reconcile; never cached.
 	siblings, err := r.listSiblingTasks(ctx, task)
 	if err != nil {
-		return ctrl.Result{}, err
+		return taskGateResult{}, err
 	}
 	indegree := r.computeIndegree(task, siblings)
 	if indegree > 0 {
@@ -289,9 +353,9 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
-			return ctrl.Result{}, err
+			return taskGateResult{}, err
 		}
-		return ctrl.Result{}, nil
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
 
 	// Plan 04-05 Task 2: PauseBetweenWaves dispatch block. PlanReconciler
@@ -299,7 +363,8 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	// approve-wave-N on the parent Plan; until the label is cleared (by
 	// PlanReconciler on annotation consume), the Task stays AwaitingApproval.
 	if _, paused := task.Labels["tideproject.k8s/wave-paused"]; paused {
-		return r.patchTaskAwaitingApproval(ctx, task, gates.PolicyPause)
+		result, err := r.patchTaskAwaitingApproval(ctx, task, gates.PolicyPause)
+		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 
 	// Plan 04-05 gate-policy hook (level=task). The Task gate fires here —
@@ -310,16 +375,61 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	policy := gates.EvaluatePolicy(project.Spec.Gates, "task")
 	if policy == gates.PolicyApprove || policy == gates.PolicyPause {
 		if !gates.CheckApprove(task, "task") {
-			return r.patchTaskAwaitingApproval(ctx, task, policy)
+			result, err := r.patchTaskAwaitingApproval(ctx, task, policy)
+			return taskGateResult{shouldHalt: true, result: result}, err
 		}
 		newAnno := gates.ConsumeApprove(task, "task")
 		patch := client.MergeFrom(task.DeepCopy())
 		task.SetAnnotations(newAnno)
 		if err := r.Patch(ctx, task, patch); err != nil {
-			return ctrl.Result{}, err
+			return taskGateResult{}, err
 		}
 	}
 
+	return taskGateResult{project: project}, nil
+}
+
+// checkRunningState handles a Task in Phase=Running: looks up the current Job
+// and delegates to handleJobCompletion if the Job has reached a terminal
+// condition. Returns shouldHalt=true in all cases — a Running Task never
+// proceeds to the dispatch path.
+//
+// Phase 04.1 P3.1 — extracted from gateChecks (step 2) to keep gateChecks ≤ 80 lines.
+func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojectv1alpha1.Task) (taskGateResult, error) {
+	jobName := podjob.JobName(task.UID, task.Status.Attempt)
+	var job batchv1.Job
+	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: jobName}, &job); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return taskGateResult{}, err
+		}
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+	}
+	if isJobTerminal(&job) {
+		project, err := r.resolveProject(ctx, task)
+		if errors.Is(err, ErrParentUnresolved) {
+			// Task is Running (Job just completed) but the Project has disappeared.
+			// Requeue to give label-stamping a chance; do not set the condition here
+			// because the Task was already dispatched (not awaiting stamp).
+			return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+		}
+		if err != nil {
+			return taskGateResult{}, err
+		}
+		result, err := r.handleJobCompletion(ctx, task, project)
+		return taskGateResult{shouldHalt: true, result: result}, err
+	}
+	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+}
+
+// acquireDispatchSlots performs the rate-limit gate (FAIL-03 token bucket) and
+// returns a release function the caller MUST call (typically via defer). The
+// release function cancels the held rate-limit reservation if it was acquired.
+// On dispatch-job-create success the caller suppresses the release by setting
+// committed=true before the deferred call executes (CR-03 deferred reservation
+// cancel — preserved across Phase 04.1 P3.1 extraction).
+//
+// Phase 04.1 P3.1 — extracted from reconcileDispatch step 6.
+func (r *TaskReconciler) acquireDispatchSlots(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project) (release func(), err error) {
 	// Step 6: Rate-limit gate (Pattern 1 — no blocking per Pitfall 1, D-D3).
 	//
 	// CR-03: Once a token is reserved (d == 0), any subsequent error before the
@@ -327,17 +437,17 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	// bucket drains permanently on transient errors (signing, marshal, patch,
 	// Create), and the controller silently throttles itself.
 	var heldReservation interface{ Cancel() }
-	committed := false
-	defer func() {
-		if !committed && heldReservation != nil {
+	release = func() {
+		if heldReservation != nil {
 			heldReservation.Cancel()
 		}
-	}()
+	}
+
 	if project.Spec.ProviderSecretRef != "" {
 		var secret corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); err != nil {
 			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, err
+				return release, err
 			}
 		} else {
 			lim := r.Budget.ForSecret(string(secret.UID), r.defaultsForSecret(&secret))
@@ -356,9 +466,11 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 						LastTransitionTime: metav1.Now(),
 					})
 					if err := r.Status().Patch(ctx, task, patch); err != nil {
-						return ctrl.Result{}, err
+						return release, err
 					}
-					return ctrl.Result{RequeueAfter: d}, nil
+					// Return a sentinel error that encodes the requeue delay so
+					// reconcileDispatch can translate it back to a ctrl.Result.
+					return release, &rateLimitedError{delay: d}
 				}
 				// d == 0: token consumed. Hold the reservation so any error
 				// before Job Create returns the token to the bucket.
@@ -367,10 +479,31 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		}
 	}
 
+	return release, nil
+}
+
+// rateLimitedError is returned by acquireDispatchSlots when the rate-limit
+// bucket is exhausted. reconcileDispatch unwraps it to produce the correct
+// ctrl.Result{RequeueAfter: d}.
+type rateLimitedError struct {
+	delay time.Duration
+}
+
+func (e *rateLimitedError) Error() string {
+	return fmt.Sprintf("rate-limit bucket exhausted; requeue after %s", e.delay)
+}
+
+// prepareDispatch computes the attempt counter (including max-attempts check),
+// mints the credproxy-signed token (Phase 04.1 P1.3 — DefaultCaps applied via
+// podjob.DefaultCaps), and builds the EnvelopeIn JSON. Returns a taskDispatchSpec
+// the caller passes to createDispatchJob.
+//
+// Phase 04.1 P3.1 — extracted from reconcileDispatch steps 7-9.
+func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project) (taskDispatchSpec, error) {
 	// Step 7: Attempt counter.
 	attempt, err := r.nextAttempt(ctx, task)
 	if err != nil {
-		return ctrl.Result{}, err
+		return taskDispatchSpec{}, err
 	}
 	maxAttempts := int(project.Spec.MaxAttemptsPerTask)
 	if maxAttempts <= 0 {
@@ -387,9 +520,9 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
-			return ctrl.Result{}, err
+			return taskDispatchSpec{}, err
 		}
-		return ctrl.Result{}, nil
+		return taskDispatchSpec{}, &maxAttemptsError{}
 	}
 
 	// Step 8: Mint signed token (D-C3).
@@ -404,20 +537,46 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 	wallClock := taskCaps.WallClockSeconds
 	token, err := credproxy.Sign(r.SigningKey, string(task.UID), time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("mint signed token: %w", err)
+		return taskDispatchSpec{}, fmt.Errorf("mint signed token: %w", err)
 	}
 
 	// Step 9: Build EnvelopeIn; translate api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03.
 	_, envInJSON, err := r.buildEnvelopeIn(ctx, task, project, attempt, token)
 	if err != nil {
-		return ctrl.Result{}, err
+		return taskDispatchSpec{}, err
 	}
+
+	return taskDispatchSpec{
+		attempt:   attempt,
+		token:     token,
+		envInJSON: envInJSON,
+		project:   project,
+	}, nil
+}
+
+// maxAttemptsError is a sentinel returned by prepareDispatch when the Task has
+// exhausted its retry budget. reconcileDispatch treats this as a clean halt
+// (the status patch was already applied inside prepareDispatch) and returns
+// ctrl.Result{}, nil to stop requeueing.
+type maxAttemptsError struct{}
+
+func (e *maxAttemptsError) Error() string { return "task exceeded max dispatch attempts" }
+
+// createDispatchJob patches Task.Status to dispatching (step 10), calls
+// podjob.BuildJobSpec, creates the Job via the K8s API (step 11, idempotent on
+// AlreadyExists), and patches Task.Status to Running on success (step 12).
+// Returns (ctrl.Result{}, nil) on successful dispatch.
+//
+// Phase 04.1 P3.1 — extracted from reconcileDispatch steps 10-12.
+func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojectv1alpha1.Task, spec taskDispatchSpec) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+	project := spec.project
 
 	// Step 10: Patch Status.Attempt BEFORE Create (Pitfall 2 mitigation — prevents
 	// drift if client.Create succeeds but the status patch fails on transient error).
 	{
 		patch := client.MergeFrom(task.DeepCopy())
-		task.Status.Attempt = attempt
+		task.Status.Attempt = spec.attempt
 		now := metav1.Now()
 		task.Status.StartedAt = &now
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
@@ -439,9 +598,9 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		ParentObj:      task,
 		Level:          "task",
 		Project:        project,
-		Attempt:        attempt,
-		SignedToken:    token,
-		EnvelopeInJSON: envInJSON,
+		Attempt:        spec.attempt,
+		SignedToken:    spec.token,
+		EnvelopeInJSON: spec.envInJSON,
 		SubagentImage:  r.SubagentImage,
 		CredproxyImage: r.CredproxyImage,
 		SecretUID:      secretUID,
@@ -459,9 +618,6 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		// AlreadyExists: idempotent success — watch-lag race (Pitfall F / SUB-03).
 		logger.Info("job already exists; treating as successful dispatch", "job", job.Name)
 	}
-	// CR-03: Job is committed (either created fresh or already exists). Mark
-	// committed so the deferred reservation cancel does not return the token.
-	committed = true
 
 	// Step 12: Patch Status.Phase=Running + Condition Running=True, Reason=Dispatched.
 	{
@@ -471,7 +627,7 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 			Type:               tideprojectv1alpha1.ConditionRunning,
 			Status:             metav1.ConditionTrue,
 			Reason:             "Dispatched",
-			Message:            fmt.Sprintf("Job %s dispatched (attempt %d)", job.Name, attempt),
+			Message:            fmt.Sprintf("Job %s dispatched (attempt %d)", job.Name, spec.attempt),
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
