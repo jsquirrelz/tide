@@ -48,12 +48,19 @@ func (f *fakeEnvReader) ReadOut(_ context.Context, _, _ string) (pkgdispatch.Env
 }
 
 // testTask constructs a minimal Task for backend tests.
+// Phase 04.1 P1.4: the tideproject.k8s/project label is required so
+// PodJobBackend.resolveProject can use the label fast-path (the prior
+// projectList.Items[0] fallback was removed). In production, PlanReconciler
+// stamps this label; in tests we set it at construction time.
 func testTask(ns, name string, uid types.UID) *tidev1alpha1.Task {
 	return &tidev1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 			UID:       uid,
+			Labels: map[string]string{
+				"tideproject.k8s/project": "project-alpha",
+			},
 		},
 		Spec: tidev1alpha1.TaskSpec{
 			PlanRef:             "plan-alpha",
@@ -245,7 +252,9 @@ func TestPodJobBackend_Run_CreatesJob(t *testing.T) {
 func TestPodJobBackend_Run_IdempotentOnAlreadyExists(t *testing.T) {
 	s := testScheme(t)
 	task := testTask("default", "task-beta", "uid-beta")
-	project := testProject("default", "project-beta", "project-uid-beta")
+	// Phase 04.1 P1.4: project name must match the tideproject.k8s/project label
+	// set in testTask (project-alpha) so the label fast-path resolves the project.
+	project := testProject("default", "project-alpha", "project-uid-beta")
 
 	// Pre-create the Job before Run is called — simulates AlreadyExists from watch lag.
 	preExistingJob := &batchv1.Job{
@@ -327,7 +336,9 @@ func TestPodJobBackend_Run_IdempotentOnAlreadyExists(t *testing.T) {
 func TestPodJobBackend_Run_PropagatesEnvelopeReadError(t *testing.T) {
 	s := testScheme(t)
 	task := testTask("default", "task-gamma", "uid-gamma")
-	project := testProject("default", "project-gamma", "project-uid-gamma")
+	// Phase 04.1 P1.4: project name must match the tideproject.k8s/project label
+	// set in testTask (project-alpha) so the label fast-path resolves the project.
+	project := testProject("default", "project-alpha", "project-uid-gamma")
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(s).
@@ -387,7 +398,9 @@ func TestPodJobBackend_Run_PropagatesEnvelopeReadError(t *testing.T) {
 func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 	s := testScheme(t)
 	task := testTask("default", "task-delta", "uid-delta")
-	project := testProject("default", "project-delta", "project-uid-delta")
+	// Phase 04.1 P1.4: project name must match the tideproject.k8s/project label
+	// set in testTask (project-alpha) so the label fast-path resolves the project.
+	project := testProject("default", "project-alpha", "project-uid-delta")
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(s).

@@ -61,6 +61,12 @@ const taskFinalizer = "tideproject.k8s/task-cleanup"
 // Registered in SetupWithManager; used by listSiblingTasks.
 const taskPlanRefIndexKey = ".spec.planRef"
 
+// ErrParentUnresolved signals that resolveProject (or walkOwnerChainToProject)
+// could not locate the owning Project via either the label fast-path or the
+// bounded owner-ref chain walk. Callers convert this to a
+// ConditionParentUnresolved status patch + 30s requeue. Phase 04.1 P1.4.
+var ErrParentUnresolved = errors.New("no parent Project found via label or owner-ref chain")
+
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
 // Task is owned by Plan; the parent ref is set via internal/owner.EnsureOwnerRef.
 type TaskReconciler struct {
@@ -205,6 +211,12 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		}
 		if isJobTerminal(&job) {
 			project, err := r.resolveProject(ctx, task)
+			if errors.Is(err, ErrParentUnresolved) {
+				// Task is Running (Job just completed) but the Project has disappeared.
+				// Requeue to give label-stamping a chance; do not set the condition here
+				// because the Task was already dispatched (not awaiting stamp).
+				return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+			}
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -215,8 +227,25 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 
 	// Step 3: Resolve Project.
 	project, err := r.resolveProject(ctx, task)
+	if errors.Is(err, ErrParentUnresolved) {
+		// Phase 04.1 P1.4: parent Project not yet resolvable. Set condition,
+		// requeue without dispatching. PIT-4: MergeFrom+Patch (not Update) for
+		// race safety with concurrent Plan reconciles that may stamp the label.
+		patch := client.MergeFrom(task.DeepCopy())
+		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha1.ConditionParentUnresolved,
+			Status:             metav1.ConditionTrue,
+			Reason:             tideprojectv1alpha1.ReasonNoProjectLabel,
+			Message:            "No Project found via label or owner-ref chain; awaiting label stamp by PlanReconciler",
+			LastTransitionTime: metav1.Now(),
+		})
+		if perr := r.Status().Patch(ctx, task, patch); perr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch parent-unresolved condition: %w", perr)
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	if err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("resolve project: %w", err)
 	}
 
 	// Plan 04-05 reject short-circuit (D-G1 per-level policy enum, T-04-G1
@@ -599,9 +628,13 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	return ctrl.Result{}, nil
 }
 
-// resolveProject finds the Project owning this Task. It first tries the
-// tideproject.k8s/project label (stamped by PlanReconciler) and falls back to
-// listing all Projects in the same namespace.
+// resolveProject locates the owning Project for a Task via:
+//  1. label fast-path (tideproject.k8s/project)
+//  2. owner-ref chain walk (Task→Plan→Phase→Milestone→Project, bounded depth 5)
+//  3. ErrParentUnresolved on miss (caller sets ConditionParentUnresolved)
+//
+// Phase 04.1 P1.4 removed the prior `projectList.Items[0]` fallback which
+// silently mis-routed Tasks in multi-Project namespaces.
 func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1alpha1.Task) (*tideprojectv1alpha1.Project, error) {
 	// Fast path: PlanReconciler stamps tideproject.k8s/project=<name> on all Tasks.
 	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
@@ -610,15 +643,84 @@ func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1
 			return &project, nil
 		}
 	}
-	// Fallback: find any Project in the same namespace.
-	var projectList tideprojectv1alpha1.ProjectList
-	if err := r.List(ctx, &projectList, client.InNamespace(task.Namespace)); err != nil {
-		return nil, fmt.Errorf("list projects: %w", err)
+	// Owner-ref chain walk: Task→Plan→Phase→Milestone→Project (bounded depth 5).
+	if parent, err := r.walkOwnerChainToProject(ctx, task); err == nil && parent != nil {
+		return parent, nil
 	}
-	if len(projectList.Items) > 0 {
-		return &projectList.Items[0], nil
+	return nil, ErrParentUnresolved
+}
+
+// walkOwnerChainToProject walks the owner-ref chain looking for a Project,
+// bounded to depth 5 (Task→Plan→Phase→Milestone→Project). Returns nil, nil
+// on miss (not an error — the caller decides whether the miss is terminal).
+// Phase 04.1 P1.4.
+func (r *TaskReconciler) walkOwnerChainToProject(ctx context.Context, obj client.Object) (*tideprojectv1alpha1.Project, error) {
+	const maxDepth = 5
+	return r.walkOwnerChainToProjectDepth(ctx, obj, maxDepth)
+}
+
+func (r *TaskReconciler) walkOwnerChainToProjectDepth(ctx context.Context, obj client.Object, depth int) (*tideprojectv1alpha1.Project, error) {
+	if depth <= 0 || obj == nil {
+		return nil, nil
 	}
-	return nil, fmt.Errorf("no project found in namespace %s", task.Namespace)
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tideprojectv1alpha1.GroupVersion.String()) {
+			var p tideprojectv1alpha1.Project
+			if err := r.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
+				return &p, nil
+			}
+			continue
+		}
+		// Recurse: fetch the parent by Kind and walk from there. Supported
+		// intermediate Kinds: Plan, Phase, Milestone, Wave.
+		parent, err := r.fetchTaskOwnerParent(ctx, obj.GetNamespace(), ref)
+		if err != nil || parent == nil {
+			continue
+		}
+		if p, err := r.walkOwnerChainToProjectDepth(ctx, parent, depth-1); err == nil && p != nil {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
+// fetchTaskOwnerParent returns the parent CRD identified by an OwnerReference,
+// or nil if the Kind is unknown. Bounded to TIDE Kinds (Plan/Phase/Milestone/Wave/Task).
+func (r *TaskReconciler) fetchTaskOwnerParent(ctx context.Context, ns string, ref metav1.OwnerReference) (client.Object, error) {
+	key := client.ObjectKey{Namespace: ns, Name: ref.Name}
+	switch ref.Kind {
+	case "Plan":
+		var p tideprojectv1alpha1.Plan
+		if err := r.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Phase":
+		var p tideprojectv1alpha1.Phase
+		if err := r.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Milestone":
+		var p tideprojectv1alpha1.Milestone
+		if err := r.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Wave":
+		var p tideprojectv1alpha1.Wave
+		if err := r.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Task":
+		var p tideprojectv1alpha1.Task
+		if err := r.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+	return nil, nil
 }
 
 // listSiblingTasks returns all Tasks in the same Plan as task (same namespace, same PlanRef).

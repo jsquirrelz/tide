@@ -3,6 +3,7 @@ package podjob
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -20,6 +22,12 @@ import (
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
+
+// ErrParentUnresolved signals that PodJobBackend.Run could not locate the
+// owning Project for the dispatched Task via the label fast-path or the
+// bounded owner-ref chain walk. Callers (the calling controller) surface this
+// as a ConditionParentUnresolved status patch + 30s requeue. Phase 04.1 P1.4.
+var ErrParentUnresolved = errors.New("no parent Project found via label or owner-ref chain")
 
 // EnvelopeReader is the interface for reading an EnvelopeOut from the per-Project PVC.
 // Injected into PodJobBackend for testability — production wiring uses
@@ -149,17 +157,13 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("task with UID %q not found", in.TaskUID)
 	}
 
-	// 2. Resolve Project.
-	var projectList tidev1alpha1.ProjectList
-	if err := b.Client.List(ctx, &projectList, client.InNamespace(task.Namespace)); err != nil {
-		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("list projects: %w", err)
-	}
-	var project *tidev1alpha1.Project
-	if len(projectList.Items) > 0 {
-		project = &projectList.Items[0]
-	}
-	if project == nil {
-		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no project found in namespace %q", task.Namespace)
+	// 2. Resolve Project via label fast-path then owner-ref chain walk.
+	// Phase 04.1 P1.4: the prior `projectList.Items[0]` fallback silently
+	// mis-routed Tasks in multi-Project namespaces — replaced with
+	// ErrParentUnresolved so the calling controller sets the condition.
+	project, err := b.resolveProject(ctx, task)
+	if err != nil {
+		return pkgdispatch.EnvelopeOut{}, err
 	}
 
 	// 3. Determine attempt number. For Run callers (test fixtures and Phase 3 planners),
@@ -248,4 +252,87 @@ func isJobTerminal(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+// resolveProject locates the owning Project for a Task via:
+//  1. label fast-path (tideproject.k8s/project)
+//  2. owner-ref chain walk (Task→Plan→Phase→Milestone→Project, bounded depth 5)
+//  3. ErrParentUnresolved on miss
+//
+// Phase 04.1 P1.4 — replaces the prior projectList.Items[0] fallback.
+func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha1.Task) (*tidev1alpha1.Project, error) {
+	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+		var project tidev1alpha1.Project
+		if err := b.Client.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
+			return &project, nil
+		}
+	}
+	if parent, err := b.walkOwnerChain(ctx, task, 5); err == nil && parent != nil {
+		return parent, nil
+	}
+	return nil, ErrParentUnresolved
+}
+
+// walkOwnerChain walks the owner-ref chain looking for a Project, bounded to
+// depth levels. Returns nil, nil on miss. Phase 04.1 P1.4.
+func (b *PodJobBackend) walkOwnerChain(ctx context.Context, obj client.Object, depth int) (*tidev1alpha1.Project, error) {
+	if depth <= 0 || obj == nil {
+		return nil, nil
+	}
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tidev1alpha1.GroupVersion.String()) {
+			var p tidev1alpha1.Project
+			if err := b.Client.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
+				return &p, nil
+			}
+			continue
+		}
+		parent, err := b.fetchBackendOwnerParent(ctx, obj.GetNamespace(), ref)
+		if err != nil || parent == nil {
+			continue
+		}
+		if p, err := b.walkOwnerChain(ctx, parent, depth-1); err == nil && p != nil {
+			return p, nil
+		}
+	}
+	return nil, nil
+}
+
+// fetchBackendOwnerParent returns the parent CRD identified by an OwnerReference,
+// or nil if the Kind is unknown. Bounded to TIDE Kinds. Phase 04.1 P1.4.
+func (b *PodJobBackend) fetchBackendOwnerParent(ctx context.Context, ns string, ref metav1.OwnerReference) (client.Object, error) {
+	key := client.ObjectKey{Namespace: ns, Name: ref.Name}
+	switch ref.Kind {
+	case "Plan":
+		var p tidev1alpha1.Plan
+		if err := b.Client.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Phase":
+		var p tidev1alpha1.Phase
+		if err := b.Client.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Milestone":
+		var p tidev1alpha1.Milestone
+		if err := b.Client.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Wave":
+		var p tidev1alpha1.Wave
+		if err := b.Client.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	case "Task":
+		var p tidev1alpha1.Task
+		if err := b.Client.Get(ctx, key, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+	return nil, nil
 }

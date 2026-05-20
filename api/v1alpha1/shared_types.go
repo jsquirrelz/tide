@@ -129,3 +129,26 @@ const (
 	// reconciliation has re-entered the normal advance path (D-G4).
 	ReasonResumedByUser = "ResumedByUser"
 )
+
+// Phase 04.1 P1.4 condition + reason vocabulary — parent-resolution failure
+// surfaces when a Task or Plan cannot find its owning Project via the
+// `tideproject.k8s/project` label fast-path OR via an owner-ref chain walk
+// (Task→Plan→Phase→Milestone→Project, bounded depth 5). Distinct from
+// ConditionFailed because the resource is not terminally failed — it's
+// awaiting either a label stamp from PlanReconciler (Task case) or an
+// owner-ref addition (Plan case). Caller requeues after 30s and tries again.
+//
+// Closes the silent mis-routing bug class in multi-Project namespaces where
+// the prior fallback `projectList.Items[0]` would adopt whichever Project
+// sorted first.
+const (
+	// ConditionParentUnresolved is set on a Task or Plan when its parent
+	// Project cannot be resolved by label or owner-chain walk.
+	ConditionParentUnresolved = "ParentUnresolved"
+
+	// ReasonNoProjectLabel — no tideproject.k8s/project label on the resource.
+	ReasonNoProjectLabel = "NoProjectLabel"
+
+	// ReasonNoOwnerRef — no Project owner ref in the (bounded) owner-ref chain.
+	ReasonNoOwnerRef = "NoOwnerRef"
+)

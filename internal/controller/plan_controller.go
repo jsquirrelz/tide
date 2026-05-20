@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,6 +49,8 @@ import (
 )
 
 const planFinalizer = "tideproject.k8s/plan-cleanup"
+// Note: ErrParentUnresolved is declared in task_controller.go (same package).
+// Phase 04.1 P1.4 — shared across TaskReconciler and PlanReconciler.
 
 // PlanReconciler reconciles a Plan object at Standard depth (D-C1).
 // Plan is owned by Phase; the parent ref is set via internal/owner.EnsureOwnerRef.
@@ -521,13 +524,34 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		return ctrl.Result{}, fmt.Errorf("compute waves for plan %s: %w", plan.Name, err)
 	}
 
-	// Resolve the project name (for Task label stamping).
-	projectName := r.resolveProjectName(ctx, plan)
-
-	// Step 4+5: Materialize Waves and stamp Task labels.
+	// Step 4: Materialize Waves (independent of Project resolution — DAG-only).
 	if err := r.materializeWaves(ctx, plan, taskList.Items, layers); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// Step 5: Resolve the project name for Task label stamping.
+	// Phase 04.1 P1.4: on miss, set ConditionParentUnresolved and requeue after 30s
+	// so Tasks can still be dispatched on the next cycle once the label is stamped.
+	// Wave materialization above completes regardless (it is label-independent).
+	projectName, projectErr := r.resolveProjectName(ctx, plan)
+	if errors.Is(projectErr, ErrParentUnresolved) {
+		patch := client.MergeFrom(plan.DeepCopy())
+		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha1.ConditionParentUnresolved,
+			Status:             metav1.ConditionTrue,
+			Reason:             tideprojectv1alpha1.ReasonNoProjectLabel,
+			Message:            "No Project found via label or owner-ref chain; awaiting owner-ref wiring by PhaseReconciler",
+			LastTransitionTime: metav1.Now(),
+		})
+		if perr := r.Status().Patch(ctx, plan, patch); perr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch parent-unresolved condition on plan: %w", perr)
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	if projectErr != nil {
+		return ctrl.Result{}, fmt.Errorf("resolve project name: %w", projectErr)
+	}
+
 	if err := r.stampTaskLabels(ctx, taskList.Items, layers, projectName); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -785,23 +809,23 @@ func (r *PlanReconciler) stampTaskLabels(ctx context.Context, tasks []tideprojec
 	return nil
 }
 
-// resolveProjectName returns the Project name for this Plan by walking the owner
-// ref chain or listing Projects in the namespace. Returns empty string when no
-// Project is found (graceful degradation — labels will be stamped on next reconcile).
-func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideprojectv1alpha1.Plan) string {
-	// Try to find a Project label on the Plan itself first.
+// resolveProjectName returns the Project name for this Plan via:
+//  1. label fast-path (tideproject.k8s/project)
+//  2. owner-ref chain walk via resolveProjectForPlan (Plan→Phase→Milestone→Project)
+//  3. ErrParentUnresolved on miss (caller sets ConditionParentUnresolved)
+//
+// Phase 04.1 P1.4 removed the prior `projectList.Items[0]` fallback which
+// silently mis-routed Plans in multi-Project namespaces.
+func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideprojectv1alpha1.Plan) (string, error) {
+	// Fast path: label stamped on this Plan.
 	if name, ok := plan.Labels["tideproject.k8s/project"]; ok && name != "" {
-		return name
+		return name, nil
 	}
-	// Fall back to listing projects in the namespace (Phase 2 fallback).
-	var projectList tideprojectv1alpha1.ProjectList
-	if err := r.List(ctx, &projectList, client.InNamespace(plan.Namespace)); err != nil {
-		return ""
+	// Owner-ref chain walk: Plan→Phase→Milestone→Project (via Spec.PhaseRef).
+	if project := r.resolveProjectForPlan(ctx, plan); project != nil {
+		return project.Name, nil
 	}
-	if len(projectList.Items) > 0 {
-		return projectList.Items[0].Name
-	}
-	return ""
+	return "", ErrParentUnresolved
 }
 
 // SetupWithManager wires the watch with a namespace-filter predicate per AUTH-02.
