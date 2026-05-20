@@ -63,6 +63,22 @@ type Gates struct {
 	PauseBetweenWaves bool `json:"pauseBetweenWaves,omitempty"`
 }
 
+// RouteSpec is a (method, path-prefix) tuple used to extend the credproxy
+// upstream allowlist for a Project (Phase 04.1 P4.2). The credproxy sidecar
+// always enforces the hardcoded baseline (POST /v1/messages and
+// POST /v1/messages/count_tokens); RouteSpec entries are additive extensions,
+// never replacements.
+type RouteSpec struct {
+	// Method is the HTTP method. Currently only GET and POST are accepted.
+	// +kubebuilder:validation:Enum=GET;POST
+	Method string `json:"method"`
+
+	// PathPrefix is the URL path prefix. Must start with "/v1/" — paths
+	// outside the Anthropic API surface are rejected at admission.
+	// +kubebuilder:validation:Pattern=`^/v1/[a-zA-Z0-9_/-]+$`
+	PathPrefix string `json:"pathPrefix"`
+}
+
 // ProviderConfig configures one LLM provider (Phase 2+).
 type ProviderConfig struct {
 	// Name is the provider identifier (only "anthropic" is supported in v1).
@@ -76,6 +92,17 @@ type ProviderConfig struct {
 	// TokensPerMinute optionally caps token throughput per minute for this provider.
 	// +optional
 	TokensPerMinute *int32 `json:"tokensPerMinute,omitempty"`
+
+	// AllowedRoutes optionally extends the hardcoded credproxy allowlist
+	// (POST /v1/messages + POST /v1/messages/count_tokens) with additional
+	// (method, path-prefix) tuples. Use this to grant the subagent access
+	// to newly-released LLM endpoints (Files API, Search Tools, prompt
+	// caching) without rebuilding the credproxy image.
+	// Hardcoded safe defaults ALWAYS apply — operator additions are
+	// additive, never restrictive. Admin/billing paths are rejected at
+	// admission (defense in depth).
+	// +optional
+	AllowedRoutes []RouteSpec `json:"allowedRoutes,omitempty"`
 }
 
 // BudgetConfig declares cost/token caps for the Project (Phase 2+).

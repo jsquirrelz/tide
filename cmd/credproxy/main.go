@@ -41,6 +41,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -93,6 +94,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 2b. TIDE_ALLOWED_ROUTES (optional) carries a JSON-encoded []RouteSpec that
+	// extends the credproxy upstream allowlist for this Project (Phase 04.1 P4.2).
+	// Empty/unset → empty slice → only the hardcoded baseline applies.
+	var extraRoutes []credproxy.RouteSpec
+	if rawRoutes := os.Getenv("TIDE_ALLOWED_ROUTES"); rawRoutes != "" {
+		if err := json.Unmarshal([]byte(rawRoutes), &extraRoutes); err != nil {
+			log.Error(err, "failed to parse TIDE_ALLOWED_ROUTES; falling back to baseline-only allowlist")
+			extraRoutes = nil
+		}
+	}
+	log.Info("loaded ExtraAllowedRoutes", "count", len(extraRoutes), "routes", extraRoutes)
+
 	// 3. Mint self-signed TLS cert + key into certDir.
 	log.Info("minting self-signed cert", "certDir", certDir, "validity", certValidity.String())
 	if err := credproxy.MintSelfSignedCert(certDir, certValidity); err != nil {
@@ -102,13 +115,14 @@ func main() {
 
 	// 4. Construct the proxy.
 	p := &credproxy.Proxy{
-		SigningKey:      signingKey,
-		ExpectedTaskUID: taskUID,
-		UpstreamBaseURL: upstreamURL,
-		RealAPIKey:      realAPIKey,
-		ListenAddr:      listenAddr,
-		CertFile:        certDir + "/cert.pem",
-		KeyFile:         certDir + "/key.pem",
+		SigningKey:          signingKey,
+		ExpectedTaskUID:     taskUID,
+		UpstreamBaseURL:     upstreamURL,
+		RealAPIKey:          realAPIKey,
+		ListenAddr:          listenAddr,
+		CertFile:            certDir + "/cert.pem",
+		KeyFile:             certDir + "/key.pem",
+		ExtraAllowedRoutes:  extraRoutes,
 	}
 
 	// 5. Install signal handler for graceful shutdown on SIGTERM/SIGINT.

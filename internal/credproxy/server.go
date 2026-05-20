@@ -10,6 +10,16 @@ import (
 	"strings"
 )
 
+// RouteSpec is a (method, path-prefix) tuple for the per-Project credproxy
+// allowlist extension (Phase 04.1 P4.2). This type is intentionally duplicated
+// from api/v1alpha1.RouteSpec — the credproxy package MUST NOT import
+// api/v1alpha1 (providerfirewall analyzer rule); JSON serialisation at the
+// TIDE_ALLOWED_ROUTES env-var boundary bridges the two types.
+type RouteSpec struct {
+	Method     string `json:"method"`
+	PathPrefix string `json:"pathPrefix"`
+}
+
 // Proxy is the HTTPS reverse-proxy sidecar that validates HMAC-signed bearer
 // tokens and injects the real ANTHROPIC_API_KEY on outbound requests.
 //
@@ -27,6 +37,12 @@ type Proxy struct {
 	RealAPIKey        string // from envFrom secretRef <providerSecretRef>
 	ListenAddr        string // "127.0.0.1:8443"
 	CertFile, KeyFile string // /etc/tide/proxy/{cert.pem,key.pem}
+
+	// ExtraAllowedRoutes carries operator-extended (method, path-prefix) tuples
+	// populated from TIDE_ALLOWED_ROUTES env var (Phase 04.1 P4.2). The
+	// hardcoded allowedRoutes baseline is ALWAYS checked first and cannot be
+	// removed — operator additions are additive, never restrictive.
+	ExtraAllowedRoutes []RouteSpec
 }
 
 // allowedRoutes is the defense-in-depth allowlist of (method, path-prefix)
@@ -46,14 +62,24 @@ var allowedRoutes = []struct {
 	{http.MethodPost, "/v1/messages/count_tokens"},
 }
 
-// isAllowedRoute returns true iff (method, path) matches at least one
-// allowedRoutes entry.
-func isAllowedRoute(method, path string) bool {
+// isAllowedRoute returns true iff (method, path) matches the hardcoded
+// baseline allowlist or any ExtraAllowedRoutes entry on the Proxy.
+//
+// The baseline is checked first and is always enforced — operator
+// ExtraAllowedRoutes are additive extensions, not replacements (P4.2).
+func (p *Proxy) isAllowedRoute(method, path string) bool {
+	// Hardcoded baseline (CR-04 — preserved verbatim, cannot be removed).
 	for _, route := range allowedRoutes {
 		if method != route.method {
 			continue
 		}
 		if path == route.prefix || strings.HasPrefix(path, route.prefix+"/") {
+			return true
+		}
+	}
+	// Per-Project extensions injected via TIDE_ALLOWED_ROUTES (Phase 04.1 P4.2).
+	for _, r := range p.ExtraAllowedRoutes {
+		if method == r.Method && (path == r.PathPrefix || strings.HasPrefix(path, r.PathPrefix+"/")) {
 			return true
 		}
 	}
@@ -105,8 +131,8 @@ func (p *Proxy) Handler() (http.Handler, error) {
 
 		// CR-04: Defense-in-depth — even a valid token may only reach the
 		// narrow SDK surface the subagent legitimately uses. Reject any
-		// (method, path) outside the allowlist with 403.
-		if !isAllowedRoute(r.Method, r.URL.Path) {
+		// (method, path) outside the allowlist (baseline + extensions) with 403.
+		if !p.isAllowedRoute(r.Method, r.URL.Path) {
 			http.Error(w, "forbidden: route not allowed", http.StatusForbidden)
 			return
 		}

@@ -446,6 +446,10 @@ func main() {
 		setupLog.Error(err, "unable to create webhook", "kind", "Wave")
 		os.Exit(1)
 	}
+	if err := webhookv1alpha1.SetupProjectWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "kind", "Project")
+		os.Exit(1)
+	}
 
 	// +kubebuilder:scaffold:builder
 

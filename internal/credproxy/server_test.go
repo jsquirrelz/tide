@@ -220,6 +220,49 @@ func TestProxyHandler_RejectsUnlistedRouteWith403(t *testing.T) {
 	}
 }
 
+// TestProxy_IsAllowedRoute_BaselineUnchanged asserts that the hardcoded
+// baseline routes are always allowed, even when ExtraAllowedRoutes is empty.
+func TestProxy_IsAllowedRoute_BaselineUnchanged(t *testing.T) {
+	p := &Proxy{}
+	if !p.isAllowedRoute("POST", "/v1/messages") {
+		t.Error("baseline POST /v1/messages should be allowed")
+	}
+	if !p.isAllowedRoute("POST", "/v1/messages/count_tokens") {
+		t.Error("baseline POST /v1/messages/count_tokens should be allowed")
+	}
+}
+
+// TestProxy_IsAllowedRoute_ExtraAllowed asserts that ExtraAllowedRoutes
+// extends the allowlist additively (Phase 04.1 P4.2).
+func TestProxy_IsAllowedRoute_ExtraAllowed(t *testing.T) {
+	p := &Proxy{ExtraAllowedRoutes: []RouteSpec{{Method: "POST", PathPrefix: "/v1/files"}}}
+	if !p.isAllowedRoute("POST", "/v1/files") {
+		t.Error("extra route /v1/files should be allowed")
+	}
+	if !p.isAllowedRoute("POST", "/v1/files/abc") {
+		t.Error("path-prefix match /v1/files/abc should be allowed")
+	}
+	// Baseline still applies when extras are set.
+	if !p.isAllowedRoute("POST", "/v1/messages") {
+		t.Error("baseline /v1/messages should still be allowed with extra routes present")
+	}
+}
+
+// TestProxy_IsAllowedRoute_RejectsUnlisted asserts that a method or path
+// not in the baseline or ExtraAllowedRoutes is rejected.
+func TestProxy_IsAllowedRoute_RejectsUnlisted(t *testing.T) {
+	p := &Proxy{ExtraAllowedRoutes: []RouteSpec{{Method: "POST", PathPrefix: "/v1/files"}}}
+	if p.isAllowedRoute("DELETE", "/v1/files") {
+		t.Error("non-allowed method DELETE should be rejected")
+	}
+	if p.isAllowedRoute("POST", "/v1/admin/users") {
+		t.Error("unlisted path /v1/admin should be rejected (also webhook-denied but proxy is defense-in-depth)")
+	}
+	if p.isAllowedRoute("GET", "/v1/messages") {
+		t.Error("GET on POST-only baseline route should be rejected")
+	}
+}
+
 // TestProxyHandler_RejectsWrongMethodWith403 asserts that even an allowlisted
 // path is rejected if the method doesn't match (e.g. GET /v1/messages).
 func TestProxyHandler_RejectsWrongMethodWith403(t *testing.T) {

@@ -2,6 +2,7 @@ package podjob
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -245,6 +246,15 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		Env: []corev1.EnvVar{
 			{Name: "TIDE_TASK_UID", Value: envelopeUID},
 			{Name: "TIDE_PROXY_LISTEN", Value: "0.0.0.0:8443"},
+			// Phase 04.1 P4.2: inject operator-extended allowlist as JSON array.
+			// marshalAllowedRoutes returns "[]" when Providers is empty or has no
+			// AllowedRoutes — credproxy treats this as baseline-only mode.
+			{Name: "TIDE_ALLOWED_ROUTES", Value: func() string {
+				if opts.Project != nil {
+					return marshalAllowedRoutes(opts.Project.Spec.Providers)
+				}
+				return "[]"
+			}()},
 		},
 		EnvFrom: func() []corev1.EnvFromSource {
 			// Always include the signing-key secret.
@@ -378,4 +388,37 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			},
 		},
 	}
+}
+
+// routeJSON is the wire format for a single allowlist entry serialized into
+// the TIDE_ALLOWED_ROUTES env var (Phase 04.1 P4.2). The field names must
+// match the credproxy.RouteSpec JSON tags — the two types are parallel by
+// design (import-firewall: jobspec.go may import api/v1alpha1; credproxy
+// may not).
+type routeJSON struct {
+	Method     string `json:"method"`
+	PathPrefix string `json:"pathPrefix"`
+}
+
+// marshalAllowedRoutes serializes the flattened AllowedRoutes from all
+// Project.Spec.Providers entries into a JSON array for the TIDE_ALLOWED_ROUTES
+// env var consumed by the credproxy sidecar (Phase 04.1 P4.2).
+//
+// Returns "[]" on empty input — credproxy unmarshals this into an empty slice
+// and only the hardcoded baseline allowlist applies.
+func marshalAllowedRoutes(providers []tidev1alpha1.ProviderConfig) string {
+	var routes []routeJSON
+	for _, p := range providers {
+		for _, r := range p.AllowedRoutes {
+			routes = append(routes, routeJSON{Method: r.Method, PathPrefix: r.PathPrefix})
+		}
+	}
+	if len(routes) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(routes)
+	if err != nil {
+		return "[]" // safe default — credproxy treats as empty
+	}
+	return string(b)
 }
