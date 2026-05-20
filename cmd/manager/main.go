@@ -291,6 +291,16 @@ func main() {
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
 		HelmProviderDefaults:    helmProviderDefaults,
+		// CR-01 fix: Dispatcher must be assigned for planner-dispatch path to fire
+		// (milestone_controller.go:144 gates on r.Dispatcher != nil). Without this
+		// the W-2 mid-stack boundary push never triggers at the milestone level.
+		Dispatcher: dispatcher,
+		// CR-02 fix: TidePushImage must be assigned so triggerBoundaryPush does not
+		// silently no-op at V(1) (boundary_push.go empty-image branch).
+		TidePushImage: tidePushImage,
+		// CR-01 fix: EnvReader is consumed by handleJobCompletion to materialize
+		// child Phase CRDs from the planner Job's EnvelopeOut.
+		EnvReader: envReader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -302,6 +312,13 @@ func main() {
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
 		HelmProviderDefaults:    helmProviderDefaults,
+		// CR-01 fix: Dispatcher must be assigned for planner-dispatch path to fire
+		// (phase_controller.go:136 gates on r.Dispatcher != nil).
+		Dispatcher: dispatcher,
+		// CR-02 fix: TidePushImage required for W-2 phase-boundary push.
+		TidePushImage: tidePushImage,
+		// CR-01 fix: EnvReader consumed by handleJobCompletion.
+		EnvReader: envReader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -314,6 +331,11 @@ func main() {
 		WatchNamespace:          watchNamespace,
 		Dispatcher:              dispatcher,
 		HelmProviderDefaults:    helmProviderDefaults,
+		// CR-02 fix: TidePushImage required for W-2 plan-boundary push.
+		TidePushImage: tidePushImage,
+		// CR-01 fix: EnvReader consumed by handleJobCompletion to materialize
+		// child Task/Wave CRDs from the planner Job's EnvelopeOut.
+		EnvReader: envReader,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)
