@@ -61,12 +61,6 @@ const taskFinalizer = "tideproject.k8s/task-cleanup"
 // Registered in SetupWithManager; used by listSiblingTasks.
 const taskPlanRefIndexKey = ".spec.planRef"
 
-// defaultWallClockFloorSeconds is the floor on Task.Spec.Caps.WallClockSeconds
-// used to derive the token validity window when Caps is nil or zero (WR-01).
-// Must outlive image pull + scheduler delay + init container startup, which
-// can comfortably exceed 60s on a cold cluster.
-const defaultWallClockFloorSeconds int32 = 300
-
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
 // Task is owned by Plan; the parent ref is set via internal/owner.EnsureOwnerRef.
 type TaskReconciler struct {
@@ -371,18 +365,14 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 
 	// Step 8: Mint signed token (D-C3).
 	//
-	// WR-01: Establish a floor on the token validity window. When Caps is nil
-	// or WallClockSeconds is zero, a 0 + DefaultWallClockGraceSeconds (60s)
-	// token will frequently expire before the Pod's first request (image pull
-	// + scheduler delay + init containers can exceed 60s), producing a
-	// misleading "auth" error instead of a budget/timing error.
-	var wallClock int32
-	if task.Spec.Caps != nil {
-		wallClock = task.Spec.Caps.WallClockSeconds
-	}
-	if wallClock <= 0 {
-		wallClock = defaultWallClockFloorSeconds
-	}
+	// Phase 04.1 P1.3 fix: route through podjob.DefaultCaps so token validity
+	// shares the executor 300s wall-clock floor with the Job's
+	// activeDeadlineSeconds derivation. Both consumers MUST go through DefaultCaps —
+	// drift between derivations is exactly the bug class audit P1.3 closed. Task
+	// dispatch is always executor Kind; planner reconcilers (milestone/phase/plan)
+	// pass JobKindPlanner via Plan 04.1-05 (P1.2) and get the 600s floor instead.
+	taskCaps := podjob.DefaultCaps(task.Spec.Caps, podjob.JobKindExecutor)
+	wallClock := taskCaps.WallClockSeconds
 	token, err := credproxy.Sign(r.SigningKey, string(task.UID), time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("mint signed token: %w", err)
