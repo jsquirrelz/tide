@@ -34,17 +34,51 @@ export type SSEState =
   | "offline";
 
 export type SSEStreamResult = {
-  /** Latest accumulator of MessageEvents received since mount. */
+  /**
+   * Latest accumulator of MessageEvents received since mount. Capped at
+   * MAX_SSE_EVENTS (oldest dropped on overflow) so a long-lived stream
+   * cannot leak unbounded MessageEvent references (CR-05 fix — each
+   * MessageEvent holds DOM-side references; uncapped growth on a
+   * project-event stream produced a hundreds-of-MB leak on workday-open
+   * dashboard tabs).
+   */
   events: MessageEvent[];
   /** Connection state — drives the header pill + log-streamer chrome. */
   state: SSEState;
   /** Highest numeric event id observed; 0 if none. */
   lastEventId: number;
+  /**
+   * Monotonic total of events received since mount (CR-05 fix). Consumers
+   * use this — not `events.length` — to detect new events when the buffer
+   * has been sliced. Resets to 0 on remount (url change).
+   */
+  totalReceived: number;
 };
 
 const MAX_BACKOFF_MS = 30_000;
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_RING_LINES = 5_000;
+/**
+ * CR-05 fix: hard cap on retained MessageEvent references inside the
+ * stream-level buffer. Chosen at 1000 because most UI consumers
+ * (useTaskLog ring buffer at 5000 lines) cap their own derived state
+ * downstream — the stream buffer is a short-lived hand-off, not a log
+ * store. Combined with totalReceived consumers can detect slice drops
+ * and re-sync.
+ */
+export const MAX_SSE_EVENTS = 1_000;
+
+export type SSEStreamOptions = {
+  /**
+   * CR-05 fix: per-event callback fired synchronously for EVERY incoming
+   * MessageEvent (not subject to the stream-buffer cap). Consumers that
+   * derive their own state (e.g. useTaskLog's 5000-line ring buffer) MUST
+   * use this rather than reading `events` so they don't lose events when
+   * the stream buffer slices on overflow. The callback runs inside
+   * EventSource.onmessage; keep it cheap.
+   */
+  onMessage?: (e: MessageEvent) => void;
+};
 
 /**
  * useSSEStream subscribes to the given SSE URL via browser-native
@@ -56,13 +90,21 @@ const MAX_RING_LINES = 5_000;
  * itself via window.setTimeout so React's useEffect cleanup chain stays
  * coherent.
  */
-export function useSSEStream(url: string): SSEStreamResult {
+export function useSSEStream(
+  url: string,
+  options?: SSEStreamOptions,
+): SSEStreamResult {
   const [, forceRender] = useReducer((x: number) => x + 1, 0);
   const resultRef = useRef<SSEStreamResult>({
     events: [],
     state: "connecting",
     lastEventId: 0,
+    totalReceived: 0,
   });
+  // Latest onMessage callback — held in a ref so identity changes don't
+  // re-open the EventSource. The latest callback fires for every event.
+  const onMessageRef = useRef<SSEStreamOptions["onMessage"]>(options?.onMessage);
+  onMessageRef.current = options?.onMessage;
   const attemptRef = useRef(0);
   const esRef = useRef<EventSource | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,7 +127,26 @@ export function useSSEStream(url: string): SSEStreamResult {
 
       es.onmessage = (e: MessageEvent) => {
         if (unmountedRef.current) return;
-        const nextEvents = resultRef.current.events.concat(e);
+        // CR-05 fix: invoke the per-event callback FIRST (before any buffer
+        // mutation) so derived consumers like useTaskLog observe every
+        // event independent of the stream-buffer cap.
+        if (onMessageRef.current) {
+          try {
+            onMessageRef.current(e);
+          } catch {
+            /* consumer-thrown errors must not poison the stream */
+          }
+        }
+        // CR-05 fix: cap the retained events array at MAX_SSE_EVENTS.
+        // Slice from the end on overflow (keep the newest) so consumers
+        // see continuous tail behavior. Track totalReceived monotonically
+        // so derived consumers can distinguish "new events" from "events
+        // I already saw at the same index" when slicing shifts indices.
+        const appended = resultRef.current.events.concat(e);
+        const nextEvents =
+          appended.length > MAX_SSE_EVENTS
+            ? appended.slice(appended.length - MAX_SSE_EVENTS)
+            : appended;
         const eid = parseInt(e.lastEventId ?? "", 10);
         const nextLast = Number.isFinite(eid)
           ? Math.max(resultRef.current.lastEventId, eid)
@@ -94,6 +155,7 @@ export function useSSEStream(url: string): SSEStreamResult {
           events: nextEvents,
           state: "connected",
           lastEventId: nextLast,
+          totalReceived: resultRef.current.totalReceived + 1,
         };
         forceRender();
       };
@@ -178,30 +240,36 @@ export type TaskLogResult = {
  */
 export function useTaskLog(taskName: string): TaskLogResult {
   const url = `/api/v1/tasks/${encodeURIComponent(taskName)}/log`;
-  const stream = useSSEStream(url);
 
+  // CR-05 fix: derive lines from a per-event callback instead of polling
+  // stream.events. The stream-level buffer is capped at MAX_SSE_EVENTS, so
+  // reading events.length-based offsets would miss messages on overflow.
+  // The callback fires for every event independent of the stream buffer.
+  //
+  // setLines uses the functional updater so React 18's automatic batching
+  // can coalesce N synchronous emissions into one render commit; each call
+  // updates `prev` in the closure so no events are lost across the
+  // synchronous burst.
   const [lines, setLines] = useState<string[]>([]);
-  const consumedRef = useRef(0);
 
-  useEffect(() => {
-    const total = stream.events.length;
-    if (total <= consumedRef.current) return;
-    const fresh = stream.events.slice(consumedRef.current);
-    consumedRef.current = total;
-    setLines((prev) => {
-      const next = prev.concat(fresh.map((e) => String(e.data)));
-      // Ring-buffer cap — drop oldest when over budget.
-      if (next.length > MAX_RING_LINES) {
-        return next.slice(next.length - MAX_RING_LINES);
-      }
-      return next;
-    });
-  }, [stream.events]);
+  const stream = useSSEStream(url, {
+    onMessage: (e: MessageEvent) => {
+      const data = String(e.data);
+      setLines((prev) => {
+        const next = prev.length >= MAX_RING_LINES
+          ? // Already at cap: drop the oldest, append the new line.
+            // slice(1) is O(n) but n is bounded at MAX_RING_LINES (5000),
+            // and the per-event work stays O(MAX_RING_LINES) total.
+            [...prev.slice(1), data]
+          : [...prev, data];
+        return next;
+      });
+    },
+  });
 
   // Reset the buffer when the task name (and therefore url) changes.
   useEffect(() => {
     setLines([]);
-    consumedRef.current = 0;
   }, [taskName]);
 
   return { lines, state: stream.state };

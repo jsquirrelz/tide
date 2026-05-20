@@ -20,7 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
-import { useSSEStream, useTaskLog } from "./sse";
+import { MAX_SSE_EVENTS, useSSEStream, useTaskLog } from "./sse";
 
 // FakeEventSource captures construction args and exposes hooks to pump
 // open/message/error events from the test.
@@ -120,6 +120,42 @@ describe("useSSEStream (Test 1)", () => {
     // first socket must have been closed exactly once.
     unmount();
     expect(es.closeCalls).toBe(1);
+  });
+
+  // CR-05 + WR-05 regression test: useSSEStream MUST cap its retained
+  // MessageEvent buffer at MAX_SSE_EVENTS even when the consumer does NOT
+  // attach an onMessage callback (i.e. some future "raw events" consumer
+  // is added without its own cap). Without this, a long-lived SSE tab
+  // leaked unbounded MessageEvent references — Pitfall 22 / T-04-D.
+  it("caps events at MAX_SSE_EVENTS on overflow (CR-05 / WR-05 regression)", () => {
+    const { result } = renderHook(() =>
+      useSSEStream("/api/v1/projects/p-cap/events"),
+    );
+    const es = FakeEventSource.instances[0];
+    act(() => es._emitOpen());
+
+    // Push MAX_SSE_EVENTS + 500 events; buffer must be exactly MAX_SSE_EVENTS.
+    const overflow = 500;
+    const total = MAX_SSE_EVENTS + overflow;
+    act(() => {
+      for (let i = 0; i < total; i++) {
+        es._emitMessage({ data: `evt-${i}`, lastEventId: String(i + 1) });
+      }
+    });
+
+    // Cap holds — the array does NOT grow past MAX_SSE_EVENTS.
+    expect(result.current.events.length).toBe(MAX_SSE_EVENTS);
+    // Newest preserved (last event is evt-(total-1)).
+    expect(result.current.events[result.current.events.length - 1].data).toBe(
+      `evt-${total - 1}`,
+    );
+    // Oldest dropped (first kept event is evt-(overflow) since overflow items
+    // were sliced off the head).
+    expect(result.current.events[0].data).toBe(`evt-${overflow}`);
+    // totalReceived is monotonic — independent of the buffer cap.
+    expect(result.current.totalReceived).toBe(total);
+    // lastEventId tracks the highest id seen.
+    expect(result.current.lastEventId).toBe(total);
   });
 });
 
