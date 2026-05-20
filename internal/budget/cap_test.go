@@ -60,11 +60,11 @@ func TestIsCapExceeded(t *testing.T) {
 // AbsoluteCapCents check is backward-compatible and unchanged.
 func TestIsCapExceeded_RollingCap(t *testing.T) {
 	cases := []struct {
-		name         string
-		absoluteCap  int64
-		rollingCap   int64
-		spent        int64
-		want         bool
+		name        string
+		absoluteCap int64
+		rollingCap  int64
+		spent       int64
+		want        bool
 	}{
 		{
 			name:        "absolute=0, rolling=100, spent=150 → exceeded by rolling",
@@ -138,7 +138,7 @@ func TestIsCapExceeded_RollingCap(t *testing.T) {
 			p := &tidev1alpha1.Project{
 				Spec: tidev1alpha1.ProjectSpec{
 					Budget: tidev1alpha1.BudgetConfig{
-						AbsoluteCapCents:    tc.absoluteCap,
+						AbsoluteCapCents:      tc.absoluteCap,
 						RollingWindowCapCents: tc.rollingCap,
 					},
 				},

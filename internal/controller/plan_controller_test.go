@@ -131,7 +131,7 @@ func newPlanReconciler() *PlanReconciler {
 		Dispatcher:     &stubDispatcher{},
 		SubagentImage:  testSubagentImage,
 		CredproxyImage: testCredproxyImage,
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 	}
 }
 

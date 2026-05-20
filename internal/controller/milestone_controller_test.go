@@ -169,7 +169,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			EnvReader:      newMapEnvReader(),
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		// Reconcile a few times — first for finalizer ensure, then for owner ref, then for dispatch.
@@ -211,7 +211,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			EnvReader:      envReader,
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		// Drive initial reconciles to create the Job.
@@ -275,7 +275,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			EnvReader:      envReader,
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())

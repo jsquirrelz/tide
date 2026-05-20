@@ -100,7 +100,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			EnvReader:      newMapEnvReader(),
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())

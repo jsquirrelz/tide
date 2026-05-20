@@ -113,7 +113,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 				EnvReader:      newMapEnvReader(),
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 
 			// Drive 5 reconcile passes to get past: finalizer-add → owner-ref → dispatch.

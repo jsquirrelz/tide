@@ -242,7 +242,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
@@ -306,7 +306,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
@@ -378,7 +378,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				PlannerPool:    newPlannerPoolForTest(),
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
@@ -426,7 +426,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
@@ -484,7 +484,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())

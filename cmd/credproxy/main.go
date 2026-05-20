@@ -115,14 +115,14 @@ func main() {
 
 	// 4. Construct the proxy.
 	p := &credproxy.Proxy{
-		SigningKey:          signingKey,
-		ExpectedTaskUID:     taskUID,
-		UpstreamBaseURL:     upstreamURL,
-		RealAPIKey:          realAPIKey,
-		ListenAddr:          listenAddr,
-		CertFile:            certDir + "/cert.pem",
-		KeyFile:             certDir + "/key.pem",
-		ExtraAllowedRoutes:  extraRoutes,
+		SigningKey:         signingKey,
+		ExpectedTaskUID:    taskUID,
+		UpstreamBaseURL:    upstreamURL,
+		RealAPIKey:         realAPIKey,
+		ListenAddr:         listenAddr,
+		CertFile:           certDir + "/cert.pem",
+		KeyFile:            certDir + "/key.pem",
+		ExtraAllowedRoutes: extraRoutes,
 	}
 
 	// 5. Install signal handler for graceful shutdown on SIGTERM/SIGINT.

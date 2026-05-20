@@ -123,7 +123,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -162,7 +162,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -234,7 +234,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -275,7 +275,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 

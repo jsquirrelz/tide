@@ -82,7 +82,7 @@ func TestGateChecks_TerminalShortCircuit(t *testing.T) {
 		Deps: TaskReconcilerDeps{
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
@@ -124,7 +124,7 @@ func TestGateChecks_FailedShortCircuit(t *testing.T) {
 		Client: fakeClient,
 		Scheme: s,
 		Deps: TaskReconcilerDeps{
-			Budget:  budget.NewStore(),
+			Budget:   budget.NewStore(),
 			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 		},
 	}
@@ -159,7 +159,7 @@ func TestGateChecks_ParentUnresolved(t *testing.T) {
 		Client: fakeClient,
 		Scheme: s,
 		Deps: TaskReconcilerDeps{
-			Budget:  budget.NewStore(),
+			Budget:   budget.NewStore(),
 			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 		},
 	}
@@ -198,7 +198,7 @@ func TestAcquireDispatchSlots_NoProviderSecret(t *testing.T) {
 		Client: fakeClient,
 		Scheme: s,
 		Deps: TaskReconcilerDeps{
-			Budget:  budget.NewStore(),
+			Budget:   budget.NewStore(),
 			Defaults: budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 		},
 	}
@@ -251,7 +251,7 @@ func TestAcquireDispatchSlots_RateLimitHit(t *testing.T) {
 		Client: fakeClient,
 		Scheme: s,
 		Deps: TaskReconcilerDeps{
-			Budget:  exhaustedStore,
+			Budget:   exhaustedStore,
 			Defaults: exhaustedLimits,
 		},
 	}
@@ -305,7 +305,7 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 		Client: fakeClient,
 		Scheme: s,
 		Deps: TaskReconcilerDeps{
-			Budget:  store,
+			Budget:   store,
 			Defaults: limits,
 		},
 	}
@@ -355,7 +355,7 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 		Deps: TaskReconcilerDeps{
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
@@ -423,7 +423,7 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 		Deps: TaskReconcilerDeps{
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
@@ -492,7 +492,7 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 		Deps: TaskReconcilerDeps{
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
-			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
@@ -579,7 +579,7 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 		Deps: TaskReconcilerDeps{
 			Budget:         store,
 			Defaults:       limits,
-			SigningKey:      []byte("tide-test-signing-key-32-bytes!!"),
+			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 			Dispatcher:     &stubDispatcher{},

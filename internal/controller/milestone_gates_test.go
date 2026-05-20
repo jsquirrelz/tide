@@ -118,7 +118,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -159,7 +159,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -236,7 +236,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -277,7 +277,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 

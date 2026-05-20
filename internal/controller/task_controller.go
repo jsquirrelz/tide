@@ -83,7 +83,7 @@ type TaskReconcilerDeps struct {
 	Dispatcher     dispatch.Dispatcher
 	Budget         *budget.Store
 	Defaults       budget.Limits
-	SigningKey      []byte
+	SigningKey     []byte
 	SubagentImage  string
 	CredproxyImage string
 	EnvReader      podjob.EnvelopeReader
@@ -208,10 +208,10 @@ type taskGateResult struct {
 //
 // Phase 04.1 P3.1 — extracted from reconcileDispatch steps 7-9.
 type taskDispatchSpec struct {
-	attempt    int
-	token      string
-	envInJSON  []byte
-	project    *tideprojectv1alpha1.Project
+	attempt   int
+	token     string
+	envInJSON []byte
+	project   *tideprojectv1alpha1.Project
 }
 
 // reconcileDispatch is the 12-step dispatch flow decomposed into 4 named

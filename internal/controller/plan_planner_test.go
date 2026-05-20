@@ -66,7 +66,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			EnvReader:      newMapEnvReader(),
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
@@ -101,7 +101,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			EnvReader:      newMapEnvReader(),
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())

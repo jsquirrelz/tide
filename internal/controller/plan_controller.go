@@ -51,6 +51,7 @@ import (
 )
 
 const planFinalizer = "tideproject.k8s/plan-cleanup"
+
 // Note: ErrParentUnresolved is declared in task_controller.go (same package).
 // Phase 04.1 P1.4 — shared across TaskReconciler and PlanReconciler.
 
