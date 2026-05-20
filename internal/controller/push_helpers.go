@@ -12,6 +12,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -139,7 +140,9 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 		"--commit-message=" + opts.CommitMessage,
 	}
 	if len(opts.ArtifactPaths) > 0 {
-		args = append(args, "--artifact-paths="+joinCSV(opts.ArtifactPaths))
+		// WR-04 fix: use strings.Join (stdlib O(n)) instead of the
+		// custom joinCSV which built the CSV via O(n²) string concat.
+		args = append(args, "--artifact-paths="+strings.Join(opts.ArtifactPaths, ","))
 	}
 
 	volumes := []corev1.Volume{
@@ -368,15 +371,6 @@ func buildCommitMessage(boundary, name string) (string, error) {
 	}
 }
 
-// joinCSV joins paths with commas. Tide-push's --artifact-paths flag
-// parses CSV; keep the join shape consistent with the parser there.
-func joinCSV(paths []string) string {
-	out := ""
-	for i, p := range paths {
-		if i > 0 {
-			out += ","
-		}
-		out += p
-	}
-	return out
-}
+// WR-04 fix: joinCSV deleted in favor of strings.Join at the single call
+// site above. The original helper rebuilt a CSV via O(n²) string concat;
+// strings.Join is O(n) and shipping in the stdlib.
