@@ -83,9 +83,9 @@ func TestReconcilerWiringComplete(t *testing.T) {
 			message: "PlanReconciler.EnvReader must be non-nil",
 		},
 		{
-			name:    "Task.Dispatcher",
-			nilFn:   func() bool { return (&controller.TaskReconciler{Dispatcher: dispatcher}).Dispatcher == nil },
-			message: "TaskReconciler.Dispatcher must be non-nil",
+			name:    "Task.Deps.Dispatcher",
+			nilFn:   func() bool { return (&controller.TaskReconciler{Deps: controller.TaskReconcilerDeps{Dispatcher: dispatcher}}).Deps.Dispatcher == nil },
+			message: "TaskReconciler.Deps.Dispatcher must be non-nil (Phase 04.1 P3.2 — dispatch-tier deps now carried in Deps)",
 		},
 	}
 

@@ -42,6 +42,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"k8s.io/client-go/tools/record"
+
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
@@ -67,6 +69,27 @@ const taskPlanRefIndexKey = ".spec.planRef"
 // ConditionParentUnresolved status patch + 30s requeue. Phase 04.1 P1.4.
 var ErrParentUnresolved = errors.New("no parent Project found via label or owner-ref chain")
 
+// TaskReconcilerDeps carries the dispatch-related dependencies for TaskReconciler.
+// Mirrors HelmProviderDefaults precedent at dispatch_helpers.go:60-69.
+//
+// Fields are populated at Manager wiring time (cmd/manager/main.go) and never
+// mutated thereafter — copying a small struct at construction is cheaper than
+// indirection at every dispatch (RESEARCH.md §P3.2 §Known pitfalls).
+//
+// Pool fields (PlannerPool, ExecutorPool) and WatchNamespace stay as direct
+// TaskReconciler fields because they're conceptually separate from "what to
+// dispatch with" — they're concurrency limiters, not dispatch-tier deps.
+type TaskReconcilerDeps struct {
+	Dispatcher     dispatch.Dispatcher
+	Budget         *budget.Store
+	Defaults       budget.Limits
+	SigningKey      []byte
+	SubagentImage  string
+	CredproxyImage string
+	EnvReader      podjob.EnvelopeReader
+	Recorder       record.EventRecorder
+}
+
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
 // Task is owned by Plan; the parent ref is set via internal/owner.EnsureOwnerRef.
 type TaskReconciler struct {
@@ -79,33 +102,12 @@ type TaskReconciler struct {
 	// ExecutorPool — Task reconcile dispatches executor-pool subagents in Phase 2.
 	ExecutorPool *pool.Pool
 
-	Dispatcher dispatch.Dispatcher
-
-	// Budget is the in-process per-Secret-UID rate-limiter store (D-D1).
-	Budget *budget.Store
-
-	// Defaults carries the Helm-driven rate-limit defaults applied when no
-	// Secret annotation or Project.Spec.Providers entry overrides them.
-	Defaults budget.Limits
-
-	// SigningKey is the HMAC signing key used to mint per-Task dispatch tokens
-	// (D-C3). Loaded from the tide-signing-key Secret at Manager startup.
-	SigningKey []byte
-
-	// SubagentImage is the image ref for the subagent container (Plan 04 stub for
-	// Phase 2; Plan 12's Helm values bind the production image in Phase 3+).
-	SubagentImage string
-
-	// CredproxyImage is the image ref for the tide-credproxy sidecar (Plan 05).
-	CredproxyImage string
-
-	// EnvReader reads the EnvelopeOut from the per-Project PVC after Job completion.
-	// Production wiring uses podjob.FilesystemEnvelopeReader; tests inject an
-	// in-memory stub.
-	EnvReader podjob.EnvelopeReader
-
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
+
+	// Deps carries the dispatch-tier dependencies. Phase 04.1 P3.2 — mirrors the
+	// HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
+	Deps TaskReconcilerDeps
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -170,7 +172,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// 5. Phase 2 dispatch body inside the Dispatcher seam (REQ-SUB-01).
-	if r.Dispatcher != nil {
+	if r.Deps.Dispatcher != nil {
 		return r.reconcileDispatch(ctx, &task)
 	}
 
@@ -450,7 +452,7 @@ func (r *TaskReconciler) acquireDispatchSlots(ctx context.Context, task *tidepro
 				return release, err
 			}
 		} else {
-			lim := r.Budget.ForSecret(string(secret.UID), r.defaultsForSecret(&secret))
+			lim := r.Deps.Budget.ForSecret(string(secret.UID), r.defaultsForSecret(&secret))
 			if lim != nil {
 				rsv := lim.Reserve()
 				d := rsv.Delay()
@@ -535,7 +537,7 @@ func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv
 	// pass JobKindPlanner via Plan 04.1-05 (P1.2) and get the 600s floor instead.
 	taskCaps := podjob.DefaultCaps(task.Spec.Caps, podjob.JobKindExecutor)
 	wallClock := taskCaps.WallClockSeconds
-	token, err := credproxy.Sign(r.SigningKey, string(task.UID), time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	token, err := credproxy.Sign(r.Deps.SigningKey, string(task.UID), time.Duration(wallClock+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
 		return taskDispatchSpec{}, fmt.Errorf("mint signed token: %w", err)
 	}
@@ -601,8 +603,8 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		Attempt:        spec.attempt,
 		SignedToken:    spec.token,
 		EnvelopeInJSON: spec.envInJSON,
-		SubagentImage:  r.SubagentImage,
-		CredproxyImage: r.CredproxyImage,
+		SubagentImage:  r.Deps.SubagentImage,
+		CredproxyImage: r.Deps.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",
 		ProjectUID:     string(project.UID),
@@ -688,7 +690,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	logger := logf.FromContext(ctx)
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
-	out, err := r.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
+	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
 	if err != nil {
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Failed"
@@ -953,7 +955,7 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 // Returns a non-zero delay when the bucket is exhausted (caller must RequeueAfter).
 // Standalone helper satisfying plan's "helpers named in <interfaces>" requirement (grep target).
 func (r *TaskReconciler) gateDispatch(projectName, secretUID string, limits budget.Limits) time.Duration {
-	lim := r.Budget.ForSecret(secretUID, limits)
+	lim := r.Deps.Budget.ForSecret(secretUID, limits)
 	if lim == nil {
 		return 0
 	}
@@ -985,8 +987,8 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 		Attempt:        attempt,
 		SignedToken:    token,
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  r.SubagentImage,
-		CredproxyImage: r.CredproxyImage,
+		SubagentImage:  r.Deps.SubagentImage,
+		CredproxyImage: r.Deps.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",
 		ProjectUID:     string(project.UID),
@@ -1005,12 +1007,12 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 }
 
 // defaultsForSecret derives the effective Limits for a Secret.
-// Precedence: Secret annotation > r.Defaults (Helm defaults).
+// Precedence: Secret annotation > r.Deps.Defaults (Helm defaults).
 func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits {
 	if secret == nil {
-		return r.Defaults
+		return r.Deps.Defaults
 	}
-	limits := r.Defaults
+	limits := r.Deps.Defaults
 	if v, ok := secret.Annotations["tideproject.k8s/requests-per-minute"]; ok {
 		var rpm int
 		if _, err := fmt.Sscanf(v, "%d", &rpm); err == nil {

@@ -58,15 +58,17 @@ var _ dispatch.Dispatcher = (*stubDispatcher)(nil)
 // the in-process .spec.planRef field indexer work correctly.
 func newTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 	return &TaskReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		Budget:         testBudgetStore,
-		Defaults:       testBudgetDefaults,
-		SigningKey:     testSigningKey,
-		SubagentImage:  testSubagentImage,
-		CredproxyImage: testCredproxyImage,
-		EnvReader:      envReader,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: TaskReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			Budget:         testBudgetStore,
+			Defaults:       testBudgetDefaults,
+			SigningKey:     testSigningKey,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			EnvReader:      envReader,
+		},
 	}
 }
 
@@ -405,15 +407,17 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_ = rsv
 
 			r := &TaskReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				Budget:         exhaustedStore,
-				Defaults:       exhaustedLimits,
-				SigningKey:     testSigningKey,
-				SubagentImage:  testSubagentImage,
-				CredproxyImage: testCredproxyImage,
-				EnvReader:      newMapEnvReader(),
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: TaskReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					Budget:         exhaustedStore,
+					Defaults:       exhaustedLimits,
+					SigningKey:     testSigningKey,
+					SubagentImage:  testSubagentImage,
+					CredproxyImage: testCredproxyImage,
+					EnvReader:      newMapEnvReader(),
+				},
 			}
 
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
@@ -489,15 +493,17 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			}
 
 			r := &TaskReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				Budget:         stormStore,
-				Defaults:       stormLimits,
-				SigningKey:     testSigningKey,
-				SubagentImage:  testSubagentImage,
-				CredproxyImage: testCredproxyImage,
-				EnvReader:      newMapEnvReader(),
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: TaskReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					Budget:         stormStore,
+					Defaults:       stormLimits,
+					SigningKey:     testSigningKey,
+					SubagentImage:  testSubagentImage,
+					CredproxyImage: testCredproxyImage,
+					EnvReader:      newMapEnvReader(),
+				},
 			}
 
 			// Drive all tasks through finalizer + owner-ref passes first.
