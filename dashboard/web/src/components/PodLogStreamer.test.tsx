@@ -81,12 +81,12 @@ describe("PodLogStreamer (Test 3) — auto-scroll behavior", () => {
     render(<PodLogStreamer taskName="t-3" onClose={() => {}} />);
     const viewport = screen.getByTestId("pod-log-viewport");
 
-    // Synthesize a "scrolled up" position. The component reads
-    // scrollTop / scrollHeight / clientHeight to decide auto-scroll;
-    // we feed them via Object.defineProperty and dispatch a scroll
-    // event.
+    // Synthesize scroll geometry the component reads. Mark scrollTop
+    // as writable so the production code's useLayoutEffect auto-scroll
+    // assignment (el.scrollTop = el.scrollHeight) doesn't throw.
     Object.defineProperty(viewport, "scrollTop", {
       configurable: true,
+      writable: true,
       value: 0,
     });
     Object.defineProperty(viewport, "scrollHeight", {
@@ -110,14 +110,28 @@ describe("PodLogStreamer (Test 3) — auto-scroll behavior", () => {
     render(<PodLogStreamer taskName="t-4" onClose={() => {}} />);
     const viewport = screen.getByTestId("pod-log-viewport");
 
-    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 0 });
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 });
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 });
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0,
+    });
+    Object.defineProperty(viewport, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(viewport, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
     act(() => fireEvent.scroll(viewport));
     expect(screen.getByTestId("pod-log-pause-indicator")).toBeInTheDocument();
 
     // Scroll back to bottom — scrollTop + clientHeight ≈ scrollHeight.
-    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 800 });
+    Object.defineProperty(viewport, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 800,
+    });
     act(() => fireEvent.scroll(viewport));
     expect(screen.queryByTestId("pod-log-pause-indicator")).toBeNull();
   });
@@ -136,8 +150,12 @@ describe("PodLogStreamer (Test 4) — ANSI rendering", () => {
     expect(errSpan.tagName.toLowerCase()).toBe("span");
     expect(errSpan.getAttribute("style") ?? "").toMatch(/color/i);
 
-    // Trailing plain segment.
-    expect(screen.getByText(/ fail/)).toBeInTheDocument();
+    // Trailing plain segment — match the literal " fail" content via
+    // an exact text matcher. getByText/regex normalizes whitespace so
+    // a substring match would lose the leading space; instead we walk
+    // the rendered line and assert the textContent contains both.
+    const line = screen.getByTestId("pod-log-line-0");
+    expect(line.textContent).toBe("ERROR fail");
   });
 });
 

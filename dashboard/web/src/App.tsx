@@ -11,6 +11,7 @@ import ExecutionDAGView, {
 import TaskDetailDrawer, {
   type TaskDetailData,
 } from "./components/TaskDetailDrawer";
+import PodLogStreamer from "./components/PodLogStreamer";
 
 /**
  * Top-level dashboard component (plan 04-13 wiring).
@@ -42,7 +43,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState<string>("my-project");
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
-  const [, setStreamingTask] = useState<string | null>(null);
+  const [streamingTask, setStreamingTask] = useState<string | null>(null);
 
   // setSelectedProject reserved for plan 04-15's ProjectPicker wiring.
   void setSelectedProject;
@@ -73,10 +74,14 @@ export default function App() {
   }, []);
 
   const onOpenLogStream = useCallback((name: string) => {
-    // Plan 04-16 mounts <PodLogStreamer> inline below the drawer body
-    // when streamingTask is non-null. For this plan we just hold the
-    // state — the streamer component renders nothing yet.
+    // Drawer "Open log stream" button → mount <PodLogStreamer> inline
+    // below the drawer body (UI-SPEC §8). The streamer owns its own
+    // SSE EventSource lifecycle via useTaskLog (src/lib/sse.ts).
     setStreamingTask(name);
+  }, []);
+
+  const onCloseLogStream = useCallback(() => {
+    setStreamingTask(null);
   }, []);
 
   // Empty plan data for the right pane until a Plan is selected. Plan
@@ -128,6 +133,18 @@ export default function App() {
           onClose={onCloseDrawer}
           onOpenLogStream={onOpenLogStream}
         />
+        {streamingTask !== null && (
+          <div
+            data-testid="streaming-task-panel"
+            className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-border-subtle)]"
+            style={{ height: "240px", background: "var(--color-surface-raised)" }}
+          >
+            <PodLogStreamer
+              taskName={streamingTask}
+              onClose={onCloseLogStream}
+            />
+          </div>
+        )}
       </AppShell>
     </ToastProvider>
   );
