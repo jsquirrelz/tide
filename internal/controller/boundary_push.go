@@ -78,7 +78,12 @@ func triggerBoundaryPush(
 		// dev clusters without the Helm chart): cannot dispatch a Job
 		// with an empty container image — K8s API rejects it as Invalid.
 		// Skip rather than fail the reconcile loop.
-		logger.V(1).Info("skipping boundary push: TidePushImage not configured", "level", level, "project", project.Name)
+		//
+		// CR-02 fix: promoted to Info (was V(1)) so silent disablement is
+		// operator-visible at default log verbosity. In production this
+		// signals a chart/env misconfiguration (TIDE_PUSH_IMAGE env unset)
+		// and warrants attention even though it's not fatal.
+		logger.Info("skipping boundary push: TidePushImage not configured", "level", level, "project", project.Name)
 		return nil
 	}
 
