@@ -21,4 +21,24 @@
 // `make tide-lint`. The companion fixtures under testdata/src/{badlabels,
 // goodlabels}/ assert positive and negative cases per analysistest's
 // GOPATH-style resolver convention.
+//
+// # Known limitation — WR-15
+//
+// The analyzer matches *ast.BasicLit nodes of kind STRING. A caller that
+// names the label via an identifier or named constant bypasses the check:
+//
+//	const taskLabel = "task"
+//	prometheus.NewCounterVec(opts, []string{taskLabel}) // NOT caught
+//
+//	var taskLabel = "task"
+//	prometheus.NewCounterVec(opts, []string{taskLabel}) // NOT caught
+//
+// Pattern-matching analyzers (without go/types resolution) can only see
+// literal string nodes. Reviewers MUST treat this as a literal-only
+// guardrail rather than a complete cardinality oracle. If the codebase
+// needs identifier-aware detection later, extend the analyzer with
+// go/types to resolve const declarations to their string value
+// (significant rework — judge cost/benefit; the literal form is the
+// idiomatic Prometheus label-slice shape so the literal check catches
+// the common case).
 package metriccardinality
