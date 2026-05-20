@@ -33,6 +33,8 @@ export default function MilestoneNode({ data, selected }: NodeProps<MilestoneNod
       selected={selected}
       width={240}
       minHeight={72}
+      /* CR-04 fix: Milestone nodes in Planning DAG are not clickable. */
+      clickable={false}
     />
   );
 }

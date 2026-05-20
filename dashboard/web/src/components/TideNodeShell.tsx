@@ -66,6 +66,16 @@ export type TideNodeShellProps = {
   width: number;
   /** Min height per UI-SPEC §5 table. */
   minHeight: number;
+  /**
+   * CR-04 fix: when false, the node renders without click affordance —
+   * no onClick handler, no role="button", no tabIndex, no Enter/Space
+   * keyboard handler, no hover/pointer cursor. Default true preserves
+   * existing behavior for kinds that ARE clickable (Plan in the Planning
+   * DAG, Task in the Execution DAG). Set false for Project/Milestone/Phase
+   * nodes in the Planning DAG since those click callbacks pollute the
+   * right-pane plan selection.
+   */
+  clickable?: boolean;
 };
 
 export default function TideNodeShell({
@@ -79,6 +89,7 @@ export default function TideNodeShell({
   selected = false,
   width,
   minHeight,
+  clickable = true,
 }: TideNodeShellProps) {
   const onNodeClick = useNodeClick();
 
@@ -100,26 +111,37 @@ export default function TideNodeShell({
 
   // Tailwind v4 arbitrary-value classes for tokens; the Tailwind compiler
   // emits these as raw CSS variable references.
+  // CR-04 fix: suppress hover/cursor affordance for non-clickable nodes so
+  // the UI signal matches the click behavior.
   const containerClass = clsx(
-    "flex flex-col rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] cursor-pointer",
-    "hover:bg-[var(--color-surface-overlay)]",
+    "flex flex-col rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]",
+    clickable && "cursor-pointer hover:bg-[var(--color-surface-overlay)]",
     // 2px accent ring when selected
     selected && "ring-2 ring-[var(--color-accent)] ring-offset-0",
     // 4px destructive border-left for failed family
     isFailed && "border-l-4 border-l-[var(--color-destructive)]",
   );
 
+  // CR-04 fix: when clickable=false, omit role="button"/tabIndex/onClick/
+  // onKeyDown so the node is presentational only and clicks don't trigger
+  // the right-pane callback. aria-label still names the node for screen
+  // readers.
   return (
     <div
       data-testid={`tide-node-${kind}`}
       data-kind={kind}
       data-selected={selected ? "true" : "false"}
       data-failed={isFailed ? "true" : "false"}
-      role="button"
-      tabIndex={0}
+      data-clickable={clickable ? "true" : "false"}
+      {...(clickable
+        ? {
+            role: "button" as const,
+            tabIndex: 0,
+            onClick: fire,
+            onKeyDown: onKey,
+          }
+        : {})}
       aria-label={`${KIND_LABEL[kind]} ${name}, status ${status}`}
-      onClick={fire}
-      onKeyDown={onKey}
       className={containerClass}
       style={{
         width: `${width}px`,
