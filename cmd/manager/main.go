@@ -352,6 +352,11 @@ func main() {
 		// CR-01 fix: EnvReader is consumed by handleJobCompletion to materialize
 		// child Phase CRDs from the planner Job's EnvelopeOut.
 		EnvReader: envReader,
+		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract;
+		// signing key mints a token the sidecar validates before forwarding.
+		SigningKey:     signingKey,
+		CredproxyImage: credproxyImage,
+		SubagentImage:  subagentImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -370,6 +375,10 @@ func main() {
 		TidePushImage: tidePushImage,
 		// CR-01 fix: EnvReader consumed by handleJobCompletion.
 		EnvReader: envReader,
+		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
+		SigningKey:     signingKey,
+		CredproxyImage: credproxyImage,
+		SubagentImage:  subagentImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -387,6 +396,10 @@ func main() {
 		// CR-01 fix: EnvReader consumed by handleJobCompletion to materialize
 		// child Task/Wave CRDs from the planner Job's EnvelopeOut.
 		EnvReader: envReader,
+		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
+		SigningKey:     signingKey,
+		CredproxyImage: credproxyImage,
+		SubagentImage:  subagentImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)

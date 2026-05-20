@@ -59,12 +59,14 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 		r := &PlanReconciler{
-			Client:        mgrClient,
-			Scheme:        k8sClient.Scheme(),
-			Dispatcher:    &stubDispatcher{},
-			PlannerPool:   newPlannerPoolForTest(),
-			EnvReader:     newMapEnvReader(),
-			SubagentImage: testSubagentImage,
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      newMapEnvReader(),
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:      testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
@@ -92,12 +94,14 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		planUID := got.UID
 
 		r := &PlanReconciler{
-			Client:        mgrClient,
-			Scheme:        k8sClient.Scheme(),
-			Dispatcher:    &stubDispatcher{},
-			PlannerPool:   newPlannerPoolForTest(),
-			EnvReader:     newMapEnvReader(),
-			SubagentImage: testSubagentImage,
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      newMapEnvReader(),
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:      testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())

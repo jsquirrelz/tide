@@ -13,6 +13,9 @@ import (
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
 
+// Note: JobKind type + JobKindExecutor/JobKindPlanner constants are defined in
+// caps.go (Phase 04.1 P1.3) alongside DefaultCaps. This file consumes them.
+
 // Container and volume name constants exported so Plan 09 (TaskReconciler) and
 // Plan 13 (integration tests) can reference them by name rather than by string literal.
 const (
@@ -52,10 +55,27 @@ const (
 	DefaultTTLSecondsAfterFinished = 600
 )
 
-// BuildOptions carries all inputs required to build a Job spec for a Task dispatch.
+// BuildOptions carries all inputs required to build a Job spec.
+// Supports both executor (task) and planner (milestone/phase/plan) Kinds.
+// Phase 04.1 P1.2: extended with Kind, ParentObj, Level, and Caps so planner
+// Jobs share the full Phase 2 dispatch contract.
 type BuildOptions struct {
-	// Task is the Task CRD being dispatched.
+	// Kind discriminates planner from executor Jobs. Required.
+	// JobKindExecutor: task dispatch (Task reconciler).
+	// JobKindPlanner: planner dispatch (Milestone/Phase/Plan reconcilers).
+	Kind JobKind
+
+	// Task is the Task CRD being dispatched (executor Kind only).
 	Task *tidev1alpha1.Task
+
+	// ParentObj is the parent CRD for both Kinds. For JobKindExecutor this is
+	// the Task; for JobKindPlanner this is the Milestone, Phase, or Plan.
+	// Used for Job name + label derivation (Phase 04.1 P1.2).
+	ParentObj metav1.Object
+
+	// Level is the dispatch level string: "milestone"|"phase"|"plan"|"task".
+	// Drives the planner Job name format + level label (Phase 04.1 P1.2).
+	Level string
 
 	// Project is the owning Project (for namespace + ProviderSecretRef).
 	Project *tidev1alpha1.Project
@@ -69,7 +89,7 @@ type BuildOptions struct {
 	SignedToken string
 
 	// EnvelopeInJSON is the marshalled EnvelopeIn that the envelope-writer init
-	// container will write to /workspace/envelopes/{taskUID}/in.json.
+	// container will write to /workspace/envelopes/{parentUID}/in.json.
 	EnvelopeInJSON []byte
 
 	// SubagentImage is the image ref for the subagent container (Plan 04 stub for
@@ -91,46 +111,101 @@ type BuildOptions struct {
 	// ProjectUID is the UID of the owning Project. Used as the subPath prefix:
 	// {project-uid}/workspace. Kubelet enforces subPath isolation across Projects.
 	ProjectUID string
+
+	// Caps applied via DefaultCaps (Phase 04.1 P1.3 — single source of truth
+	// for the wall-clock floor; both executor and planner Kinds route through
+	// the same helper, preventing token-validity vs Job-deadline drift).
+	// nil → DefaultCaps applies the Kind-appropriate floor automatically.
+	Caps *tidev1alpha1.Caps
 }
 
-// BuildJobSpec returns a complete *batchv1.Job for the Task at the given attempt
-// number, ready for client.Create. The caller is responsible for invoking
-// internal/owner.EnsureOwnerRef on the returned Job AFTER BuildJobSpec returns,
-// per the Phase 1 helper-package-usage rule in PATTERNS.md.
+// BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
+// at the given attempt number, ready for client.Create. The caller is responsible
+// for invoking internal/owner.EnsureOwnerRef on the returned Job AFTER
+// BuildJobSpec returns, per the Phase 1 helper-package-usage rule in PATTERNS.md.
 //
 // Key contracts:
-//   - Job name: JobName(opts.Task.UID, opts.Attempt) — the SUB-03 idempotency key.
+//   - Job name: deterministic per Kind (executor: JobName, planner: PlannerJobName).
 //   - backoffLimit: 0 — retries are controller-side via attempt counter (Pitfall 9).
 //   - Two init containers: envelope-writer (standard), tide-credproxy (native sidecar).
 //   - Subagent container receives only the signed token, never the raw provider secret (D-C4).
 //   - PVC subPath: {project-uid}/workspace enforces per-Project isolation (Blocker #2/#3).
+//
+// Phase 04.1 P1.2: opts.Kind discriminates planner from executor Kinds. The
+// Kind-invariant PodSpec (envelope-writer + credproxy sidecar + subagent container
+// with signed-token env + PVC subPath + 3 SecurityContexts + ActiveDeadline via
+// DefaultCaps) is shared; per-Kind divergence is Job name + label set only.
 func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	// 1. Compute the active deadline.
 	//    Phase 04.1 P1.3 fix: route through DefaultCaps so that nil/zero caps
 	//    apply the Kind-appropriate floor (executor=300s, planner=600s) —
-	//    matches the controller's token mint validity (task_controller.go for
-	//    executor; milestone/phase/plan_controller.go for planner via Plan 05)
-	//    and prevents the 60s active deadline + 360s token validity drift
-	//    documented in audit P1.3. For task dispatch (this call site) pass
-	//    JobKindExecutor; Plan 04.1-05 (P1.2) extends BuildOptions with a
-	//    Kind field that propagates through so planner Jobs pass JobKindPlanner.
-	caps := DefaultCaps(opts.Task.Spec.Caps, JobKindExecutor)
+	//    matches the controller's token mint validity and prevents the 60s
+	//    active deadline + 360s token validity drift documented in audit P1.3.
+	//    Phase 04.1 P1.2: use opts.Caps + opts.Kind so planner Kinds apply
+	//    the 600s planner floor via the Kind-discriminated DefaultCaps API.
+	kind := opts.Kind
+	if kind == "" {
+		kind = JobKindExecutor // backward compat: pre-P1.2 callers that omit Kind
+	}
+	var capsInput *tidev1alpha1.Caps
+	switch kind {
+	case JobKindExecutor:
+		if opts.Task != nil {
+			capsInput = opts.Task.Spec.Caps
+		}
+	default:
+		capsInput = opts.Caps
+	}
+	caps := DefaultCaps(capsInput, kind)
 	wallClockSeconds := int64(caps.WallClockSeconds)
 	activeDeadline := wallClockSeconds + DefaultWallClockGraceSeconds
 
-	// 2. Build the four labels stamped on Job + propagated to Pod via Template.
+	// 2. Build labels + Job name — the only per-Kind divergence (Phase 04.1 P1.2).
+	//    Shared label: project-uid, attempt, provider-secret-uid.
+	//    Kind-specific: role, level, <level>-uid (planner) or task-uid (executor).
+	var jobName string
+	var parentUID string
 	labels := map[string]string{
-		"tideproject.k8s/task-uid":            string(opts.Task.UID),
 		"tideproject.k8s/attempt":             fmt.Sprintf("%d", opts.Attempt),
 		"tideproject.k8s/provider-secret-uid": opts.SecretUID,
-		"tideproject.k8s/role":                "executor",
+	}
+	switch kind {
+	case JobKindPlanner:
+		if opts.ParentObj != nil {
+			parentUID = string(opts.ParentObj.GetUID())
+		}
+		jobName = PlannerJobName(opts.Level, parentUID, opts.Attempt)
+		labels["tideproject.k8s/role"] = "planner"
+		labels["tideproject.k8s/level"] = opts.Level
+		if opts.Level != "" && parentUID != "" {
+			labels[fmt.Sprintf("tideproject.k8s/%s-uid", opts.Level)] = parentUID
+		}
+	default: // JobKindExecutor (and legacy callers with Kind=="")
+		if opts.Task != nil {
+			parentUID = string(opts.Task.UID)
+		}
+		jobName = JobName(opts.Task.UID, opts.Attempt)
+		labels["tideproject.k8s/task-uid"] = string(opts.Task.UID)
+		labels["tideproject.k8s/role"] = "executor"
 	}
 
 	// 3. Compute the PVC subPath for per-Project isolation (Blocker #2/#3).
-	subPath := opts.ProjectUID + "/workspace"
+	// subPath must be a relative path (K8s rejects absolute). When ProjectUID is empty
+	// (planner Job created before Project resolves), use parentUID as the path prefix
+	// so the path is still relative and unique. In production ProjectUID is always set.
+	subPathPrefix := opts.ProjectUID
+	if subPathPrefix == "" {
+		subPathPrefix = parentUID
+	}
+	subPath := subPathPrefix + "/workspace"
 
-	// 4. Build envelope-writer init container (standard init — NOT a sidecar).
-	// Writes EnvelopeIn JSON to /workspace/envelopes/{taskUID}/in.json via base64-decode.
+	// 4. Determine the parent UID to use in the envelope-writer env var.
+	//    For executors this is task UID; for planners it is the parent CRD UID.
+	//    The env var drives the in.json path inside the PVC slice.
+	envelopeUID := parentUID
+
+	// 5. Build envelope-writer init container (standard init — NOT a sidecar).
+	// Writes EnvelopeIn JSON to /workspace/envelopes/{uid}/in.json via base64-decode.
 	envelopeB64 := base64.StdEncoding.EncodeToString(opts.EnvelopeInJSON)
 	envelopeWriter := corev1.Container{
 		Name:  ContainerNameEnvelopeWriter,
@@ -139,7 +214,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			`mkdir -p /workspace/envelopes/${TIDE_TASK_UID} && echo "$ENVELOPE_IN_B64" | base64 -d > /workspace/envelopes/${TIDE_TASK_UID}/in.json`,
 		},
 		Env: []corev1.EnvVar{
-			{Name: "TIDE_TASK_UID", Value: string(opts.Task.UID)},
+			{Name: "TIDE_TASK_UID", Value: envelopeUID},
 			{Name: "ENVELOPE_IN_B64", Value: envelopeB64},
 		},
 		VolumeMounts: []corev1.VolumeMount{
@@ -158,7 +233,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 	}
 
-	// 5. Build tide-credproxy init container with RestartPolicy: Always (K8s 1.33 native sidecar).
+	// 6. Build tide-credproxy init container with RestartPolicy: Always (K8s 1.33 native sidecar).
 	// The sidecar MUST have RestartPolicy Always to mark it as a native sidecar — this is the
 	// K8s 1.33 marker that causes the Job to complete when the main container exits, while
 	// kubelet terminates the sidecar in reverse spec order (RESEARCH.md Pattern 2).
@@ -168,7 +243,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		// RestartPolicy: Always is the K8s 1.33 native-sidecar marker.
 		RestartPolicy: ptr.To(corev1.ContainerRestartPolicyAlways),
 		Env: []corev1.EnvVar{
-			{Name: "TIDE_TASK_UID", Value: string(opts.Task.UID)},
+			{Name: "TIDE_TASK_UID", Value: envelopeUID},
 			{Name: "TIDE_PROXY_LISTEN", Value: "0.0.0.0:8443"},
 		},
 		EnvFrom: func() []corev1.EnvFromSource {
@@ -178,7 +253,8 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			}
 			// Only add the provider secret when a name is set — K8s rejects empty
 			// SecretRef.Name (Required value validation).
-			if opts.Project.Spec.ProviderSecretRef != "" {
+			// Guard against nil Project (e.g. planner Jobs created before Project resolves).
+			if opts.Project != nil && opts.Project.Spec.ProviderSecretRef != "" {
 				srcs = append(srcs, corev1.EnvFromSource{
 					SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: opts.Project.Spec.ProviderSecretRef}},
 				})
@@ -207,14 +283,14 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 	}
 
-	// 6. Build the main subagent container. The subagent receives only the signed token
+	// 7. Build the main subagent container. The subagent receives only the signed token
 	// (not the raw provider secret) — D-C4 secret isolation contract.
 	subagent := corev1.Container{
 		Name:       ContainerNameSubagent,
 		Image:      opts.SubagentImage,
 		WorkingDir: "/workspace",
 		Env: []corev1.EnvVar{
-			{Name: "TIDE_TASK_UID", Value: string(opts.Task.UID)},
+			{Name: "TIDE_TASK_UID", Value: envelopeUID},
 			// D-C1: subagent points to the localhost credproxy — never reaches Anthropic directly.
 			{Name: "ANTHROPIC_BASE_URL", Value: "https://127.0.0.1:8443"},
 			// D-C1: signed token replaces the real API key in the subagent process.
@@ -248,7 +324,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 	}
 
-	// 7. Compose the PodSpec.
+	// 8. Compose the PodSpec.
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: ServiceAccountSubagent,
 		SecurityContext: &corev1.PodSecurityContext{
@@ -275,11 +351,19 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		RestartPolicy: corev1.RestartPolicyNever,
 	}
 
-	// 8. Compose the Job.
+	// 9. Compose the Job.
+	// Derive namespace: use Project.Namespace when present; otherwise fall back
+	// to ParentObj.GetNamespace() (planner Jobs with no Project resolved yet).
+	jobNamespace := ""
+	if opts.Project != nil {
+		jobNamespace = opts.Project.Namespace
+	} else if opts.ParentObj != nil {
+		jobNamespace = opts.ParentObj.GetNamespace()
+	}
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      JobName(opts.Task.UID, opts.Attempt),
-			Namespace: opts.Project.Namespace,
+			Name:      jobName,
+			Namespace: jobNamespace,
 			Labels:    labels,
 		},
 		Spec: batchv1.JobSpec{

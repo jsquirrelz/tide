@@ -93,12 +93,14 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 		}, "5s", "100ms").Should(Succeed())
 
 		r := &PhaseReconciler{
-			Client:        mgrClient,
-			Scheme:        k8sClient.Scheme(),
-			Dispatcher:    &stubDispatcher{},
-			PlannerPool:   newPlannerPoolForTest(),
-			EnvReader:     newMapEnvReader(),
-			SubagentImage: testSubagentImage,
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      newMapEnvReader(),
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:      testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())

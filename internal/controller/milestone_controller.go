@@ -19,8 +19,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
@@ -75,6 +78,17 @@ type MilestoneReconciler struct {
 
 	// SubagentImage is the image ref for the planner subagent container.
 	SubagentImage string
+
+	// CredproxyImage is the image ref for the tide-credproxy sidecar.
+	// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
+	CredproxyImage string
+
+	// SigningKey is the HMAC signing key used to mint per-dispatch tokens
+	// for the credproxy sidecar (Phase 04.1 P1.2 fix).
+	// Phase 04.1 P1.2 fix: each planner reconciler gains a SigningKey field,
+	// wired in cmd/manager/main.go, so planner Jobs can authenticate with
+	// the credproxy sidecar (mirrors TaskReconciler.SigningKey).
+	SigningKey []byte
 
 	// TidePushImage is the image ref for the tide-push container used by
 	// the W-2 boundary push trigger (plan 04-06).
@@ -229,15 +243,72 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	}
 
 	// Step 5: Build planner envelope.
-	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 20}
-	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, 1, "", caps, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
+	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner). The marshaled
+	// envelope (previously discarded with _ = envInJSON) is now passed into
+	// BuildOptions and written by the envelope-writer init container; the
+	// subagent container reads it at startup.
+	attempt := 1 // milestone planner dispatch is single-shot per ROADMAP scope; CR-NN for retry semantics
+
+	// Phase 04.1 P1.2 fix: pass JobKindPlanner so nil caps apply the 600s
+	// planner floor (covers pod startup + Anthropic API call latency) instead of
+	// the 300s executor floor. Plan 04.1-03 shipped the dual-floor DefaultCaps.
+	// Project.Spec does not carry per-project Caps (only Task does) — pass nil
+	// to let DefaultCaps apply the 600s planner floor unconditionally.
+	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
+	// If operator has not set Iterations, apply the 20-iteration planner default
+	// inline (the Caps type doesn't carry per-Kind iteration defaults; only the
+	// wall-clock floor differs by Kind via DefaultCaps).
+	if plannerCaps.Iterations <= 0 {
+		plannerCaps.Iterations = 20
+	}
+	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", pkgdispatch.Caps{
+		WallClockSeconds: int(plannerCaps.WallClockSeconds),
+		Iterations:       int(plannerCaps.Iterations),
+	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}
-	_ = envInJSON
 
-	// Step 6: Build + Create planner Job (deterministic name = D-B5 dedup key).
-	job := r.buildPlannerJob(ms, jobName)
+	// Mint a signed token for the credproxy sidecar (mirrors task_controller.go Step 8).
+	token, err := credproxy.Sign(r.SigningKey, string(ms.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("mint planner signed token: %w", err)
+	}
+
+	// Resolve secretUID from the Project's ProviderSecretRef (mirrors task_controller.go Step 11).
+	var secretUID string
+	if project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if sErr := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); sErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+
+	// Step 6: Build + Create planner Job via shared BuildJobSpec (D-B5 dedup key).
+	// Phase 04.1 P1.2 fix: replaced r.buildPlannerJob (skeletal 1-container PodSpec)
+	// with podjob.BuildJobSpec(JobKindPlanner) which includes PVC subPath isolation,
+	// envelope-writer init container, credproxy native sidecar, signed-token env,
+	// bounded ActiveDeadline via DefaultCaps, and 3 SecurityContexts.
+	opts := podjob.BuildOptions{
+		Kind:           podjob.JobKindPlanner,
+		ParentObj:      ms,
+		Level:          "milestone",
+		Attempt:        attempt,
+		Project:        project,
+		SignedToken:    token,
+		EnvelopeInJSON: envInJSON,
+		SubagentImage:  r.SubagentImage,
+		CredproxyImage: r.CredproxyImage,
+		SecretUID:      secretUID,
+		PVCName:        "tide-projects",
+		ProjectUID:     string(project.UID),
+		Caps:           plannerCaps,
+	}
+	if opts.SubagentImage == "" {
+		opts.SubagentImage = r.HelmProviderDefaults.Image
+	}
+	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
 		return ctrl.Result{}, fmt.Errorf("ensure owner ref on planner job: %w", err)
 	}
@@ -419,31 +490,6 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-func (r *MilestoneReconciler) buildPlannerJob(ms *tideprojectv1alpha1.Milestone, jobName string) *batchv1.Job {
-	backoffLimit := int32(0)
-	ttl := int32(300)
-	image := r.SubagentImage
-	if image == "" {
-		image = "ghcr.io/jsquirrelz/tide-stub-subagent:test"
-	}
-	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: ms.Namespace,
-			Labels: map[string]string{
-				"tideproject.k8s/milestone-uid": string(ms.UID),
-				"tideproject.k8s/level":         "milestone",
-				"tideproject.k8s/role":          "planner",
-			},
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit:            &backoffLimit,
-			TTLSecondsAfterFinished: &ttl,
-			Template:                batchv1Template(jobName, image),
-		},
-	}
 }
 
 // SetupWithManager wires Owns(&Job{}) and Owns(&Phase{}) per D-A2, plus a

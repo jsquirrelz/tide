@@ -434,7 +434,10 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 		}
 	}
 	opts := podjob.BuildOptions{
+		Kind:           podjob.JobKindExecutor,
 		Task:           task,
+		ParentObj:      task,
+		Level:          "task",
 		Project:        project,
 		Attempt:        attempt,
 		SignedToken:    token,
@@ -818,7 +821,10 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 		}
 	}
 	opts := podjob.BuildOptions{
+		Kind:           podjob.JobKindExecutor,
 		Task:           task,
+		ParentObj:      task,
+		Level:          "task",
 		Project:        project,
 		Attempt:        attempt,
 		SignedToken:    token,

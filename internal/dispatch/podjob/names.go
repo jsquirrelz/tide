@@ -21,3 +21,18 @@ import (
 func JobName(taskUID types.UID, attempt int) string {
 	return fmt.Sprintf("tide-task-%s-%d", taskUID, attempt)
 }
+
+// PlannerJobName returns the deterministic Job name for a planner dispatch at the
+// given level.
+//
+// Format: "tide-{level}-{parentUID}-{attempt}".
+//
+// Matches the existing milestone_controller.go:176 name shape
+// (tide-milestone-<uid>-1). The attempt number is single-shot per ROADMAP scope;
+// retry semantics are tracked as CR-NN for a future plan.
+// AlreadyExists on duplicate Create == successful idempotent dispatch (SUB-03).
+//
+// Phase 04.1 P1.2.
+func PlannerJobName(level, parentUID string, attempt int) string {
+	return fmt.Sprintf("tide-%s-%s-%d", level, parentUID, attempt)
+}

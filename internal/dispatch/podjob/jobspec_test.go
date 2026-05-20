@@ -12,7 +12,7 @@ import (
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
 
-// buildTestOptions constructs a minimal BuildOptions for use in tests.
+// buildTestOptions constructs a minimal BuildOptions for executor Kind tests.
 func buildTestOptions() BuildOptions {
 	task := &tidev1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -41,11 +41,51 @@ func buildTestOptions() BuildOptions {
 		},
 	}
 	return BuildOptions{
+		Kind:           JobKindExecutor,
 		Task:           task,
+		ParentObj:      task,
+		Level:          "task",
 		Project:        project,
 		Attempt:        1,
 		SignedToken:    "test-signed-token",
 		EnvelopeInJSON: []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn"}`),
+		SubagentImage:  "ghcr.io/jsquirrelz/tide-stub-subagent:test",
+		CredproxyImage: "ghcr.io/jsquirrelz/tide-credproxy:test",
+		SecretUID:      "secret-uid-test",
+		PVCName:        "tide-projects",
+		ProjectUID:     "project-uid-test",
+	}
+}
+
+// buildPlannerTestOptions constructs a minimal BuildOptions for planner Kind tests.
+// Covers milestone-level dispatch (Phase 04.1 P1.2).
+func buildPlannerTestOptions() BuildOptions {
+	ms := &tidev1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "milestone-alpha",
+			Namespace: "default",
+			UID:       types.UID("milestone-uid-test"),
+		},
+	}
+	project := &tidev1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "project-alpha",
+			Namespace: "default",
+			UID:       types.UID("project-uid-test"),
+		},
+		Spec: tidev1alpha1.ProjectSpec{
+			TargetRepo:        "https://github.com/example/repo",
+			ProviderSecretRef: "provider-secret-alpha",
+		},
+	}
+	return BuildOptions{
+		Kind:           JobKindPlanner,
+		ParentObj:      ms,
+		Level:          "milestone",
+		Project:        project,
+		Attempt:        1,
+		SignedToken:    "test-planner-signed-token",
+		EnvelopeInJSON: []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn","role":"planner"}`),
 		SubagentImage:  "ghcr.io/jsquirrelz/tide-stub-subagent:test",
 		CredproxyImage: "ghcr.io/jsquirrelz/tide-credproxy:test",
 		SecretUID:      "secret-uid-test",
@@ -360,5 +400,194 @@ func TestBuildJobSpec_EnvelopeWriterCommand_DecodesB64ToInJson(t *testing.T) {
 	}
 	if string(decoded) != string(opts.EnvelopeInJSON) {
 		t.Errorf("decoded ENVELOPE_IN_B64 = %q; want %q", decoded, opts.EnvelopeInJSON)
+	}
+}
+
+// ---- Phase 04.1 P1.2: JobKindPlanner tests ----
+
+// TestBuildJobSpec_Planner_NameFollowsPlannerFormat verifies the deterministic
+// Job name for a planner dispatch: tide-<level>-<parentUID>-<attempt>.
+func TestBuildJobSpec_Planner_NameFollowsPlannerFormat(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	want := PlannerJobName("milestone", "milestone-uid-test", 1)
+	if job.Name != want {
+		t.Errorf("planner job.Name = %q; want %q", job.Name, want)
+	}
+}
+
+// TestBuildJobSpec_Planner_LabelsContainRolePlannerAndLevel verifies the planner
+// label set: role=planner, level=milestone, milestone-uid=<uid>.
+func TestBuildJobSpec_Planner_LabelsContainRolePlannerAndLevel(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	labels := job.Labels
+	if labels["tideproject.k8s/role"] != "planner" {
+		t.Errorf("planner job label role = %q; want \"planner\"", labels["tideproject.k8s/role"])
+	}
+	if labels["tideproject.k8s/level"] != "milestone" {
+		t.Errorf("planner job label level = %q; want \"milestone\"", labels["tideproject.k8s/level"])
+	}
+	if labels["tideproject.k8s/milestone-uid"] != "milestone-uid-test" {
+		t.Errorf("planner job label milestone-uid = %q; want \"milestone-uid-test\"", labels["tideproject.k8s/milestone-uid"])
+	}
+	// executor-specific task-uid label MUST NOT appear on planner Jobs
+	if _, ok := labels["tideproject.k8s/task-uid"]; ok {
+		t.Error("planner job label should not contain tideproject.k8s/task-uid")
+	}
+}
+
+// TestBuildJobSpec_Planner_HasTwoInitContainers_EnvelopeWriterAndCredproxy
+// verifies that the Kind-invariant init container topology applies to planner Jobs.
+func TestBuildJobSpec_Planner_HasTwoInitContainers_EnvelopeWriterAndCredproxy(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	initContainers := job.Spec.Template.Spec.InitContainers
+	if len(initContainers) != 2 {
+		t.Fatalf("planner job: expected 2 initContainers, got %d", len(initContainers))
+	}
+	if initContainers[0].Name != ContainerNameEnvelopeWriter {
+		t.Errorf("initContainers[0].Name = %q; want %q", initContainers[0].Name, ContainerNameEnvelopeWriter)
+	}
+	if initContainers[1].Name != ContainerNameCredproxy {
+		t.Errorf("initContainers[1].Name = %q; want %q", initContainers[1].Name, ContainerNameCredproxy)
+	}
+}
+
+// TestBuildJobSpec_Planner_CredproxySidecarHasRestartPolicyAlways verifies that
+// the native-sidecar marker applies to planner Jobs as well as executor Jobs.
+func TestBuildJobSpec_Planner_CredproxySidecarHasRestartPolicyAlways(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	initContainers := job.Spec.Template.Spec.InitContainers
+	if len(initContainers) < 2 {
+		t.Fatalf("planner job: expected at least 2 initContainers, got %d", len(initContainers))
+	}
+	credproxy := initContainers[1]
+	if credproxy.RestartPolicy == nil {
+		t.Fatal("planner credproxy initContainer.RestartPolicy is nil; want ContainerRestartPolicyAlways")
+	}
+	if *credproxy.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("planner credproxy RestartPolicy = %q; want ContainerRestartPolicyAlways", *credproxy.RestartPolicy)
+	}
+}
+
+// TestBuildJobSpec_Planner_PVCMountWithSubPathIsolation verifies that planner
+// Jobs mount the PVC with the same {project-uid}/workspace subPath as executor Jobs.
+func TestBuildJobSpec_Planner_PVCMountWithSubPathIsolation(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	volumes := job.Spec.Template.Spec.Volumes
+
+	var foundWorkspace bool
+	for _, v := range volumes {
+		if v.Name == VolumeProjectWorkspace {
+			foundWorkspace = true
+			if v.PersistentVolumeClaim == nil {
+				t.Errorf("planner volume %q has no PVC source", VolumeProjectWorkspace)
+			} else if v.PersistentVolumeClaim.ClaimName != opts.PVCName {
+				t.Errorf("planner PVC claimName = %q; want %q", v.PersistentVolumeClaim.ClaimName, opts.PVCName)
+			}
+		}
+	}
+	if !foundWorkspace {
+		t.Errorf("planner volumes missing %q", VolumeProjectWorkspace)
+	}
+
+	// Verify subagent container uses subPath {project-uid}/workspace
+	wantSubPath := opts.ProjectUID + "/workspace"
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		t.Fatal("planner job: no containers")
+	}
+	subagent := containers[0]
+	var foundMount bool
+	for _, vm := range subagent.VolumeMounts {
+		if vm.Name == VolumeProjectWorkspace {
+			foundMount = true
+			if vm.SubPath != wantSubPath {
+				t.Errorf("planner subagent volumeMount SubPath = %q; want %q", vm.SubPath, wantSubPath)
+			}
+		}
+	}
+	if !foundMount {
+		t.Errorf("planner subagent container missing volumeMount %q", VolumeProjectWorkspace)
+	}
+}
+
+// TestBuildJobSpec_Planner_SubagentHasSignedTokenEnv verifies that the planner
+// Job's subagent container receives the signed token env (D-C1 contract).
+func TestBuildJobSpec_Planner_SubagentHasSignedTokenEnv(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	job := BuildJobSpec(opts)
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		t.Fatal("planner job: no containers")
+	}
+	subagent := containers[0]
+	var foundToken bool
+	for _, e := range subagent.Env {
+		if e.Name == "ANTHROPIC_API_KEY" && e.Value != "" {
+			foundToken = true
+		}
+	}
+	if !foundToken {
+		t.Error("planner subagent container missing ANTHROPIC_API_KEY env var (signed token)")
+	}
+}
+
+// TestBuildJobSpec_Planner_ActiveDeadlineUsesPlanner600sFloor verifies that when
+// no caps are passed the planner floor (600s + grace) is applied via DefaultCaps.
+func TestBuildJobSpec_Planner_ActiveDeadlineUsesPlanner600sFloor(t *testing.T) {
+	opts := buildPlannerTestOptions()
+	opts.Caps = nil // explicitly nil → planner floor applies
+	job := BuildJobSpec(opts)
+	want := int64(plannerCapsFloorSeconds) + DefaultWallClockGraceSeconds
+	if job.Spec.ActiveDeadlineSeconds == nil {
+		t.Fatal("planner job.Spec.ActiveDeadlineSeconds is nil")
+	}
+	if *job.Spec.ActiveDeadlineSeconds != want {
+		t.Errorf("planner ActiveDeadlineSeconds = %d; want %d (600s floor + %ds grace)",
+			*job.Spec.ActiveDeadlineSeconds, want, DefaultWallClockGraceSeconds)
+	}
+}
+
+// TestBuildJobSpec_Planner_ContainerTopologyMatchesExecutor verifies that the
+// planner Job has the same container count (2 main containers) and init container
+// count (2) as the executor Job — the Kind-invariant PodSpec contract.
+func TestBuildJobSpec_Planner_ContainerTopologyMatchesExecutor(t *testing.T) {
+	plannerJob := BuildJobSpec(buildPlannerTestOptions())
+	executorJob := BuildJobSpec(buildTestOptions())
+
+	plannerInits := len(plannerJob.Spec.Template.Spec.InitContainers)
+	executorInits := len(executorJob.Spec.Template.Spec.InitContainers)
+	if plannerInits != executorInits {
+		t.Errorf("init container count mismatch: planner=%d executor=%d (should match Kind-invariant PodSpec)", plannerInits, executorInits)
+	}
+
+	plannerContainers := len(plannerJob.Spec.Template.Spec.Containers)
+	executorContainers := len(executorJob.Spec.Template.Spec.Containers)
+	if plannerContainers != executorContainers {
+		t.Errorf("main container count mismatch: planner=%d executor=%d (should match Kind-invariant PodSpec)", plannerContainers, executorContainers)
+	}
+}
+
+// TestPlannerJobName_Format verifies the tide-<level>-<uid>-<attempt> format.
+func TestPlannerJobName_Format(t *testing.T) {
+	tests := []struct {
+		level    string
+		uid      string
+		attempt  int
+		expected string
+	}{
+		{"milestone", "abc-123", 1, "tide-milestone-abc-123-1"},
+		{"phase", "def-456", 2, "tide-phase-def-456-2"},
+		{"plan", "ghi-789", 1, "tide-plan-ghi-789-1"},
+	}
+	for _, tt := range tests {
+		got := PlannerJobName(tt.level, tt.uid, tt.attempt)
+		if got != tt.expected {
+			t.Errorf("PlannerJobName(%q, %q, %d) = %q; want %q", tt.level, tt.uid, tt.attempt, got, tt.expected)
+		}
 	}
 }
