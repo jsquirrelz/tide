@@ -566,6 +566,14 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 // After this call, project.Status.Phase reflects the current budget state.
 func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tideprojectv1alpha1.Project, now time.Time) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
+
+	// Phase 04.1 P4.1: reset rolling window if elapsed. Failures are logged
+	// non-fatal (Pitfall C pattern) — never block dispatch on a tally op.
+	if _, err := budget.MaybeResetWindow(ctx, r.Client, project, now); err != nil {
+		logger.Error(err, "budget window reset failed (non-fatal)")
+	}
+
+	// Existing cap check follows — now sees the post-reset CostSpentCents value.
 	bypassed := budget.IsBypassed(project, now)
 	capExceeded := budget.IsCapExceeded(project)
 

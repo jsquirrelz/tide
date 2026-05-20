@@ -84,18 +84,20 @@ type BudgetConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	AbsoluteCapCents int64 `json:"absoluteCapCents"`
 
-	// RollingWindowCapCents optionally caps spending over the window defined by the
-	// BudgetStatus.WindowStart field.
-	//
-	// DEFERRED (WR-02): As of Phase 2 only AbsoluteCapCents is enforced.
-	// WindowStart is set on first roll-up and never reset, so the rolling cap
-	// behaves identically to an absolute cap. A future phase will add
-	// window-boundary reset logic in ProjectReconciler that compares
-	// (now - WindowStart) against the configured window and zeros the tally
-	// when crossed; until then this field is documentation-only and should
-	// not be relied on for cost control.
+	// RollingWindowCapCents caps spending over the rolling window defined by
+	// BudgetStatus.WindowStart and BudgetConfig.RollingWindowDuration. When
+	// the window elapses, ProjectReconciler.handleBudgetGate resets
+	// CostSpentCents + TokensSpent and advances WindowStart.
 	// +optional
 	RollingWindowCapCents int64 `json:"rollingWindowCapCents,omitempty"`
+
+	// RollingWindowDuration is the window length over which
+	// RollingWindowCapCents applies. Default: 24h when unset. Must be >= 1h
+	// to prevent inadvertent denial-of-dispatch via tiny windows.
+	// Validation: enforced semantically in ProjectReconciler (metav1.Duration
+	// is a struct; controller-gen Pattern markers require a string type).
+	// +optional
+	RollingWindowDuration *metav1.Duration `json:"rollingWindowDuration,omitempty"`
 }
 
 // PlanAdmissionConfig controls file-touch policy during plan validation (Phase 2+).

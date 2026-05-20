@@ -56,6 +56,105 @@ func TestIsCapExceeded(t *testing.T) {
 	}
 }
 
+// TestIsCapExceeded_RollingCap verifies the rolling cap check added in Phase 04.1 P4.1.
+// AbsoluteCapCents check is backward-compatible and unchanged.
+func TestIsCapExceeded_RollingCap(t *testing.T) {
+	cases := []struct {
+		name         string
+		absoluteCap  int64
+		rollingCap   int64
+		spent        int64
+		want         bool
+	}{
+		{
+			name:        "absolute=0, rolling=100, spent=150 → exceeded by rolling",
+			absoluteCap: 0,
+			rollingCap:  100,
+			spent:       150,
+			want:        true,
+		},
+		{
+			name:        "absolute=0, rolling=100, spent=50 → NOT exceeded",
+			absoluteCap: 0,
+			rollingCap:  100,
+			spent:       50,
+			want:        false,
+		},
+		{
+			name:        "absolute=0, rolling=100, spent=100 → at cap, not exceeded",
+			absoluteCap: 0,
+			rollingCap:  100,
+			spent:       100,
+			want:        false,
+		},
+		{
+			name:        "absolute=100, rolling=0, spent=150 → exceeded by absolute (existing behavior preserved)",
+			absoluteCap: 100,
+			rollingCap:  0,
+			spent:       150,
+			want:        true,
+		},
+		{
+			name:        "absolute=100, rolling=200, both set, spent=150 → exceeded absolute not rolling",
+			absoluteCap: 100,
+			rollingCap:  200,
+			spent:       150,
+			want:        true,
+		},
+		{
+			name:        "absolute=200, rolling=100, both set, spent=150 → exceeded rolling not absolute",
+			absoluteCap: 200,
+			rollingCap:  100,
+			spent:       150,
+			want:        true,
+		},
+		{
+			name:        "both caps set, both exceeded, spent=300 → exceeded",
+			absoluteCap: 100,
+			rollingCap:  100,
+			spent:       300,
+			want:        true,
+		},
+		{
+			name:        "nil project → NOT exceeded",
+			absoluteCap: 0,
+			rollingCap:  0,
+			spent:       0,
+			want:        false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "nil project → NOT exceeded" {
+				got := IsCapExceeded(nil)
+				if got != tc.want {
+					t.Errorf("IsCapExceeded(nil) = %v; want %v", got, tc.want)
+				}
+				return
+			}
+
+			p := &tidev1alpha1.Project{
+				Spec: tidev1alpha1.ProjectSpec{
+					Budget: tidev1alpha1.BudgetConfig{
+						AbsoluteCapCents:    tc.absoluteCap,
+						RollingWindowCapCents: tc.rollingCap,
+					},
+				},
+				Status: tidev1alpha1.ProjectStatus{
+					Budget: tidev1alpha1.BudgetStatus{CostSpentCents: tc.spent},
+				},
+			}
+			got := IsCapExceeded(p)
+			if got != tc.want {
+				t.Errorf("IsCapExceeded(absolute=%d, rolling=%d, spent=%d) = %v; want %v",
+					tc.absoluteCap, tc.rollingCap, tc.spent, got, tc.want)
+			}
+		})
+	}
+}
+
 // ---- IsBypassed ----
 
 func TestIsBypassed(t *testing.T) {

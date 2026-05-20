@@ -1,10 +1,12 @@
-// Package budget unit tests for tally.go: RollUpUsage.
+// Package budget unit tests for tally.go: RollUpUsage, MaybeResetWindow.
 // Uses controller-runtime's fake client with WithStatusSubresource so Status
 // patches actually persist.
 package budget
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,5 +143,106 @@ func TestRollUpUsage_PreservesExistingWindowStart(t *testing.T) {
 	// `Truncate(1000000000)` (1e9 ns).
 	if !updated.Status.Budget.WindowStart.Time.Truncate(time.Second).Equal(existingTime.Time.Truncate(time.Second)) {
 		t.Errorf("WindowStart changed: got %v; want %v", updated.Status.Budget.WindowStart, existingTime)
+	}
+}
+
+// TestMaybeResetWindow_TableDriven covers the window-reset cases:
+//   - no rolling cap configured        → no-op
+//   - rolling cap set but WindowStart nil → no-op (first roll-up sets it)
+//   - window not yet elapsed           → no-op
+//   - window elapsed, default duration → reset
+//   - window elapsed, custom duration  → reset
+//
+// Uses the existing newTallyFakeClient + makeProject helpers (Phase 04.1 P4.1).
+func TestMaybeResetWindow_TableDriven(t *testing.T) {
+	baseTime := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	baseTimeMeta := metav1.NewTime(baseTime)
+
+	cases := []struct {
+		name            string
+		rollingCapCents int64
+		windowDuration  *metav1.Duration
+		windowStart     *metav1.Time
+		costSpent       int64
+		now             time.Time
+		wantReset       bool
+		wantCostSpent   int64 // expected CostSpentCents AFTER MaybeResetWindow
+	}{
+		{
+			name:            "no rolling cap → no-op",
+			rollingCapCents: 0,
+			windowStart:     &baseTimeMeta,
+			costSpent:       50,
+			now:             baseTime.Add(48 * time.Hour),
+			wantReset:       false,
+			wantCostSpent:   50,
+		},
+		{
+			name:            "rolling cap set but WindowStart nil → no-op",
+			rollingCapCents: 100,
+			windowStart:     nil,
+			costSpent:       50,
+			now:             baseTime,
+			wantReset:       false,
+			wantCostSpent:   50,
+		},
+		{
+			name:            "window not elapsed (default 24h) → no-op",
+			rollingCapCents: 100,
+			windowStart:     &baseTimeMeta,
+			costSpent:       50,
+			now:             baseTime.Add(23 * time.Hour),
+			wantReset:       false,
+			wantCostSpent:   50,
+		},
+		{
+			name:            "window elapsed (default 24h) → reset",
+			rollingCapCents: 100,
+			windowStart:     &baseTimeMeta,
+			costSpent:       95,
+			now:             baseTime.Add(25 * time.Hour),
+			wantReset:       true,
+			wantCostSpent:   0,
+		},
+		{
+			name:            "window elapsed (custom 1h duration) → reset",
+			rollingCapCents: 100,
+			windowDuration:  &metav1.Duration{Duration: 1 * time.Hour},
+			windowStart:     &baseTimeMeta,
+			costSpent:       95,
+			now:             baseTime.Add(2 * time.Hour),
+			wantReset:       true,
+			wantCostSpent:   0,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			p := makeProject(fmt.Sprintf("test-%s", strings.ReplaceAll(tc.name, " ", "-")))
+			p.Spec.Budget.RollingWindowCapCents = tc.rollingCapCents
+			p.Spec.Budget.RollingWindowDuration = tc.windowDuration
+			p.Status.Budget.WindowStart = tc.windowStart
+			p.Status.Budget.CostSpentCents = tc.costSpent
+
+			c := newTallyFakeClient(t, p)
+			ctx := context.Background()
+
+			reset, err := MaybeResetWindow(ctx, c, p, tc.now)
+			if err != nil {
+				t.Fatalf("MaybeResetWindow: %v", err)
+			}
+			if reset != tc.wantReset {
+				t.Errorf("reset = %v; want %v", reset, tc.wantReset)
+			}
+
+			var updated tidev1alpha1.Project
+			if err := c.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Name}, &updated); err != nil {
+				t.Fatalf("get project: %v", err)
+			}
+			if updated.Status.Budget.CostSpentCents != tc.wantCostSpent {
+				t.Errorf("CostSpentCents = %d; want %d", updated.Status.Budget.CostSpentCents, tc.wantCostSpent)
+			}
+		})
 	}
 }
