@@ -9,3 +9,7 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include embedded data files needed by go:embed directives
+# (e.g. internal/gitleaks/default_rules.toml referenced by scanner.go)
+!**/*.toml
