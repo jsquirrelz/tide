@@ -196,7 +196,10 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 		const projectName = "bp-it-ph-proj"
 		const msName = "bp-it-ph-ms"
 		const phaseName = "bp-it-ph"
-		AfterEach(func() { cleanupBP(projectName, msName, phaseName, "") })
+		AfterEach(func() {
+			// CR-03 fix: child Plan added to satisfy BoundaryDetected — cleanup too.
+			cleanupBP(projectName, msName, phaseName, phaseName+"-child")
+		})
 
 		It("phase boundary dispatches `tide: phase <name> authored`", func() {
 			proj := makeProjectBP(projectName)
@@ -229,6 +232,41 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
 			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-phase-%s-1", got.UID), "default")).To(Succeed())
+
+			// CR-03 fix: PhaseReconciler now gates the boundary push on
+			// gates.BoundaryDetected. Create a Succeeded child Plan with
+			// proper controller owner-ref so the gate returns true.
+			truePtr := true
+			childPlan := &tideprojectv1alpha1.Plan{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      phaseName + "-child",
+					Namespace: "default",
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion:         "tideproject.k8s/v1alpha1",
+						Kind:               "Phase",
+						Name:               got.Name,
+						UID:                got.UID,
+						Controller:         &truePtr,
+						BlockOwnerDeletion: &truePtr,
+					}},
+				},
+				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
+			}
+			Expect(k8sClient.Create(ctx, childPlan)).To(Succeed())
+			waitITCacheSync(childPlan.Name, &tideprojectv1alpha1.Plan{})
+			var freshPlan tideprojectv1alpha1.Plan
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: childPlan.Name, Namespace: "default"}, &freshPlan)).To(Succeed())
+			planPatch := client.MergeFrom(freshPlan.DeepCopy())
+			freshPlan.Status.Phase = "Succeeded"
+			Expect(k8sClient.Status().Patch(ctx, &freshPlan, planPatch)).To(Succeed())
+			Eventually(func() string {
+				var g tideprojectv1alpha1.Plan
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: childPlan.Name, Namespace: "default"}, &g); err != nil {
+					return ""
+				}
+				return g.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+
 			drive(r.Reconcile, phaseName, 3)
 
 			expectPushJobMessage(proj.UID, "tide: phase "+phaseName+" authored")
