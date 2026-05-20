@@ -28,6 +28,17 @@ linters:
       logcheck:
         type: "module"
         description: Checks Go logging calls for Kubernetes logging conventions.
+        settings:
+          # Phase 04.1 P4.4: tightened sub-checks to enforce the post-sweep convention.
+          # Knob names verified against logcheck v0.10.1 (sigs.k8s.io/logtools) via
+          # source inspection of gclplugin/plugin.go (settings.Check map[string]bool)
+          # and logcheck/pkg/logcheck.go constants before committing.
+          # The check map uses names WITHOUT the "check-" prefix (plugin convention).
+          # Defaults already on: structured, parameters, deprecations,
+          #   verbosity-zero, verbosity-error, key.
+          # Enabling additional checks:
+          check:
+            with-helpers: true
     revive:
       rules:
         - name: comment-spacings

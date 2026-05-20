@@ -161,7 +161,14 @@ func main() {
 	//   TIDE_LEADER_LEASE_SECONDS    → ctrl.Options.LeaseDuration            D-D1
 	//   TIDE_LEADER_RENEW_SECONDS    → ctrl.Options.RenewDeadline            D-D1
 	//   TIDE_LEADER_RETRY_SECONDS    → ctrl.Options.RetryPeriod              D-D1
+	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override
+	// via Helm values.tidePushImage (which sets TIDE_PUSH_IMAGE on the controller
+	// env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
 	tidePushImage := envOrDefault("TIDE_PUSH_IMAGE", "ghcr.io/jsquirrelz/tide-push:v0.1.0-dev")
+
+	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override
+	// via Helm values.claudeSubagentImage (which sets CLAUDE_SUBAGENT_IMAGE on the
+	// controller env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
 	claudeSubagentImage := envOrDefault("CLAUDE_SUBAGENT_IMAGE", "ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0-dev")
 	helmProviderDefaults := tideHelmProviderDefaults(claudeSubagentImage)
 	leaderLease, leaderRenew, leaderRetry := resolveLeaderElectionTiming()

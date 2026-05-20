@@ -729,7 +729,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			return ctrl.Result{}, nil
 		}
 		if skipped {
-			logger.V(1).Info("Skipped controller-side output validation; workspace root not visible", "task", task.Name, "workspaceRoot", taskWorkspaceRoot)
+			logger.V(1).Info("skipped controller-side output validation; workspace root not visible", "task", task.Name, "workspaceRoot", taskWorkspaceRoot)
 		}
 		if len(violations) > 0 {
 			msg := buildViolationMessage(violations)
