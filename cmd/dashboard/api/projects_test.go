@@ -412,3 +412,55 @@ func TestBudgetSummary(t *testing.T) {
 		t.Errorf("p3 (cap=0 = uncapped): withinBudget=%v, want true", w)
 	}
 }
+
+// TestListProjectsActiveMilestoneCountCrossNamespace is the WR-10 regression
+// test: projects in different namespaces that happen to share a name must
+// NOT cross-contaminate each other's activeMilestoneCount via the hoisted
+// MilestoneList. Before the fix the per-project countActiveMilestones
+// listed by namespace, so name-collisions did NOT bleed; after the fix the
+// activeByProject map keys on (namespace, name) — this test guards that
+// keying.
+func TestListProjectsActiveMilestoneCountCrossNamespace(t *testing.T) {
+	_, router := newHandler(t,
+		newProject("alpha", "ns-A", "Running"),
+		newProject("alpha", "ns-B", "Running"),
+		newMilestone("a-m-running", "ns-A", "alpha", "Running"),
+		newMilestone("a-m-succeeded", "ns-A", "alpha", "Succeeded"), // excluded
+		newMilestone("b-m-pending", "ns-B", "alpha", "Pending"),
+		newMilestone("b-m-running", "ns-B", "alpha", "Running"),
+	)
+
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var got []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 projects, got %d", len(got))
+	}
+
+	// Index by composite key so same-name distinct-namespace projects
+	// are unambiguously addressable in assertions.
+	byKey := make(map[string]int)
+	for _, p := range got {
+		key := p["namespace"].(string) + "/" + p["name"].(string)
+		byKey[key] = int(p["activeMilestoneCount"].(float64))
+	}
+	if byKey["ns-A/alpha"] != 1 {
+		t.Errorf("ns-A/alpha activeMilestoneCount=%d, want 1 (Running only; Succeeded excluded)", byKey["ns-A/alpha"])
+	}
+	if byKey["ns-B/alpha"] != 2 {
+		t.Errorf("ns-B/alpha activeMilestoneCount=%d, want 2 (Pending + Running)", byKey["ns-B/alpha"])
+	}
+}

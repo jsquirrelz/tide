@@ -96,6 +96,13 @@ type errorBody struct {
 // List implements GET /api/v1/projects[?namespace=foo]. Returns a JSON
 // array of projectSummary; empty array (NOT 404) when no projects exist.
 // Optional `namespace` query param filters; absent = all namespaces.
+//
+// WR-10 fix: hoists a single MilestoneList outside the projects loop and
+// groups by (namespace, ProjectRef) once, replacing the previous
+// O(Projects × Milestones) per-request behavior with O(Projects + Milestones).
+// Same namespace filter as the ProjectList so the milestone query stays
+// scoped identically. If the milestone List fails, every project still
+// returns with activeMilestoneCount=0 (partial-result contract preserved).
 func (h *ProjectsHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	namespace := r.URL.Query().Get("namespace")
@@ -112,22 +119,53 @@ func (h *ProjectsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Single milestone List (scoped to the same namespace filter as the
+	// projects List). On error the map stays empty and every project
+	// reports activeMilestoneCount=0 — same partial-result semantics as
+	// the per-project path used to have.
+	activeByProject := h.activeMilestoneCountsByProject(ctx, opts)
+
 	// Pre-allocate so an empty result still serializes as `[]`, not
 	// `null` — D-UI-SPEC empty-state contract relies on the empty-array
 	// distinction client-side.
 	summaries := make([]projectSummary, 0, len(projects.Items))
 	for i := range projects.Items {
 		p := &projects.Items[i]
-		count, cerr := h.countActiveMilestones(ctx, p)
-		if cerr != nil {
-			// Log but don't fail the list — surface the partial result
-			// with active-count of 0 rather than 500 the whole call.
-			h.Log.Error(cerr, "count active milestones failed (returning 0)", "project", p.Name)
-		}
+		count := activeByProject[projectKey(p.Namespace, p.Name)]
 		summaries = append(summaries, summarize(p, count))
 	}
 
 	writeJSON(w, http.StatusOK, summaries)
+}
+
+// projectKey is the composite (namespace, name) key used by the
+// activeMilestoneCountsByProject lookup. Distinct namespaces can host
+// projects with colliding names without their milestone counts merging.
+func projectKey(namespace, name string) string {
+	return namespace + "/" + name
+}
+
+// activeMilestoneCountsByProject performs a single MilestoneList scoped
+// to the given ListOptions and returns a (namespace+"/"+ProjectRef) →
+// activeCount map. Active = Status.Phase is neither "Succeeded" nor
+// "Failed". On List error: logs and returns an empty map (consistent
+// with the previous per-project countActiveMilestones partial-result
+// behavior — never 500s the parent List request).
+func (h *ProjectsHandler) activeMilestoneCountsByProject(ctx context.Context, opts []client.ListOption) map[string]int {
+	var ms tidev1alpha1.MilestoneList
+	if err := h.Client.List(ctx, &ms, opts...); err != nil {
+		h.Log.Error(err, "list milestones for active-count failed (returning empty map)")
+		return map[string]int{}
+	}
+	out := make(map[string]int, len(ms.Items))
+	for i := range ms.Items {
+		m := &ms.Items[i]
+		if m.Status.Phase == "Succeeded" || m.Status.Phase == "Failed" {
+			continue
+		}
+		out[projectKey(m.Namespace, m.Spec.ProjectRef)]++
+	}
+	return out
 }
 
 // Get implements GET /api/v1/projects/{name}[?namespace=foo]. Returns a
