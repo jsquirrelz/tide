@@ -5,7 +5,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 
 import TaskDetailDrawer, {
@@ -159,15 +158,20 @@ describe("TaskDetailDrawer — Test 7: drawer content (header, status row, metad
     );
     // Look for the field-label tokens rather than the values so the test
     // does not depend on the specific values besides the metadata existing.
-    expect(screen.getByText(/namespace/i)).toBeInTheDocument();
-    expect(screen.getByText(/attempt/i)).toBeInTheDocument();
-    expect(screen.getByText(/pod/i)).toBeInTheDocument();
-    expect(screen.getByText(/exit code/i)).toBeInTheDocument();
-    expect(screen.getByText(/wave/i)).toBeInTheDocument();
-    expect(screen.getByText(/scheduled/i)).toBeInTheDocument();
-    expect(screen.getByText(/envelope/i)).toBeInTheDocument();
-    // And the failed exit code value renders.
-    expect(screen.getByText("1")).toBeInTheDocument();
+    // Use the metadata grid scope to avoid matching the "Inspect wave"
+    // button label in the Actions row.
+    const grid = screen.getByTestId("drawer-metadata");
+    expect(grid).toHaveTextContent(/namespace/i);
+    expect(grid).toHaveTextContent(/attempt/i);
+    expect(grid).toHaveTextContent(/pod/i);
+    expect(grid).toHaveTextContent(/exit code/i);
+    expect(grid).toHaveTextContent(/wave index/i);
+    expect(grid).toHaveTextContent(/scheduled/i);
+    expect(grid).toHaveTextContent(/envelope/i);
+    // Verify the failed task's exitCode = 1 renders inside the grid (not
+    // any other "1" in the document — e.g. attempt "1 of 3" if defaults
+    // change).
+    expect(grid.textContent).toMatch(/exit code\D*1/i);
   });
 });
 

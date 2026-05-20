@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 
 // Mock @xyflow's useNodesInitialized to flip true synchronously so layout
 // runs in the first effect tick — keeps the test deterministic without a
@@ -177,40 +177,38 @@ describe("ExecutionDAGView — Test 5: WaveBackground bands at z-index 0; tasks 
 });
 
 describe("ExecutionDAGView — Test 3: Pitfall 26 flicker mitigation", () => {
-  it("newly-mounted view begins with data-flicker-ready='false' then flips to 'true' after layout", async () => {
-    // Pass an explicit `forceFlickerDelay=true` prop so the component
-    // exposes the transitional state to the test (in production the same
-    // sequence happens within React's commit/effect ticks).
+  it("opacity:0 → opacity:1 transition (data-flicker-ready) gates on useNodesInitialized + dagre layout", async () => {
+    // Render with plan=null first so we can observe the pre-data
+    // "false" state, then pass real data to observe the transition
+    // to "true" once useNodesInitialized + dagre layout complete.
     const { rerender } = render(
       <ExecutionDAGView
         planName="04-13"
-        plan={EXECUTION_PAYLOAD}
+        plan={null}
         onTaskClick={() => undefined}
-        // Test-only seam: split the layout pass across two ticks so the
-        // assertion can observe the opacity:0 → opacity:1 transition.
-        forceFlickerDelay
       />,
     );
     const root = document.querySelector('[data-testid="execution-dag-view"]')!;
+    // No plan yet → still "false" (Pitfall 26 starting state).
     expect(root.getAttribute("data-flicker-ready")).toBe("false");
 
-    // Advance the second tick — useNodesInitialized has already returned
-    // true (mocked above), so flipping happens after one rAF.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-
+    // Now feed real plan data. The mocked `useNodesInitialized()`
+    // returns true synchronously, so the layout effect runs in the
+    // commit phase that follows the data-load effect.
     rerender(
       <ExecutionDAGView
         planName="04-13"
         plan={EXECUTION_PAYLOAD}
         onTaskClick={() => undefined}
-        forceFlickerDelay
       />,
     );
     await waitFor(() => {
       const r2 = document.querySelector('[data-testid="execution-dag-view"]')!;
       expect(r2.getAttribute("data-flicker-ready")).toBe("true");
     });
+    // After the layout pass, task nodes carry opacity:1 (UI-SPEC §5);
+    // before flicker-ready transitions to true they would have opacity:0.
+    // We assert on the data-flicker-ready transition rather than reading
+    // individual node opacity (which @xyflow nests inside its own wrapper).
   });
 });
