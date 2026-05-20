@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-20T07:43:15.363Z"
-last_activity: 2026-05-19 -- Phase 04 execution started
+last_updated: "2026-05-20T10:29:09.277Z"
+last_activity: 2026-05-20 -- Phase 04.1 execution started
 progress:
   total_phases: 8
   completed_phases: 6
-  total_plans: 67
+  total_plans: 82
   completed_plans: 67
-  percent: 100
+  percent: 82
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 04.1 — pre-v1-audit-fixes-cross-phase-uat-closeout (URGENT, INSERTED after Phase 4)
+**Current focus:** Phase 04.1 — pre-v1-audit-fixes-cross-phase-uat-closeout
 
 ## Current Position
 
-Phase: 04 (gates-observability-dashboard-cli) — EXECUTING
-Plan: 1 of 16
-Status: Executing Phase 04
-Last activity: 2026-05-19 -- Phase 04 execution started
+Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
+Plan: 1 of 15
+Status: Executing Phase 04.1
+Last activity: 2026-05-20 -- Phase 04.1 execution started
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 

@@ -65,6 +65,12 @@ jobs:
       - name: Verify no blocking I/O in reconcilers (Pitfall 1)
         run: make verify-no-blocking
 
+      - name: Verify pkg/dispatch imports (SUB-01)
+        run: make verify-dispatch-imports
+
+      - name: Verify import firewall (SUB-05 — alias for tide-lint providerfirewall)
+        run: make verify-import-firewall
+
       - name: Run custom analyzers (POOL-03 / Pitfall 6)
         run: make tide-lint
 

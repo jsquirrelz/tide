@@ -26,4 +26,5 @@ jobs:
       - name: Running Tests
         run: |
           go mod tidy
+          git diff --exit-code go.mod go.sum  # Phase 04.1 P2.3 — fail if tidy mutated tracked files
           make test

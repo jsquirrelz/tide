@@ -1,0 +1,38 @@
+name: Live E2E (Claude-backed)
+
+# Phase 04.1 P2.4 — workflow_dispatch ONLY per locked user decision. No
+# schedule: trigger committed at v1.0. Operators forking the repo can wire
+# their own ANTHROPIC_API_KEY repo secret and add a schedule trigger when
+# their budget alerting is ready. The make test-e2e-live target is
+# triple-gated (//go:build live_e2e, BeforeSuite env-var check, $1.00 hard
+# cap via absoluteCapCents=100) so accidental dispatch costs are bounded.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  live-e2e:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Run live Claude E2E (cost-capped)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: make test-e2e-live

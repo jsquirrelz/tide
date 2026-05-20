@@ -40,45 +40,25 @@ Two gates protect against accidental live API calls during normal development:
 
 These three gates compose: a developer or operator must explicitly opt into all three to make a real API call. There is no path from `make test` to a paid request.
 
-## Nightly CI Recipe
+## CI integration
 
-Template GitHub Actions workflow (`.github/workflows/live-e2e.yml`) — operators copy and adapt for whatever CI they use:
+A workflow file `.github/workflows/live-e2e.yml` is committed with
+`workflow_dispatch:` ONLY (no `schedule:` trigger) per Phase 04.1 P2.4
+locked decision. To enable nightly runs in your fork:
 
-```yaml
-name: Live Claude E2E (nightly)
-on:
-  schedule:
-    # 06:00 UTC every day — adjust to your team's cost-monitoring window.
-    - cron: '0 6 * * *'
-  workflow_dispatch: {}  # allow manual triggering for debug runs
+1. Add a repo secret `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions).
+2. Edit `.github/workflows/live-e2e.yml` and add a `schedule:` trigger, e.g.:
+   ```yaml
+   on:
+     workflow_dispatch:
+     schedule:
+       - cron: '0 7 * * *'  # 07:00 UTC daily
+   ```
+3. Ensure your fork has a budget alerting setup (the `test-e2e-live` target
+   is triple-gated and capped at $1.00 per run, but unbounded daily
+   invocations still accumulate).
 
-jobs:
-  live-e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25  # 15m test + 5m kind setup + 5m slack
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-      - uses: helm/kind-action@v1
-        with:
-          version: v0.31.0
-          cluster_name: tide-live-e2e
-      - name: Build + load TIDE images
-        run: make test-int-kind-prep
-      - name: Install TIDE controller
-        run: |
-          helm install tide ./charts/tide --create-namespace -n tide-system \
-            --wait --timeout 5m
-      - name: Run live E2E spec
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: make test-e2e-live
-      - name: Capture controller logs on failure
-        if: failure()
-        run: kubectl logs -n tide-system deployment/tide-controller-manager --tail=500
-```
+The on-demand dispatch (`gh workflow run live-e2e.yml`) works out of the box.
 
 **Alerting:** wire the workflow's failure notification to fire on two consecutive nightly failures (not the first one — a transient API blip should not page the on-call). GitHub Actions doesn't expose this natively; operators typically pipe failures into a tracker (Slack, PagerDuty) that aggregates by job name + dedupes on the same-day successful run. See `T-314` mitigation in the plan's `<threat_model>`.
 
