@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { fetchProject, fetchProjects } from "./api";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function stubFetchOK<T>(payload: T) {
   vi.stubGlobal(
