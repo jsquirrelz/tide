@@ -56,7 +56,11 @@ type Caps struct {
 // Pitfall 9 / T-02-03-03).
 type TaskDev struct {
 	// TestMode overrides the stub subagent's exit behaviour (used by integration tests).
-	// +kubebuilder:validation:Enum=success;fail-exit-1;hang;exceed-output-paths
+	// The wait-for-signal mode (Phase 3 D-D3) pins the stub at Running until the
+	// orchestrator touches /workspace/envelopes/{task-uid}/release — required by
+	// the chaos-resume Layer B spec to observe mid-wave leader handoff. See
+	// cmd/stub-subagent/main.go:dispatchWaitForSignal for the polling contract.
+	// +kubebuilder:validation:Enum=success;fail-exit-1;hang;exceed-output-paths;wait-for-signal
 	// +optional
 	TestMode string `json:"testMode,omitempty"`
 }
