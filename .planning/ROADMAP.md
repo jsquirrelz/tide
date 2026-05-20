@@ -183,7 +183,7 @@ Plans:
 - [x] 04-15-PLAN.md — Status/primitive components (StatusBadge, ProjectPicker, ClipboardCopyAction, WaveBackground) (Wave 7)
 - [x] 04-13-PLAN.md — DAG views + 5 custom nodes + TaskDetailDrawer + dagre layout (Wave 8)
 - [x] 04-16-PLAN.md — PodLogStreamer + SSE hooks + ANSI parser + EmptyState/ErrorState/LoadingState + bundle-size gate + Makefile embed (Wave 9)
-- [ ] 04-14-PLAN.md — Helm chart additions (dashboard-deployment + RBAC + ServiceMonitor) + E2E smoke (Wave 10)
+- [x] 04-14-PLAN.md — Helm chart additions (dashboard-deployment + RBAC + ServiceMonitor) + E2E smoke (Wave 10)
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — React Flow vs htmx is contributor-pool-shaping; two-DAG view UX needs prototyping; SSE-through-ingress concerns; observability data volume (Pitfall 17); dashboard websocket leak prevention (Pitfall 22).
 
