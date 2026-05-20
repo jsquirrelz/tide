@@ -322,6 +322,15 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project,
 		WatchNamespace:          watchNamespace,
 		TidePushImage:           tidePushImage,
+		// Phase 04.1 P1.1 fix: Dispatcher must be assigned for the
+		// reconcileProjectPhase2 path to fire — project_controller.go:198 gates
+		// budget cap + init Job + Phase 3 clone/push lifecycle on r.Dispatcher != nil.
+		// Without this assignment, ProjectReconciler only ever sets the Ready
+		// condition and never runs Phase 2/3 lifecycle work in production.
+		// (EnvReader is intentionally NOT added — ProjectReconciler does not
+		// dispatch subagents and has no envelope-out consumer; locked user
+		// decision documented in 04.1-RESEARCH.md §P1.1 Open Question 2.)
+		Dispatcher: dispatcher,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
