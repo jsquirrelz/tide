@@ -324,16 +324,16 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 // shapes:
 //
 //   - "plan":      "tide: plan <name> authored + executed"  ← only one
-//                                                             with "+ executed"
-//                                                             suffix (Tasks
-//                                                             have already
-//                                                             executed by
-//                                                             the time Plan
-//                                                             boundary fires).
+//     with "+ executed"
+//     suffix (Tasks
+//     have already
+//     executed by
+//     the time Plan
+//     boundary fires).
 //   - "phase":     "tide: phase <name> authored"
 //   - "milestone": "tide: milestone <name> authored"
 //   - "project":   "tide: project complete"                 ← no name suffix;
-//                                                             final commit.
+//     final commit.
 //
 // Returns an error for unknown boundary names (e.g., "wave" — Tasks
 // ship in their parent Plan's commit) or for an empty name when one

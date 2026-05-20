@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	pkggit "github.com/jsquirrelz/tide/pkg/git"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // addWorktreeFunc is the package-level test seam — production code resolves

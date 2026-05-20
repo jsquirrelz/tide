@@ -42,9 +42,9 @@ import (
 // Each sub-test asserts:
 //   - Push Job exists with name `tide-push-<project.UID>`.
 //   - Container Args carry `--commit-message=<level-shape>`:
-//       milestone → "tide: milestone <name> authored"
-//       phase     → "tide: phase <name> authored"
-//       plan      → "tide: plan <name> authored + executed"
+//     milestone → "tide: milestone <name> authored"
+//     phase     → "tide: phase <name> authored"
+//     plan      → "tide: plan <name> authored + executed"
 var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", Label("envtest", "phase4", "boundarypush-integration"), func() {
 	ctx := context.Background()
 

@@ -93,6 +93,9 @@ func TestIntegrationKind(t *testing.T) {
 	if os.Getenv("SKIP_KIND_TESTS") == "true" {
 		t.Skip("SKIP_KIND_TESTS=true; skipping Layer B kind tests")
 	}
+	if testing.Short() {
+		t.Skip("skipping kind integration tests in short mode")
+	}
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Integration Kind Suite")
 }

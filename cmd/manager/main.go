@@ -59,6 +59,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
+	// +kubebuilder:scaffold:imports
 )
 
 // preChargeTimeout bounds the POOL-02 PreCharge call at Manager startup.
@@ -219,6 +220,7 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
+	// +kubebuilder:scaffold:scheme
 
 	// 3. Construct the Manager (CTRL-01, CTRL-03).
 	//    Phase 3 D-D1: leader-election timings come from Helm via the env-var
@@ -422,6 +424,8 @@ func main() {
 		setupLog.Error(err, "unable to create webhook", "kind", "Wave")
 		os.Exit(1)
 	}
+
+	// +kubebuilder:scaffold:builder
 
 	// 9. Register Phase 2 budget.PreCharge as a Manager Runnable (D-D1 / Pitfall C).
 	//    Runs after Manager.Start completes leader-election + cache sync so the

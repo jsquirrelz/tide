@@ -385,7 +385,7 @@ func (r *PhaseReconciler) buildPlannerJob(ph *tideprojectv1alpha1.Phase, jobName
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: &ttl,
-			Template: batchv1Template(jobName, image),
+			Template:                batchv1Template(jobName, image),
 		},
 	}
 }

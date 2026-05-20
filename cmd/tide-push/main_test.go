@@ -212,13 +212,13 @@ func TestRunPushModeCleanFirstPush(t *testing.T) {
 	writeArtifact(t, ws, "artifacts/M-001/P-003/L-005/PLAN.md", "# clean plan\n")
 
 	cfg := pushConfig{
-		Mode:           "push",
-		Branch:         branch,
-		LastPushedSHA:  "",
-		CommitMessage:  "tide: plan 03-foo authored + executed",
-		ArtifactPaths:  []string{"artifacts/M-001/P-003/L-005/PLAN.md"},
-		Workspace:      ws,
-		ProjectUID:     "p1",
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/M-001/P-003/L-005/PLAN.md"},
+		Workspace:     ws,
+		ProjectUID:    "p1",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -285,13 +285,13 @@ func TestRunPushModeGitleaksBlocksAnthropicKey(t *testing.T) {
 		"# plan with secret\nANTHROPIC_API_KEY="+secret+" \n")
 
 	cfg := pushConfig{
-		Mode:           "push",
-		Branch:         branch,
-		LastPushedSHA:  "",
-		CommitMessage:  "tide: plan 03-foo authored + executed",
-		ArtifactPaths:  []string{"artifacts/M-001/P-003/L-005/PLAN.md"},
-		Workspace:      ws,
-		ProjectUID:     "p2",
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/M-001/P-003/L-005/PLAN.md"},
+		Workspace:     ws,
+		ProjectUID:    "p2",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -343,13 +343,13 @@ func TestRunPushModeSubsequentPushHonorsLease(t *testing.T) {
 
 	// First push.
 	cfg1 := pushConfig{
-		Mode:           "push",
-		Branch:         branch,
-		LastPushedSHA:  "",
-		CommitMessage:  "tide: plan 03-foo authored + executed",
-		ArtifactPaths:  []string{"artifacts/file-1.md"},
-		Workspace:      ws,
-		ProjectUID:     "p3",
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/file-1.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3",
 	}
 	exit1, stderr1 := stderrAndRun(t, ctx, cfg1, "pat-1")
 	if exit1 != 0 {
@@ -363,13 +363,13 @@ func TestRunPushModeSubsequentPushHonorsLease(t *testing.T) {
 	// Second push with lease=first headSHA.
 	writeArtifact(t, ws, "artifacts/file-2.md", "# second push\n")
 	cfg2 := pushConfig{
-		Mode:           "push",
-		Branch:         branch,
-		LastPushedSHA:  pr1.HeadSHA,
-		CommitMessage:  "tide: plan 03-bar authored + executed",
-		ArtifactPaths:  []string{"artifacts/file-2.md"},
-		Workspace:      ws,
-		ProjectUID:     "p3",
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: pr1.HeadSHA,
+		CommitMessage: "tide: plan 03-bar authored + executed",
+		ArtifactPaths: []string{"artifacts/file-2.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3",
 	}
 	exit2, stderr2 := stderrAndRun(t, ctx, cfg2, "pat-2")
 	if exit2 != 0 {
@@ -394,13 +394,13 @@ func TestRunPushModeRefusesMainBranch(t *testing.T) {
 	_ = bareSrc
 
 	cfg := pushConfig{
-		Mode:           "push",
-		Branch:         "main",
-		LastPushedSHA:  "",
-		CommitMessage:  "tide: plan x authored",
-		ArtifactPaths:  []string{},
-		Workspace:      ws,
-		ProjectUID:     "p4",
+		Mode:          "push",
+		Branch:        "main",
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan x authored",
+		ArtifactPaths: []string{},
+		Workspace:     ws,
+		ProjectUID:    "p4",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -457,13 +457,13 @@ func TestRunPushModeRefusesMissingCreds(t *testing.T) {
 	ws := setupWorkspace(t, bareSrc, branch)
 
 	cfg := pushConfig{
-		Mode:           "push",
-		Branch:         branch,
-		LastPushedSHA:  "",
-		CommitMessage:  "tide: plan x",
-		ArtifactPaths:  []string{},
-		Workspace:      ws,
-		ProjectUID:     "p6",
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan x",
+		ArtifactPaths: []string{},
+		Workspace:     ws,
+		ProjectUID:    "p6",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

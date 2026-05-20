@@ -50,11 +50,11 @@ type ProjectsHandler struct {
 // size and avoid surfacing transient fields (managedFields, etc.) the
 // dashboard never needs.
 type projectSummary struct {
-	Name                  string        `json:"name"`
-	Namespace             string        `json:"namespace"`
-	Phase                 string        `json:"phase"`
-	ActiveMilestoneCount  int           `json:"activeMilestoneCount"`
-	Budget                budgetSummary `json:"budget"`
+	Name                 string        `json:"name"`
+	Namespace            string        `json:"namespace"`
+	Phase                string        `json:"phase"`
+	ActiveMilestoneCount int           `json:"activeMilestoneCount"`
+	Budget               budgetSummary `json:"budget"`
 }
 
 // budgetSummary captures the three Budget fields the dashboard's status

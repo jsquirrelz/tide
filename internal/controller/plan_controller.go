@@ -461,7 +461,7 @@ func (r *PlanReconciler) buildPlanPlannerJob(plan *tideprojectv1alpha1.Plan, job
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: &ttl,
-			Template: batchv1Template(jobName, image),
+			Template:                batchv1Template(jobName, image),
 		},
 	}
 }

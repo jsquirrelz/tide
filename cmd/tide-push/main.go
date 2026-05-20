@@ -2,32 +2,32 @@
 //
 // Operating modes:
 //
-//   --mode=clone   — initial repo clone into <workspace>/repo.git. Used once
-//                    at Project creation by the ProjectReconciler's clone
-//                    Job (see internal/controller/push_helpers.go
-//                    buildCloneJob). Reads GIT_PAT for private repos;
-//                    public repos work without one.
+//	--mode=clone   — initial repo clone into <workspace>/repo.git. Used once
+//	                 at Project creation by the ProjectReconciler's clone
+//	                 Job (see internal/controller/push_helpers.go
+//	                 buildCloneJob). Reads GIT_PAT for private repos;
+//	                 public repos work without one.
 //
-//   --mode=push    — level-boundary push (Phase 3 D-B2). Stages
-//                    --artifact-paths into the per-run worktree at
-//                    <workspace>/worktrees/run-<branch>, creates a single
-//                    commit with --commit-message and the fixed TIDE-bot
-//                    author signature (W11), computes a unified-diff of
-//                    the new commit, scans the diff with internal/gitleaks
-//                    (D-B3), and on clean diff pushes with HTTPS+PAT and
-//                    --force-with-lease against --last-pushed-sha (D-B6).
+//	--mode=push    — level-boundary push (Phase 3 D-B2). Stages
+//	                 --artifact-paths into the per-run worktree at
+//	                 <workspace>/worktrees/run-<branch>, creates a single
+//	                 commit with --commit-message and the fixed TIDE-bot
+//	                 author signature (W11), computes a unified-diff of
+//	                 the new commit, scans the diff with internal/gitleaks
+//	                 (D-B3), and on clean diff pushes with HTTPS+PAT and
+//	                 --force-with-lease against --last-pushed-sha (D-B6).
 //
 // Exit-code map (Phase 03-RESEARCH Q5 RESOLVED — the reconciler in
 // plan 03-08 maps each `reason` to a distinct Project.Status.phase):
 //
-//   0  — success (push or clone succeeded)
-//   1  — generic git failure
-//   2  — invariant violation (envelope.reason=invalid-branch for D-B6
-//        main-guard, missing-creds for absent GIT_PAT, or bad args)
-//   10 — gitleaks finding (envelope.reason=leak-detected)
-//   11 — lease rejection (envelope.reason=lease-rejected)
-//   12 — auth failure (envelope.reason=auth-failed)
-//   13 — network/timeout (envelope.reason=network-timeout)
+//	0  — success (push or clone succeeded)
+//	1  — generic git failure
+//	2  — invariant violation (envelope.reason=invalid-branch for D-B6
+//	     main-guard, missing-creds for absent GIT_PAT, or bad args)
+//	10 — gitleaks finding (envelope.reason=leak-detected)
+//	11 — lease rejection (envelope.reason=lease-rejected)
+//	12 — auth failure (envelope.reason=auth-failed)
+//	13 — network/timeout (envelope.reason=network-timeout)
 //
 // Credentials: GIT_PAT comes from the K8s Secret named in
 // project.Spec.Git.CredsSecretRef, wired as envFrom on the push Job pod
@@ -518,6 +518,7 @@ func classifyGitError(err error) int {
 //   - the raw PAT
 //   - url.QueryEscape(pat)  — percent-encoding for application/x-www-form-urlencoded
 //   - url.PathEscape(pat)   — percent-encoding for URL paths (treats / specially)
+//
 // Duplicate-redact is safe because ReplaceAll is idempotent on its own
 // output: once a substring becomes `<redacted>` it no longer matches the
 // next variant.

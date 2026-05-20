@@ -88,6 +88,9 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName},
 		}
 		Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &tideprojectv1alpha1.Phase{})
+		}, "5s", "100ms").Should(Succeed())
 
 		r := &PhaseReconciler{
 			Client:        mgrClient,

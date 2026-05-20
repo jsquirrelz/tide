@@ -202,6 +202,9 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      waveName,
 					Namespace: indegreeNamespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
+					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
 					PlanRef:   planName,
@@ -250,6 +253,9 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      waveName,
 					Namespace: indegreeNamespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
+					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
 					PlanRef:   planName,

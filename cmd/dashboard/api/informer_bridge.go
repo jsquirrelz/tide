@@ -73,8 +73,8 @@ import (
 // the same cache as `c` to ensure consistent reads during event delivery.
 func BridgeInformerToHub(ctx context.Context, c cache.Cache, cli client.Reader, h *hub.Hub, log logr.Logger) error {
 	type kindWiring struct {
-		obj         client.Object
-		typePrefix  string // "project", "milestone", "phase", "plan", "task", "wave"
+		obj        client.Object
+		typePrefix string // "project", "milestone", "phase", "plan", "task", "wave"
 	}
 	wirings := []kindWiring{
 		{&tidev1alpha1.Project{}, "project"},

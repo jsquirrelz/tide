@@ -78,13 +78,13 @@ type Dependencies struct {
 //
 // Route table (Wave 5 inventory):
 //
-//   GET /healthz                              — process liveness
-//   GET /readyz                               — process readiness
-//   GET /api/v1/projects                      — list
-//   GET /api/v1/projects/{name}               — single
-//   GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
-//   GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
-//   GET /*                                    — SPA fallback (embed.FS)
+//	GET /healthz                              — process liveness
+//	GET /readyz                               — process readiness
+//	GET /api/v1/projects                      — list
+//	GET /api/v1/projects/{name}               — single
+//	GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
+//	GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
+//	GET /*                                    — SPA fallback (embed.FS)
 //
 // EventsHandler is registered only when deps.Hub is non-nil; LogsHandler
 // only when deps.Clientset is non-nil. Tests pass nil for both to walk

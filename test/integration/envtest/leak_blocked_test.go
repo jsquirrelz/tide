@@ -38,13 +38,13 @@ import (
 // Plan 04-06 Task 3 — W-1 integration envtest covering the push-result
 // envelope reason path end-to-end.
 //
-//   TestProject_LeakBlocked          — exit-10 / reason="leak-detected"
-//                                       → PhasePushLeakBlocked + counter
-//                                       increments.
-//   TestProject_LeaseFailed_NoLeakCounter — exit-11 / reason="lease-rejected"
-//                                       → PhasePushLeaseFailed (today's
-//                                       behavior); SecretLeakBlockedTotal
-//                                       counter UNCHANGED.
+//	TestProject_LeakBlocked          — exit-10 / reason="leak-detected"
+//	                                    → PhasePushLeakBlocked + counter
+//	                                    increments.
+//	TestProject_LeaseFailed_NoLeakCounter — exit-11 / reason="lease-rejected"
+//	                                    → PhasePushLeaseFailed (today's
+//	                                    behavior); SecretLeakBlockedTotal
+//	                                    counter UNCHANGED.
 //
 // Tests share a namespace but use distinct Project names so the metric
 // label tuples don't collide.

@@ -42,9 +42,10 @@ import (
 
 // TestOtelInitWiredInMain asserts the three required wire-up substrings
 // are present in cmd/manager/main.go:
-//   1. the internal/otelinit import line,
-//   2. the constructor call site,
-//   3. the deferred Shutdown.
+//  1. the internal/otelinit import line,
+//  2. the constructor call site,
+//  3. the deferred Shutdown.
+//
 // All three are required for the dispatch-chain spans to flush before
 // the process exits.
 func TestOtelInitWiredInMain(t *testing.T) {

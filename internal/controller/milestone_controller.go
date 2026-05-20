@@ -420,7 +420,7 @@ func (r *MilestoneReconciler) buildPlannerJob(ms *tideprojectv1alpha1.Milestone,
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: &ttl,
-			Template: batchv1Template(jobName, image),
+			Template:                batchv1Template(jobName, image),
 		},
 	}
 }

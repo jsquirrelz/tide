@@ -36,16 +36,16 @@ import (
 // Plan 04-05 Task 3: Layer A integration envtest covering the three core gate
 // flows end-to-end:
 //
-//   1. TestGateApproveFlow — Project.Gates.Milestone=approve → Milestone parks
-//      at AwaitingApproval → annotate approve-milestone=true → Eventually
-//      Succeeded and annotation consumed.
-//   2. TestRejectHalts — operator writes reject annotation on Project mid-run
-//      → all in-flight up-stack CRDs reach Status.Phase=Failed with
-//      Reason=RejectedByUser and Message containing the operator reason.
-//   3. TestWavePauseBetweenWaves — Project.Gates.PauseBetweenWaves=true; 2-
-//      wave Task DAG; wave 0 Succeeded → Plan Condition WaveOrLevelPaused
-//      True → annotate approve-wave-1=true → Eventually wave 2 dispatches
-//      (the Tasks lose the wave-paused label) and the Condition flips False.
+//  1. TestGateApproveFlow — Project.Gates.Milestone=approve → Milestone parks
+//     at AwaitingApproval → annotate approve-milestone=true → Eventually
+//     Succeeded and annotation consumed.
+//  2. TestRejectHalts — operator writes reject annotation on Project mid-run
+//     → all in-flight up-stack CRDs reach Status.Phase=Failed with
+//     Reason=RejectedByUser and Message containing the operator reason.
+//  3. TestWavePauseBetweenWaves — Project.Gates.PauseBetweenWaves=true; 2-
+//     wave Task DAG; wave 0 Succeeded → Plan Condition WaveOrLevelPaused
+//     True → annotate approve-wave-1=true → Eventually wave 2 dispatches
+//     (the Tasks lose the wave-paused label) and the Condition flips False.
 var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "phase4", "gates-integration"), func() {
 	ctx := context.Background()
 

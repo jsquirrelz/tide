@@ -50,7 +50,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 		}
 	})
 
-	It("allows ValidateCreate (Phase 1 no-op; Phase 2 rejects client-applies per D-B1)", func() {
+	It("rejects client-applied waves per D-B1", func() {
 		wave := &tideprojectv1alpha1.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-create-wave",
@@ -61,8 +61,26 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				WaveIndex: 0,
 			},
 		}
-		Expect(k8sClient.Create(ctx, wave)).To(Succeed(),
-			"Wave create should succeed — Phase 1 validator is no-op (D-B1 client-applies rejection wires in Phase 2)")
+		err := k8sClient.Create(ctx, wave)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("client-applied Waves not allowed"))
+	})
+
+	It("allows Reconciler-applied waves (has owner ref)", func() {
+		wave := &tideprojectv1alpha1.Wave{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "webhook-create-wave-succ",
+				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
+				},
+			},
+			Spec: tideprojectv1alpha1.WaveSpec{
+				PlanRef:   "some-plan",
+				WaveIndex: 0,
+			},
+		}
+		Expect(k8sClient.Create(ctx, wave)).To(Succeed())
 	})
 
 	It("allows ValidateUpdate (Phase 1 no-op)", func() {
@@ -70,6 +88,9 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-update-wave",
 				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "plan-a", UID: "dummy-uid"},
+				},
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
 				PlanRef:   "plan-a",
@@ -94,6 +115,9 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-delete-wave",
 				Namespace: namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
+				},
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
 				PlanRef:   "some-plan",

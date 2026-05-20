@@ -157,6 +157,9 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
 
 		r := &MilestoneReconciler{
 			Client:        mgrClient,
@@ -188,6 +191,9 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
 
 		// Pre-populate envelope reader with a phase ChildCRD.
 		phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName}
@@ -207,9 +213,11 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		// Drive initial reconciles to create the Job.
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
 
-		// Fetch Milestone UID for envelope setup.
+		// Fetch Milestone UID for envelope setup. Wait for cache to sync.
 		var got tideprojectv1alpha1.Milestone
-		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)
+		}, "5s", "100ms").Should(Succeed())
 
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 			APIVersion: pkgdispatch.APIVersionV1Alpha1,
@@ -250,6 +258,9 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{

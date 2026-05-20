@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"context"
+	"fmt"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -69,8 +70,10 @@ type WaveCustomValidator struct{}
 // can exercise the registration plumbing without depending on the not-yet-
 // existent WaveReconciler.
 func (v *WaveCustomValidator) ValidateCreate(_ context.Context, obj *tideprojectv1alpha1.Wave) (admission.Warnings, error) {
-	wavelog.V(1).Info("ValidateCreate (no-op in Phase 1 — D-B1 rejection wires in Phase 2)", "name", obj.GetName())
-	// Phase 2: reject client-applied Waves lacking the WaveReconciler-stamped owner-ref.
+	wavelog.V(1).Info("ValidateCreate (D-B1 rejection wired)", "name", obj.GetName())
+	if len(obj.GetOwnerReferences()) == 0 {
+		return nil, fmt.Errorf("Wave %s/%s rejected per D-B1: client-applied Waves not allowed; the WaveReconciler is the sole producer", obj.Namespace, obj.Name)
+	}
 	return nil, nil
 }
 

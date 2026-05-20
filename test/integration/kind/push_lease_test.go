@@ -103,7 +103,7 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 		jobName := fmt.Sprintf("tide-push-%s", project.UID)
 		job := waitForPushJob(pushLeaseNS, jobName, 90*time.Second)
 		args := pushJobArgs(job)
-		Expect(args).To(ContainElement("--last-pushed-sha=" + priorSHA),
+		Expect(args).To(ContainElement("--last-pushed-sha="+priorSHA),
 			"subsequent push must carry recorded LastPushedSHA as the lease (D-B6)")
 	})
 
