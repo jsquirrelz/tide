@@ -46,6 +46,7 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -53,7 +54,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -73,6 +76,11 @@ const defaultHeartbeatInterval = 15 * time.Second
 type EventsHandler struct {
 	Hub *hub.Hub
 	Log logr.Logger
+	// Client is the controller-runtime read-only client used for the
+	// existence pre-check (WR-01). Optional — if nil, the handler skips
+	// the existence check (preserves existing test fixtures that
+	// construct the handler without a Client).
+	Client client.Client
 
 	// heartbeatInterval is private + injected via options so tests can
 	// shrink it to 50ms without exposing the field on the public surface.
@@ -88,6 +96,15 @@ type EventsHandlerOption func(*EventsHandler)
 func WithHeartbeatInterval(d time.Duration) EventsHandlerOption {
 	return func(h *EventsHandler) {
 		h.heartbeatInterval = d
+	}
+}
+
+// WithClient injects the controller-runtime client used for the
+// project-existence pre-check (WR-01). Optional — handlers constructed
+// without a Client skip the existence check.
+func WithClient(c client.Client) EventsHandlerOption {
+	return func(h *EventsHandler) {
+		h.Client = c
 	}
 }
 
@@ -126,6 +143,36 @@ func (h *EventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	projectName := chi.URLParam(r, "name")
+	if projectName == "" {
+		// Defensive: chi should never invoke us without `name` because the
+		// route pattern requires it. Surface a 400 before any SSE framing.
+		http.Error(w, `{"error":"missing project name"}`, http.StatusBadRequest)
+		return
+	}
+
+	// WR-01 fix: project-existence pre-check. Without this, probe traffic
+	// or typos open SSE connections that stream nothing — the operator
+	// sees a hanging "connected" pipe that never delivers events. With a
+	// Client wired the handler returns 404 before promoting the
+	// connection to event-stream framing. The dashboard SA's cluster-wide
+	// read RBAC (D-D2) makes this check safe and cheap (informer cache).
+	//
+	// Trust-model note: this check is NOT a per-request authorization. Any
+	// browser that can reach the dashboard can subscribe to any project
+	// the dashboard SA can see. Operators running the dashboard in shared
+	// clusters MUST front it with an OIDC reverse proxy or similar (per
+	// D-D2 trust model).
+	if h.Client != nil {
+		namespace := r.URL.Query().Get("namespace")
+		if err := projectExists(r.Context(), h.Client, projectName, namespace); err != nil {
+			h.Log.V(1).Info("events SSE: project not found",
+				"project", projectName, "namespace", namespace, "err", err.Error())
+			http.Error(w, fmt.Sprintf(`{"error":"project %q not found"}`, projectName), http.StatusNotFound)
+			return
+		}
+	}
+
 	// Pitfall 23 — disable buffering at every layer we can address.
 	// X-Accel-Buffering targets nginx-ingress; Cache-Control:no-cache
 	// stops CDNs / browser-side caches; Connection:keep-alive is the
@@ -136,17 +183,6 @@ func (h *EventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-
-	projectName := chi.URLParam(r, "name")
-	if projectName == "" {
-		// Defensive: chi should never invoke us without `name` because the
-		// route pattern requires it. Surface a clean event-stream-style
-		// error and return — the connection is already 200 so we emit a
-		// `event: error\ndata: ...\n\n` frame rather than rewriting headers.
-		fmt.Fprint(w, "event: error\ndata: {\"error\":\"missing project name\"}\n\n")
-		flusher.Flush()
-		return
-	}
 
 	lastEventID := parseLastEventID(r.Header.Get("Last-Event-ID"))
 
@@ -194,6 +230,36 @@ func (h *EventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// projectExists returns nil iff at least one Project with the given name
+// exists. When namespace is empty, the function lists across all
+// namespaces and matches by name. When namespace is set, the function
+// does a direct Get against (namespace, name) — cheaper but requires
+// the caller to know the namespace.
+//
+// WR-01 fix: invoked from ServeHTTP before promoting the response to
+// SSE framing so probe traffic / typos return 404 instead of opening
+// connections that never receive events.
+func projectExists(ctx context.Context, c client.Client, name, namespace string) error {
+	if namespace != "" {
+		var proj tidev1alpha1.Project
+		if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &proj); err != nil {
+			return err
+		}
+		return nil
+	}
+	// Cross-namespace: list all and match by name.
+	var list tidev1alpha1.ProjectList
+	if err := c.List(ctx, &list); err != nil {
+		return err
+	}
+	for i := range list.Items {
+		if list.Items[i].Name == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("project %q not found in any namespace", name)
 }
 
 // parseLastEventID parses the `Last-Event-ID` HTTP header per the

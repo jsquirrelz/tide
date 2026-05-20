@@ -115,7 +115,11 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	}
 	var eh *dashboardapi.EventsHandler
 	if deps.Hub != nil {
-		eh = dashboardapi.NewEventsHandler(deps.Hub, deps.Log)
+		// WR-01 fix: pass the read-only client so the handler can do a
+		// project-existence pre-check before promoting the response to
+		// SSE framing.
+		eh = dashboardapi.NewEventsHandler(deps.Hub, deps.Log,
+			dashboardapi.WithClient(deps.Client))
 	}
 	var lh *dashboardapi.LogsHandler
 	if deps.Clientset != nil {
