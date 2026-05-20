@@ -106,10 +106,16 @@ type BuildOptions struct {
 //   - PVC subPath: {project-uid}/workspace enforces per-Project isolation (Blocker #2/#3).
 func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	// 1. Compute the active deadline.
-	var wallClockSeconds int64
-	if opts.Task.Spec.Caps != nil {
-		wallClockSeconds = int64(opts.Task.Spec.Caps.WallClockSeconds)
-	}
+	//    Phase 04.1 P1.3 fix: route through DefaultCaps so that nil/zero caps
+	//    apply the Kind-appropriate floor (executor=300s, planner=600s) —
+	//    matches the controller's token mint validity (task_controller.go for
+	//    executor; milestone/phase/plan_controller.go for planner via Plan 05)
+	//    and prevents the 60s active deadline + 360s token validity drift
+	//    documented in audit P1.3. For task dispatch (this call site) pass
+	//    JobKindExecutor; Plan 04.1-05 (P1.2) extends BuildOptions with a
+	//    Kind field that propagates through so planner Jobs pass JobKindPlanner.
+	caps := DefaultCaps(opts.Task.Spec.Caps, JobKindExecutor)
+	wallClockSeconds := int64(caps.WallClockSeconds)
 	activeDeadline := wallClockSeconds + DefaultWallClockGraceSeconds
 
 	// 2. Build the four labels stamped on Job + propagated to Pod via Template.
