@@ -353,14 +353,26 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		projectUID = string(project.UID)
 	}
 
-	if r.EnvReader == nil {
-		logger.Info("no env reader; marking Milestone Succeeded without ChildCRD materialization")
-		return r.patchMilestoneSucceeded(ctx, ms)
+	// Phase 04.1: reject short-circuit FIRST (operator stop should always halt,
+	// regardless of envelope availability or read errors). Was previously checked
+	// after envelope read, which made TestRejectHalts race with the EnvelopeRead
+	// failure path when the shared envReader has no SetOut for this UID.
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
 	}
 
-	envOut, err := r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
-	if err != nil {
-		return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", err.Error())
+	// Phase 04.1: tolerate nil EnvReader — continue through gate logic with an
+	// empty envOut. Previously a nil EnvReader short-circuited to patchSucceeded
+	// which skipped gate decisions in test setups.
+	var envOut pkgdispatch.EnvelopeOut
+	if r.EnvReader != nil {
+		var err error
+		envOut, err = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
+		if err != nil {
+			return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", err.Error())
+		}
+	} else {
+		logger.V(1).Info("no env reader; skipping envelope read", "milestone", ms.Name)
 	}
 
 	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
@@ -370,13 +382,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		}
 	}
 
-	// Plan 04-05: gate-policy hook. Two checks land at the Succeeded seam:
-	//   (a) project-level reject short-circuit → patch Failed/RejectedByUser
-	//   (b) per-level gate policy (approve/pause) → park AwaitingApproval
-	//       unless the approve annotation is present (and consume it).
-	if project != nil && gates.CheckRejected(project) {
-		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
-	}
+	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
+	// top of handleJobCompletion per Phase 04.1 — reject should not be
+	// gated on envelope-read success.
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "milestone")
 		if policy == gates.PolicyApprove || policy == gates.PolicyPause {

@@ -220,22 +220,25 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 
 			envReader := newMapEnvReader()
 			r := &controller.PhaseReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			drive(r.Reconcile, phaseName, 5)
 			var got tideprojectv1alpha1.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
-			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
-			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-phase-%s-1", got.UID), "default")).To(Succeed())
 
-			// CR-03 fix: PhaseReconciler now gates the boundary push on
-			// gates.BoundaryDetected. Create a Succeeded child Plan with
-			// proper controller owner-ref so the gate returns true.
+			// Phase 04.1: create the Succeeded child Plan BEFORE marking the
+			// planner Job terminal. Otherwise the manager-loaded PhaseReconciler
+			// can race the test: on Job-terminal it sees no child Plans yet,
+			// runs the boundary-detected gate as "no children", and patches
+			// Phase=Succeeded — which short-circuits subsequent reconciles and
+			// the push Job never fires (CR-03 boundary gate).
 			truePtr := true
 			childPlan := &tideprojectv1alpha1.Plan{
 				ObjectMeta: metav1.ObjectMeta{
@@ -266,6 +269,9 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				}
 				return g.Status.Phase
 			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+
+			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
+			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-phase-%s-1", got.UID), "default")).To(Succeed())
 
 			drive(r.Reconcile, phaseName, 3)
 
@@ -306,12 +312,14 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 
 			envReader := newMapEnvReader()
 			r := &controller.PlanReconciler{
-				Client:        mgrClient,
-				Scheme:        k8sClient.Scheme(),
-				Dispatcher:    &stubDispatcher{},
-				EnvReader:     envReader,
-				SubagentImage: testSubagentImage,
-				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			drive(r.Reconcile, planName, 5)
 			var got tideprojectv1alpha1.Plan

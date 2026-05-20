@@ -255,7 +255,7 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		Dispatcher:     &stubDispatcher{},
 		SubagentImage:  testSubagentImage,
 		CredproxyImage: testCredproxyImage,
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PhaseReconciler: %w", err)
 	}
@@ -266,7 +266,7 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		Dispatcher:     &stubDispatcher{},
 		SubagentImage:  testSubagentImage,
 		CredproxyImage: testCredproxyImage,
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PlanReconciler: %w", err)
 	}

@@ -286,14 +286,20 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		projectUID = string(project.UID)
 	}
 
-	if r.EnvReader == nil {
-		logger.Info("no env reader; marking Phase Succeeded")
-		return r.patchPhaseSucceeded(ctx, ph)
-	}
-
-	envOut, err := r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID))
-	if err != nil {
-		return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", err.Error())
+	// Phase 04.1: read envelope only when EnvReader is wired. Continue through
+	// gate + boundary-push logic regardless — those are envelope-independent.
+	// Previously a nil EnvReader short-circuited to patchSucceeded, which
+	// skipped the boundary push trigger and caused test-suite races where the
+	// manager-loaded reconciler beat the test's reconciler to status.
+	var envOut pkgdispatch.EnvelopeOut
+	if r.EnvReader != nil {
+		var err error
+		envOut, err = r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID))
+		if err != nil {
+			return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", err.Error())
+		}
+	} else {
+		logger.V(1).Info("no env reader; skipping envelope read", "phase", ph.Name)
 	}
 
 	if len(envOut.ChildCRDs) > 0 {
@@ -324,9 +330,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE patchSucceeded.
 	//
 	// CR-03 fix: gate the push on gates.BoundaryDetected so the push only
-	// fires when all child Plans have actually Succeeded. See parallel
-	// reasoning + test-fixture-preservation rationale in
-	// milestone_controller.go handleJobCompletion.
+	// fires when all child Plans have actually Succeeded.
+	//
+	// Phase 04.1: when child Plans exist but are NOT all Succeeded yet, requeue
+	// rather than patching Phase=Succeeded — otherwise the Phase reaches
+	// terminal status before the boundary push ever fires (which races with
+	// child-Plan completion in tests and skips push in production when child
+	// Plans complete after the Phase's planner Job).
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ph, "Plan")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -335,11 +345,31 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
 			return ctrl.Result{}, err
 		}
+	} else if r.hasChildPlans(ctx, ph) {
+		// Children exist but not all Succeeded — requeue and wait.
+		logger.V(1).Info("boundary push deferred: child Plans pending", "phase", ph.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: child Plans not all Succeeded yet", "phase", ph.Name)
+		logger.V(1).Info("boundary push skipped: phase has no child Plans", "phase", ph.Name)
 	}
 
 	return r.patchPhaseSucceeded(ctx, ph)
+}
+
+// hasChildPlans reports whether any Plan is owned by this Phase. Phase 04.1.
+func (r *PhaseReconciler) hasChildPlans(ctx context.Context, ph *tideprojectv1alpha1.Phase) bool {
+	var planList tideprojectv1alpha1.PlanList
+	if err := r.List(ctx, &planList, client.InNamespace(ph.Namespace)); err != nil {
+		return false
+	}
+	for i := range planList.Items {
+		for _, ref := range planList.Items[i].OwnerReferences {
+			if ref.Kind == "Phase" && ref.UID == ph.UID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideprojectv1alpha1.Phase) (ctrl.Result, error) {
