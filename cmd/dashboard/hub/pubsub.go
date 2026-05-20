@@ -132,6 +132,17 @@ func (h *Hub) Subscribe(project string, lastEventID int64) *Subscriber {
 
 	h.subs[project] = append(h.subs[project], sub)
 
+	// WR-08 fix: cap lastEventID at the hub's nextID[project]. A buggy or
+	// malicious client sending an oversized Last-Event-ID (e.g. 99999999999)
+	// would otherwise match nothing in the replay buffer AND silently sit
+	// "live" with no events ever arriving (because ev.ID > lastEventID is
+	// always false). Capping at nextID forces oversized values into "no
+	// replay" semantics instead of "permanent silence" — which is the
+	// correct EventSource spec behavior when the resume cursor is unknown.
+	if max := h.nextID[project]; lastEventID > max {
+		lastEventID = max
+	}
+
 	// Replay any buffered events with ID > lastEventID. Non-blocking
 	// enqueue — if replay overflows the buffer, drop-oldest applies.
 	for _, ev := range h.replay[project] {
