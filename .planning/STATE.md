@@ -4,10 +4,10 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-20T06:09:25.425Z"
+last_updated: "2026-05-20T07:43:15.363Z"
 last_activity: 2026-05-19 -- Phase 04 execution started
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 6
   total_plans: 67
   completed_plans: 67
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 04 — gates-observability-dashboard-cli
+**Current focus:** Phase 04.1 — pre-v1-audit-fixes-cross-phase-uat-closeout (URGENT, INSERTED after Phase 4)
 
 ## Current Position
 
@@ -72,6 +72,7 @@ Progress: [██████████] 100% (Phase 02.2 scope)
 - Phase 02.1 inserted after Phase 2: Layer B kind integration tests: ship test files in Phase 2, debug/fix in 2.1 to make make test-int green on dev laptop (URGENT)
 - Phase 02.2 inserted after Phase 02: Layer B kind test timing fixes — closes Phase 02.1 BLOCKED runtime gate (kindTestTimeout vs helm timeout mismatch; AfterSuite zombie-container cleanup; make test-int wall-time scope; optional cert-manager bump) (URGENT)
 - Phase 02.2 COMPLETED 2026-05-14: Closed Phase 02.1's BLOCKED runtime gate. 12 tactical iterations, 11 cascades closed. Five original fixes landed (kindTestTimeout 4m→7m; cert-manager v1.16.2→v1.20.2; helm install --replace; cleanupKindCluster() zombie-container fallback; CI YAML DUR-check drop). Seven additional harness/production-wiring fixes surfaced and closed across cascades 2–11: --metrics-bind-address flag, --webhook-cert-path flag, Makefile 300s→600s→1800s budget, credproxy/caps/output/failure fixture helpers, Dispatcher field nil production wiring, Job activeDeadlineSeconds + Layer A Eventually budgets + Makefile timeout, PVC namespace-scoping architectural pivot (PodStatusEnvelopeReader), Secret namespace-scoping (ensureSigningKeySecret). End-to-end runtime verification PASSED: 7/7 Layer B specs PASS (clean + rerun), 18/18 Layer A PASS; inner wall 355.20s; chain_status: empirically_closed. Captured in 02.2-12-VERIFICATION.md.
+- Phase 04.1 inserted after Phase 4: Pre-v1 audit fixes + cross-phase UAT closeout (URGENT)
 
 ### Decisions
 
