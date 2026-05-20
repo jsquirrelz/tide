@@ -128,7 +128,24 @@ type WaveBand = {
   waveIndex: number;
   bounds: { x: number; y: number; width: number; height: number };
   taskCount: number;
+  /** WR-13 fix: count of member tasks in the failed family — drives
+   * WaveBackground's blocked-color fill (UI-SPEC §6). */
+  failedCount: number;
 };
+
+/**
+ * The status family that triggers the WaveBackground "failed band" signal
+ * per UI-SPEC §6. Matches the FAILED_STATUSES set in TideNodeShell — kept
+ * locally to avoid a circular component import; if the list drifts in
+ * either file, the visual signal breaks. (Status strings come from the
+ * CRD enum so the set is bounded.)
+ */
+const FAILED_TASK_STATUSES: ReadonlySet<string> = new Set([
+  "Failed",
+  "PushLeaseFailed",
+  "PushLeakBlocked",
+  "Rejected",
+]);
 
 function computeBands(
   nodes: Node[],
@@ -151,6 +168,15 @@ function computeBands(
     const minY = Math.min(...ys) - PADDING;
     const maxX = Math.max(...ws) + PADDING;
     const maxY = Math.max(...hs) + PADDING;
+    // WR-13 fix: count member tasks whose status is in the failed family
+    // so WaveBackground can render the failed-band UI-SPEC §6 signal.
+    let failedCount = 0;
+    for (const n of ns) {
+      const data = n.data as TaskNodeData | undefined;
+      if (data && FAILED_TASK_STATUSES.has(data.status)) {
+        failedCount += 1;
+      }
+    }
     bands.push({
       waveIndex: w,
       bounds: {
@@ -160,6 +186,7 @@ function computeBands(
         height: maxY - minY,
       },
       taskCount: ns.length,
+      failedCount,
     });
   }
   return bands.sort((a, b) => a.waveIndex - b.waveIndex);
@@ -252,6 +279,8 @@ function ExecutionDAGViewInner({
               bounds={b.bounds}
               taskCount={b.taskCount}
               isActiveDispatch={plan?.activeDispatchWave === b.waveIndex}
+              /* WR-13 fix: drive failed-band styling from member task statuses. */
+              failedCount={b.failedCount}
             />
           ))}
         </svg>
