@@ -224,7 +224,7 @@ Plans:
 
 (Waves 0-10; planner re-layered Kahn-style from the original 7-wave hint to honor file-overlap implicit dependencies.)
 
-**Plans:** 9/15 plans executed
+**Plans:** 11/15 plans executed
 
 Plans:
 - [x] 04.1-01-PLAN.md — Wave 0 tooling readiness gate (Wave 0)
@@ -234,10 +234,10 @@ Plans:
 - [x] 04.1-05-PLAN.md — P1.2 planner Job contract refactor via JobKind discriminator (Wave 3)
 - [x] 04.1-06-PLAN.md — P2.1-P2.4 CI/tooling hygiene bundle (Wave 3)
 - [x] 04.1-07-PLAN.md — P3.1 TaskReconciler.reconcileDispatch decomposition (Wave 4)
-- [ ] 04.1-08-PLAN.md — P3.2 TaskReconcilerDeps carrier struct (Wave 5)
+- [x] 04.1-08-PLAN.md — P3.2 TaskReconcilerDeps carrier struct (Wave 5)
 - [x] 04.1-09-PLAN.md — P4.1 budget rolling-window reset + RollingWindowDuration field (Wave 6)
 - [x] 04.1-10-PLAN.md — P4.2 cred-proxy upstream allowlist via Spec.Providers[*].AllowedRoutes (Wave 7)
-- [ ] 04.1-11-PLAN.md — P4.3 PROD_OVERRIDE markers + P4.4 logging convention sweep + logcheck tighten (Wave 8)
+- [x] 04.1-11-PLAN.md — P4.3 PROD_OVERRIDE markers + P4.4 logging convention sweep + logcheck tighten (Wave 8)
 - [ ] 04.1-12-PLAN.md — Phase 02 UAT runner — make test-int 6/6 items closed (Wave 6)
 - [ ] 04.1-13-PLAN.md — Phase 03 UAT runner — items 3+4 stale-flipped, 1+2+5 verified (Wave 6)
 - [ ] 04.1-14-PLAN.md — Phase 04 UAT runner — gate flow + dashboard + CLI (Wave 9)
@@ -270,5 +270,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
-| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 9/15 | In Progress|  |
+| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 11/15 | In Progress|  |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
