@@ -55,10 +55,12 @@ func TestTailDefaultsContainerSkipsCredproxy(t *testing.T) {
 	// Container resolution heuristic — given a Pod with credproxy + subagent
 	// containers, the default picker MUST select "subagent" (or whichever
 	// is the non-credproxy/non-init-* container).
+	// WR-12: pickContainer now takes an optional []ContainerStatus arg.
+	// Passing nil preserves the previous "first match wins" behavior.
 	got := pickContainer([]corev1.Container{
 		{Name: "credproxy"},
 		{Name: "subagent"},
-	}, "")
+	}, "", nil)
 	if got != "subagent" {
 		t.Errorf("expected default to skip credproxy and pick 'subagent'; got %q", got)
 	}
@@ -67,7 +69,7 @@ func TestTailDefaultsContainerSkipsCredproxy(t *testing.T) {
 	got = pickContainer([]corev1.Container{
 		{Name: "credproxy"},
 		{Name: "subagent"},
-	}, "credproxy")
+	}, "credproxy", nil)
 	if got != "credproxy" {
 		t.Errorf("explicit --container should win; got %q", got)
 	}
@@ -76,9 +78,25 @@ func TestTailDefaultsContainerSkipsCredproxy(t *testing.T) {
 	got = pickContainer([]corev1.Container{
 		{Name: "init-clone"},
 		{Name: "subagent"},
-	}, "")
+	}, "", nil)
 	if got != "subagent" {
 		t.Errorf("expected init-clone skipped; got %q", got)
+	}
+
+	// WR-12 regression: when ContainerStatuses is non-empty, a container
+	// in Spec but missing from Status is skipped (kubelet hasn't started
+	// it yet → pods/log would error). subagent is in Spec but not yet in
+	// Status → return empty; backup is in both → return "backup".
+	got = pickContainer([]corev1.Container{
+		{Name: "credproxy"},
+		{Name: "subagent"},
+		{Name: "backup"},
+	}, "", []corev1.ContainerStatus{
+		{Name: "credproxy"},
+		{Name: "backup"},
+	})
+	if got != "backup" {
+		t.Errorf("expected pickContainer to skip not-yet-started 'subagent' and pick 'backup'; got %q", got)
 	}
 }
 

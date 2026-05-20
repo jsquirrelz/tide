@@ -97,11 +97,18 @@ func defaultTailPodPicker(ctx context.Context, k client.Client, ns, taskName str
 		p := &pods.Items[i]
 		switch p.Status.Phase {
 		case corev1.PodRunning, corev1.PodPending:
-			c := pickContainer(p.Spec.Containers, opt.container)
+			// WR-12 fix: pass ContainerStatuses so pickContainer can
+			// cross-check against actually-started containers (kubelet
+			// rejects pods/log on not-yet-started containers).
+			c := pickContainer(p.Spec.Containers, opt.container, p.Status.ContainerStatuses)
 			if c == "" {
+				available := make([]string, 0, len(p.Status.ContainerStatuses))
+				for _, cs := range p.Status.ContainerStatuses {
+					available = append(available, cs.Name)
+				}
 				return "", "", fmt.Errorf(
-					"tide: task %q has pod %q with no resolvable container; pass --container",
-					taskName, p.Name,
+					"tide: task %q pod %q has no resolvable container (available: %v); pass --container",
+					taskName, p.Name, available,
 				)
 			}
 			return p.Name, c, nil
@@ -162,11 +169,27 @@ func tailRun(ctx context.Context, k client.Client, cs kubernetes.Interface, ns, 
 // pickContainer resolves the container the operator wants to tail. Explicit
 // --container wins (operator authority). Otherwise the first container whose
 // Name is NOT "credproxy" and does NOT start with "init-" — that's the
-// subagent main container by Phase-1/2 convention. Returns empty string if
-// no candidate is found (caller surfaces a friendly error).
-func pickContainer(containers []corev1.Container, explicit string) string {
+// subagent main container by Phase-1/2 convention.
+//
+// WR-12 fix: when statuses is non-empty, cross-check the candidate against
+// the pod's ContainerStatuses[*].Name set so we never return a name that
+// hasn't yet been started — kubelet rejects pods/log GETs for containers
+// not in the status set with a confusing "container X not in pod Y" error
+// after the response headers have already been flushed. Returns empty
+// string if no candidate is found (caller surfaces a friendly error).
+//
+// Callers that have access to corev1.PodStatus should pass
+// pod.Status.ContainerStatuses; callers that only have Spec containers
+// may pass nil to preserve the previous "first match wins" behavior.
+func pickContainer(containers []corev1.Container, explicit string, statuses []corev1.ContainerStatus) string {
 	if explicit != "" {
 		return explicit
+	}
+	// Build a quick lookup of started container names if we have status.
+	// Empty set = "no status known", skip the cross-check.
+	knownStatus := make(map[string]struct{}, len(statuses))
+	for _, s := range statuses {
+		knownStatus[s.Name] = struct{}{}
 	}
 	for _, c := range containers {
 		if c.Name == "credproxy" {
@@ -174,6 +197,13 @@ func pickContainer(containers []corev1.Container, explicit string) string {
 		}
 		if strings.HasPrefix(c.Name, "init-") {
 			continue
+		}
+		if len(knownStatus) > 0 {
+			if _, ok := knownStatus[c.Name]; !ok {
+				// Spec lists this container but kubelet hasn't started it
+				// yet — skip rather than return a name pods/log will reject.
+				continue
+			}
 		}
 		return c.Name
 	}
