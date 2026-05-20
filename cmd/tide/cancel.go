@@ -59,7 +59,7 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 	}
 
 	if dryRun {
-		return cancelDryRun(ctx, c, ns, projectName, &proj, out)
+		return cancelDryRun(ctx, c, ns, projectName, &proj, out, errOut)
 	}
 
 	fmt.Fprintf(errOut, "Deleting project %s (foreground cascade)…\n", projectName)
@@ -80,7 +80,11 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 // cancelDryRun lists owner-ref'd / project-labelled children and prints the
 // deletion scope without performing the Delete. Useful when an operator
 // wants to verify the cascade target before committing.
-func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, proj *tidev1alpha1.Project, out io.Writer) error {
+//
+// WR-06 fix: errors from c.List MUST be surfaced — silently swallowing
+// (RBAC denial, apiserver timeout) made the operator see zero children
+// for a kind without knowing the listing failed.
+func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, proj *tidev1alpha1.Project, out, errOut io.Writer) error {
 	fmt.Fprintf(out, "tide cancel --dry-run\n")
 	fmt.Fprintf(out, "  namespace: %s\n", ns)
 	fmt.Fprintf(out, "  project: %s\n", projectName)
@@ -93,7 +97,9 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 	// label form is consistent with the rest of the CLI.
 	{
 		var list tidev1alpha1.MilestoneList
-		if err := c.List(ctx, &list, client.InNamespace(ns)); err == nil {
+		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
+			fmt.Fprintf(errOut, "warning: list Milestones failed (cannot enumerate scope): %v\n", err)
+		} else {
 			for i := range list.Items {
 				m := &list.Items[i]
 				if m.Labels["tideproject.k8s/project"] == projectName {
@@ -104,7 +110,9 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 	}
 	{
 		var list tidev1alpha1.PhaseList
-		if err := c.List(ctx, &list, client.InNamespace(ns)); err == nil {
+		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
+			fmt.Fprintf(errOut, "warning: list Phases failed (cannot enumerate scope): %v\n", err)
+		} else {
 			for i := range list.Items {
 				p := &list.Items[i]
 				if p.Labels["tideproject.k8s/project"] == projectName {
@@ -115,7 +123,9 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 	}
 	{
 		var list tidev1alpha1.PlanList
-		if err := c.List(ctx, &list, client.InNamespace(ns)); err == nil {
+		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
+			fmt.Fprintf(errOut, "warning: list Plans failed (cannot enumerate scope): %v\n", err)
+		} else {
 			for i := range list.Items {
 				p := &list.Items[i]
 				if p.Labels["tideproject.k8s/project"] == projectName {
@@ -126,7 +136,9 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 	}
 	{
 		var list tidev1alpha1.TaskList
-		if err := c.List(ctx, &list, client.InNamespace(ns)); err == nil {
+		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
+			fmt.Fprintf(errOut, "warning: list Tasks failed (cannot enumerate scope): %v\n", err)
+		} else {
 			for i := range list.Items {
 				tk := &list.Items[i]
 				if tk.Labels["tideproject.k8s/project"] == projectName {
