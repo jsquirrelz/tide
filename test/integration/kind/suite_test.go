@@ -64,13 +64,24 @@ const (
 	//       explicit --timeout)
 	//   (c) waitForControllerReady fallback (~5s, no-op when helm --wait
 	//       succeeds)
-	//   (d) variance margin (60s — slow CI runners, image-pull stalls)
+	//   (d) per-spec budget for the full Layer B suite (~350s observed in
+	//       the 02.2-12 empirical-close baseline across 13 specs)
+	//   (e) variance margin (60s — slow CI runners, image-pull stalls)
 	//
-	// 7m = 50s + 300s + 5s + 60s + slack. Going below ~6m25s shadow-kills
-	// the helm subprocess before its own --timeout fires (see
+	// 12m = 50s + 300s + 5s + 350s + 60s + slack. Going below ~6m25s
+	// shadow-kills the helm subprocess before its own --timeout fires (see
 	// .planning/phases/02.1-.../02.1-04-VERIFICATION.md §"Root-cause
 	// analysis" for the failure mode this constant closes — Phase 02.2).
-	kindTestTimeout = 7 * time.Minute
+	//
+	// Bumped from 7m → 12m in Phase 04.1 Plan 12 iter 2: the 7m baseline
+	// assumed helm install succeeded first try and consumed only ~50s of the
+	// budget; iter 1 observed helm --wait failing at 5m03s and exhausting
+	// the budget across 311s BeforeSuite + 16s chaos_resume + 141s
+	// output_test = 469s > 420s, which cancelled the suite context and
+	// SKIP'd 11 of 13 specs. Source:
+	// .planning/phases/04.1-pre-v1-audit-fixes-cross-phase-uat-closeout/04.1-12-SUMMARY.md
+	// §"Root Cause of 11 Skips: kindTestTimeout Exhaustion".
+	kindTestTimeout = 12 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
 	// Deployment installs into (config/default Kustomize manifest target).
