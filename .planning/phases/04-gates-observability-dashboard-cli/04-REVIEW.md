@@ -89,7 +89,7 @@ findings:
   warning: 15
   info: 0
   total: 20
-status: issues_found
+status: resolved
 ---
 
 # Phase 4: Code Review Report
