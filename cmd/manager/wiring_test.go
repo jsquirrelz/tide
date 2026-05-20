@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/jsquirrelz/tide/internal/controller"
@@ -95,5 +97,24 @@ func TestReconcilerWiringComplete(t *testing.T) {
 				t.Errorf("%s: %s", tc.name, tc.message)
 			}
 		})
+	}
+}
+
+// TestProductionOverrideMarkers asserts the PROD_OVERRIDE_REQUIRED marker
+// persists above the dev-tag default envOrDefault calls at main.go:164-165.
+// Phase 04.1 P4.3 — comment-only enforcement; prevents future maintainers
+// from accepting :v0.1.0-dev as release-stable by accident.
+func TestProductionOverrideMarkers(t *testing.T) {
+	data, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "PROD_OVERRIDE_REQUIRED") {
+		t.Fatal("expected PROD_OVERRIDE_REQUIRED marker in main.go (Phase 04.1 P4.3)")
+	}
+	count := strings.Count(content, "PROD_OVERRIDE_REQUIRED")
+	if count < 2 {
+		t.Fatalf("expected >= 2 PROD_OVERRIDE_REQUIRED markers (one per dev tag default); got %d", count)
 	}
 }
