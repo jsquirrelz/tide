@@ -238,8 +238,9 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	envReader := newMapEnvReader()
 
 	if err := (&controller.MilestoneReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		EnvReader: envReader,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("MilestoneReconciler: %w", err)
 	}

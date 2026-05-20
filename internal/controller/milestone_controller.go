@@ -173,6 +173,27 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		return ctrl.Result{}, nil
 	}
 
+	// Step 1a: AwaitingApproval is paused — the reconciler MUST NOT re-dispatch
+	// the planner. Two sub-cases:
+	//   (a) no approve annotation → keep paused, return early
+	//   (b) approve annotation present → re-enter handleJobCompletion (which
+	//       handles the annotation-consume + patchSucceeded branch).
+	// Phase 04.1: closes a long-running flake where the reconciler fell through
+	// to dispatchPlanner on AwaitingApproval and re-patched Phase=Running on
+	// every reconcile (manifested as TestGateApproveFlow intermittent failures).
+	if ms.Status.Phase == "AwaitingApproval" {
+		if gates.CheckApprove(ms, "milestone") {
+			jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
+			var job batchv1.Job
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: jobName}, &job); err == nil {
+				return r.handleJobCompletion(ctx, ms, &job)
+			}
+			// Job missing — annotation-only finalization (no envelope read needed).
+			return r.patchMilestoneSucceeded(ctx, ms)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
 
 	// Step 2: On Running — check Job terminal state.
