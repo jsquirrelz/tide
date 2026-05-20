@@ -120,6 +120,24 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+##@ Phase 4 kind-harness E2E (plan 04-14)
+
+# test-e2e-kind builds the manager + dashboard + tide CLI binaries, spins up a
+# dedicated kind cluster (`tide-e2e-phase4`), helm-installs the chart with
+# dashboard.enabled=true, and runs the kind_e2e-tagged specs under test/e2e/.
+#
+# Separate from `test-e2e` because the two suites use different paradigms:
+#   - `test-e2e` (kubebuilder): kustomize-driven `make deploy` against `tide-test-e2e` cluster
+#   - `test-e2e-kind` (Phase 4): helm-driven chart install against `tide-e2e-phase4` cluster
+#
+# Both are tagged `kind`-test work; both honor SKIP_KIND_TESTS=true to short-
+# circuit on dev machines without container tooling. The full Phase 4 E2E gate
+# runs `test-e2e-kind`; the kubebuilder `test-e2e` continues to cover the
+# kustomize install path.
+.PHONY: test-e2e-kind
+test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-flow + tail cancellation).
+	go test -tags=kind_e2e -timeout=15m ./test/e2e/... -v -ginkgo.v
+
 ##@ Integration tests (TEST-02 — Phase 2)
 
 .PHONY: test-int test-int-fast test-int-kind-prep
