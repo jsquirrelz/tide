@@ -34,16 +34,21 @@ import (
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
-// approveWaveRE validates the --wave flag value. Per the plan: <plan-name>/<N>
-// where plan-name follows K8s DNS-label-style characters and N is a
-// non-negative integer.
-var approveWaveRE = regexp.MustCompile(`^[a-z0-9.-]+/\d+$`)
+// approveWaveRE validates the --wave flag SHAPE — non-empty plan name +
+// slash + non-negative integer. WR-07 fix: the loose character class
+// `[a-z0-9.-]+` accepted invalid plan names like `..-..` that the apiserver
+// would then reject on Get with a confusing apiserver-side error. After
+// matching this regex, the plan-name component is additionally validated
+// against k8s.io/apimachinery/pkg/util/validation.IsDNS1123Label so the
+// CLI produces a friendly local error instead of a 422 from the apiserver.
+var approveWaveRE = regexp.MustCompile(`^[^/]+/\d+$`)
 
 // approveRun is the testable seam. Resolves the target object (Project for
 // level discovery; Plan for --wave) and writes the canonical approve
@@ -72,6 +77,12 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 	}
 	parts := strings.SplitN(waveFlag, "/", 2)
 	planName := parts[0]
+	// WR-07 fix: validate plan-name as DNS-1123 BEFORE issuing the apiserver
+	// Get so invalid names produce a friendly local error rather than an
+	// apiserver-side 422 / "name is invalid" string.
+	if errs := validation.IsDNS1123Label(planName); len(errs) > 0 {
+		return fmt.Errorf("--wave: plan name %q is not a valid DNS-1123 label: %s", planName, strings.Join(errs, "; "))
+	}
 	waveN, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("--wave: parse wave integer: %w", err)
