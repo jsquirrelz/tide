@@ -490,6 +490,25 @@ verify-rbac-marker-discipline: ## Assert no wildcard kubebuilder:rbac markers in
 	fi
 	@echo "OK: no RBAC wildcard markers"
 
+##@ Helm Chart Validation (Phase 4 plan 04-14 — D-X3 / T-04-D2)
+
+.PHONY: helm-lint-validate
+helm-lint-validate: ## Helm chart sanity: helm lint + helm template renders without error.
+	@helm lint charts/tide
+	@helm template charts/tide > /dev/null
+	@echo "PASS: helm lint + helm template render"
+
+.PHONY: helm-rbac-assert
+helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list, watch} (T-04-D2 mitigation).
+	@# Walk the rendered chart for any ClusterRole whose name contains "dashboard",
+	@# extract every rules[].verbs[] entry, and fail if any verb is not in
+	@# {get, list, watch}. The Phase 4 dashboard ClusterRole is the only
+	@# "dashboard"-named role in the chart (templates/dashboard-rbac.yaml).
+	@# Implementation uses python3 + PyYAML (already required by hack/helm/
+	@# augment-tide-chart.sh) so this target has zero new tool dependencies.
+	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
+	@python3 hack/helm/assert-dashboard-rbac.py /tmp/tide-helm-render.yaml
+
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 
 # Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:

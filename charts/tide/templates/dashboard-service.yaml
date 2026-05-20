@@ -1,0 +1,26 @@
+{{- if .Values.dashboard.enabled }}
+# Dashboard Service (Phase 4 D-D2 / D-X3).
+#
+# ClusterIP exposing port 80 → 8080 (HTTP + SSE). No NodePort, no
+# LoadBalancer — operators front this with their own Ingress (docs/dashboard.md
+# covers nginx-ingress + SSE Pitfall 23 mitigation; Ingress shape itself is
+# deferred per CONTEXT 04-D-X3).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "tide.fullname" . }}-dashboard
+  labels:
+    control-plane: dashboard
+  {{- include "tide.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.dashboard.service.type | default "ClusterIP" }}
+  selector:
+    app.kubernetes.io/name: tide-dashboard
+    control-plane: dashboard
+    {{- include "tide.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: http
+    port: {{ .Values.dashboard.service.port | default 80 }}
+    protocol: TCP
+    targetPort: {{ .Values.dashboard.service.targetPort | default 8080 }}
+{{- end }}

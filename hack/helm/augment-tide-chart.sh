@@ -243,10 +243,41 @@ if ENV3_MARKER not in content:
         count=1,
     )
 
+# ── 8f: Phase 4 plan 04-14 — OTel env-var injection ─────────────────────────
+# Adds OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG,
+# OTEL_SERVICE_NAME on the manager container. Read by internal/otelinit at boot
+# (plan 04-03). Empty endpoint → no-op TracerProvider (zero overhead, default
+# posture). Sampler is env-driven (Pitfall 24 mitigation; no WithSampler in code).
+ENV4_MARKER = "# phase4-env-injected"
+ENV4_BLOCK = """        # Phase 4 plan 04-14 (D-O3): OTel env vars read by internal/otelinit.
+        # Empty OTEL_EXPORTER_OTLP_ENDPOINT → no-op TracerProvider (zero
+        # overhead, default posture for plain clusters). Sampler is env-driven
+        # to honor Pitfall 24 mitigation (no WithSampler in code).
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ quote .Values.otel.exporter.endpoint }}
+        - name: OTEL_TRACES_SAMPLER
+          value: {{ quote .Values.otel.tracesSampler }}
+        - name: OTEL_TRACES_SAMPLER_ARG
+          value: {{ quote .Values.otel.tracesSamplerArg }}
+        - name: OTEL_SERVICE_NAME
+          value: {{ quote .Values.otel.serviceName }}
+        # phase4-env-injected
+"""
+if ENV4_MARKER not in content:
+    # Insert immediately after the Phase 3 marker line so OTel vars sit
+    # alongside the existing TIDE_* env block. Anchor: the literal phase3
+    # marker line (8-space indent + `# phase3-env-injected`).
+    content = re.sub(
+        r'(        # phase3-env-injected\n)',
+        r'\1' + ENV4_BLOCK,
+        content,
+        count=1,
+    )
+
 with open(path, 'w') as f:
     f.write(content)
 
-print("OK: deployment.yaml Phase 2 + Phase 3 fields injected (idempotent)")
+print("OK: deployment.yaml Phase 2 + Phase 3 + Phase 4 fields injected (idempotent)")
 PYEOF
 fi
 
