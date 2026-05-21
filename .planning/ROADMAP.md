@@ -165,7 +165,7 @@ Plans:
   4. A user can open the dashboard at `https://tide-dashboard.<cluster>/` and see live Planning + Execution DAGs rendered side-by-side via React Flow v12 + dagre + Tailwind v4, with per-task status badges, status updates streaming over Server-Sent Events, click-through to opt-in `pods/log` WebSocket streams via the apiserver proxy — and verify the dashboard exposes zero mutation endpoints (all state changes route through `kubectl` or `tide` CLI) and runs in its own Deployment with its own read-only ServiceAccount distinct from the orchestrator's
   5. A user can run `tide apply -f project.yaml`, `tide watch <project>`, `tide tail <task>`, `tide approve <project>`, `tide inspect-wave <plan>`, and `tide artifact-get <ref>` from a single stateless cobra-based CLI (no local cache) talking to the K8s API — and confirm `tide tail` streams pod logs via the `pods/log` subresource without any local caching
 
-**Plans:** 16 plans
+**Plans:** 17 plans
 
 Plans:
 - [x] 04-01-PLAN.md — internal/metrics registry + Phase4 API constants + cmd/manager metrics blank import (Wave 1)
@@ -184,6 +184,7 @@ Plans:
 - [x] 04-13-PLAN.md — DAG views + 5 custom nodes + TaskDetailDrawer + dagre layout (Wave 8)
 - [x] 04-16-PLAN.md — PodLogStreamer + SSE hooks + ANSI parser + EmptyState/ErrorState/LoadingState + bundle-size gate + Makefile embed (Wave 9)
 - [x] 04-14-PLAN.md — Helm chart additions (dashboard-deployment + RBAC + ServiceMonitor) + E2E smoke (Wave 10)
+- [ ] 04-17-PLAN.md — last-mile App.tsx wiring: useProjects + useTasks + useTaskDetail hooks + GET /api/v1/plans/{name} + GET /api/v1/tasks/{name} backend (Wave 11)
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — React Flow vs htmx is contributor-pool-shaping; two-DAG view UX needs prototyping; SSE-through-ingress concerns; observability data volume (Pitfall 17); dashboard websocket leak prevention (Pitfall 22).
 
