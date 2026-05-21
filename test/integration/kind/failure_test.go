@@ -181,6 +181,8 @@ metadata:
 	ensureSubagentSA(ns)
 	ensureProjectsPVC(ns)
 	ensureSigningKeySecret(ns)
+	// Cascade-11: pre-bind WaitForFirstConsumer PVC for Pod-less fixtures (push-lease).
+	pvcPrewarmPod(ns)
 }
 
 // makeKindTask creates a Task in the kind cluster.

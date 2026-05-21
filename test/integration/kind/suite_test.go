@@ -43,6 +43,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -606,6 +607,91 @@ spec:
     requests:
       storage: 1Gi
 `, ns)
+}
+
+// pvcPrewarmPod schedules a one-shot pause Pod that mounts the namespace-local
+// tide-projects PVC, waits for the PVC to reach ClaimBound, then deletes the
+// Pod. This is a test-side compensator for kind's default
+// rancher.io/local-path StorageClass, which has
+// volumeBindingMode: WaitForFirstConsumer — a PVC stays Pending until the
+// first Pod consuming it is scheduled.
+//
+// Pod-bearing Layer-B fixtures (chaos-resume, credproxy, output, up_stack)
+// trigger binding naturally because the ProjectReconciler dispatches a
+// tide-init Job within their first reconcile window. Pod-less fixtures
+// (push-lease, which mocks Project.Status.Phase=Complete via direct status
+// patch and never dispatches a Task) deadlock: the controller's PVC-Bound
+// gate at internal/controller/project_controller.go:246 requeues forever.
+// Pre-warming the PVC here unblocks both classes with a no-op for the first
+// and a real bind for the second.
+//
+// Idempotency contract: if the PVC is already ClaimBound when this helper is
+// invoked, it returns immediately without creating the Pod (cheap Get only).
+// This keeps the helper a near-zero-cost no-op for the natural-binding
+// fixtures that already pass.
+//
+// See .planning/debug/push-lease-pvc-pending.md for the full cascade-11
+// root-cause analysis and the OPTION A vs OPTION B decision recap.
+func pvcPrewarmPod(ns string) {
+	// Step 1 — idempotency check: if PVC already Bound, skip the prewarm.
+	existing := &corev1.PersistentVolumeClaim{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{
+		Name:      "tide-projects",
+		Namespace: ns,
+	}, existing); err != nil {
+		GinkgoWriter.Printf("pvcPrewarmPod: tide-projects PVC in namespace %q not yet visible (%v); proceeding to schedule prewarm Pod\n", ns, err)
+	} else if existing.Status.Phase == corev1.ClaimBound {
+		GinkgoWriter.Printf("pvcPrewarmPod: tide-projects PVC in namespace %q already Bound; skipping prewarm\n", ns)
+		return
+	}
+
+	// Step 2 — create a pause Pod that mounts the PVC. The mere presence of
+	// spec.volumes referencing the PVC is sufficient to trigger the
+	// local-path provisioner; the container does not need to mount the
+	// volume to cause the bind side-effect.
+	podYAML := fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: tide-projects-prewarm
+  namespace: %s
+spec:
+  restartPolicy: Never
+  containers:
+    - name: pause
+      image: busybox:1.36
+      command: ["sleep", "60"]
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: tide-projects
+`, ns)
+	_ = applyYAML(podYAML)
+
+	// Step 3 — wait for the PVC to reach ClaimBound. 60s budget matches the
+	// Risks: low estimate in push-lease-pvc-pending.md:181; 1s poll interval
+	// matches existing Eventually precedents in this package.
+	Eventually(func() corev1.PersistentVolumeClaimPhase {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := k8sClient.Get(ctx, client.ObjectKey{
+			Name:      "tide-projects",
+			Namespace: ns,
+		}, pvc); err != nil {
+			return ""
+		}
+		return pvc.Status.Phase
+	}, 60*time.Second, time.Second).Should(Equal(corev1.ClaimBound),
+		"tide-projects PVC in namespace %q must reach Bound after prewarm Pod scheduled", ns)
+
+	// Step 4 — best-effort cleanup. The pause Pod's sleep 60 ensures it
+	// self-exits even if our explicit Delete is skipped or fails; AfterEach
+	// namespace deletion GCs any orphans. Errors are logged but do NOT fail
+	// the helper.
+	prewarm := &corev1.Pod{}
+	prewarm.Name = "tide-projects-prewarm"
+	prewarm.Namespace = ns
+	if err := k8sClient.Delete(ctx, prewarm); err != nil {
+		GinkgoWriter.Printf("pvcPrewarmPod: best-effort delete of tide-projects-prewarm Pod in namespace %q returned %v (non-fatal; AfterEach will GC)\n", ns, err)
+	}
 }
 
 // ensureSigningKeySecret mirrors the helm-created tide-signing-key Secret into
