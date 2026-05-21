@@ -5,7 +5,7 @@ milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-05-21T04:48:51.108Z"
-last_activity: 2026-05-21 -- Plan 04.1-13 closed (Phase 03 UAT: 4 pass + 1 deferred to Phase 5; 03-VERIFICATION.md gate flipped CONDITIONAL→APPROVED)
+last_activity: 2026-05-21 -- Plan 04.1-14 in iteration: Dockerfile.dashboard fix landed (425c315); Item 3 dashboard interactive Task→DetailDrawer awaits Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap)
 progress:
   total_phases: 8
   completed_phases: 6
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
-Plan: 13 of 15 (Plan 13 closed; Plans 14 + 15 remain)
-Status: Executing Phase 04.1 — Plan 14 (Wave 9 Phase 04 UAT closeout) next
-Last activity: 2026-05-21 -- Plan 04.1-13 closed (Phase 03 UAT: 4 pass + 1 deferred to Phase 5; 03-VERIFICATION.md gate flipped CONDITIONAL→APPROVED)
+Plan: 14 of 15 (in iteration — Items 1/2/4 verified, Item 3 awaiting Phase 04 Plans 04-15/04-16 — see 04.1-14-SUMMARY.md)
+Status: Plan 14 iteration: implement Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap), then re-verify Item 3, then finalize Plan 14 VERIFICATION.md/HUMAN-UAT.md edits
+Last activity: 2026-05-21 -- Plan 04.1-14 in iteration: Dockerfile.dashboard fix landed (425c315); Item 3 dashboard interactive Task→DetailDrawer awaits Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap)
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
