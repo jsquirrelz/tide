@@ -247,6 +247,16 @@ func patchJobToFailed(ns, jobName string) {
 		"status": map[string]any{
 			"failed": 1,
 			"conditions": []map[string]any{
+				// K8s 1.31+ requires FailureTarget=True before Failed=True can be set on Job status.
+				// See .planning/debug/push-lease-pvc-pending.md cascade-12 footnote.
+				{
+					"type":               string(batchv1.JobFailureTarget),
+					"status":             string(corev1.ConditionTrue),
+					"reason":             "LeaseRejected",
+					"message":            "mocked: --force-with-lease detected divergence",
+					"lastTransitionTime": time.Now().UTC().Format(time.RFC3339),
+					"lastProbeTime":      time.Now().UTC().Format(time.RFC3339),
+				},
 				{
 					"type":               string(batchv1.JobFailed),
 					"status":             string(corev1.ConditionTrue),
