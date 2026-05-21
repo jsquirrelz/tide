@@ -1,28 +1,40 @@
 ---
 phase: 02-dispatch-plan-validation-innermost-reconcilers-harness
 verified: 2026-05-13T00:00:00Z
-status: human_needed
-score: 4/5 must-haves verified (SC#4 and SC#5 require kind cluster for Layer B)
+status: pass
+score: 5/5 must-haves verified — SC#4 and SC#5 closed via Phase 04.1 Plan 12 iter-5 clean make test-int run on 2026-05-21 (5 of 6 Layer B UAT specs PASS; item 2 has no test file, deferred-no-test)
 overrides_applied: 0
 human_verification:
   - test: "Run `make test-int` (Layer B kind suite) — Wave dispatch end-to-end"
     expected: "Three-task wave (alpha/beta/gamma) all reach Succeeded via stub-subagent Jobs in kind cluster; Wave CRD rolls up to Succeeded"
     why_human: "Layer B kind tests require Docker + kind v0.31 loaded with stub-subagent and credproxy images; cannot run in this environment"
+    result: pass
+    verified_by: "Phase 04.1 Plan 12 iter-5 (2026-05-21) — wave_test.go:60 'AC1: three-task wave — all tasks succeed via stub-subagent' PASS in 31.5s; companion spec wave_test.go:94 'AC1: wave 1 (gamma) does not dispatch until wave 0 tasks complete' PASS in 21.2s — confirms wave-boundary semantics for both the success path and the dependency-gate path; evidence /tmp/04.1-12-iter5-clean-run.log"
   - test: "Run Layer B 429 storm test — FAIL-03 / AC#4 synthetic kind path"
     expected: "Pre-drained bucket causes Tasks to stay Pending with RateLimitHit condition; `tide_provider_rate_limit_hits_total` counter increments; refill allows dispatch"
     why_human: "Real Prometheus counter increment over kind cluster requires full Layer B run"
+    result: deferred-no-test
+    verified_by: "No Layer B kind spec exists for rate-limit FAIL-03; the counter increment IS verified by Layer A envtest rate_limit_test.go (Layer A 29/29 PASS in iter-5). The kind-path UAT item was authored before a corresponding Layer B spec was written. Deferred to a future Phase 03/04 plan that authors the Layer B 429 storm test, or accept the Layer A envtest coverage as sufficient per the FAIL-03 contract (token bucket interaction is namespace-independent)."
   - test: "Run Layer B caps_test — wall-clock cap kills hang-mode Job (AC5 / HARN-02)"
     expected: "testMode=hang Task Job reaches Failed with reason DeadlineExceeded within activeDeadlineSeconds=70s window"
     why_human: "Requires kind cluster with stub-subagent image loaded"
+    result: pass
+    verified_by: "Phase 04.1 Plan 12 iter-5 (2026-05-21) — caps_test.go:57 'AC5: hang mode + wall-clock cap terminates subagent Job within cap window' PASS in 88.1s; Job reached JobFailed within the activeDeadlineSeconds budget; Task transitioned to Failed phase post-Job-completion; evidence /tmp/04.1-12-iter5-clean-run.log"
   - test: "Run Layer B credproxy_test — credproxy sidecar starts and emits startup log (AC5 / HARN-03)"
     expected: "Pod contains tide-credproxy init container; container log contains 'credproxy listening on 127.0.0.1:8443'"
     why_human: "Requires kind cluster with credproxy image loaded; forward-proxy happy path requires network capable cluster"
+    result: pass
+    verified_by: "Phase 04.1 Plan 12 iter-5 (2026-05-21) — credproxy_test.go:73 'HARN-03: credproxy sidecar container starts and becomes Ready' PASS in 16.8s; credproxy_test.go:126 'HARN-03: credproxy container log contains credproxy listening on 127.0.0.1:8443' PASS in 18.1s; sidecar container observed in Task pod with the canonical startup log line; evidence /tmp/04.1-12-iter5-clean-run.log"
   - test: "Run Layer B output_test — exceed-output-paths mode causes Task to fail (AC5 / HARN-05)"
     expected: "Task with testMode=exceed-output-paths reaches Failed phase after harness output validator detects out-of-scope write"
     why_human: "Requires kind cluster with stub-subagent image; outputs.Validate is wired via handleJobCompletion reading PVC"
+    result: pass
+    verified_by: "Phase 04.1 Plan 12 iter-5 (2026-05-21) — output_test.go:56 'AC5: exceed-output-paths mode causes Task to fail with output violation' PASS in 28.8s; Task reached Failed phase with OutputPathsViolation condition reason within the 2-minute Eventually budget; evidence /tmp/04.1-12-iter5-clean-run.log. Closure required Phase 04.1 P1.4 fixture-label backfill (commit 6d0aba3) to resolve the Project label dependency."
   - test: "Run Layer B failure_test — failed sibling does not block independent tasks; dependent never dispatches (AC3 / FAIL-01)"
     expected: "alpha-fail (independent) reaches Succeeded; beta-fail (testMode=fail-exit-1) reaches Failed; gamma-fail (depends on beta) never enters Running"
     why_human: "Requires kind cluster; Consistently assertion needs real Job lifecycle over minutes"
+    result: pass
+    verified_by: "Phase 04.1 Plan 12 iter-5 (2026-05-21) — failure_test.go:54 'AC3: failed task β does not block independent sibling α; dependent γ never dispatches' PASS in 56.3s; alpha-fail reached Succeeded, beta-fail reached Failed, gamma-fail Consistently non-Running across the 30-second observation window; evidence /tmp/04.1-12-iter5-clean-run.log. Closure required Phase 04.1 P1.4 fixture-label backfill (commit 6d0aba3)."
 ---
 
 # Phase 2: Dispatch & Plan Validation — Innermost Reconcilers + Harness
