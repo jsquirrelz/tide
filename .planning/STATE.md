@@ -5,7 +5,7 @@ milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-05-21T04:48:51.108Z"
-last_activity: 2026-05-21 -- Completed quick task 260521-hk4: Phase 03 cascade 12 FailureTarget condition in patchJobToFailed (K8s 1.31+ Job status validation)
+last_activity: 2026-05-21 -- Completed quick task 260521-jz0: Phase 03 cascade 13 handleInitJobCompletion idempotency guard (production fix; runtime gate in flight)
 progress:
   total_phases: 8
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
 Plan: 1 of 15
 Status: Executing Phase 04.1
-Last activity: 2026-05-21 -- Completed quick task 260521-hk4: Phase 03 cascade 12 FailureTarget condition in patchJobToFailed (K8s 1.31+ Job status validation)
+Last activity: 2026-05-21 -- Completed quick task 260521-jz0: Phase 03 cascade 13 handleInitJobCompletion idempotency guard (production fix; runtime gate in flight)
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
@@ -148,6 +148,7 @@ None yet.
 | 260521-f8x | Phase 03 cascade 7: gate Plan-planner dispatch on resolveProjectForPlan != nil | 2026-05-21 | 88356ad, 6212147 | [260521-f8x-phase-03-cascade-7-gate-plan-planner-dis](./quick/260521-f8x-phase-03-cascade-7-gate-plan-planner-dis/) |
 | 260521-gmm | Phase 03 cascade 11: pvcPrewarmPod helper to bind WaitForFirstConsumer PVCs | 2026-05-21 | e8083a5 | [260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper](./quick/260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper/) |
 | 260521-hk4 | Phase 03 cascade 12: patchJobToFailed sets FailureTarget=True for K8s 1.31+ Job status | 2026-05-21 | 03af69b | [260521-hk4-phase-03-cascade-12-patchjobtofailed-mus](./quick/260521-hk4-phase-03-cascade-12-patchjobtofailed-mus/) |
+| 260521-jz0 | Phase 03 cascade 13: handleInitJobCompletion idempotency guard (prevent Phase=Initialized stomp) | 2026-05-21 | 0c6905b, 6a9f095 | [260521-jz0-phase-03-cascade-13-idempotency-guard-in](./quick/260521-jz0-phase-03-cascade-13-idempotency-guard-in/) |
 
 ## Session Continuity
 
