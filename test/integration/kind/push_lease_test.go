@@ -35,7 +35,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -55,21 +54,9 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 	const pushLeaseNS = "push-lease-test"
 
 	BeforeEach(func() {
-		// Phase 04.1 Plan 12 iter-5: scope-defer Phase 03 push_lease tests
-		// when SKIP_PHASE3_PUSH_LEASE_TESTS=true so they don't burn the suite
-		// budget while the Phase 02 UAT closeout (plan 04.1-12) executes.
-		// Without this skip, the 4 push_lease specs each fail at ~103s
-		// (90s Eventually + cleanup), consuming ~415s of the suite ctx and
-		// starving the trailing chaos_resume + caps_test specs (which then
-		// SKIP via skipIfCRDsOnlyMode on ctx.DeadlineExceeded).
-		//
-		// The push_lease failures are a Phase 03 cascade — likely a
-		// namespace-local SA/Secret mirroring gap similar to chaos-resume
-		// (Cascade 6). They belong to a separate Phase 03 fix plan.
-		if os.Getenv("SKIP_PHASE3_PUSH_LEASE_TESTS") == "true" {
-			Skip("SKIP_PHASE3_PUSH_LEASE_TESTS=true; deferring Phase 03 push_lease tests during Phase 02 UAT closeout (Phase 04.1 Plan 12 iter-5)")
-		}
 		skipIfCRDsOnlyMode()
+		By("Ensure namespace-local SA + signing-key Secret (Phase 04.1 P12 Cascade 9 — same shape as Cascade 6)")
+		createNamespace(pushLeaseNS)
 	})
 
 	AfterEach(func() {
