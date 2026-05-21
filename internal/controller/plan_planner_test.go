@@ -29,6 +29,8 @@ import (
 var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest", "phase3"), func() {
 	const planName = "plan-planner-dispatch"
 	const phaseRef = "phase-planner-dispatch"
+	const milestoneRefName = "milestone-planner-dispatch"
+	const projectRefName = "project-planner-dispatch"
 	ctx := context.Background()
 
 	AfterEach(func() {
@@ -38,6 +40,19 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			_ = k8sClient.Update(ctx, p)
 			_ = k8sClient.Delete(ctx, p)
 		}
+		ph := &tideprojectv1alpha1.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseRef, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha1.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: milestoneRefName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		cleanupProject(projectRefName)
 		var jobs batchv1.JobList
 		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
 		for i := range jobs.Items {
@@ -47,6 +62,24 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 	})
 
 	It("Test 5: dispatches planner Job when Plan has no Tasks yet", func() {
+		// Cascade-7 fix: reconcilePlannerDispatch now gates on
+		// resolveProjectForPlan != nil. This test exercises the happy path
+		// (dispatch proceeds when Project chain resolves), so we create the
+		// full Project → Milestone → Phase → Plan hierarchy in-test.
+		makeProjectForTask(projectRefName)
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: milestoneRefName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectRefName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(milestoneRefName, "default", &tideprojectv1alpha1.Milestone{})
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phaseRef, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneRefName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phaseRef, "default", &tideprojectv1alpha1.Phase{})
+
 		// Plan with no Tasks and no ValidationState — should trigger planner dispatch.
 		p := &tideprojectv1alpha1.Plan{
 			ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"},

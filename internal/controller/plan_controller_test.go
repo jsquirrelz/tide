@@ -25,6 +25,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -472,6 +474,82 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			var wave1 tideprojectv1alpha1.Wave
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: wave1Name, Namespace: "default"}, &wave1)).To(Succeed(),
 				"expected wave-1 to be created after adding a dependent Task (PERSIST-03 assertion)")
+		})
+	})
+})
+
+// Cascade 7: reconcilePlannerDispatch must not commit a planner Job to the
+// API server when resolveProjectForPlan returns nil. BuildJobSpec drops the
+// credproxy provider Secret from EnvFrom when opts.Project == nil
+// (internal/dispatch/podjob/jobspec.go:259-273), which would launch credproxy
+// without ANTHROPIC_API_KEY → CrashLoopBackOff → Job.Status.Failed=1. Dispatch
+// is single-shot (idempotent on AlreadyExists), so the first nil-Project create
+// would permanently wedge the planner. The guard tested here gates dispatch on
+// Project resolution: empty PhaseRef → permanent (no requeue); non-empty
+// PhaseRef but unresolvable chain → transient (requeue after 1s).
+var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label("envtest", "phase2"), func() {
+	ctx := context.Background()
+
+	Describe("TestPlanReconciler_PlannerDispatch_RequeuesWhenPhaseNotInCache", func() {
+		const planName = "plan-cascade7-transient"
+		const phaseRef = "phase-cascade7-missing"
+
+		BeforeEach(func() {
+			// Phase is deliberately NOT created — resolveProjectForPlan returns
+			// nil via the Phase Get-failure branch at line 487.
+			makePlan(planName, phaseRef, "")
+		})
+		AfterEach(func() {
+			cleanupPlanFixture(planName, nil)
+		})
+
+		It("should requeue without dispatching when Phase/Milestone/Project chain is unresolvable", func() {
+			r := newPlanReconciler()
+
+			var plan tideprojectv1alpha1.Plan
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan)).To(Succeed())
+			planUID := plan.UID
+
+			result, handled, err := r.reconcilePlannerDispatch(ctx, &plan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(handled).To(BeFalse(),
+				"guard should NOT mark as handled — dispatch was not committed")
+			Expect(result.RequeueAfter).To(Equal(1*time.Second),
+				"transient cache-miss arm must requeue at 1s")
+
+			// No planner Job should exist — the guard fired before r.Create.
+			var job batchv1.Job
+			err = mgrClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("tide-plan-%s-1", planUID),
+				Namespace: "default",
+			}, &job)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+				"planner Job must not exist when guard fires")
+		})
+	})
+
+	Describe("TestPlanReconciler_PlannerDispatch_PermanentOnEmptyPhaseRef", func() {
+		// Empty-PhaseRef arm: stack-constructed Plan (no round-trip through
+		// k8sClient.Create — admission may reject empty PhaseRef). The List
+		// inside reconcilePlannerDispatch needs valid Namespace/Name, so we
+		// stamp both even though the spec is otherwise empty.
+		It("should refuse dispatch without requeueing when Spec.PhaseRef is empty", func() {
+			r := newPlanReconciler()
+			plan := tideprojectv1alpha1.Plan{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "plan-cascade7-perm",
+					Namespace: "default",
+				},
+				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: ""},
+			}
+			result, handled, err := r.reconcilePlannerDispatch(ctx, &plan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(handled).To(BeFalse(),
+				"guard should NOT mark as handled — dispatch was not committed")
+			Expect(result.Requeue).To(BeFalse(),
+				"empty-PhaseRef arm must not requeue (permanent error)")
+			Expect(result.RequeueAfter).To(Equal(time.Duration(0)),
+				"empty-PhaseRef arm must not requeue (permanent error)")
 		})
 	})
 })

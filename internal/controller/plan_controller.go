@@ -243,6 +243,27 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 
 	project := r.resolveProjectForPlan(ctx, plan)
 
+	// Cascade 7: BuildJobSpec drops the credproxy provider Secret when
+	// opts.Project==nil (internal/dispatch/podjob/jobspec.go:259-273), causing
+	// credproxy to start without ANTHROPIC_API_KEY → CrashLoopBackOff. Dispatch
+	// is single-shot (idempotent on AlreadyExists), so the first nil-Project
+	// create would permanently wedge the planner. Gate dispatch on Project
+	// resolution.
+	if project == nil {
+		logger := logf.FromContext(ctx).WithValues("plan", plan.Name)
+		if plan.Spec.PhaseRef == "" {
+			// Permanent: empty PhaseRef is a configuration error; admission
+			// validation should reject it. Refuse dispatch without requeueing so
+			// we don't loop on bad input.
+			logger.Info("refusing plan-planner dispatch: plan.spec.phaseRef is empty", "cascade", 7)
+			return ctrl.Result{}, false, nil
+		}
+		// Transient: Phase/Milestone/Project chain not yet visible in informer
+		// cache. Requeue to retry once the cache catches up.
+		logger.V(1).Info("deferring plan-planner dispatch: project chain not yet resolvable, requeueing", "cascade", 7)
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, false, nil
+	}
+
 	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
 	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner).
 	attempt := 1 // plan planner dispatch is single-shot per ROADMAP scope
