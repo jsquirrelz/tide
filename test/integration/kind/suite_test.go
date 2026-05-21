@@ -152,6 +152,22 @@ var _ = BeforeSuite(func() {
 	By("Waiting for controller-manager Deployment to become ready")
 	waitForControllerReady()
 
+	// Phase 04.1 Plan 12 iter-3 (Cascade 4-b): mirror the tide-signing-key
+	// Secret into the shared fixture namespace AFTER waitForControllerReady
+	// rather than inside applyController(). applyController() returns early
+	// on helm --wait failure (e.g. when chart resources take > 5m to become
+	// Ready, even though the Deployment itself comes up); the prior in-helm
+	// placement of ensureSigningKeySecret(kindNamespace) was skipped in that
+	// path, causing all subsequent kind-namespace Tasks to fail with
+	// `CreateContainerConfigError: secret "tide-signing-key" not found` on
+	// the credproxy init container. Doing the mirror here, gated on
+	// controllerSigningKeyData()'s availability (which the helper handles
+	// internally with a GinkgoWriter warning + skip), survives the
+	// helm-failed-but-Deployment-up case. Source:
+	// .planning/phases/04.1-.../04.1-12-SUMMARY.md §"Cascade 4-b".
+	By("Mirroring tide-signing-key into kindNamespace (helm-failure-resilient)")
+	ensureSigningKeySecret(kindNamespace)
+
 	GinkgoWriter.Println("Layer B kind suite ready; cluster: " + kindClusterName)
 })
 
@@ -423,11 +439,13 @@ func applyController() {
 	}
 	GinkgoWriter.Printf("helm upgrade --install completed in %s\n%s\n", elapsed, out)
 
-	// The chart creates tide-signing-key only in the controller namespace, but
-	// credproxy sidecars resolve envFrom secrets in the Task pod namespace.
-	// Mirror the same signing key into the shared fixture namespace after helm
-	// creates the source secret.
-	ensureSigningKeySecret(kindNamespace)
+	// NOTE: tide-signing-key mirroring into kindNamespace was MOVED to a
+	// separate BeforeSuite step after waitForControllerReady() — Phase 04.1
+	// Plan 12 iter-3 Cascade 4-b. The chart creates the source Secret in
+	// .Release.Namespace (= tide-system) even when helm --wait subsequently
+	// times out; keeping the mirror inside this function meant the
+	// helm-failure-early-return path skipped it and broke every test that
+	// runs in kindNamespace.
 }
 
 func helmControllerArgs(chartDir string, rolloutNonce string) []string {
