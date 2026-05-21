@@ -13,3 +13,9 @@
 # Re-include embedded data files needed by go:embed directives
 # (e.g. internal/gitleaks/default_rules.toml referenced by scanner.go)
 !**/*.toml
+
+# Re-include the dashboard SPA bundle for the dashboard image build
+# (cmd/dashboard/embed/embed.go: //go:embed all:dist requires dist/ contents).
+# This was added in Phase 04.1 Plan 14 UAT closeout when the dashboard image
+# was split out of the shared controller Dockerfile (Dockerfile.dashboard).
+!cmd/dashboard/embed/dist/**

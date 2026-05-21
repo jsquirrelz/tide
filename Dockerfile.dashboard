@@ -1,0 +1,34 @@
+# TIDE dashboard image (Phase 4 D-D2 / Phase 4.1 Plan 14 UAT closeout shim).
+#
+# This Dockerfile is the operator-facing dashboard container. It compiles
+# cmd/dashboard into a `/dashboard` binary, which embeds the Vite-built SPA
+# from cmd/dashboard/embed/dist via the //go:embed directive in
+# cmd/dashboard/embed/embed.go.
+#
+# Why a dedicated Dockerfile instead of reusing Dockerfile (the manager image):
+# the chart's dashboard-deployment.yaml invokes `/dashboard` as its container
+# command. Reusing the manager image (which produces /manager) leaves the
+# container in CrashLoopBackOff with "exec: /dashboard: not found". This file
+# is the minimal viable fix; Phase 5 DIST-04 may consolidate or split further.
+#
+# The SPA must be pre-built into cmd/dashboard/embed/dist/ before `docker build`
+# (run `make dashboard-frontend` if cmd/dashboard/embed/dist is stale).
+FROM golang:1.26 AS builder
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.mod
+COPY go.sum go.sum
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o dashboard ./cmd/dashboard
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/dashboard .
+USER 65532:65532
+
+ENTRYPOINT ["/dashboard"]
