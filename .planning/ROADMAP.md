@@ -184,7 +184,7 @@ Plans:
 - [x] 04-13-PLAN.md — DAG views + 5 custom nodes + TaskDetailDrawer + dagre layout (Wave 8)
 - [x] 04-16-PLAN.md — PodLogStreamer + SSE hooks + ANSI parser + EmptyState/ErrorState/LoadingState + bundle-size gate + Makefile embed (Wave 9)
 - [x] 04-14-PLAN.md — Helm chart additions (dashboard-deployment + RBAC + ServiceMonitor) + E2E smoke (Wave 10)
-- [ ] 04-17-PLAN.md — last-mile App.tsx wiring: useProjects + useTasks + useTaskDetail hooks + GET /api/v1/plans/{name} + GET /api/v1/tasks/{name} backend (Wave 11)
+- [x] 04-17-PLAN.md — last-mile App.tsx wiring: useProjects + useTasks + useTaskDetail hooks + GET /api/v1/plans/{name} + GET /api/v1/tasks/{name} backend (Wave 11)
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — React Flow vs htmx is contributor-pool-shaping; two-DAG view UX needs prototyping; SSE-through-ingress concerns; observability data volume (Pitfall 17); dashboard websocket leak prevention (Pitfall 22).
 
@@ -270,6 +270,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 2. Dispatch & Plan Validation — Innermost Reconcilers + Harness | 9/13 | In Progress|  |
 | 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
-| 4. Gates, Observability, Dashboard, CLI | 0/TBD | Not started | - |
+| 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 11/15 | In Progress|  |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |

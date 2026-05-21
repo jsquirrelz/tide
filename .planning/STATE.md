@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-21T04:48:51.108Z"
-last_activity: 2026-05-21 -- Plan 04.1-14 in iteration: Dockerfile.dashboard fix landed (425c315); Item 3 dashboard interactive Task→DetailDrawer awaits Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap)
+last_updated: "2026-05-21T23:30:00.000Z"
+last_activity: 2026-05-21 -- Plan 04-17 LANDED (ff01ccc + 45f8d17): last-mile App.tsx wiring complete (useProjects + useTasks + useTaskDetail + GET /api/v1/plans/{name} + GET /api/v1/tasks/{name}). Plan 04.1-14 next iteration can re-verify Item 3 live against a kind cluster.
 progress:
   total_phases: 8
   completed_phases: 6
-  total_plans: 82
-  completed_plans: 80
-  percent: 96
+  total_plans: 83
+  completed_plans: 81
+  percent: 98
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
-Plan: 14 of 15 (in iteration — Items 1/2/4 verified, Item 3 awaiting Phase 04 Plans 04-15/04-16 — see 04.1-14-SUMMARY.md)
-Status: Plan 14 iteration: implement Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap), then re-verify Item 3, then finalize Plan 14 VERIFICATION.md/HUMAN-UAT.md edits
-Last activity: 2026-05-21 -- Plan 04.1-14 in iteration: Dockerfile.dashboard fix landed (425c315); Item 3 dashboard interactive Task→DetailDrawer awaits Phase 04 Plans 04-15 (ProjectPicker) + 04-16 (useTasks SSE bootstrap)
+Plan: 14 of 15 (in iteration — Items 1/2/4 verified clean; Item 3 dashboard interactive Project→Plan→Task wiring NOW LANDED via Phase 04 Plans 04-15 + 04-16 + 04-17; awaits live re-verification against a fresh kind cluster — see 04.1-14-SUMMARY.md + 04-17-SUMMARY.md)
+Status: Plan 14 iteration: Phase 04 Plan 04-17 (last-mile App.tsx wiring) LANDED 2026-05-21 (ff01ccc + 45f8d17). Next step: 04.1-14 next iteration re-runs Item 3 live against a kind cluster, then finalizes 04-HUMAN-UAT.md Test 3 + 04-VERIFICATION.md human_verification[2] flips from human_needed to verified, then Plan 14 SUMMARY finalized and chain advances to Plan 04.1-15 (Phase 04.1 closeout).
+Last activity: 2026-05-21 -- Plan 04-17 LANDED (ff01ccc backend + 45f8d17 frontend): GET /api/v1/plans/{name} + GET /api/v1/tasks/{name} surfaces the rich shape SSE can't carry; useProjects + useTasks + useTaskDetail hooks compose useSSEStream unmodified; App.tsx wires the three hooks + mounts ProjectPicker into Header.projectPicker; bundle 154.86KB gzipped (gate 500KB); zero locked-contract files touched.
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
@@ -64,6 +64,7 @@ Progress: [██████████] 100% (Phase 02.2 scope)
 | Phase 01 P09 | 5min | 2 tasks | 5 files |
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P11 | 19min | 2 tasks | 52 files |
 | Phase 02 P09 | multi-session | 3 tasks | 23 files |
+| Phase 04-gates-observability-dashboard-cli P17 | 24min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
