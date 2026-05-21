@@ -71,6 +71,9 @@ metadata:
   name: alpha-fail
   namespace: %s
   labels:
+    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback.
+    # Project name follows createProjectHierarchy convention: ns+"-project".
+    tideproject.k8s/project: failure-test-project
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: fail-plan
@@ -85,6 +88,7 @@ metadata:
   name: beta-fail
   namespace: %s
   labels:
+    tideproject.k8s/project: failure-test-project
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: fail-plan
@@ -99,6 +103,7 @@ metadata:
   name: gamma-fail
   namespace: %s
   labels:
+    tideproject.k8s/project: failure-test-project
     tideproject.k8s/wave-index: "1"
 spec:
   planRef: fail-plan

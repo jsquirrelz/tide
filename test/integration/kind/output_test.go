@@ -72,6 +72,11 @@ metadata:
   name: exceed-output-task
   namespace: %s
   labels:
+    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback in
+    # resolveProject; the label is now required for Task→Project resolution
+    # because PlanReconciler-stamped owner-refs race with the Task reconciler.
+    # The project name follows the createProjectHierarchy convention: ns+"-project".
+    tideproject.k8s/project: output-test-project
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: output-plan

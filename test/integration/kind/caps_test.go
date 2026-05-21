@@ -73,6 +73,9 @@ metadata:
   name: hang-task
   namespace: %s
   labels:
+    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback.
+    # Project name follows createProjectHierarchy convention: ns+"-project".
+    tideproject.k8s/project: caps-test-project
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: cap-plan
