@@ -279,6 +279,99 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				"Phase should be Initialized after init Job success")
 		})
 
+		It("TestProjectReconciler_OnInitJobSuccess_DoesNotRevertPhaseFromComplete", func() {
+			ns := "default"
+			pvcName := "tide-projects-no-revert"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			project := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-no-revert-from-complete",
+					Namespace: ns,
+				},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/repo.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			fetched := &tideprojectv1alpha1.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Pre-create a Succeeded init Job (mirror lines 243-271 of the canonical test).
+			completedJob := buildSucceededInitJob(fetched, pvcName)
+			Expect(k8sClient.Create(ctx, completedJob)).To(Succeed())
+			now := metav1.Now()
+			jobPatch := completedJob.DeepCopy()
+			jobPatch.Status = batchv1.JobStatus{
+				Succeeded:      1,
+				StartTime:      &now,
+				CompletionTime: &now,
+				Conditions: []batchv1.JobCondition{
+					{
+						Type:               batchv1.JobSuccessCriteriaMet,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      now,
+						LastTransitionTime: now,
+						Reason:             "CompletionsReached",
+					},
+					{
+						Type:               batchv1.JobComplete,
+						Status:             corev1.ConditionTrue,
+						LastProbeTime:      now,
+						LastTransitionTime: now,
+					},
+				},
+			}
+			Expect(k8sClient.Status().Update(ctx, jobPatch)).To(Succeed())
+
+			// Reconcile 2: seam body observes Succeeded Job → Phase=Initialized.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("Initialized"),
+				"Phase should be Initialized after init Job success")
+
+			// Cascade 13 contract: manually advance Phase to Complete (simulating
+			// the push_lease_test's forcePushReady helper). The init Job is STILL
+			// Succeeded in the cluster — a subsequent Reconcile will re-enter
+			// handleInitJobCompletion's isJobSucceeded branch.
+			statusPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Phase = tideprojectv1alpha1.PhaseComplete
+			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
+
+			// Sanity check the patch landed.
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("Complete"),
+				"pre-flight: Phase should be Complete after manual patch")
+
+			// Reconcile 3: handleInitJobCompletion fires AGAIN (init Job still
+			// Succeeded). Without the cascade-13 guard, this would re-stomp
+			// Phase back to Initialized. With the guard, Phase stays at Complete.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal("Complete"),
+				"Cascade 13: Phase MUST NOT revert from Complete to Initialized — handleInitJobCompletion must be idempotent against forward-progressed Phase states")
+		})
+
 		It("TestProjectReconciler_OnInitJobFailure_SetsPhaseInitFailed", func() {
 			ns := "default"
 			pvcName := "tide-projects-initfail"

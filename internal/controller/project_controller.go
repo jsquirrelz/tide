@@ -296,6 +296,24 @@ func (r *ProjectReconciler) ensureInitJob(ctx context.Context, project *tideproj
 // Project.Status.Phase accordingly.
 func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, job *batchv1.Job) (ctrl.Result, error) {
 	if isJobSucceeded(job) {
+		// Cascade 13 idempotency guard: handleInitJobCompletion is called on
+		// every reconcile pass — the init Job remains Succeeded permanently
+		// after first completion. Without this guard, the function re-stomps
+		// Phase=Initialized on every reconcile, clobbering forward Phase
+		// transitions (Complete, PushLeaseFailed, PushLeakBlocked, Running).
+		// That breaks the push-Job-failed branch at line ~480 which is gated
+		// on Phase==Complete at line ~440 — push_lease Tests 3+4 timed out
+		// observing Phase=Initialized instead of Phase=PushLeaseFailed.
+		// Reference: .planning/debug/push-lease-phase-revert.md.
+		switch project.Status.Phase {
+		case tideprojectv1alpha1.PhaseRunning,
+			tideprojectv1alpha1.PhaseComplete,
+			tideprojectv1alpha1.PhasePushLeaseFailed,
+			tideprojectv1alpha1.PhasePushLeakBlocked:
+			// Phase has already advanced past Initialized — init-Job-completion
+			// was processed in a prior reconcile. Skip the re-patch.
+			return ctrl.Result{}, nil
+		}
 		patch := client.MergeFrom(project.DeepCopy())
 		project.Status.Phase = tideprojectv1alpha1.PhaseInitialized
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
