@@ -87,9 +87,10 @@ const (
 	//   - Phase 04.1-12 iter-5 bump → 18m: iter-4 observed 908s inner wall
 	//     barely over 900s (15m), causing chaos_resume + caps_test to
 	//     SKIP at the tail. push_lease specs (4 × ~103s = 415s) are the
-	//     dominant budget consumer; iter-5 scope-defers them via
-	//     SKIP_PHASE3_PUSH_LEASE_TESTS=true. 18m gives headroom for
-	//     unexpected first-run delays without re-tripping the cascade.
+	//     dominant budget consumer (now run unconditionally per the
+	//     quick-task Cascade 9 recipe — see 04.1-12-SUMMARY.md Outstanding
+	//     Follow-up #2). 18m gives headroom for unexpected first-run
+	//     delays without re-tripping the cascade.
 	kindTestTimeout = 18 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
