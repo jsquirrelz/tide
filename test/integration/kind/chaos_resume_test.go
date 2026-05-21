@@ -125,6 +125,17 @@ var _ = Describe("Chaos-resume: kill controller pod mid-wave (PERSIST-04 / TEST-
 	// — but split into 5 By("Pillar N: ...") subtests per W12 fix for localized
 	// failure attribution.
 	It("D-D4 four pillars + algorithmic invariant hold across controller kill", func() {
+		By("Ensure namespace-local SA + signing-key Secret (Phase 04.1 P12 iter-4 Cascade 6)")
+		// chaos-resume-test fixture YAML creates the Namespace/PVC/provider-Secret
+		// inline but NOT the tide-subagent ServiceAccount or the helm-mirrored
+		// tide-signing-key Secret. Without the SA, kubelet rejects Pod creation
+		// with `serviceaccount "tide-subagent" not found`; without the signing
+		// key, credproxy init container CreateContainerConfigError's. Both must
+		// land in chaos-resume-test before applyFile so the Tasks actually run.
+		// createNamespace() is idempotent (kubectl apply tolerates re-creates)
+		// and bundles ensureSubagentSA + ensureProjectsPVC + ensureSigningKeySecret.
+		createNamespace(chaosResumeNS)
+
 		By("Apply fixture: 3-task mixed-state Plan (α=success, β/γ=wait-for-signal)")
 		Expect(applyFile(filepath.Join("testdata", "chaos-resume-three-task.yaml"))).To(Succeed(),
 			"chaos-resume fixture must apply cleanly")
