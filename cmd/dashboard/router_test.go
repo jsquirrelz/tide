@@ -251,6 +251,8 @@ func TestRouteTableContainsExpectedGETs(t *testing.T) {
 		"GET /readyz":                 true,
 		"GET /api/v1/projects":        true,
 		"GET /api/v1/projects/{name}": true,
+		"GET /api/v1/plans/{name}":    true,
+		"GET /api/v1/tasks/{name}":    true,
 	}
 	got := make(map[string]bool)
 	err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

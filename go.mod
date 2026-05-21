@@ -3,6 +3,7 @@ module github.com/jsquirrelz/tide
 go 1.26.0
 
 require (
+	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-git/go-git/v5 v5.19.0
 	github.com/go-logr/logr v1.4.3
 	github.com/go-logr/zapr v1.3.0
@@ -16,6 +17,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
+	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.28.0
 	golang.org/x/time v0.14.0
 	golang.org/x/tools v0.45.0
@@ -59,7 +61,6 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gitleaks/go-gitdiff v0.9.1 // indirect
-	github.com/go-chi/chi/v5 v5.1.0 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.0 // indirect
@@ -141,7 +142,6 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
-	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

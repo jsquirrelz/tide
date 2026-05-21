@@ -83,6 +83,8 @@ type Dependencies struct {
 //	GET /api/v1/projects                      — list
 //	GET /api/v1/projects/{name}               — single
 //	GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
+//	GET /api/v1/plans/{name}                  — single plan + task cards (plan 04-17)
+//	GET /api/v1/tasks/{name}                  — rich task detail (plan 04-17)
 //	GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
 //	GET /*                                    — SPA fallback (embed.FS)
 //
@@ -108,10 +110,21 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	r.Get("/readyz", processReadyzHandler)
 
 	// API surface — DASH-05: GET-only. Plan 04-11 added the project-scoped
-	// SSE events endpoint and the per-task pod-log SSE endpoint.
+	// SSE events endpoint and the per-task pod-log SSE endpoint. Plan
+	// 04-17 added /api/v1/plans/{name} + /api/v1/tasks/{name} (the
+	// rich-detail GETs the SSE projection cannot carry).
 	ph := &dashboardapi.ProjectsHandler{
 		Client: deps.Client,
 		Log:    deps.Log,
+	}
+	plansHandler := &dashboardapi.PlansHandler{
+		Client: deps.Client,
+		Log:    deps.Log,
+	}
+	tasksHandler := &dashboardapi.TasksHandler{
+		Client:    deps.Client,
+		Clientset: deps.Clientset, // MAY be nil — TasksHandler tolerates.
+		Log:       deps.Log,
 	}
 	var eh *dashboardapi.EventsHandler
 	if deps.Hub != nil {
@@ -128,6 +141,8 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
+		r.Get("/plans/{name}", plansHandler.Get)
+		r.Get("/tasks/{name}", tasksHandler.Get)
 		if eh != nil {
 			r.Get("/projects/{name}/events", eh.ServeHTTP)
 		}
