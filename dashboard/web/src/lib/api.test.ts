@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { fetchProject, fetchProjects } from "./api";
+import { fetchPlan, fetchProject, fetchProjects, fetchTask } from "./api";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -94,5 +94,58 @@ describe("api — Test 8: typed async fetch helpers", () => {
   it("fetchProject() throws on 404 with the error body", async () => {
     stubFetchHTTPError(404, { error: "project nope not found" });
     await expect(fetchProject("nope")).rejects.toThrow(/nope/);
+  });
+
+  it("fetchPlan(name) calls /api/v1/plans/{name} and returns the parsed JSON (plan 04-17)", async () => {
+    const payload = {
+      name: "p-1",
+      namespace: "default",
+      phase: "Running",
+      phaseRef: "ph-1",
+      tasks: [
+        {
+          name: "t-a",
+          phase: "Succeeded",
+          waveIndex: 0,
+          attempt: 1,
+          dependsOn: [],
+        },
+      ],
+      activeDispatchWave: null,
+    };
+    stubFetchOK(payload);
+    const res = await fetchPlan("p-1");
+    expect(res).toEqual(payload);
+    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("/api/v1/plans/p-1");
+  });
+
+  it("fetchTask(name, namespace) appends ?namespace=foo (plan 04-17)", async () => {
+    const payload = {
+      name: "t-007",
+      projectName: "prj-1",
+      planName: "p-1",
+      status: "Running",
+      namespace: "default",
+      attempt: 2,
+      attemptMax: 5,
+      podName: "t-007-pod",
+      exitCode: null,
+      waveIndex: 1,
+      scheduledAt: "2026-05-21T19:00:00Z",
+      envelopePath: "/workspace/envelopes/uid-007/result.json",
+      elapsedText: "running for 2m 30s",
+      conditions: [],
+    };
+    stubFetchOK(payload);
+    const res = await fetchTask("t-007", "default");
+    expect(res).toEqual(payload);
+    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("/api/v1/tasks/t-007?namespace=default");
+  });
+
+  it("fetchTask() throws on 404 with the task name in the error message (plan 04-17)", async () => {
+    stubFetchHTTPError(404, { error: "task missing not found" });
+    await expect(fetchTask("missing")).rejects.toThrow(/missing/);
   });
 });

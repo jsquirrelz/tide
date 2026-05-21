@@ -96,3 +96,99 @@ export async function fetchProject(
   }
   return (await res.json()) as ProjectDetail;
 }
+
+/** Mirrors cmd/dashboard/api/plans.go::planTaskCard (plan 04-17). */
+export type PlanTaskCard = {
+  name: string;
+  phase: string;
+  waveIndex: number;
+  attempt: number;
+  dependsOn: string[];
+};
+
+/** Mirrors cmd/dashboard/api/plans.go::planDetail (plan 04-17). */
+export type PlanDetail = {
+  name: string;
+  namespace: string;
+  phase: string;
+  phaseRef: string;
+  tasks: PlanTaskCard[];
+  activeDispatchWave: number | null;
+};
+
+/** Mirrors cmd/dashboard/api/tasks.go::taskCondition (plan 04-17). */
+export type TaskCondition = {
+  type: string;
+  reason: string;
+  age: string;
+};
+
+/**
+ * Mirrors cmd/dashboard/api/tasks.go::taskDetail (plan 04-17).
+ *
+ * Suffixed `JSON` to disambiguate from the React-layer `TaskDetailData`
+ * type exported by components/TaskDetailDrawer.tsx — they differ only in
+ * the typing of `status` (raw `string` here, `StatusValue` union there).
+ * The `useTaskDetail()` hook in lib/tasks.ts performs the runtime
+ * coercion via the canonical STATUS_TABLE from StatusBadge.
+ */
+export type TaskDetailJSON = {
+  name: string;
+  projectName: string;
+  planName: string;
+  status: string;
+  namespace: string;
+  attempt: number;
+  attemptMax: number;
+  podName: string;
+  exitCode: number | null;
+  waveIndex: number;
+  scheduledAt: string;
+  envelopePath: string;
+  elapsedText: string;
+  conditions: TaskCondition[];
+};
+
+/**
+ * GET /api/v1/plans/{name}[?namespace=foo] (plan 04-17).
+ *
+ * Returns the plan + child task cards (name, phase, waveIndex, attempt,
+ * dependsOn[]) sorted server-side by (waveIndex ASC, name ASC) for
+ * deterministic ExecutionDAGView rendering. Throws on 404 / 500.
+ */
+export async function fetchPlan(
+  name: string,
+  namespace?: string,
+): Promise<PlanDetail> {
+  const url = withNamespace(
+    `/api/v1/plans/${encodeURIComponent(name)}`,
+    namespace,
+  );
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`fetchPlan(${name}) failed: ${await readError(res)}`);
+  }
+  return (await res.json()) as PlanDetail;
+}
+
+/**
+ * GET /api/v1/tasks/{name}[?namespace=foo] (plan 04-17).
+ *
+ * Returns the rich task detail the drawer renders: status, attempt,
+ * attemptMax, podName, exitCode, waveIndex, scheduledAt, envelopePath,
+ * elapsedText, conditions[]. Throws on 404 / 500.
+ */
+export async function fetchTask(
+  name: string,
+  namespace?: string,
+): Promise<TaskDetailJSON> {
+  const url = withNamespace(
+    `/api/v1/tasks/${encodeURIComponent(name)}`,
+    namespace,
+  );
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`fetchTask(${name}) failed: ${await readError(res)}`);
+  }
+  return (await res.json()) as TaskDetailJSON;
+}

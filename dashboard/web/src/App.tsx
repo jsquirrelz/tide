@@ -5,48 +5,77 @@ import Header from "./components/Header";
 import ConnectionStatusIndicator from "./components/ConnectionStatusIndicator";
 import { ToastProvider } from "./components/ToastContainer";
 import PlanningDAGView from "./components/PlanningDAGView";
-import ExecutionDAGView, {
-  type ExecutionPlanData,
-} from "./components/ExecutionDAGView";
-import TaskDetailDrawer, {
-  type TaskDetailData,
-} from "./components/TaskDetailDrawer";
+import ExecutionDAGView from "./components/ExecutionDAGView";
+import TaskDetailDrawer from "./components/TaskDetailDrawer";
 import PodLogStreamer from "./components/PodLogStreamer";
+import ProjectPicker from "./components/ProjectPicker";
+import EmptyState from "./components/EmptyState";
+import LoadingState from "./components/LoadingState";
+import ErrorState from "./components/ErrorState";
+import { useProjects } from "./lib/projects";
+import { useTaskDetail, useTasks } from "./lib/tasks";
 
 /**
- * Top-level dashboard component (plan 04-13 wiring).
+ * Top-level dashboard component (plan 04-13 + plan 04-17 wiring).
+ *
+ *   Hooks composed (plan 04-17 — last-mile wiring):
+ *     useProjects()                 — fetches /api/v1/projects once + on refetch
+ *     useTasks(project, plan)       — fetches /api/v1/plans/{plan} on planName change;
+ *                                     SSE on /projects/{project}/events triggers debounced refetch
+ *     useTaskDetail(project, task)  — fetches /api/v1/tasks/{task} on taskName change;
+ *                                     same SSE refresh-trigger pattern.
+ *   The placeholder defaults from the pre-04-17 wiring are gone; selectedProject
+ *   is null until either useProjects defaults it to projects[0].name or the
+ *   operator picks one from <ProjectPicker>.
  *
  *   Renders:
- *     - <AppShell> chrome (plan 04-12)
- *     - <PlanningDAGView projectName={selectedProject} /> (left pane)
- *     - <ExecutionDAGView planName={selectedPlan} /> (right pane)
- *     - <TaskDetailDrawer taskName={selectedTask} /> (overlay)
+ *     - AppShell chrome (plan 04-12)
+ *     - Header projectPicker slot populated by ProjectPicker (plan 04-15 + 04-17)
+ *     - PlanningDAGView (left pane) — projectName={selectedProject}
+ *     - ExecutionDAGView (right pane) — planName + plan props
+ *     - TaskDetailDrawer (overlay) — taskName + task props
  *
  *   State (this plan):
- *     - selectedProject: which project the picker chose (header — wired in
- *       plan 04-15's <ProjectPicker> slot, defaults to a placeholder until
- *       the SSE bootstrap lands).
+ *     - selectedProject: which project the picker chose (header). Null until
+ *       useProjects defaults it to projects[0].name or the operator picks
+ *       one from the header dropdown.
  *     - selectedPlan: PlanNode click swaps the right pane.
  *     - selectedTask: TaskNode click opens the drawer.
  *     - streamingTask: drawer "Open log stream" click — the PodLogStreamer
- *       mount itself lands in plan 04-16.
+ *       mount lives below the drawer body.
  *
  *   URL hash deep-link support: #/plan/<plan-name> drives selectedPlan via
  *   a window.location.hash watcher (browser-native History API per UI-SPEC
  *   §Plan-click-swaps-right-pane — no router library).
  */
 export default function App() {
-  // Placeholder defaults — plan 04-15's ProjectPicker + plan 04-16's SSE
-  // bootstrap populate these from the live cluster. v1.0 ships with a
-  // sane default so a freshly-deployed cluster boots straight into the
-  // empty-state pane.
-  const [selectedProject, setSelectedProject] = useState<string>("my-project");
+  // Plan 04-17: selectedProject starts null; useProjects defaults it to
+  // projects[0].name once the list lands (single-project clusters never
+  // need an extra click). The pre-04-17 "my-project" placeholder is gone.
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [streamingTask, setStreamingTask] = useState<string | null>(null);
 
-  // setSelectedProject reserved for plan 04-15's ProjectPicker wiring.
-  void setSelectedProject;
+  // Plan 04-17 hook wiring (replaces the pre-04-17 placeholder defaults).
+  const {
+    projects,
+    loading: projectsLoading,
+    error: projectsError,
+  } = useProjects();
+  const executionPlan = useTasks(selectedProject, selectedPlan);
+  const taskDetail = useTaskDetail(selectedProject, selectedTask);
+
+  // Default selectedProject to the first project once useProjects resolves.
+  // Operators with a single-project cluster never see the picker; multi-
+  // project clusters land on the first entry and the picker lets them
+  // switch. If selectedProject is already set (deep-link or prior pick),
+  // we never clobber it.
+  useEffect(() => {
+    if (selectedProject === null && projects.length > 0) {
+      setSelectedProject(projects[0].name);
+    }
+  }, [projects, selectedProject]);
 
   // URL hash deep-link: #/plan/<name> sets selectedPlan.
   useEffect(() => {
@@ -84,15 +113,49 @@ export default function App() {
     setStreamingTask(null);
   }, []);
 
-  // Empty plan data for the right pane until a Plan is selected. Plan
-  // 04-16's useTasks(planName) hook replaces this with live SSE data.
-  const executionPlan: ExecutionPlanData | null = selectedPlan
-    ? { planName: selectedPlan, tasks: [] }
-    : null;
-
-  // Resolved task detail data is null until a fetch hook is wired in
-  // plan 04-16. The drawer renders nothing when task is null (UI-SPEC §7).
-  const taskDetail: TaskDetailData | null = null;
+  // Body branching (UI-SPEC §13/§14/§15):
+  //   - projectsError       → ErrorState ERR1 (backend-unreachable)
+  //   - initial load        → LoadingState L1 (initial)
+  //   - empty cluster       → EmptyState  E1 (no-projects)
+  //   - otherwise           → the two-column grid (PlanningDAGView + ExecutionDAGView)
+  let body: React.ReactNode;
+  if (projectsError) {
+    body = <ErrorState variant="backend-unreachable" />;
+  } else if (projectsLoading && projects.length === 0) {
+    body = <LoadingState variant="initial" />;
+  } else if (projects.length === 0) {
+    body = <EmptyState variant="no-projects" />;
+  } else {
+    body = (
+      <div className="grid h-full grid-cols-2 gap-2 p-4">
+        <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
+          {/* selectedProject is guaranteed non-null in this branch: the
+              auto-default useEffect picks projects[0].name once
+              projects.length > 0, which is the same gate as this branch. */}
+          <PlanningDAGView
+            projectName={selectedProject ?? ""}
+            onPlanClick={onPlanClick}
+          />
+        </div>
+        <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
+          {selectedPlan ? (
+            <ExecutionDAGView
+              planName={selectedPlan}
+              plan={executionPlan}
+              onTaskClick={onTaskClick}
+            />
+          ) : (
+            <div
+              className="flex h-full items-center justify-center text-[var(--color-text-muted)]"
+              style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
+            >
+              Select a plan to view its execution DAG
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ToastProvider>
@@ -100,33 +163,13 @@ export default function App() {
         header={
           <Header
             connectionStatus={<ConnectionStatusIndicator state="connected" />}
+            projectPicker={
+              <ProjectPicker projects={projects.map((p) => ({ name: p.name, namespace: p.namespace, phase: p.phase }))} value={selectedProject} onChange={setSelectedProject} />
+            }
           />
         }
       >
-        <div className="grid h-full grid-cols-2 gap-2 p-4">
-          <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
-            <PlanningDAGView
-              projectName={selectedProject}
-              onPlanClick={onPlanClick}
-            />
-          </div>
-          <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
-            {selectedPlan ? (
-              <ExecutionDAGView
-                planName={selectedPlan}
-                plan={executionPlan}
-                onTaskClick={onTaskClick}
-              />
-            ) : (
-              <div
-                className="flex h-full items-center justify-center text-[var(--color-text-muted)]"
-                style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
-              >
-                Select a plan to view its execution DAG
-              </div>
-            )}
-          </div>
-        </div>
+        {body}
         <TaskDetailDrawer
           taskName={selectedTask}
           task={taskDetail}
