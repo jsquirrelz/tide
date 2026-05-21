@@ -5,7 +5,7 @@ milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-05-21T04:48:51.108Z"
-last_activity: 2026-05-21 -- Phase 04.1 execution started
+last_activity: 2026-05-21 -- Completed quick task 260521-ccz: Phase 03 cascade 9 push_lease recipe applied
 progress:
   total_phases: 8
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
 Plan: 1 of 15
 Status: Executing Phase 04.1
-Last activity: 2026-05-21 -- Phase 04.1 execution started
+Last activity: 2026-05-21 -- Completed quick task 260521-ccz: Phase 03 cascade 9 push_lease recipe applied
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
@@ -138,6 +138,12 @@ None yet.
 - **Phase 1 is the densest pitfall window** (PITFALLS.md): 8 critical/serious pitfalls bake in at the CRD-schema + controller-scaffold boundary — long-running reconcile (P1), status-as-truth resumption bug (P4), DAG unification (P3), unified worker pool (P6), RBAC scope creep (P15), breaking CRD schema changes (P16), finalizer leaks (P21), wrong owner refs (P23). Plan-time research should focus there.
 - **Phase 2 carries the security/correctness fanout** (PITFALLS.md): subagent context bleed (P7), runaway agent loops (P8), 429 rate-limit cascade (P9), watch-lag duplicate dispatch (P11), secret leakage (P18 harness side), hallucinated `depends_on` (P19), indegree-on-partial-failure (P10).
 - **Bootstrap deadlock (Pitfall 12)** is structurally addressed: Phases 1-4 = M0 (TIDE-on-host via GSD), Phase 5 = M_self (TIDE-in-cluster authors same artifacts). Both pinned to `v1alpha1` schema with no breaking changes across the bridge.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260521-ccz | Phase 03 cascade 9: apply createNamespace(pushLeaseNS) recipe + drop SKIP gate | 2026-05-21 | 5e1db67, bc3ed29 | [260521-ccz-push-lease-cascade-9-recipe](./quick/260521-ccz-push-lease-cascade-9-recipe/) |
 
 ## Session Continuity
 
