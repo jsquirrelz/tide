@@ -216,10 +216,13 @@ var _ = Describe("Chaos-resume: kill controller pod mid-wave (PERSIST-04 / TEST-
 		waitForChaosTaskPhase("beta-chaos", "Succeeded", 4*time.Minute)
 		waitForChaosTaskPhase("gamma-chaos", "Succeeded", 4*time.Minute)
 
-		// Exactly 3 Jobs in the namespace, all succeeded.
+		// Exactly 3 executor Jobs (α, β, γ) must succeed; non-task Jobs (init,
+		// planners, release-writer) are excluded by the role=executor label filter
+		// per .planning/debug/chaos-resume-cascade-10.md (Resolution, lines 282–294).
 		Eventually(func() int {
 			jobs := &batchv1.JobList{}
-			_ = k8sClient.List(ctx, jobs, client.InNamespace(chaosResumeNS))
+			_ = k8sClient.List(ctx, jobs, client.InNamespace(chaosResumeNS),
+				client.MatchingLabels{"tideproject.k8s/role": "executor"})
 			succeeded := 0
 			for _, j := range jobs.Items {
 				if isJobSucceededShort(&j) {
