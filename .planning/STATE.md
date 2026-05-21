@@ -5,7 +5,7 @@ milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
 last_updated: "2026-05-21T04:48:51.108Z"
-last_activity: 2026-05-21 -- Completed quick task 260521-eoz: Phase 03 cascade 10 Pillar 4 filter (framing flipped: test bug, not duplicate dispatch)
+last_activity: 2026-05-21 -- Completed quick task 260521-f8x: Phase 03 cascade 7 nil-Project guard on Plan-planner dispatch (closes 04.1-12 Outstanding Follow-up #1)
 progress:
   total_phases: 8
   completed_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
 Plan: 1 of 15
 Status: Executing Phase 04.1
-Last activity: 2026-05-21 -- Completed quick task 260521-eoz: Phase 03 cascade 10 Pillar 4 filter (framing flipped: test bug, not duplicate dispatch)
+Last activity: 2026-05-21 -- Completed quick task 260521-f8x: Phase 03 cascade 7 nil-Project guard on Plan-planner dispatch (closes 04.1-12 Outstanding Follow-up #1)
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
@@ -145,6 +145,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 260521-ccz | Phase 03 cascade 9: apply createNamespace(pushLeaseNS) recipe + drop SKIP gate | 2026-05-21 | 5e1db67, bc3ed29 | [260521-ccz-push-lease-cascade-9-recipe](./quick/260521-ccz-push-lease-cascade-9-recipe/) |
 | 260521-eoz | Phase 03 cascade 10: Pillar 4 List filter (refutes duplicate-dispatch framing) | 2026-05-21 | aa65c8e | [260521-eoz-phase-03-cascade-10-filter-pillar-4-list](./quick/260521-eoz-phase-03-cascade-10-filter-pillar-4-list/) |
+| 260521-f8x | Phase 03 cascade 7: gate Plan-planner dispatch on resolveProjectForPlan != nil | 2026-05-21 | 88356ad, 6212147 | [260521-f8x-phase-03-cascade-7-gate-plan-planner-dis](./quick/260521-f8x-phase-03-cascade-7-gate-plan-planner-dis/) |
 
 ## Session Continuity
 
