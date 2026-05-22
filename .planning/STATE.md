@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-22T00:55:00.000Z"
-last_activity: 2026-05-22 -- Plan 04.1-14 FINAL (iteration 2): Item 3 live re-verified against fresh tide-uat kind cluster AFTER Plan 04-17 wiring landed; 04-HUMAN-UAT.md flipped to status=complete (4/4 passed); 04-VERIFICATION.md flipped to status=verified (re_verification=true); SUMMARY finalized. Next step: Plan 04.1-15 (Phase 04.1 closeout).
+last_updated: "2026-05-22T01:10:00.000Z"
+last_activity: 2026-05-22 -- Phase 04.1 CLOSED (15/15 plans): Plan 04.1-15 closeout commit updated ROADMAP.md Progress row to Complete + Plans list to 15/15; STATE.md bumped to 83/83 (100%). Phase 5 (Distribution & Self-Hosting Acceptance) ready to plan.
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 83
-  completed_plans: 82
-  percent: 99
+  completed_plans: 83
+  percent: 100
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 04.1 — pre-v1-audit-fixes-cross-phase-uat-closeout
+**Current focus:** Phase 5 — distribution-self-hosting-acceptance (ready to plan)
 
 ## Current Position
 
-Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
-Plan: 14 of 15 (FINAL — all 4 UAT items verified across iterations 1 + 2; Phase 04 VERIFICATION.md flipped to status=verified; HUMAN-UAT.md flipped to status=complete; SUMMARY finalized with Iteration 2 section)
-Status: Plan 14 iteration 2 (2026-05-22) closed Item 3 live re-verification post-Plan-04-17. All 4 Phase 04 UAT items now resolved (Item 2 carries pass-by-construction caveat for live OTLP cross-vendor consumption, deferred to Phase 5 DIST acceptance). Next step: Plan 04.1-15 (Phase 04.1 closeout) PLAN exists; awaits execution.
-Last activity: 2026-05-22 -- Plan 04.1-14 iteration 2 finalized: fresh tide-uat kind cluster + helm-install + 04-17 wiring re-verified live (rich PlanDetail + TaskDetailData via new GET /api/v1/plans/{name} + /api/v1/tasks/{name}; zero-mutation 16/16 → 405; SSE real events; SPA bundle hash matches commit 45f8d17; placeholder 'my-project' gone). 04-HUMAN-UAT.md + 04-VERIFICATION.md + 04.1-14-SUMMARY.md all flipped atomically.
+Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — COMPLETE
+Plan: 15 of 15 — Phase 04.1 closeout commit landed; ROADMAP Progress row = Complete; audit-uat total_items = 0.
+Status: Phase 04.1 closed 2026-05-22. All 15 plans executed across 11 waves (4 P1 production-wiring + 4 P2 CI/tooling + 2 P3 code-shape + 4 P4 improvements + 3 cross-phase UAT runners + 1 closeout). All 15 outstanding human-UAT items in Phases 02/03/04 closed or deferred-with-caveat (Phase 03 Item 2 deferred-to-Phase-5 for ANTHROPIC_API_KEY availability; Phase 04 Item 2 pass-by-construction with live OTLP consumption deferred to Phase 5 DIST acceptance). Next step: Phase 5 (Distribution & Self-Hosting Acceptance) — `/gsd-plan-phase 5` or equivalent kickoff.
+Last activity: 2026-05-22 -- Plan 04.1-15 (Phase 04.1 closeout): ROADMAP.md Plans 11/15 → 15/15, Progress row In Progress → Complete (2026-05-22); STATE.md completed_plans 82 → 83, percent 99 → 100, completed_phases 6 → 7.
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 

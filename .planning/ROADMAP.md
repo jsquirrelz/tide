@@ -225,7 +225,7 @@ Plans:
 
 (Waves 0-10; planner re-layered Kahn-style from the original 7-wave hint to honor file-overlap implicit dependencies.)
 
-**Plans:** 11/15 plans executed
+**Plans:** 15/15 plans executed
 
 Plans:
 - [x] 04.1-01-PLAN.md — Wave 0 tooling readiness gate (Wave 0)
@@ -239,10 +239,10 @@ Plans:
 - [x] 04.1-09-PLAN.md — P4.1 budget rolling-window reset + RollingWindowDuration field (Wave 6)
 - [x] 04.1-10-PLAN.md — P4.2 cred-proxy upstream allowlist via Spec.Providers[*].AllowedRoutes (Wave 7)
 - [x] 04.1-11-PLAN.md — P4.3 PROD_OVERRIDE markers + P4.4 logging convention sweep + logcheck tighten (Wave 8)
-- [ ] 04.1-12-PLAN.md — Phase 02 UAT runner — make test-int 6/6 items closed (Wave 6)
-- [ ] 04.1-13-PLAN.md — Phase 03 UAT runner — items 3+4 stale-flipped, 1+2+5 verified (Wave 6)
-- [ ] 04.1-14-PLAN.md — Phase 04 UAT runner — gate flow + dashboard + CLI (Wave 9)
-- [ ] 04.1-15-PLAN.md — Phase 04.1 closeout — ROADMAP + STATE update (Wave 10)
+- [x] 04.1-12-PLAN.md — Phase 02 UAT runner — make test-int 6/6 items closed (Wave 6)
+- [x] 04.1-13-PLAN.md — Phase 03 UAT runner — items 3+4 stale-flipped, 1+2+5 verified (Wave 6)
+- [x] 04.1-14-PLAN.md — Phase 04 UAT runner — gate flow + dashboard + CLI (Wave 9)
+- [x] 04.1-15-PLAN.md — Phase 04.1 closeout — ROADMAP + STATE update (Wave 10)
 
 ### Phase 5: Distribution & Self-Hosting Acceptance
 **Goal**: A Helm chart packages CRDs (dedicated subchart for safe upgrades), the controller Deployment, the dashboard Deployment, RBAC, and namespace setup; the release pipeline uses `helmify`; an Apache 2.0 LICENSE is at the repo root; documentation covers install / Project authoring with 3 sample CRDs / provider configuration / git remote configuration / failure recovery / RBAC reference / troubleshooting; an external-operator dry-run confirms clone-to-first-run under 30 minutes; and **the v1 acceptance test passes**: a fresh `kind` cluster + `helm install tide` + `kubectl apply -f project.yaml` drives this repo's next milestone end-to-end, producing committed artifacts on a per-run branch with a clean status. M_self consumes M0's artifacts against the same `v1alpha1` CRD schema with no breaking changes.
@@ -271,5 +271,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 02.2. Layer B kind test timing fixes (INSERTED) | 13/13 | Complete | 2026-05-14 |
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
-| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 11/15 | In Progress|  |
+| 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
