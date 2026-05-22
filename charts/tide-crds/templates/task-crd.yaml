@@ -4,6 +4,7 @@ metadata:
   name: tasks.tideproject.k8s
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
   labels:
   {{- include "tide-crds.labels" . | nindent 4 }}
 spec:
@@ -15,7 +16,17 @@ spec:
     singular: task
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Task is the Schema for the tasks API
@@ -89,13 +100,18 @@ spec:
                   enum constraint, mirroring the Gates pattern in shared_types.go.
                 properties:
                   testMode:
-                    description: TestMode overrides the stub subagent's exit behaviour
-                      (used by integration tests).
+                    description: |-
+                      TestMode overrides the stub subagent's exit behaviour (used by integration tests).
+                      The wait-for-signal mode (Phase 3 D-D3) pins the stub at Running until the
+                      orchestrator touches /workspace/envelopes/{task-uid}/release — required by
+                      the chaos-resume Layer B spec to observe mid-wave leader handoff. See
+                      cmd/stub-subagent/main.go:dispatchWaitForSignal for the polling contract.
                     enum:
                     - success
                     - fail-exit-1
                     - hang
                     - exceed-output-paths
+                    - wait-for-signal
                     type: string
                 type: object
               filesTouched:
