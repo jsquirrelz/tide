@@ -1,0 +1,48 @@
+TIDE
+Copyright 2026 The TIDE Authors
+
+This product includes software developed at The TIDE Authors
+(https://github.com/jsquirrelz/tide).
+
+Licensed under the Apache License, Version 2.0 (see LICENSE for details).
+
+---
+
+This product bundles or depends upon the following third-party software,
+each of which carries its own NOTICE that is propagated here per the
+Apache 2.0 license redistribution requirements (Apache ASF licensing-howto
+§"Required Third-Party Notices").
+
+  - Kubernetes (https://github.com/kubernetes/kubernetes) — Apache-2.0
+    Includes the transitive dependencies k8s.io/api, k8s.io/apimachinery,
+    k8s.io/apiextensions-apiserver, and k8s.io/client-go (verified in go.sum
+    at v0.36.1) which collectively carry the upstream Kubernetes project
+    NOTICE.
+
+      Copyright The Kubernetes Authors.
+
+  - kubernetes-sigs/controller-runtime
+    (https://github.com/kubernetes-sigs/controller-runtime) — Apache-2.0
+    The controller framework that TIDE's reconcilers build upon
+    (sigs.k8s.io/controller-runtime v0.24.x).
+
+      Copyright The Kubernetes Authors.
+
+  - kubernetes-sigs/kubebuilder
+    (https://github.com/kubernetes-sigs/kubebuilder) — Apache-2.0
+    The scaffolding toolchain that emits TIDE's CRD shapes, controllers,
+    and webhook stubs (kubebuilder v4.14.0).
+
+      Copyright The Kubernetes Authors.
+
+---
+
+The full NOTICE text from each bundled Apache-2.0 dependency is preserved
+in that dependency's source tree under the module cache; this file
+enumerates the upstream attribution so a downstream consumer can locate
+the source of each. For an exhaustive, machine-generated audit of every
+Apache-2.0-licensed transitive dependency, run:
+
+    go-licenses report ./...
+
+against the production binaries under cmd/.
