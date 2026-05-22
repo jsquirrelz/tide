@@ -882,36 +882,42 @@ All commits must include the `Signed-off-by:` trailer. Add automatically with:
 
 **If this table looks long:** that's intentional. Phase 5 has the most "verify before claiming" risk of any phase because it's the v1.0 ship phase. Better to surface 10 assumptions and validate them than ship 1 unstated assumption that breaks a v1 OSS user's first install.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `docs/concepts.md` ship in v1?**
    - What we know: Kueue and ArgoCD both have a "Core Concepts" doc between landing and Install [VERIFIED via WebFetch]. D-C3's 10-entry index doesn't include it.
    - What's unclear: Whether the README's existing paradigm-spec content (Levels 1-5, water metaphor, two-DAG framing) is operator-readable or needs translation.
+   - **RESOLVED: YES** — user explicitly accepted via discuss-phase HIGH-4 revision 2026-05-22; CONTEXT.md D-C3 now lists 11 entries with `concepts.md` at slot #2; commit e476c68.
    - Recommendation: Add `docs/concepts.md` as an 11th doc index entry. ~1 page summarizing the paradigm in operator-not-spec-writer language. Risk if skipped: Pitfall 24 surface area larger. Risk if added: 1 more doc to maintain; lower if well-scoped.
 
 2. **Where does `cmd/tide-demo-init`'s bootstrap bare repo live?**
    - What we know: file:// URLs are filesystem-local; controller pod has its own filesystem (Pitfall 12).
    - What's unclear: Three viable options — (a) PVC + Job mount, (b) hostPath on kind-only setups, (c) tar stream via kubectl exec.
+   - **RESOLVED: PVC + Job pattern adopted** per researcher recommendation (Option b+a hybrid: in-cluster Job + PVC). Plan 05-12 implements this; medium sample's apply sequence runs PVC create → init Job → wait Complete → project.yaml apply.
    - Recommendation: Option (a) — a small bootstrap Job in `examples/projects/medium/` that creates the bare repo on a dedicated `demo-remote-pvc`. Documented in `examples/projects/medium/README.md` as a precondition before `kubectl apply -f project.yaml`.
 
 3. **Does the chart-publish job need to publish to an `index.yaml` (gh-pages branch) as well as OCI?**
    - What we know: D-X5 says OCI is primary, `index.yaml` is "optional in the same release.yaml step."
    - What's unclear: How many users need the `helm repo add` UX in 2026.
+   - **RESOLVED: OCI only for v1** per researcher recommendation; `index.yaml` deferred to post-v1 (will fast-follow if Issues surface need). Plan 05-16 publishes via `helm push oci://ghcr.io/jsquirrelz/tide-charts` only; INSTALL.md documents OCI as the v1 channel.
    - Recommendation: Phase 5 ships OCI only. `index.yaml` is a post-v1 fast-follow if Issues surface need. Documented in `docs/INSTALL.md` as "Helm OCI is the v1 distribution channel; `helm repo add` is post-v1."
 
 4. **Should the dry-run pre-pull TIDE images for speed?**
    - What we know: Pitfall 5 highlights the 30-min margin is tight.
    - What's unclear: Whether the first dry-run exceeds 25 min; whether image pre-pull saves enough.
+   - **RESOLVED: deferred** — baseline first; optimize only if dry-run hits 30min ceiling. Plan 05-15's `DRY_RUN_TIMEOUT_SECONDS` env var allows tuning later without code change; Plan 05-17 closeout SUMMARY logs the residual UAT item ("First Phase 5 dry-run is the timing baseline").
    - Recommendation: DEFER optimization. First Phase 5 dry-run is the baseline; optimize only if `totalSeconds > 1620` (27 min, leaving < 3 min margin).
 
 5. **Should `make acceptance-v1` integrate Chrome DevTools MCP for dashboard screenshots automatically, or leave it as a manual maintainer step?**
    - What we know: Phase 04.1 P14 (dashboard UAT) already exercises Chrome DevTools MCP locally.
    - What's unclear: Whether the make target should invoke a script that opens a headless Chrome, or whether the maintainer manually does it.
+   - **RESOLVED: manual for v1** per maintainer-ritual posture (D-A4). Plan 05-15's acceptance-v1.sh prints an explicit "Open dashboard at http://localhost:8080 and screenshot it for the release notes" message at run-completion; automation is post-v1 scope.
    - Recommendation: Manual for v1 — the make target outputs "Acceptance phase complete. Open dashboard at http://localhost:8080 and take a screenshot to attach to release notes." Automating it is post-v1; the maintainer ritual posture (D-A4) is "human-in-the-loop is the value."
 
 6. **Does the per-namespace-rolebinding.yaml need a corresponding ServiceAccount per namespace, or does it bind to the existing `tide-orchestrator` SA in `tide-system`?**
    - What we know: AUTH-02 says "one TIDE install per cluster, each Project runs in its own namespace with namespace-scoped RBAC." Existing `tide-orchestrator` SA is in `tide-system`.
    - What's unclear: Whether subjects.namespace in the RoleBinding points to the operator namespace (`tide-system`) or the project namespace.
+   - **RESOLVED: `tide-system`** per researcher recommendation (central SA pattern). Plan 05-13's per-namespace-rolebinding.yaml template renders `subjects[].namespace: {{ $.Release.Namespace }}` (which resolves to `tide-system` at install time); RoleBinding lives in the project namespace per standard K8s pattern.
    - Recommendation: Subjects point to the operator namespace (`tide-system`'s `tide-orchestrator` SA); RoleBinding lives in the project namespace. This is standard K8s pattern for "central SA, namespace-scoped grants." Verified in the code example above.
 
 ## Environment Availability
