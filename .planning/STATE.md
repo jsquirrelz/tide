@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-21T23:30:00.000Z"
-last_activity: 2026-05-21 -- Plan 04-17 LANDED (ff01ccc + 45f8d17): last-mile App.tsx wiring complete (useProjects + useTasks + useTaskDetail + GET /api/v1/plans/{name} + GET /api/v1/tasks/{name}). Plan 04.1-14 next iteration can re-verify Item 3 live against a kind cluster.
+last_updated: "2026-05-22T00:55:00.000Z"
+last_activity: 2026-05-22 -- Plan 04.1-14 FINAL (iteration 2): Item 3 live re-verified against fresh tide-uat kind cluster AFTER Plan 04-17 wiring landed; 04-HUMAN-UAT.md flipped to status=complete (4/4 passed); 04-VERIFICATION.md flipped to status=verified (re_verification=true); SUMMARY finalized. Next step: Plan 04.1-15 (Phase 04.1 closeout).
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 83
-  completed_plans: 81
-  percent: 98
+  completed_plans: 82
+  percent: 99
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — EXECUTING
-Plan: 14 of 15 (in iteration — Items 1/2/4 verified clean; Item 3 dashboard interactive Project→Plan→Task wiring NOW LANDED via Phase 04 Plans 04-15 + 04-16 + 04-17; awaits live re-verification against a fresh kind cluster — see 04.1-14-SUMMARY.md + 04-17-SUMMARY.md)
-Status: Plan 14 iteration: Phase 04 Plan 04-17 (last-mile App.tsx wiring) LANDED 2026-05-21 (ff01ccc + 45f8d17). Next step: 04.1-14 next iteration re-runs Item 3 live against a kind cluster, then finalizes 04-HUMAN-UAT.md Test 3 + 04-VERIFICATION.md human_verification[2] flips from human_needed to verified, then Plan 14 SUMMARY finalized and chain advances to Plan 04.1-15 (Phase 04.1 closeout).
-Last activity: 2026-05-21 -- Plan 04-17 LANDED (ff01ccc backend + 45f8d17 frontend): GET /api/v1/plans/{name} + GET /api/v1/tasks/{name} surfaces the rich shape SSE can't carry; useProjects + useTasks + useTaskDetail hooks compose useSSEStream unmodified; App.tsx wires the three hooks + mounts ProjectPicker into Header.projectPicker; bundle 154.86KB gzipped (gate 500KB); zero locked-contract files touched.
+Plan: 14 of 15 (FINAL — all 4 UAT items verified across iterations 1 + 2; Phase 04 VERIFICATION.md flipped to status=verified; HUMAN-UAT.md flipped to status=complete; SUMMARY finalized with Iteration 2 section)
+Status: Plan 14 iteration 2 (2026-05-22) closed Item 3 live re-verification post-Plan-04-17. All 4 Phase 04 UAT items now resolved (Item 2 carries pass-by-construction caveat for live OTLP cross-vendor consumption, deferred to Phase 5 DIST acceptance). Next step: Plan 04.1-15 (Phase 04.1 closeout) PLAN exists; awaits execution.
+Last activity: 2026-05-22 -- Plan 04.1-14 iteration 2 finalized: fresh tide-uat kind cluster + helm-install + 04-17 wiring re-verified live (rich PlanDetail + TaskDetailData via new GET /api/v1/plans/{name} + /api/v1/tasks/{name}; zero-mutation 16/16 → 405; SSE real events; SPA bundle hash matches commit 45f8d17; placeholder 'my-project' gone). 04-HUMAN-UAT.md + 04-VERIFICATION.md + 04.1-14-SUMMARY.md all flipped atomically.
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
