@@ -4,6 +4,7 @@ metadata:
   name: plans.tideproject.k8s
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
   labels:
   {{- include "tide-crds.labels" . | nindent 4 }}
 spec:
@@ -27,7 +28,17 @@ spec:
     singular: plan
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Plan is the Schema for the plans API
