@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 5 context gathered
-last_updated: "2026-05-22T16:12:58.673Z"
-last_activity: 2026-05-22 -- Phase 5 planning complete
+last_updated: "2026-05-22T16:51:06.819Z"
+last_activity: 2026-05-22 -- Phase 5 execution started
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 100
-  completed_plans: 83
-  percent: 83
+  completed_plans: 91
+  percent: 91
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 5 — distribution-self-hosting-acceptance (ready to plan)
+**Current focus:** Phase 5 — distribution-self-hosting-acceptance
 
 ## Current Position
 
-Phase: 04.1 (pre-v1-audit-fixes-cross-phase-uat-closeout) — COMPLETE
-Plan: 15 of 15 — Phase 04.1 closeout commit landed; ROADMAP Progress row = Complete; audit-uat total_items = 0.
-Status: Ready to execute
-Last activity: 2026-05-22 -- Phase 5 planning complete
+Phase: 5 (distribution-self-hosting-acceptance) — EXECUTING
+Plan: 1 of 17
+Status: Executing Phase 5
+Last activity: 2026-05-22 -- Phase 5 execution started
 
 Progress: [██████████] 100% (Phase 02.2 scope)
 
