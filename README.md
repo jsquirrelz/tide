@@ -1,3 +1,27 @@
+## Quickstart
+
+Four commands. $0 LLM cost. Tests the dispatch path end-to-end via the stub-subagent. Detailed install steps + per-OS prerequisites are in [docs/INSTALL.md](docs/INSTALL.md).
+
+```bash
+kind create cluster --name tide-demo
+helm install tide-crds oci://ghcr.io/jsquirrelz/tide-charts/tide-crds --version 1.0.0 -n tide-system --create-namespace
+helm install tide oci://ghcr.io/jsquirrelz/tide-charts/tide --version 1.0.0 -n tide-system
+kubectl apply -f examples/projects/small/project.yaml
+```
+
+```text
+# Expected output (abbreviated)
+customresourcedefinition.apiextensions.k8s.io/projects.tideproject.k8s created
+NAME: tide-crds   STATUS: deployed
+NAME: tide        STATUS: deployed
+project.tideproject.k8s/small-project created
+condition met
+```
+
+> **First time?** Skip to [docs/INSTALL.md](docs/INSTALL.md) for the 4-command install with full prerequisites and troubleshooting.
+
+---
+
  # TIDE — Topologically-Indexed Dependency Execution
   The Milestone → Phase → Plan → Task & Wave paradigm for autonomous coding agents
 
