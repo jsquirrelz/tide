@@ -56,7 +56,13 @@ fi
 # ---------------------------------------------------------------------------
 # Check 3: Go-header coverage
 #
-# Walk every *.go under the repo, excluding vendor/, testdata/, and .git/.
+# Walk every *.go under the repo, excluding:
+#   - vendor/        (third-party deps; their own license headers apply)
+#   - testdata/      (test fixtures; ignored by go tooling)
+#   - .git/          (git internals)
+#   - .claude/       (Claude Code working-tree state, including worktrees/)
+#   - examples/      (operator-facing demo content; MIT-licensed per D-B3,
+#                    distinct from TIDE's Apache-2.0 distribution)
 # Any file lacking the verbatim "Apache License, Version 2.0" header string
 # is a coverage gap; we list them all so the operator can see the full
 # delta in one shot rather than fixing them one at a time.
@@ -66,6 +72,8 @@ MISSING=$(
     -not -path '*/vendor/*' \
     -not -path '*/testdata/*' \
     -not -path '*/.git/*' \
+    -not -path '*/.claude/*' \
+    -not -path '*/examples/*' \
     -print0 \
   | xargs -0 grep -L "Apache License, Version 2.0" \
   || true
