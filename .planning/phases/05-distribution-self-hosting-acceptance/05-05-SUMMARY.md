@@ -65,7 +65,9 @@ completed: 2026-05-21
 
 ## Task Commits
 
-1. **Task 1: Lockstep bump 0.1.0-dev → 1.0.0 in SOT chart metadata** — see commit log (single commit; hash recorded post-write per parallel executor protocol).
+1. **Task 1: Lockstep bump 0.1.0-dev → 1.0.0 in SOT chart metadata** — `3aa94fa` (feat)
+   - Touched: `hack/helm/tide-chart.yaml`, `hack/helm/tide-crds-chart.yaml`, `charts/tide/Chart.yaml`, `charts/tide-crds/Chart.yaml`
+   - Plus this SUMMARY.md and `deferred-items.md` rolled into the same commit per parallel executor protocol.
 
 ## Files Created/Modified
 
@@ -158,7 +160,7 @@ Files claimed:
 - `[FOUND]` `.planning/phases/05-distribution-self-hosting-acceptance/deferred-items.md` exists
 - `[FOUND]` `.planning/phases/05-distribution-self-hosting-acceptance/05-05-SUMMARY.md` exists (this file)
 
-Commit hash will be appended after the task commit lands.
+Commit hash: `3aa94fa` — verified via `git log --oneline -1`.
 
 ## Self-Check: PASSED
 
