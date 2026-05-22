@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: executing
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-05-22T01:10:00.000Z"
-last_activity: 2026-05-22 -- Phase 04.1 CLOSED (15/15 plans): Plan 04.1-15 closeout commit updated ROADMAP.md Progress row to Complete + Plans list to 15/15; STATE.md bumped to 83/83 (100%). Phase 5 (Distribution & Self-Hosting Acceptance) ready to plan.
+status: "Phase 04.1 closed 2026-05-22. All 15 plans executed across 11 waves (4 P1 production-wiring + 4 P2 CI/tooling + 2 P3 code-shape + 4 P4 improvements + 3 cross-phase UAT runners + 1 closeout). All 15 outstanding human-UAT items in Phases 02/03/04 closed or deferred-with-caveat (Phase 03 Item 2 deferred-to-Phase-5 for ANTHROPIC_API_KEY availability; Phase 04 Item 2 pass-by-construction with live OTLP consumption deferred to Phase 5 DIST acceptance). Next step: Phase 5 (Distribution & Self-Hosting Acceptance) — `/gsd-plan-phase 5` or equivalent kickoff."
+stopped_at: Phase 5 context gathered
+last_updated: "2026-05-22T11:34:35.400Z"
+last_activity: "2026-05-22 -- Plan 04.1-15 (Phase 04.1 closeout): ROADMAP.md Plans 11/15 → 15/15, Progress row In Progress → Complete (2026-05-22); STATE.md completed_plans 82 → 83, percent 99 → 100, completed_phases 6 → 7."
 progress:
   total_phases: 8
   completed_phases: 7
@@ -153,6 +153,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-17T12:59:01.629Z
-Stopped at: Phase 4 UI-SPEC approved
-Resume file: .planning/phases/04-gates-observability-dashboard-cli/04-UI-SPEC.md
+Last session: 2026-05-22T11:34:35.384Z
+Stopped at: Phase 5 context gathered
+Resume file: .planning/phases/05-distribution-self-hosting-acceptance/05-CONTEXT.md
