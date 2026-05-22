@@ -159,7 +159,8 @@ $ ls -la examples/tide-demo-fixture/
 
 ## Plan Closeout Commit
 
-_Will be appended after the SUMMARY.md is committed (final commit of this plan)._
+- `956f75b` — `docs(05-06): complete tide-demo-fixture scaffold plan` (this SUMMARY.md commit)
+- Predecessor: `31fc1f1` — `feat(05-06): scaffold examples/tide-demo-fixture (D-B3 medium-sample seed)`
 
 ---
 *Phase: 05-distribution-self-hosting-acceptance*
