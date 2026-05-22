@@ -60,17 +60,18 @@ Phase 5 does NOT: ship a multi-vendor subagent matrix (`internal/subagent/openai
 
 - **D-C2:** **`docs/INSTALL.md` is the on-ramp.** Detailed install steps (prerequisites: Docker, kubectl, helm 3, kind; cluster create; CRD subchart install separate from main chart with explanation; ANTHROPIC_API_KEY Secret creation; git creds Secret creation; project apply). Sections cover the 3 OS install paths (macOS via brew; Linux via package manager + go install; Windows via WSL2 + scoop). Links forward to `docs/project-authoring.md` for next step. Single source of truth for "how do I install TIDE"; README Quickstart points here.
 
-- **D-C3:** **Docs reader-journey order** in `docs/README.md` (new index file):
+- **D-C3:** **Docs reader-journey order** in `docs/README.md` (new index file) — **11 numbered entries, 12 doc files** (entry #4 covers two co-located docs for dashboard + CLI):
   1. **install** — `docs/INSTALL.md` (new) — prerequisites + Helm install + first sample
-  2. **project authoring** — `docs/project-authoring.md` (new) — Project.Spec field reference + 3 sample walkthrough
-  3. **dashboard + CLI** — `docs/dashboard.md` (exists) + `docs/cli.md` (exists)
-  4. **gates** — `docs/gates.md` (exists)
-  5. **observability** — `docs/observability.md` (exists)
-  6. **git hosts** — `docs/git-hosts.md` (exists)
-  7. **storage drivers** — `docs/rwx-drivers.md` (exists)
-  8. **live E2E** — `docs/live-e2e.md` (exists)
-  9. **troubleshooting** — `docs/troubleshooting.md` (new)
-  10. **RBAC reference** — `docs/rbac.md` (new) — per-Kind verbs, namespace-scoped role binding template
+  2. **concepts** — `docs/concepts.md` (new) — TIDE's five-level paradigm in operator-readable language (~1 page; precedent: Kueue + ArgoCD both ship "Core Concepts" docs before Getting Started; **adopted per user revision 2026-05-22 after researcher Open Question #1**)
+  3. **project authoring** — `docs/project-authoring.md` (new) — Project.Spec field reference + 3 sample walkthrough
+  4. **dashboard + CLI** — `docs/dashboard.md` (exists) + `docs/cli.md` (exists)
+  5. **gates** — `docs/gates.md` (exists)
+  6. **observability** — `docs/observability.md` (exists)
+  7. **git hosts** — `docs/git-hosts.md` (exists)
+  8. **storage drivers** — `docs/rwx-drivers.md` (exists)
+  9. **live E2E** — `docs/live-e2e.md` (exists)
+  10. **troubleshooting** — `docs/troubleshooting.md` (new)
+  11. **RBAC reference** — `docs/rbac.md` (new) — per-Kind verbs, namespace-scoped role binding template
   No mkdocs site, no GitHub Pages publish — that's post-v1. The `docs/` directory + `docs/README.md` index is the v1 surface.
 
 - **D-C4:** **`docs/troubleshooting.md` shape:** single Markdown table `Symptom | Cause | Recipe`, ~12 entries covering: finalizer stuck (with `kubectl patch finalizers` recipe — ROADMAP mandates this), `ANTHROPIC_API_KEY` invalid (401 in controller logs), push lease conflict (Phase 3 D-B6 `PushLeaseFailed` + bypass annotation), gitleaks blocked (`tide_secret_leak_blocked_total` increment + per-Project gitleaks-config override), PVC `ReadWriteMany` missing (links to `rwx-drivers.md`), dashboard 404 (port-forward needed; ingress doc), CRDs not registered (CRD subchart not installed — common misstep given the split), admission webhook 422 (cycle detected or file-touch mismatch — Phase 2 D-E1..E4), budget halted (`BudgetExceeded` + bypass annotation), gate awaiting approval (`tide approve` or `kubectl annotate`), pod `ImagePullBackoff` (image pull secret or registry credentials), leader election lost (controller restart — chaos-resume infra). Each row links to deeper doc if applicable. Scan-friendly for ops in incident.
