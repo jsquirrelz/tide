@@ -1,3 +1,10 @@
+<<<<<<< HEAD
+# Phase 5 — Deferred Items
+
+Out-of-scope discoveries logged during plan execution. Address in a follow-up plan.
+
+- 2026-05-22 (plan 05-01) — `cmd/dashboard/api/plans.go` and `cmd/dashboard/api/tasks.go` are not gofmt-clean. Detected when `make fmt` ran during plan 05-01 verification. Out of scope for DIST-03 (these files already carry the Apache-2.0 header, so the verify-license gate is unaffected). Defer to a follow-up plan or a `/gsd:quick`.
+=======
 # Phase 05 — Deferred Items
 
 Items discovered during plan execution that are out of scope for the current plan but should be tracked.
@@ -37,3 +44,4 @@ Items discovered during plan execution that are out of scope for the current pla
 - `charts/tide/templates/projects-pvc.yaml` (chart-tree — uses templated accessModes; SOT hardcodes it)
 
 **Severity:** Low — current chart-tree is correct and CI helm-lint passes. The drift only manifests if `augment-tide-chart.sh` is run alongside an unrelated bump, which is exactly what plan 05-05 did. Future plans that edit SOT files must reconcile this drift first or selectively `git checkout` the unrelated paths post-augment.
+>>>>>>> worktree-agent-aa8905b2c77141ff0

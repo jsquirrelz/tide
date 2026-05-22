@@ -527,6 +527,12 @@ helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list
 	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
 	@python3 hack/helm/assert-dashboard-rbac.py /tmp/tide-helm-render.yaml
 
+##@ Legal compliance gates (Phase 5 DIST-03 — Plan 05-01)
+
+.PHONY: verify-license
+verify-license: ## Phase 5 DIST-03 — verify LICENSE+NOTICE+Go-header coverage.
+	@bash hack/scripts/verify-license.sh
+
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 
 # Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:
