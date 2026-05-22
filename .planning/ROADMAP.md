@@ -257,7 +257,38 @@ Plans:
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — self-hosting demo exercises everything; map demo's exact apply→author→plan→dispatch→push sequence against TIDE-on-host behavior to surface drift before integration test runs; OSS-adoption-death-by-missing-docs prevention (Pitfall 24).
 
-**Plans**: TBD
+**Plans:** 17 plans
+
+Plans:
+**Wave 1** *(parallel — no cross-deps; mostly disjoint file paths)*
+- [ ] 05-01-PLAN.md — LICENSE + NOTICE + verify-license.sh (DIST-03)
+- [ ] 05-02-PLAN.md — CONTRIBUTING.md + SECURITY.md (DIST-04)
+- [ ] 05-03-PLAN.md — README Quickstart prepend (DIST-04, D-C1)
+- [ ] 05-04-PLAN.md — docs/README.md index + concepts.md + verify-docs-coverage.sh (DIST-04, D-C3)
+- [ ] 05-05-PLAN.md — Chart.yaml lockstep version bump 0.1.0-dev → 1.0.0 (DIST-01, D-X3)
+- [ ] 05-06-PLAN.md — examples/tide-demo-fixture/ MIT-licensed scaffold (DIST-04, D-B3)
+- [ ] 05-09-PLAN.md — docs/rbac.md (DIST-04 + AUTH-02 catch-up doc + D-X7)
+- [ ] 05-10-PLAN.md — docs/troubleshooting.md (DIST-04, D-C4 ≥12-row table)
+
+**Wave 2** *(depends on Wave 1 — docs reference samples; chart additions depend on 05-05 version lock)*
+- [ ] 05-07-PLAN.md — docs/INSTALL.md (DIST-04 + D-C2 + Pitfall 4 mitigation)
+- [ ] 05-08-PLAN.md — docs/project-authoring.md (DIST-04 + Variant B prompt guidance)
+- [ ] 05-11-PLAN.md — examples/projects/{small,large}/ samples (DIST-04 + BOOT-04 acceptance project.yaml)
+- [ ] 05-13-PLAN.md — per-namespace-rolebinding.yaml + projectNamespaces values key (DIST-01 + AUTH-02 catch-up template)
+- [ ] 05-14-PLAN.md — CRD-subchart resource-policy: keep annotation (DIST-01, Pitfall 2)
+
+**Wave 3** *(depends on Wave 1 + Wave 2 — medium sample uses cmd/tide-demo-init binary)*
+- [ ] 05-12-PLAN.md — cmd/tide-demo-init/ binary + medium/ sample (DIST-04 + D-B3 + RESEARCH Topic 4)
+
+**Wave 4** *(depends on chart-finalized + samples-finalized)*
+- [ ] 05-15-PLAN.md — Makefile dry-run-v1 + acceptance-v1 + 4 hack/scripts (DIST-05 + BOOT-02 + BOOT-04)
+
+**Wave 5** *(depends on dry-run plumbing)*
+- [ ] 05-16-PLAN.md — release.yaml extensions + dry-run.yaml (DIST-01 + DIST-02 + DIST-05)
+
+**Wave 6** *(depends on all 16)*
+- [ ] 05-17-PLAN.md — Phase 5 closeout (ROADMAP + STATE update + 05-SUMMARY.md)
+
 
 ## Progress
 
