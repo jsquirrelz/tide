@@ -123,6 +123,13 @@ cp "${HACK_DIR}/push-rbac.yaml" "${CHART_DIR}/templates/push-rbac.yaml"
 #    resource-policy: keep preserves in-flight workspace state across helm uninstall.
 cp "${HACK_DIR}/projects-pvc.yaml" "${CHART_DIR}/templates/projects-pvc.yaml"
 
+# 7a. per-namespace-rolebinding.yaml — Phase 5 D-X4 / AUTH-02 catch-up. Helm template
+#     ranges .Values.projectNamespaces; emits one RoleBinding per listed namespace
+#     binding the controller-manager SA (in .Release.Namespace) to the consolidated
+#     manager-role ClusterRole shipped from Phase 1. Empty default → zero RoleBindings
+#     emitted; opt-in for multi-Project installs.
+cp "${HACK_DIR}/per-namespace-rolebinding.yaml" "${CHART_DIR}/templates/per-namespace-rolebinding.yaml"
+
 # 8. Phase 2 Deployment augmentation: envFrom (TIDE_SIGNING_KEY secret), Phase 2 CLI
 #    args (--subagent-image, --credproxy-image, --default-file-touch-mode,
 #    --rate-limit-default-rpm, --rate-limit-default-burst), and the tide-projects PVC

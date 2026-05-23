@@ -1,0 +1,37 @@
+# Phase 5 D-X4 — AUTH-02 catch-up: per-namespace RoleBinding template.
+#
+# Source-of-truth for charts/tide/templates/per-namespace-rolebinding.yaml. Mirrored
+# by hack/helm/augment-tide-chart.sh after each `make helm-controller` run, following
+# the chart-is-fixed-contract anti-pattern in CLAUDE.md — never hand-edit the file
+# under charts/tide/templates/.
+#
+# Renders one RoleBinding per entry in `.Values.projectNamespaces` (empty default →
+# zero RoleBindings shipped; opt-in for multi-Project installs). Each RoleBinding
+# binds the controller-manager ServiceAccount (lives in the operator namespace —
+# i.e. `.Release.Namespace`, conventionally `tide-system`) to the consolidated
+# Phase 1 manager-role ClusterRole, scoped to the listed Project namespace.
+#
+# Subjects.namespace = operator namespace per Open Question 6 RESOLVED (central-SA
+# pattern; one orchestrator SA, namespace-scoped grants). Resolving the SA name and
+# fullname-prefixed role name via `tide.fullname` matches the existing
+# charts/tide/templates/serviceaccount.yaml + charts/tide/templates/manager-rbac.yaml
+# naming conventions exactly.
+{{- range $ns := .Values.projectNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-orchestrator-{{ $ns }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tide.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: per-namespace-rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: '{{ include "tide.fullname" $ }}-manager-role'
+subjects:
+- kind: ServiceAccount
+  name: '{{ include "tide.fullname" $ }}-controller-manager'
+  namespace: {{ $.Release.Namespace }}
+{{- end }}
