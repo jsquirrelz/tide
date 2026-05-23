@@ -1,12 +1,29 @@
 # TIDE release pipeline.
 #
-# Triggered ONLY on tag push matching `v*` (e.g. `v0.1.0`, `v1.0.0`).
-# NOT triggered on PR or branch push — release is an intentional human
-# action: push a `v*` tag, this workflow runs `goreleaser release --clean`,
-# multi-OS/arch tarballs + checksums.txt land in the GitHub Release.
+# Triggered ONLY on tag push matching `v*` (e.g. `v0.1.0`, `v1.0.0`,
+# `v1.0.0-rc.1`). NOT triggered on PR or branch push — release is an
+# intentional human action: push a `v*` tag, this workflow runs the gate
+# chain (helmify-verify → pre-flight → release → chart-publish).
+#
+# Tag posture:
+#   `v*-rc.*`  — release-candidate tag. Fires `helmify-verify` here AND
+#                triggers `.github/workflows/dry-run.yaml` (separate workflow
+#                per Phase 04.1 P2.4 two-workflow pattern). The `release` and
+#                `chart-publish` jobs are gated off by `if: !contains(...-rc.)`
+#                so goreleaser does NOT build binaries for rc tags.
+#   `v*`        — full release tag (no `-rc.` suffix). Full chain runs:
+#                helmify-verify (chart-tree reproducibility) → pre-flight
+#                (verify the parent-version-matched rc dry-run succeeded) →
+#                release (goreleaser binaries) → chart-publish (Helm OCI push
+#                to ghcr.io).
 #
 # Phase 5 wires the krew-release-bot side (PR to krew-index) on top of the
-# checksums.txt produced here. See .planning/phases/04-.../04-09-PLAN.md.
+# checksums.txt produced by the release job. See .planning/phases/04-.../04-09-PLAN.md.
+# Phase 5 Plan 05-16 added helmify-verify, pre-flight, and chart-publish jobs;
+# see .planning/phases/05-distribution-self-hosting-acceptance/05-16-PLAN.md.
+#
+# No `schedule:` cron — Phase 04.1 P2.4 lock (release is a deliberate human
+# action; nightly/cron release pipelines are out of scope for v1).
 
 name: release
 
@@ -18,8 +35,147 @@ on:
 permissions: {}
 
 jobs:
+  # Gate 1 — chart-tree reproducibility (D-X2 verify-only).
+  #
+  # Mirror of `.github/workflows/ci.yaml` `helm-lint` job. Regenerates both
+  # charts via `make helm` (helmify + augment) and fails if the result diverges
+  # from the committed `charts/` tree. Fires on both rc and full tags — the
+  # gate is cheap (< 5 min) and high-signal (catches contributor hand-edits to
+  # charts/ that bypass hack/helm/ source-of-truth files).
+  helmify-verify:
+    name: Helmify chart reproducibility (D-X2 verify-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      # Regenerate the charts from kubebuilder Kustomize output to verify
+      # `make helm` is reproducible — any drift between the committed charts/
+      # tree and what helmify+augment produce fails the release.
+      - name: Regenerate charts via make helm
+        run: make helm
+
+      # Verify the committed chart tree matches a fresh `make helm` regeneration.
+      # If a contributor hand-edited charts/ without updating hack/helm/ source-
+      # of-truth files, this step catches it AT RELEASE TIME (CI's helm-lint
+      # catches it earlier on PR, but this is the last gate before binaries
+      # ship — defense in depth).
+      - name: Verify chart tree is reproducible
+        run: |
+          if ! git diff --quiet charts/; then
+            echo "FAIL: charts/ tree drifted from a fresh make helm regeneration"
+            git diff --stat charts/
+            git diff charts/ | head -100
+            exit 1
+          fi
+          echo "PASS: charts/ tree matches helmify+augment output"
+
+  # Gate 2 — verify the parent-version-matched rc dry-run succeeded (D-D3).
+  #
+  # MEDIUM-9 revision (2026-05-22): filter rc tags by parent MAJOR.MINOR.PATCH
+  # rather than "latest rc globally" so a stale rc from a different version
+  # cannot false-pass the gate.
+  #
+  # Contract: the maintainer pushes `vX.Y.Z-rc.N` first (which triggers
+  # `.github/workflows/dry-run.yaml`), waits for that workflow to succeed, then
+  # pushes the matching `vX.Y.Z` tag. This job extracts X.Y.Z from the release
+  # tag, finds the highest matching `vX.Y.Z-rc.*` tag, and verifies the
+  # dry-run.yaml run for that exact rc tag concluded `success`.
+  #
+  # ASSUMPTION (documented per MEDIUM-9): single-maintainer release discipline
+  # — rc tags carry the parent MAJOR.MINOR.PATCH they precede. Cross-version
+  # rc tags (e.g. `v2.0.0-rc.1` accidentally landing while releasing `v1.0.0`)
+  # are excluded by design via `git tag --list "v${PARENT_VERSION}-rc.*"`.
+  pre-flight:
+    name: Pre-flight (verify recent rc dry-run for parent version)
+    if: ${{ !contains(github.ref, '-rc.') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read   # required by `gh run list --workflow ...`
+    steps:
+      - name: Clone the code (fetch all tags)
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 brings in the full tag list so `git tag --list`
+          # below sees ALL prior rc tags (not just the one being released).
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify parent-version-matched rc dry-run succeeded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract MAJOR.MINOR.PATCH from the current release tag.
+          # GITHUB_REF_NAME is e.g. "v1.0.0" for a release; we want the rc
+          # tags for v1.0.0 (e.g. v1.0.0-rc.1, v1.0.0-rc.2).
+          #
+          # MEDIUM-9 revision: parent-version-filtered match, NOT "latest rc
+          # globally" — a v2.0.0-rc.* must NOT satisfy a v1.0.0 release gate.
+          RELEASE_TAG="${GITHUB_REF_NAME}"
+          PARENT_VERSION="${RELEASE_TAG#v}"  # strip leading 'v' -> "1.0.0"
+
+          # Find the latest rc tag matching this specific parent version.
+          # Pattern: v1.0.0-rc.* (NOT v1.0.1-rc.*, NOT v2.0.0-rc.*).
+          # --sort=-version:refname picks the highest rc.N for that parent.
+          MATCHING_RC=$(git tag --list "v${PARENT_VERSION}-rc.*" --sort=-version:refname | head -1)
+
+          if [ -z "${MATCHING_RC}" ]; then
+            echo "FAIL: No rc tag found matching pattern v${PARENT_VERSION}-rc.*"
+            echo "Release ${RELEASE_TAG} requires a parent-version-matched rc dry-run before goreleaser fires."
+            echo ""
+            echo "Recovery: tag v${PARENT_VERSION}-rc.1 (or similar), wait for"
+            echo "dry-run.yaml to succeed, then retag ${RELEASE_TAG}."
+            exit 1
+          fi
+
+          echo "Found parent-version-matched rc: ${MATCHING_RC}"
+
+          # Verify the dry-run.yaml run for this exact rc tag concluded success.
+          # `gh run list --branch <tag>` works for tag-triggered workflows
+          # because the ref's symbolic name is the tag name.
+          DRY_RUN_RESULT=$(gh run list \
+            --workflow dry-run.yaml \
+            --branch "${MATCHING_RC}" \
+            --limit 1 \
+            --json conclusion \
+            --jq '.[0].conclusion')
+
+          if [ "${DRY_RUN_RESULT}" != "success" ]; then
+            echo "FAIL: dry-run.yaml for ${MATCHING_RC} did not succeed (conclusion: ${DRY_RUN_RESULT})"
+            echo ""
+            echo "Inspect: gh run list --workflow dry-run.yaml --branch ${MATCHING_RC}"
+            exit 1
+          fi
+
+          echo "PASS: dry-run.yaml for ${MATCHING_RC} succeeded; release ${RELEASE_TAG} cleared for goreleaser."
+
+  # Gate 3 — goreleaser builds multi-OS/arch binaries (existing job, preserved
+  # verbatim from Phase 04-09 except for the new `if:` and `needs:` gates).
+  #
+  # `if: !contains(...-rc.)` keeps binaries from being built for rc tags;
+  # rc tags trigger ONLY the dry-run gate (separate workflow).
   release:
     name: Release (goreleaser)
+    if: ${{ !contains(github.ref, '-rc.') }}
+    needs: [helmify-verify, pre-flight]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -61,3 +217,64 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Gate 4 — Helm OCI chart publish to ghcr.io (D-X5).
+  #
+  # Runs AFTER `release` succeeds (so charts never publish for a failed
+  # binary release). Pushes both charts (tide-crds first because tide depends
+  # on it) to ghcr.io/jsquirrelz/tide-charts/{tide-crds,tide}.
+  #
+  # Pitfall 3 mitigation: `packages: write` is REQUIRED for ghcr.io OCI push;
+  # the default `secrets.GITHUB_TOKEN` does NOT have this scope unless declared
+  # explicitly. helmify-verify job uses `contents: read` only (no write); this
+  # job is the only one that needs write to GHCR packages.
+  chart-publish:
+    name: Publish Helm charts to OCI registry (ghcr.io)
+    if: ${{ !contains(github.ref, '-rc.') }}
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write   # Pitfall 3 — REQUIRED for ghcr.io OCI push
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      # `--password-stdin` keeps the token off the command line and out of
+      # `set -x` traces (information-disclosure mitigation per Pitfall 3 +
+      # threat T-05-16-02).
+      - name: Helm registry login (ghcr.io)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # Both charts in lockstep — Chart.yaml already reflects ${GITHUB_REF_NAME}
+      # version from Plan 05-05 (v1.0.0 bump). `--version` and `--app-version`
+      # overrides are belt-and-braces for tag-driven version stamping.
+      - name: Package charts
+        run: |
+          helm package charts/tide-crds --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
+          helm package charts/tide --version "${GITHUB_REF_NAME#v}" --app-version "${GITHUB_REF_NAME#v}"
+
+      # Push order matters: tide-crds first (tide depends on it via Chart.yaml
+      # `dependencies:` block). If tide is pushed before tide-crds, operators
+      # running `helm install` against the OCI registry may briefly see a
+      # dangling dependency.
+      - name: Push charts to OCI registry
+        run: |
+          helm push tide-crds-${GITHUB_REF_NAME#v}.tgz oci://ghcr.io/jsquirrelz/tide-charts
+          helm push tide-${GITHUB_REF_NAME#v}.tgz oci://ghcr.io/jsquirrelz/tide-charts
+
+      # `if: always()` ensures the token is invalidated even if push failed.
+      # Defense-in-depth against credential leakage in subsequent jobs (none
+      # exist today, but future maintenance might add some).
+      - name: Helm registry logout
+        if: always()
+        run: helm registry logout ghcr.io
