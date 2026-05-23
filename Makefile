@@ -545,6 +545,33 @@ verify-docs: ## Phase 5 DIST-04 — verify docs/README.md index + all referenced
 test-per-ns-rb: ## Phase 5 DIST-01 / AUTH-02 — verify per-namespace-rolebinding.yaml renders correctly.
 	@bash hack/scripts/test-per-ns-rb.sh
 
+##@ Phase 5 v1.0 ship gates (DIST-05 dry-run + BOOT-02/BOOT-04 acceptance — Plan 05-15)
+
+# dry-run-v1 (D-D1..D-D4): scripted Docker-in-Docker exercise of the README
+# Quickstart against a clean ubuntu:24.04 image, timed end-to-end. Small-sample
+# Project Status.Phase=Complete is the timer-stop. Plan 05-16 wires this into
+# release.yaml on `v*-rc.*` tags; runs locally without CI integration via this
+# target. $0 LLM cost — uses the stub-subagent path.
+DRY_RUN_IMAGE ?= ubuntu:24.04
+DRY_RUN_TIMEOUT_SECONDS ?= 1800
+
+.PHONY: dry-run-v1
+dry-run-v1: ## Phase 5 D-D1 — Docker-in-Docker external-operator dry-run (≤ 30 min, $0 LLM cost).
+	@hack/scripts/dry-run-v1.sh
+
+# acceptance-v1 (D-A1..D-A4): maintainer-only ritual on the dev laptop. Fresh
+# kind cluster + helm install + applies examples/projects/large/project.yaml +
+# watches Project to Complete + captures evidence under .acceptance-runs/<ts>/.
+# Hard $25 cap, no bypass. NOT wired into CI — maintainer-driven only.
+.PHONY: acceptance-v1
+acceptance-v1: ## Phase 5 D-A4 — maintainer ritual ($25 hard cap; requires ANTHROPIC_API_KEY).
+	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
+	  echo "ERROR: ANTHROPIC_API_KEY env not set — refusing to run acceptance-v1"; \
+	  echo "       See docs/INSTALL.md for Secret setup."; \
+	  exit 1; \
+	fi
+	@hack/scripts/acceptance-v1.sh
+
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 
 # Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:
