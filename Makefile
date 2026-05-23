@@ -539,6 +539,12 @@ verify-license: ## Phase 5 DIST-03 — verify LICENSE+NOTICE+Go-header coverage.
 verify-docs: ## Phase 5 DIST-04 — verify docs/README.md index + all referenced docs present.
 	@bash hack/scripts/verify-docs-coverage.sh --strict
 
+##@ Per-namespace RBAC render gate (Phase 5 DIST-01 + AUTH-02 — Plan 05-13)
+
+.PHONY: test-per-ns-rb
+test-per-ns-rb: ## Phase 5 DIST-01 / AUTH-02 — verify per-namespace-rolebinding.yaml renders correctly.
+	@bash hack/scripts/test-per-ns-rb.sh
+
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 
 # Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:
