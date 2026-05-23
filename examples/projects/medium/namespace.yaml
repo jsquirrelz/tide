@@ -1,0 +1,14 @@
+# examples/projects/medium/namespace.yaml — Phase 5 D-B2 medium-sample namespace.
+#
+# Distinct from Phase 1's `tide-samples` (plural) kubebuilder fixture namespace
+# per Pitfall 9 — the two paths serve different audiences and never share
+# resources. The `tide-sample-` prefix is the Phase 5 sample convention
+# (matches tide-sample-small and tide-sample-large).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium

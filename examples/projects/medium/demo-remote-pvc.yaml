@@ -1,0 +1,30 @@
+# examples/projects/medium/demo-remote-pvc.yaml — Phase 5 D-B3 / RESEARCH
+# §"Topic 4 Option b" + §"Pitfall 12 mitigation".
+#
+# The medium sample's local-only `file://` git remote is bootstrapped onto
+# this PVC by the demo-remote-init Job (`demo-remote-init-job.yaml`). TIDE's
+# controller-side clone Job then mounts the SAME PVC and clones from
+# file:///demo-remote.git — the in-cluster Job + shared-PVC pattern keeps
+# the entire dependency chain local to the cluster (no external public
+# repo per D-B3 user decision).
+#
+# 100Mi is more than enough for the tiny embedded fixture (~5 small files,
+# kilobytes of content) plus the per-run-branch commits TIDE pushes back.
+# ReadWriteOnce is sufficient because the init Job and the controller's
+# clone Job either run sequentially (Job → Job) or co-locate on the same
+# node when their Pods overlap.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: demo-remote-pvc
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+    app.kubernetes.io/component: demo-remote
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 100Mi

@@ -1,0 +1,51 @@
+# examples/projects/medium/demo-remote-init-job.yaml — Phase 5 D-B3 /
+# MEDIUM-11 lock / RESEARCH §"Topic 4 Option b" + §"Pitfall 12 mitigation".
+#
+# This Job runs cmd/tide-demo-init/ (image
+# `ghcr.io/jsquirrelz/tide-demo-init:v1.0.0` — built from
+# images/tide-demo-init/Dockerfile) to create a bare git repo at
+# /workspace/demo-remote.git on the shared `demo-remote-pvc`. The binary
+# embeds the contents of `examples/tide-demo-fixture/` via //go:embed
+# and pushes them as the initial commit.
+#
+# APPLY ORDER (see README.md): namespace → demo-remote-pvc → THIS Job →
+# wait for Complete → secret → project.yaml.
+#
+# Once Job.status.succeeded == 1, the bare repo is ready and the
+# medium-sample Project's clone Job can mount the same PVC, find the bare
+# repo at the same path, and clone via file:///demo-remote.git.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-remote-init
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+    app.kubernetes.io/component: demo-remote-init
+spec:
+  # backoffLimit 1 = one retry on Pod-level failure; the binary itself is
+  # idempotent-by-refusal (refuses to overwrite an existing bare repo via
+  # exit 2 invariantError), so re-runs after a partial success will FAIL
+  # fast rather than silently double-init.
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: demo-remote-init
+        tideproject.k8s/sample: medium
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: tide-demo-init
+          image: ghcr.io/jsquirrelz/tide-demo-init:v1.0.0
+          args:
+            - --bootstrap-dir=/workspace/demo-remote.git
+          volumeMounts:
+            - name: demo-remote
+              mountPath: /workspace
+      volumes:
+        - name: demo-remote
+          persistentVolumeClaim:
+            claimName: demo-remote-pvc

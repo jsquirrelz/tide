@@ -1,0 +1,135 @@
+# examples/projects/medium/project.yaml — Phase 5 D-B2 medium sample (~$5 real Claude).
+#
+# This sample lets operators run TIDE against real Claude (Haiku 4.5, cost-disciplined
+# per D-B1) with a hard $5 cap — no external public repo dependency (D-B3). The
+# targetRepo is a local-only file:// git remote bootstrapped on `demo-remote-pvc`
+# by the demo-remote-init Job (Phase 5 D-B3 / RESEARCH §"Topic 4 Option b").
+#
+# APPLY ORDER (do NOT apply this file alone — see README.md):
+#   1. namespace.yaml
+#   2. demo-remote-pvc.yaml
+#   3. demo-remote-init-job.yaml         (waits for completion before #4)
+#   4. kubectl create secret tide-secrets ANTHROPIC_API_KEY + GIT_PAT
+#   5. project.yaml                      (THIS file)
+#
+# Schema-gap notes (carry-forward from plan 05-11 deferred-items.md and
+# verified 2026-05-23 against api/v1alpha1/project_types.go):
+#
+# - ProjectSpec.targetRepo CEL validation is currently
+#   `self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')`.
+#   The intended contract value is `file:///demo-remote.git`. The small sample
+#   uses the same convention (`file:///tmp/no-such-repo`) and ships as-is —
+#   the gap is documented in deferred-items.md and the v1.x schema work
+#   extends the allow-list to include the file:// scheme.
+# - ProjectSpec.Git.RepoURL has a `^https?://.+` Pattern validator with the
+#   same gap. Same treatment.
+# - ProjectSpec has no `OutcomePrompt` field in v1.0; the prompt is carried
+#   as `tideproject.k8s/outcome-prompt` annotation (same posture as the
+#   large sample; v1.x promotes to a first-class Spec field).
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: medium-project
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+  annotations:
+    # Medium-sample outcome prompt — small enough to fit comfortably under
+    # the $5 cap (D-B1) yet substantive enough to exercise TIDE's clone →
+    # plan → execute → push loop end-to-end. ONE Phase, ONE Plan, target
+    # 3-5 tasks (tight scope is the cost-control mechanism — same shape
+    # as the large sample's Variant B per D-B4).
+    #
+    # The targetRepo is the local-only file:// remote populated from
+    # examples/tide-demo-fixture/ — a tiny Go scaffold with main.go +
+    # main_test.go + a Greeting(name) string function. The prompt asks
+    # for a second exported function (timestamp formatting) alongside
+    # Greeting, plus a unit test. Pass criterion: `go test ./...`
+    # exits 0 inside the cloned repo.
+    tideproject.k8s/outcome-prompt: |
+      The targetRepo is a tiny Go scaffold from examples/tide-demo-fixture/
+      with a `Greeting(name) string` function plus a passing test.
+
+      Add a second exported function alongside `Greeting`: `FormattedNow() string`
+      that returns the current time formatted as RFC3339. Update main.go to
+      print both functions' output (one per line). Add a unit test for the
+      new function that asserts the returned string parses back via
+      time.Parse(time.RFC3339, ...).
+
+      Concrete deliverables (tight scope — ONE Phase, ONE Plan, target 3-5
+      tasks):
+
+      1. main.go — add `FormattedNow()`; update main() to print both.
+      2. main_test.go — add `TestFormattedNow` asserting round-trip parse.
+
+      Constraints:
+      - DO NOT add external dependencies beyond the standard library.
+      - DO NOT modify go.mod / go.sum.
+      - Follow the existing repo conventions (MIT license header on new
+        Go files; deterministic, side-effect-free function shape).
+
+      Pass criterion: `go test ./...` is green inside the cloned working tree.
+spec:
+  # D-B3 local-only git remote. The CEL validator on this field currently
+  # only accepts http(s) / git@ prefixes — see schema-gap notes at the top
+  # of this file. The medium sample's local-only contract requires file://.
+  targetRepo: file:///demo-remote.git
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # The Secret is created BEFORE this CRD is applied (README.md step 4).
+  # Same Secret carries GIT_PAT (unused for file:// but the schema requires
+  # the GitConfig.CredsSecretRef field).
+  providerSecretRef: tide-secrets
+
+  # D-B1: $5 cap for the medium sample. If hit, dispatch halts with
+  # Phase=BudgetExceeded (Phase 2 D-D2 + Phase 04.1 P4.1 rolling-window
+  # infra). The tight outcome-prompt scope bounds expected spend well
+  # under this cap — the cap is a safety net, not the operating budget.
+  budget:
+    absoluteCapCents: 500
+    rollingWindowCapCents: 500
+    # 24h rolling window per Phase 04.1 P4.1. metav1.Duration parses Go
+    # duration strings; default would be 24h when unset; explicit per
+    # Pitfall 7.
+    rollingWindowDuration: 24h
+
+  # Phase 3 D-C2: cost-disciplined model pick per D-B1 spectrum. Haiku 4.5
+  # is materially cheaper than Sonnet/Opus and adequate for the
+  # function-addition outcome prompt above. Acceptance test uses Opus
+  # (large sample); medium uses Haiku.
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:v1.0.0
+    model: claude-haiku-4-5
+
+  # Phase 3 D-B6 per-project git target. TIDE pushes per-Phase / per-Plan /
+  # per-Task / final-Project commits to a per-run branch on this remote.
+  # Branch shape: tide/run-medium-project-<unix-ts>. NEVER pushes to main.
+  #
+  # The same `tide-secrets` Secret carries GIT_PAT; the value can be empty
+  # for file:// (no auth required), but the schema mandates the field.
+  git:
+    repoURL: file:///demo-remote.git
+    credsSecretRef: tide-secrets
+
+  # All gates set to `auto` so the medium sample runs end-to-end without
+  # human interruption. Operators inspecting the run watch
+  # Project.Status.phase + the dashboard; gate-policy demos are a docs/
+  # concern, not this sample's purpose.
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  # Phase 2 D-E1: file-touch admission in strict mode. The PLAN.md the
+  # planner authors must declare its file touches precisely; admission
+  # rejects on mismatch.
+  planAdmission:
+    fileTouchMode: strict
+
+  # Phase 2 SUB-04 cap. 3 attempts per task is the v1 default.
+  maxAttemptsPerTask: 3
