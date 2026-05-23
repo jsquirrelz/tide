@@ -47,3 +47,20 @@ Out-of-scope discoveries logged during plan execution. Address in follow-up plan
 ## Discovered 2026-05-22 (during plan 05-14 execution)
 
 **Phase 3 + 04.1 helmified CRD subchart drift** — `charts/tide-crds/templates/*-crd.yaml` was stale relative to `config/crd/bases/`. Plan 05-14's `make helm-crds && git diff --exit-code charts/tide-crds/` acceptance criterion required landing the catch-up alongside the `helm.sh/resource-policy: keep` annotation. Affected fields: `additionalPrinterColumns`, `Project.Spec.{Git,Subagent,Budget.RollingWindowDuration}`, `ProviderConfig.AllowedRoutes`, `Project.Status.Git`, Task `wait-for-signal` mode. Documented in 05-14's commit body + SUMMARY's Deviations section. The root cause appears to be that prior phases didn't run the augment script after schema changes; recommend adding `make helm-crds` to the per-phase verification gate in future schema-modifying phases.
+
+## Discovered 2026-05-23 (during plan 05-11 execution, Rule 1 deviation)
+
+**Project.Spec is missing 5 fields the planner assumed exist** — Plan 05-11's plan body referenced `outcomePrompt`, `branchStrategy`, `governanceLevel`, `gitCredsSecretRef`, `rollingWindowDurationSeconds` as Project.Spec fields, but none of them exist in `api/v1alpha1/project_types.go`. kubebuilder structural schema would silently prune them on `kubectl apply`.
+
+**Most consequential gap: `outcomePrompt`.** The Variant B outcome prompt (1,643 chars) drives the v1 acceptance test (BOOT-04). The executor carried it as a `tideproject.k8s/outcome-prompt` **annotation** on the large sample's Project CRD. v1.0 controllers will need to read this annotation; v1.x schema work should promote it to a first-class `Project.Spec.OutcomePrompt` field.
+
+**Other 4 fields** were either omitted (`governanceLevel`, `branchStrategy` — gate policy + per-run branch behavior are managed elsewhere in current schema) or remapped to existing schema paths (`gitCredsSecretRef` → `git.credsSecretRef` already exists; `rollingWindowDurationSeconds` → `budget.rollingWindowDuration` already exists per Phase 04.1 P4.1).
+
+**Action items (v1.x):**
+1. Add `Project.Spec.OutcomePrompt string` to `api/v1alpha1/project_types.go` (the most-needed field; controllers should read it from `Project.Spec.OutcomePrompt`, falling back to the annotation for v1.0-compat).
+2. Update planner subagent code paths to read from the new field.
+3. Migrate the large sample from annotation to Spec field once both controllers + samples are ready.
+
+## Discovered 2026-05-22 (during plan 05-08 execution, recovered #3099 worktree-path drift)
+
+**Worktree-relative absolute-path resolution drift** — Plan 05-08 executor's initial `Write` of `docs/project-authoring.md` resolved to the main repo's checkout instead of the worktree's checkout. Recovered with `mv` into the worktree + re-verify. No state polluted in main repo. Same root cause as the orchestrator-cwd issue I (the orchestrator) hit during Wave 1 merge. This is a known issue (`#3099` — `worktree-path-safety.md`). Worth keeping in mind for any worktree-spawning future workflow runs; ensuring path safety checks land deterministically before `Write`/`Edit` calls would prevent the recovery dance.
