@@ -533,6 +533,12 @@ helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list
 verify-license: ## Phase 5 DIST-03 — verify LICENSE+NOTICE+Go-header coverage.
 	@bash hack/scripts/verify-license.sh
 
+##@ Docs coverage gate (Phase 5 DIST-04 — Plan 05-04)
+
+.PHONY: verify-docs
+verify-docs: ## Phase 5 DIST-04 — verify docs/README.md index + all referenced docs present.
+	@bash hack/scripts/verify-docs-coverage.sh --strict
+
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 
 # Two-chart pair, both helmify-driven from kubebuilder's config/ Kustomize output:
