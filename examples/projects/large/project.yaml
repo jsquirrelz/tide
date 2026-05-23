@@ -13,12 +13,9 @@
 # evidence capture. Direct apply would race the controller bring-up and miss
 # the run-start timestamp the 7-check verifier needs.
 #
-# Schema note: v1alpha1's ProjectSpec does NOT carry an `outcomePrompt` field
-# (verified 2026-05-22 via `grep outcomePrompt api/v1alpha1/`). The Variant B
-# outcome prompt is carried as an annotation (`tideproject.k8s/outcome-prompt`)
-# in v1.0 and documented inline as `# outcomePrompt:` for human readability.
-# v1.x schema work may promote this to a first-class Spec field; in v1.0 the
-# planner subagent reads the annotation off the Project CRD.
+# Schema note: ProjectSpec.OutcomePrompt is a first-class Spec field (root-
+# cause fix landed 2026-05-23). The Variant B outcome prompt below is read
+# verbatim by the planner subagent at dispatch time.
 ---
 apiVersion: v1
 kind: Namespace
@@ -38,50 +35,51 @@ metadata:
     app.kubernetes.io/name: tide
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: large
-  annotations:
-    # Variant B outcomePrompt — Phase 5 D-B4 / RESEARCH §"Topic 5".
-    # The planner subagent reads this annotation at dispatch time to seed the
-    # phase brief + PLAN.md authoring step. Tight scope is the cost-control
-    # mechanism (5-7 tasks, ONE Plan, ONE Phase) — too vague and TIDE wanders
-    # and blows the budget; too prescriptive and we're hand-authoring the plan.
-    tideproject.k8s/outcome-prompt: |
-      Author the scaffold for `internal/subagent/openai/` in this repository,
-      mirroring the existing `internal/subagent/anthropic/` layout.
-
-      Concrete deliverables (tight scope — target 5-7 tasks, ONE Plan, ONE Phase):
-
-      1. `internal/subagent/openai/client.go` — defines `Client` struct + constructor.
-         Match the shape of `internal/subagent/anthropic/client.go`. DO NOT call
-         the real OpenAI API; the constructor takes an API key string but the
-         methods are stubbed.
-
-      2. `internal/subagent/openai/run.go` — defines `Subagent.Run(ctx, EnvelopeIn)
-         (EnvelopeOut, error)` matching `pkg/dispatch.Subagent`. STUB implementation:
-         return a canned `EnvelopeOut{Status: "success", Artifacts: []}` envelope.
-         Add a TODO comment explaining real-API integration is v1.x scope.
-
-      3. `internal/subagent/openai/Dockerfile` — multi-stage build mirroring
-         `internal/subagent/anthropic/Dockerfile`. Final image must build clean.
-
-      4. `internal/subagent/openai/run_test.go` — ONE unit test verifying the
-         stub returns the canned envelope and matches the `Subagent` interface.
-
-      5. `internal/subagent/openai/doc.go` — package doc comment referencing
-         Phase 3 D-C1 layering pattern.
-
-      Constraints:
-      - DO NOT modify any files outside `internal/subagent/openai/`.
-      - DO NOT add the openai package to `cmd/manager`'s build (the contract is
-        authoring the scaffold, not wiring it; wiring is v1.x scope).
-      - Follow the existing repo conventions in CLAUDE.md (Apache-2.0 headers,
-        logging discipline, error handling).
-
-      Pass criterion: `go test ./internal/subagent/openai/...` is green;
-      `docker build -f internal/subagent/openai/Dockerfile .` builds without error.
 spec:
   # D-A1: targetRepo is THIS TIDE repo. TIDE will clone it, author the openai
   # scaffold on a per-run branch, and push back (never to main per Phase 3 D-B6).
   targetRepo: https://github.com/jsquirrelz/tide.git
+
+  # Variant B outcome prompt — Phase 5 D-B4 / RESEARCH §"Topic 5". Tight scope
+  # is the cost-control mechanism (5-7 tasks, ONE Plan, ONE Phase) — too vague
+  # and TIDE wanders and blows the budget; too prescriptive and we're hand-
+  # authoring the plan. Field is `spec.outcomePrompt` (added 2026-05-23 root-
+  # cause fix; previously carried as `tideproject.k8s/outcome-prompt` annotation
+  # in Wave 2 Plan 05-11 — that workaround is now reverted).
+  outcomePrompt: |
+    Author the scaffold for `internal/subagent/openai/` in this repository,
+    mirroring the existing `internal/subagent/anthropic/` layout.
+
+    Concrete deliverables (tight scope — target 5-7 tasks, ONE Plan, ONE Phase):
+
+    1. `internal/subagent/openai/client.go` — defines `Client` struct + constructor.
+       Match the shape of `internal/subagent/anthropic/client.go`. DO NOT call
+       the real OpenAI API; the constructor takes an API key string but the
+       methods are stubbed.
+
+    2. `internal/subagent/openai/run.go` — defines `Subagent.Run(ctx, EnvelopeIn)
+       (EnvelopeOut, error)` matching `pkg/dispatch.Subagent`. STUB implementation:
+       return a canned `EnvelopeOut{Status: "success", Artifacts: []}` envelope.
+       Add a TODO comment explaining real-API integration is v1.x scope.
+
+    3. `internal/subagent/openai/Dockerfile` — multi-stage build mirroring
+       `internal/subagent/anthropic/Dockerfile`. Final image must build clean.
+
+    4. `internal/subagent/openai/run_test.go` — ONE unit test verifying the
+       stub returns the canned envelope and matches the `Subagent` interface.
+
+    5. `internal/subagent/openai/doc.go` — package doc comment referencing
+       Phase 3 D-C1 layering pattern.
+
+    Constraints:
+    - DO NOT modify any files outside `internal/subagent/openai/`.
+    - DO NOT add the openai package to `cmd/manager`'s build (the contract is
+      authoring the scaffold, not wiring it; wiring is v1.x scope).
+    - Follow the existing repo conventions in CLAUDE.md (Apache-2.0 headers,
+      logging discipline, error handling).
+
+    Pass criterion: `go test ./internal/subagent/openai/...` is green;
+    `docker build -f internal/subagent/openai/Dockerfile .` builds without error.
 
   # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
   # The Secret is created by `make acceptance-v1` (plan 05-15) before this
@@ -140,9 +138,7 @@ spec:
   maxAttemptsPerTask: 3
 
 # ─────────────────────────────────────────────────────────────────────────
-# outcomePrompt (Variant B) is carried as `tideproject.k8s/outcome-prompt`
-# annotation on metadata above. Schema-as-of-v1.0 has no first-class
-# outcomePrompt Spec field; the planner subagent reads the annotation.
-# Refactor: v1.x ships a real Spec.OutcomePrompt field per D-B4 follow-up.
-# 5-7 tasks, ONE Plan scope is the cost-control invariant.
+# outcomePrompt (Variant B) is carried in spec.outcomePrompt above. The
+# planner subagent reads it verbatim at dispatch time. 5-7 tasks, ONE Plan,
+# ONE Phase is the cost-control invariant.
 # ─────────────────────────────────────────────────────────────────────────

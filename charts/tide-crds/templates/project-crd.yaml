@@ -145,10 +145,12 @@ spec:
                     type: string
                   repoURL:
                     description: |-
-                      RepoURL is the HTTPS URL of the target repo, e.g.,
-                      "https://github.com/owner/repo.git". CEL pattern below catches non-HTTP
-                      URLs at admission time.
-                    pattern: ^https?://.+
+                      RepoURL is the URL of the target repo, e.g.,
+                      "https://github.com/owner/repo.git" (production) or
+                      "file:///workspace/demo-remote/repo.git" (local-only demo per Phase 5 D-B3
+                      — medium sample bootstraps a bare repo on a PVC and points TIDE at it
+                      without any external git host). Pattern below allows http(s) + file:///.
+                    pattern: ^(https?://|file:///).+
                     type: string
                 required:
                 - credsSecretRef
@@ -175,6 +177,14 @@ spec:
                   task:
                     type: string
                 type: object
+              outcomePrompt:
+                description: |-
+                  OutcomePrompt is the human-authored outcome statement that TIDE turns
+                  into a phase brief + PLAN.md + tasks (Phase 5 BOOT-04). The planner
+                  subagent reads this verbatim from .spec; the v1.0 stub-subagent ignores
+                  it (small samples can leave it empty for the smoke-test path).
+                  Multi-line YAML literals (`|`) are the conventional shape.
+                type: string
               planAdmission:
                 description: PlanAdmission controls file-touch policy during plan validation
                   (Phase 2+).
@@ -377,16 +387,20 @@ spec:
                     type: string
                 type: object
               targetRepo:
-                description: TargetRepo is the URL of the repo this Project operates
-                  on.
+                description: |-
+                  TargetRepo is the URL of the repo this Project operates on. Supports
+                  http(s) (production), SSH (`git@host:owner/repo.git`), and `file:///`
+                  URLs (Phase 5 D-B3 — local-only demo, medium sample bootstraps a bare
+                  repo on a PVC).
                 minLength: 1
                 type: string
             required:
             - targetRepo
             type: object
             x-kubernetes-validations:
-            - message: targetRepo must be a valid http(s) or SSH git URL
+            - message: targetRepo must be a http(s), SSH, or file:// git URL
               rule: self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')
+                || self.targetRepo.startsWith('file://')
           status:
             description: status defines the observed state of Project
             properties:

@@ -12,20 +12,12 @@
 #   4. kubectl create secret tide-secrets ANTHROPIC_API_KEY + GIT_PAT
 #   5. project.yaml                      (THIS file)
 #
-# Schema-gap notes (carry-forward from plan 05-11 deferred-items.md and
-# verified 2026-05-23 against api/v1alpha1/project_types.go):
-#
-# - ProjectSpec.targetRepo CEL validation is currently
-#   `self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')`.
-#   The intended contract value is `file:///demo-remote.git`. The small sample
-#   uses the same convention (`file:///tmp/no-such-repo`) and ships as-is —
-#   the gap is documented in deferred-items.md and the v1.x schema work
-#   extends the allow-list to include the file:// scheme.
-# - ProjectSpec.Git.RepoURL has a `^https?://.+` Pattern validator with the
-#   same gap. Same treatment.
-# - ProjectSpec has no `OutcomePrompt` field in v1.0; the prompt is carried
-#   as `tideproject.k8s/outcome-prompt` annotation (same posture as the
-#   large sample; v1.x promotes to a first-class Spec field).
+# Schema notes (root-cause fix landed 2026-05-23):
+#   - ProjectSpec.OutcomePrompt is now a first-class Spec field — read directly
+#     by the planner subagent. Previously (briefly) carried as
+#     `tideproject.k8s/outcome-prompt` annotation in Wave 3.
+#   - targetRepo CEL validator accepts `file:///` URLs alongside http(s) + SSH.
+#   - GitConfig.RepoURL Pattern accepts `file:///` URLs alongside http(s).
 ---
 apiVersion: tideproject.k8s/v1alpha1
 kind: Project
@@ -36,47 +28,41 @@ metadata:
     app.kubernetes.io/name: tide
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: medium
-  annotations:
-    # Medium-sample outcome prompt — small enough to fit comfortably under
-    # the $5 cap (D-B1) yet substantive enough to exercise TIDE's clone →
-    # plan → execute → push loop end-to-end. ONE Phase, ONE Plan, target
-    # 3-5 tasks (tight scope is the cost-control mechanism — same shape
-    # as the large sample's Variant B per D-B4).
-    #
-    # The targetRepo is the local-only file:// remote populated from
-    # examples/tide-demo-fixture/ — a tiny Go scaffold with main.go +
-    # main_test.go + a Greeting(name) string function. The prompt asks
-    # for a second exported function (timestamp formatting) alongside
-    # Greeting, plus a unit test. Pass criterion: `go test ./...`
-    # exits 0 inside the cloned repo.
-    tideproject.k8s/outcome-prompt: |
-      The targetRepo is a tiny Go scaffold from examples/tide-demo-fixture/
-      with a `Greeting(name) string` function plus a passing test.
-
-      Add a second exported function alongside `Greeting`: `FormattedNow() string`
-      that returns the current time formatted as RFC3339. Update main.go to
-      print both functions' output (one per line). Add a unit test for the
-      new function that asserts the returned string parses back via
-      time.Parse(time.RFC3339, ...).
-
-      Concrete deliverables (tight scope — ONE Phase, ONE Plan, target 3-5
-      tasks):
-
-      1. main.go — add `FormattedNow()`; update main() to print both.
-      2. main_test.go — add `TestFormattedNow` asserting round-trip parse.
-
-      Constraints:
-      - DO NOT add external dependencies beyond the standard library.
-      - DO NOT modify go.mod / go.sum.
-      - Follow the existing repo conventions (MIT license header on new
-        Go files; deterministic, side-effect-free function shape).
-
-      Pass criterion: `go test ./...` is green inside the cloned working tree.
 spec:
-  # D-B3 local-only git remote. The CEL validator on this field currently
-  # only accepts http(s) / git@ prefixes — see schema-gap notes at the top
-  # of this file. The medium sample's local-only contract requires file://.
+  # D-B3 local-only git remote. Now accepted by the CEL validator (relaxed
+  # 2026-05-23 root-cause fix — file:/// added alongside http(s) + SSH).
   targetRepo: file:///demo-remote.git
+
+  # Medium-sample outcome prompt — small enough to fit comfortably under the
+  # $5 cap (D-B1) yet substantive enough to exercise TIDE's clone → plan →
+  # execute → push loop end-to-end. ONE Phase, ONE Plan, target 3-5 tasks
+  # (tight scope is the cost-control mechanism — same shape as the large
+  # sample's Variant B per D-B4). Field is `spec.outcomePrompt` (added
+  # 2026-05-23 root-cause fix; previously carried as annotation in Wave 3
+  # Plan 05-12 — that workaround is now reverted).
+  outcomePrompt: |
+    The targetRepo is a tiny Go scaffold from examples/tide-demo-fixture/
+    with a `Greeting(name) string` function plus a passing test.
+
+    Add a second exported function alongside `Greeting`: `FormattedNow() string`
+    that returns the current time formatted as RFC3339. Update main.go to
+    print both functions' output (one per line). Add a unit test for the
+    new function that asserts the returned string parses back via
+    time.Parse(time.RFC3339, ...).
+
+    Concrete deliverables (tight scope — ONE Phase, ONE Plan, target 3-5
+    tasks):
+
+    1. main.go — add `FormattedNow()`; update main() to print both.
+    2. main_test.go — add `TestFormattedNow` asserting round-trip parse.
+
+    Constraints:
+    - DO NOT add external dependencies beyond the standard library.
+    - DO NOT modify go.mod / go.sum.
+    - Follow the existing repo conventions (MIT license header on new
+      Go files; deterministic, side-effect-free function shape).
+
+    Pass criterion: `go test ./...` is green inside the cloned working tree.
 
   # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
   # The Secret is created BEFORE this CRD is applied (README.md step 4).

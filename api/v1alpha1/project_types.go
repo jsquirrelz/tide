@@ -203,10 +203,12 @@ type LevelConfig struct {
 // HTTPS+PAT is the primary v1.0 path; SSH is documented with host-key caveats
 // per REQUIREMENTS.md ART-05 but defaults to HTTPS+PAT.
 type GitConfig struct {
-	// RepoURL is the HTTPS URL of the target repo, e.g.,
-	// "https://github.com/owner/repo.git". CEL pattern below catches non-HTTP
-	// URLs at admission time.
-	// +kubebuilder:validation:Pattern=`^https?://.+`
+	// RepoURL is the URL of the target repo, e.g.,
+	// "https://github.com/owner/repo.git" (production) or
+	// "file:///workspace/demo-remote/repo.git" (local-only demo per Phase 5 D-B3
+	// — medium sample bootstraps a bare repo on a PVC and points TIDE at it
+	// without any external git host). Pattern below allows http(s) + file:///.
+	// +kubebuilder:validation:Pattern=`^(https?://|file:///).+`
 	RepoURL string `json:"repoURL"`
 
 	// CredsSecretRef is the K8s Secret name (same-namespace) carrying the
@@ -267,11 +269,22 @@ type BudgetStatus struct {
 }
 
 // ProjectSpec defines the desired state of Project.
-// +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')",message="targetRepo must be a valid http(s) or SSH git URL"
+// +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@') || self.targetRepo.startsWith('file://')",message="targetRepo must be a http(s), SSH, or file:// git URL"
 type ProjectSpec struct {
-	// TargetRepo is the URL of the repo this Project operates on.
+	// TargetRepo is the URL of the repo this Project operates on. Supports
+	// http(s) (production), SSH (`git@host:owner/repo.git`), and `file:///`
+	// URLs (Phase 5 D-B3 — local-only demo, medium sample bootstraps a bare
+	// repo on a PVC).
 	// +kubebuilder:validation:MinLength=1
 	TargetRepo string `json:"targetRepo"`
+
+	// OutcomePrompt is the human-authored outcome statement that TIDE turns
+	// into a phase brief + PLAN.md + tasks (Phase 5 BOOT-04). The planner
+	// subagent reads this verbatim from .spec; the v1.0 stub-subagent ignores
+	// it (small samples can leave it empty for the smoke-test path).
+	// Multi-line YAML literals (`|`) are the conventional shape.
+	// +optional
+	OutcomePrompt string `json:"outcomePrompt,omitempty"`
 
 	// SecretRefs references K8s Secrets for credentials (AUTH-01 — Phase 3).
 	// +optional

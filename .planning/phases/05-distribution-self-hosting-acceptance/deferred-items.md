@@ -48,38 +48,34 @@ Out-of-scope discoveries logged during plan execution. Address in follow-up plan
 
 **Phase 3 + 04.1 helmified CRD subchart drift** — `charts/tide-crds/templates/*-crd.yaml` was stale relative to `config/crd/bases/`. Plan 05-14's `make helm-crds && git diff --exit-code charts/tide-crds/` acceptance criterion required landing the catch-up alongside the `helm.sh/resource-policy: keep` annotation. Affected fields: `additionalPrinterColumns`, `Project.Spec.{Git,Subagent,Budget.RollingWindowDuration}`, `ProviderConfig.AllowedRoutes`, `Project.Status.Git`, Task `wait-for-signal` mode. Documented in 05-14's commit body + SUMMARY's Deviations section. The root cause appears to be that prior phases didn't run the augment script after schema changes; recommend adding `make helm-crds` to the per-phase verification gate in future schema-modifying phases.
 
-## Discovered 2026-05-23 (during plan 05-11 execution, Rule 1 deviation)
+## Discovered 2026-05-23 (during plan 05-11 execution, Rule 1 deviation) — **RESOLVED 2026-05-23**
 
-**Project.Spec is missing 5 fields the planner assumed exist** — Plan 05-11's plan body referenced `outcomePrompt`, `branchStrategy`, `governanceLevel`, `gitCredsSecretRef`, `rollingWindowDurationSeconds` as Project.Spec fields, but none of them exist in `api/v1alpha1/project_types.go`. kubebuilder structural schema would silently prune them on `kubectl apply`.
+**Project.Spec was missing 5 fields the planner assumed exist** — Plan 05-11's plan body referenced `outcomePrompt`, `branchStrategy`, `governanceLevel`, `gitCredsSecretRef`, `rollingWindowDurationSeconds` as Project.Spec fields, but none existed in `api/v1alpha1/project_types.go`.
 
-**Most consequential gap: `outcomePrompt`.** The Variant B outcome prompt (1,643 chars) drives the v1 acceptance test (BOOT-04). The executor carried it as a `tideproject.k8s/outcome-prompt` **annotation** on the large sample's Project CRD. v1.0 controllers will need to read this annotation; v1.x schema work should promote it to a first-class `Project.Spec.OutcomePrompt` field.
+**RESOLVED:** Root-cause fix landed pre-Wave-4 (commit batch on 2026-05-23):
+1. `Project.Spec.OutcomePrompt string` added to `api/v1alpha1/project_types.go` (optional, multi-line YAML literal shape).
+2. CRDs regenerated via `make manifests` + propagated to `charts/tide-crds/templates/` via `make helm-crds`.
+3. `examples/projects/large/project.yaml` migrated from `tideproject.k8s/outcome-prompt` annotation → `spec.outcomePrompt`.
+4. `examples/projects/medium/project.yaml` migrated from annotation → `spec.outcomePrompt`.
 
-**Other 4 fields** were either omitted (`governanceLevel`, `branchStrategy` — gate policy + per-run branch behavior are managed elsewhere in current schema) or remapped to existing schema paths (`gitCredsSecretRef` → `git.credsSecretRef` already exists; `rollingWindowDurationSeconds` → `budget.rollingWindowDuration` already exists per Phase 04.1 P4.1).
-
-**Action items (v1.x):**
-1. Add `Project.Spec.OutcomePrompt string` to `api/v1alpha1/project_types.go` (the most-needed field; controllers should read it from `Project.Spec.OutcomePrompt`, falling back to the annotation for v1.0-compat).
-2. Update planner subagent code paths to read from the new field.
-3. Migrate the large sample from annotation to Spec field once both controllers + samples are ready.
+**Other 4 fields** stay omitted/remapped — they don't need first-class Spec field equivalents:
+- `governanceLevel`, `branchStrategy` → gate policy + per-run branch behavior live in existing fields/conventions.
+- `gitCredsSecretRef` → `spec.git.credsSecretRef` already exists.
+- `rollingWindowDurationSeconds` → `spec.budget.rollingWindowDuration` (metav1.Duration) already exists per Phase 04.1 P4.1.
 
 ## Discovered 2026-05-22 (during plan 05-08 execution, recovered #3099 worktree-path drift)
 
 **Worktree-relative absolute-path resolution drift** — Plan 05-08 executor's initial `Write` of `docs/project-authoring.md` resolved to the main repo's checkout instead of the worktree's checkout. Recovered with `mv` into the worktree + re-verify. No state polluted in main repo. Same root cause as the orchestrator-cwd issue I (the orchestrator) hit during Wave 1 merge. This is a known issue (`#3099` — `worktree-path-safety.md`). Worth keeping in mind for any worktree-spawning future workflow runs; ensuring path safety checks land deterministically before `Write`/`Edit` calls would prevent the recovery dance.
 
-## Discovered 2026-05-23 (during plan 05-12 execution — same v1.0 schema gaps as 05-11, medium-sample now hits them too)
+## Discovered 2026-05-23 (during plan 05-12 execution — same v1.0 schema gaps as 05-11, medium-sample now hits them too) — **RESOLVED 2026-05-23**
 
-**Medium sample inherits the same v1.0 schema gaps as the large sample.** Plan 05-12 ships `examples/projects/medium/project.yaml` with three contract values that the v1.0 schema can't currently express:
+**Medium sample previously inherited the same v1.0 schema gaps as the large sample.** All 3 gaps resolved via root-cause fix pre-Wave-4:
 
-1. **`targetRepo: file:///demo-remote.git`** — the local-only-git-remote contract per D-B3. `ProjectSpec.targetRepo`'s CEL validator currently rejects file:// (`self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')`). The small sample (`file:///tmp/no-such-repo`) is in the same boat; both ship as-is.
-2. **`spec.git.repoURL: file:///demo-remote.git`** — same gap (`GitConfig.RepoURL` Pattern `^https?://.+`). Same treatment.
-3. **`tideproject.k8s/outcome-prompt` annotation** — outcomePrompt carried as annotation per the same v1.0 schema gap that 05-11 documented for the large sample.
+1. **`targetRepo: file:///demo-remote.git`** — RESOLVED. `ProjectSpec` XValidation extended to allow `file://` URLs alongside `http`/`git@`.
+2. **`spec.git.repoURL: file:///demo-remote.git`** — RESOLVED. `GitConfig.RepoURL` Pattern relaxed from `^https?://.+` to `^(https?://|file:///).+`.
+3. **`tideproject.k8s/outcome-prompt` annotation** — RESOLVED. `outcomePrompt` is now a first-class `Project.Spec.OutcomePrompt` field; medium + large samples migrated from annotation to spec.
 
-**Action items (v1.x — already on the action list from 05-11; this entry just confirms the gap affects all 3 samples now):**
-
-1. Extend `ProjectSpec.targetRepo` CEL validator to include the `file://` scheme alongside `http`/`git@`. Same for `GitConfig.RepoURL` Pattern.
-2. Promote `outcomePrompt` to a first-class `Project.Spec.OutcomePrompt` string field; planner subagents should prefer the Spec field, falling back to the annotation for v1.0-compat.
-3. Migrate all three samples from annotation/file-URL-via-as-is to schema-clean forms once both controllers + samples are ready.
-
-**Severity:** Low — the medium sample ships with the correct contract values; only the admission gate needs to widen for the sample to apply cleanly on a strict-CEL cluster. Operators on local dev can disable the validating webhook if needed (`controllerManager.validatingWebhook.enabled=false`). Documented inline in `examples/projects/medium/project.yaml` + `examples/projects/medium/README.md`.
+All 3 samples now apply cleanly under strict-CEL admission. Schema test `TestProjectCRDSchemaHasRepoURLPattern` updated to match the new pattern.
 
 ## Discovered 2026-05-23 (during plan 05-12 execution, Rule 3 deviation — Go embed across go.mod boundary)
 
