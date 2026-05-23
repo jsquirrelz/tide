@@ -12,6 +12,9 @@ Dockerfile.cross
 /manager
 /credproxy
 /tide
+/tide-demo-init
+/tide-push
+/stub-subagent
 
 # goreleaser snapshot/release build output (plan 04-09 — D-C2)
 /dist/
@@ -41,3 +44,9 @@ go.work
 # Developer-local toolchain + AI session artifacts
 .claude/
 .tool-versions
+
+# Phase 5 D-B3 (MEDIUM-11 lock): cmd/tide-demo-init/fixture/ is materialized
+# from examples/tide-demo-fixture/ at build time (via go:generate locally
+# or via Dockerfile COPY in the image build). Never committed — the SOT
+# lives at examples/tide-demo-fixture/.
+cmd/tide-demo-init/fixture/
