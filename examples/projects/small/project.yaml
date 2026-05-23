@@ -1,0 +1,59 @@
+# examples/projects/small/project.yaml — Phase 5 D-B2 small sample ($0 stub).
+#
+# This sample is the `make dry-run-v1` target (DIST-05) — $0 LLM cost, repeatable
+# without burning quota. The stub-subagent (cmd/stub-subagent) returns canned
+# success envelopes regardless of targetRepo (verified in plan 06 main_test.go;
+# MEDIUM-7 placeholder design), so this sample exercises K8s plumbing (CRD
+# admission, controller dispatch, Pod lifecycle) without any network or LLM cost.
+#
+# Multi-doc YAML: Namespace + Project. Applying this file via
+# `kubectl apply -f examples/projects/small/project.yaml` is equivalent to
+# applying namespace.yaml + this file separately.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: small-project
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+spec:
+  # MEDIUM-7 placeholder: stub-subagent ignores targetRepo and returns canned
+  # success envelopes regardless. An unreachable `file://` path is safer than a
+  # real GitHub URL — a real URL could be transiently rate-limited or replaced,
+  # causing flaky dry-runs. The unreachable path is load-bearing-by-virtue-of-
+  # being-ignored — it proves the stub doesn't actually resolve targetRepo.
+  targetRepo: file:///tmp/no-such-repo
+
+  budget:
+    # $0 — stub-subagent makes zero API calls. Hard cap of 0 is the strongest
+    # safety signal: if any real LLM dispatch happened, the budget gate would
+    # halt immediately with Phase=BudgetExceeded.
+    absoluteCapCents: 0
+
+  subagent:
+    # ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0 is the v1 stub image
+    # (Phase 5 D-X3 chart version bump synchronizes the tag). The stub binary
+    # is cmd/stub-subagent (Phase 2 SUB-04).
+    image: ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0
+    model: stub
+
+  gates:
+    # All gates set to `auto` so the small sample runs end-to-end without any
+    # human approval steps — it's a smoke test, not a gate-policy demo.
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
