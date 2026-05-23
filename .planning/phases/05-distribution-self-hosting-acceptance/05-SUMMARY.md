@@ -232,9 +232,36 @@ No other deviations. All 3 plan tasks executed as specified.
 | 2 | STATE.md updates (frontmatter counters + body Current Position + Current focus) | `27cee9d` |
 | 3 | 05-SUMMARY.md authored + final closeout chore commit | TBD (closeout) |
 
-## Self-Check
+## Self-Check: PASSED
 
-Per the executor self-check protocol, all artifact assertions verified before this SUMMARY landed. Final verification follows in the closeout commit.
+Per the executor self-check protocol (verified post-Task-3 commit, pre-closeout commit):
+
+**Files created:**
+- ✅ `.planning/phases/05-distribution-self-hosting-acceptance/05-SUMMARY.md` (this file; 241 lines)
+
+**Files modified:**
+- ✅ `.planning/ROADMAP.md` (Plans count + 17 plan rows + Progress table row + closing footer)
+- ✅ `.planning/STATE.md` (frontmatter counters + body Current Position + Current focus)
+
+**Commits:**
+- ✅ `93a6aca` — `docs(05-17): flip ROADMAP Phase 5 to 16/16 Complete + tick all 17 plan rows`
+- ✅ `27cee9d` — `docs(05-17): bump STATE.md frontmatter + body for Phase 5 closeout`
+- ✅ `2ddb1e7` — `docs(05-17): author 05-SUMMARY.md — Phase 5 closeout`
+
+**SDK roundtrip verification (LOW-14):**
+
+```bash
+$ gsd-sdk query state.json | jq '.progress'
+{
+  "total_phases": 8,
+  "completed_phases": 8,
+  "total_plans": 100,
+  "completed_plans": 100,
+  "percent": 100
+}
+```
+
+All 8 milestone phases at PLAN/SUMMARY parity (disk-derived counts match the STATE.md frontmatter values; no preservation-fallback required).
 
 ---
 
