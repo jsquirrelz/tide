@@ -64,3 +64,40 @@ Out-of-scope discoveries logged during plan execution. Address in follow-up plan
 ## Discovered 2026-05-22 (during plan 05-08 execution, recovered #3099 worktree-path drift)
 
 **Worktree-relative absolute-path resolution drift** — Plan 05-08 executor's initial `Write` of `docs/project-authoring.md` resolved to the main repo's checkout instead of the worktree's checkout. Recovered with `mv` into the worktree + re-verify. No state polluted in main repo. Same root cause as the orchestrator-cwd issue I (the orchestrator) hit during Wave 1 merge. This is a known issue (`#3099` — `worktree-path-safety.md`). Worth keeping in mind for any worktree-spawning future workflow runs; ensuring path safety checks land deterministically before `Write`/`Edit` calls would prevent the recovery dance.
+
+## Discovered 2026-05-23 (during plan 05-12 execution — same v1.0 schema gaps as 05-11, medium-sample now hits them too)
+
+**Medium sample inherits the same v1.0 schema gaps as the large sample.** Plan 05-12 ships `examples/projects/medium/project.yaml` with three contract values that the v1.0 schema can't currently express:
+
+1. **`targetRepo: file:///demo-remote.git`** — the local-only-git-remote contract per D-B3. `ProjectSpec.targetRepo`'s CEL validator currently rejects file:// (`self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')`). The small sample (`file:///tmp/no-such-repo`) is in the same boat; both ship as-is.
+2. **`spec.git.repoURL: file:///demo-remote.git`** — same gap (`GitConfig.RepoURL` Pattern `^https?://.+`). Same treatment.
+3. **`tideproject.k8s/outcome-prompt` annotation** — outcomePrompt carried as annotation per the same v1.0 schema gap that 05-11 documented for the large sample.
+
+**Action items (v1.x — already on the action list from 05-11; this entry just confirms the gap affects all 3 samples now):**
+
+1. Extend `ProjectSpec.targetRepo` CEL validator to include the `file://` scheme alongside `http`/`git@`. Same for `GitConfig.RepoURL` Pattern.
+2. Promote `outcomePrompt` to a first-class `Project.Spec.OutcomePrompt` string field; planner subagents should prefer the Spec field, falling back to the annotation for v1.0-compat.
+3. Migrate all three samples from annotation/file-URL-via-as-is to schema-clean forms once both controllers + samples are ready.
+
+**Severity:** Low — the medium sample ships with the correct contract values; only the admission gate needs to widen for the sample to apply cleanly on a strict-CEL cluster. Operators on local dev can disable the validating webhook if needed (`controllerManager.validatingWebhook.enabled=false`). Documented inline in `examples/projects/medium/project.yaml` + `examples/projects/medium/README.md`.
+
+## Discovered 2026-05-23 (during plan 05-12 execution, Rule 3 deviation — Go embed across go.mod boundary)
+
+**`//go:embed` rejects directories carrying a sibling `go.mod`.** Plan 05-12 Task 1 hit this immediately on first build:
+
+```
+cmd/tide-demo-init/main.go:92:12: pattern all:fixture: cannot embed directory fixture: in different module
+```
+
+**Cause:** `examples/tide-demo-fixture/` ships its own `go.mod` / `go.sum` (it's a tiny standalone Go module the medium-sample's Claude task operates on). When the Dockerfile/`go:generate` copies it into `cmd/tide-demo-init/fixture/`, the sibling `go.mod` makes Go's embed treat `fixture/` as a different module — which embed refuses.
+
+**Fix landed inline:** Rename `go.mod` → `go.mod.txt` and `go.sum` → `go.sum.txt` at materialization time (both in the `//go:generate` directive AND in the Dockerfile RUN steps). `cmd/tide-demo-init/main.go`'s `restoreShimmedName` helper reverses the rename at unpack time so the bare repo's working tree carries the canonical filenames byte-for-byte equivalent to the SOT.
+
+**MEDIUM-11 lock honored:** The embed directive `//go:embed all:fixture` itself is unchanged. Only the on-disk layout that the embed reads from is renamed transiently — the directive shape is identical to the plan's locked value.
+
+**Action items (v1.x):**
+
+1. Document the submodule-shim pattern in `docs/contributing.md` if/when other in-tree binaries need to embed module-shaped content (e.g., future test fixtures that ship their own go.mod).
+2. Consider whether to migrate the fixture content to avoid carrying `go.mod`/`go.sum` (would require rethinking `examples/tide-demo-fixture/` to be parseable as Go source without being a runnable module). Not pursued in v1.0 — the shim keeps the SOT intact and the bare-repo content authentic.
+
+**Severity:** Low — shim is fully transparent to operators; only matters at build time.
