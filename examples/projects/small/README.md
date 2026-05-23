@@ -1,0 +1,141 @@
+# TIDE Small Sample ($0 stub-subagent)
+
+**Audience:** Operators running the $0 small sample as a smoke test against any
+TIDE-equipped cluster.
+
+**Status:** v1.0. This sample is the `make dry-run-v1` target (DIST-05) — the
+external-operator install-flow proof point that ships as part of the v1
+release.
+
+**Scope of this doc:**
+
+- What this sample does (apply / observe / cleanup)
+- Why the targetRepo is a placeholder `file://` path
+- Apply / watch / cleanup recipes
+- Troubleshooting reminder (CRDs first)
+
+## What this does
+
+Applying this sample drives a TIDE `Project` to `Status.phase=Complete` using
+the stub-subagent — a tiny in-cluster binary (`cmd/stub-subagent`) that
+returns canned success envelopes regardless of the request shape. The result:
+
+- TIDE's `ProjectReconciler` admits the CRD, runs the init Job (which the
+  stub treats as a no-op), and progresses the Phase through to `Complete`.
+- Zero LLM API calls. Zero network traffic outside the cluster.
+- Zero cost. Repeatable. Safe to run on any TIDE-equipped cluster.
+
+The sample exercises the K8s plumbing — CRD admission, controller dispatch,
+Pod lifecycle, status-phase progression — without paying for an LLM round-trip.
+It's the first step a new operator takes after `helm install` to confirm
+TIDE is wired correctly end-to-end.
+
+Typical wall time: **~1-2 minutes** from `kubectl apply` to `Status=Complete`.
+
+## On the placeholder targetRepo
+
+The Project's `spec.targetRepo` is `file:///tmp/no-such-repo` — a deliberately
+unreachable placeholder. The stub-subagent does NOT resolve `targetRepo`; it
+returns canned envelopes regardless of what's there (verified by the
+stub-subagent's unit test in plan 06 — MEDIUM-7 design lock).
+
+A real GitHub URL would work too, but the unreachable path is safer for a
+smoke test: it can't be transiently rate-limited, it can't be replaced or
+removed, and the file:// scheme proves the controller doesn't accidentally
+try to clone the URL. A passing smoke test against an unreachable URL is
+strictly stronger evidence than a passing smoke test against `github.com/foo`.
+
+If you ever see the controller log a network error or git-clone failure when
+running this sample, that's a regression — the stub-subagent should never
+touch `targetRepo`.
+
+## Prerequisites
+
+- A Kubernetes cluster (kind / minikube / any cluster with TIDE installed)
+- TIDE CRDs installed: `helm install tide-crds ./charts/tide-crds` (or OCI)
+- TIDE controller installed: `helm install tide ./charts/tide` (or OCI)
+
+See [docs/INSTALL.md](../../../docs/INSTALL.md) for the full install recipe.
+
+## Apply
+
+The sample is a single multi-doc YAML file (Namespace + Project). Apply
+either of:
+
+```bash
+# Apply the multi-doc file (preferred; one command):
+kubectl apply -f examples/projects/small/project.yaml
+
+# Or apply namespace.yaml + project.yaml separately:
+kubectl apply -f examples/projects/small/
+```
+
+Both forms are equivalent — `namespace.yaml` and `project.yaml` declare the
+same Namespace shape (the multi-doc form in `project.yaml` is a convenience
+for the one-command path).
+
+## Watch
+
+```bash
+kubectl get project small-project -n tide-sample-small -w
+```
+
+Or wait for completion explicitly:
+
+```bash
+kubectl wait --for=jsonpath='{.status.phase}'=Complete \
+  project/small-project -n tide-sample-small --timeout=10m
+```
+
+Expected outcome: `Status.phase=Complete` within ~1-2 minutes. If it stalls,
+see Troubleshooting below.
+
+## Cleanup
+
+```bash
+kubectl delete -f examples/projects/small/project.yaml
+# Or to remove the namespace and everything in it:
+kubectl delete namespace tide-sample-small
+```
+
+The Namespace deletion cascades to the Project and all child CRDs (Milestone,
+Phase, Plan, Task, Wave) via owner-refs.
+
+## Troubleshooting
+
+**`kubectl apply` returns `no matches for kind "Project" in version
+"tideproject.k8s/v1alpha1"`** — the TIDE CRDs are not installed. Install the
+CRDs chart FIRST before the controller chart (Pitfall 4):
+
+```bash
+helm install tide-crds ./charts/tide-crds -n tide-system --create-namespace
+helm install tide ./charts/tide -n tide-system
+```
+
+The CRD subchart is intentionally split from the main controller chart (Phase
+1 D-E1) so CRDs can be upgraded independently of the controller — but that
+split means a fresh cluster needs both, in order.
+
+**Project stays in `Pending` forever** — check the controller logs:
+
+```bash
+kubectl logs -n tide-system deploy/tide-controller-manager --tail=100
+```
+
+The stub-subagent image must be pullable (`ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0`).
+If the controller can't pull the image, the Project waits indefinitely. Verify
+your cluster has internet access or pre-load the image into the kind node:
+
+```bash
+docker pull ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0
+kind load docker-image ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0 --name <kind-cluster-name>
+```
+
+For the full troubleshooting table, see
+[docs/troubleshooting.md](../../../docs/troubleshooting.md) (lands in plan 05-08).
+
+## Related
+
+- [examples/projects/README.md](../README.md) — cost-spectrum overview of all 3 samples
+- [examples/projects/large/README.md](../large/README.md) — the $25 acceptance test
+- [docs/project-authoring.md](../../../docs/project-authoring.md) — Project.Spec field reference

@@ -1,0 +1,13 @@
+# examples/projects/large/namespace.yaml — Phase 5 D-B2 large-sample namespace.
+#
+# Distinct from Phase 1's `tide-samples` (plural) kubebuilder fixture namespace
+# per Pitfall 9 — the two paths serve different audiences and never share
+# resources. The `tide-sample-` prefix is the Phase 5 sample convention.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-sample-large
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: large
