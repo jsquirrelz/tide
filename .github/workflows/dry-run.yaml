@@ -1,0 +1,110 @@
+# TIDE release-candidate dry-run gate (Phase 5 D-D3 / REQ-DIST-05).
+#
+# Triggered ONLY on tag push matching `v*-rc.*` (release candidate). NOT on
+# PR, branch push, or full release tag — rc tags are an intentional human
+# action: push `v1.0.0-rc.1` to verify the operator install flow before
+# pushing the matching `v1.0.0` full release tag.
+#
+# Posture: `workflow_dispatch:` + tag gate ONLY. NO `schedule:` cron, per
+# Phase 04.1 P2.4 lock (live LLM runs on a schedule are unjustified at v1
+# scale; operators forking the repo can wire their own scheduled run later).
+# Mirrors the posture of `.github/workflows/live-e2e.yml`.
+#
+# Cross-workflow contract with release.yaml's `pre-flight` job: when the
+# maintainer pushes the matching full release tag (e.g. `v1.0.0` after
+# `v1.0.0-rc.1`), release.yaml's pre-flight extracts MAJOR.MINOR.PATCH from
+# the release tag, finds the highest `vMAJOR.MINOR.PATCH-rc.*` tag, and
+# verifies THIS workflow's run for that exact rc tag concluded `success`
+# (MEDIUM-9 parent-version-filtered match — cross-version rc tags are
+# excluded by design).
+#
+# Wall-clock budget: 30 min (DRY_RUN_TIMEOUT_SECONDS=1800 in
+# hack/scripts/dry-run-v1.sh per D-D3) + 5 min runner buffer = 35 min
+# job-level timeout. If the dry-run exceeds 30 min, the script exits
+# non-zero; if the runner exceeds 35 min, GitHub Actions hard-kills the job.
+# Either way, the gate fires and release.yaml's pre-flight blocks the
+# matching full release.
+
+name: dry-run
+
+on:
+  push:
+    tags:
+      - 'v*-rc.*'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  dry-run:
+    name: External-operator dry-run (D-D1 DinD; ≤30 min, $0 LLM cost)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35   # 30-min D-D3 budget + 5-min cold-start buffer
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # Pin kind to the same version `.github/workflows/ci.yaml` test-int job
+      # and `live-e2e.yml` use (v0.31.0). Drift between dry-run kind and CI
+      # kind would defeat the "this is what operators will experience" purpose.
+      - name: Install kind v0.31.0
+        run: |
+          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+          kind version
+
+      # Pin Helm to match ci.yaml + release.yaml chart-publish job (v3.16.3).
+      # The dry-run script (hack/scripts/dry-run-v1.sh) installs Helm INSIDE
+      # the DinD container with the same pinned version — this step installs
+      # it on the runner for any setup steps that need it (e.g., verifying
+      # the dry-run-v1.sh helpers).
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      # The actual dry-run. `make dry-run-v1` invokes
+      # hack/scripts/dry-run-v1.sh which:
+      #   - spawns a fresh ubuntu:24.04 container with /var/run/docker.sock
+      #     mounted (sibling-container DinD pattern per RESEARCH Pitfall 6 —
+      #     NO --privileged flag; kind containers are siblings of the DinD
+      #     container, not nested)
+      #   - runs the README Quickstart commands verbatim inside that container
+      #   - times each phase (clone, chart-install, crd-ready, project-apply,
+      #     project-complete) and emits dry-run-report.json
+      #   - exits non-zero if any step fails OR wall-clock > 30 min
+      - name: Run dry-run-v1 (Docker-in-Docker external-operator simulation)
+        run: make dry-run-v1
+
+      # Upload evidence for postmortem even on failure. Artifact name is
+      # parameterized on the rc tag so multiple rc tags (rc.1, rc.2, ...) can
+      # coexist without overwriting each other.
+      #
+      # `if: always()` ensures upload happens for both success and failure —
+      # operators downloading the v1.0 release see proof of install-flow
+      # correctness; maintainers debugging a failed rc see the transcript +
+      # report.
+      #
+      # Glob `/tmp/tide-dry-run-*/...` matches the DRY_RUN_DIR default in
+      # hack/scripts/dry-run-v1.sh (`/tmp/tide-dry-run-$(date +%s)`).
+      - name: Upload dry-run evidence (transcript + report)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dry-run-evidence-${{ github.ref_name }}
+          path: |
+            /tmp/tide-dry-run-*/dry-run-report.json
+            /tmp/tide-dry-run-*/transcript.log
+          retention-days: 90   # explicit per RESEARCH §D-D4 (GitHub default)
+          if-no-files-found: warn
