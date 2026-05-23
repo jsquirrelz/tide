@@ -1,0 +1,148 @@
+# examples/projects/large/project.yaml — Phase 5 D-B2 large sample ($25 acceptance).
+#
+# This sample IS the v1 acceptance test (BOOT-04). It targets THIS TIDE repo and
+# drives TIDE to author the scaffold for `internal/subagent/openai/` mirroring
+# the existing `internal/subagent/anthropic/` layering (Phase 3 D-C1). Single
+# Phase scope (D-A1). Hard $25 cap, no bypass (D-A2). Variant B outcome prompt
+# per RESEARCH §"Topic 5" — tight scope (5-7 tasks, ONE Plan, ONE Phase) with
+# concrete deliverables + the constraint "do NOT integrate against real OpenAI
+# API" to bound budget consumption.
+#
+# Run via `make acceptance-v1` (lands in plan 05-15). DO NOT `kubectl apply`
+# this file directly — the make target sets up cluster + secrets + watch +
+# evidence capture. Direct apply would race the controller bring-up and miss
+# the run-start timestamp the 7-check verifier needs.
+#
+# Schema note: v1alpha1's ProjectSpec does NOT carry an `outcomePrompt` field
+# (verified 2026-05-22 via `grep outcomePrompt api/v1alpha1/`). The Variant B
+# outcome prompt is carried as an annotation (`tideproject.k8s/outcome-prompt`)
+# in v1.0 and documented inline as `# outcomePrompt:` for human readability.
+# v1.x schema work may promote this to a first-class Spec field; in v1.0 the
+# planner subagent reads the annotation off the Project CRD.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-sample-large
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: large
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: large-project
+  namespace: tide-sample-large
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: large
+  annotations:
+    # Variant B outcomePrompt — Phase 5 D-B4 / RESEARCH §"Topic 5".
+    # The planner subagent reads this annotation at dispatch time to seed the
+    # phase brief + PLAN.md authoring step. Tight scope is the cost-control
+    # mechanism (5-7 tasks, ONE Plan, ONE Phase) — too vague and TIDE wanders
+    # and blows the budget; too prescriptive and we're hand-authoring the plan.
+    tideproject.k8s/outcome-prompt: |
+      Author the scaffold for `internal/subagent/openai/` in this repository,
+      mirroring the existing `internal/subagent/anthropic/` layout.
+
+      Concrete deliverables (tight scope — target 5-7 tasks, ONE Plan, ONE Phase):
+
+      1. `internal/subagent/openai/client.go` — defines `Client` struct + constructor.
+         Match the shape of `internal/subagent/anthropic/client.go`. DO NOT call
+         the real OpenAI API; the constructor takes an API key string but the
+         methods are stubbed.
+
+      2. `internal/subagent/openai/run.go` — defines `Subagent.Run(ctx, EnvelopeIn)
+         (EnvelopeOut, error)` matching `pkg/dispatch.Subagent`. STUB implementation:
+         return a canned `EnvelopeOut{Status: "success", Artifacts: []}` envelope.
+         Add a TODO comment explaining real-API integration is v1.x scope.
+
+      3. `internal/subagent/openai/Dockerfile` — multi-stage build mirroring
+         `internal/subagent/anthropic/Dockerfile`. Final image must build clean.
+
+      4. `internal/subagent/openai/run_test.go` — ONE unit test verifying the
+         stub returns the canned envelope and matches the `Subagent` interface.
+
+      5. `internal/subagent/openai/doc.go` — package doc comment referencing
+         Phase 3 D-C1 layering pattern.
+
+      Constraints:
+      - DO NOT modify any files outside `internal/subagent/openai/`.
+      - DO NOT add the openai package to `cmd/manager`'s build (the contract is
+        authoring the scaffold, not wiring it; wiring is v1.x scope).
+      - Follow the existing repo conventions in CLAUDE.md (Apache-2.0 headers,
+        logging discipline, error handling).
+
+      Pass criterion: `go test ./internal/subagent/openai/...` is green;
+      `docker build -f internal/subagent/openai/Dockerfile .` builds without error.
+spec:
+  # D-A1: targetRepo is THIS TIDE repo. TIDE will clone it, author the openai
+  # scaffold on a per-run branch, and push back (never to main per Phase 3 D-B6).
+  targetRepo: https://github.com/jsquirrelz/tide.git
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # The Secret is created by `make acceptance-v1` (plan 05-15) before this
+  # CRD is applied — never inline raw credentials in the sample (T-05-11-01).
+  providerSecretRef: anthropic-creds
+
+  # D-A2 hard $25 cap, no bypass. If hit, dispatch halts with
+  # Phase=BudgetExceeded (Phase 2 D-D2 + Phase 04.1 P4.1 infra). The cap
+  # itself is one of the acceptance signals — proves the budget gate works.
+  budget:
+    absoluteCapCents: 2500
+    rollingWindowCapCents: 2500
+    # 24h rolling window. metav1.Duration parses Go duration strings (NOT
+    # the misnamed `rollingWindowDurationSeconds` from older docs — the
+    # schema's actual field is `rollingWindowDuration: <duration-string>`).
+    # Default would be 24h when unset; explicit per Pitfall 7.
+    rollingWindowDuration: 24h
+
+  # Phase 3 D-C2: pin the real Claude image + opus model for the v1
+  # acceptance test (haiku/sonnet are for cost-discipline samples like medium;
+  # opus is the model the acceptance run deserves).
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:v1.0.0
+    model: claude-opus-4-7
+
+  # Phase 3 D-B6 per-project git target. TIDE pushes per-Phase / per-Plan /
+  # per-Task / final-Project commits to a per-run branch on this remote.
+  # Branch shape: tide/run-large-project-<unix-ts>. NEVER pushes to main.
+  git:
+    repoURL: https://github.com/jsquirrelz/tide.git
+    # Same anthropic-creds Secret can carry GIT_PAT alongside ANTHROPIC_API_KEY,
+    # or you can use a separate Secret. `make acceptance-v1` creates the
+    # combined `tide-secrets` Secret by convention.
+    credsSecretRef: tide-secrets
+
+  # D-A1 Single Phase scope: all gates set to `auto` so the acceptance run
+  # proceeds without human interruption. The acceptance signal is "TIDE
+  # finishes a full Phase descent in one go under the $25 cap" — pausing for
+  # gate approval would conflate operator latency with TIDE behavior.
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  # Phase 2 D-E1: file-touch admission in strict mode. The PLAN.md the planner
+  # authors must declare its file touches precisely; admission rejects on
+  # mismatch (no warn-and-continue at acceptance time).
+  planAdmission:
+    fileTouchMode: strict
+
+  # Phase 2 SUB-04 cap. 3 attempts per task is the v1 default — high enough
+  # to recover from transient 429s, low enough that a genuinely-broken task
+  # surfaces quickly.
+  maxAttemptsPerTask: 3
+
+# ─────────────────────────────────────────────────────────────────────────
+# outcomePrompt (Variant B) is carried as `tideproject.k8s/outcome-prompt`
+# annotation on metadata above. Schema-as-of-v1.0 has no first-class
+# outcomePrompt Spec field; the planner subagent reads the annotation.
+# Refactor: v1.x ships a real Spec.OutcomePrompt field per D-B4 follow-up.
+# 5-7 tasks, ONE Plan scope is the cost-control invariant.
+# ─────────────────────────────────────────────────────────────────────────
