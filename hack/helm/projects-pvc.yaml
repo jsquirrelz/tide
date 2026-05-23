@@ -12,7 +12,9 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   accessModes:
-    - ReadWriteMany
+    {{- range (.Values.workspaces.pvc.accessModes | default (list "ReadWriteMany")) }}
+    - {{ . | quote }}
+    {{- end }}
   resources:
     requests:
       storage: {{ .Values.workspaces.pvc.size | default "10Gi" }}

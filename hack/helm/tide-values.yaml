@@ -38,6 +38,7 @@ controllerManager:
       repository: ghcr.io/jsquirrelz/tide-controller
       tag: v0.1.0-dev
       pullPolicy: IfNotPresent
+    podAnnotations: {}
     resources:
       limits:
         cpu: 500m
@@ -306,3 +307,12 @@ workspaces:
     name: tide-projects
     size: 10Gi
     storageClassName: ""  # cluster default; set to a CSI RWX driver for production
+    accessModes: [ReadWriteMany]  # production-default; matches the chart's single-shared-RWX-PVC architecture (see comment above). Override via `--set workspaces.pvc.accessModes={RWO-mode}` for single-node kind/minikube test clusters whose default provisioner (rancher.io/local-path) only supports the non-shared access modes.
+
+# Phase 5 D-X4 — per-namespace RoleBinding template (AUTH-02 catch-up).
+# Empty default: no per-namespace RoleBindings shipped unless operator opts in.
+# For multi-Project installs, list the Project namespaces here:
+#   projectNamespaces:
+#     - tide-customer-acme
+#     - tide-customer-globex
+projectNamespaces: []
