@@ -257,37 +257,37 @@ Plans:
 
 **Research flag**: Recommend `/gsd:research-phase` during planning — self-hosting demo exercises everything; map demo's exact apply→author→plan→dispatch→push sequence against TIDE-on-host behavior to surface drift before integration test runs; OSS-adoption-death-by-missing-docs prevention (Pitfall 24).
 
-**Plans:** 17 plans
+**Plans:** 16/16 plans executed
 
 Plans:
 **Wave 1** *(parallel — no cross-deps; mostly disjoint file paths)*
-- [ ] 05-01-PLAN.md — LICENSE + NOTICE + verify-license.sh (DIST-03)
-- [ ] 05-02-PLAN.md — CONTRIBUTING.md + SECURITY.md (DIST-04)
-- [ ] 05-03-PLAN.md — README Quickstart prepend (DIST-04, D-C1)
-- [ ] 05-04-PLAN.md — docs/README.md index + concepts.md + verify-docs-coverage.sh (DIST-04, D-C3)
-- [ ] 05-05-PLAN.md — Chart.yaml lockstep version bump 0.1.0-dev → 1.0.0 (DIST-01, D-X3)
-- [ ] 05-06-PLAN.md — examples/tide-demo-fixture/ MIT-licensed scaffold (DIST-04, D-B3)
-- [ ] 05-09-PLAN.md — docs/rbac.md (DIST-04 + AUTH-02 catch-up doc + D-X7)
-- [ ] 05-10-PLAN.md — docs/troubleshooting.md (DIST-04, D-C4 ≥12-row table)
+- [x] 05-01-PLAN.md — LICENSE + NOTICE + verify-license.sh (DIST-03)
+- [x] 05-02-PLAN.md — CONTRIBUTING.md + SECURITY.md (DIST-04)
+- [x] 05-03-PLAN.md — README Quickstart prepend (DIST-04, D-C1)
+- [x] 05-04-PLAN.md — docs/README.md index + concepts.md + verify-docs-coverage.sh (DIST-04, D-C3 — 11-entry index)
+- [x] 05-05-PLAN.md — Chart.yaml lockstep version bump 0.1.0-dev → 1.0.0 (DIST-01, D-X3)
+- [x] 05-06-PLAN.md — examples/tide-demo-fixture/ MIT-licensed scaffold (DIST-04, D-B3)
+- [x] 05-09-PLAN.md — docs/rbac.md (DIST-04 + AUTH-02 catch-up doc + D-X7)
+- [x] 05-10-PLAN.md — docs/troubleshooting.md (DIST-04, D-C4 — 13-row table)
 
 **Wave 2** *(depends on Wave 1 — docs reference samples; chart additions depend on 05-05 version lock)*
-- [ ] 05-07-PLAN.md — docs/INSTALL.md (DIST-04 + D-C2 + Pitfall 4 mitigation)
-- [ ] 05-08-PLAN.md — docs/project-authoring.md (DIST-04 + Variant B prompt guidance)
-- [ ] 05-11-PLAN.md — examples/projects/{small,large}/ samples (DIST-04 + BOOT-04 acceptance project.yaml)
-- [ ] 05-13-PLAN.md — per-namespace-rolebinding.yaml + projectNamespaces values key (DIST-01 + AUTH-02 catch-up template)
-- [ ] 05-14-PLAN.md — CRD-subchart resource-policy: keep annotation (DIST-01, Pitfall 2)
+- [x] 05-07-PLAN.md — docs/INSTALL.md (DIST-04 + D-C2 + Pitfall 4 mitigation)
+- [x] 05-08-PLAN.md — docs/project-authoring.md (DIST-04 + Variant B prompt guidance)
+- [x] 05-11-PLAN.md — examples/projects/{small,large}/ samples (DIST-04 + BOOT-04 acceptance project.yaml)
+- [x] 05-13-PLAN.md — per-namespace-rolebinding.yaml + projectNamespaces values key (DIST-01 + AUTH-02 catch-up template)
+- [x] 05-14-PLAN.md — CRD-subchart resource-policy: keep annotation, Wave 1 per HIGH-2 (DIST-01, Pitfall 2)
 
 **Wave 3** *(depends on Wave 1 + Wave 2 — medium sample uses cmd/tide-demo-init binary)*
-- [ ] 05-12-PLAN.md — cmd/tide-demo-init/ binary + medium/ sample (DIST-04 + D-B3 + RESEARCH Topic 4)
+- [x] 05-12-PLAN.md — cmd/tide-demo-init/ binary + medium/ sample (DIST-04 + D-B3 + RESEARCH Topic 4; embed strategy locked per MEDIUM-11)
 
 **Wave 4** *(depends on chart-finalized + samples-finalized)*
-- [ ] 05-15-PLAN.md — Makefile dry-run-v1 + acceptance-v1 + 4 hack/scripts (DIST-05 + BOOT-02 + BOOT-04)
+- [x] 05-15-PLAN.md — Makefile dry-run-v1 + acceptance-v1 + 4 hack/scripts (DIST-05 + BOOT-02 + BOOT-04; 3-of-4 commit shapes per MEDIUM-6)
 
 **Wave 5** *(depends on dry-run plumbing)*
-- [ ] 05-16-PLAN.md — release.yaml extensions + dry-run.yaml (DIST-01 + DIST-02 + DIST-05)
+- [x] 05-16-PLAN.md — release.yaml extensions + dry-run.yaml (DIST-01 + DIST-02 + DIST-05; parent-version-filtered rc match per MEDIUM-9)
 
 **Wave 6** *(depends on all 16)*
-- [ ] 05-17-PLAN.md — Phase 5 closeout (ROADMAP + STATE update + 05-SUMMARY.md)
+- [x] 05-17-PLAN.md — Phase 5 closeout (ROADMAP + STATE update + 05-SUMMARY.md)
 
 
 ## Progress
@@ -303,4 +303,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
-| 5. Distribution & Self-Hosting Acceptance | 0/TBD | Not started | - |
+| 5. Distribution & Self-Hosting Acceptance | 16/16 | Complete | 2026-05-23 |
+
+All 8 phases complete — TIDE v1.0 ship-ready.

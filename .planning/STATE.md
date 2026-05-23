@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-05-22T16:51:06.819Z"
-last_activity: 2026-05-22 -- Phase 5 execution started
+status: completed
+stopped_at: Phase 5 closed — v1.0 ship-ready
+last_updated: "2026-05-23T14:00:00.000Z"
+last_activity: 2026-05-23 -- Phase 5 CLOSED (16/16 plans + 1 closeout): Plan 05-17 closeout commit updated ROADMAP.md Progress row to Complete + Plans list to 16/16 + ticked all 17 plan rows; STATE.md bumped to completed_phases 8/8 + completed_plans 100/100 (100%); 05-SUMMARY.md authored documenting all 21 D-* decisions, 8 REQ-IDs, 12 mitigated pitfalls, mid-phase root-cause fix wave (6127806), and v1.x deferred backlog. M0 → M_self bridge complete. Next: maintainer tags v1.0.0-rc.1 to fire dry-run.yaml; on rc green, tags v1.0.0 for full release.yaml chain.
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 100
-  completed_plans: 91
-  percent: 91
+  completed_plans: 100
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 5 — distribution-self-hosting-acceptance
+**Current focus:** v1.0 release readiness — Phase 5 complete; run `make acceptance-v1` for BOOT-04 acceptance ritual, then tag `v1.0.0-rc.1` to fire dry-run.yaml.
 
 ## Current Position
 
-Phase: 5 (distribution-self-hosting-acceptance) — EXECUTING
-Plan: 1 of 17
-Status: Executing Phase 5
-Last activity: 2026-05-22 -- Phase 5 execution started
+Phase: 5 (distribution-self-hosting-acceptance) — COMPLETE
+Plan: 17 of 17 — Phase 5 closeout commit landed; ROADMAP Progress row = Complete; all 8 milestone phases complete.
+Status: Phase 5 closed 2026-05-23. All 16 execution plans landed across 6 waves (1 OSS-readiness root files + 4 docs + 1 fixture + 1 chart version bump + 2 chart-template additions + 2 sample sets + 1 demo-init binary + 1 hack/scripts plumbing + 1 release-pipeline + 1 closeout). LICENSE + NOTICE landed; 4 new docs + concepts.md indexed; 3-sample cost spectrum (small/medium/large) ready; chart version 1.0.0 lockstep; per-namespace-rolebinding template + resource-policy:keep annotation in place; make dry-run-v1 + make acceptance-v1 + release.yaml chart-publish all wired. Mid-phase root-cause fix wave (commit 6127806) closed Project.Spec.OutcomePrompt + file:// URL schema gaps that surfaced in Wave 1-3 sample deferrals — Wave 4+ inherited a cleanly-typed schema. M0 → M_self bridge complete. Next step: maintainer tags `v1.0.0-rc.1` to fire dry-run.yaml; on rc success, tags `v1.0.0` for full release.yaml chain (goreleaser binaries + helmify-verify + OCI chart push to ghcr.io/jsquirrelz/tide-charts). Optional: maintainer runs `make acceptance-v1` for BOOT-04 ritual ($25 Anthropic spend, evidence captured under .acceptance-runs/<timestamp>/).
+Last activity: 2026-05-23 -- Plan 05-17 (Phase 5 closeout): ROADMAP.md Plans 17 → 16/16 plans executed, Progress row Not started → Complete (2026-05-23), 17 plan-row checkboxes ticked; STATE.md completed_plans 91 → 100, percent 91 → 100, completed_phases 7 → 8; 05-SUMMARY.md authored (8/8 REQ-IDs, 21 D-* decisions, 12 pitfalls mitigated, 11 iteration-2 revisions, 8 deferred items of which 2 RESOLVED mid-phase, residual UAT items + maintainer next-steps playbook).
 
-Progress: [██████████] 100% (Phase 02.2 scope)
+Progress: [██████████] 100% (all 8 milestone phases complete — TIDE v1.0 ship-ready)
 
 ## Performance Metrics
 
