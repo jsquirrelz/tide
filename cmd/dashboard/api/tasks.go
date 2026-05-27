@@ -75,7 +75,7 @@ type taskDetail struct {
 	Status       string          `json:"status"`
 	Namespace    string          `json:"namespace"`
 	Attempt      int             `json:"attempt"`
-	AttemptMax  int             `json:"attemptMax"`
+	AttemptMax   int             `json:"attemptMax"`
 	PodName      string          `json:"podName"`
 	ExitCode     *int            `json:"exitCode"`
 	WaveIndex    int             `json:"waveIndex"`

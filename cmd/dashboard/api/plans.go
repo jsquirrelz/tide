@@ -52,11 +52,11 @@ type PlansHandler struct {
 // Mirrors the frontend ExecutionTaskData shape (ExecutionDAGView.tsx)
 // minus the StatusValue coercion the React layer applies to `phase`.
 type planTaskCard struct {
-	Name       string   `json:"name"`
-	Phase      string   `json:"phase"`
-	WaveIndex  int      `json:"waveIndex"`
-	Attempt    int      `json:"attempt"`
-	DependsOn  []string `json:"dependsOn"`
+	Name      string   `json:"name"`
+	Phase     string   `json:"phase"`
+	WaveIndex int      `json:"waveIndex"`
+	Attempt   int      `json:"attempt"`
+	DependsOn []string `json:"dependsOn"`
 }
 
 // planDetail is the JSON shape returned by Get. The frontend's

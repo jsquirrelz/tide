@@ -303,6 +303,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 3. Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption | 0/TBD | Not started | - |
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
-| 5. Distribution & Self-Hosting Acceptance | 16/16 | Complete | 2026-05-23 |
+| 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
 
 All 8 phases complete — TIDE v1.0 ship-ready.
