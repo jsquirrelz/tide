@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: completed
 stopped_at: Phase 5 closed — v1.0 ship-ready
-last_updated: "2026-05-23T14:00:00.000Z"
-last_activity: 2026-05-23 -- Phase 5 CLOSED (16/16 plans + 1 closeout): Plan 05-17 closeout commit updated ROADMAP.md Progress row to Complete + Plans list to 16/16 + ticked all 17 plan rows; STATE.md bumped to completed_phases 8/8 + completed_plans 100/100 (100%); 05-SUMMARY.md authored documenting all 21 D-* decisions, 8 REQ-IDs, 12 mitigated pitfalls, mid-phase root-cause fix wave (6127806), and v1.x deferred backlog. M0 → M_self bridge complete. Next: maintainer tags v1.0.0-rc.1 to fire dry-run.yaml; on rc green, tags v1.0.0 for full release.yaml chain.
+last_updated: "2026-05-27T03:13:00.000Z"
+last_activity: 2026-05-27 -- Quick task 260526-w11 (Phase 5 closeout polish): gofmt cmd/dashboard/api/{plans,tasks}.go struct alignment (commit 489dd71) + ROADMAP Progress row reconciled 16/16 → 17/17 for Phase 5 (commit 1769a60). Closes the Phase 5 deferred gofmt entry and the 05-SUMMARY.md §Deviations #2 mismatch. v1.0.0-rc.1 tag is now unblocked from a closeout-polish standpoint.
 progress:
   total_phases: 8
   completed_phases: 8
@@ -150,6 +150,7 @@ None yet.
 | 260521-gmm | Phase 03 cascade 11: pvcPrewarmPod helper to bind WaitForFirstConsumer PVCs | 2026-05-21 | e8083a5 | [260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper](./quick/260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper/) |
 | 260521-hk4 | Phase 03 cascade 12: patchJobToFailed sets FailureTarget=True for K8s 1.31+ Job status | 2026-05-21 | 03af69b | [260521-hk4-phase-03-cascade-12-patchjobtofailed-mus](./quick/260521-hk4-phase-03-cascade-12-patchjobtofailed-mus/) |
 | 260521-jz0 | Phase 03 cascade 13: handleInitJobCompletion idempotency guard (prevent Phase=Initialized stomp) | 2026-05-21 | 0c6905b, 6a9f095 | [260521-jz0-phase-03-cascade-13-idempotency-guard-in](./quick/260521-jz0-phase-03-cascade-13-idempotency-guard-in/) |
+| 260526-w11 | Phase 5 closeout polish: gofmt cmd/dashboard/api/{plans,tasks}.go + ROADMAP Progress row 16/16 → 17/17 | 2026-05-27 | 489dd71, 1769a60 | [260526-w11-phase-5-closeout-polish-roadmap-16-16-17](./quick/260526-w11-phase-5-closeout-polish-roadmap-16-16-17/) |
 
 ## Session Continuity
 

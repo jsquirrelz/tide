@@ -2,9 +2,9 @@
 
 Out-of-scope discoveries logged during plan execution. Address in follow-up plans or `/gsd:quick`.
 
-## Discovered 2026-05-22 (during plan 05-01 execution)
+## Discovered 2026-05-22 (during plan 05-01 execution) — **RESOLVED 2026-05-27**
 
-- `cmd/dashboard/api/plans.go` and `cmd/dashboard/api/tasks.go` are not gofmt-clean. Detected when `make fmt` ran during plan 05-01 verification. Out of scope for DIST-03 (these files already carry the Apache-2.0 header, so the verify-license gate is unaffected). Defer to a follow-up plan or `/gsd:quick`.
+- `cmd/dashboard/api/plans.go` and `cmd/dashboard/api/tasks.go` are not gofmt-clean. Detected when `make fmt` ran during plan 05-01 verification. Out of scope for DIST-03 (these files already carry the Apache-2.0 header, so the verify-license gate is unaffected). Defer to a follow-up plan or `/gsd:quick`. **RESOLVED 2026-05-27** via quick task `260526-w11`, commit `489dd71` (`style(quick-260526-w11): gofmt cmd/dashboard/api/{plans,tasks}.go struct alignment`). Apache-2.0 headers byte-identical post-format; `verify-license` gate confirmed green.
 
 ## Discovered 2026-05-22 (during plan 05-01 execution, Rule 2 deviation)
 
