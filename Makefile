@@ -258,6 +258,9 @@ docker-push: ## Push docker image with the manager.
 # - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+# IMAGE_TAG is used by docker-buildx-snapshot for the 6-image snapshot build.
+# Default 1.0.0 matches chart appVersion after Phase 06 CHART-01 fix.
+IMAGE_TAG ?= 1.0.0
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
@@ -267,6 +270,22 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
 	- $(CONTAINER_TOOL) buildx rm tide-builder
 	rm Dockerfile.cross
+
+.PHONY: docker-buildx-snapshot
+docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of all 6 component images (no push; IMAGE_TAG=$(IMAGE_TAG)).
+	@echo "Building all 6 component images for linux/amd64,linux/arm64 (no push; tag=$(IMAGE_TAG))..."
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-controller:$(IMAGE_TAG) -f ./Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-dashboard:$(IMAGE_TAG) -f ./Dockerfile.dashboard .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-stub-subagent:$(IMAGE_TAG) -f images/stub-subagent/Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-credproxy:$(IMAGE_TAG) -f images/credproxy/Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-push:$(IMAGE_TAG) -f images/tide-push/Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-claude-subagent:$(IMAGE_TAG) -f images/claude-subagent/Dockerfile .
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -571,6 +590,10 @@ acceptance-v1: ## Phase 5 D-A4 — maintainer ritual ($25 hard cap; requires ANT
 	  exit 1; \
 	fi
 	@hack/scripts/acceptance-v1.sh
+
+.PHONY: acceptance-v1-smoke
+acceptance-v1-smoke: ## Phase 6 ACC-01 — $0 BOOT-04 revalidation (stub-subagent, no API key required).
+	@ACCEPTANCE_SAMPLE=small hack/scripts/acceptance-v1.sh
 
 ##@ Helm Chart Generation (D-E1, D-E2 — Plan 11)
 

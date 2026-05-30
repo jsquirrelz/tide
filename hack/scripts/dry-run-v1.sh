@@ -20,6 +20,15 @@
 # reaches the host Docker daemon. --network host scopes kind's bridge to the
 # host's network so kubectl from inside the container can reach the apiserver
 # on the kind-created network without extra port-forwarding.
+#
+# DinD heredoc split (IMG-LOAD-01 + DRY-01):
+#   Pass 1: kind cluster creation + tool installs + git clone
+#   Outer: load-images-if-needed.sh loads all 6 images into tide-dry-run cluster
+#   Pass 2: cert-manager bring-up (DRY-01) + helm install + kubectl apply + wait
+#
+# The two-pass split works because the DinD container uses the host Docker daemon
+# (via /var/run/docker.sock mount) — a kind cluster created in Pass 1 is
+# reachable from the outer script via `kind get clusters`.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -36,6 +45,10 @@ DRY_RUN_IMAGE="${DRY_RUN_IMAGE:-ubuntu:24.04}"
 # exercised.
 DRY_RUN_REPO_URL="${DRY_RUN_REPO_URL:-https://github.com/jsquirrelz/tide}"
 
+# cert-manager version override (mirrors acceptance-v1.sh; default pinned to
+# Phase 02.2 bump decision — K8s 1.33-compatible).
+TIDE_CERT_MANAGER_VERSION="${TIDE_CERT_MANAGER_VERSION:-v1.20.2}"
+
 mkdir -p "${DRY_RUN_DIR}"
 
 echo "Phase 5 D-D1 dry-run starting:"
@@ -47,11 +60,10 @@ echo "  REPO_ROOT (host)   = ${REPO_ROOT}"
 
 START_TIME=$(date +%s)
 
-# Inner DinD pipeline. Each `kind create cluster`, `helm install`, and `kubectl
-# apply` runs verbatim from the README Quickstart so a successful dry-run is
-# evidence the README is operator-followable end-to-end. The `set -euo
-# pipefail` inside the heredoc preserves fail-fast inside the container; an
-# inner failure surfaces as a non-zero PIPESTATUS[0] outside.
+# ── Pass 1: cluster creation + tool installs + git clone ─────────────────────
+# Creates the tide-dry-run kind cluster using the host Docker daemon via the
+# /var/run/docker.sock mount. The outer script can then call
+# load-images-if-needed.sh to kind-load images before Pass 2 runs helm install.
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "${DRY_RUN_DIR}":/workspace \
@@ -70,21 +82,66 @@ docker run --rm \
     curl -fsSLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
     chmod +x /usr/local/bin/kubectl
 
-    # README Quickstart — cloned-repo path (the rc-tag gate runs before OCI
-    # charts are published; OCI path goes live in Plan 05-16 once the chart is
-    # pushed). Locally-cloned chart paths match the 'helm install ./charts/...'
-    # alternative documented in docs/INSTALL.md.
+    # Create the kind cluster (uses host Docker daemon via /var/run/docker.sock).
+    kind create cluster --name tide-dry-run
+
+    # Clone the repo into the shared workspace volume so Pass 2 can find it.
     git clone ${DRY_RUN_REPO_URL} /workspace/tide
+  " 2>&1 | tee "${TRANSCRIPT_PATH}"
+
+# ── Outer: load images into tide-dry-run cluster (IMG-LOAD-01) ───────────────
+# The kind cluster created in Pass 1 is reachable from the outer script because
+# it uses the host Docker daemon. load-images-if-needed.sh uses docker manifest
+# inspect to probe registry availability; builds + kind-loads locally if absent.
+echo "==> loading images into tide-dry-run cluster (IMG-LOAD-01)..."
+bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "tide-dry-run" "1.0.0" 2>&1 | tee -a "${TRANSCRIPT_PATH}"
+
+# ── Pass 2: cert-manager + helm install + kubectl apply + wait ────────────────
+# Runs inside the same DinD environment. The kind cluster and /workspace/tide
+# clone are both available from Pass 1. cert-manager is installed BEFORE helm
+# install because charts/tide references cert-manager.io/v1 CRDs (DRY-01).
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "${DRY_RUN_DIR}":/workspace \
+  --network host \
+  -e TIDE_CERT_MANAGER_VERSION="${TIDE_CERT_MANAGER_VERSION}" \
+  "${DRY_RUN_IMAGE}" bash -c "
+    set -euo pipefail
+
+    # Re-install tools (new container; binaries from Pass 1 are gone).
+    apt-get update -qq && apt-get install -qq -y curl ca-certificates
+
+    curl -fsSLo /usr/local/bin/helm https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz 2>/dev/null || true
+    curl -fsSL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar xz -C /tmp
+    mv /tmp/linux-amd64/helm /usr/local/bin/helm
+
+    curl -fsSLo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
+    chmod +x /usr/local/bin/kubectl
+
+    curl -fsSLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+    chmod +x /usr/local/bin/kind
+
     cd /workspace/tide
 
-    kind create cluster --name tide-dry-run
+    # DRY-01: cert-manager bring-up (mirrors acceptance-v1.sh lines 88-94).
+    # charts/tide references cert-manager.io/v1 Certificate + Issuer resources;
+    # helm refuses to apply CRs whose CRDs are not present.
+    CERT_MANAGER_VERSION=\"\${TIDE_CERT_MANAGER_VERSION:-v1.20.2}\"
+    echo \"==> installing cert-manager \${CERT_MANAGER_VERSION}...\"
+    kubectl apply -f \"https://github.com/cert-manager/cert-manager/releases/download/\${CERT_MANAGER_VERSION}/cert-manager.yaml\"
+    echo \"==> waiting for cert-manager Deployments to roll out...\"
+    for deploy in cert-manager cert-manager-cainjector cert-manager-webhook; do
+      kubectl -n cert-manager rollout status deployment/\"\${deploy}\" --timeout=120s
+    done
+
+    # Helm install (README Quickstart path — locally-cloned chart paths).
     helm install tide-crds ./charts/tide-crds -n tide-system --create-namespace
     helm install tide ./charts/tide -n tide-system
     kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
     kubectl apply -f examples/projects/small/project.yaml
     kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small-project -n tide-sample-small --timeout=10m
-  " 2>&1 | tee "${TRANSCRIPT_PATH}"
+  " 2>&1 | tee -a "${TRANSCRIPT_PATH}"
 
 EXIT_CODE=${PIPESTATUS[0]}
 END_TIME=$(date +%s)
