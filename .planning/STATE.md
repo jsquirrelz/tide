@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: planning
+status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-05-30T17:31:04.141Z"
-last_activity: "2026-05-30 -- Quick task 260530-hrc opened Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. ROADMAP carries new Phase 6 row + STUB section (Goal: TBD pointing forward to 06-FINDINGS.md); STATE.md frontmatter reframed (8/9, percent 88, in_progress); 06-FINDINGS.md authored as scope-of-record for SPEC/DISCUSS/PLAN to consume next session; Phase 5 deferred-items.md appended with cascade-2 back-reference."
+last_updated: "2026-05-30T18:12:09.096Z"
+last_activity: 2026-05-30 -- Phase 06 planning complete
 progress:
-  total_phases: 9
-  completed_phases: 8
-  total_plans: 100
-  completed_plans: 100
-  percent: 88
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 6
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 Phase: 6 (v1-image-publish-and-ship-readiness-revalidation) — PLANNING
 Plan: 0 of TBD — Phase 6 opened by quick task 260530-hrc; SPEC/DISCUSS/PLAN/EXECUTE cycles to follow.
-Status: Phase 5 stays Complete (closed 2026-05-23 — LICENSE + NOTICE + 5 new docs + concepts.md + 3-sample cost spectrum + chart version 1.0.0 lockstep + per-namespace-rolebinding + resource-policy:keep + dry-run.yaml + release.yaml chain all shipped). Phase 6 opened 2026-05-30 to plug the image-publish-pipeline gap surfaced by today's BOOT-04 second cascade (BG task bs3ntw3rt at 2026-05-30T16:25:00Z): `.goreleaser.yaml` builds only the tide CLI, no `.github/workflows/*.yaml` publishes the 6 component images `charts/tide/values.yaml` references, and chart values.yaml hardcodes 5 component tags at `v0.1.0-dev` while dashboard defaults to chart appVersion `1.0.0` — none exist on ghcr.io. Phase 6 is the catch-up phase, NOT a Phase 5 reopen. This quick task (260530-hrc) handled the planning bookkeeping only (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference). Next steps: `/gsd-spec-phase 06` → `/gsd-discuss-phase 06` → `/gsd-plan-phase 06` → `/gsd-execute-phase 06` in subsequent sessions.
-Last activity: 2026-05-30 -- Quick task 260530-hrc opened Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. ROADMAP carries new Phase 6 row + STUB section (Goal: TBD pointing forward to 06-FINDINGS.md); STATE.md frontmatter reframed (8/9, percent 88, in_progress); 06-FINDINGS.md authored as scope-of-record for SPEC/DISCUSS/PLAN to consume next session; Phase 5 deferred-items.md appended with cascade-2 back-reference.
+Status: Ready to execute
+Last activity: 2026-05-30 -- Phase 06 planning complete
 
 Progress: [████████░░] 88% (8 of 9 milestone phases complete — Phase 6 in planning)
 
