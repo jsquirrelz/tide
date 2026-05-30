@@ -50,3 +50,6 @@ go.work
 # or via Dockerfile COPY in the image build). Never committed — the SOT
 # lives at examples/tide-demo-fixture/.
 cmd/tide-demo-init/fixture/
+
+# Phase 6 ACC-01 — acceptance run evidence archives (maintainer-local, never committed)
+.acceptance-runs/
