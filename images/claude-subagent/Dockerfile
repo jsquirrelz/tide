@@ -4,7 +4,9 @@
 #                -f images/claude-subagent/Dockerfile .
 #
 # Stage 1: compile a static Linux Go binary.
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 
@@ -20,7 +22,7 @@ COPY pkg/git/ pkg/git/
 COPY cmd/claude-subagent/ cmd/claude-subagent/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/claude-subagent \
       ./cmd/claude-subagent

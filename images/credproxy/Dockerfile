@@ -4,7 +4,9 @@
 #                -f images/credproxy/Dockerfile .
 #
 # Stage 1: compile a static Linux binary.
-FROM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 
@@ -17,7 +19,7 @@ COPY cmd/credproxy/ cmd/credproxy/
 COPY internal/credproxy/ internal/credproxy/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/credproxy \
       ./cmd/credproxy
