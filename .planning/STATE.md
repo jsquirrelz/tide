@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: completed
-stopped_at: Phase 5 closed — v1.0 ship-ready
-last_updated: "2026-05-30T16:25:00.000Z"
-last_activity: 2026-05-30 -- Quick task 260530-h2h (BOOT-04 acceptance-v1 cert-manager prereq fix): hack/scripts/acceptance-v1.sh now installs cert-manager v1.20.2 between kind create and helm install tide (commit adb1053); docs/INSTALL.md documents cert-manager prereq with version pin (commit 7d3af9d). Mirrors the Layer B integration test pattern at suite_test.go:329-369. Discovered when today's make acceptance-v1 attempt (BG bess2gftr) failed mid-`helm install tide` with "no matches for kind Certificate" — script gap + doc gap. Both closed; ready to re-fire the ritual.
+status: in_progress
+stopped_at: Phase 6 opened — v1.0 image-publish pipeline + acceptance revalidation in planning
+last_updated: "2026-05-30T16:56:17.000Z"
+last_activity: 2026-05-30 -- Quick task 260530-hrc (Open Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation): today's BOOT-04 retry second cascade (BG task bs3ntw3rt at 2026-05-30T16:25:00Z) made it past the morning cert-manager prereq fix (260530-h2h, commits adb1053 + 7d3af9d) but timed out at `kubectl wait deploy/tide-controller-manager`. `kubectl describe pod` showed tide-controller-manager Pending + tide-dashboard ImagePullBackOff. Root cause — `.goreleaser.yaml` builds only the tide CLI binary (no `dockers:` section, no `docker_manifests:`); no `.github/workflows/*.yaml` publishes the 6 component images `charts/tide/values.yaml` references; plus chart values.yaml hardcodes 5 component tags at `v0.1.0-dev` (controllerManager:39, stubSubagent:140, credProxy:144, tidePush:155, claudeSubagent:165) while dashboard defaults to `.Chart.AppVersion` (`1.0.0`, line 244) — neither tag exists on ghcr.io. Phase 5's claim of "v1.0 ship-ready" was premature; D-A4 operator-only BOOT-04 didn't run end-to-end until today. Phase 6 opened to plug the gap; this quick task landed the planning bookkeeping (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference). SPEC/DISCUSS/PLAN/EXECUTE cycles to follow in subsequent sessions. See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for scope-of-record.
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 8
   total_plans: 100
   completed_plans: 100
-  percent: 100
+  percent: 88
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0 release readiness — Phase 5 complete; run `make acceptance-v1` for BOOT-04 acceptance ritual, then tag `v1.0.0-rc.1` to fire dry-run.yaml.
+**Current focus:** Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. Read `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for scope-of-record; run `/gsd-spec-phase 06` next.
 
 ## Current Position
 
-Phase: 5 (distribution-self-hosting-acceptance) — COMPLETE
-Plan: 17 of 17 — Phase 5 closeout commit landed; ROADMAP Progress row = Complete; all 8 milestone phases complete.
-Status: Phase 5 closed 2026-05-23. All 16 execution plans landed across 6 waves (1 OSS-readiness root files + 4 docs + 1 fixture + 1 chart version bump + 2 chart-template additions + 2 sample sets + 1 demo-init binary + 1 hack/scripts plumbing + 1 release-pipeline + 1 closeout). LICENSE + NOTICE landed; 4 new docs + concepts.md indexed; 3-sample cost spectrum (small/medium/large) ready; chart version 1.0.0 lockstep; per-namespace-rolebinding template + resource-policy:keep annotation in place; make dry-run-v1 + make acceptance-v1 + release.yaml chart-publish all wired. Mid-phase root-cause fix wave (commit 6127806) closed Project.Spec.OutcomePrompt + file:// URL schema gaps that surfaced in Wave 1-3 sample deferrals — Wave 4+ inherited a cleanly-typed schema. M0 → M_self bridge complete. Next step: maintainer tags `v1.0.0-rc.1` to fire dry-run.yaml; on rc success, tags `v1.0.0` for full release.yaml chain (goreleaser binaries + helmify-verify + OCI chart push to ghcr.io/jsquirrelz/tide-charts). Optional: maintainer runs `make acceptance-v1` for BOOT-04 ritual ($25 Anthropic spend, evidence captured under .acceptance-runs/<timestamp>/).
-Last activity: 2026-05-23 -- Plan 05-17 (Phase 5 closeout): ROADMAP.md Plans 17 → 16/16 plans executed, Progress row Not started → Complete (2026-05-23), 17 plan-row checkboxes ticked; STATE.md completed_plans 91 → 100, percent 91 → 100, completed_phases 7 → 8; 05-SUMMARY.md authored (8/8 REQ-IDs, 21 D-* decisions, 12 pitfalls mitigated, 11 iteration-2 revisions, 8 deferred items of which 2 RESOLVED mid-phase, residual UAT items + maintainer next-steps playbook).
+Phase: 6 (v1-image-publish-and-ship-readiness-revalidation) — PLANNING
+Plan: 0 of TBD — Phase 6 opened by quick task 260530-hrc; SPEC/DISCUSS/PLAN/EXECUTE cycles to follow.
+Status: Phase 5 stays Complete (closed 2026-05-23 — LICENSE + NOTICE + 5 new docs + concepts.md + 3-sample cost spectrum + chart version 1.0.0 lockstep + per-namespace-rolebinding + resource-policy:keep + dry-run.yaml + release.yaml chain all shipped). Phase 6 opened 2026-05-30 to plug the image-publish-pipeline gap surfaced by today's BOOT-04 second cascade (BG task bs3ntw3rt at 2026-05-30T16:25:00Z): `.goreleaser.yaml` builds only the tide CLI, no `.github/workflows/*.yaml` publishes the 6 component images `charts/tide/values.yaml` references, and chart values.yaml hardcodes 5 component tags at `v0.1.0-dev` while dashboard defaults to chart appVersion `1.0.0` — none exist on ghcr.io. Phase 6 is the catch-up phase, NOT a Phase 5 reopen. This quick task (260530-hrc) handled the planning bookkeeping only (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference). Next steps: `/gsd-spec-phase 06` → `/gsd-discuss-phase 06` → `/gsd-plan-phase 06` → `/gsd-execute-phase 06` in subsequent sessions.
+Last activity: 2026-05-30 -- Quick task 260530-hrc opened Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. ROADMAP carries new Phase 6 row + STUB section (Goal: TBD pointing forward to 06-FINDINGS.md); STATE.md frontmatter reframed (8/9, percent 88, in_progress); 06-FINDINGS.md authored as scope-of-record for SPEC/DISCUSS/PLAN to consume next session; Phase 5 deferred-items.md appended with cascade-2 back-reference.
 
-Progress: [██████████] 100% (all 8 milestone phases complete — TIDE v1.0 ship-ready)
+Progress: [████████░░] 88% (8 of 9 milestone phases complete — Phase 6 in planning)
 
 ## Performance Metrics
 
@@ -152,9 +152,10 @@ None yet.
 | 260521-jz0 | Phase 03 cascade 13: handleInitJobCompletion idempotency guard (prevent Phase=Initialized stomp) | 2026-05-21 | 0c6905b, 6a9f095 | [260521-jz0-phase-03-cascade-13-idempotency-guard-in](./quick/260521-jz0-phase-03-cascade-13-idempotency-guard-in/) |
 | 260526-w11 | Phase 5 closeout polish: gofmt cmd/dashboard/api/{plans,tasks}.go + ROADMAP Progress row 16/16 → 17/17 | 2026-05-27 | 489dd71, 1769a60 | [260526-w11-phase-5-closeout-polish-roadmap-16-16-17](./quick/260526-w11-phase-5-closeout-polish-roadmap-16-16-17/) |
 | 260530-h2h | BOOT-04 acceptance-v1 cert-manager prereq fix (script + INSTALL.md prereq subsection; mirrors Layer B integration test pattern) | 2026-05-30 | adb1053, 7d3af9d | [260530-h2h-boot-04-acceptance-v1-cert-manager-prere](./quick/260530-h2h-boot-04-acceptance-v1-cert-manager-prere/) |
+| 260530-hrc | Open Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference) | 2026-05-30 | TBD | [260530-hrc-open-phase-6-v1-0-image-publish-pipeline](./quick/260530-hrc-open-phase-6-v1-0-image-publish-pipeline/) |
 
 ## Session Continuity
 
-Last session: 2026-05-22T11:34:35.384Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-distribution-self-hosting-acceptance/05-CONTEXT.md
+Last session: 2026-05-30T16:56:17.000Z
+Stopped at: Phase 6 opened (quick task 260530-hrc); ready for /gsd-spec-phase 06 in next session
+Resume file: .planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md
