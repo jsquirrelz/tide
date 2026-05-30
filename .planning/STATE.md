@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: completed
 stopped_at: Phase 5 closed — v1.0 ship-ready
-last_updated: "2026-05-27T03:13:00.000Z"
-last_activity: 2026-05-27 -- Quick task 260526-w11 (Phase 5 closeout polish): gofmt cmd/dashboard/api/{plans,tasks}.go struct alignment (commit 489dd71) + ROADMAP Progress row reconciled 16/16 → 17/17 for Phase 5 (commit 1769a60). Closes the Phase 5 deferred gofmt entry and the 05-SUMMARY.md §Deviations #2 mismatch. v1.0.0-rc.1 tag is now unblocked from a closeout-polish standpoint.
+last_updated: "2026-05-30T16:25:00.000Z"
+last_activity: 2026-05-30 -- Quick task 260530-h2h (BOOT-04 acceptance-v1 cert-manager prereq fix): hack/scripts/acceptance-v1.sh now installs cert-manager v1.20.2 between kind create and helm install tide (commit adb1053); docs/INSTALL.md documents cert-manager prereq with version pin (commit 7d3af9d). Mirrors the Layer B integration test pattern at suite_test.go:329-369. Discovered when today's make acceptance-v1 attempt (BG bess2gftr) failed mid-`helm install tide` with "no matches for kind Certificate" — script gap + doc gap. Both closed; ready to re-fire the ritual.
 progress:
   total_phases: 8
   completed_phases: 8
@@ -151,6 +151,7 @@ None yet.
 | 260521-hk4 | Phase 03 cascade 12: patchJobToFailed sets FailureTarget=True for K8s 1.31+ Job status | 2026-05-21 | 03af69b | [260521-hk4-phase-03-cascade-12-patchjobtofailed-mus](./quick/260521-hk4-phase-03-cascade-12-patchjobtofailed-mus/) |
 | 260521-jz0 | Phase 03 cascade 13: handleInitJobCompletion idempotency guard (prevent Phase=Initialized stomp) | 2026-05-21 | 0c6905b, 6a9f095 | [260521-jz0-phase-03-cascade-13-idempotency-guard-in](./quick/260521-jz0-phase-03-cascade-13-idempotency-guard-in/) |
 | 260526-w11 | Phase 5 closeout polish: gofmt cmd/dashboard/api/{plans,tasks}.go + ROADMAP Progress row 16/16 → 17/17 | 2026-05-27 | 489dd71, 1769a60 | [260526-w11-phase-5-closeout-polish-roadmap-16-16-17](./quick/260526-w11-phase-5-closeout-polish-roadmap-16-16-17/) |
+| 260530-h2h | BOOT-04 acceptance-v1 cert-manager prereq fix (script + INSTALL.md prereq subsection; mirrors Layer B integration test pattern) | 2026-05-30 | adb1053, 7d3af9d | [260530-h2h-boot-04-acceptance-v1-cert-manager-prere](./quick/260530-h2h-boot-04-acceptance-v1-cert-manager-prere/) |
 
 ## Session Continuity
 

@@ -97,3 +97,14 @@ cmd/tide-demo-init/main.go:92:12: pattern all:fixture: cannot embed directory fi
 2. Consider whether to migrate the fixture content to avoid carrying `go.mod`/`go.sum` (would require rethinking `examples/tide-demo-fixture/` to be parseable as Go source without being a runnable module). Not pursued in v1.0 — the shim keeps the SOT intact and the bare-repo content authentic.
 
 **Severity:** Low — shim is fully transparent to operators; only matters at build time.
+
+## Discovered 2026-05-30 (during BOOT-04 acceptance retry attempt) — **RESOLVED 2026-05-30**
+
+**`hack/scripts/acceptance-v1.sh` was missing a cert-manager install step.** Discovered when today's `make acceptance-v1` invocation (background task `bess2gftr` at 2026-05-30T16:13:45Z) failed mid-`helm install tide` with `no matches for kind "Certificate" in version "cert-manager.io/v1"`. The tide chart's webhook + metrics Certificates (`charts/tide/templates/{serving-cert,selfsigned-issuer,metrics-certs}.yaml`) require cert-manager CRDs to exist in the cluster, but the script jumped straight from `kind create cluster` to `helm install tide` with no cert-manager bring-up. The Layer B integration tests already wire this up at `test/integration/kind/suite_test.go:157,329-369` (pinned `v1.20.2`); the BOOT-04 ritual just didn't mirror the pattern. `docs/INSTALL.md` also didn't document cert-manager as a prereq, even though the dependency is mentioned in `docs/observability.md:64-65` and `docs/rbac.md:227-247`.
+
+**RESOLVED 2026-05-30** via quick task `260530-h2h`:
+
+1. `hack/scripts/acceptance-v1.sh` — cert-manager install + wait block inserted between kind create and helm install, mirroring `installCertManager()` from the Layer B integration tests. `TIDE_CERT_MANAGER_VERSION` env-override convention preserved (same as `test/integration/kind/suite_test.go:336`). Default pinned to `v1.20.2`. Commit `adb1053` (`fix(quick-260530-h2h): install cert-manager v1.20.2 before helm install tide in acceptance-v1.sh`).
+2. `docs/INSTALL.md` — cert-manager prereq subsection added before the `helm install tide` instructions, with version pinning guidance + cross-references to `docs/observability.md` and `docs/rbac.md`. Commit `7d3af9d` (`docs(quick-260530-h2h): document cert-manager v1.20.2 prerequisite in INSTALL.md`).
+
+**Lesson for plan authors:** when the BOOT-04 plan was authored, the planner-time research noted cert-manager as an installed dep but didn't trace the Helm install order — the acceptance script needs to mirror the integration-test bring-up pattern verbatim, not just the steady-state assumption that cert-manager "is already there." Future scripts that install `charts/tide` from scratch should always be cross-checked against `test/integration/kind/suite_test.go`'s suite-setup sequence.
