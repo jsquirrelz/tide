@@ -302,7 +302,7 @@ Plans:
 - [x] 06-03-PLAN.md — D-01/D-04 build-images matrix job in release.yaml + chart-publish needs extension (Wave 2)
 - [x] 06-04-PLAN.md — IMG-LOAD-01/DRY-01/D-05: load-images-if-needed.sh helper + acceptance-v1.sh $0 mode + dry-run-v1.sh cert-manager + Makefile targets (Wave 3)
 - [x] 06-05-PLAN.md — DOC-01 INSTALL.md Maintainer image-publish section + premature-claim audit (Wave 4)
-- [ ] 06-06-PLAN.md — ACC-01 $0 BOOT-04 closeout gate: make acceptance-v1-smoke green + D-06 evidence captured (Wave 5)
+- [x] 06-06-PLAN.md — ACC-01 $0 BOOT-04 closeout gate: make acceptance-v1-smoke green + D-06 evidence captured (Wave 5)
 
 
 ## Progress
