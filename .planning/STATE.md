@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-05-30T18:42:57.922Z"
+stopped_at: Phase 6 image-publish PROVEN at $0 BOOT-04; cascade-7 (Project→Milestone authoring gap) is the v1.0 ship blocker — deferred to a new Phase 7
+last_updated: "2026-05-30T21:51:58.733Z"
 last_activity: 2026-05-30
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -162,6 +162,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-30T18:42:57.833Z
-Stopped at: Completed 06-01-PLAN.md
-Resume file: None
+Last session: 2026-05-30T21:51:58.618Z
+Stopped at: Phase 6 image-publish PROVEN at $0 BOOT-04; cascade-7 (Project→Milestone authoring gap) is the v1.0 ship blocker — deferred to a new Phase 7
+Resume file: .planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-ACCEPTANCE-FINDINGS.md
