@@ -33,6 +33,26 @@ webhooks:
     service:
       name: '{{ include "tide.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
+      path: /validate-tideproject-k8s-v1alpha1-project
+  failurePolicy: Fail
+  name: vproject-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - tideproject.k8s
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - projects
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: '{{ include "tide.fullname" . }}-webhook-service'
+      namespace: '{{ .Release.Namespace }}'
       path: /validate-tideproject-k8s-v1alpha1-wave
   failurePolicy: Fail
   name: vwave-v1alpha1.kb.io

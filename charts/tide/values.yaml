@@ -36,7 +36,7 @@ controllerManager:
       watchNamespace: ""
     image:
       repository: ghcr.io/jsquirrelz/tide-controller
-      tag: v0.1.0-dev
+      tag: ""
       pullPolicy: IfNotPresent
     podAnnotations: {}
     resources:
@@ -137,11 +137,11 @@ rateLimits:
 images:
   stubSubagent:
     repository: ghcr.io/jsquirrelz/tide-stub-subagent
-    tag: v0.1.0-dev
+    tag: ""
     pullPolicy: IfNotPresent
   credProxy:
     repository: ghcr.io/jsquirrelz/tide-credproxy
-    tag: v0.1.0-dev
+    tag: ""
     pullPolicy: IfNotPresent
   busybox:
     repository: busybox
@@ -152,17 +152,17 @@ images:
   # Wired to controller via TIDE_PUSH_IMAGE env var on manager Deployment.
   tidePush:
     repository: ghcr.io/jsquirrelz/tide-push
-    tag: v0.1.0-dev
+    tag: ""
     pullPolicy: IfNotPresent
   # Phase 3 plan 03-09 (D-C2 swap-in): real Claude-Code-backed subagent image.
   # Used as the default fallback when Project.Spec.subagent.image is empty;
   # individual Projects can pin a different vendor image per Project (D-C2).
   # Wired to controller via CLAUDE_SUBAGENT_IMAGE env var on manager Deployment.
-  # In production, prefer pinning by @sha256 digest — tag-based pulls of "v0.1.0-dev"
+  # In production, prefer pinning by @sha256 digest — tag-based pulls of mutable tags
   # are not reproducible across pulls.
   claudeSubagent:
     repository: ghcr.io/jsquirrelz/tide-claude-subagent
-    tag: v0.1.0-dev
+    tag: ""
     pullPolicy: IfNotPresent
 
 # Phase 3 plan 03-09 (D-C4): per-level subagent defaults. Resolution chain at

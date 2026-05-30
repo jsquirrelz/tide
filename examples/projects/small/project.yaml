@@ -43,10 +43,11 @@ spec:
     absoluteCapCents: 0
 
   subagent:
-    # ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0 is the v1 stub image
+    # ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0 is the v1 stub image
     # (Phase 5 D-X3 chart version bump synchronizes the tag). The stub binary
-    # is cmd/stub-subagent (Phase 2 SUB-04).
-    image: ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0
+    # is cmd/stub-subagent (Phase 2 SUB-04). Tag has no "v" prefix — matches
+    # the appVersion-resolved tag from the chart (CHART-01 / Phase 6 A7).
+    image: ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0
     model: stub
 
   gates:

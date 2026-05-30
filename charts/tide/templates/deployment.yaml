@@ -20,9 +20,6 @@ spec:
       {{- include "tide.selectorLabels" . | nindent 8 }}
       annotations:
         kubectl.kubernetes.io/default-container: manager
-        {{- with .Values.controllerManager.manager.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
     spec:
       containers:
       - args:
@@ -40,10 +37,6 @@ spec:
           value: {{ quote .Values.controllerManager.manager.env.watchNamespace }}
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
-        # Phase 3 plan 03-09 (D-B1 / D-C2 / D-C4 / D-D1): Helm env-var wiring.
-        # Read by cmd/manager/main.go via env.go helpers; flow through to
-        # ProjectReconciler.TidePushImage, ProviderDefaults.{Image,Models},
-        # and ctrl.Options.{LeaseDuration,RenewDeadline,RetryPeriod}.
         - name: TIDE_PUSH_IMAGE
           value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default "latest" }}"
         - name: CLAUDE_SUBAGENT_IMAGE
@@ -76,6 +69,7 @@ spec:
         - name: OTEL_SERVICE_NAME
           value: {{ quote .Values.otel.serviceName }}
         # phase4-env-injected
+
         envFrom:
         - secretRef:
             name: {{ .Values.signingKey.secretName | default "tide-signing-key" }}
