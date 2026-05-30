@@ -255,6 +255,77 @@ TIDE is opinionated. It's a good fit for some teams and a poor fit for others. T
 
 If you're still here, the [first Project apply](#first-project-apply) above is the cheapest way to feel TIDE end-to-end before you decide.
 
+## Maintainer: image-publish pipeline
+
+This section is for maintainers who are cutting releases or verifying the pre-publish local path. Operators installing from an already-published `v1.0.0` tag can skip to [Next steps](#next-steps).
+
+### What publishes
+
+The 6 TIDE component images are published to `ghcr.io/jsquirrelz/` as multi-arch (`linux/amd64` + `linux/arm64`) OCI images:
+
+| Image name | Source Dockerfile |
+|------------|-------------------|
+| `ghcr.io/jsquirrelz/tide-controller` | `./Dockerfile` |
+| `ghcr.io/jsquirrelz/tide-dashboard` | `./Dockerfile.dashboard` |
+| `ghcr.io/jsquirrelz/tide-stub-subagent` | `images/stub-subagent/Dockerfile` |
+| `ghcr.io/jsquirrelz/tide-credproxy` | `images/credproxy/Dockerfile` |
+| `ghcr.io/jsquirrelz/tide-push` | `images/tide-push/Dockerfile` |
+| `ghcr.io/jsquirrelz/tide-claude-subagent` | `images/claude-subagent/Dockerfile` |
+
+### CI pipeline (IMG-01)
+
+Images publish automatically via the `build-images` matrix job in `.github/workflows/release.yaml` when a `v*` tag is pushed. Release-candidate tags (`v*-rc.*`) do **not** trigger image publish — they only fire the chart-tree reproducibility gate (`helmify-verify`).
+
+Run order for a full release tag (e.g. `v1.0.0`):
+
+```
+helmify-verify
+    ├── build-images   (parallel with pre-flight — builds + pushes all 6 images)
+    └── pre-flight
+            └── release
+                    └── chart-publish   (after both build-images and release succeed)
+```
+
+The chart is only published after all 6 `build-images` matrix legs succeed — images are always pushed before the chart (D-04).
+
+**Image tag convention:** The `build-images` job strips the `v` prefix from the git tag via `${GITHUB_REF_NAME#v}`, so `v1.0.0` produces image tag `1.0.0`. This matches the Helm chart `appVersion` exactly — the chart's `| default .Chart.AppVersion` fallback and the published image tags resolve to the same string without any manual alignment.
+
+### Local pre-publish path (IMG-LOAD-01)
+
+Before cutting the `v1.0.0` tag, verify the full TIDE boot path at $0 cost using locally-built images:
+
+```bash
+make acceptance-v1-smoke
+```
+
+This runs `ACCEPTANCE_SAMPLE=small hack/scripts/acceptance-v1.sh`, which:
+
+1. Calls `hack/scripts/load-images-if-needed.sh <cluster_name> 1.0.0` for each of the 6 images.
+2. For each image, probes `docker manifest inspect ghcr.io/jsquirrelz/<name>:1.0.0`. If absent (pre-publish), builds the image locally via `docker build` and loads it into the kind cluster via `kind load docker-image ... --name <cluster>`.
+3. Installs cert-manager, the `tide-crds` chart, and the `tide` chart against the locally-loaded images.
+4. Applies `examples/projects/small/project.yaml` (the $0 stub-subagent sample) and waits up to 10 minutes for `status.phase=Complete`.
+
+No `ANTHROPIC_API_KEY` is required for `acceptance-v1-smoke`. The stub-subagent exercises TIDE's full dispatch path (Project → Phase → Plan → Task → Wave reconciler) against a canned envelope at zero LLM cost.
+
+### GHCR visibility (Pitfall 3 — act on first push)
+
+The first push of each new package to `ghcr.io/jsquirrelz/` defaults to **private**. After the first successful `build-images` CI run, the maintainer must set each package to public:
+
+1. Navigate to `https://github.com/users/jsquirrelz/packages/container/<name>/settings` for each of the 6 image names above.
+2. Under "Danger Zone", set **Package visibility** to **Public**.
+
+Until this is done, `docker manifest inspect` returns `401 Unauthorized` even though the image exists. Downstream `helm install` attempts will surface this as `ImagePullBackOff` (see [docs/troubleshooting.md](troubleshooting.md) for the recipe).
+
+### Existence check
+
+Verify a specific image is published and public:
+
+```bash
+docker manifest inspect ghcr.io/jsquirrelz/tide-controller:1.0.0
+```
+
+Exits `0` if the image is published and publicly accessible; non-zero if absent or private. Run for each of the 6 images before announcing a release.
+
 ## Next steps
 
 - **[docs/project-authoring.md](project-authoring.md)** — author your first Project; walks the 3-sample cost spectrum (small / medium / large).
