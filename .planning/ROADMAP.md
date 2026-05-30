@@ -322,3 +322,29 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 4/6 | In Progress|  |
 
 8 of 9 milestone phases complete — Phase 6 in planning (v1.0 image-publish pipeline + ship-readiness revalidation). See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for Phase 6 scope-of-record.
+
+### Phase 7: Project-to-Milestone Authoring and Self-Bootstrap
+
+**Goal:** Close cascade-7 — the v1.0 ship blocker discovered during Phase 6's BOOT-04 `$0` acceptance revalidation. Wire the `ProjectReconciler`'s `Initialized → author-Milestone` dispatch so a bare `Project` self-bootstraps its `Milestone` instead of stalling at `status.phase=Initialized` forever. Mirror the proven `milestone_controller.go:reconcilePlannerDispatch` pattern one level up: dispatch a planner Job, read the authored Milestone from `EnvelopeOut`, `Create` the Milestone CR, and honor the `milestone: auto` gate. This is the top of the five-level cascade and the heart of the Core Value ("a human applies a Project; TIDE authors MILESTONE.md by dispatching a planner") — the TIDE-on-TIDE acceptance bar.
+
+**Requirements**: TBD (derive in /gsd-spec-phase 7)
+**Depends on:** Phase 3 (down-stack Milestone→Phase→Plan→Task reconcilers — already wired), Phase 6 (image-publish pipeline — shipped)
+**Plans:** 0 plans
+
+**In scope:**
+- `ProjectReconciler` `Initialized → author-Milestone` planner dispatch (Project-side analog of `milestone_controller.go:reconcilePlannerDispatch` + `handleJobCompletion`)
+- `Create(Milestone)` from the planner's `EnvelopeOut` (no `Create(.*Milestone)` exists today)
+- `milestone: auto` gate handling at the Project level
+- `cmd/stub-subagent` support for a project-level planner request returning a canned Milestone envelope (the `$0` path — stub today only emits `task`-level `KindTaskEnvelopeOut`)
+- Layer B integration test that applies a **bare** Project (no pre-authored Milestone fixture) and asserts Milestone materialization — closes the test-coverage gap that let cascade-7 survive to v1
+
+**Out of scope:**
+- Anything down-stack of Milestone (Milestone→Phase→Plan→Task authoring/dispatch already works — do not redo)
+- Changes to `acceptance-v1.sh` (cascades 1–6 fixed; it already drives correctly through `Initialized`)
+
+**Acceptance gate:** `make acceptance-v1-smoke` reaches `Project status.phase=Complete` at `$0` (no API key). On green, v1.0 is ship-ready.
+
+**Scope-of-record:** `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-ACCEPTANCE-FINDINGS.md`
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
