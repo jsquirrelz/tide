@@ -14,6 +14,12 @@
 # (e.g. internal/gitleaks/default_rules.toml referenced by scanner.go)
 !**/*.toml
 
+# Re-include prompt templates for the claude-subagent image
+# (internal/subagent/common/prompt_templates.go: //go:embed templates/*.tmpl).
+# Without this, `**` excludes the .tmpl files and the claude-subagent build
+# fails with "pattern templates/*.tmpl: no matching files found".
+!**/*.tmpl
+
 # Re-include the dashboard SPA bundle for the dashboard image build
 # (cmd/dashboard/embed/embed.go: //go:embed all:dist requires dist/ contents).
 # This was added in Phase 04.1 Plan 14 UAT closeout when the dashboard image
