@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 06 — v1-image-publish-and-ship-readiness-revalidation
+**Current focus:** Phase 07 — Project→Milestone Authoring / Self-Bootstrap (closes cascade-7, the v1.0 ship blocker)
 
 ## Current Position
 
-Phase: 06 (v1-image-publish-and-ship-readiness-revalidation) — EXECUTING
-Plan: 6 of 6
-Status: Ready to execute
+Phase: 07 (project-to-milestone-authoring-and-self-bootstrap) — PLANNING
+Plan: none yet (SPEC + CONTEXT done; next: /gsd-plan-phase 7)
+Status: Context gathered; ready to plan
 Last activity: 2026-05-30
 
-Progress: [████████░░] 83%
+Progress: Phase 6 complete (image-publish proven); Phase 7 opened to close cascade-7
 
 ## Performance Metrics
 
