@@ -294,12 +294,12 @@ Plans:
 **Goal**: Every Docker image the `charts/tide` chart references is buildable and publishable from a real pipeline, the chart's component tags resolve to the chart `appVersion` instead of the dead `v0.1.0-dev` pin, and the BOOT-04 operator ritual completes end-to-end green at **$0** (locally-built + kind-loaded images, no real LLM spend) — closing the image-publish gap that the 2026-05-30 BOOT-04 retry exposed.
 **Depends on**: Phase 5
 **Requirements**: IMG-01, CHART-01, DRY-01, IMG-LOAD-01, ACC-01, DOC-01, HYG-01
-**Plans:** 2/6 plans executed
+**Plans:** 3/6 plans executed
 
 Plans:
 - [x] 06-01-PLAN.md — CHART-01 SOT tag alignment (5 v0.1.0-dev → appVersion) + HYG-01 gitignore + troubleshooting + A7 project.yaml fix (Wave 1)
 - [x] 06-02-PLAN.md — D-02 Dockerfile --platform=$BUILDPLATFORM cross-compile refactor across all 6 component images (Wave 2)
-- [ ] 06-03-PLAN.md — D-01/D-04 build-images matrix job in release.yaml + chart-publish needs extension (Wave 2)
+- [x] 06-03-PLAN.md — D-01/D-04 build-images matrix job in release.yaml + chart-publish needs extension (Wave 2)
 - [ ] 06-04-PLAN.md — IMG-LOAD-01/DRY-01/D-05: load-images-if-needed.sh helper + acceptance-v1.sh $0 mode + dry-run-v1.sh cert-manager + Makefile targets (Wave 3)
 - [ ] 06-05-PLAN.md — DOC-01 INSTALL.md Maintainer image-publish section + premature-claim audit (Wave 4)
 - [ ] 06-06-PLAN.md — ACC-01 $0 BOOT-04 closeout gate: make acceptance-v1-smoke green + D-06 evidence captured (Wave 5)
@@ -319,6 +319,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
-| 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 2/6 | In Progress|  |
+| 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 3/6 | In Progress|  |
 
 8 of 9 milestone phases complete — Phase 6 in planning (v1.0 image-publish pipeline + ship-readiness revalidation). See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for Phase 6 scope-of-record.
