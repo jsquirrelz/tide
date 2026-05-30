@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 6 context gathered
-last_updated: "2026-05-30T18:12:09.096Z"
-last_activity: 2026-05-30 -- Phase 06 planning complete
+last_updated: "2026-05-30T18:15:13.812Z"
+last_activity: 2026-05-30 -- Phase 06 execution started
 progress:
   total_phases: 1
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. Read `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for scope-of-record; run `/gsd-spec-phase 06` next.
+**Current focus:** Phase 06 — v1-image-publish-and-ship-readiness-revalidation
 
 ## Current Position
 
-Phase: 6 (v1-image-publish-and-ship-readiness-revalidation) — PLANNING
-Plan: 0 of TBD — Phase 6 opened by quick task 260530-hrc; SPEC/DISCUSS/PLAN/EXECUTE cycles to follow.
-Status: Ready to execute
-Last activity: 2026-05-30 -- Phase 06 planning complete
+Phase: 06 (v1-image-publish-and-ship-readiness-revalidation) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 06
+Last activity: 2026-05-30 -- Phase 06 execution started
 
 Progress: [████████░░] 88% (8 of 9 milestone phases complete — Phase 6 in planning)
 
