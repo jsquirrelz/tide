@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: Phase 6 context gathered
-last_updated: "2026-05-30T18:15:13.812Z"
-last_activity: 2026-05-30 -- Phase 06 execution started
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-05-30T18:21:55.075Z"
+last_activity: 2026-05-30
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 17
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 06 (v1-image-publish-and-ship-readiness-revalidation) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 06
-Last activity: 2026-05-30 -- Phase 06 execution started
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-05-30
 
-Progress: [████████░░] 88% (8 of 9 milestone phases complete — Phase 6 in planning)
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [████████░░] 88% (8 of 9 milestone phases complete
 | Phase 01-foundation-crds-pkg-dag-controller-scaffold P11 | 19min | 2 tasks | 52 files |
 | Phase 02 P09 | multi-session | 3 tasks | 23 files |
 | Phase 04-gates-observability-dashboard-cli P17 | 24min | 2 tasks | 13 files |
+| Phase 06 P01 | 8min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,7 @@ Recent decisions affecting current work:
 - [Phase 02.2]: PVC namespace-scoping architectural pivot (cascade-10) — manager-side PVC mount removed; EnvelopeReader is now PodStatusEnvelopeReader which reads EnvelopeOut from the subagent container's terminationMessagePath via Pod.status.containerStatuses[].state.terminated.message. Manager no longer requires cross-namespace PVC visibility. Pod-side PVC remains namespace-local provisioned by ensureProjectsPVC(ns) per test namespace; testdata/three-task-wave.yaml declares it inline for kubectl apply -f self-containedness.
 - [Phase 02.2]: Secret namespace-scoping (cascade-11) — ensureSigningKeySecret(ns) mirrors tide-system/tide-signing-key into target namespace via kubectl get secret -o jsonpath + base64-identical data. controllerSigningKeyData() centralizes the read; createNamespace(ns) + applyController() both call it. CRDs-only mode degrades to GinkgoWriter warning (not Fail()).
 - [Phase 02.2]: 02.2-12-VERIFICATION.md records chain_status: empirically_closed — 7/7 Layer B PASS (clean + rerun), 18/18 Layer A PASS, inner wall 355.20s, pvc_not_found_event_count=0, signing_key_not_found_event_count=0, deadline_exceeded_count=0.
+- [Phase ?]: CHART-01: 5 TIDE component tags in SOT changed v0.1.0-dev to empty string so helm default .Chart.AppVersion resolves them to 1.0.0; busybox 1.36 preserved
 
 ### Pending Todos
 
@@ -156,6 +158,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-30T17:31:04.070Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-CONTEXT.md
+Last session: 2026-05-30T18:21:55.039Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
