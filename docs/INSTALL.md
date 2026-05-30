@@ -98,6 +98,28 @@ If `docker` reports no daemon, re-check the WSL2 integration toggle in Docker De
 
 The chart pair is intentionally **NOT** wired as a Helm dependency (per D-E1's upgrade safety rationale — splitting the CRDs into their own chart lets `helm upgrade tide ...` roll the controller without touching CRD storage). You must install both, in this exact order.
 
+### cert-manager prerequisite
+
+The main `tide` chart's webhook and metrics Certificate resources — specifically `charts/tide/templates/serving-cert.yaml`, `charts/tide/templates/selfsigned-issuer.yaml`, and `charts/tide/templates/metrics-certs.yaml` — reference `cert-manager.io/v1` kinds. Helm refuses to apply custom resources whose CRDs are not registered in the cluster, so cert-manager **must be installed before the `tide` chart's helm-install step** below. The `tide-crds` subchart does **not** depend on cert-manager — only the main `tide` chart does — so cert-manager can install in either order relative to `tide-crds`, as long as it lands before `tide`.
+
+Install cert-manager (pinned default `v1.20.2`):
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+```
+
+Wait for all three cert-manager Deployments to roll out before proceeding:
+
+```bash
+kubectl -n cert-manager rollout status deployment/cert-manager --timeout=120s
+kubectl -n cert-manager rollout status deployment/cert-manager-cainjector --timeout=120s
+kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=120s
+```
+
+`v1.20.2` is the project's tested default — it's the same version pinned in `test/integration/kind/suite_test.go` (the Layer B integration harness) and `hack/scripts/acceptance-v1.sh` (the maintainer acceptance ritual), and it's compatible with the K8s 1.33 `kindest/node` pin used across both. Maintainers running the acceptance ritual can override via the `TIDE_CERT_MANAGER_VERSION` environment variable; the integration harness honors the same name, so the two recipes stay in lockstep.
+
+cert-manager's broader role in the cluster — beyond the chart's own Certificate resources — is also touched on by [docs/observability.md](./observability.md) (metrics-server cert wiring) and [docs/rbac.md](./rbac.md) (RBAC for cert-manager's own service accounts). Refer to those docs for the full operational picture; this prerequisite section is scoped specifically to "what `helm install tide` needs to succeed."
+
 ### Quickstart (OCI registry — primary path)
 
 ```bash

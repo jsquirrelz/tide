@@ -58,6 +58,21 @@ if [ -n "${ACCEPTANCE_LOAD_IMAGES:-}" ]; then
   KIND_CLUSTER="${CLUSTER_NAME}" make -C "${REPO_ROOT}" test-int-kind-prep || true
 fi
 
+# ── cert-manager (required by charts/tide webhook + metrics Certificates) ───
+# The tide chart references cert-manager.io/v1 Certificate + Issuer resources
+# in charts/tide/templates/{serving-cert,selfsigned-issuer,metrics-certs}.yaml.
+# Helm refuses to apply CRs whose CRDs aren't present, so cert-manager MUST be
+# installed BEFORE the helm-install steps below. Mirrors the Layer B
+# integration test pattern at test/integration/kind/suite_test.go:329-369.
+# Pinned v1.20.2 per Phase 02.2 cert-manager bump decision (K8s 1.33-compatible).
+CERT_MANAGER_VERSION="${TIDE_CERT_MANAGER_VERSION:-v1.20.2}"
+echo "==> installing cert-manager ${CERT_MANAGER_VERSION}..."
+kubectl apply -f "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml"
+echo "==> waiting for cert-manager Deployments to roll out..."
+for deploy in cert-manager cert-manager-cainjector cert-manager-webhook; do
+  kubectl -n cert-manager rollout status deployment/"${deploy}" --timeout=120s
+done
+
 # ── Helm install (both charts) ──────────────────────────────────────────────
 echo "==> helm-installing tide-crds + tide..."
 helm install tide-crds "${REPO_ROOT}/charts/tide-crds" -n tide-system --create-namespace
