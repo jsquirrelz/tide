@@ -109,6 +109,60 @@ kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-sy
 if [ "${ACCEPTANCE_SAMPLE}" = "small" ]; then
   # $0 small-sample mode — stub-subagent, no API key, no per-run branch (D-05).
   # absoluteCapCents: 0 in small/project.yaml enforces zero API cost at controller level.
+
+  # ── Per-namespace resources (cascade-5) ────────────────────────────────────
+  # The ProjectReconciler (PVC-Bound gate) and Task Jobs require tide-projects
+  # PVC + tide-subagent SA + tide-signing-key Secret in the PROJECT's namespace.
+  # The chart provisions these only in tide-system, so mirror them into
+  # ${PROJECT_NAMESPACE}. Mirrors the proven Layer B helpers
+  # (ensureProjectsPVC / ensureSubagentSA / ensureSigningKeySecret) in
+  # test/integration/kind/suite_test.go.
+  echo "==> provisioning per-namespace resources in ${PROJECT_NAMESPACE} (cascade-5)..."
+  kubectl create namespace "${PROJECT_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+  SIGNING_KEY="$(kubectl get secret tide-signing-key -n tide-system -o jsonpath='{.data.TIDE_SIGNING_KEY}')"
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: tide-projects, namespace: ${PROJECT_NAMESPACE} }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: tide-subagent, namespace: ${PROJECT_NAMESPACE} }
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: tide-signing-key, namespace: ${PROJECT_NAMESPACE} }
+type: Opaque
+data: { TIDE_SIGNING_KEY: ${SIGNING_KEY} }
+EOF
+
+  # Prewarm the WaitForFirstConsumer PVC — kind's rancher.io/local-path won't
+  # bind until a consumer Pod is scheduled, but the reconciler's PVC-Bound gate
+  # blocks dispatch until it binds (deadlock). A throwaway pause Pod breaks it.
+  # Mirrors pvcPrewarmPod in test/integration/kind/suite_test.go.
+  echo "==> prewarming tide-projects PVC (WaitForFirstConsumer)..."
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata: { name: tide-projects-prewarm, namespace: ${PROJECT_NAMESPACE} }
+spec:
+  restartPolicy: Never
+  containers:
+    - name: pause
+      image: busybox:1.36
+      command: ["sleep", "60"]
+      volumeMounts: [ { name: workspace, mountPath: /workspaces } ]
+  volumes:
+    - name: workspace
+      persistentVolumeClaim: { claimName: tide-projects }
+EOF
+  kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/tide-projects -n "${PROJECT_NAMESPACE}" --timeout=90s || true
+  kubectl delete pod tide-projects-prewarm -n "${PROJECT_NAMESPACE}" --ignore-not-found --wait=false
+
   echo "==> applying examples/projects/small/project.yaml (\$0 stub mode — D-05)..."
   kubectl apply -f "${REPO_ROOT}/examples/projects/small/project.yaml"
 
