@@ -136,7 +136,9 @@ docker run --rm \
 
     # Helm install (README Quickstart path — locally-cloned chart paths).
     helm install tide-crds ./charts/tide-crds -n tide-system --create-namespace
-    helm install tide ./charts/tide -n tide-system
+    # RWO PVC override for single-node kind (rancher.io/local-path has no RWX) —
+    # mirrors acceptance-v1.sh + test/integration/kind/suite_test.go:480.
+    helm install tide ./charts/tide -n tide-system --set 'workspaces.pvc.accessModes={ReadWriteOnce}'
     kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
     kubectl apply -f examples/projects/small/project.yaml

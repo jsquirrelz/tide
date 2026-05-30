@@ -96,7 +96,13 @@ done
 # ── Helm install (both charts) ──────────────────────────────────────────────
 echo "==> helm-installing tide-crds + tide..."
 helm install tide-crds "${REPO_ROOT}/charts/tide-crds" -n tide-system --create-namespace
-helm install tide "${REPO_ROOT}/charts/tide" -n tide-system
+# Override the chart's default RWX PVC accessModes → RWO for single-node kind:
+# kind's default StorageClass (rancher.io/local-path) only supports ReadWriteOnce,
+# so the chart's ReadWriteMany tide-projects PVC stays Pending and the controller
+# never reaches Available. RWO is correct on a single node (same-node pods share it).
+# Mirrors the proven Layer B pattern at test/integration/kind/suite_test.go:480.
+helm install tide "${REPO_ROOT}/charts/tide" -n tide-system \
+  --set 'workspaces.pvc.accessModes={ReadWriteOnce}'
 kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
 # ── Apply project + watch (mode-specific, D-05 / CHANGE 4) ─────────────────
