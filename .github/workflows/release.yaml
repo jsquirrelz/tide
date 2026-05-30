@@ -218,11 +218,109 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Gate 4 — Helm OCI chart publish to ghcr.io (D-X5).
+  # Gate 4 — build and push all 6 component images to ghcr.io (IMG-01).
   #
-  # Runs AFTER `release` succeeds (so charts never publish for a failed
-  # binary release). Pushes both charts (tide-crds first because tide depends
-  # on it) to ghcr.io/jsquirrelz/tide-charts/{tide-crds,tide}.
+  # D-01: goreleaser stays CLI+chart only — no `dockers:` or `docker_manifests:`
+  # sections in .goreleaser.yaml. Image publish is handled here via
+  # docker/build-push-action matrix, decoupled from goreleaser.
+  #
+  # D-04 placement: runs in parallel with `pre-flight` (both need helmify-verify)
+  # so images are ready before `chart-publish` fires. The `chart-publish` job
+  # gains `needs: [build-images, release]` — a chart is only published after all
+  # 6 matrix jobs succeed and goreleaser has created the GitHub Release. A matrix
+  # failure leaves the chart unpublished (no dangling chart with missing images —
+  # T-06-03-02 mitigation).
+  #
+  # Tag posture: `if: !contains(...-rc.)` mirrors the guard on `release` and
+  # `chart-publish` — rc tags do NOT push images (Pitfall 7 avoidance; T-06-03-04).
+  #
+  # Security: `packages: write` is job-level on this job only (T-06-03-03).
+  # docker/login-action@v3 handles the token via --password-stdin semantics
+  # internally — the token never appears in a `run:` step or set -x trace
+  # (T-06-03-01 mitigation; mirrors the existing chart-publish GHCR login pattern).
+  #
+  # Multi-arch: linux/amd64 + linux/arm64 via buildx + QEMU. QEMU is required
+  # for the arm64 node runtime stage in tide-claude-subagent. 30-minute timeout
+  # covers QEMU-emulated npm install (2-5 min) with safe margin.
+  #
+  # GHA cache: per-component scope prevents the 6 matrix jobs from clobbering
+  # each other's cache entries (type=gha,scope=${{ matrix.component }}).
+  build-images:
+    name: Build and push component images (IMG-01)
+    if: ${{ !contains(github.ref, '-rc.') }}
+    needs: [helmify-verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write   # IMG-01 / T-06-03-03 — scoped to this job only
+    strategy:
+      matrix:
+        include:
+          - component: tide-controller
+            dockerfile: ./Dockerfile
+            context: .
+          - component: tide-dashboard
+            dockerfile: ./Dockerfile.dashboard
+            context: .
+          - component: tide-stub-subagent
+            dockerfile: images/stub-subagent/Dockerfile
+            context: .
+          - component: tide-credproxy
+            dockerfile: images/credproxy/Dockerfile
+            context: .
+          - component: tide-push
+            dockerfile: images/tide-push/Dockerfile
+            context: .
+          - component: tide-claude-subagent
+            dockerfile: images/claude-subagent/Dockerfile
+            context: .
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Strip the `v` prefix from the tag (v1.0.0 → 1.0.0) so the image tag
+      # matches chart appVersion exactly — mirrors the ${GITHUB_REF_NAME#v}
+      # pattern used in chart-publish (Pitfall 2 avoidance).
+      - name: Derive image tag
+        run: echo "IMAGE_TAG=${GITHUB_REF_NAME#v}" >> "${GITHUB_ENV}"
+
+      # QEMU is required for arm64 cross-compilation under buildx — specifically
+      # for the node runtime stage in tide-claude-subagent's Dockerfile.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # docker/login-action handles --password-stdin internally; the token is
+      # never passed as a positional argument or printed in `run:` step output
+      # (T-06-03-01 — information-disclosure mitigation).
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.component }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/jsquirrelz/${{ matrix.component }}:${{ env.IMAGE_TAG }}
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  # Gate 5 — Helm OCI chart publish to ghcr.io (D-X5).
+  #
+  # Runs AFTER both `build-images` (all 6 matrix jobs) AND `release` succeed
+  # (D-04: images published before the chart that references them; a matrix
+  # failure leaves the chart unpublished — T-06-03-02 partial-manifest mitigation).
   #
   # Pitfall 3 mitigation: `packages: write` is REQUIRED for ghcr.io OCI push;
   # the default `secrets.GITHUB_TOKEN` does NOT have this scope unless declared
@@ -231,7 +329,7 @@ jobs:
   chart-publish:
     name: Publish Helm charts to OCI registry (ghcr.io)
     if: ${{ !contains(github.ref, '-rc.') }}
-    needs: release
+    needs: [build-images, release]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
