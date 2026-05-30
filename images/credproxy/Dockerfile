@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build the credproxy sidecar binary.
 # Invoked from REPO ROOT:
 #   docker build -t ghcr.io/jsquirrelz/tide-credproxy:v0.1.0-dev \
@@ -12,14 +13,15 @@ WORKDIR /workspace
 
 # Cache the dependency layer before copying source.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs (see .dockerignore for exclusions).
 COPY cmd/credproxy/ cmd/credproxy/
 COPY internal/credproxy/ internal/credproxy/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/credproxy \
       ./cmd/credproxy

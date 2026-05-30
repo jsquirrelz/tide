@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build the stub-subagent binary.
 # Invoked from REPO ROOT:
 #   docker build -t ghcr.io/jsquirrelz/tide-stub-subagent:test \
@@ -12,14 +13,15 @@ WORKDIR /workspace
 
 # Cache the dependency layer before copying source.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs (see .dockerignore for exclusions).
 COPY pkg/dispatch/ pkg/dispatch/
 COPY cmd/stub-subagent/ cmd/stub-subagent/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/stub-subagent \
       ./cmd/stub-subagent

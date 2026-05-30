@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # TIDE dashboard image (Phase 4 D-D2 / Phase 4.1 Plan 14 UAT closeout shim).
 #
 # This Dockerfile is the operator-facing dashboard container. It compiles
@@ -20,11 +21,12 @@ ARG TARGETARCH
 WORKDIR /workspace
 COPY go.mod go.mod
 COPY go.sum go.sum
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o dashboard ./cmd/dashboard
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o dashboard ./cmd/dashboard
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /

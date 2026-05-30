@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build the tide-push binary.
 # Invoked from REPO ROOT:
 #   docker build -t ghcr.io/jsquirrelz/tide-push:test \
@@ -12,7 +13,7 @@ WORKDIR /workspace
 
 # Cache the dependency layer before copying source.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs (see .dockerignore for exclusions).
 # pkg/dispatch is brought in transitively by pkg/git / internal/gitleaks
@@ -25,7 +26,8 @@ COPY cmd/tide-push/ cmd/tide-push/
 # go-git/v5 is pure-Go and works on distroless/static (no /bin/git
 # shell-out, no CA bundle needed — go-git uses Go's crypto/tls).
 # gitleaks v8 is also pure-Go.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/tide-push \
       ./cmd/tide-push

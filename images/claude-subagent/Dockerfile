@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build the claude-subagent runtime image.
 # Invoked from REPO ROOT:
 #   docker build -t ghcr.io/jsquirrelz/tide-claude-subagent:test \
@@ -12,7 +13,7 @@ WORKDIR /workspace
 
 # Cache the dependency layer before copying source.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs (see .dockerignore for exclusions).
 COPY pkg/dispatch/ pkg/dispatch/
@@ -22,7 +23,8 @@ COPY pkg/git/ pkg/git/
 COPY cmd/claude-subagent/ cmd/claude-subagent/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
       -o /out/claude-subagent \
       ./cmd/claude-subagent
@@ -36,7 +38,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
 # Host configuration directories are not bind-mounted (CLAUDE.md anti-pattern).
 FROM node:22-slim
 
-RUN npm install -g @anthropic-ai/claude-code@2.1.142
+RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.142
 
 COPY --from=builder /out/claude-subagent /usr/local/bin/claude-subagent
 
