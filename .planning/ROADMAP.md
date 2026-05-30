@@ -21,6 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Up-Stack Reconcilers, Git Integration, Real Subagent, Resumption** — Plan/Phase/Milestone/Project reconcilers, `pkg/git` with HTTPS+PAT and gitleaks, real Claude-Code-backed subagent replaces stub, chaos-resume acceptance test proves indegree+completed-set resumption
 - [ ] **Phase 4: Gates, Observability, Dashboard, CLI** — Per-level gate policy, structured logs + Prometheus + OTel/OpenInference, two-DAG read-only dashboard, `tide` CLI
 - [ ] **Phase 5: Distribution & Self-Hosting Acceptance** — Helm chart, Apache 2.0, docs, external-operator dry-run, fresh kind + helm install + project apply drives this repo's next milestone
+- [ ] **Phase 6: v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation** — Multi-arch Docker image build + push for all 6 chart-referenced components, chart values.yaml tag-alignment SOT fix, dry-run-v1 cert-manager prereq fix, image-load fallback for local cluster acceptance, BOOT-04 end-to-end revalidation, README + INSTALL.md ship-state corrections
 
 ## Phase Details
 
@@ -289,6 +290,12 @@ Plans:
 **Wave 6** *(depends on all 16)*
 - [x] 05-17-PLAN.md — Phase 5 closeout (ROADMAP + STATE update + 05-SUMMARY.md)
 
+### Phase 6: v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation
+**Goal**: TBD — see `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for scope. Phase opens with the bookkeeping landed by quick task `260530-hrc` (this commit). Final goal + requirements + plans are authored by `/gsd-spec-phase 06` + `/gsd-discuss-phase 06` + `/gsd-plan-phase 06` in subsequent sessions.
+**Depends on**: Phase 5
+**Requirements**: TBD
+**Plans:** 0/0 (planning)
+
 
 ## Progress
 
@@ -304,5 +311,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
+| 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 0/0 (planning) | Not started | - |
 
-All 8 phases complete — TIDE v1.0 ship-ready.
+8 of 9 milestone phases complete — Phase 6 in planning (v1.0 image-publish pipeline + ship-readiness revalidation). See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for Phase 6 scope-of-record.
