@@ -679,17 +679,22 @@ make helm    # runs bash hack/helm/augment-tide-chart.sh which cp's the SOT to c
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **DinD heredoc split for dry-run-v1 image-load**
    - What we know: `dry-run-v1.sh` runs everything inside one `docker run` heredoc. The kind cluster is created inside DinD. The outer script can reach the kind cluster via `--network host` + `/var/run/docker.sock` mount.
    - What's unclear: The exact split point. Option A — call `load-images-if-needed.sh` from outside the DinD run, between two `docker run` invocations (split the heredoc). Option B — pass images into the DinD container pre-loaded using `kind load` from outside (the outer script creates the kind cluster first, then loads images, then runs the inner pipeline in DinD). Option C — skip image-load in `dry-run-v1.sh` for the $0 case (since `dry-run-v1.sh` targets the `v*-rc.*` gate, images may be published at that point).
    - Recommendation: Option C is simplest for the rc-tag use case (images should be pushed before tagging rc). For the pre-publish local developer case, Option A (split heredoc) is cleanest. The planner should pick one and document it.
+   - RESOLVED: Plan 04 Task 3 — Option A (split heredoc). The single DinD `docker run` heredoc is split into two passes; the outer script calls `load-images-if-needed.sh` between Pass 1 (cluster create) and Pass 2 (cert-manager + helm install + kubectl apply + wait).
 
 2. **`project.yaml` stub-subagent tag inconsistency (A7)**
    - What we know: `examples/projects/small/project.yaml` line 49 says `v1.0.0` (with `v`). After CHART-01 the chart values resolve to `1.0.0` (no `v`).
    - What's unclear: Whether to fix the project.yaml tag to `1.0.0` (CHART-01 consistency) or build+load both tags.
    - Recommendation: Fix `project.yaml` to use `1.0.0` (matches appVersion convention). The `v` prefix was likely a copy-paste from goreleaser tag naming. This is a small additional edit scoped to `examples/projects/small/project.yaml`.
+   - RESOLVED: Plan 01 Task 1 — `examples/projects/small/project.yaml` tag changed `v1.0.0` → `1.0.0` (consistent with appVersion convention; single tag used by both chart and project.yaml).
+
+3. **$0 acceptance mode — `make acceptance-v1-smoke` vs `ACCEPTANCE_SAMPLE=small`**
+   - RESOLVED: Plan 04/06 — both knobs are supported. `ACCEPTANCE_SAMPLE=small` is the canonical env var controlling $0 mode in `acceptance-v1.sh`; `make acceptance-v1-smoke` is the Makefile convenience target that sets `ACCEPTANCE_SAMPLE=small` and invokes the script. `ACCEPTANCE_SAMPLE=small` is the $0 entry point.
 
 ---
 
