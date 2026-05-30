@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: in_progress
-stopped_at: Phase 6 opened — v1.0 image-publish pipeline + acceptance revalidation in planning
-last_updated: "2026-05-30T16:56:17.000Z"
-last_activity: 2026-05-30 -- Quick task 260530-hrc (Open Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation): today's BOOT-04 retry second cascade (BG task bs3ntw3rt at 2026-05-30T16:25:00Z) made it past the morning cert-manager prereq fix (260530-h2h, commits adb1053 + 7d3af9d) but timed out at `kubectl wait deploy/tide-controller-manager`. `kubectl describe pod` showed tide-controller-manager Pending + tide-dashboard ImagePullBackOff. Root cause — `.goreleaser.yaml` builds only the tide CLI binary (no `dockers:` section, no `docker_manifests:`); no `.github/workflows/*.yaml` publishes the 6 component images `charts/tide/values.yaml` references; plus chart values.yaml hardcodes 5 component tags at `v0.1.0-dev` (controllerManager:39, stubSubagent:140, credProxy:144, tidePush:155, claudeSubagent:165) while dashboard defaults to `.Chart.AppVersion` (`1.0.0`, line 244) — neither tag exists on ghcr.io. Phase 5's claim of "v1.0 ship-ready" was premature; D-A4 operator-only BOOT-04 didn't run end-to-end until today. Phase 6 opened to plug the gap; this quick task landed the planning bookkeeping (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference). SPEC/DISCUSS/PLAN/EXECUTE cycles to follow in subsequent sessions. See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for scope-of-record.
+status: planning
+stopped_at: Phase 6 context gathered
+last_updated: "2026-05-30T17:31:04.141Z"
+last_activity: "2026-05-30 -- Quick task 260530-hrc opened Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation. ROADMAP carries new Phase 6 row + STUB section (Goal: TBD pointing forward to 06-FINDINGS.md); STATE.md frontmatter reframed (8/9, percent 88, in_progress); 06-FINDINGS.md authored as scope-of-record for SPEC/DISCUSS/PLAN to consume next session; Phase 5 deferred-items.md appended with cascade-2 back-reference."
 progress:
   total_phases: 9
   completed_phases: 8
@@ -156,6 +156,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-30T16:56:17.000Z
-Stopped at: Phase 6 opened (quick task 260530-hrc); ready for /gsd-spec-phase 06 in next session
-Resume file: .planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md
+Last session: 2026-05-30T17:31:04.070Z
+Stopped at: Phase 6 context gathered
+Resume file: .planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-CONTEXT.md
