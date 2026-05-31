@@ -260,6 +260,16 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	// The sidecar MUST have RestartPolicy Always to mark it as a native sidecar — this is the
 	// K8s 1.33 marker that causes the Job to complete when the main container exits, while
 	// kubelet terminates the sidecar in reverse spec order (RESEARCH.md Pattern 2).
+	//
+	// cascade-13: credproxy injection is gated on a provider secret. The proxy's job is to
+	// firewall + authenticate real provider calls (D-C1); with no ProviderSecretRef there is
+	// no upstream to proxy and credproxy's requireEnv("ANTHROPIC_API_KEY") would crash the pod
+	// (Init:CrashLoopBackOff). When absent, we skip credproxy AND the cert-shared volume/mount
+	// + the subagent's cert env so the PodSpec stays valid (no mount → missing-volume API error)
+	// and coherent (no dangling SSL_CERT_FILE pointing at an empty emptyDir). The $0 stub
+	// subagent makes no provider call, so dropping the localhost base-url plumbing is harmless.
+	credproxyEnabled := opts.Project != nil && opts.Project.Spec.ProviderSecretRef != ""
+
 	credproxy := corev1.Container{
 		Name:  ContainerNameCredproxy,
 		Image: opts.CredproxyImage,
@@ -317,33 +327,42 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 
 	// 7. Build the main subagent container. The subagent receives only the signed token
 	// (not the raw provider secret) — D-C4 secret isolation contract.
-	subagent := corev1.Container{
-		Name:       ContainerNameSubagent,
-		Image:      opts.SubagentImage,
-		WorkingDir: "/workspace",
-		Env: []corev1.EnvVar{
-			{Name: "TIDE_TASK_UID", Value: envelopeUID},
+	subagentEnv := []corev1.EnvVar{
+		{Name: "TIDE_TASK_UID", Value: envelopeUID},
+		// D-C1: signed token replaces the real API key in the subagent process.
+		{Name: "ANTHROPIC_API_KEY", Value: opts.SignedToken},
+		{Name: "ANTHROPIC_AUTH_TOKEN", Value: opts.SignedToken},
+	}
+	subagentMounts := []corev1.VolumeMount{
+		{
+			Name:      VolumeProjectWorkspace,
+			MountPath: "/workspace",
+			SubPath:   subPath,
+		},
+	}
+	// cascade-13: only wire the localhost-credproxy plumbing (base-url + cert trust + cert
+	// mount) when credproxy is actually injected. Without it, SSL_CERT_FILE would point at an
+	// empty emptyDir and the cert mount would reference a removed volume (hard API error).
+	if credproxyEnabled {
+		subagentEnv = append(subagentEnv,
 			// D-C1: subagent points to the localhost credproxy — never reaches Anthropic directly.
-			{Name: "ANTHROPIC_BASE_URL", Value: "https://127.0.0.1:8443"},
-			// D-C1: signed token replaces the real API key in the subagent process.
-			{Name: "ANTHROPIC_API_KEY", Value: opts.SignedToken},
-			{Name: "ANTHROPIC_AUTH_TOKEN", Value: opts.SignedToken},
+			corev1.EnvVar{Name: "ANTHROPIC_BASE_URL", Value: "https://127.0.0.1:8443"},
 			// Trust the sidecar's self-signed cert for both Node.js and Go runtimes.
-			{Name: "SSL_CERT_FILE", Value: "/etc/tide/proxy/ca.crt"},
-			{Name: "NODE_EXTRA_CA_CERTS", Value: "/etc/tide/proxy/ca.crt"},
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      VolumeProjectWorkspace,
-				MountPath: "/workspace",
-				SubPath:   subPath,
-			},
-			{
-				Name:      VolumeCertShared,
-				MountPath: "/etc/tide/proxy",
-				ReadOnly:  true,
-			},
-		},
+			corev1.EnvVar{Name: "SSL_CERT_FILE", Value: "/etc/tide/proxy/ca.crt"},
+			corev1.EnvVar{Name: "NODE_EXTRA_CA_CERTS", Value: "/etc/tide/proxy/ca.crt"},
+		)
+		subagentMounts = append(subagentMounts, corev1.VolumeMount{
+			Name:      VolumeCertShared,
+			MountPath: "/etc/tide/proxy",
+			ReadOnly:  true,
+		})
+	}
+	subagent := corev1.Container{
+		Name:         ContainerNameSubagent,
+		Image:        opts.SubagentImage,
+		WorkingDir:   "/workspace",
+		Env:          subagentEnv,
+		VolumeMounts: subagentMounts,
 		// D-A4: subagent has zero K8s verbs — no EnvFrom from K8s Secrets.
 		// D-C4: raw API key is NOT in subagent's env or EnvFrom.
 		SecurityContext: &corev1.SecurityContext{
@@ -357,30 +376,38 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	}
 
 	// 8. Compose the PodSpec.
+	// cascade-13: credproxy (native sidecar) and the cert-shared emptyDir it produces are
+	// included together or skipped together. credproxy is the sole producer of the cert
+	// volume; gating both keeps the PodSpec valid (no mount references a removed volume).
+	initContainers := []corev1.Container{envelopeWriter}
+	volumes := []corev1.Volume{
+		{
+			Name: VolumeProjectWorkspace,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: opts.PVCName,
+				},
+			},
+		},
+	}
+	if credproxyEnabled {
+		initContainers = append(initContainers, credproxy)
+		volumes = append(volumes, corev1.Volume{
+			Name: VolumeCertShared,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: ServiceAccountSubagent,
 		SecurityContext: &corev1.PodSecurityContext{
 			FSGroup: ptr.To(int64(1000)),
 		},
-		InitContainers: []corev1.Container{envelopeWriter, credproxy},
+		InitContainers: initContainers,
 		Containers:     []corev1.Container{subagent},
-		Volumes: []corev1.Volume{
-			{
-				Name: VolumeProjectWorkspace,
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: opts.PVCName,
-					},
-				},
-			},
-			{
-				Name: VolumeCertShared,
-				VolumeSource: corev1.VolumeSource{
-					EmptyDir: &corev1.EmptyDirVolumeSource{},
-				},
-			},
-		},
-		RestartPolicy: corev1.RestartPolicyNever,
+		Volumes:        volumes,
+		RestartPolicy:  corev1.RestartPolicyNever,
 	}
 
 	// 9. Compose the Job.

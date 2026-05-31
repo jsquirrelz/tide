@@ -110,6 +110,44 @@ func buildPlannerTestOptions() BuildOptions {
 	}
 }
 
+// buildNoSecretTestOptions constructs executor BuildOptions for a Project with NO
+// ProviderSecretRef — the $0 acceptance / stub path (cascade-13). credproxy must be
+// absent in this configuration.
+func buildNoSecretTestOptions() BuildOptions {
+	opts := buildTestOptions()
+	// Clone the Project so we don't mutate the shared fixture, and clear the secret ref.
+	project := *opts.Project
+	project.Spec.ProviderSecretRef = ""
+	opts.Project = &project
+	opts.SecretUID = ""
+	return opts
+}
+
+// validatePodSpecVolumeMountRefs asserts that every VolumeMount in every container and
+// initContainer references a volume that is declared in spec.Volumes. A mount pointing at
+// a missing volume is a hard K8s API validation error — this catches the cascade-13 failure
+// mode where gating credproxy could orphan the cert-shared mount.
+func validatePodSpecVolumeMountRefs(t *testing.T, spec corev1.PodSpec) {
+	t.Helper()
+	declared := map[string]bool{}
+	for _, v := range spec.Volumes {
+		declared[v.Name] = true
+	}
+	check := func(c corev1.Container) {
+		for _, vm := range c.VolumeMounts {
+			if !declared[vm.Name] {
+				t.Errorf("container %q mounts volume %q which is not declared in spec.Volumes (invalid PodSpec)", c.Name, vm.Name)
+			}
+		}
+	}
+	for _, c := range spec.InitContainers {
+		check(c)
+	}
+	for _, c := range spec.Containers {
+		check(c)
+	}
+}
+
 func TestBuildJobSpec_Name_FollowsDeterministicFormat(t *testing.T) {
 	opts := buildTestOptions()
 	job := BuildJobSpec(opts)
@@ -589,6 +627,158 @@ func TestBuildJobSpec_Planner_ContainerTopologyMatchesExecutor(t *testing.T) {
 	executorContainers := len(executorJob.Spec.Template.Spec.Containers)
 	if plannerContainers != executorContainers {
 		t.Errorf("main container count mismatch: planner=%d executor=%d (should match Kind-invariant PodSpec)", plannerContainers, executorContainers)
+	}
+}
+
+// ---- cascade-13: credproxy injection gated on ProviderSecretRef ----
+
+// TestBuildJobSpec_Credproxy_PresentWhenProviderSecretRefSet verifies that the
+// credproxy native sidecar IS injected when the Project carries a ProviderSecretRef,
+// and that the cert-shared volume + subagent cert plumbing accompany it.
+func TestBuildJobSpec_Credproxy_PresentWhenProviderSecretRefSet(t *testing.T) {
+	opts := buildTestOptions() // has ProviderSecretRef set
+	if opts.Project.Spec.ProviderSecretRef == "" {
+		t.Fatal("test fixture invariant broken: expected a ProviderSecretRef")
+	}
+	job := BuildJobSpec(opts)
+	spec := job.Spec.Template.Spec
+
+	// credproxy initContainer present.
+	var hasCredproxy bool
+	for _, c := range spec.InitContainers {
+		if c.Name == ContainerNameCredproxy {
+			hasCredproxy = true
+		}
+	}
+	if !hasCredproxy {
+		t.Error("credproxy initContainer should be present when ProviderSecretRef is set")
+	}
+
+	// cert-shared volume present.
+	var hasCertVolume bool
+	for _, v := range spec.Volumes {
+		if v.Name == VolumeCertShared {
+			hasCertVolume = true
+		}
+	}
+	if !hasCertVolume {
+		t.Errorf("volume %q should be present when credproxy is injected", VolumeCertShared)
+	}
+
+	// subagent cert mount + ANTHROPIC_BASE_URL present.
+	subagent := spec.Containers[0]
+	var hasCertMount bool
+	for _, vm := range subagent.VolumeMounts {
+		if vm.Name == VolumeCertShared {
+			hasCertMount = true
+		}
+	}
+	if !hasCertMount {
+		t.Errorf("subagent should mount %q when credproxy is injected", VolumeCertShared)
+	}
+	var hasBaseURL bool
+	for _, e := range subagent.Env {
+		if e.Name == "ANTHROPIC_BASE_URL" {
+			hasBaseURL = true
+		}
+	}
+	if !hasBaseURL {
+		t.Error("subagent should have ANTHROPIC_BASE_URL when credproxy is injected")
+	}
+
+	validatePodSpecVolumeMountRefs(t, spec)
+}
+
+// TestBuildJobSpec_Credproxy_AbsentWhenNoProviderSecretRef verifies the cascade-13 fix:
+// with no ProviderSecretRef ($0 stub path), credproxy and the cert-shared volume/mount +
+// subagent cert env are all skipped, and the PodSpec remains valid (no orphaned mount).
+func TestBuildJobSpec_Credproxy_AbsentWhenNoProviderSecretRef(t *testing.T) {
+	opts := buildNoSecretTestOptions()
+	if opts.Project.Spec.ProviderSecretRef != "" {
+		t.Fatal("test fixture invariant broken: expected empty ProviderSecretRef")
+	}
+	job := BuildJobSpec(opts)
+	spec := job.Spec.Template.Spec
+
+	// Only envelope-writer should remain as an initContainer.
+	if len(spec.InitContainers) != 1 {
+		t.Fatalf("expected exactly 1 initContainer (envelope-writer only), got %d", len(spec.InitContainers))
+	}
+	if spec.InitContainers[0].Name != ContainerNameEnvelopeWriter {
+		t.Errorf("sole initContainer = %q; want %q", spec.InitContainers[0].Name, ContainerNameEnvelopeWriter)
+	}
+	for _, c := range spec.InitContainers {
+		if c.Name == ContainerNameCredproxy {
+			t.Error("credproxy initContainer must be ABSENT when ProviderSecretRef is empty")
+		}
+	}
+
+	// cert-shared volume must be absent.
+	for _, v := range spec.Volumes {
+		if v.Name == VolumeCertShared {
+			t.Errorf("volume %q must be ABSENT when credproxy is skipped", VolumeCertShared)
+		}
+	}
+
+	// subagent must NOT mount cert-shared and must NOT carry cert/base-url env.
+	subagent := spec.Containers[0]
+	for _, vm := range subagent.VolumeMounts {
+		if vm.Name == VolumeCertShared {
+			t.Errorf("subagent must not mount %q when credproxy is skipped (orphaned mount → invalid PodSpec)", VolumeCertShared)
+		}
+	}
+	for _, e := range subagent.Env {
+		if e.Name == "ANTHROPIC_BASE_URL" || e.Name == "SSL_CERT_FILE" || e.Name == "NODE_EXTRA_CA_CERTS" {
+			t.Errorf("subagent must not carry %q when credproxy is skipped", e.Name)
+		}
+	}
+	// The signed token env must still be present (subagent identity is unchanged).
+	var hasToken bool
+	for _, e := range subagent.Env {
+		if e.Name == "ANTHROPIC_API_KEY" && e.Value == opts.SignedToken {
+			hasToken = true
+		}
+	}
+	if !hasToken {
+		t.Error("subagent should still carry ANTHROPIC_API_KEY (signed token) even without credproxy")
+	}
+
+	// PodSpec must be valid: no mount references a missing volume.
+	validatePodSpecVolumeMountRefs(t, spec)
+
+	// envelope-writer (the surviving init container) must still mount the workspace.
+	var hasWorkspaceMount bool
+	for _, vm := range spec.InitContainers[0].VolumeMounts {
+		if vm.Name == VolumeProjectWorkspace {
+			hasWorkspaceMount = true
+		}
+	}
+	if !hasWorkspaceMount {
+		t.Errorf("envelope-writer must still mount %q in the no-secret path", VolumeProjectWorkspace)
+	}
+}
+
+// TestBuildJobSpec_PodSpecValid_BothSecretConfigurations is a belt-and-suspenders check
+// that the rendered PodSpec validates (no mount→missing-volume) WITH and WITHOUT a
+// ProviderSecretRef, for both executor and planner Kinds.
+func TestBuildJobSpec_PodSpecValid_BothSecretConfigurations(t *testing.T) {
+	cases := map[string]BuildOptions{
+		"executor-with-secret":    buildTestOptions(),
+		"executor-without-secret": buildNoSecretTestOptions(),
+		"planner-with-secret":     buildPlannerTestOptions(),
+		"planner-without-secret": func() BuildOptions {
+			o := buildPlannerTestOptions()
+			p := *o.Project
+			p.Spec.ProviderSecretRef = ""
+			o.Project = &p
+			return o
+		}(),
+	}
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			job := BuildJobSpec(opts)
+			validatePodSpecVolumeMountRefs(t, job.Spec.Template.Spec)
+		})
 	}
 }
 

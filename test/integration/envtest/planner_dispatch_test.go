@@ -67,6 +67,11 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 					RepoURL:        "https://github.com/example/pd-test.git",
 					CredsSecretRef: "pd-test-creds",
 				},
+				// cascade-13: credproxy is now gated on ProviderSecretRef. This spec exercises
+				// the full dispatch contract INCLUDING the credproxy native sidecar, so the
+				// Project must carry a provider secret ref (the $0/no-secret path is covered by
+				// the jobspec unit tests' present/absent assertions).
+				ProviderSecretRef: "pd-test-provider-secret",
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
