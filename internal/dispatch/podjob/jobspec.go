@@ -179,7 +179,10 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 
 	// 2. Build labels + Job name — the only per-Kind divergence (Phase 04.1 P1.2).
 	//    Shared label: project-uid, attempt, provider-secret-uid.
-	//    Kind-specific: role, level, <level>-uid (planner) or task-uid (executor).
+	//    Kind-specific: role, level, <level>-uid, task-uid (planner) or task-uid (executor).
+	//    Planner pods carry BOTH tideproject.k8s/<level>-uid AND tideproject.k8s/task-uid
+	//    (set to parentUID) so that PodStatusEnvelopeReader.ReadOut, which queries by
+	//    task-uid, finds planner pods without a separate label key per level.
 	var jobName string
 	var parentUID string
 	labels := map[string]string{
@@ -196,6 +199,9 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		labels["tideproject.k8s/level"] = opts.Level
 		if opts.Level != "" && parentUID != "" {
 			labels[fmt.Sprintf("tideproject.k8s/%s-uid", opts.Level)] = parentUID
+			// PodStatusEnvelopeReader queries by task-uid; planner pods also carry
+			// this label (keyed by parentUID) so the shared reader finds them.
+			labels["tideproject.k8s/task-uid"] = parentUID
 		}
 	default: // JobKindExecutor (and legacy callers with Kind=="")
 		if opts.Task != nil {

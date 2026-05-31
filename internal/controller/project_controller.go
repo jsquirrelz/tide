@@ -157,10 +157,10 @@ type ProjectReconciler struct {
 
 	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
 	EnvReader            podjob.EnvelopeReader
-	SigningKey            []byte
-	SubagentImage         string
-	CredproxyImage        string
-	HelmProviderDefaults  ProviderDefaults
+	SigningKey           []byte
+	SubagentImage        string
+	CredproxyImage       string
+	HelmProviderDefaults ProviderDefaults
 
 	// Recorder emits K8s Events for observable budget and bypass transitions
 	// (T-02-10-05 — audit trail for AbsoluteCapReached; T-02-10-01 — bypass).
@@ -649,6 +649,25 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	case tideprojectv1alpha1.PhaseComplete,
 		tideprojectv1alpha1.PhaseInitFailed:
 		return ctrl.Result{}, nil
+	}
+
+	// Step 1b: Idempotency guard — skip dispatch when the Project already owns
+	// >=1 Milestone. Once the label fix makes the envelope round-trip succeed,
+	// Projects that already have a pre-applied Milestone (push-lease, chaos-resume,
+	// wave-test fixtures) would otherwise author a spurious extra Milestone.
+	// This mirrors BoundaryDetected's ownership check without the all-Succeeded
+	// requirement — we just need to know children exist.
+	{
+		var existingMilestones tideprojectv1alpha1.MilestoneList
+		if lErr := r.List(ctx, &existingMilestones, client.InNamespace(project.Namespace)); lErr != nil {
+			return ctrl.Result{}, fmt.Errorf("idempotency: list milestones: %w", lErr)
+		}
+		for i := range existingMilestones.Items {
+			if metav1.IsControlledBy(&existingMilestones.Items[i], project) {
+				// Project already has at least one owned Milestone — planner already ran.
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)

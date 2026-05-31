@@ -433,7 +433,10 @@ func TestBuildJobSpec_Planner_NameFollowsPlannerFormat(t *testing.T) {
 }
 
 // TestBuildJobSpec_Planner_LabelsContainRolePlannerAndLevel verifies the planner
-// label set: role=planner, level=milestone, milestone-uid=<uid>.
+// label set: role=planner, level=milestone, milestone-uid=<uid>, task-uid=<uid>.
+// Planner pods carry task-uid (equal to parentUID) so that PodStatusEnvelopeReader,
+// which queries by task-uid, can find planner pods using the same code path as executor
+// pods. Both the level-specific label and task-uid are required.
 func TestBuildJobSpec_Planner_LabelsContainRolePlannerAndLevel(t *testing.T) {
 	opts := buildPlannerTestOptions()
 	job := BuildJobSpec(opts)
@@ -447,9 +450,10 @@ func TestBuildJobSpec_Planner_LabelsContainRolePlannerAndLevel(t *testing.T) {
 	if labels["tideproject.k8s/milestone-uid"] != "milestone-uid-test" {
 		t.Errorf("planner job label milestone-uid = %q; want \"milestone-uid-test\"", labels["tideproject.k8s/milestone-uid"])
 	}
-	// executor-specific task-uid label MUST NOT appear on planner Jobs
-	if _, ok := labels["tideproject.k8s/task-uid"]; ok {
-		t.Error("planner job label should not contain tideproject.k8s/task-uid")
+	// Planner pods MUST also carry task-uid (=parentUID) so PodStatusEnvelopeReader
+	// finds them via the shared label query. This dual-label is intentional.
+	if labels["tideproject.k8s/task-uid"] != "milestone-uid-test" {
+		t.Errorf("planner job label task-uid = %q; want \"milestone-uid-test\" (parentUID for shared reader lookup)", labels["tideproject.k8s/task-uid"])
 	}
 }
 

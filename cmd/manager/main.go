@@ -339,7 +339,7 @@ func main() {
 		// can dispatch the project-level planner Job (D-A2 5th dispatch site).
 		// Values are the same variables already computed above for MilestoneReconciler.
 		EnvReader:            envReader,
-		SigningKey:            signingKey,
+		SigningKey:           signingKey,
 		SubagentImage:        subagentImage,
 		CredproxyImage:       credproxyImage,
 		HelmProviderDefaults: helmProviderDefaults,
