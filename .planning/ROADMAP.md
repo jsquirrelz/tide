@@ -320,7 +320,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
 | 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 6/6 | Complete | 2026-05-30 |
-| 7. Project-to-Milestone Authoring and Self-Bootstrap | 1/6 | In Progress|  |
+| 7. Project-to-Milestone Authoring and Self-Bootstrap | 2/6 | In Progress|  |
 
 8 of 9 milestone phases complete — Phase 7 planning complete; executing to close cascade-7 (v1.0 ship blocker).
 
@@ -330,7 +330,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 **Requirements**: REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7 (REQ-7 splits into REQ-7a ValidationState stamp + REQ-7b patchPlanSucceeded)
 **Depends on:** Phase 3 (down-stack Milestone→Phase→Plan→Task reconcilers — already wired), Phase 6 (image-publish pipeline — shipped)
-**Plans:** 1/6 plans executed
+**Plans:** 2/6 plans executed
 
 **Acceptance gate:** `make acceptance-v1-smoke` reaches `Project status.phase=Complete` at `$0` (no API key). On green, v1.0 is ship-ready.
 
@@ -339,7 +339,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 Plans:
 **Wave 0** *(parallel — test scaffolds before implementation)*
 - [x] 07-01-PLAN.md — Wave 0 test scaffolds: stub-subagent planner unit test (RED) + bare-project.yaml fixture (REQ-3, REQ-5)
-- [ ] 07-02-PLAN.md — Wave 0 Layer B integration spec: bare_project_test.go asserting full cascade + Project=Complete (REQ-1, REQ-2, REQ-4, REQ-5, REQ-7a, REQ-7b)
+- [x] 07-02-PLAN.md — Wave 0 Layer B integration spec: bare_project_test.go asserting full cascade + Project=Complete (REQ-1, REQ-2, REQ-4, REQ-5, REQ-7a, REQ-7b)
 
 **Wave 1** *(blocked on Wave 0 — unit test must exist before implementation)*
 - [ ] 07-03-PLAN.md — Stub planner-mode ChildCRD tree (dispatchPlannerSuccess) + parentName injection in BuildPlannerEnvelope (REQ-3)

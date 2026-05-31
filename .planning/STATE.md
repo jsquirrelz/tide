@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
 stopped_at: Phase 7 context gathered
-last_updated: "2026-05-31T06:06:21.269Z"
+last_updated: "2026-05-31T06:10:39.238Z"
 last_activity: 2026-05-31
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 12
-  completed_plans: 7
-  percent: 58
+  completed_plans: 8
+  percent: 67
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 ## Current Position
 
 Phase: 07 (project-to-milestone-authoring-and-self-bootstrap) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-05-31
 
-Progress: [██████░░░░] 58%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -132,6 +132,7 @@ Recent decisions affecting current work:
 - [Phase 02.2]: Secret namespace-scoping (cascade-11) — ensureSigningKeySecret(ns) mirrors tide-system/tide-signing-key into target namespace via kubectl get secret -o jsonpath + base64-identical data. controllerSigningKeyData() centralizes the read; createNamespace(ns) + applyController() both call it. CRDs-only mode degrades to GinkgoWriter warning (not Fail()).
 - [Phase 02.2]: 02.2-12-VERIFICATION.md records chain_status: empirically_closed — 7/7 Layer B PASS (clean + rerun), 18/18 Layer A PASS, inner wall 355.20s, pvc_not_found_event_count=0, signing_key_not_found_event_count=0, deadline_exceeded_count=0.
 - [Phase ?]: CHART-01: 5 TIDE component tags in SOT changed v0.1.0-dev to empty string so helm default .Chart.AppVersion resolves them to 1.0.0; busybox 1.36 preserved
+- [Phase ?]: Layer B bare-project cascade spec (07-02)
 
 ### Pending Todos
 
@@ -163,6 +164,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-05-31T06:06:21.237Z
+Last session: 2026-05-31T06:10:39.204Z
 Stopped at: Phase 7 context gathered
 Resume file: None
