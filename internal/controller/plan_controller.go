@@ -470,6 +470,35 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	return ctrl.Result{}, nil
 }
 
+// patchPlanSucceeded sets Plan.Status.Phase=Succeeded and stamps the
+// ConditionSucceeded condition. Called from reconcileWaveMaterialization when
+// BoundaryDetected(plan, "Task") returns true (REQ-7b). Mirrors
+// milestone_controller.go's patchMilestoneSucceeded pattern.
+func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.Phase = "Succeeded"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             "TasksCompleted",
+		Message:            "All owned Tasks reached Succeeded; Plan complete",
+		LastTransitionTime: metav1.Now(),
+	})
+	// Clear any prior WaveOrLevelPaused state so the transition is
+	// visible to operators tailing conditions (mirrors patchMilestoneSucceeded).
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Message:            "Plan complete; all Tasks Succeeded",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
 // patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
 // Used by the Plan 04-05 gate-policy hook (reject short-circuit).
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
@@ -623,6 +652,22 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 
 	if err := r.stampTaskLabels(ctx, taskList.Items, layers, projectName); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// REQ-7b: check whether all owned Tasks have Succeeded. When true, stamp
+	// Plan.Status.Phase=Succeeded so PhaseReconciler.handleJobCompletion can
+	// observe Plan=Succeeded via gates.BoundaryDetected(ph, "Plan") and advance
+	// the Phase. The Succeeded short-circuit in reconcilePlannerDispatch (terminal
+	// guard) prevents re-entry on subsequent reconciles. The childless guard in
+	// BoundaryDetected (returns false when 0 Tasks owned) prevents premature
+	// Succeeded before Task dispatch; Owns(&Task{}) re-enqueues this Plan on
+	// every Task status update so the check converges correctly.
+	detected, derr := gates.BoundaryDetected(ctx, r.Client, plan, "Task")
+	if derr != nil {
+		return ctrl.Result{}, derr
+	}
+	if detected {
+		return r.patchPlanSucceeded(ctx, plan)
 	}
 
 	// Plan 04-05 Task 2: PauseBetweenWaves hook. After labels are stamped, check
