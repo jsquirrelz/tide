@@ -802,9 +802,18 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 
 	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
 	// Milestone is in the allowlist (dispatch_helpers.go:80).
+	// cascade-11: race-free idempotency guard at the materialization point —
+	// skip authoring when a child Milestone (by spec.projectRef, or
+	// IsControlledBy fallback) already exists, then CONTINUE to auto-proceed.
 	if len(envOut.ChildCRDs) > 0 {
-		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, project, envOut.ChildCRDs); mErr != nil {
-			return ctrl.Result{}, fmt.Errorf("project planner child CRD materialization failed: %w", mErr)
+		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, project)
+		if gErr != nil {
+			return ctrl.Result{}, gErr
+		}
+		if !already {
+			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, project, envOut.ChildCRDs); mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("project planner child CRD materialization failed: %w", mErr)
+			}
 		}
 	}
 

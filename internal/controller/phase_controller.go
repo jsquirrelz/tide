@@ -325,9 +325,18 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		logger.V(1).Info("no env reader; skipping envelope read", "phase", ph.Name)
 	}
 
+	// cascade-11: race-free idempotency guard at the materialization point —
+	// skip authoring when a child Plan (by spec.phaseRef, or IsControlledBy
+	// fallback) already exists, then CONTINUE to gate/boundary handling.
 	if len(envOut.ChildCRDs) > 0 {
-		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ph, envOut.ChildCRDs); mErr != nil {
-			return r.patchPhaseFailed(ctx, ph, "ChildCRDMaterializationFailed", mErr.Error())
+		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, ph)
+		if gErr != nil {
+			return ctrl.Result{}, gErr
+		}
+		if !already {
+			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ph, envOut.ChildCRDs); mErr != nil {
+				return r.patchPhaseFailed(ctx, ph, "ChildCRDMaterializationFailed", mErr.Error())
+			}
 		}
 	}
 

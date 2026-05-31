@@ -400,9 +400,18 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	}
 
 	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
+	// cascade-11: race-free idempotency guard at the materialization point —
+	// skip authoring when a child Phase (by spec.milestoneRef, or IsControlledBy
+	// fallback) already exists, then CONTINUE to gate/boundary/complete handling.
 	if len(envOut.ChildCRDs) > 0 {
-		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ms, envOut.ChildCRDs); mErr != nil {
-			return r.patchMilestoneFailed(ctx, ms, "ChildCRDMaterializationFailed", mErr.Error())
+		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, ms)
+		if gErr != nil {
+			return ctrl.Result{}, gErr
+		}
+		if !already {
+			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ms, envOut.ChildCRDs); mErr != nil {
+				return r.patchMilestoneFailed(ctx, ms, "ChildCRDMaterializationFailed", mErr.Error())
+			}
 		}
 	}
 

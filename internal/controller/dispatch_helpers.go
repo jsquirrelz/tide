@@ -185,6 +185,85 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 	return envIn, data, nil
 }
 
+// childrenAlreadyMaterialized reports whether the parent already has >=1
+// child CRD of its expected child kind in the parent's namespace, matched
+// by the parent-specRef field (Phase.spec.milestoneRef / Plan.spec.phaseRef /
+// Task.spec.planRef / Milestone.spec.projectRef), with metav1.IsControlledBy
+// as a belt-and-suspenders fallback.
+//
+// cascade-11: the cascade-10 spec-ref idempotency guard covered only the
+// fresh-dispatch path (reconcilePlannerDispatch). The handleJobCompletion →
+// MaterializeChildCRDs path was UNGUARDED, so a Milestone that dispatched its
+// planner Job before its sibling Phase was visible (multi-doc kubectl apply
+// race) would, on planner-Job completion, unconditionally materialize a
+// spurious stub child subtree. Guarding dispatch is racy against not-yet-applied
+// siblings; the guard must live at the race-free materialization point. The
+// parent-specRef is set synchronously at child-apply time (race-free); ownerRef
+// is set asynchronously by the child's reconciler, so IsControlledBy is only a
+// fallback. This is the symmetric completion of the dispatch guards at
+// milestone_controller.go:245 and phase_controller.go:206.
+//
+// bare-Project / genuine self-bootstrap is unaffected: at the first materialize
+// the parent has 0 existing children of the expected kind → guard returns false
+// → the genuine first child is materialized once; a later reconcile finds it by
+// specRef → idempotent skip.
+//
+// parent must be one of *Project, *Milestone, *Phase, or *Plan. Any other type
+// (or a List error) returns (false, err-or-nil) so the caller proceeds to
+// materialize — fail-open preserves bare-Project bootstrap.
+func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent metav1.Object) (bool, error) {
+	ns := parent.GetNamespace()
+	name := parent.GetName()
+
+	switch p := parent.(type) {
+	case *tideprojectv1alpha1.Project:
+		var children tideprojectv1alpha1.MilestoneList
+		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
+			return false, fmt.Errorf("idempotency: list milestones: %w", err)
+		}
+		for i := range children.Items {
+			if children.Items[i].Spec.ProjectRef == name || metav1.IsControlledBy(&children.Items[i], p) {
+				return true, nil
+			}
+		}
+	case *tideprojectv1alpha1.Milestone:
+		var children tideprojectv1alpha1.PhaseList
+		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
+			return false, fmt.Errorf("idempotency: list phases: %w", err)
+		}
+		for i := range children.Items {
+			if children.Items[i].Spec.MilestoneRef == name || metav1.IsControlledBy(&children.Items[i], p) {
+				return true, nil
+			}
+		}
+	case *tideprojectv1alpha1.Phase:
+		var children tideprojectv1alpha1.PlanList
+		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
+			return false, fmt.Errorf("idempotency: list plans: %w", err)
+		}
+		for i := range children.Items {
+			if children.Items[i].Spec.PhaseRef == name || metav1.IsControlledBy(&children.Items[i], p) {
+				return true, nil
+			}
+		}
+	case *tideprojectv1alpha1.Plan:
+		var children tideprojectv1alpha1.TaskList
+		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
+			return false, fmt.Errorf("idempotency: list tasks: %w", err)
+		}
+		for i := range children.Items {
+			if children.Items[i].Spec.PlanRef == name || metav1.IsControlledBy(&children.Items[i], p) {
+				return true, nil
+			}
+		}
+	default:
+		// Unknown parent type — fail open (proceed to materialize). Should
+		// not happen; the four reconcilers pass concrete typed pointers.
+		return false, nil
+	}
+	return false, nil
+}
+
 // MaterializeChildCRDs server-side-creates child CRDs from
 // EnvelopeOut.ChildCRDs.
 //

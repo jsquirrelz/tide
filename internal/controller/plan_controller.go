@@ -386,20 +386,29 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	}
 
 	if len(envOut.ChildCRDs) > 0 {
-		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, plan, envOut.ChildCRDs); mErr != nil {
-			patch := client.MergeFrom(plan.DeepCopy())
-			plan.Status.Phase = "Failed"
-			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionFailed,
-				Status:             metav1.ConditionTrue,
-				Reason:             "ChildCRDMaterializationFailed",
-				Message:            mErr.Error(),
-				LastTransitionTime: metav1.Now(),
-			})
-			if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
-				return ctrl.Result{}, pErr
+		// cascade-11: race-free idempotency guard at the materialization point —
+		// skip authoring when a child Task (by spec.planRef, or IsControlledBy
+		// fallback) already exists, then CONTINUE to ValidationState/Wave handling.
+		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, plan)
+		if gErr != nil {
+			return ctrl.Result{}, gErr
+		}
+		if !already {
+			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, plan, envOut.ChildCRDs); mErr != nil {
+				patch := client.MergeFrom(plan.DeepCopy())
+				plan.Status.Phase = "Failed"
+				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionFailed,
+					Status:             metav1.ConditionTrue,
+					Reason:             "ChildCRDMaterializationFailed",
+					Message:            mErr.Error(),
+					LastTransitionTime: metav1.Now(),
+				})
+				if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
+					return ctrl.Result{}, pErr
+				}
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
 		}
 
 		// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
