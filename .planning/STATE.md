@@ -164,6 +164,7 @@ None yet.
 | 260526-w11 | Phase 5 closeout polish: gofmt cmd/dashboard/api/{plans,tasks}.go + ROADMAP Progress row 16/16 → 17/17 | 2026-05-27 | 489dd71, 1769a60 | [260526-w11-phase-5-closeout-polish-roadmap-16-16-17](./quick/260526-w11-phase-5-closeout-polish-roadmap-16-16-17/) |
 | 260530-h2h | BOOT-04 acceptance-v1 cert-manager prereq fix (script + INSTALL.md prereq subsection; mirrors Layer B integration test pattern) | 2026-05-30 | adb1053, 7d3af9d | [260530-h2h-boot-04-acceptance-v1-cert-manager-prere](./quick/260530-h2h-boot-04-acceptance-v1-cert-manager-prere/) |
 | 260530-hrc | Open Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference) | 2026-05-30 | TBD | [260530-hrc-open-phase-6-v1-0-image-publish-pipeline](./quick/260530-hrc-open-phase-6-v1-0-image-publish-pipeline/) |
+| 260531-oek | Phase 7 cascade-12: chart-template dispatch image tags default to .Chart.AppVersion not "latest" (subagent/credproxy/push/claude) — fixes $0 acceptance ImagePullBackOff stall | 2026-05-31 | 3edceb7 | [260531-oek-fix-cascade-12-chart-template-dispatch-i](./quick/260531-oek-fix-cascade-12-chart-template-dispatch-i/) |
 
 ## Session Continuity
 
