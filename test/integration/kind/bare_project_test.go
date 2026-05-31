@@ -63,10 +63,15 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 
 	BeforeEach(func() {
 		skipIfCRDsOnlyMode()
-		ensureSubagentSA(bareProjectNS)
-		ensureProjectsPVC(bareProjectNS)
-		pvcPrewarmPod(bareProjectNS)
-		ensureSigningKeySecret(bareProjectNS)
+		// createNamespace creates the namespace FIRST, then provisions the
+		// per-namespace SA + tide-projects PVC + signing-key Secret and prewarms
+		// the WaitForFirstConsumer PVC — in the correct order (the same all-in-one
+		// helper push_lease_test.go uses). The previous code called the individual
+		// helpers BEFORE the namespace existed (the fixture's Namespace doc applies
+		// too late, at applyFile below), so each helper silently no-op'd against a
+		// nonexistent namespace and the PVC never bound — the BeforeEach timed out
+		// before the spec body ran.
+		createNamespace(bareProjectNS)
 		Expect(applyFile("testdata/bare-project.yaml")).To(Succeed())
 	})
 
