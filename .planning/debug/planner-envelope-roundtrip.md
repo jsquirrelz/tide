@@ -38,11 +38,19 @@ The cascade-9 idempotency guards (commit, milestone+phase) use `metav1.IsControl
 - cascade-8 fixed (planner envelope round-trip: dual-label + plan Job-watch + provider-secret + project idempotency guard) — commits 728b60a, 3ea86e5.
 - cascade-9 boundary-push placement corrected (guards gate only fresh dispatch) — commit fix(07-09); Layer A boundary-push green. (But the guard is racy for pre-applied children → cascade-10.)
 
-## Outstanding (for the decision)
+## cascade-10 APPLIED (2026-05-31, commit 1fbacad)
 
-- cascade-10: race-free idempotency guard (spec-ref based) so existing pre-applied-Milestone fixtures (chaos-resume, three-task) don't author spurious subtrees.
-- A clean full `make test-int` (14/14) on an adequately-resourced cluster.
-- `make acceptance-v1-smoke` ($0 BOOT-04 ship gate, REQ-6) → Project=Complete — not yet run.
+User chose "apply cascade-10 now, defer env-gated verification." Done: milestone guard now matches `Phase.spec.milestoneRef == ms.Name` (race-free; set synchronously at apply) with IsControlledBy as fallback; phase guard matches `Plan.spec.phaseRef == ph.Name` likewise; plan guard already used the race-free `taskPlanRefIndexKey` field index. **Layer A: 29/29 SUCCESS, exit 0** (gate-approve + boundary-push flows green — confirms the guards don't break reconciler logic). bare-Project flow provably unaffected (0 children at each level → guard never fires → authors once, identical to the proven cascade-8 state).
+
+## Outstanding (env-gated — DEFERRED to a clean/larger environment)
+
+The current test host's Docker VM (7.65GiB) starves the now-heavier full Layer B suite (controller goes unready mid-run → timeouts). These need an adequately-resourced env or fresh session for a reliable signal:
+
+1. Clean full `make test-int` → expect **Layer A 29/29 + Layer B 14/14** (bare-Project passes — proven 4×; chaos-resume + three-task now pass with the race-free guard skipping their pre-applied-Milestone authoring).
+2. `make acceptance-v1-smoke` ($0 BOOT-04 ship gate, REQ-6) → `Project status.phase=Complete`.
+3. On green: v1.0 is ship-ready → tag per the release flow.
+
+All Phase 7 CODE is committed (07-01..07-05 + cascade-8/9/10 fixes). Only env-gated verification + the tag remain.
 
 ---
 
