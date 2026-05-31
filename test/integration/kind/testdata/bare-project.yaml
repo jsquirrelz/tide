@@ -1,0 +1,41 @@
+---
+# bare-project.yaml — Layer B fixture for plan 07-05's bare_project_test.go.
+#
+# Tests the full Project→Milestone→Phase→Plan→Task self-bootstrap at $0
+# (stub). No pre-applied Milestone — the ProjectReconciler authors it via
+# planner Job dispatch (REQ-1..REQ-5). No spec.git — $0 path must not
+# trigger clone/push Jobs (D-04: git guard is
+# project.Spec.Git != nil && project.Spec.Git.RepoURL != "").
+#
+# The subagent image is resolved from the helm chart's --subagent-image
+# Deployment arg (set to the kind-loaded stub image via
+# `helm upgrade --install --set images.stubSubagent.tag=test`). Per-Project
+# spec.subagent.image is intentionally omitted; the controller's
+# Helm-chart default is the stub in the Layer B test environment.
+#
+# W13 note: ownerReferences are OMITTED from this YAML. ProjectReconciler
+# sets them on child CRs via internal/owner.EnsureOwnerRef on first reconcile
+# (against the real Project UID). This is exactly the contract under test.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bare-project-test
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: bare-project
+  namespace: bare-project-test
+spec:
+  targetRepo: "file:///tmp/no-such-repo"
+  budget:
+    absoluteCapCents: 0
+  subagent:
+    model: stub
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
