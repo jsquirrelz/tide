@@ -319,32 +319,36 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 4. Gates, Observability, Dashboard, CLI | 17/17 | Complete | 2026-05-21 |
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
-| 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 4/6 | In Progress|  |
+| 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 6/6 | Complete | 2026-05-30 |
+| 7. Project-to-Milestone Authoring and Self-Bootstrap | 0/6 | In Progress | - |
 
-8 of 9 milestone phases complete — Phase 6 in planning (v1.0 image-publish pipeline + ship-readiness revalidation). See `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-FINDINGS.md` for Phase 6 scope-of-record.
+8 of 9 milestone phases complete — Phase 7 planning complete; executing to close cascade-7 (v1.0 ship blocker).
 
 ### Phase 7: Project-to-Milestone Authoring and Self-Bootstrap
 
-**Goal:** Close cascade-7 — the v1.0 ship blocker discovered during Phase 6's BOOT-04 `$0` acceptance revalidation. Wire the `ProjectReconciler`'s `Initialized → author-Milestone` dispatch so a bare `Project` self-bootstraps its `Milestone` instead of stalling at `status.phase=Initialized` forever. Mirror the proven `milestone_controller.go:reconcilePlannerDispatch` pattern one level up: dispatch a planner Job, read the authored Milestone from `EnvelopeOut`, `Create` the Milestone CR, and honor the `milestone: auto` gate. This is the top of the five-level cascade and the heart of the Core Value ("a human applies a Project; TIDE authors MILESTONE.md by dispatching a planner") — the TIDE-on-TIDE acceptance bar.
+**Goal:** A bare `Project` CRD self-bootstraps the full five-level cascade — TIDE authors its `Milestone`, which drives `Phase → Plan → Task` — and reaches `Project status.phase=Complete` at `$0` (stub-driven, no API key), closing cascade-7, the v1.0 ship blocker.
 
-**Requirements**: TBD (derive in /gsd-spec-phase 7)
+**Requirements**: REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7 (REQ-7 splits into REQ-7a ValidationState stamp + REQ-7b patchPlanSucceeded)
 **Depends on:** Phase 3 (down-stack Milestone→Phase→Plan→Task reconcilers — already wired), Phase 6 (image-publish pipeline — shipped)
-**Plans:** 0 plans
-
-**In scope:**
-- `ProjectReconciler` `Initialized → author-Milestone` planner dispatch (Project-side analog of `milestone_controller.go:reconcilePlannerDispatch` + `handleJobCompletion`)
-- `Create(Milestone)` from the planner's `EnvelopeOut` (no `Create(.*Milestone)` exists today)
-- `milestone: auto` gate handling at the Project level
-- `cmd/stub-subagent` support for a project-level planner request returning a canned Milestone envelope (the `$0` path — stub today only emits `task`-level `KindTaskEnvelopeOut`)
-- Layer B integration test that applies a **bare** Project (no pre-authored Milestone fixture) and asserts Milestone materialization — closes the test-coverage gap that let cascade-7 survive to v1
-
-**Out of scope:**
-- Anything down-stack of Milestone (Milestone→Phase→Plan→Task authoring/dispatch already works — do not redo)
-- Changes to `acceptance-v1.sh` (cascades 1–6 fixed; it already drives correctly through `Initialized`)
+**Plans:** 6 plans
 
 **Acceptance gate:** `make acceptance-v1-smoke` reaches `Project status.phase=Complete` at `$0` (no API key). On green, v1.0 is ship-ready.
 
-**Scope-of-record:** `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-ACCEPTANCE-FINDINGS.md`
+**Scope-of-record:** `.planning/phases/07-project-to-milestone-authoring-and-self-bootstrap/07-SPEC.md`
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 7 to break down)
+**Wave 0** *(parallel — test scaffolds before implementation)*
+- [ ] 07-01-PLAN.md — Wave 0 test scaffolds: stub-subagent planner unit test (RED) + bare-project.yaml fixture (REQ-3, REQ-5)
+- [ ] 07-02-PLAN.md — Wave 0 Layer B integration spec: bare_project_test.go asserting full cascade + Project=Complete (REQ-1, REQ-2, REQ-4, REQ-5, REQ-7a, REQ-7b)
+
+**Wave 1** *(blocked on Wave 0 — unit test must exist before implementation)*
+- [ ] 07-03-PLAN.md — Stub planner-mode ChildCRD tree (dispatchPlannerSuccess) + parentName injection in BuildPlannerEnvelope (REQ-3)
+
+**Wave 2** *(blocked on Wave 1 — needs stub parentName contract)*
+- [ ] 07-04-PLAN.md — Down-stack fixes: ValidationState=Validated stamp in handlePlannerJobCompletion + patchPlanSucceeded via BoundaryDetected(plan,Task) (REQ-7a, REQ-7b)
+
+**Wave 3** *(blocked on Wave 2 — needs down-stack fixes to be in place)*
+- [ ] 07-05-PLAN.md — ProjectReconciler 5th dispatch site: 5 struct fields + manager wiring + reconcileProjectPlannerDispatch + handleProjectJobCompletion + checkProjectComplete (REQ-1, REQ-2, REQ-4)
+
+**Wave 4** *(blocked on Wave 3 — all production code must be green)*
+- [ ] 07-06-PLAN.md — Final acceptance gate: make test-int (7+1/7 Layer B + 18/18 Layer A) + make acceptance-v1-smoke → Project=Complete (REQ-6)
