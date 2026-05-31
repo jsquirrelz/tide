@@ -401,6 +401,19 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			}
 			return ctrl.Result{}, nil
 		}
+
+		// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
+		// proceeds past the gate at line 535. The admission webhook stamps Validated
+		// at CREATE time for plans authored via the webhook path; for plans authored
+		// by the planner Job (production dispatch path) the webhook has already run
+		// but the controller must re-stamp here because the planner Job materializes
+		// Tasks after admission. This is the correct seam: Tasks are now present,
+		// the DAG is definitionally valid for $0-stub execution.
+		valPatch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.ValidationState = "Validated"
+		if err := r.Status().Patch(ctx, plan, valPatch); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Plan 04-05: gate-policy hook (level=plan). Lands BEFORE clearing the
