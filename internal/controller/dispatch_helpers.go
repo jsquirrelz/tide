@@ -169,6 +169,15 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 		Provider:      ResolveProvider(project, level, helmDefaults),
 	}
 
+	// Inject parentName into Provider.Params so the stub (and real planner
+	// subagents) can populate the child *Ref field (e.g. milestoneRef, phaseRef)
+	// without querying the K8s API — parent.GetName() is the authoritative
+	// source (T-07-03-03: parentName is metadata, not a secret).
+	if envIn.Provider.Params == nil {
+		envIn.Provider.Params = make(map[string]string)
+	}
+	envIn.Provider.Params["parentName"] = parent.GetName()
+
 	data, err := json.Marshal(envIn)
 	if err != nil {
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal planner envelope: %w", err)
