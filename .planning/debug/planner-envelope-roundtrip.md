@@ -1,10 +1,49 @@
 ---
 slug: planner-envelope-roundtrip
-status: resolved
+status: investigating
 trigger: "Phase 7 cascade-8 — bare Project never authors its Milestone; bare_project_test.go Layer B cascade fails at first assertion (no Milestone owned by bare-project). The planner-level envelope round-trip never materializes child CRDs."
 created: 2026-05-31
 updated: 2026-05-31
 phase: 07-project-to-milestone-authoring-and-self-bootstrap
+---
+
+# Debug: planner-envelope-roundtrip (Phase 7 cascade-8 + cascade-9)
+
+## REOPENED for cascade-9 (2026-05-31) — symmetric idempotency guards
+
+cascade-8 is fixed and the bare-Project cascade PASSES (full tree → Project=Complete). But the full `make test-int` regression sweep (post-fix, warm cluster) is **13/14 Layer B** with **Layer A 29/29** and the bare-Project spec PASSING. The one failure is **chaos_resume_test.go:233** Pillar 4: "exactly 3 executor Jobs must reach status.succeeded=1 post-release — got 4."
+
+**cascade-9 root cause (confirmed via manager log + fixture read):** The cascade-8 dual-label fix activated the planner envelope round-trip GLOBALLY (all levels). The cascade-8 session added an idempotency guard ONLY at the project level (`reconcileProjectPlannerDispatch`, commit 728b60a). The **milestone/phase/plan reconcilers author children UNCONDITIONALLY** — no idempotency guard. So `chaos-resume-milestone` (which already owns a pre-applied `chaos-resume-phase`) ALSO authors a spurious `stub-phase-1` → `stub-plan-1` → `stub-task-1` → a 4th executor Job. Manager log proof: both `chaos-resume-phase` AND `stub-phase-1` (+ `stub-plan-1`) reconcile in namespace `chaos-resume-test`. The chaos-resume fixture pre-applies the FULL hierarchy (Project→Milestone→Phase→Plan→3 Tasks), so the spurious stub subtree is purely the milestone re-authoring.
+
+**APPROVED FIX (user-confirmed): symmetric idempotency guards.** Extend the project-level guard pattern (728b60a) to the **milestone, phase, and plan** authoring paths: skip planner dispatch / child materialization when the level already owns ≥1 child of the expected kind (Milestone→Phase, Phase→Plan, Plan→Task). Use `gates.BoundaryDetected`-style owned-children detection or a direct owned-child List + `metav1.IsControlledBy` filter (same as the project guard). 
+- chaos-resume-milestone owns chaos-resume-phase → guard SKIPS authoring → no stub subtree → 3 executor Jobs → chaos-resume PASSES. No test/fixture edits needed.
+- bare-Project flow UNAFFECTED: each level starts with 0 owned children, so the guard never blocks the genuine self-bootstrap.
+
+**Verification bar:** rebuild controller:test (+ stub if touched), `kind load` into the warm `tide-test` cluster, re-run the FULL `make test-int` (KEEP_KIND_CLUSTER=true) — expect Layer A 29/29 + Layer B 14/14 (bare-Project still PASSES, chaos-resume now PASSES). Watch for any cascade-10. Then the orchestrator runs `make acceptance-v1-smoke` (REQ-6).
+
+**Scope guard:** This expands down-stack edits to milestone_controller.go / phase_controller.go / plan_controller.go authoring paths — the user explicitly approved this expansion (it is the symmetric completion of the project-level guard). Do NOT touch charts/ or hack/scripts/acceptance-v1.sh. If a cascade-10 of a NEW class appears, checkpoint and surface.
+
+## cascade-9 follow-up: the guard is RACY → cascade-10 (2026-05-31, SURFACED to user)
+
+The cascade-9 idempotency guards (commit, milestone+phase) use `metav1.IsControlledBy` (ownerRef). But a **pre-applied** child Phase (chaos-resume-phase, declared with `spec.milestoneRef`) gets its ownerRef set **asynchronously** by the PhaseReconciler. At the milestone's FIRST reconcile, chaos-resume-phase is not yet owner-ref'd → the guard sees 0 owned Phases → the milestone authors a spurious `stub-phase-1`→`stub-plan-1`→stub-task → 4th executor Job. Manager-log proof (fresh-cluster run): `stub-phase-1` + `stub-plan-1` reconcile alongside `chaos-resume-phase` in `chaos-resume-test`. So cascade-9's guard does NOT fix chaos-resume; chaos still fails Pillar 4 (`:233` "exactly 3, got 4") when the cluster is healthy enough to reach that assertion.
+
+**cascade-10 fix (NOT yet applied — surfaced for decision):** make the guard race-free by counting children via the **spec parent-ref** (Phase.spec.milestoneRef == ms.Name, Plan.spec.phaseRef == ph.Name) — set at apply time, before ownerRef — OR by both ownerRef AND specRef. Apply symmetrically at milestone/phase (and verify plan). Then re-verify chaos-resume + three-task on a NON-resource-constrained cluster.
+
+**Environmental compounding factor:** the test host's Docker VM has only **7.65 GiB**. The cascade-8 activation makes the full Layer B suite materially heavier (active authoring cascades on every milestone-bearing fixture + the bare-Project 5-level cascade). The single-node kind cluster is overwhelmed mid-run → controller-manager goes unready → credproxy HARN-03 + chaos-resume fail and wave_test specs skip ("controller not ready") + the go-test 20m budget (KIND_GO_TEST_TIMEOUT) is exceeded (only ~10/14 specs run). Multiple full `make test-int` runs over a ~3h session also OOM-killed (exit 137) the kept cluster. A clean, adequately-resourced environment is needed for a reliable full-suite signal.
+
+## What IS proven (robust across 4+ runs)
+
+- **Layer A: 29/29** (clean in isolation and on fresh clusters; the budget/indegree failures seen only under full-suite CPU contention are flakes).
+- **bare-Project cascade PASSES**: bare Project → stub-milestone-1 (Succeeded) → stub-phase-1 → stub-plan-1 (ValidationState=Validated) → stub-task (Succeeded) → Wave → **Project=Complete**. This is cascade-7's closure / the v1.0 TIDE-on-TIDE self-bootstrap proof. Verified in focused runs AND full-suite runs.
+- cascade-8 fixed (planner envelope round-trip: dual-label + plan Job-watch + provider-secret + project idempotency guard) — commits 728b60a, 3ea86e5.
+- cascade-9 boundary-push placement corrected (guards gate only fresh dispatch) — commit fix(07-09); Layer A boundary-push green. (But the guard is racy for pre-applied children → cascade-10.)
+
+## Outstanding (for the decision)
+
+- cascade-10: race-free idempotency guard (spec-ref based) so existing pre-applied-Milestone fixtures (chaos-resume, three-task) don't author spurious subtrees.
+- A clean full `make test-int` (14/14) on an adequately-resourced cluster.
+- `make acceptance-v1-smoke` ($0 BOOT-04 ship gate, REQ-6) → Project=Complete — not yet run.
+
 ---
 
 # Debug: planner-envelope-roundtrip (Phase 7 cascade-8)
