@@ -40,11 +40,15 @@ import (
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/budget"
+	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/gates"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // pushResultEnvelope mirrors the JSON envelope emitted by cmd/tide-push
@@ -151,6 +155,13 @@ type ProjectReconciler struct {
 	// both clone- and push-mode Jobs (Phase 3 plan 03-06).
 	TidePushImage string
 
+	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
+	EnvReader            podjob.EnvelopeReader
+	SigningKey            []byte
+	SubagentImage         string
+	CredproxyImage        string
+	HelmProviderDefaults  ProviderDefaults
+
 	// Recorder emits K8s Events for observable budget and bypass transitions
 	// (T-02-10-05 — audit trail for AbsoluteCapReached; T-02-10-01 — bypass).
 	Recorder record.EventRecorder
@@ -159,6 +170,7 @@ type ProjectReconciler struct {
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=projects/finalizers,verbs=update
+// +kubebuilder:rbac:groups=tideproject.k8s,resources=milestones,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -381,6 +393,16 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
+	// Step 0: Check if all owned Milestones have Succeeded → Complete.
+	if complete, err := r.checkProjectComplete(ctx, project); err != nil || complete {
+		return ctrl.Result{}, err
+	}
+
+	// Step 0b: Dispatch project-level planner Job (D-A2 5th dispatch site).
+	if result, err := r.reconcileProjectPlannerDispatch(ctx, project); err != nil || result.Requeue || result.RequeueAfter > 0 {
+		return result, err
+	}
+
 	// Step 1: Branch-name init (D-B6). Format: tide/run-<project>-<unix>.
 	// Unix epoch only — refnames cannot contain ":" so RFC3339 is forbidden.
 	if project.Status.Git.BranchName == "" {
@@ -576,6 +598,200 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		}
 	}
 
+	return ctrl.Result{}, nil
+}
+
+// checkProjectComplete returns true (and patches Status.Phase=Complete) when
+// BoundaryDetected reports all owned Milestones have reached Succeeded.
+// Returns false without patching when no Milestones exist yet (childless guard).
+func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *tideprojectv1alpha1.Project) (bool, error) {
+	detected, err := gates.BoundaryDetected(ctx, r.Client, project, "Milestone")
+	if err != nil {
+		return false, err
+	}
+	if !detected {
+		return false, nil
+	}
+	patch := client.MergeFrom(project.DeepCopy())
+	project.Status.Phase = tideprojectv1alpha1.PhaseComplete
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionSucceeded,
+		Status:             metav1.ConditionTrue,
+		Reason:             "MilestonesSucceeded",
+		Message:            "All owned Milestones reached Succeeded",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, project, patch); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+// reconcileProjectPlannerDispatch is the D-A2 5th dispatch site — mirrors
+// milestone_controller.go:reconcilePlannerDispatch one level up.
+//
+// Job name format (D-05): "tide-project-<uid>-1".
+// Level string: "project". Project IS both the parent and the project parameter.
+// No AwaitingApproval check (D-02: no gate at Project→Milestone level).
+//
+// Gated on len(r.SigningKey) > 0 — when SigningKey is not wired (test mode
+// that doesn't configure dispatch), the function is a no-op so existing tests
+// that only exercise clone/push lifecycle are unaffected.
+func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+	// Guard: SigningKey is required to mint credproxy tokens — if not wired
+	// (e.g. unit tests that only test clone/push lifecycle), skip dispatch.
+	if len(r.SigningKey) == 0 {
+		return ctrl.Result{}, nil
+	}
+
+	// Step 1: Terminal short-circuit.
+	switch project.Status.Phase {
+	case tideprojectv1alpha1.PhaseComplete,
+		tideprojectv1alpha1.PhaseInitFailed:
+		return ctrl.Result{}, nil
+	}
+
+	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)
+
+	// Step 2: On Running — check Job terminal state.
+	if project.Status.Phase == tideprojectv1alpha1.PhaseRunning {
+		var job batchv1.Job
+		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &job); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+		if isJobTerminal(&job) {
+			return r.handleProjectJobCompletion(ctx, project, &job)
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Step 3: Acquire PlannerPool (POOL-01) before creating the Job (D-A4).
+	if r.PlannerPool != nil {
+		if err := r.PlannerPool.Acquire(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		defer r.PlannerPool.Release()
+	}
+
+	// Step 4: Build caps.
+	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
+	if plannerCaps.Iterations <= 0 {
+		plannerCaps.Iterations = 20
+	}
+
+	// Step 5: Build planner envelope.
+	// For ProjectReconciler: level="project", parent=project, project=project (same object).
+	attempt := 1
+	_, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", pkgdispatch.Caps{
+		WallClockSeconds: int(plannerCaps.WallClockSeconds),
+		Iterations:       int(plannerCaps.Iterations),
+	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build project planner envelope: %w", err)
+	}
+
+	// Step 6: Mint signed token for the credproxy sidecar.
+	token, err := credproxy.Sign(r.SigningKey, string(project.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("mint project planner signed token: %w", err)
+	}
+
+	// Step 7: Resolve secretUID from ProviderSecretRef.
+	var secretUID string
+	if project.Spec.ProviderSecretRef != "" {
+		var secret corev1.Secret
+		if sErr := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); sErr == nil {
+			secretUID = string(secret.UID)
+		}
+	}
+
+	// Step 8: Resolve SubagentImage.
+	subagentImg := r.SubagentImage
+	if subagentImg == "" {
+		subagentImg = r.HelmProviderDefaults.Image
+	}
+
+	// Step 9: Build + Create planner Job via shared BuildJobSpec.
+	opts := podjob.BuildOptions{
+		Kind:           podjob.JobKindPlanner,
+		ParentObj:      project,
+		Level:          "project",
+		Attempt:        attempt,
+		Project:        project,
+		SignedToken:    token,
+		EnvelopeInJSON: envInJSON,
+		SubagentImage:  subagentImg,
+		CredproxyImage: r.CredproxyImage,
+		SecretUID:      secretUID,
+		PVCName:        "tide-projects",
+		ProjectUID:     string(project.UID),
+		Caps:           plannerCaps,
+	}
+	job := podjob.BuildJobSpec(opts)
+	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {
+		return ctrl.Result{}, fmt.Errorf("ensure owner ref on project planner job: %w", err)
+	}
+	if err := r.Create(ctx, job); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, fmt.Errorf("create project planner job: %w", err)
+		}
+		// AlreadyExists: idempotent success.
+	}
+
+	// Step 10: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
+	patch := client.MergeFrom(project.DeepCopy())
+	project.Status.Phase = tideprojectv1alpha1.PhaseRunning
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionAuthoringPlanner,
+		Status:             metav1.ConditionTrue,
+		Reason:             "PlannerDispatched",
+		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, project, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// handleProjectJobCompletion reads EnvelopeOut from the completed planner Job
+// and calls MaterializeChildCRDs to create the Milestone CR owned by the Project.
+// Per D-02: no gate at the Project level — auto-proceed after materialization.
+// The Owns(&Milestone{}) watch re-enqueues the Project when the child Milestone
+// status changes, which triggers checkProjectComplete on the next reconcile.
+func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, _ *batchv1.Job) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	// Tolerate nil EnvReader — matches milestone pattern (test setups may omit it).
+	var envOut pkgdispatch.EnvelopeOut
+	if r.EnvReader != nil {
+		var err error
+		// project is both the top-level object and its own "parent" at this level;
+		// use project.UID as both projectUID and parentUID (the envelope is keyed by
+		// the parent's UID, and the Project IS the parent at the project level).
+		envOut, err = r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID))
+		if err != nil {
+			logger.Error(err, "project planner envelope read failed; proceeding without ChildCRDs", "project", project.Name)
+		}
+	} else {
+		logger.V(1).Info("no env reader; skipping envelope read", "project", project.Name)
+	}
+
+	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
+	// Milestone is in the allowlist (dispatch_helpers.go:80).
+	if len(envOut.ChildCRDs) > 0 {
+		if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, project, envOut.ChildCRDs); mErr != nil {
+			return ctrl.Result{}, fmt.Errorf("project planner child CRD materialization failed: %w", mErr)
+		}
+	}
+
+	// D-02: no gate at Project→Milestone level — auto-proceed.
+	// The Owns(&Milestone{}) watch re-enqueues the Project when Milestone status
+	// changes, driving checkProjectComplete to fire on the next reconcile.
 	return ctrl.Result{}, nil
 }
 
