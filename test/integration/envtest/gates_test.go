@@ -110,7 +110,11 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
 
 			// 3. Drive MilestoneReconciler through the planner-dispatch + job-completion seam.
-			envReader := newMapEnvReader()
+			// Use the SHARED suite-level reader so the manager auto-reconciler
+			// (re-enqueued by Owns(&Job{}) when the fake Job goes terminal) reads
+			// the SAME populated envelope as this manually-driven reconciler —
+			// otherwise it races us with an empty reader and locks Failed.
+			envReader := suiteEnvReader
 			r := newMilestoneReconcilerForGateIT(envReader)
 			driveMSReconcile(r, msName, 5)
 
@@ -199,7 +203,9 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
 
-			envReader := newMapEnvReader()
+			// Shared suite-level reader (see TestGateApproveFlow) so the manager
+			// auto-reconciler does not race this spec with an empty reader.
+			envReader := suiteEnvReader
 			r := newMilestoneReconcilerForGateIT(envReader)
 			driveMSReconcile(r, msName, 5)
 

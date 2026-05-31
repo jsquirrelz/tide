@@ -34,6 +34,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,6 +75,18 @@ var (
 	// registered via mgr.GetFieldIndexer(). Use mgrClient in tests that call
 	// MatchingFields on custom indexes (e.g., .spec.planRef).
 	mgrClient client.Client
+
+	// suiteEnvReader is the SINGLE EnvelopeReader instance injected into the
+	// manager's auto-registered MilestoneReconciler and TaskReconciler
+	// (see newPhase2ReconcilersForTest). Tests whose fixtures trip the manager's
+	// Owns(&Job{}) watch — e.g. the gate-flow specs — MUST SetOut on this shared
+	// reader so the background manager reconciler reads populated envelope data
+	// instead of missing and writing Status.Phase=Failed (EnvelopeReadFailed).
+	// Promoted to package scope to close the gate-flow-envreader-race defect:
+	// previously the gate specs created a private reader the manager never saw,
+	// so the manager auto-reconciler raced the test-driven reconciler and locked
+	// the Milestone Failed before it could reach AwaitingApproval.
+	suiteEnvReader = newMapEnvReader()
 )
 
 // Phase 2: shared test values for reconciler field injection.
@@ -94,7 +107,13 @@ var (
 
 // mapEnvReader is an in-memory EnvelopeReader implementation for tests.
 // It maps task UID → EnvelopeOut; tests pre-populate it before reconciling.
+//
+// The mutex makes it safe for the shared suiteEnvReader to be written by the
+// test goroutine (SetOut) while the manager's background reconciler reads it
+// concurrently (ReadOut) — required now that gate-flow specs share one reader
+// with the auto-registered manager reconcilers.
 type mapEnvReader struct {
+	mu    sync.RWMutex
 	byUID map[string]pkgdispatch.EnvelopeOut
 	errs  map[string]error
 }
@@ -107,14 +126,20 @@ func newMapEnvReader() *mapEnvReader {
 }
 
 func (m *mapEnvReader) SetOut(taskUID string, out pkgdispatch.EnvelopeOut) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.byUID[taskUID] = out
 }
 
 func (m *mapEnvReader) SetErr(taskUID string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.errs[taskUID] = err
 }
 
 func (m *mapEnvReader) ReadOut(_ context.Context, _, taskUID string) (pkgdispatch.EnvelopeOut, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if err, ok := m.errs[taskUID]; ok {
 		return pkgdispatch.EnvelopeOut{}, err
 	}
@@ -237,7 +262,12 @@ var _ = AfterSuite(func() {
 // newPhase2ReconcilersForTest registers all six Phase 2 reconcilers with the
 // manager, injecting test-friendly stubs and shared test values.
 func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
-	envReader := newMapEnvReader()
+	// suiteEnvReader (package scope) is the SINGLE reader the manager's
+	// MilestoneReconciler and TaskReconciler read from. Gate-flow specs SetOut
+	// on this same instance so the background manager reconciler — re-enqueued
+	// by its Owns(&Job{}) watch when a fixture marks a Job terminal — finds
+	// populated envelope data instead of missing and failing the Milestone.
+	envReader := suiteEnvReader
 
 	if err := (&controller.MilestoneReconciler{
 		Client:         mgr.GetClient(),
