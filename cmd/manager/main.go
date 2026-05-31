@@ -334,10 +334,15 @@ func main() {
 		// budget cap + init Job + Phase 3 clone/push lifecycle on r.Dispatcher != nil.
 		// Without this assignment, ProjectReconciler only ever sets the Ready
 		// condition and never runs Phase 2/3 lifecycle work in production.
-		// (EnvReader is intentionally NOT added — ProjectReconciler does not
-		// dispatch subagents and has no envelope-out consumer; locked user
-		// decision documented in 04.1-RESEARCH.md §P1.1 Open Question 2.)
 		Dispatcher: dispatcher,
+		// Phase 7 (D-06): wire the 5 dispatch fields so reconcileProjectPlannerDispatch
+		// can dispatch the project-level planner Job (D-A2 5th dispatch site).
+		// Values are the same variables already computed above for MilestoneReconciler.
+		EnvReader:            envReader,
+		SigningKey:            signingKey,
+		SubagentImage:        subagentImage,
+		CredproxyImage:       credproxyImage,
+		HelmProviderDefaults: helmProviderDefaults,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
