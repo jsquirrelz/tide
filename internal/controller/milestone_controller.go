@@ -225,6 +225,27 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		return ctrl.Result{}, nil
 	}
 
+	// Step 2b: Idempotency guard — skip NEW planner dispatch when the Milestone
+	// already owns >=1 Phase. Placed AFTER the terminal/AwaitingApproval/Running
+	// short-circuits so it gates ONLY fresh authoring — never the level's own
+	// completion/boundary-push/gate handling (the early placement broke
+	// TestBoundaryPush_AllLevels). Symmetric to the project-level guard (728b60a).
+	// Prevents chaos-resume-milestone (pre-owns chaos-resume-phase) from authoring
+	// a spurious stub-phase-1 once the envelope round-trip is live. bare-Project
+	// flow is unaffected: each Milestone starts with 0 owned Phases.
+	{
+		var existingPhases tideprojectv1alpha1.PhaseList
+		if lErr := r.List(ctx, &existingPhases, client.InNamespace(ms.Namespace)); lErr != nil {
+			return ctrl.Result{}, fmt.Errorf("idempotency: list phases: %w", lErr)
+		}
+		for i := range existingPhases.Items {
+			if metav1.IsControlledBy(&existingPhases.Items[i], ms) {
+				// Milestone already owns >=1 Phase — planner already authored; skip dispatch.
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
 	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {

@@ -187,6 +187,26 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		return ctrl.Result{}, nil
 	}
 
+	// Idempotency guard — skip NEW planner dispatch when the Phase already owns
+	// >=1 Plan. Placed AFTER the terminal/Running short-circuits so it gates only
+	// fresh authoring, never the Phase's own completion/boundary handling (the
+	// early placement broke TestBoundaryPush_AllLevels). Symmetric to the
+	// milestone/project guards (cascade-9). Prevents chaos-resume-phase (pre-owns
+	// chaos-resume-plan) from authoring a spurious stub-plan-1. bare-Project flow
+	// is unaffected: each Phase starts with 0 owned Plans.
+	{
+		var existingPlans tideprojectv1alpha1.PlanList
+		if lErr := r.List(ctx, &existingPlans, client.InNamespace(ph.Namespace)); lErr != nil {
+			return ctrl.Result{}, fmt.Errorf("idempotency: list plans: %w", lErr)
+		}
+		for i := range existingPlans.Items {
+			if metav1.IsControlledBy(&existingPlans.Items[i], ph) {
+				// Phase already owns >=1 Plan — planner already authored; skip dispatch.
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
 	// Acquire plannerPool before creating Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
