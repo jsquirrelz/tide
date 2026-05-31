@@ -61,6 +61,7 @@ import (
 	"time"
 
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // workspaceRoot is the PVC mount point under which envelope/signal files
@@ -201,9 +202,164 @@ func writeTerminationMessage(data []byte) {
 	_ = os.WriteFile(path, data, 0o644)
 }
 
+// dispatchPlannerSuccess handles planner-mode dispatch (env.Role == "planner").
+// It switches on env.Level to emit exactly one typed ChildCRDSpec per level:
+//
+//	project   → Milestone "stub-milestone-1" with Spec {"projectRef": parentName}
+//	milestone → Phase     "stub-phase-1"     with Spec {"milestoneRef": parentName}
+//	phase     → Plan      "stub-plan-1"      with Spec {"phaseRef": parentName}
+//	plan      → Task      "stub-task-1"      with Spec {planRef, filesTouched, declaredOutputPaths, dev.testMode="success"}
+//	task (leaf/unknown)   → empty ChildCRDs, exit 0
+//
+// parentName is read from env.Provider.Params["parentName"]; falls back to
+// "stub-parent" if absent (REQ-3 / 07-03-PLAN.md task 1).
+//
+// Wave CRDs are intentionally NOT emitted — waves are derived by PlanReconciler
+// (CLAUDE.md constraint: "Waves are derived, not declared").
+func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
+	parentName := "stub-parent"
+	if env.Provider.Params != nil {
+		if v, ok := env.Provider.Params["parentName"]; ok && v != "" {
+			parentName = v
+		}
+	}
+
+	var children []pkgdispatch.ChildCRDSpec
+
+	switch env.Level {
+	case "project":
+		raw, err := json.Marshal(map[string]string{"projectRef": parentName})
+		if err != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      err.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		children = append(children, pkgdispatch.ChildCRDSpec{
+			Kind: "Milestone",
+			Name: "stub-milestone-1",
+			Spec: runtime.RawExtension{Raw: raw},
+		})
+
+	case "milestone":
+		raw, err := json.Marshal(map[string]string{"milestoneRef": parentName})
+		if err != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Phase spec: %v\n", err)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      err.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		children = append(children, pkgdispatch.ChildCRDSpec{
+			Kind: "Phase",
+			Name: "stub-phase-1",
+			Spec: runtime.RawExtension{Raw: raw},
+		})
+
+	case "phase":
+		raw, err := json.Marshal(map[string]string{"phaseRef": parentName})
+		if err != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Plan spec: %v\n", err)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      err.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		children = append(children, pkgdispatch.ChildCRDSpec{
+			Kind: "Plan",
+			Name: "stub-plan-1",
+			Spec: runtime.RawExtension{Raw: raw},
+		})
+
+	case "plan":
+		type devSpec struct {
+			TestMode string `json:"testMode"`
+		}
+		type taskSpec struct {
+			PlanRef             string   `json:"planRef"`
+			FilesTouched        []string `json:"filesTouched"`
+			DeclaredOutputPaths []string `json:"declaredOutputPaths"`
+			DependsOn           []string `json:"dependsOn"`
+			Dev                 devSpec  `json:"dev"`
+		}
+		raw, err := json.Marshal(taskSpec{
+			PlanRef:             parentName,
+			FilesTouched:        []string{"stub-output.txt"},
+			DeclaredOutputPaths: []string{"/workspace/artifacts/stub"},
+			DependsOn:           []string{},
+			Dev:                 devSpec{TestMode: "success"},
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Task spec: %v\n", err)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      err.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		children = append(children, pkgdispatch.ChildCRDSpec{
+			Kind: "Task",
+			Name: "stub-task-1",
+			Spec: runtime.RawExtension{Raw: raw},
+		})
+
+	default:
+		// "task" level (leaf) or any unknown level: no children.
+		children = []pkgdispatch.ChildCRDSpec{}
+	}
+
+	out := pkgdispatch.EnvelopeOut{
+		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+		Kind:        pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:     env.TaskUID,
+		ExitCode:    0,
+		Result:      "success",
+		Reason:      "planner stub success",
+		ChildCRDs:   children,
+		CompletedAt: time.Now().UTC(),
+	}
+	if err := writeEnvelope(outPath, out); err != nil {
+		fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write out.json: %v\n", err)
+		return 2
+	}
+	return 0
+}
+
 // dispatchSuccess handles testMode == "success" (or empty). It writes a canned
 // result.txt under the first DeclaredOutputPath and then writes out.json.
-func dispatchSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
+func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
+	// Branch on Role: planner-mode dispatch emits ChildCRDs, executor-mode
+	// dispatch writes artifact files. This must be the first check so the
+	// planner path is exercised even when Dev is nil (planner Jobs don't set
+	// Dev.TestMode — they branch on Role, not testMode).
+	if env.Role == "planner" {
+		return dispatchPlannerSuccess(ctx, env, outPath, stderr)
+	}
+
 	artifacts := []string{}
 
 	if len(env.DeclaredOutputPaths) > 0 {
