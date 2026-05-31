@@ -22,6 +22,18 @@ kind: Namespace
 metadata:
   name: bare-project-test
 ---
+# Provider Secret — stub-subagent does not use the API key but credproxy
+# requires ANTHROPIC_API_KEY to start (requireEnv fail-fast in cmd/credproxy).
+# Value is base64("test-api-key-stub-subagent-does-not-use-it").
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: bare-project-test
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+---
 apiVersion: tideproject.k8s/v1alpha1
 kind: Project
 metadata:
@@ -29,6 +41,7 @@ metadata:
   namespace: bare-project-test
 spec:
   targetRepo: "file:///tmp/no-such-repo"
+  providerSecretRef: "tide-provider-secret"
   budget:
     absoluteCapCents: 0
   subagent:

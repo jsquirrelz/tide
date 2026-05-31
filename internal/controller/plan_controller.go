@@ -949,6 +949,11 @@ func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideproje
 // approve-wave-N annotation writes trigger reconciliation (T-04-G4 mitigation).
 // The self-Watches pattern avoids filtering finalizer/owner-ref Update events
 // at the For() level.
+// Owns(&batchv1.Job{}): the plan planner Job is created by reconcilePlannerDispatch;
+// when it transitions to terminal state the plan reconciler must re-run to call
+// handlePlannerJobCompletion and materialize child Tasks. Without this Owns, the
+// plan stays in Running indefinitely — the Job completion event never re-enqueues
+// the plan (cascade-8 follow-on: plan controller missing Job watch).
 func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -961,6 +966,7 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&tideprojectv1alpha1.Plan{}).
 		Owns(&tideprojectv1alpha1.Wave{}).
 		Owns(&tideprojectv1alpha1.Task{}).
+		Owns(&batchv1.Job{}).
 		Watches(
 			&tideprojectv1alpha1.Plan{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
