@@ -191,17 +191,20 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	// >=1 Plan. Placed AFTER the terminal/Running short-circuits so it gates only
 	// fresh authoring, never the Phase's own completion/boundary handling (the
 	// early placement broke TestBoundaryPush_AllLevels). Symmetric to the
-	// milestone/project guards (cascade-9). Prevents chaos-resume-phase (pre-owns
-	// chaos-resume-plan) from authoring a spurious stub-plan-1. bare-Project flow
-	// is unaffected: each Phase starts with 0 owned Plans.
+	// milestone/project guards. cascade-10: match by spec.phaseRef (set
+	// synchronously at child-apply time), NOT ownerRef — a pre-applied child
+	// (chaos-resume-plan) gets its ownerRef set asynchronously by the PlanReconciler,
+	// so an IsControlledBy-only guard races and lets the Phase author a spurious
+	// stub-plan-1. specRef is race-free; ownerRef kept as a fallback. bare-Project
+	// flow is unaffected: each Phase starts with 0 child Plans and authors once.
 	{
 		var existingPlans tideprojectv1alpha1.PlanList
 		if lErr := r.List(ctx, &existingPlans, client.InNamespace(ph.Namespace)); lErr != nil {
 			return ctrl.Result{}, fmt.Errorf("idempotency: list plans: %w", lErr)
 		}
 		for i := range existingPlans.Items {
-			if metav1.IsControlledBy(&existingPlans.Items[i], ph) {
-				// Phase already owns >=1 Plan — planner already authored; skip dispatch.
+			if existingPlans.Items[i].Spec.PhaseRef == ph.Name || metav1.IsControlledBy(&existingPlans.Items[i], ph) {
+				// Phase already has a child Plan — planner already authored; skip dispatch.
 				return ctrl.Result{}, nil
 			}
 		}
