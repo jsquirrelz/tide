@@ -320,7 +320,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 | 04.1. Pre-v1 audit fixes + cross-phase UAT closeout (INSERTED) | 15/15 | Complete | 2026-05-22 |
 | 5. Distribution & Self-Hosting Acceptance | 17/17 | Complete | 2026-05-23 |
 | 6. v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation | 6/6 | Complete | 2026-05-30 |
-| 7. Project-to-Milestone Authoring and Self-Bootstrap | 4/6 | In Progress|  |
+| 7. Project-to-Milestone Authoring and Self-Bootstrap | 5/6 | In Progress|  |
 
 8 of 9 milestone phases complete — Phase 7 planning complete; executing to close cascade-7 (v1.0 ship blocker).
 
@@ -330,7 +330,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 **Requirements**: REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7 (REQ-7 splits into REQ-7a ValidationState stamp + REQ-7b patchPlanSucceeded)
 **Depends on:** Phase 3 (down-stack Milestone→Phase→Plan→Task reconcilers — already wired), Phase 6 (image-publish pipeline — shipped)
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 **Acceptance gate:** `make acceptance-v1-smoke` reaches `Project status.phase=Complete` at `$0` (no API key). On green, v1.0 is ship-ready.
 
@@ -348,7 +348,7 @@ Plans:
 - [x] 07-04-PLAN.md — Down-stack fixes: ValidationState=Validated stamp in handlePlannerJobCompletion + patchPlanSucceeded via BoundaryDetected(plan,Task) (REQ-7a, REQ-7b)
 
 **Wave 3** *(blocked on Wave 2 — needs down-stack fixes to be in place)*
-- [ ] 07-05-PLAN.md — ProjectReconciler 5th dispatch site: 5 struct fields + manager wiring + reconcileProjectPlannerDispatch + handleProjectJobCompletion + checkProjectComplete (REQ-1, REQ-2, REQ-4)
+- [x] 07-05-PLAN.md — ProjectReconciler 5th dispatch site: 5 struct fields + manager wiring + reconcileProjectPlannerDispatch + handleProjectJobCompletion + checkProjectComplete (REQ-1, REQ-2, REQ-4)
 
 **Wave 4** *(blocked on Wave 3 — all production code must be green)*
 - [ ] 07-06-PLAN.md — Final acceptance gate: make test-int (7+1/7 Layer B + 18/18 Layer A) + make acceptance-v1-smoke → Project=Complete (REQ-6)
