@@ -50,10 +50,24 @@ Wire the ProjectReconciler so a bare `Project` self-bootstraps the full five-lev
 - **D-07 — Project `Complete`-detection.** Add a branch that patches `Status.Phase=Complete` when ≥1 owned Milestone exists and **all** owned Milestones report `Status.Phase=Succeeded`. Use the existing `Owns(&Milestone{})` watch (re-enqueues on child status change) + a `gates.BoundaryDetected(..., "Milestone")`-style check. Coexists with the existing `reconcilePhase3Lifecycle` (branch-name init still runs; clone/push stay no-ops because `spec.git` is unset).
 - **D-08 — Stub planner-mode canned tree.** In `cmd/stub-subagent` `success` mode, when `env.Role=="planner"`, switch on `env.Level` and emit exactly one `EnvelopeOut.ChildCRDs` entry: `project→Milestone`, `milestone→Phase`, `phase→Plan`, `plan→Task`; `task`→leaf (no children, today's behavior). Child Specs must be **minimal-but-CRD-valid**: the canned `Task` MUST set `FilesTouched` non-empty (Phase 3 D-F2) and each child carries its required parent `*Ref`. Deterministic child names. Keep payload small (single child per level) so it fits the Pod termination-message envelope channel (`PodStatusEnvelopeReader`).
 
+### Down-stack cascade (post-research, locked 2026-05-31 — see `07-RESEARCH.md` + SPEC REQ 7)
+Research (HIGH confidence, verified against live reconcilers) **refuted** the assumption that the down-stack "already works." Two production gaps block a real `Milestone→Phase→Plan→Task` tree; the user chose to **include both fixes** (the accepted cascade-8/9 work):
+- **D-09a — Stamp `Plan.Status.ValidationState="Validated"` in production.** Today it's set only in tests; `reconcileWaveMaterialization` (`plan_controller.go:535`) no-ops without it → Waves never materialize → Task executor Jobs never fire. Stamp it in `PlanReconciler`'s planner-job-completion path after materializing Task children.
+- **D-09b — Add `PlanReconciler.patchPlanSucceeded`.** `PhaseReconciler.handleJobCompletion` calls `BoundaryDetected(ph,"Plan")`, which requires `Plan.Status.Phase=Succeeded` — never set today → Phase requeue-loops forever. Add the Plan `Succeeded` transition (once its Wave/Tasks complete).
+- These two are the **only** permitted down-stack reconciler-logic edits. If a third cascade surfaces during execution, surface it — don't silently expand (CLAUDE.md "don't predict chain terminator").
+- **Note the two acceptance surfaces:** `make acceptance-v1-smoke`→`Project=Complete` is reachable via the TOP chain alone (`patchMilestoneSucceeded` is unconditional — Milestone Succeeds when its own planner Job completes, `milestone_controller.go:431`; then `BoundaryDetected(project,"Milestone")`→Complete). The full-tree-to-`Succeeded` proof (REQ 5 Layer B) is what needs D-09a/b.
+
+### Research-resolved planner inputs (`07-RESEARCH.md` — use these concretely)
+- **ProjectReconciler needs exactly 5 new fields:** `EnvReader podjob.EnvelopeReader`, `SigningKey []byte`, `SubagentImage string`, `CredproxyImage string`, `HelmProviderDefaults ProviderDefaults`. All 5 values are **already computed** above the reconciler-registration block in `cmd/manager/main.go` — wire them in.
+- **Minimal valid child Specs (verified kubebuilder markers):** Milestone needs only `projectRef`; Phase only `milestoneRef`; Plan only `phaseRef`; **Task needs `planRef` + `filesTouched` (MinItems=1) + `declaredOutputPaths` (MinItems=1)**. Set `Task.Spec.Dev.TestMode="success"` in the canned Spec so the executor exits 0. **Stub must NOT emit `Wave` CRDs** (waves are derived by `PlanReconciler`).
+- **`parentName` for child `*Ref` fields:** researcher recommends injecting via `Provider.Params["parentName"]` in `BuildPlannerEnvelope` at each dispatch site (planner finalizes the mechanism).
+- **`checkProjectComplete` placement:** researcher recommends the first step of `reconcilePhase3Lifecycle`, before clone/push dispatch.
+- **`$0` budget safe:** `IsCapExceeded` checks `AbsoluteCapCents > 0` first; with `absoluteCapCents: 0` the guard short-circuits — planner dispatch proceeds, never `BudgetExceeded`.
+
 ### Claude's Discretion
 - Exact deterministic child names; placeholder Markdown artifact content (only the structured `ChildCRDs` is load-bearing at `$0` — Phase 3 D-A1's "two parallel outputs"; the Markdown surface can be a stub).
-- Where `Complete`-detection slots into the Reconcile ordering relative to `reconcilePhase3Lifecycle`.
-- Whether the project-level `handleJobCompletion` factors shared logic with milestone's via a small helper or stays a parallel method (lean toward minimal duplication without over-generalizing — Phase 3 deliberately kept four symmetric dispatch sites rather than one generic dispatcher).
+- Exact `parentName`-injection mechanism and `patchPlanSucceeded` trigger condition (per research recommendations above).
+- Whether the project-level `handleJobCompletion` factors shared logic with milestone's via a small helper or stays a parallel method (lean toward minimal duplication without over-generalizing — Phase 3 deliberately kept symmetric per-level dispatch sites rather than one generic dispatcher).
 
 </decisions>
 
@@ -63,7 +77,8 @@ Wire the ProjectReconciler so a bare `Project` self-bootstraps the full five-lev
 **Downstream agents MUST read these before planning or implementing.**
 
 ### Locked requirements & scope-of-record
-- `.planning/phases/07-project-to-milestone-authoring-and-self-bootstrap/07-SPEC.md` — locked requirements/boundaries/acceptance — MUST read before planning
+- `.planning/phases/07-project-to-milestone-authoring-and-self-bootstrap/07-SPEC.md` — locked requirements/boundaries/acceptance (7 reqs; REQ 7 = down-stack fixes) — MUST read before planning
+- `.planning/phases/07-project-to-milestone-authoring-and-self-bootstrap/07-RESEARCH.md` — HIGH-confidence live-code trace of the down-stack cascade + CRD-admission constraints + manager-wiring delta — MUST read before planning
 - `.planning/phases/06-v1-image-publish-and-ship-readiness-revalidation/06-ACCEPTANCE-FINDINGS.md` — cascade-7 evidence + recommendation (scope-of-record)
 
 ### The pattern to mirror (proven analog, one level down)

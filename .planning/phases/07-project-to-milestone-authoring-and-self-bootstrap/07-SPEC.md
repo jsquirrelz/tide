@@ -4,15 +4,16 @@ type: spec
 status: complete
 created: 2026-05-30
 ambiguity_score: 0.19
-requirements_locked: 6
+requirements_locked: 7
 tags: [cascade-7, project-milestone-authoring, self-bootstrap, ship-blocker, v1.0]
 ---
 
 # Phase 7: Project-to-Milestone Authoring and Self-Bootstrap — Specification
 
 **Created:** 2026-05-30
+**Amended:** 2026-05-31 (post-research scope decision — see REQ 7)
 **Ambiguity score:** 0.19 (gate: ≤ 0.20)
-**Requirements:** 6 locked
+**Requirements:** 7 locked
 
 ## Goal
 
@@ -64,6 +65,11 @@ Phase 6's `$0` BOOT-04 acceptance (`make acceptance-v1-smoke`) drove a bare Proj
    - Target: With Phase 7 wiring plus the smoke Project carrying `gates.milestone=auto`, the same `make acceptance-v1-smoke` proceeds `Initialized → Running → Complete` at `$0`, with **no edits** to `hack/scripts/acceptance-v1.sh`.
    - Acceptance: `make acceptance-v1-smoke` exits 0 and the Project reaches `status.phase=Complete`; the run log shows the `Milestone→Phase→Plan→Task` tree materialized; no `ANTHROPIC_API_KEY` is consumed (cost = `$0`).
 
+7. **Down-stack cascade completion** (added post-research): The Phase→Plan→Task chain actually drives to all-`Succeeded` when the stub feeds children, so the full tree is real, not partially-materialized. *(Research `07-RESEARCH.md` refuted the assumption that the down-stack "already works" — two production gaps block the cascade.)*
+   - Current: (a) `Plan.Status.ValidationState` is never set to `"Validated"` in production (only in tests), so `reconcileWaveMaterialization` (`plan_controller.go:535`) no-ops → Waves never materialize → Task executor Jobs never fire. (b) `PlanReconciler` has no `patchPlanSucceeded`, so `PhaseReconciler.handleJobCompletion`'s `BoundaryDetected(ph,"Plan")` never observes `Plan=Succeeded` → the Phase requeue-loops forever.
+   - Target: `PlanReconciler` stamps `ValidationState="Validated"` in its planner-job-completion path (after materializing Task children) so Waves derive + Task executor Jobs dispatch; and gains a `patchPlanSucceeded` transition (Plan reaches `Succeeded` once its Wave/Tasks complete) so the Phase boundary detects and advances. These are the **only** two down-stack reconciler-logic edits permitted (the cascade-8/9 work the user accepted).
+   - Acceptance: with the stub feeding a 1-1-1-1 tree, `Plan.Status.ValidationState=="Validated"`, a `Wave` materializes, the leaf `Task` executor Job runs and the Task reaches `Succeeded`, the `Plan`/`Phase` reach `Succeeded`; asserted by the bare-Project Layer B spec (REQ 5).
+
 ## Boundaries
 
 **In scope:**
@@ -76,7 +82,7 @@ Phase 6's `$0` BOOT-04 acceptance (`make acceptance-v1-smoke`) drove a bare Proj
 
 **Out of scope:**
 - Real Claude-backed authoring (live `acceptance-v1` `$25` path) — `$0` stub only; the live path is unchanged
-- Changes to down-stack reconciler *logic* (Milestone/Phase/Plan/Task reconcilers reused as-is — only the stub now feeds them children)
+- Changes to down-stack reconciler *logic* **except the two specific fixes in REQ 7** (`Plan.ValidationState="Validated"` stamp + `PlanReconciler.patchPlanSucceeded`). All other Milestone/Phase/Task reconciler logic is reused as-is — only the stub feeds them children. If a *third* down-stack cascade surfaces during execution, surface it (do not silently expand) per CLAUDE.md "don't predict chain terminator."
 - A new `project` gate level or any change to `gates.Milestone` semantics — locked decision: no new gate; existing milestone gate unchanged
 - Edits to `hack/scripts/acceptance-v1.sh` — cascades 1–6 already fixed; it drives correctly through `Initialized`
 - Multi-Milestone Projects / project-level `dependsOn` ordering — single-Milestone bootstrap proves the edge; multi-milestone authoring deferred
@@ -97,7 +103,8 @@ Phase 6's `$0` BOOT-04 acceptance (`make acceptance-v1-smoke`) drove a bare Proj
 - [ ] Exactly one Milestone CR materializes from the planner `EnvelopeOut`, owner-ref'd to the Project with `spec.projectRef` set; re-reconcile creates no duplicate
 - [ ] stub-subagent emits one `ChildCRD` of the correct Kind at each planner level (project→Milestone, milestone→Phase, phase→Plan, plan→Task) and zero at `task`; unit test passes
 - [ ] Project transitions `Running → Complete` when all child Milestones `Succeed`; stays `Running` with zero/unfinished Milestones
-- [ ] New bare-Project Layer B spec passes under `make test-int` (full `Milestone→Phase→Plan→Task` tree materializes; Project=`Complete`)
+- [ ] New bare-Project Layer B spec passes under `make test-int` (full `Milestone→Phase→Plan→Task` tree materializes AND reaches `Succeeded`; Project=`Complete`)
+- [ ] `Plan.Status.ValidationState=="Validated"` is stamped in production (not just tests); a `Wave` materializes and the leaf `Task` executor Job runs to `Succeeded`; `Plan`/`Phase` reach `Succeeded` (REQ 7 — down-stack cascade closed)
 - [ ] `make acceptance-v1-smoke` exits 0 and reaches `Project status.phase=Complete` at `$0` with no edits to `hack/scripts/acceptance-v1.sh`
 - [ ] Existing 7/7 Layer B + 18/18 Layer A specs remain green (no regression)
 
