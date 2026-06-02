@@ -93,51 +93,21 @@ test-only: ## Run the UNIT tier without re-running manifests/generate/fmt/vet/se
 test-leader-election: manifests generate fmt vet setup-envtest ## Run the slow CTRL-03 leader-election envtest (~60s; excluded from `make test`).
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test ./internal/controller/... -timeout 180s -v -ginkgo.focus="Leader Election"
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# kubectl kuberc is disabled by default for test isolation; enable with:
-# - KUBECTL_KUBERC=true
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= tide-test-e2e
-
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
-
-.PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
-	$(MAKE) cleanup-test-e2e
-
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
-
 ##@ Phase 4 kind-harness E2E (plan 04-14)
 
 # test-e2e-kind builds the manager + dashboard + tide CLI binaries, spins up a
 # dedicated kind cluster (`tide-e2e-phase4`), helm-installs the chart with
 # dashboard.enabled=true, and runs the kind_e2e-tagged specs under test/e2e/.
 #
-# Separate from `test-e2e` because the two suites use different paradigms:
-#   - `test-e2e` (kubebuilder): kustomize-driven `make deploy` against `tide-test-e2e` cluster
-#   - `test-e2e-kind` (Phase 4): helm-driven chart install against `tide-e2e-phase4` cluster
+# This is TIDE's real e2e suite. It honors SKIP_KIND_TESTS=true to short-circuit
+# on dev machines without container tooling. The heavy kind-based coverage runs
+# nightly + on-demand via .github/workflows/nightly-integration.yml, not on the
+# per-push critical path.
 #
-# Both are tagged `kind`-test work; both honor SKIP_KIND_TESTS=true to short-
-# circuit on dev machines without container tooling. The full Phase 4 E2E gate
-# runs `test-e2e-kind`; the kubebuilder `test-e2e` continues to cover the
-# kustomize install path.
+# (The former kubebuilder-scaffold `test-e2e` target was retired: its
+# kustomize-driven `make deploy` install is incompatible with TIDE's Helm +
+# /etc/tide/config.yaml + cert-manager webhook model, so it CrashLooped. The
+# kind_e2e suite below supersedes it.)
 .PHONY: test-e2e-kind
 test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-flow + tail cancellation).
 	go test -tags=kind_e2e -timeout=15m ./test/e2e/... -v -ginkgo.v

@@ -14,7 +14,13 @@
 #   - D-E1 / REQ-DIST-01 (chart pair lints)     — helm-lint job
 #
 #   Phase 2 invariants:
-#   - TEST-02 (integration test tier <5min)     — test-int job (make test-int, timeout 300s)
+#   - TEST-02 (Layer A envtest tier)            — test job "Layer A envtest" step (make test-int-fast)
+#
+# Per-push CI runs only fast gates (this workflow's test + helm-lint jobs). The
+# heavy Layer B kind integration suite (make test-int) and TIDE's real kind_e2e
+# e2e suite (make test-e2e-kind) moved OFF the per-push critical path to the
+# nightly workflow (.github/workflows/nightly-integration.yml), which also runs
+# on workflow_dispatch for on-demand verification.
 #
 # Phase 5's distribution work extends this workflow with chart-publish steps.
 
@@ -184,83 +190,3 @@ jobs:
             exit 1
           fi
           echo "OK: charts/ tree matches fresh helmify+augment output"
-
-  test-int:
-    name: Integration test suite (TEST-02 — Layer A envtest + Layer B kind, <5min)
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
-    permissions:
-      contents: read
-    env:
-      # Phase 02.1 / WR-09 / D-03 source: .planning/phases/02.1-debug-fix-the-layer-b-kind-integration-test-suite-so-make-te/02.1-BASELINE.md §Decision Log §D-03.
-      # D-03 prescribes: KEEP TIDE_REQUIRE_CONTROLLER default (unset = soft-skip)
-      # for dev runs; CI MUST set =1 so install failures fail the CI build loudly.
-      TIDE_REQUIRE_CONTROLLER: "1"
-    steps:
-      - name: Clone the code
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.26'
-          cache: true
-
-      - name: Install kind v0.31.0
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
-          kind version
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: 'v3.16.3'
-
-      # Pre-fetch manifests + envtest binaries before the timed test-int step.
-      - name: Prepare manifests and envtest binaries
-        run: |
-          make manifests generate fmt vet
-          make setup-envtest
-
-      # TEST-02: integration test suite (Layer A + Layer B).
-      # Layer A (envtest) runs always; Layer B (kind) runs in CI.
-      #
-      # The `timeout 300s` inside `make test-int` (Makefile target test-int)
-      # enforces the 300s budget on the `go test` invocation ONLY (not on
-      # test-int-kind-prep image builds + kind cluster create + kind load,
-      # which are unbounded by design — cold-cache prep cost can reach
-      # ~880s on a clean GitHub Actions runner). If go test wall-time
-      # exceeds 300s, `timeout 300s` exits 124 and the step fails. No
-      # separate DUR > 300 wall-time check is needed — Phase 02.2 dropped
-      # the redundant outer assertion that conflated prep wall with test
-      # wall (see .planning/phases/02.2-.../02.2-RESEARCH.md §"Pattern 3"
-      # and .planning/phases/02.1-.../02.1-04-VERIFICATION.md §Section 4).
-      #
-      # The outer `timeout-minutes: 6` is the genuine ceiling on the
-      # entire job (prep + go test).
-      - name: Integration test suite (TEST-02 — make test-int)
-        run: |
-          set -e
-          time make test-int
-
-      # On failure: collect Ginkgo output + kind cluster events for debugging.
-      - name: Collect kind cluster logs on failure
-        if: failure()
-        run: |
-          kind export logs /tmp/kind-logs-tide-test --name tide-test 2>/dev/null || true
-          echo "=== kubectl get all ==="
-          kubectl --context kind-tide-test get all --all-namespaces 2>/dev/null || true
-          echo "=== kubectl events ==="
-          kubectl --context kind-tide-test get events --all-namespaces --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
-
-      - name: Upload kind logs artifact on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kind-logs-test-int
-          path: /tmp/kind-logs-tide-test/
-          retention-days: 7

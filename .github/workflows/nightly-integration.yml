@@ -1,0 +1,109 @@
+# TIDE nightly heavy-integration workflow.
+#
+# This workflow carries the heavy kind-based test coverage OFF the per-push
+# critical path. Per-push CI (.github/workflows/ci.yaml) runs only fast gates
+# (Phase 1 verify-* + tide-lint + go vet + TEST-01 unit + Layer A envtest, plus
+# helm-lint). The two suites below each spin up a real kind cluster, build
+# multiple images, and take ~13-30min — far too slow and flaky for every push,
+# so they run nightly on a schedule and on-demand via workflow_dispatch:
+#
+#   - Layer B kind integration suite (make test-int): the kind tier of TEST-02.
+#     Layer A (envtest) already runs per-push in ci.yaml's `test` job.
+#   - TIDE's real e2e suite (make test-e2e-kind): the kind_e2e-tagged specs
+#     (gate-flow + dashboard + kind-setup). This supersedes the retired
+#     kubebuilder-scaffold `-tags=e2e` suite, whose kustomize `make deploy`
+#     install was incompatible with TIDE's Helm + /etc/tide/config.yaml +
+#     cert-manager webhook model (it CrashLooped).
+
+name: nightly-integration
+on:
+  schedule:
+    # Daily at 07:00 UTC.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  kind-suites:
+    name: Heavy kind suites (Layer B integration + kind_e2e e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      # Phase 02.1 / WR-09 / D-03: CI MUST set =1 so install failures fail the
+      # build loudly (dev runs leave it unset = soft-skip).
+      TIDE_REQUIRE_CONTROLLER: "1"
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install kind v0.31.0
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      # go.mod/go.sum tidy check (mirrors the pattern used by other jobs) — fail
+      # if `go mod tidy` mutates tracked files.
+      - name: Verify go.mod/go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      # Pre-fetch manifests + envtest binaries before the timed test steps.
+      - name: Prepare manifests and envtest binaries
+        run: |
+          make manifests generate fmt vet
+          make setup-envtest
+
+      # Layer B kind integration tier (the kind half of TEST-02). The
+      # `timeout 300s` inside `make test-int` bounds only the `go test`
+      # invocation; image builds + kind cluster create are unbounded by design.
+      # The job-level timeout-minutes: 45 is the genuine ceiling.
+      - name: Layer B kind integration suite (make test-int)
+        timeout-minutes: 25
+        run: |
+          set -e
+          time make test-int
+
+      # TIDE's real e2e suite — kind_e2e-tagged specs (gate-flow + dashboard +
+      # kind-setup) via helm chart install.
+      - name: TIDE kind_e2e e2e suite (make test-e2e-kind)
+        timeout-minutes: 25
+        run: |
+          set -e
+          time make test-e2e-kind
+
+      # On failure: collect Ginkgo output + kind cluster events for debugging.
+      - name: Collect kind cluster logs on failure
+        if: failure()
+        run: |
+          kind export logs /tmp/kind-logs-tide-test --name tide-test 2>/dev/null || true
+          echo "=== kubectl get all ==="
+          kubectl --context kind-tide-test get all --all-namespaces 2>/dev/null || true
+          echo "=== kubectl events ==="
+          kubectl --context kind-tide-test get events --all-namespaces --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
+
+      - name: Upload kind logs artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-logs-nightly-integration
+          path: /tmp/kind-logs-tide-test/
+          retention-days: 7
