@@ -485,6 +485,20 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		// tests. See .planning/phases/02.2-.../02.2-01-VERIFICATION.md §"Fix
 		// landscape" Option A (chart-side override + test-side --set).
 		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
+		// Disable the dashboard for the Layer B controller/CRD reconciliation
+		// suite. `make test-int-kind-prep` builds + kind-loads only the four
+		// controller-side images (controller, stub-subagent, credproxy, push) —
+		// it does NOT build/load the dashboard image. The chart defaults
+		// dashboard.enabled=true (charts/tide/values.yaml), so with the dashboard
+		// enabled its pod can never pull ghcr.io/jsquirrelz/tide-dashboard on a
+		// fresh CI kind node -> ImagePullBackOff, and helm `--wait` blocks on it
+		// until the 5m deadline even though the manager Deployment is 1/1 Ready.
+		// These 14 specs do not exercise the dashboard UI; the dashboard is
+		// covered by the separate `make test-e2e-kind` target (which builds +
+		// loads + installs it). Disabling it here removes the unpullable pod from
+		// the release so `--wait` completes once the manager is Ready.
+		// Source: debug session nightly-int-flake-timeout.
+		"--set", "dashboard.enabled=false",
 		"--wait", "--timeout", "5m",
 	}
 }

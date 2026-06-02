@@ -34,11 +34,15 @@ next_action: FIRST close the observability gap so the NEXT nightly run can disam
 - timestamp: 2026-06-02 — Layer B: BeforeSuite reused/created `tide-test`, applied CRDs, installed cert-manager v1.20.2 (`cert-manager ready`), then `Applying TIDE controller Deployment via helm @ 21:53:02.953`; `helm upgrade --install failed after 5m1.6s … Error: context deadline exceeded` at 21:58:04. `--wait --timeout 5m` confirmed in `helmControllerArgs()` (suite_test.go:461-484).
 - timestamp: 2026-06-02 — Image path NOT the cause: Makefile `test-int-kind-prep` (prereq of `test-int`, Makefile:119) builds `controller:test` + `ghcr.io/jsquirrelz/tide-{stub-subagent,credproxy,push}:test` and `kind load`s all four into `tide-test`; `helmControllerArgs` sets every image `pullPolicy=IfNotPresent` + `tag=test`. So the 5m stall is post-pull (scheduling/readiness/cert), not ImagePullBackOff.
 - timestamp: 2026-06-02 — Observability gap CONFIRMED: workflow "Collect kind cluster logs on failure" step ran `kind export logs /tmp/kind-logs-tide-test --name tide-test` but logged `No files… No artifacts will be uploaded`; the suite AfterSuite (suite_test.go:186) STEP "Deleting kind cluster tide-test @ 21:58:04.886" already removed the cluster. So no pod logs/describe/events exist for run 26849997916.
+- timestamp: 2026-06-02 — **FAILURE 1 FIXED, confirmed in CI.** Re-run on commit 96a3b44 (run 26851857098): Layer A now runs Ginkgo-only with flake-attempts=3 and is GREEN — `Ran 29 of 29 Specs in 214.581 seconds` (the 214s vs 44s reflects the retry budget absorbing the contention flake). The flake-attempts split works.
+- timestamp: 2026-06-02 — **FAILURE 2 ROOT CAUSE PINNED via dumpControllerDiagnostics() (run 26851857098).** `helm upgrade --install failed after 5m1.4s … context deadline exceeded`. Diagnostics `get pods -n tide-system` shows TWO pods: `tide-controller-manager-...-kg9wf 1/1 Running` (healthy, deployment READY 1/1 AVAILABLE 1) AND `tide-dashboard-795bf6f45d-5l78w 0/1 **ImagePullBackOff**`. helm `--wait` blocks until ALL release resources are Ready; the manager was fine, but the dashboard Deployment never became Ready → 5m deadline. The 5m timeout was a SYMPTOM, not the cause. **NOT a timeout-tightness problem.**
+- timestamp: 2026-06-02 — Dashboard image gap CONFIRMED at source: chart `dashboard.enabled: true` by default (charts/tide/values.yaml:240), image `ghcr.io/jsquirrelz/tide-dashboard` (values.yaml:243). But Makefile `test-int-kind-prep` builds/kind-loads only FOUR images (controller, stub-subagent, credproxy, push) — **NOT the dashboard** — and `helmControllerArgs()` overrides only those four (`tag=test`/`IfNotPresent`), leaving the dashboard on its chart-default image which is absent from the fresh CI kind node → ImagePullBackOff. The dashboard IS properly built+loaded+installed by the SEPARATE `make test-e2e-kind` target (Makefile:98-100,112; installs `dashboard.enabled=true`), which is nightly's second step. The Layer B `make test-int` suite (14 controller/CRD reconciliation specs) does not exercise the dashboard at all.
 
 ## Eliminated
 
 - hypothesis: "ART-01 / the kind helm-install is a v1 product regression" — ELIMINATED (pending re-verify): both layers are green locally (Layer A 29/29, Layer B 14/14, full `make test-int` exit 0) and the per-push `test`/`Tests`/`Lint` workflows are green on the same commit 0645e1a. Failures are confined to the cold-runner CI environment.
-- hypothesis: "Layer B failed on ImagePullBackOff" — ELIMINATED: images are kind-loaded by `test-int-kind-prep` and installed `IfNotPresent`; the failure is a 5m readiness `--wait` deadline, not a pull error.
+- hypothesis: "Layer B failed on ImagePullBackOff of the FOUR test-loaded images" — ELIMINATED: the controller/stub-subagent/credproxy/push images ARE kind-loaded by `test-int-kind-prep` and installed `IfNotPresent`; the manager pod ran 1/1 Ready. CORRECTION (run 26851857098): it WAS an ImagePullBackOff after all — but of the FIFTH, un-handled `tide-dashboard` image (not built/loaded by test-int-kind-prep, not overridden by helmControllerArgs), which blocked helm `--wait`. The "5m readiness deadline" framing was the symptom; the dashboard pull failure is the cause.
+- hypothesis: "Failure 2 is a too-tight 5m --wait on a cold runner (raise the timeout)" — ELIMINATED: the manager Deployment reached READY 1/1 well within the window; raising the timeout would never help because the dashboard pod can never pull its image on the fresh node. Fix is to remove the dashboard from the Layer B install, not inflate the timeout.
 
 ## Resolution
 
@@ -51,37 +55,43 @@ root_cause: |
   invalid on the mixed set). The per-push `test-int-fast` already guards this
   contention-flaky class with flake-attempts=3; nightly Layer A had no such retry, so one
   Eventually-timeout flake on a contended runner failed the whole package.
-  FAILURE 2 (Layer B helm --wait timeout): root cause NOT yet observable — the post-failure
-  `kind export logs` artifact was empty because the suite AfterSuite
-  (test/integration/kind/suite_test.go:186) deleted the tide-test cluster BEFORE the
-  workflow's failure-collection step ran. Cannot disambiguate "5m --wait genuinely too tight
-  on a cold runner" vs "real manager-pod failure" without pod-level evidence.
+  FAILURE 2 (Layer B helm --wait timeout): PINNED. The dumpControllerDiagnostics() output
+  on the next nightly (run 26851857098, commit 96a3b44) showed the manager Deployment was
+  healthy (tide-controller-manager 1/1 Running, READY 1/1) while a SECOND release pod,
+  tide-dashboard, sat at 0/1 ImagePullBackOff. The chart defaults dashboard.enabled=true
+  (charts/tide/values.yaml:240) on image ghcr.io/jsquirrelz/tide-dashboard, but Makefile
+  test-int-kind-prep builds + kind-loads only the four controller-side images (controller,
+  stub-subagent, credproxy, push) and helmControllerArgs() overrides only those four — the
+  dashboard image is never present on the fresh CI kind node. helm `--wait` blocks until
+  ALL release resources are Ready, so the unpullable dashboard pod held the install open
+  to the 5m deadline. The 5m timeout was the SYMPTOM, not the cause; raising it would never
+  help. The dashboard is exercised only by the separate `make test-e2e-kind` target (which
+  builds/loads/installs it); the Layer B suite's 14 controller/CRD specs never touch it.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
   carrying `-ginkgo.flake-attempts=3 --ginkgo.label-filter=envtest` (identical protection to
   test-int-fast), and (b) Layer B kind as its own `go test ./test/integration/kind/...`
   WITHOUT the flag (mixed Ginkgo + plain-go contract tests). A failure in either still fails
-  the target. Validated locally: Layer A green (ok, 27.4s) with the flag combo; all 6 kind
-  contract go-tests green; kind package compiles.
-  FAILURE 2 (observability-first, per user sequencing): added dumpControllerDiagnostics() in
-  test/integration/kind/suite_test.go, invoked on the helm-install failure path BEFORE Fail()
-  triggers AfterSuite teardown. It prints deployment status, describe, pods, events, and
-  current+previous manager container logs (selector control-plane=controller-manager) to
-  stdout, surviving cluster deletion. NOTE: KEEP_KIND_CLUSTER=true was considered for the
-  workflow but REJECTED to avoid two single-node clusters (tide-test + tide-e2e-phase4)
-  coexisting on the runner (OOM risk per the constrained-resource rule); the in-suite stdout
-  dump is the OOM-safe durable evidence source. Failure 2's REAL fix (raise --wait timeout vs
-  fix a pod issue) is deferred until the next nightly run surfaces the diagnostics.
+  the target. Confirmed GREEN in CI run 26851857098 (Layer A `Ran 29 of 29 Specs in 214.581s`).
+  FAILURE 2 (thorough, scoped, test-harness-only): added `--set dashboard.enabled=false` to
+  helmControllerArgs() in test/integration/kind/suite_test.go (with a code comment explaining
+  WHY: the dashboard image is not built/loaded by test-int-kind-prep; the dashboard belongs to
+  the e2e suite). This removes the unpullable dashboard pod from the Layer B release so helm
+  `--wait` completes once the manager Deployment is Ready. The chart default
+  (dashboard.enabled=true) is intentionally LEFT UNTOUCHED — it is correct for real installs and
+  for `make test-e2e-kind`. dumpControllerDiagnostics() (added the prior cycle) is KEPT in place
+  as durable future-proofing; it was the tool that pinned this root cause.
 verification: |
-  Local (where reproducible): Layer A envtest green with flake-attempts=3 flag combo
-  (go test ok, 27.4s); 6 kind contract go-tests green; kind test binary compiles; go vet
-  clean; gofmt clean; `git diff --quiet charts/` CLEAN (no chart drift).
-  CI BAR (pending — must be run by orchestrator/user): a full nightly-integration.yml run
-  GREEN end-to-end on GitHub-hosted runners (Layer B `make test-int` AND `make test-e2e-kind`).
-  If Failure 2 recurs, the new dumpControllerDiagnostics() output in the step log will
-  disambiguate root cause for the follow-up fix. Trigger via
-  `gh workflow run nightly-integration.yml --ref main`.
+  Local cheap checks (where Failure 2 does NOT reproduce — heavy kind run skipped to avoid VM
+  OOM): gofmt clean on suite_test.go; `go vet ./test/integration/kind/...` clean; kind test
+  binary compiles (`go test -run '^$' ./test/integration/kind/...` ok, 0.589s); `git diff
+  --quiet charts/` CLEAN (no chart drift — fix is test-harness-only). FAILURE 1 already proven
+  GREEN in CI (run 26851857098, Layer A 29/29). FAILURE 2 fix shape validated by the pinned
+  diagnostics; CI BAR (pending — run by orchestrator/user): a fresh full nightly-integration.yml
+  run GREEN end-to-end on GitHub-hosted runners across BOTH steps — Layer B `make test-int` AND
+  `make test-e2e-kind`. Trigger via `gh workflow run nightly-integration.yml --ref main` and
+  watch both steps. If anything recurs, dumpControllerDiagnostics() output will disambiguate.
 files_changed:
-  - Makefile (test-int split: flake-guarded Layer A + separate Layer B)
-  - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path)
+  - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [prior cycle, commit 96a3b44]
+  - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path [prior cycle]; --set dashboard.enabled=false [this cycle])
