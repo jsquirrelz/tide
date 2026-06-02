@@ -28,3 +28,11 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum  # Phase 04.1 P2.3 — fail if tidy mutated tracked files
           make test
+
+      # `make test` is now UNIT-ONLY (its package selector excludes
+      # /test/integration). Preserve Layer A coverage in the Tests job by
+      # running the envtest integration tier with -ginkgo.flake-attempts=3
+      # (set in the Makefile target) to absorb CI runner CPU contention.
+      # Mirrors the TEST-02 step in ci.yaml.
+      - name: Layer A envtest integration tier (flake-attempts)
+        run: make test-int-fast

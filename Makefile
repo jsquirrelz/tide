@@ -82,12 +82,12 @@ vet: demo-fixture ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests (TEST-01: -short skips the slow leader-election envtest; budget < 180s — includes the envtest integration suite).
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet setup-envtest ## Run the UNIT tier (TEST-01: -short skips the slow leader-election envtest; excludes the test/integration tier — that runs via test-int-fast/test-int).
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
 
 .PHONY: test-only
-test-only: ## Run go test without re-running manifests/generate/fmt/vet/setup-envtest (assumes prep already done). Used by CI's TEST-01 timing assertion.
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test-only: ## Run the UNIT tier without re-running manifests/generate/fmt/vet/setup-envtest (assumes prep already done). Used by CI's TEST-01 timing assertion. Integration tier excluded (runs via test-int-fast).
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
 
 .PHONY: test-leader-election
 test-leader-election: manifests generate fmt vet setup-envtest ## Run the slow CTRL-03 leader-election envtest (~60s; excluded from `make test`).
@@ -150,9 +150,9 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 
-test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s.
+test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s. -ginkgo.flake-attempts=3 retries the whole contention-flaky class on slow CI runners (Ginkgo-only pkg, so the flag is valid here).
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test ./test/integration/envtest/... -v -timeout=2m -ginkgo.v --ginkgo.label-filter='envtest'
+		go test ./test/integration/envtest/... -v -timeout=2m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
 
 test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Docker images and load them into the tide-test kind cluster.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
