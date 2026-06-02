@@ -38,7 +38,7 @@ func ReadEnvelopeIn(path string) (pkgdispatch.EnvelopeIn, error) {
 	if err != nil {
 		return pkgdispatch.EnvelopeIn{}, fmt.Errorf("harness: open envelope %q: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only handle; close error is not actionable
 
 	var env pkgdispatch.EnvelopeIn
 	if err := json.NewDecoder(f).Decode(&env); err != nil {

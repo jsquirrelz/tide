@@ -75,8 +75,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "credproxy: failed to build zap logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer zapCore.Sync() //nolint:errcheck
-	log := zapr.NewLogger(zapCore).WithName("credproxy")
+	defer zapCore.Sync()                                 //nolint:errcheck
+	log := zapr.NewLogger(zapCore).WithName("credproxy") //nolint:logcheck // logr idiom; klogr LoggerWithName helper not adopted in this codebase
 
 	// 1. Read required environment variables; fail-fast on missing.
 	taskUID := requireEnv(log, "TIDE_TASK_UID")

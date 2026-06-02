@@ -390,6 +390,8 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 // follow-up plans that wire cmd/manager end-to-end. The grep contract
 // + the deterministic state transitions tested in envtest are the
 // proof-of-shape Phase 3 needs.
+//
+//nolint:gocyclo // reconcile lifecycle is a flat sequence of state-transition arms; splitting would obscure the contract
 func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -399,6 +401,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	}
 
 	// Step 0b: Dispatch project-level planner Job (D-A2 5th dispatch site).
+	//nolint:staticcheck // SA1019: result.Requeue is read here as part of the reconcile control-flow contract; behavior-preserving
 	if result, err := r.reconcileProjectPlannerDispatch(ctx, project); err != nil || result.Requeue || result.RequeueAfter > 0 {
 		return result, err
 	}
@@ -782,6 +785,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 // Per D-02: no gate at the Project level — auto-proceed after materialization.
 // The Owns(&Milestone{}) watch re-enqueues the Project when the child Milestone
 // status changes, which triggers checkProjectComplete on the next reconcile.
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
 func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, _ *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -826,6 +831,8 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 // handleBudgetGate checks the budget cap and bypass annotations, patching
 // Project.Status.Phase and emitting K8s Events as needed (D-D4, FAIL-04).
 // After this call, project.Status.Phase reflects the current budget state.
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.handleBudgetGate(...)` in the reconcile chain
 func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tideprojectv1alpha1.Project, now time.Time) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -996,18 +1003,13 @@ func isJobFailed(job *batchv1.Job) bool {
 	return false
 }
 
-// boolPtr returns a pointer to the given bool value.
-//
-//go:fix inline
-func boolPtr(b bool) *bool {
-	return new(b)
-}
-
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02,
 // annotation-change predicate for bypass annotations (D-D4), and a
 // namespace-filter predicate per AUTH-02.
 func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Recorder == nil {
+		//nolint:staticcheck // SA1019: GetEventRecorderFor returns record.EventRecorder (the Recorder field's type);
+		// GetEventRecorder returns the incompatible events/v1 type — migrating is out of scope for lint hygiene.
 		r.Recorder = mgr.GetEventRecorderFor("project-controller")
 	}
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {

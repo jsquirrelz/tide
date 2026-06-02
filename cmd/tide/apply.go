@@ -88,11 +88,13 @@ func runApply(ctx context.Context, path string, out io.Writer) error {
 		}
 	}
 
+	//nolint:staticcheck // SA1019: client.Apply SSA path is load-bearing for unstructured objects;
+	// migrating to client.Client.Apply() (typed ApplyConfiguration) is out of scope for lint hygiene.
 	if err := c.Patch(ctx, obj, client.Apply, &client.PatchOptions{
 		FieldManager: "tide-cli",
 		Force:        new(true),
 	}); err != nil {
-		return formatApplyError(path, obj, err)
+		return formatApplyError(obj, err)
 	}
 
 	fmt.Fprintf(out, "%s/%s applied\n", obj.GetKind(), obj.GetName())
@@ -101,7 +103,7 @@ func runApply(ctx context.Context, path string, out io.Writer) error {
 
 // formatApplyError renders apierrors.IsInvalid causes inline so the operator
 // sees "spec.targetRepo: required value" instead of a wall of JSON.
-func formatApplyError(path string, obj *unstructured.Unstructured, err error) error {
+func formatApplyError(obj *unstructured.Unstructured, err error) error {
 	if !apierrors.IsInvalid(err) {
 		return fmt.Errorf("apply %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 	}
@@ -110,9 +112,9 @@ func formatApplyError(path string, obj *unstructured.Unstructured, err error) er
 		return fmt.Errorf("apply %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 	}
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("apply %s/%s: validation failed", obj.GetKind(), obj.GetName()))
+	fmt.Fprintf(&msg, "apply %s/%s: validation failed", obj.GetKind(), obj.GetName())
 	for _, cause := range se.ErrStatus.Details.Causes {
-		msg.WriteString(fmt.Sprintf("\n  %s: %s", cause.Field, cause.Message))
+		fmt.Fprintf(&msg, "\n  %s: %s", cause.Field, cause.Message)
 	}
 	return fmt.Errorf("%s", msg.String())
 }

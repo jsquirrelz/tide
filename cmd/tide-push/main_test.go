@@ -456,12 +456,9 @@ func TestRunCloneMode(t *testing.T) {
 		t.Errorf("expected HEAD in %s/repo.git: %v", ws, err)
 	}
 
-	// Clone mode emits no envelope.
-	if _, err := os.Stat(filepath.Join(ws, "envelopes", "push")); err == nil {
-		// dir may or may not exist; we just want to confirm no
-		// project-uid.json sitting there. The push-result path is keyed
-		// on ProjectUID which is empty for clone mode.
-	}
+	// Clone mode emits no envelope. The envelopes/push dir may or may not
+	// exist; the push-result path is keyed on ProjectUID which is empty for
+	// clone mode, so there is nothing to assert here beyond the HEAD check above.
 }
 
 // ---------- Test 6: push mode, missing GIT_PAT ----------

@@ -71,6 +71,8 @@ import (
 // `cli` is a reader-only client used for owner-chain resolution
 // (Milestone → Project, Phase → Milestone, etc.). It MUST be backed by
 // the same cache as `c` to ensure consistent reads during event delivery.
+//
+//nolint:logcheck // both ctx and logger are intentional here: ctx drives informer lifecycle, logger is the named bridge logger
 func BridgeInformerToHub(ctx context.Context, c cache.Cache, cli client.Reader, h *hub.Hub, log logr.Logger) error {
 	type kindWiring struct {
 		obj        client.Object
@@ -102,6 +104,8 @@ func BridgeInformerToHub(ctx context.Context, c cache.Cache, cli client.Reader, 
 // over the project-key resolver + the hub + the per-kind event-type
 // prefix. The prefix becomes the SSE `event:` field: "<prefix>.create",
 // "<prefix>.update", "<prefix>.delete".
+//
+//nolint:logcheck // both ctx and logger are intentional: ctx scopes owner-chain reads, logger is the named bridge logger
 func newKindHandler(ctx context.Context, cli client.Reader, h *hub.Hub, log logr.Logger, typePrefix string) toolscache.ResourceEventHandler {
 	publish := func(verb string, obj any) {
 		co, ok := obj.(client.Object)

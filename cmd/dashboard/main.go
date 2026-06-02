@@ -87,7 +87,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup")
+	setupLog := ctrl.Log.WithName("setup") //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
 
 	signalCtx := ctrl.SetupSignalHandler()
 
@@ -126,7 +126,7 @@ func main() {
 	// 3. Construct the SSE fan-out hub. Plan 04-11 wires the informer
 	//    cache's watch events into Publish() and the SSE handlers
 	//    subscribe via Hub.Subscribe().
-	pubsubHub := hub.NewHub(setupLog.WithName("hub"))
+	pubsubHub := hub.NewHub(setupLog.WithName("hub")) //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
 
 	// 4. Re-base the embedded SPA at the `dist/` sub-tree so HTTP file
 	//    paths like `/index.html` map to `dist/index.html` inside the
@@ -146,7 +146,7 @@ func main() {
 		Client:    mgr.GetClient(),
 		Hub:       pubsubHub,
 		Clientset: clientset,
-		Log:       setupLog.WithName("router"),
+		Log:       setupLog.WithName("router"), //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
 		SPAFS:     spaFS,
 	})
 

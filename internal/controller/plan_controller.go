@@ -250,7 +250,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// create would permanently wedge the planner. Gate dispatch on Project
 	// resolution.
 	if project == nil {
-		logger := logf.FromContext(ctx).WithValues("plan", plan.Name)
+		logger := logf.FromContext(ctx).WithValues("plan", plan.Name) //nolint:logcheck // controller-runtime logf idiom used codebase-wide; klogr helper not adopted
 		if plan.Spec.PhaseRef == "" {
 			// Permanent: empty PhaseRef is a configuration error; admission
 			// validation should reject it. Refuse dispatch without requeueing so

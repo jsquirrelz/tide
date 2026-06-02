@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -249,11 +250,9 @@ func ensureKindCluster() {
 	// Check if cluster already exists.
 	out, err := exec.Command("kind", "get", "clusters").CombinedOutput()
 	if err == nil {
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if line == kindClusterName {
-				GinkgoWriter.Println("Reusing existing kind cluster: " + kindClusterName)
-				return
-			}
+		if slices.Contains(strings.Split(strings.TrimSpace(string(out)), "\n"), kindClusterName) {
+			GinkgoWriter.Println("Reusing existing kind cluster: " + kindClusterName)
+			return
 		}
 	}
 

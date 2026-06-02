@@ -243,7 +243,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			Eventually(func(g Gomega) {
 				var got tideprojectv1alpha1.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(string(got.Status.Phase)).To(Equal(tideprojectv1alpha1.PhasePushLeakBlocked))
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeakBlocked))
 				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionPushLeakBlocked)
 				g.Expect(c).NotTo(BeNil(), "ConditionPushLeakBlocked should be set")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
@@ -289,7 +289,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			Eventually(func(g Gomega) {
 				var got tideprojectv1alpha1.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(string(got.Status.Phase)).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
 				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionPushLeaseFailed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
@@ -334,7 +334,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			Eventually(func(g Gomega) {
 				var got tideprojectv1alpha1.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(string(got.Status.Phase)).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed),
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed),
 					"unknown reason should fall back to PhasePushLeaseFailed (preserves bypass recovery path)")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})

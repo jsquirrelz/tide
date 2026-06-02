@@ -58,6 +58,8 @@ var approveWaveRE = regexp.MustCompile(`^[^/]+/\d+$`)
 // (e.g., "approved milestone ms-alpha on project my-project"). Currently the
 // seam exits silently on success; callers in production should add a single
 // confirmation line at the cobra adapter layer.
+//
+//nolint:unparam // out is a documented future seam (success-confirmation line); kept on the signature intentionally
 func approveRun(ctx context.Context, c client.Client, ns, projectName, waveFlag string, out io.Writer) error {
 	// Branch A: --wave plan/N — write approve-wave-N on the named Plan.
 	if waveFlag != "" {

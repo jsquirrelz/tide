@@ -102,6 +102,8 @@ func main() {
 // run is the testable in-process entry point. It reads the EnvelopeIn at
 // envelopePath, dispatches on Dev.TestMode, writes out.json, and returns
 // the process exit code (0, 1, or 2).
+//
+//nolint:unparam // stdout is part of the shared subagent-binary (stdout, stderr) entry-point contract
 func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int {
 	// Derive the output path: replace "in.json" basename with "out.json".
 	outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
@@ -109,7 +111,7 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 	// Open + decode the envelope.
 	env, err := loadEnvelope(envelopePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "stub-subagent: envelope load: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "stub-subagent: envelope load: %v\n", err) // diagnostic to stderr; write error not actionable
 		// Attempt a best-effort failure envelope if we can derive the outPath.
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
@@ -145,7 +147,7 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 		return dispatchWaitForSignal(ctx, env, outPath, stderr)
 
 	default:
-		fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode)
+		_, _ = fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode) // diagnostic to stderr; write error not actionable
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 			Kind:        pkgdispatch.KindTaskEnvelopeOut,
@@ -230,7 +232,7 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 	case "project":
 		raw, err := json.Marshal(map[string]string{"projectRef": parentName})
 		if err != nil {
-			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err) // diagnostic to stderr
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 				Kind:        pkgdispatch.KindTaskEnvelopeOut,

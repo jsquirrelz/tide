@@ -206,7 +206,7 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeSSEEvent(w, flusher, "error", fmt.Sprintf(`{"error":%q}`, err.Error()))
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }() // read-only log stream; close error is not actionable
 
 	// Spawn the reader goroutine. Scanner uses default 64KB buffer — pod
 	// logs typically have short lines (CR/LF-separated) but we provide

@@ -122,8 +122,10 @@ func (p *Proxy) Handler() (http.Handler, error) {
 		return nil, fmt.Errorf("credproxy: invalid upstream URL %q: missing host", p.UpstreamBaseURL)
 	}
 	rp := httputil.NewSingleHostReverseProxy(upstream)
+	//nolint:staticcheck // SA1019: rp.Director is load-bearing credproxy security semantics (header rewrite firewall);
+	// migrating to Rewrite is out of scope for lint hygiene and would alter the security-critical request path.
 	origDirector := rp.Director
-	rp.Director = func(req *http.Request) {
+	rp.Director = func(req *http.Request) { //nolint:staticcheck // SA1019: see above — credproxy Director firewall
 		origDirector(req)
 		req.Host = upstream.Host
 		// Replace signed-token with real key in both header forms that the

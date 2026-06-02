@@ -62,7 +62,7 @@ func TestHandleDeletion_NoFinalizer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue {
+	if res.Requeue { //nolint:staticcheck // SA1019: asserting on the same Requeue field the finalizer sets; field still valid
 		t.Errorf("expected no requeue, got Requeue=true")
 	}
 	if cleanupCalled {
@@ -88,7 +88,7 @@ func TestHandleDeletion_SuccessfulCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue {
+	if res.Requeue { //nolint:staticcheck // SA1019: asserting on the same Requeue field the finalizer sets; field still valid
 		t.Errorf("expected no requeue, got Requeue=true")
 	}
 	if !cleanupCalled {
@@ -125,7 +125,7 @@ func TestHandleDeletion_DeadlineExceeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error on forcible removal, got: %v", err)
 	}
-	if res.Requeue {
+	if res.Requeue { //nolint:staticcheck // SA1019: asserting on the same Requeue field the finalizer sets; field still valid
 		t.Errorf("expected no requeue on forcible removal, got Requeue=true")
 	}
 	if controllerutil.ContainsFinalizer(obj, testFinalizer) {
@@ -157,7 +157,7 @@ func TestHandleDeletion_NonTimeoutError(t *testing.T) {
 	if err == nil || !errors.Is(err, boom) {
 		t.Fatalf("expected boom error to be returned for requeue, got: %v", err)
 	}
-	if !res.Requeue {
+	if !res.Requeue { //nolint:staticcheck // SA1019: asserting on the same Requeue field the finalizer sets; field still valid
 		t.Errorf("expected Requeue=true on non-timeout error")
 	}
 	if !controllerutil.ContainsFinalizer(obj, testFinalizer) {
@@ -181,7 +181,7 @@ func TestHandleDeletion_IdempotentRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.Requeue {
+	if res.Requeue { //nolint:staticcheck // SA1019: asserting on the same Requeue field the finalizer sets; field still valid
 		t.Errorf("expected no requeue on idempotent re-run")
 	}
 	if cleanupCalled {

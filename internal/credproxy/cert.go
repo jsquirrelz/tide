@@ -95,11 +95,17 @@ func MintSelfSignedCert(dir string, validity time.Duration) error {
 
 // writePEM encodes der as a PEM block of blockType and writes it to path,
 // overwriting any existing file.
-func writePEM(path, blockType string, der []byte) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
+func writePEM(path, blockType string, der []byte) (err error) {
+	f, ferr := os.Create(path)
+	if ferr != nil {
+		return ferr
 	}
-	defer f.Close()
+	defer func() {
+		// Surface a close error (e.g. flush failure on a written cert file)
+		// only if the encode itself succeeded, so the original error wins.
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	return pem.Encode(f, &pem.Block{Type: blockType, Bytes: der})
 }

@@ -134,7 +134,7 @@ func defaultTailStreamer(ctx context.Context, cs kubernetes.Interface, ns, pod, 
 	if err != nil {
 		return fmt.Errorf("open log stream for pod/%s: %w", pod, err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }() // read-only log stream; close error is not actionable
 
 	// Ctx-cancel watcher — closes the stream so io.Copy returns within ~1s
 	// of Ctrl-C (Pitfall 25). Without this, io.Copy can block on a read
@@ -150,7 +150,7 @@ func defaultTailStreamer(ctx context.Context, cs kubernetes.Interface, ns, pod, 
 	if ctx.Err() == nil {
 		// EOF without ctx-cancel = pod terminated mid-stream. UX-friendly
 		// surface on stderr; exit 0.
-		fmt.Fprintln(errOut, "(stream closed by pod termination)")
+		_, _ = fmt.Fprintln(errOut, "(stream closed by pod termination)") // UX message to stderr; write error not actionable
 	}
 	return nil
 }

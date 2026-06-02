@@ -133,10 +133,11 @@ const (
 )
 
 func main() {
-	fs := flag.NewFlagSet("tide-demo-init", flag.ExitOnError)
-	bootstrapDir := fs.String("bootstrap-dir", "", "filesystem path at which to create the bare git remote (e.g. /workspace/demo-remote.git)")
+	flagSet := flag.NewFlagSet("tide-demo-init", flag.ExitOnError)
+	bootstrapDir := flagSet.String("bootstrap-dir", "",
+		"filesystem path at which to create the bare git remote (e.g. /workspace/demo-remote.git)")
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := flagSet.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-demo-init: flag parse: %v\n", err)
 		os.Exit(exitInvariant)
 	}

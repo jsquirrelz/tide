@@ -29,7 +29,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -183,23 +182,4 @@ metadata:
 	ensureSigningKeySecret(ns)
 	// Cascade-11: pre-bind WaitForFirstConsumer PVC for Pod-less fixtures (push-lease).
 	pvcPrewarmPod(ns)
-}
-
-// makeKindTask creates a Task in the kind cluster.
-func makeKindTask(ns, name, planRef string, dependsOn []string, testMode string) *tideprojectv1alpha1.Task {
-	task := &tideprojectv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-		},
-		Spec: tideprojectv1alpha1.TaskSpec{
-			PlanRef:             planRef,
-			DependsOn:           dependsOn,
-			FilesTouched:        []string{name + ".go"},
-			DeclaredOutputPaths: []string{name + ".go"},
-			Dev:                 tideprojectv1alpha1.TaskDev{TestMode: testMode},
-		},
-	}
-	Expect(k8sClient.Create(ctx, task)).To(Succeed())
-	return task
 }

@@ -37,7 +37,7 @@ import (
 //
 // Phase 1: bodies are explicit no-ops (always Allow). Phase 2 fills validation
 // logic inside the documented seams below per REQ-PLAN-01 / D-B3.
-var planlog = logf.Log.WithName("plan-webhook")
+var planlog = logf.Log.WithName("plan-webhook") //nolint:logcheck // controller-runtime logf idiom; klogr LoggerWithName helper not adopted
 
 // SetupPlanWebhookWithManager registers the validating webhook for Plan with
 // the controller-runtime Manager and configures the stateful PlanCustomValidator
@@ -51,7 +51,9 @@ func SetupPlanWebhookWithManager(mgr ctrl.Manager, defaultMode string) error {
 		WithValidator(&PlanCustomValidator{
 			Client:               mgr.GetClient(),
 			DefaultFileTouchMode: defaultMode,
-			Recorder:             mgr.GetEventRecorderFor("plan-webhook"),
+			//nolint:staticcheck // SA1019: GetEventRecorderFor returns record.EventRecorder (the Recorder field's type);
+			// GetEventRecorder returns the incompatible events/v1 type — out of scope for lint hygiene.
+			Recorder: mgr.GetEventRecorderFor("plan-webhook"),
 		}).
 		Complete()
 }

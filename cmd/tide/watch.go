@@ -77,7 +77,7 @@ func runWatch(ctx context.Context, name string, out io.Writer) error {
 	// Emit one initial line immediately so the operator sees activity
 	// without waiting a full tick.
 	if line := readAndRender(ctx, k, ns, name); line != "" {
-		fmt.Fprintln(out, line)
+		_, _ = fmt.Fprintln(out, line) // status line to stdout; write error not actionable
 		lastLine = line
 	}
 
@@ -88,7 +88,7 @@ func runWatch(ctx context.Context, name string, out io.Writer) error {
 		case <-ticker.C:
 			line := readAndRender(ctx, k, ns, name)
 			if line != "" && line != lastLine {
-				fmt.Fprintln(out, line)
+				_, _ = fmt.Fprintln(out, line) // status line to stdout; write error not actionable
 				lastLine = line
 			}
 		}

@@ -123,7 +123,7 @@ func inspectWaveRunWithErr(ctx context.Context, c client.Client, ns, projectName
 		return enc.Encode(rows)
 	default: // "human" or any other → tabwriter
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "NAME\tSTATUS\tAGE\tATTEMPT\tSCHEDULED-IN-WAVE")
+		_, _ = fmt.Fprintln(tw, "NAME\tSTATUS\tAGE\tATTEMPT\tSCHEDULED-IN-WAVE") // buffered; tw.Flush() below surfaces write errors
 		for _, r := range rows {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\n", r.Name, r.Status, r.Age, r.Attempt, r.Wave)
 		}

@@ -28,7 +28,7 @@ import (
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 )
 
-var projectlog = logf.Log.WithName("project-webhook")
+var projectlog = logf.Log.WithName("project-webhook") //nolint:logcheck // controller-runtime logf idiom; klogr LoggerWithName helper not adopted
 
 // SetupProjectWebhookWithManager registers the Project validating webhook.
 // Phase 04.1 P4.2: rejects PathPrefix values matching admin/billing surfaces

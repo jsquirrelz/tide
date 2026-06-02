@@ -546,7 +546,7 @@ var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label(
 			Expect(err).NotTo(HaveOccurred())
 			Expect(handled).To(BeFalse(),
 				"guard should NOT mark as handled — dispatch was not committed")
-			Expect(result.Requeue).To(BeFalse(),
+			Expect(result.Requeue).To(BeFalse(), //nolint:staticcheck // SA1019: asserting the controller does not set the legacy Requeue field
 				"empty-PhaseRef arm must not requeue (permanent error)")
 			Expect(result.RequeueAfter).To(Equal(time.Duration(0)),
 				"empty-PhaseRef arm must not requeue (permanent error)")

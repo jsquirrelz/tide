@@ -92,13 +92,6 @@ func (f *fakeStream) Close() error {
 	return nil
 }
 
-func (f *fakeStream) signalEOF() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.eof = true
-	f.cond.Broadcast()
-}
-
 // newLogsRouter returns a chi router mounted with a LogsHandler that uses
 // a deterministic stub streamer. The Pod has a single container named
 // "subagent". Behaviour:

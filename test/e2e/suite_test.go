@@ -70,11 +70,11 @@ const (
 	// Live Claude milestone runs are O(minutes); 15m matches the Makefile
 	// `test-e2e-live` target's `-timeout=15m`. The in-test Eventually
 	// timeouts (10m → 13m) fit comfortably inside this envelope.
-	liveE2ETestTimeout = 15 * time.Minute
+	liveE2ETestTimeout = 15 * time.Minute //nolint:unused // consumed only under -tags=live_e2e (live_claude_test.go)
 
 	// liveE2EControllerNamespace is the namespace TIDE installs into.
 	// Mirrors `kindControllerNamespace` in test/integration/kind/suite_test.go.
-	liveE2EControllerNamespace = "tide-system"
+	liveE2EControllerNamespace = "tide-system" //nolint:unused // consumed only under -tags=live_e2e (live_claude_test.go)
 )
 
 var (
@@ -82,16 +82,16 @@ var (
 	// live_claude_test.go (only when `-tags=live_e2e` is active).
 	// Without the tag, this stays nil — TestLiveE2E runs zero specs
 	// and exits cleanly.
-	liveE2EClient client.Client
+	liveE2EClient client.Client //nolint:unused // consumed only under -tags=live_e2e (live_claude_test.go)
 
 	// liveE2ECtx carries the BeforeSuite timeout to every Eventually
 	// inside the live spec.
-	liveE2ECtx    context.Context
-	liveE2ECancel context.CancelFunc
+	liveE2ECtx    context.Context    //nolint:unused // consumed only under -tags=live_e2e
+	liveE2ECancel context.CancelFunc //nolint:unused // consumed only under -tags=live_e2e
 
 	// liveE2EKubeconfigPath is the path to the kubeconfig in use.
 	// Defaults to ~/.kube/config (via KUBECONFIG env or clientcmd defaults).
-	liveE2EKubeconfigPath string
+	liveE2EKubeconfigPath string //nolint:unused // consumed only under -tags=live_e2e
 )
 
 // TestLiveE2E is the Ginkgo entry point for the live Claude nightly E2E suite.
@@ -121,7 +121,7 @@ func TestLiveE2E(t *testing.T) {
 // client is built) — without ANTHROPIC_API_KEY, the BeforeSuite Skips and
 // the whole suite reports "Ran 0 of 0 Specs". This is the second of the
 // three live-E2E gates (build tag → env → budget cap).
-func initLiveE2ESuite() {
+func initLiveE2ESuite() { //nolint:unused // called only from live_claude_test.go under -tags=live_e2e
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
@@ -146,14 +146,14 @@ func initLiveE2ESuite() {
 }
 
 // teardownLiveE2ESuite is invoked from live_claude_test.go's AfterSuite.
-func teardownLiveE2ESuite() {
+func teardownLiveE2ESuite() { //nolint:unused // called only from live_claude_test.go under -tags=live_e2e
 	if liveE2ECancel != nil {
 		liveE2ECancel()
 	}
 }
 
 // resolveKubeconfigPath honors KUBECONFIG env, then falls back to ~/.kube/config.
-func resolveKubeconfigPath() string {
+func resolveKubeconfigPath() string { //nolint:unused // called only from initLiveE2ESuite under -tags=live_e2e
 	if kc := os.Getenv("KUBECONFIG"); kc != "" {
 		return kc
 	}

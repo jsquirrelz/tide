@@ -215,7 +215,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	if err != nil {
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: create events.jsonl %q: %w", eventsPath, err)
 	}
-	defer eventsFile.Close()
+	defer func() { _ = eventsFile.Close() }() // best-effort event sink; close error is non-actionable cleanup
 
 	// 7. Pipe stdout → ParseStream(stdout, events.jsonl). Stderr surfaces
 	// as task-level Reason on non-zero exit.

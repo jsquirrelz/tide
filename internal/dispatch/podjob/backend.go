@@ -291,6 +291,8 @@ func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha1.T
 
 // walkOwnerChain walks the owner-ref chain looking for a Project, bounded to
 // depth levels. Returns nil, nil on miss. Phase 04.1 P1.4.
+//
+//nolint:unparam // error return is part of the recursive owner-walk signature; kept for caller uniformity
 func (b *PodJobBackend) walkOwnerChain(ctx context.Context, obj client.Object, depth int) (*tidev1alpha1.Project, error) {
 	if depth <= 0 || obj == nil {
 		return nil, nil

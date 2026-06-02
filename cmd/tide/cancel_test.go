@@ -44,7 +44,7 @@ func cancelFixture(t *testing.T) client.Client {
 func TestCancelRequiresForce(t *testing.T) {
 	c := cancelFixture(t)
 	var stdout, stderr bytes.Buffer
-	err := cancelRun(context.Background(), c, "default", "my-project", false /*force*/, false /*dryRun*/, &stdout, &stderr)
+	err := cancelRun(context.Background(), c, "default", "my-project", false /* force */, false /* dryRun */, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected --force-required error; got nil")
 	}
@@ -61,7 +61,7 @@ func TestCancelRequiresForce(t *testing.T) {
 func TestCancelForceDeletes(t *testing.T) {
 	c := cancelFixture(t)
 	var stdout, stderr bytes.Buffer
-	if err := cancelRun(context.Background(), c, "default", "my-project", true /*force*/, false, &stdout, &stderr); err != nil {
+	if err := cancelRun(context.Background(), c, "default", "my-project", true /* force */, false, &stdout, &stderr); err != nil {
 		t.Fatalf("cancelRun: %v", err)
 	}
 	// Project must be gone.
@@ -91,7 +91,7 @@ func TestCancelMissingProjectFriendlyError(t *testing.T) {
 func TestCancelDryRunListsChildren(t *testing.T) {
 	c := cancelFixture(t)
 	var stdout, stderr bytes.Buffer
-	if err := cancelRun(context.Background(), c, "default", "my-project", true /*force*/, true /*dry-run*/, &stdout, &stderr); err != nil {
+	if err := cancelRun(context.Background(), c, "default", "my-project", true /* force */, true /* dry-run */, &stdout, &stderr); err != nil {
 		t.Fatalf("cancelRun dry-run: %v", err)
 	}
 	// Project still exists (dry-run does not delete).

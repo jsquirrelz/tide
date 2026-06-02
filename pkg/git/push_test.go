@@ -74,9 +74,6 @@ func addCommit(t *testing.T, repo *gogit.Repository, wt *gogit.Worktree, dir, fi
 	return h
 }
 
-//go:fix inline
-func ptrSig(s object.Signature) *object.Signature { return new(s) }
-
 // TestPushFirstPushOmitsLease covers Test 2: a fresh clone pushes back to
 // the bare origin with lastPushedSHA="" — no ForceWithLease, push must
 // succeed, the bare repo's ref must advance.

@@ -570,6 +570,8 @@ func (e *maxAttemptsError) Error() string { return "task exceeded max dispatch a
 // Returns (ctrl.Result{}, nil) on successful dispatch.
 //
 // Phase 04.1 P3.1 — extracted from reconcileDispatch steps 10-12.
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.createDispatchJob(...)` in the reconcile chain
 func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojectv1alpha1.Task, spec taskDispatchSpec) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := spec.project
@@ -643,6 +645,8 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 // patchTaskFailed patches Task.Status.Phase=Failed with the supplied reason
 // + message. Used by the Plan 04-05 gate-policy hook for the reject
 // short-circuit (operator wrote tideproject.k8s/reject on the parent Project).
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.patchTaskFailed(...)` in the reconcile chain
 func (r *TaskReconciler) patchTaskFailed(ctx context.Context, task *tideprojectv1alpha1.Task, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(task.DeepCopy())
 	task.Status.Phase = "Failed"
@@ -662,6 +666,8 @@ func (r *TaskReconciler) patchTaskFailed(ctx context.Context, task *tideprojectv
 // patchTaskAwaitingApproval parks the Task at Status.Phase=AwaitingApproval
 // per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue; an
 // AnnotationChangedPredicate-driven re-reconcile is the only path forward).
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.patchTaskAwaitingApproval(...)` in the reconcile chain
 func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *tideprojectv1alpha1.Task, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
 	reason := tideprojectv1alpha1.ReasonAwaitingApproval
 	message := "Task awaiting operator approve annotation (tideproject.k8s/approve-task=true)"
@@ -686,6 +692,8 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
 // budget, and patches Task.Status to the terminal state.
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
 func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -954,6 +962,8 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 // gateDispatch handles the rate-limit gate using Pattern 1.
 // Returns a non-zero delay when the bucket is exhausted (caller must RequeueAfter).
 // Standalone helper satisfying plan's "helpers named in <interfaces>" requirement (grep target).
+//
+//nolint:unused // intentionally retained per plan <interfaces> grep contract; wired by a later phase
 func (r *TaskReconciler) gateDispatch(projectName, secretUID string, limits budget.Limits) time.Duration {
 	lim := r.Deps.Budget.ForSecret(secretUID, limits)
 	if lim == nil {
@@ -970,6 +980,8 @@ func (r *TaskReconciler) gateDispatch(projectName, secretUID string, limits budg
 
 // ensureJob builds and creates the Job for a Task dispatch.
 // This is the helper referenced by the plan's grep contract.
+//
+//nolint:unused // intentionally retained per plan grep contract; wired by a later phase
 func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, attempt int, token string, envInJSON []byte) (*batchv1.Job, error) {
 	var secretUID string
 	if project.Spec.ProviderSecretRef != "" {
@@ -1103,7 +1115,7 @@ func buildViolationMessage(violations []string) string {
 		suffix = fmt.Sprintf(" ... and %d more", len(violations)-maxList)
 	}
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("Output path violations (%d total):", len(violations)))
+	fmt.Fprintf(&msg, "Output path violations (%d total):", len(violations))
 	for _, v := range listed {
 		msg.WriteString("\n  " + v)
 	}

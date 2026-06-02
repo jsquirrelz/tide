@@ -266,7 +266,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			Eventually(func(g Gomega) {
 				var p tideprojectv1alpha1.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
-				g.Expect(string(p.Status.Phase)).To(Equal(tideprojectv1alpha1.PhasePushLeakBlocked))
+				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeakBlocked))
 				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionPushLeakBlocked)
 				g.Expect(c).NotTo(BeNil(), "ConditionPushLeakBlocked should be set on leak-detected")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
@@ -336,7 +336,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			Eventually(func(g Gomega) {
 				var p tideprojectv1alpha1.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
-				g.Expect(string(p.Status.Phase)).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
+				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
 				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionPushLeaseFailed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
@@ -348,12 +348,3 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 		})
 	})
 })
-
-// boolPtrIT is a local pointer helper for OwnerReferences. Mirrors
-// internal/controller.boolPtr but kept local because that helper is
-// unexported.
-//
-//go:fix inline
-func boolPtrIT(b bool) *bool {
-	return new(b)
-}

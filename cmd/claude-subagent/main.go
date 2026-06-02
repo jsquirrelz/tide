@@ -59,6 +59,8 @@ func main() {
 }
 
 // run is the testable entry point. Does NOT branch on env.Dev.TestMode.
+//
+//nolint:unparam // stdout is part of the shared subagent-binary (stdout, stderr) entry-point contract
 func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr io.Writer) int {
 	outPath := filepath.Join(filepath.Dir(envelopePath), "out.json")
 	env, err := harness.ReadEnvelopeIn(envelopePath)
@@ -70,11 +72,11 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	}
 	out, runErr := newSubagent("claude", workspaceRoot).Run(ctx, env)
 	if runErr != nil {
-		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
+		_, _ = fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr) // diagnostic to stderr; write error not actionable
 		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
-		fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err) // diagnostic to stderr
 		return 2
 	}
 	return out.ExitCode
@@ -97,7 +99,7 @@ func failEnvelope(taskUID string, err error, exitCode int, result string) pkgdis
 }
 
 func failOut(stderr io.Writer, outPath, taskUID string, err error, exitCode int, result string) int {
-	fmt.Fprintf(stderr, "claude-subagent: %v\n", err)
+	_, _ = fmt.Fprintf(stderr, "claude-subagent: %v\n", err) // diagnostic to stderr; write error not actionable
 	_ = writeEnvelope(outPath, failEnvelope(taskUID, err, exitCode, result))
 	return exitCode
 }

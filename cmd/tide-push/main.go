@@ -195,7 +195,7 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 	case "push":
 		return runPush(ctx, cfg, stderr)
 	default:
-		fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push)\n", cfg.Mode)
+		_, _ = fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push)\n", cfg.Mode) // diagnostic to stderr
 		return exitInvariant
 	}
 }
@@ -205,11 +205,11 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 // the Project's one-time setup.
 func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	if cfg.RepoURL == "" {
-		fmt.Fprintf(stderr, "tide-push: clone mode requires --repo-url\n")
+		_, _ = fmt.Fprintf(stderr, "tide-push: clone mode requires --repo-url\n") // diagnostic to stderr
 		return exitInvariant
 	}
 	if cfg.Workspace == "" {
-		fmt.Fprintf(stderr, "tide-push: clone mode requires --workspace\n")
+		_, _ = fmt.Fprintf(stderr, "tide-push: clone mode requires --workspace\n") // diagnostic to stderr
 		return exitInvariant
 	}
 
@@ -385,7 +385,7 @@ func computeUnifiedDiff(repo *gogit.Repository, oldHash, newHash plumbing.Hash) 
 	// tree.Diff path documented in 03-RESEARCH §W10.
 	patch, err := newCommit.Patch(oldCommit)
 	if err != nil {
-		return "", fmt.Errorf("Patch %s..%s: %w", oldHash, newHash, err)
+		return "", fmt.Errorf("patch %s..%s: %w", oldHash, newHash, err)
 	}
 	return patch.String(), nil
 }
@@ -393,12 +393,12 @@ func computeUnifiedDiff(repo *gogit.Repository, oldHash, newHash plumbing.Hash) 
 // copyIntoWorktree copies src to dst, creating parent dirs as needed.
 // Uses io.Copy rather than os.Link because the source and destination
 // may live on different filesystems within the PVC SubPath mount.
-func copyIntoWorktree(src, dst string) error {
+func copyIntoWorktree(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open src %s: %w", src, err)
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }() // read-only handle; close error is not actionable
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(dst), err)
 	}
@@ -406,7 +406,13 @@ func copyIntoWorktree(src, dst string) error {
 	if err != nil {
 		return fmt.Errorf("create dst %s: %w", dst, err)
 	}
-	defer out.Close()
+	defer func() {
+		// A failed close on the destination can mean a truncated/unflushed
+		// copy; surface it if the copy itself succeeded.
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close dst %s: %w", dst, cerr)
+		}
+	}()
 	if _, err := io.Copy(out, in); err != nil {
 		return fmt.Errorf("copy %s -> %s: %w", src, dst, err)
 	}

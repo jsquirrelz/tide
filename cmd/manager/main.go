@@ -179,7 +179,7 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup")
+	setupLog := ctrl.Log.WithName("setup") //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
 
 	// Establish the manager's parent context early — used by both OTel
 	// init below and mgr.Start at the bottom. ctrl.SetupSignalHandler

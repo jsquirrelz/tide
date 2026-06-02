@@ -32,7 +32,7 @@ import (
 // Phase 1: bodies are explicit no-ops (always Allow). Phase 2 fills the
 // reject-client-applies logic per D-B1: only the WaveReconciler should
 // produce Wave objects, and the webhook enforces that contract.
-var wavelog = logf.Log.WithName("wave-webhook")
+var wavelog = logf.Log.WithName("wave-webhook") //nolint:logcheck // controller-runtime logf idiom; klogr LoggerWithName helper not adopted
 
 // SetupWaveWebhookWithManager registers the validating webhook for Wave with
 // the controller-runtime Manager. Wave is a single-version Kind (v1alpha1
@@ -72,7 +72,7 @@ type WaveCustomValidator struct{}
 func (v *WaveCustomValidator) ValidateCreate(_ context.Context, obj *tideprojectv1alpha1.Wave) (admission.Warnings, error) {
 	wavelog.V(1).Info("ValidateCreate (D-B1 rejection wired)", "name", obj.GetName())
 	if len(obj.GetOwnerReferences()) == 0 {
-		return nil, fmt.Errorf("Wave %s/%s rejected per D-B1: client-applied Waves not allowed; the WaveReconciler is the sole producer", obj.Namespace, obj.Name)
+		return nil, fmt.Errorf("wave %s/%s rejected per D-B1: client-applied Waves not allowed; the WaveReconciler is the sole producer", obj.Namespace, obj.Name)
 	}
 	return nil, nil
 }
