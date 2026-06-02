@@ -73,8 +73,12 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 fmt: ## Run go fmt against code.
 	go fmt ./...
 
+.PHONY: demo-fixture
+demo-fixture: ## Materialize cmd/tide-demo-init/fixture/ from examples/tide-demo-fixture/ (gitignored SOT lock; required by //go:embed all:fixture).
+	go generate ./cmd/tide-demo-init/...
+
 .PHONY: vet
-vet: ## Run go vet against code.
+vet: demo-fixture ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
@@ -197,7 +201,7 @@ test-e2e-live: ## Live nightly E2E (requires ANTHROPIC_API_KEY env) — incurs c
 	go test -tags=live_e2e ./test/e2e/... -timeout=15m -v
 
 .PHONY: lint
-lint: golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
+lint: demo-fixture golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
 
 .PHONY: lint-fix
@@ -460,7 +464,7 @@ tide-lint: ## Run TIDE custom analyzers (POOL-03 / Pitfall 6 + SUB-05 / Pitfall 
 ##@ Import firewall (SUB-05 / Pitfall 14 — Phase 2)
 
 .PHONY: verify-import-firewall
-verify-import-firewall: ## Run providerfirewall analyzer via tide-lint multichecker (SUB-05 / Pitfall 14). Fails on any LLM SDK import inside firewalled boundaries.
+verify-import-firewall: demo-fixture ## Run providerfirewall analyzer via tide-lint multichecker (SUB-05 / Pitfall 14). Fails on any LLM SDK import inside firewalled boundaries.
 	go run ./cmd/tide-lint ./...
 
 ##@ PERSIST gates (PERSIST-01, PERSIST-02 / Pitfall 4)
