@@ -18,6 +18,7 @@ limitations under the License.
 package budget
 
 import (
+	"maps"
 	"time"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -99,9 +100,7 @@ func ConsumeBypass(project *tidev1alpha1.Project) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(project.Annotations))
-	for k, v := range project.Annotations {
-		out[k] = v
-	}
+	maps.Copy(out, project.Annotations)
 	delete(out, "tideproject.k8s/bypass-budget")
 	return out
 }

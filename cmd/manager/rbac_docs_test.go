@@ -138,7 +138,7 @@ func TestPushRBACNamespaceScoped(t *testing.T) {
 // fooled by an explanatory comment that names a forbidden verb.
 func stripComments(body string) string {
 	var out strings.Builder
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if idx := strings.Index(line, "#"); idx >= 0 {
 			line = line[:idx]
 		}

@@ -11,6 +11,7 @@ You may obtain a copy of the License at
 package controller
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,11 +70,11 @@ func TestBuildPushJobName(t *testing.T) {
 	}
 	job := buildPushJob(project, "tide-projects", opts, scheme)
 	want := "tide-push-proj-uid-abc"
-	if job.ObjectMeta.Name != want {
-		t.Errorf("Job.Name = %q, want %q (D-B5 deterministic)", job.ObjectMeta.Name, want)
+	if job.Name != want {
+		t.Errorf("Job.Name = %q, want %q (D-B5 deterministic)", job.Name, want)
 	}
-	if job.ObjectMeta.Namespace != "test-ns" {
-		t.Errorf("Job.Namespace = %q, want %q", job.ObjectMeta.Namespace, "test-ns")
+	if job.Namespace != "test-ns" {
+		t.Errorf("Job.Namespace = %q, want %q", job.Namespace, "test-ns")
 	}
 }
 
@@ -105,7 +106,7 @@ func TestBuildPushJobEnvFromCredsSecret(t *testing.T) {
 	}
 	found := false
 	for _, ef := range envFrom {
-		if ef.SecretRef != nil && ef.SecretRef.LocalObjectReference.Name == project.Spec.Git.CredsSecretRef {
+		if ef.SecretRef != nil && ef.SecretRef.Name == project.Spec.Git.CredsSecretRef {
 			found = true
 			break
 		}
@@ -189,13 +190,7 @@ func TestBuildPushJobArgs(t *testing.T) {
 		"--project-uid=proj-uid-abc",
 	}
 	for _, w := range wants {
-		found := false
-		for _, a := range args {
-			if a == w {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(args, w)
 		if !found {
 			t.Errorf("Args missing %q (got: %s)", w, joined)
 		}
@@ -241,8 +236,8 @@ func TestBuildCloneJobName(t *testing.T) {
 	opts := CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}
 	job := buildCloneJob(project, "tide-projects", opts, scheme)
 	want := "tide-clone-proj-uid-abc"
-	if job.ObjectMeta.Name != want {
-		t.Errorf("Job.Name = %q, want %q", job.ObjectMeta.Name, want)
+	if job.Name != want {
+		t.Errorf("Job.Name = %q, want %q", job.Name, want)
 	}
 }
 
@@ -337,13 +332,7 @@ func TestBuildPushJobWithArtifacts(t *testing.T) {
 		"--artifact-paths=artifacts/M-001/P-003/L-005/PLAN.md,artifacts/M-001/P-003/L-005/SUMMARY.md",
 	}
 	for _, w := range wants {
-		found := false
-		for _, a := range args {
-			if a == w {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(args, w)
 		if !found {
 			t.Errorf("Args missing %q (got: %s)", w, joined)
 		}
@@ -364,13 +353,7 @@ func TestBuildCloneJobArgs(t *testing.T) {
 		"--repo-url=https://github.com/example/demo.git",
 	}
 	for _, w := range wants {
-		found := false
-		for _, a := range args {
-			if a == w {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(args, w)
 		if !found {
 			t.Errorf("Clone args missing %q (got: %s)", w, joined)
 		}

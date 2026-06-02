@@ -46,7 +46,6 @@ func TestIsCapExceeded(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "nil project" {
 				got := IsCapExceeded(nil)
@@ -141,7 +140,6 @@ func TestIsCapExceeded_RollingCap(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "nil project → NOT exceeded" {
 				got := IsCapExceeded(nil)
@@ -224,7 +222,6 @@ func TestIsBypassed(t *testing.T) {
 
 	now := time.Now()
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			p := &tidev1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{

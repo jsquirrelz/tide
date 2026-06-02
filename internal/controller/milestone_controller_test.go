@@ -43,8 +43,8 @@ func newPlannerPoolForTest() *pool.Pool {
 type reconcilerFunc func(context.Context, reconcile.Request) (ctrl.Result, error)
 
 func reconcileWithRetry(r reconcilerFunc, name types.NamespacedName, n int) error {
-	for i := 0; i < n; i++ {
-		for attempt := 0; attempt < 5; attempt++ {
+	for range n {
+		for range 5 {
 			_, err := r(context.Background(), reconcile.Request{NamespacedName: name})
 			if err == nil {
 				break

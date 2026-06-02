@@ -157,7 +157,7 @@ func TestRollUpUsage_PreservesExistingWindowStart(t *testing.T) {
 	// JSON encoding, stripping sub-second precision and the monotonic clock reading.
 	// WR-08: time.Second is the self-documenting form of the previous magic
 	// `Truncate(1000000000)` (1e9 ns).
-	if !updated.Status.Budget.WindowStart.Time.Truncate(time.Second).Equal(existingTime.Time.Truncate(time.Second)) {
+	if !updated.Status.Budget.WindowStart.Time.Truncate(time.Second).Equal(existingTime.Truncate(time.Second)) {
 		t.Errorf("WindowStart changed: got %v; want %v", updated.Status.Budget.WindowStart, existingTime)
 	}
 }
@@ -233,7 +233,6 @@ func TestMaybeResetWindow_TableDriven(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			p := makeProject(fmt.Sprintf("test-%s", strings.ReplaceAll(tc.name, " ", "-")))
 			p.Spec.Budget.RollingWindowCapCents = tc.rollingCapCents

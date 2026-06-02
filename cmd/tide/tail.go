@@ -47,7 +47,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -128,7 +127,7 @@ func defaultTailStreamer(ctx context.Context, cs kubernetes.Interface, ns, pod, 
 	req := cs.CoreV1().Pods(ns).GetLogs(pod, &corev1.PodLogOptions{
 		Follow:     true,
 		Container:  container,
-		TailLines:  ptr.To(opt.tailLines),
+		TailLines:  new(opt.tailLines),
 		Timestamps: opt.timestamps,
 	})
 	stream, err := req.Stream(ctx)

@@ -52,7 +52,6 @@ func TestEvaluatePolicy(t *testing.T) {
 			"wave", PolicyAuto},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := EvaluatePolicy(tc.gates, tc.level)
 			if got != tc.want {

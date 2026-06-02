@@ -103,7 +103,7 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 			wv := w
 			r := &WaveReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_ = k8sClient.Delete(context.Background(), &wv)
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				_, _ = r.Reconcile(context.Background(), reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: wv.Name, Namespace: "default"},
 				})
@@ -114,7 +114,7 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
 		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Dispatcher: &stubDispatcher{}, SigningKey: testSigningKey, CredproxyImage: testCredproxyImage}
 		_ = k8sClient.Delete(context.Background(), p)
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			_, _ = r.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: planName, Namespace: "default"},
 			})
@@ -141,8 +141,8 @@ func newPlanReconciler() *PlanReconciler {
 func reconcilePlanN(r *PlanReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
 	var result ctrl.Result
 	var err error
-	for i := 0; i < n; i++ {
-		for attempt := 0; attempt < 5; attempt++ {
+	for range n {
+		for range 5 {
 			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
 			if err == nil {
 				break
@@ -257,7 +257,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			Expect(err).NotTo(HaveOccurred())
 
 			// Expect 3 Waves: tide-wave-{UID}-0, -1, -2.
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
 				var wave tideprojectv1alpha1.Wave
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed(),
@@ -377,7 +377,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			_, err := reconcilePlanN(r, planNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
 				var wave tideprojectv1alpha1.Wave
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed())

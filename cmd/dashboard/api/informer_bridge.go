@@ -103,7 +103,7 @@ func BridgeInformerToHub(ctx context.Context, c cache.Cache, cli client.Reader, 
 // prefix. The prefix becomes the SSE `event:` field: "<prefix>.create",
 // "<prefix>.update", "<prefix>.delete".
 func newKindHandler(ctx context.Context, cli client.Reader, h *hub.Hub, log logr.Logger, typePrefix string) toolscache.ResourceEventHandler {
-	publish := func(verb string, obj interface{}) {
+	publish := func(verb string, obj any) {
 		co, ok := obj.(client.Object)
 		if !ok {
 			// DeletedFinalStateUnknown or non-object — try the tombstone
@@ -141,13 +141,13 @@ func newKindHandler(ctx context.Context, cli client.Reader, h *hub.Hub, log logr
 	}
 
 	return toolscache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(obj any) {
 			publish("create", obj)
 		},
-		UpdateFunc: func(_, newObj interface{}) {
+		UpdateFunc: func(_, newObj any) {
 			publish("update", newObj)
 		},
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(obj any) {
 			publish("delete", obj)
 		},
 	}

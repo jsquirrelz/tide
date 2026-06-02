@@ -100,7 +100,7 @@ func readPlannerOutEnvelope(t *testing.T, dir string) pkgdispatch.EnvelopeOut {
 // variants.
 func assertSpecContainsKey(t *testing.T, spec runtime.RawExtension, key string) {
 	t.Helper()
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(spec.Raw, &m); err != nil {
 		t.Fatalf("unmarshal ChildCRD Spec.Raw: %v", err)
 	}
@@ -109,7 +109,7 @@ func assertSpecContainsKey(t *testing.T, spec runtime.RawExtension, key string) 
 	}
 }
 
-func mapKeys(m map[string]interface{}) []string {
+func mapKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)
@@ -228,11 +228,11 @@ func TestPlannerPlan(t *testing.T) {
 	assertSpecContainsKey(t, child.Spec, "declaredOutputPaths")
 
 	// Assert testMode:"success" is present in the dev sub-object.
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(child.Spec.Raw, &m); err != nil {
 		t.Fatalf("unmarshal Task Spec.Raw: %v", err)
 	}
-	dev, ok := m["dev"].(map[string]interface{})
+	dev, ok := m["dev"].(map[string]any)
 	if !ok {
 		t.Fatalf("planner/plan: Task Spec.Raw missing \"dev\" object; got keys: %v", mapKeys(m))
 	}

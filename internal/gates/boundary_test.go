@@ -218,7 +218,7 @@ func TestBoundaryDetectedSignature(t *testing.T) {
 		t.Fatalf("create phase: %v", err)
 	}
 
-	if ok, err := BoundaryDetected(context.Background(), c, ms, "Phase"); !(ok && err == nil) {
+	if ok, err := BoundaryDetected(context.Background(), c, ms, "Phase"); !ok || err != nil {
 		t.Errorf("integration shape (ok=%v, err=%v) — want ok=true, err=nil", ok, err)
 	}
 }
@@ -243,7 +243,6 @@ func TestBoundaryDetectedUnsupportedKind(t *testing.T) {
 // child Succeeded under each parent kind.
 func TestBoundaryDetectedSupportedKinds(t *testing.T) {
 	for _, ck := range []string{"Milestone", "Phase", "Plan", "Task"} {
-		ck := ck
 		t.Run(ck, func(t *testing.T) {
 			c, scheme := fakeClientForGatesTest(t)
 			var parent client.Object

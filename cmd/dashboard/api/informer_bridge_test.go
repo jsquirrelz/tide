@@ -234,7 +234,7 @@ func TestInformerBridgePublishesOnAdd(t *testing.T) {
 		if ev.Type != "project.create" {
 			t.Errorf("event Type = %q, want %q", ev.Type, "project.create")
 		}
-		var payload map[string]interface{}
+		var payload map[string]any
 		if err := json.Unmarshal(ev.JSON, &payload); err != nil {
 			t.Fatalf("unmarshal payload: %v", err)
 		}

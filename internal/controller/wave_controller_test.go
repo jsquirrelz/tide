@@ -109,7 +109,7 @@ func cleanupWave(waveName string, taskNames []string) {
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: waveName, Namespace: "default"}, wave); err == nil {
 		r := &WaveReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_ = k8sClient.Delete(context.Background(), wave)
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			_, _ = r.Reconcile(context.Background(), reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: waveName, Namespace: "default"},
 			})
@@ -138,8 +138,8 @@ func newWaveReconciler() *WaveReconciler {
 func reconcileWaveN(r *WaveReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
 	var result ctrl.Result
 	var err error
-	for i := 0; i < n; i++ {
-		for attempt := 0; attempt < 5; attempt++ {
+	for range n {
+		for range 5 {
 			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
 			if err == nil {
 				break

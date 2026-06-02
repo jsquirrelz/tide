@@ -248,10 +248,10 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			},
 		},
 		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                ptr.To(int64(1000)),
-			RunAsNonRoot:             ptr.To(true),
-			AllowPrivilegeEscalation: ptr.To(false),
-			ReadOnlyRootFilesystem:   ptr.To(true),
+			RunAsUser:                new(int64(1000)),
+			RunAsNonRoot:             new(true),
+			AllowPrivilegeEscalation: new(false),
+			ReadOnlyRootFilesystem:   new(true),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
@@ -317,10 +317,10 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			},
 		},
 		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                ptr.To(int64(1000)),
-			RunAsNonRoot:             ptr.To(true),
-			AllowPrivilegeEscalation: ptr.To(false),
-			ReadOnlyRootFilesystem:   ptr.To(true),
+			RunAsUser:                new(int64(1000)),
+			RunAsNonRoot:             new(true),
+			AllowPrivilegeEscalation: new(false),
+			ReadOnlyRootFilesystem:   new(true),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
@@ -366,11 +366,11 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		// D-A4: subagent has zero K8s verbs — no EnvFrom from K8s Secrets.
 		// D-C4: raw API key is NOT in subagent's env or EnvFrom.
 		SecurityContext: &corev1.SecurityContext{
-			RunAsUser:                ptr.To(int64(1000)),
-			RunAsNonRoot:             ptr.To(true),
-			AllowPrivilegeEscalation: ptr.To(false),
+			RunAsUser:                new(int64(1000)),
+			RunAsNonRoot:             new(true),
+			AllowPrivilegeEscalation: new(false),
 			// Note: ReadOnlyRootFilesystem is false for subagent — it writes to /workspace.
-			ReadOnlyRootFilesystem: ptr.To(false),
+			ReadOnlyRootFilesystem: new(false),
 			Capabilities:           &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
@@ -402,7 +402,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	podSpec := corev1.PodSpec{
 		ServiceAccountName: ServiceAccountSubagent,
 		SecurityContext: &corev1.PodSecurityContext{
-			FSGroup: ptr.To(int64(1000)),
+			FSGroup: new(int64(1000)),
 		},
 		InitContainers: initContainers,
 		Containers:     []corev1.Container{subagent},
@@ -426,9 +426,9 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			Labels:    labels,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(0)),
-			TTLSecondsAfterFinished: ptr.To(int32(DefaultTTLSecondsAfterFinished)),
-			ActiveDeadlineSeconds:   ptr.To(activeDeadline),
+			BackoffLimit:            new(int32(0)),
+			TTLSecondsAfterFinished: new(int32(DefaultTTLSecondsAfterFinished)),
+			ActiveDeadlineSeconds:   new(activeDeadline),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,

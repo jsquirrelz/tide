@@ -313,7 +313,7 @@ func summarize(p *tidev1alpha1.Project, activeMilestoneCount int) projectSummary
 // etc. on the way out. T-04-D1 XSS mitigation: any Project name with
 // a literal `<script>` segment is rendered as escaped Unicode, never as
 // a tag.
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)

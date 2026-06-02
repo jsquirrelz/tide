@@ -230,7 +230,7 @@ func TestPodJobBackend_Run_CreatesJob(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		var jobList batchv1.JobList
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			if err := fakeClient.List(ctx, &jobList, client.InNamespace("default")); err == nil && len(jobList.Items) > 0 {
 				break
 			}
@@ -318,7 +318,7 @@ func TestPodJobBackend_Run_IdempotentOnAlreadyExists(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		var jobList batchv1.JobList
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			if err := fakeClient.List(ctx, &jobList, client.InNamespace("default")); err == nil && len(jobList.Items) > 0 {
 				break
 			}
@@ -386,7 +386,7 @@ func TestPodJobBackend_Run_PropagatesEnvelopeReadError(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		var jobList batchv1.JobList
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			if err := fakeClient.List(ctx, &jobList, client.InNamespace("default")); err == nil && len(jobList.Items) > 0 {
 				break
 			}
@@ -453,7 +453,7 @@ func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		var jobList batchv1.JobList
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			if err := fakeClient.List(ctx, &jobList, client.InNamespace("default")); err == nil && len(jobList.Items) > 0 {
 				break
 			}

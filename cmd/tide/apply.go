@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -90,7 +90,7 @@ func runApply(ctx context.Context, path string, out io.Writer) error {
 
 	if err := c.Patch(ctx, obj, client.Apply, &client.PatchOptions{
 		FieldManager: "tide-cli",
-		Force:        ptr.To(true),
+		Force:        new(true),
 	}); err != nil {
 		return formatApplyError(path, obj, err)
 	}
@@ -109,11 +109,12 @@ func formatApplyError(path string, obj *unstructured.Unstructured, err error) er
 	if !ok || se.ErrStatus.Details == nil {
 		return fmt.Errorf("apply %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 	}
-	msg := fmt.Sprintf("apply %s/%s: validation failed", obj.GetKind(), obj.GetName())
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("apply %s/%s: validation failed", obj.GetKind(), obj.GetName()))
 	for _, cause := range se.ErrStatus.Details.Causes {
-		msg += fmt.Sprintf("\n  %s: %s", cause.Field, cause.Message)
+		msg.WriteString(fmt.Sprintf("\n  %s: %s", cause.Field, cause.Message))
 	}
-	return fmt.Errorf("%s", msg)
+	return fmt.Errorf("%s", msg.String())
 }
 
 // bytesReader wraps a byte slice in an io.Reader without pulling in bytes

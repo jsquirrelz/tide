@@ -157,7 +157,7 @@ func TestPreCharge_HandlesNoLabel(t *testing.T) {
 
 	// Store should remain empty — no buckets created for unlabeled Jobs.
 	found := false
-	store.m.Range(func(_, _ interface{}) bool {
+	store.m.Range(func(_, _ any) bool {
 		found = true
 		return false
 	})

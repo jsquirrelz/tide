@@ -53,7 +53,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -194,7 +193,7 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	stream, err := h.openStream(ctx, h.Clientset, namespace, podName, &corev1.PodLogOptions{
 		Follow:     true,
 		Container:  containerName,
-		TailLines:  ptr.To(int64(100)),
+		TailLines:  new(int64(100)),
 		Timestamps: true,
 	})
 	if err != nil {

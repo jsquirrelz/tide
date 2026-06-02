@@ -127,7 +127,6 @@ func TestComputeWaves(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			assertComputeWavesCase(t, c.nodes, c.edges, c.want, c.wantCycle, c.wantErr)
 		})
@@ -267,7 +266,7 @@ func TestComputeWaves_Determinism(t *testing.T) {
 		t.Fatalf("first run waves mismatch\n got:  %v\n want: %v", first, want)
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		got, err := ComputeWaves(nodes, edges)
 		if err != nil {
 			t.Fatalf("iteration %d: ComputeWaves: %v", i, err)

@@ -136,8 +136,8 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 						Kind:               "Project",
 						Name:               projectName,
 						UID:                projectUID,
-						Controller:         boolPtr(true),
-						BlockOwnerDeletion: boolPtr(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -236,7 +236,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			// Ensure the shared PVC exists so the Project reconcile path proceeds.
 			ensurePVC(ctx, r.SharedPVCName, "default")
 
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			}
 
@@ -282,7 +282,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			r.SharedPVCName = "tide-projects-pushres-2"
 			ensurePVC(ctx, r.SharedPVCName, "default")
 
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			}
 
@@ -327,7 +327,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			r.SharedPVCName = "tide-projects-pushres-3"
 			ensurePVC(ctx, r.SharedPVCName, "default")
 
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			}
 

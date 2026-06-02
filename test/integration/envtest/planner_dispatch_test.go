@@ -122,7 +122,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 			}
 
 			// Drive 5 reconcile passes to get past: finalizer-add → owner-ref → dispatch.
-			for i := 0; i < 5; i++ {
+			for range 5 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: pdMilestoneName, Namespace: "default"},
 				})
@@ -155,7 +155,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 				"planner Job must have level=milestone label")
 
 			By("asserting milestone-uid label is set")
-			Expect(job.Labels[fmt.Sprintf("tideproject.k8s/milestone-uid")]).To(Equal(string(got.UID)),
+			Expect(job.Labels["tideproject.k8s/milestone-uid"]).To(Equal(string(got.UID)),
 				"planner Job must have tideproject.k8s/milestone-uid label")
 
 			// --- Milestone Status assertion ---

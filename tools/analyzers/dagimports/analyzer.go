@@ -47,7 +47,7 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	path := pass.Pkg.Path()
 	if !strings.Contains(path, "/pkg/dag") && !strings.HasSuffix(path, "pkg/dag") {
 		return nil, nil

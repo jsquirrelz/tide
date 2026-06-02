@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -232,10 +233,8 @@ func (h *TasksHandler) resolveWaveIndex(ctx context.Context, tk *tidev1alpha1.Ta
 		if wv.Spec.PlanRef != tk.Spec.PlanRef {
 			continue
 		}
-		for _, tref := range wv.Status.TaskRefs {
-			if tref == tk.Name {
-				return wv.Spec.WaveIndex
-			}
+		if slices.Contains(wv.Status.TaskRefs, tk.Name) {
+			return wv.Spec.WaveIndex
 		}
 	}
 	return 0

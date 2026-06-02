@@ -15,6 +15,7 @@ You may obtain a copy of the License at
 package gates
 
 import (
+	"maps"
 	"os"
 	"reflect"
 	"strings"
@@ -81,7 +82,6 @@ func TestCheckApprove(t *testing.T) {
 		{"approve-plan=true", map[string]string{"tideproject.k8s/approve-plan": "true"}, "plan", true},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := CheckApprove(mkMilestone(tc.ann), tc.level)
 			if got != tc.want {
@@ -157,9 +157,7 @@ func TestConsumeApprovePurity(t *testing.T) {
 		"some-other-key":                    "preserved",
 	}
 	originalCopy := map[string]string{}
-	for k, v := range originalAnnotations {
-		originalCopy[k] = v
-	}
+	maps.Copy(originalCopy, originalAnnotations)
 
 	ms := mkMilestone(originalAnnotations)
 	got := ConsumeApprove(ms, "milestone")
@@ -185,9 +183,7 @@ func TestConsumeWaveApprovePurity(t *testing.T) {
 		"keep-me":                        "yes",
 	}
 	originalCopy := map[string]string{}
-	for k, v := range originalAnnotations {
-		originalCopy[k] = v
-	}
+	maps.Copy(originalCopy, originalAnnotations)
 
 	plan := mkPlan(originalAnnotations)
 	got := ConsumeWaveApprove(plan, 2)
@@ -210,9 +206,7 @@ func TestConsumeRejectPurity(t *testing.T) {
 		"label-style":            "stays",
 	}
 	originalCopy := map[string]string{}
-	for k, v := range originalAnnotations {
-		originalCopy[k] = v
-	}
+	maps.Copy(originalCopy, originalAnnotations)
 
 	project := mkProject(originalAnnotations)
 	got := ConsumeReject(project)

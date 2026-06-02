@@ -97,7 +97,7 @@ func TestPoolPreChargeFromZeroJobs(t *testing.T) {
 		t.Fatalf("PreCharge with no jobs: %v", err)
 	}
 	// Capacity unchanged: all 4 slots should still be acquirable.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if err := p.Acquire(context.Background()); err != nil {
 			t.Fatalf("Acquire %d/4 after empty PreCharge: %v", i+1, err)
 		}

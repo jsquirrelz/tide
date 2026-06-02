@@ -278,7 +278,7 @@ func TestStub_ExceedOutputPathsMode(t *testing.T) {
 func TestStub_InvalidEnvelope_BadAPIVersion(t *testing.T) {
 	dir := t.TempDir()
 	// Write an envelope with wrong apiVersion
-	badEnv := map[string]interface{}{
+	badEnv := map[string]any{
 		"apiVersion": "wrong.group/v1",
 		"kind":       pkgdispatch.KindTaskEnvelopeIn,
 		"taskUID":    "bad-uid",

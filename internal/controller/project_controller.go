@@ -947,7 +947,7 @@ func (r *ProjectReconciler) buildInitJob(project *tideprojectv1alpha1.Project, p
 							},
 							SecurityContext: &corev1.SecurityContext{
 								RunAsUser:                &runAsUser,
-								ReadOnlyRootFilesystem:   boolPtr(false),
+								ReadOnlyRootFilesystem:   new(false),
 								AllowPrivilegeEscalation: &allowPrivEsc,
 								Capabilities: &corev1.Capabilities{
 									Drop: []corev1.Capability{"ALL"},
@@ -997,8 +997,10 @@ func isJobFailed(job *batchv1.Job) bool {
 }
 
 // boolPtr returns a pointer to the given bool value.
+//
+//go:fix inline
 func boolPtr(b bool) *bool {
-	return &b
+	return new(b)
 }
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02,

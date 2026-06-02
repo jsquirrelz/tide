@@ -45,7 +45,7 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)

@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -63,13 +64,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		Eventually(func(g Gomega) {
 			args := pushArgForJob(pushJobName)
 			g.Expect(args).NotTo(BeEmpty(), "expected push Job %s to exist", pushJobName)
-			found := false
-			for _, a := range args {
-				if a == "--commit-message="+expectedMessage {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(args, "--commit-message="+expectedMessage)
 			g.Expect(found).To(BeTrue(),
 				"expected push Job args to contain --commit-message=%q; got: %s",
 				expectedMessage, strings.Join(args, " "))

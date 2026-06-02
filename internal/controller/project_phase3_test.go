@@ -98,7 +98,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 
 		// Drive reconciles: finalizer, init job, init completion, then phase 3.
 		// Simulate init job success so the reconciler advances.
-		for i := 0; i < 8; i++ {
+		for range 8 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			if err != nil {
 				if !isConflict(err) {
@@ -173,7 +173,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		}
 
 		// Reconcile to process the annotation.
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			if err != nil && !isConflict(err) {
 				Expect(err).NotTo(HaveOccurred())

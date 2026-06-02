@@ -109,7 +109,7 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 			// less than the refill interval — fine in practice but implicitly
 			// time-dependent under CI load). Each Reserve is intentionally NOT
 			// cancelled so the token is permanently consumed.
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				rsv := limiter.Reserve()
 				// Intentionally NOT cancelled — we want this reservation to
 				// permanently consume the token so the bucket stays drained.
@@ -137,7 +137,7 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 
 			numTasks := 5
 			taskNames := make([]string, numTasks)
-			for i := 0; i < numTasks; i++ {
+			for i := range numTasks {
 				taskNames[i] = fmt.Sprintf("rate-task-%02d", i)
 				makeTask(ctx, taskNames[i], planName, nil, []string{fmt.Sprintf("rate-%d.go", i)})
 			}

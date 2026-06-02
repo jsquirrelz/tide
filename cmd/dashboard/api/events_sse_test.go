@@ -149,7 +149,7 @@ func TestEventsHandlerLastEventIDReplay(t *testing.T) {
 
 	// Publish 5 events BEFORE any subscriber connects so they sit in the
 	// hub's replay buffer.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		hubInst.Publish("foo", hub.Event{
 			Type: "tick",
 			JSON: json.RawMessage(fmt.Sprintf(`{"i":%d}`, i)),
@@ -306,7 +306,7 @@ func TestSSEFanoutCleanup(t *testing.T) {
 	var clientWG sync.WaitGroup
 	var connectedCount atomic.Int64
 	cancels := make([]context.CancelFunc, numClients)
-	for i := 0; i < numClients; i++ {
+	for i := range numClients {
 		clientWG.Add(1)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancels[i] = cancel

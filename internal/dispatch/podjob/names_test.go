@@ -61,7 +61,6 @@ func TestJobName(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			got := JobName(c.uid, c.attempt)
 			if got != c.want {

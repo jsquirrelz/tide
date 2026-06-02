@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -125,11 +126,11 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				"sh", "-c",
 			))
 			// Command should contain mkdir -p
-			cmdJoined := ""
+			var cmdJoined strings.Builder
 			for _, c := range job.Spec.Template.Spec.Containers[0].Command {
-				cmdJoined += c + " "
+				cmdJoined.WriteString(c + " ")
 			}
-			Expect(cmdJoined).To(ContainSubstring("mkdir -p"))
+			Expect(cmdJoined.String()).To(ContainSubstring("mkdir -p"))
 
 			// Verify shared PVC subPath wiring (Blocker #2/#3).
 			foundPVC := false

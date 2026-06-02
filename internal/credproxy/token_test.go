@@ -129,7 +129,6 @@ var verifyTests = []struct {
 func TestVerify(t *testing.T) {
 	key := []byte("12345678901234567890123456789012") // 32 bytes
 	for _, tc := range verifyTests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			tok := tc.setup(key)
 			err := Verify(key, tok, tc.uid)

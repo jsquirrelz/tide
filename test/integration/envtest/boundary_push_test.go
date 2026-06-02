@@ -13,6 +13,7 @@ package envtest_integration
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,8 +70,8 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 	// reconciler in the BeforeSuite often races on finalizer-add /
 	// owner-ref-add steps with our direct r.Reconcile.
 	drive := func(reconcileFn func(context.Context, reconcile.Request) (reconcile.Result, error), name string, n int) {
-		for i := 0; i < n; i++ {
-			for attempt := 0; attempt < 5; attempt++ {
+		for range n {
+			for range 5 {
 				_, err := reconcileFn(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 				})
@@ -105,13 +106,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 		Eventually(func(g Gomega) {
 			args := pushArgsForJob(pushJobName)
 			g.Expect(args).NotTo(BeEmpty(), "expected push Job %s to exist", pushJobName)
-			found := false
-			for _, a := range args {
-				if a == "--commit-message="+expectedMessage {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(args, "--commit-message="+expectedMessage)
 			g.Expect(found).To(BeTrue(),
 				"expected push Job args to contain --commit-message=%q; got: %s",
 				expectedMessage, strings.Join(args, " "))

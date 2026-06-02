@@ -1102,11 +1102,12 @@ func buildViolationMessage(violations []string) string {
 		listed = violations[:maxList]
 		suffix = fmt.Sprintf(" ... and %d more", len(violations)-maxList)
 	}
-	msg := fmt.Sprintf("Output path violations (%d total):", len(violations))
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("Output path violations (%d total):", len(violations)))
 	for _, v := range listed {
-		msg += "\n  " + v
+		msg.WriteString("\n  " + v)
 	}
-	return msg + suffix
+	return msg.String() + suffix
 }
 
 func validateControllerOutputPaths(workspaceRoot string, runStart time.Time, declared []string) ([]string, bool, error) {

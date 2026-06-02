@@ -201,10 +201,11 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	condType := tideprojectv1alpha1.ConditionReconciling
 	condStatus := metav1.ConditionTrue
 	reason := "Aggregating"
-	if phase == "Succeeded" {
+	switch phase {
+	case "Succeeded":
 		condType = tideprojectv1alpha1.ConditionSucceeded
 		reason = "AllTasksSucceeded"
-	} else if phase == "Failed" {
+	case "Failed":
 		condType = tideprojectv1alpha1.ConditionFailed
 		reason = "MemberTaskFailed"
 	}

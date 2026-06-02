@@ -134,8 +134,8 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 						Kind:               "Project",
 						Name:               projectName,
 						UID:                uid,
-						Controller:         boolPtrIT(true),
-						BlockOwnerDeletion: boolPtrIT(true),
+						Controller:         new(true),
+						BlockOwnerDeletion: new(true),
 					},
 				},
 			},
@@ -181,7 +181,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 	}
 
 	driveProjectReconcile := func(r *controller.ProjectReconciler, name string, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			_, _ = r.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 			})
@@ -352,6 +352,8 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 // boolPtrIT is a local pointer helper for OwnerReferences. Mirrors
 // internal/controller.boolPtr but kept local because that helper is
 // unexported.
+//
+//go:fix inline
 func boolPtrIT(b bool) *bool {
-	return &b
+	return new(b)
 }

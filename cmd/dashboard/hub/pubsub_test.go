@@ -229,11 +229,11 @@ func TestConcurrentSubscribePublishUnsubscribe(t *testing.T) {
 	var publishedCount atomic.Int64
 
 	// Publishers.
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for i := 0; i < iterationsPerWorker; i++ {
+			for range iterationsPerWorker {
 				h.Publish("p", Event{Type: "t", JSON: json.RawMessage(`{}`)})
 				publishedCount.Add(1)
 			}
@@ -241,14 +241,14 @@ func TestConcurrentSubscribePublishUnsubscribe(t *testing.T) {
 	}
 
 	// Subscribers.
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			for i := 0; i < iterationsPerWorker; i++ {
+			for range iterationsPerWorker {
 				sub := h.Subscribe("p", 0)
 				// Drain a few events non-blockingly.
-				for k := 0; k < 5; k++ {
+				for range 5 {
 					select {
 					case <-sub.Events():
 					default:
@@ -273,7 +273,7 @@ func TestLastEventIDReplay(t *testing.T) {
 	h := newTestHub(t)
 
 	// Publish 5 events (IDs 1..5 stamped by the hub).
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		h.Publish("my-project", Event{Type: "x", JSON: json.RawMessage(`{}`)})
 	}
 
@@ -312,7 +312,7 @@ func TestReplayBufferTruncation(t *testing.T) {
 
 	// Publish more than the replay buffer holds.
 	const overflow = 50
-	for i := 0; i < replayBufferSize+overflow; i++ {
+	for range replayBufferSize + overflow {
 		h.Publish("my-project", Event{Type: "x", JSON: json.RawMessage(`{}`)})
 	}
 

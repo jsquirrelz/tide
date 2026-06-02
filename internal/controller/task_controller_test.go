@@ -80,8 +80,8 @@ func newTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 func reconcileN(r *TaskReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
 	var result ctrl.Result
 	var err error
-	for i := 0; i < n; i++ {
-		for attempt := 0; attempt < 5; attempt++ {
+	for range n {
+		for range 5 {
 			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
 			if err == nil {
 				break
@@ -462,12 +462,12 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
 
-			for i := 0; i < taskCount; i++ {
+			for i := range taskCount {
 				makeTask(fmt.Sprintf("task-storm-%d", i), planRef, nil, projectName)
 			}
 		})
 		AfterEach(func() {
-			for i := 0; i < taskCount; i++ {
+			for i := range taskCount {
 				cleanupTask(fmt.Sprintf("task-storm-%d", i))
 			}
 			cleanupProject(projectName)
@@ -484,7 +484,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			stormLimits := budget.Limits{RequestsPerMinute: 5, BurstSize: 2}
 			lim := stormStore.ForSecret(secretUID, stormLimits)
 			// Exhaust burst tokens.
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				rsv := lim.Reserve()
 				// WR-10: Intentionally NOT cancelled — these reservations
 				// must permanently drain the burst so all 20 storm tasks
@@ -507,14 +507,14 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			}
 
 			// Drive all tasks through finalizer + owner-ref passes first.
-			for i := 0; i < taskCount; i++ {
+			for i := range taskCount {
 				name := types.NamespacedName{Name: fmt.Sprintf("task-storm-%d", i), Namespace: "default"}
 				_, _ = reconcileN(r, name, 3)
 			}
 
 			// Rapid reconcile of all 20 tasks — all should hit rate-limit gate.
 			requeueCount := 0
-			for i := 0; i < taskCount; i++ {
+			for i := range taskCount {
 				name := types.NamespacedName{Name: fmt.Sprintf("task-storm-%d", i), Namespace: "default"}
 				result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 				Expect(err).NotTo(HaveOccurred())
@@ -536,7 +536,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 			// After refill, at least one task should be dispatchable.
 			dispatched := false
-			for i := 0; i < taskCount; i++ {
+			for i := range taskCount {
 				name := types.NamespacedName{Name: fmt.Sprintf("task-storm-%d", i), Namespace: "default"}
 				var t tideprojectv1alpha1.Task
 				if err := k8sClient.Get(ctx, name, &t); err != nil {

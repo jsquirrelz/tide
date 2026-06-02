@@ -86,7 +86,7 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	path := pass.Pkg.Path()
 	if !inFirewalledScope(path) {
 		return nil, nil

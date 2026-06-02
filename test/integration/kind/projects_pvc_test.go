@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -182,12 +183,7 @@ func decodeKindYAMLDocs(t *testing.T, data []byte, source string) []kindYAMLDoc 
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func assertProjectsPVCShape(t *testing.T, pvc *kindYAMLDoc, ns string) {

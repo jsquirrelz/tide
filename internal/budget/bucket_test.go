@@ -102,15 +102,15 @@ func TestStore_Concurrent_SafeUnder_LoadOrStore(t *testing.T) {
 	limits := Limits{RequestsPerMinute: 60, BurstSize: 10}
 
 	const goroutines = 50
-	results := make([]*interface{}, goroutines)
+	results := make([]*any, goroutines)
 	// Use a generic holder to avoid storing *rate.Limiter pointer in slice
 	// causing alignment issues; just check identity via pointer comparison.
-	type result struct{ lim interface{} }
+	type result struct{ lim any }
 	limResults := make([]result, goroutines)
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		idx := i
 		go func() {
 			defer wg.Done()
@@ -145,7 +145,7 @@ func TestStore_ForSecret_BurstBehavior(t *testing.T) {
 	}
 
 	// Burst of 5 should be immediately allowed.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !lim.Allow() {
 			t.Errorf("burst request %d/5 should be allowed immediately; got denied", i+1)
 		}

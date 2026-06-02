@@ -256,7 +256,7 @@ func computeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []fileTouchMis
 
 	var mismatches []fileTouchMismatch
 
-	for i := 0; i < len(tasks); i++ {
+	for i := range tasks {
 		for j := i + 1; j < len(tasks); j++ {
 			a := &tasks[i]
 			b := &tasks[j]

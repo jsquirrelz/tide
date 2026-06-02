@@ -40,6 +40,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,9 +131,7 @@ func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDef
 	var params map[string]string
 	if levelCfg != nil && len(levelCfg.Params) > 0 {
 		params = make(map[string]string, len(levelCfg.Params))
-		for k, v := range levelCfg.Params {
-			params[k] = v
-		}
+		maps.Copy(params, levelCfg.Params)
 	}
 	// (Project-level Params are not currently exposed on SubagentConfig
 	// — LevelConfig.Params is the per-level extension; if a future

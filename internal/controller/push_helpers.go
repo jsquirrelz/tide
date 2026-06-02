@@ -18,7 +18,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/ptr"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/owner"
@@ -192,8 +191,8 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 			Namespace: project.Namespace,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(2)),
-			TTLSecondsAfterFinished: ptr.To(int32(300)),
+			BackoffLimit:            new(int32(2)),
+			TTLSecondsAfterFinished: new(int32(300)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
@@ -270,8 +269,8 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 			Namespace: project.Namespace,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit:            ptr.To(int32(2)),
-			TTLSecondsAfterFinished: ptr.To(int32(300)),
+			BackoffLimit:            new(int32(2)),
+			TTLSecondsAfterFinished: new(int32(300)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,

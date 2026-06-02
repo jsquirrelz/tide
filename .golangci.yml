@@ -56,6 +56,17 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # Test files are exempt from opinionated/style linters only. All linters
+      # remain ENABLED for production code. errcheck on tests is conventional
+      # (defer x.Close() in tests is idiomatic); lll/unparam/goconst/dupl are
+      # noise on table-driven test helpers and fixtures.
+      - linters:
+          - lll
+          - unparam
+          - goconst
+          - dupl
+          - errcheck
+        path: _test\.go
     paths:
       - third_party$
       - builtin$

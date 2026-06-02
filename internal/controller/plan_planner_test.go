@@ -141,7 +141,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 
 		// Wave materialization should have created Waves (3 from α…θ fixture).
 		Eventually(func(g Gomega) {
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
 				var wave tideprojectv1alpha1.Wave
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed())

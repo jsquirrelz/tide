@@ -391,7 +391,6 @@ func TestEnvelopeIn_SubtestTable(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			assertRoundTripIn(t, c.in)
 		})
@@ -420,7 +419,6 @@ func TestEnvelopeOut_SubtestTable(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			assertRoundTripOut(t, c.out)
 		})

@@ -66,14 +66,14 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 	}
 
 	driveMSReconcile := func(r *controller.MilestoneReconciler, name string, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			_, _ = r.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 			})
 		}
 	}
 	drivePlanReconcile := func(r *controller.PlanReconciler, name string, n int) {
-		for i := 0; i < n; i++ {
+		for range n {
 			_, _ = r.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: name, Namespace: "default"},
 			})

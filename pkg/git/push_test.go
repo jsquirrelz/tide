@@ -67,14 +67,15 @@ func addCommit(t *testing.T, repo *gogit.Repository, wt *gogit.Worktree, dir, fi
 	if _, err := wt.Add(filename); err != nil {
 		t.Fatalf("wt.Add %s: %v", filename, err)
 	}
-	h, err := wt.Commit(msg, &gogit.CommitOptions{Author: ptrSig(mkSigner(authorName))})
+	h, err := wt.Commit(msg, &gogit.CommitOptions{Author: new(mkSigner(authorName))})
 	if err != nil {
 		t.Fatalf("wt.Commit %q: %v", msg, err)
 	}
 	return h
 }
 
-func ptrSig(s object.Signature) *object.Signature { return &s }
+//go:fix inline
+func ptrSig(s object.Signature) *object.Signature { return new(s) }
 
 // TestPushFirstPushOmitsLease covers Test 2: a fresh clone pushes back to
 // the bare origin with lastPushedSHA="" — no ForceWithLease, push must

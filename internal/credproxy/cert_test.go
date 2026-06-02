@@ -23,6 +23,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -83,13 +84,7 @@ func TestMintSelfSignedCert_SANsIncludeLocalhostAnd127001(t *testing.T) {
 	}
 
 	// Check DNS SANs include localhost.
-	foundLocalhost := false
-	for _, dns := range cert.DNSNames {
-		if dns == "localhost" {
-			foundLocalhost = true
-			break
-		}
-	}
+	foundLocalhost := slices.Contains(cert.DNSNames, "localhost")
 	if !foundLocalhost {
 		t.Errorf("expected DNS SAN 'localhost', got %v", cert.DNSNames)
 	}

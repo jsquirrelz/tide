@@ -123,7 +123,7 @@ func TestListProjectsReturnsAll(t *testing.T) {
 		t.Errorf("expected application/json; got %q", ct)
 	}
 
-	var got []map[string]interface{}
+	var got []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestListProjectsNamespaceFilter(t *testing.T) {
 		t.Fatalf("GET ns-A: %v", err)
 	}
 	defer resp2.Body.Close()
-	var got []map[string]interface{}
+	var got []map[string]any
 	if err := json.NewDecoder(resp2.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestGetProjectWithChildren(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var got map[string]interface{}
+	var got map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -237,17 +237,17 @@ func TestGetProjectWithChildren(t *testing.T) {
 		t.Errorf("name=%v, want alpha", got["name"])
 	}
 
-	milestones, _ := got["milestones"].([]interface{})
+	milestones, _ := got["milestones"].([]any)
 	if len(milestones) != 2 {
 		t.Errorf("milestones len=%d, want 2 (m1 + m2; orphan excluded)", len(milestones))
 	}
 
-	phases, _ := got["phases"].([]interface{})
+	phases, _ := got["phases"].([]any)
 	if len(phases) != 2 {
 		t.Errorf("phases len=%d, want 2 (p1 + p2; orphan-phase excluded)", len(phases))
 	}
 
-	plans, _ := got["plans"].([]interface{})
+	plans, _ := got["plans"].([]any)
 	if len(plans) != 1 {
 		t.Errorf("plans len=%d, want 1 (pl1; orphan-plan excluded)", len(plans))
 	}
@@ -393,13 +393,13 @@ func TestBudgetSummary(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	var got []map[string]interface{}
+	var got []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	byName := make(map[string]map[string]interface{})
+	byName := make(map[string]map[string]any)
 	for _, p := range got {
-		byName[p["name"].(string)] = p["budget"].(map[string]interface{})
+		byName[p["name"].(string)] = p["budget"].(map[string]any)
 	}
 
 	if w := byName["p1"]["withinBudget"]; w != true {
@@ -442,7 +442,7 @@ func TestListProjectsActiveMilestoneCountCrossNamespace(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 
-	var got []map[string]interface{}
+	var got []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
