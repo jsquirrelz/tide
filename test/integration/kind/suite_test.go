@@ -442,6 +442,14 @@ func applyController() {
 	elapsed := time.Since(start)
 	if err != nil {
 		GinkgoWriter.Printf("helm upgrade --install failed after %s: %v\n%s\n", elapsed, err, out)
+		// Capture pod-level diagnostics BEFORE Fail() triggers AfterSuite, which
+		// deletes the kind cluster (destroying any chance of post-hoc `kind
+		// export logs`). This disambiguates a genuine `--wait` timeout (manager
+		// pod healthy but slow to schedule on a cold 2-core runner) from a real
+		// pod failure (CrashLoop / webhook-cert wait / config). Emitted to
+		// stdout so it survives in the captured `go test -v` output even after
+		// the cluster is gone. Source: debug session nightly-int-flake-timeout.
+		dumpControllerDiagnostics("helm upgrade --install failed")
 		if os.Getenv("TIDE_REQUIRE_CONTROLLER") == "1" {
 			Fail(fmt.Sprintf("helm upgrade --install failed (TIDE_REQUIRE_CONTROLLER=1): %v", err))
 		}
@@ -533,6 +541,55 @@ func isDeploymentReady() (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == "1", nil
+}
+
+// dumpControllerDiagnostics emits manager-pod-level state (deployment status,
+// pods, recent events, container logs incl. previous-restart logs) for the
+// tide-system namespace to stdout. It is called on the helm-install failure
+// path BEFORE Fail() so the evidence survives AfterSuite's cluster teardown —
+// the nightly workflow's post-failure `kind export logs` step runs only after
+// the suite process exits, by which point the cluster is already deleted.
+//
+// Best-effort: every kubectl invocation is tolerant of errors (the cluster may
+// be partially up). Plain exec.Command (no ctx) is intentional — when this is
+// reached the suite ctx may already be on its way to cancellation.
+func dumpControllerDiagnostics(reason string) {
+	ns := kindControllerNamespace
+	hdr := "=== CONTROLLER DIAGNOSTICS (" + reason + ") ns=" + ns + " ==="
+	fmt.Fprintln(os.Stdout, hdr)
+	GinkgoWriter.Println(hdr)
+
+	run := func(label string, args ...string) {
+		full := append([]string{"--kubeconfig", kubeconfigPath}, args...)
+		out, err := exec.Command("kubectl", full...).CombinedOutput()
+		block := "--- " + label + " ---\n" + string(out)
+		if err != nil {
+			block += "(kubectl error: " + err.Error() + ")\n"
+		}
+		fmt.Fprintln(os.Stdout, block)
+		GinkgoWriter.Println(block)
+	}
+
+	run("deployment "+kindControllerDeployment, "get", "deployment",
+		kindControllerDeployment, "-n", ns, "-o", "wide")
+	run("describe deployment "+kindControllerDeployment, "describe", "deployment",
+		kindControllerDeployment, "-n", ns)
+	run("pods", "get", "pods", "-n", ns, "-o", "wide")
+	run("describe pods", "describe", "pods", "-n", ns)
+	run("events", "get", "events", "-n", ns,
+		"--sort-by=.lastTimestamp")
+	// Current + previous-restart logs for the manager (CrashLoop leaves the
+	// failure only in --previous). --all-containers covers any sidecar.
+	run("logs (current)", "logs", "-n", ns,
+		"-l", "control-plane=controller-manager", "--all-containers=true",
+		"--tail=200", "--prefix=true")
+	run("logs (previous)", "logs", "-n", ns,
+		"-l", "control-plane=controller-manager", "--all-containers=true",
+		"--previous=true", "--tail=200", "--prefix=true")
+
+	footer := "=== END CONTROLLER DIAGNOSTICS ==="
+	fmt.Fprintln(os.Stdout, footer)
+	GinkgoWriter.Println(footer)
 }
 
 // applyYAML applies a YAML string to the kind cluster via kubectl stdin.
