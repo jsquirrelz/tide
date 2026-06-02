@@ -45,6 +45,8 @@ Concrete verification protocols for Phase 02.2-style runtime gates:
 - **Test ran:** `tail -30 /tmp/<plan>-clean-run.log` shows Ginkgo summary line `Ran X Specs in Ys`
 - **Dispatch is live (Phase 02.2-10 evidence shape):** `grep -E '"creating job"|"dispatch"' /tmp/<plan>-clean-run.log` returns ≥ 1 line, AND `kubectl get jobs --all-namespaces` shows Jobs in the test namespaces
 - **Cascade closed:** the specific manager-log error that defined the cascade (e.g. `"no project found in namespace X"`) returns 0 in the new run's log
+- **`make test-int` exit ≠ "Ginkgo green."** The `test/integration/kind` package bundles plain go-tests (e.g. the helm-template contract tests like `TestHelmDeploymentTemplateRendersManagerPodAnnotations`) alongside the Ginkgo specs. One RED go-test fails the package and trips `make test-int` non-zero **even when both layers print `Ran X of Y … SUCCESS!`**. Always read the echoed `MAKE_EXIT` AND `grep -nE '^--- FAIL|^FAIL\s'` the log — not just the Ginkgo summary. (Phase 7 nearly tagged v1.0 on "14/14 green" while `make test-int` was red on a dropped chart-template block.)
+- **A subagent's "pre-existing / unrelated" dismissal of a failing test is a claim, not verification.** Before relaying it as safe, git-archaeology the regressing commit (`git log -S '<token>' -- <file>`) and confirm it does not fail the gate. (Two Phase-7 agents waved off the dropped `podAnnotations` render block as pre-existing; it was a real ship-blocker — the verifier caught it and a `make test-int` re-run proved it.)
 
 ## Operating Notes (Phase 02.2 lessons)
 
@@ -65,6 +67,8 @@ Rules learned from 10 BLOCKED iterations across Phase 02.2. Trust them.
 - **End-of-turn summary: one or two sentences.** What changed and what's next. Resist the urge to recap multi-section status when the conversation thread is fresh.
 - **Use TaskCreate for multi-cycle workflows.** A plan-check-commit-execute loop repeated 5+ times in one session genuinely benefits from task tracking. The system reminders about TaskCreate are not boilerplate.
 - **STATE.md "Current Position" body text drifts.** It's prose, not derived; updates to it need to happen explicitly. The frontmatter (`progress.completed_plans`) is computed by SDK verbs; the body text is not.
+- **Constrained-VM full-suite recipe (the dev Docker VM is ~7.65 GiB).** It DOES fit a clean `make test-int` if you don't accumulate state: delete → recreate → pre-warm (provisioner Ready + `kind load busybox:1.36`) a fresh kind cluster per heavy run, one heavy run at a time. Never let `make acceptance-v1-smoke` (it spins its OWN `tide-acceptance-<ts>` cluster) run while a `tide-test` cluster is still up — two single-node clusters OOM the node (exit 137). Phase 7's "env-gated, needs a bigger VM" deferral was actually solvable this way on the same 7.65 GiB host.
+- **The acceptance `$0` path is a different deploy surface than Layer B — peel it one layer at a time.** Layer B fixtures carry a dummy `providerSecretRef` and use the test harness's helm install; the `$0` small-project has none and uses the chart defaults. So `$0` acceptance surfaces bugs Layer B masks (cascade-12 chart `default "latest"` image tags; cascade-13 credproxy hard-requiring `ANTHROPIC_API_KEY`). Expect each green layer to expose the next; don't predict the terminator.
 
 ## What this repository is
 
