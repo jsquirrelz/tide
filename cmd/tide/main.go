@@ -69,9 +69,10 @@ var rootCmd = newRootCmd()
 // tests can build isolated trees without touching the package-level rootCmd.
 func newRootCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:           filepath.Base(os.Args[0]),
-		Short:         "Manage TIDE Projects on Kubernetes",
-		Long:          "tide is the operator CLI for TIDE — Topologically-Indexed Dependency Execution. Apply Projects, watch progress, inspect waves, fetch artifacts, and govern gates without leaving the terminal.",
+		Use:   filepath.Base(os.Args[0]),
+		Short: "Manage TIDE Projects on Kubernetes",
+		Long: "tide is the operator CLI for TIDE — Topologically-Indexed Dependency Execution. " +
+			"Apply Projects, watch progress, inspect waves, fetch artifacts, and govern gates without leaving the terminal.",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: false,

@@ -85,7 +85,8 @@ func run(pass *analysis.Pass) (any, error) {
 					}
 					if unquoted == "task" {
 						pass.Reportf(bl.Pos(),
-							"metriccardinality: %q label forbidden in prometheus.%s(...) — adds unbounded task-axis cardinality (Pitfall 17 / D-X4)",
+							"metriccardinality: %q label forbidden in prometheus.%s(...) — adds unbounded "+
+								"task-axis cardinality (Pitfall 17 / D-X4)",
 							"task", sel.Sel.Name)
 					}
 				}

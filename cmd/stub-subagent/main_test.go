@@ -254,7 +254,7 @@ func TestStub_ExceedOutputPathsMode(t *testing.T) {
 
 	// Verify the leak file was written at /workspace/escape/leak.txt
 	// (In tests, /workspace/escape may or may not exist, but the stub attempts to write there)
-	leakPath := "/workspace/escape/leak.txt"
+	leakPath := leakEscapePath
 	if data, err := os.ReadFile(leakPath); err == nil {
 		if string(data) != "leaked" {
 			t.Errorf("leak.txt content = %q, want %q", string(data), "leaked")
@@ -266,7 +266,7 @@ func TestStub_ExceedOutputPathsMode(t *testing.T) {
 	}
 	foundLeak := false
 	for _, a := range out.Artifacts {
-		if a == "/workspace/escape/leak.txt" {
+		if a == leakEscapePath {
 			foundLeak = true
 		}
 	}

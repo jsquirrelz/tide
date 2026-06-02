@@ -34,8 +34,9 @@ func newInspectWaveCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "inspect-wave <project>",
 		Short: "List Tasks in a Project's wave with status/age/attempt/wave columns",
-		Long:  "tide inspect-wave renders the wave's task list in kubectl-aligned tabwriter columns (NAME, STATUS, AGE, ATTEMPT, SCHEDULED-IN-WAVE). Filter by --wave N. Honours -o json.",
-		Args:  cobra.ExactArgs(1),
+		Long: "tide inspect-wave renders the wave's task list in kubectl-aligned tabwriter columns " +
+			"(NAME, STATUS, AGE, ATTEMPT, SCHEDULED-IN-WAVE). Filter by --wave N. Honours -o json.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInspectWave(cmd, args)
 		},

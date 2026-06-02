@@ -75,7 +75,9 @@ var tailStreamer = defaultTailStreamer
 // task_controller.go:673) and picks the first Pod whose Status.Phase is in
 // {Running, Pending}. Pending is allowed because Follow=true streams begin
 // once the container is ready — operator UX matches `kubectl logs -f`.
-func defaultTailPodPicker(ctx context.Context, k client.Client, ns, taskName string, opt tailOptions) (string, string, error) {
+func defaultTailPodPicker(
+	ctx context.Context, k client.Client, ns, taskName string, opt tailOptions,
+) (string, string, error) {
 	var task tidev1alpha1.Task
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &task); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -123,7 +125,9 @@ func defaultTailPodPicker(ctx context.Context, k client.Client, ns, taskName str
 // the stream so io.Copy returns. EOF from a terminated pod prints a stderr
 // banner and exits 0 (operator UX expectation — kubectl logs -f exits 0 on
 // pod-terminate too).
-func defaultTailStreamer(ctx context.Context, cs kubernetes.Interface, ns, pod, container string, opt tailOptions, out, errOut io.Writer) error {
+func defaultTailStreamer(
+	ctx context.Context, cs kubernetes.Interface, ns, pod, container string, opt tailOptions, out, errOut io.Writer,
+) error {
 	req := cs.CoreV1().Pods(ns).GetLogs(pod, &corev1.PodLogOptions{
 		Follow:     true,
 		Container:  container,
@@ -150,14 +154,17 @@ func defaultTailStreamer(ctx context.Context, cs kubernetes.Interface, ns, pod, 
 	if ctx.Err() == nil {
 		// EOF without ctx-cancel = pod terminated mid-stream. UX-friendly
 		// surface on stderr; exit 0.
-		_, _ = fmt.Fprintln(errOut, "(stream closed by pod termination)") // UX message to stderr; write error not actionable
+		fmt.Fprintln(errOut, "(stream closed by pod termination)")
 	}
 	return nil
 }
 
 // tailRun is the testable seam. The cobra adapter resolves clientsets, picks
 // the pod/container via tailPodPicker, then hands off to tailStreamer.
-func tailRun(ctx context.Context, k client.Client, cs kubernetes.Interface, ns, taskName string, opt tailOptions, out, errOut io.Writer) error {
+func tailRun(
+	ctx context.Context, k client.Client, cs kubernetes.Interface, ns, taskName string,
+	opt tailOptions, out, errOut io.Writer,
+) error {
 	pod, container, err := tailPodPicker(ctx, k, ns, taskName, opt)
 	if err != nil {
 		return err
@@ -243,7 +250,8 @@ func newTailCmd() *cobra.Command {
 			return tailRun(cmd.Context(), k, cs, ns, args[0], opt, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
-	c.Flags().StringVarP(&opt.container, "container", "c", "", "Container name to stream from (default: first non-credproxy/non-init container)")
+	c.Flags().StringVarP(&opt.container, "container", "c", "",
+		"Container name to stream from (default: first non-credproxy/non-init container)")
 	c.Flags().Int64Var(&opt.tailLines, "tail", 100, "Number of recent lines to print before streaming")
 	c.Flags().BoolVarP(&opt.timestamps, "timestamps", "t", true, "Include timestamps on log lines")
 	// metav1 is used by the production picker via the corev1.PodList paginator;

@@ -45,7 +45,8 @@ func newApplyCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply a TIDE manifest (server-side apply)",
-		Long:  "tide apply wraps kubectl apply semantics: reads YAML, server-side-applies with FieldManager=tide-cli, and surfaces CRD validation errors field-by-field.",
+		Long: "tide apply wraps kubectl apply semantics: reads YAML, server-side-applies with " +
+			"FieldManager=tide-cli, and surfaces CRD validation errors field-by-field.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if file == "" {
 				return fmt.Errorf("--file/-f is required")

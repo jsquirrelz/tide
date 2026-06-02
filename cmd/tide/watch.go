@@ -46,8 +46,9 @@ func newWatchCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "watch <project>",
 		Short: "Watch a TIDE Project's live status",
-		Long:  "tide watch streams a one-line status update per refresh tick (default 1s). Honours --namespace from kubeconfig; Ctrl-C exits cleanly.",
-		Args:  cobra.ExactArgs(1),
+		Long: "tide watch streams a one-line status update per refresh tick (default 1s). " +
+			"Honours --namespace from kubeconfig; Ctrl-C exits cleanly.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWatch(cmd.Context(), args[0], cmd.OutOrStdout())
 		},
@@ -77,7 +78,7 @@ func runWatch(ctx context.Context, name string, out io.Writer) error {
 	// Emit one initial line immediately so the operator sees activity
 	// without waiting a full tick.
 	if line := readAndRender(ctx, k, ns, name); line != "" {
-		_, _ = fmt.Fprintln(out, line) // status line to stdout; write error not actionable
+		fmt.Fprintln(out, line)
 		lastLine = line
 	}
 
@@ -88,7 +89,7 @@ func runWatch(ctx context.Context, name string, out io.Writer) error {
 		case <-ticker.C:
 			line := readAndRender(ctx, k, ns, name)
 			if line != "" && line != lastLine {
-				_, _ = fmt.Fprintln(out, line) // status line to stdout; write error not actionable
+				fmt.Fprintln(out, line)
 				lastLine = line
 			}
 		}

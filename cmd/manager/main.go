@@ -140,15 +140,24 @@ func main() {
 
 	flag.StringVar(&configPath, "config", "/etc/tide/config.yaml", "Path to runtime config YAML")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election (CTRL-03)")
-	flag.StringVar(&watchNamespace, "watch-namespace", "", "Restrict watches to this namespace (AUTH-02). Empty = all namespaces.")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Bind address for the metrics endpoint (controllerManager.manager.args in values.yaml)")
-	flag.StringVar(&webhookCertPath, "webhook-cert-path", "/tmp/k8s-webhook-server/serving-certs", "Path to the webhook serving cert directory (controller-runtime CertDir; controllerManager.manager.args in values.yaml)")
+	flag.StringVar(&watchNamespace, "watch-namespace", "",
+		"Restrict watches to this namespace (AUTH-02). Empty = all namespaces.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443",
+		"Bind address for the metrics endpoint (controllerManager.manager.args in values.yaml)")
+	flag.StringVar(&webhookCertPath, "webhook-cert-path", "/tmp/k8s-webhook-server/serving-certs",
+		"Path to the webhook serving cert directory "+
+			"(controller-runtime CertDir; controllerManager.manager.args in values.yaml)")
 	// Phase 2 flags — bound from Helm values.yaml via the controller Deployment args.
-	flag.StringVar(&subagentImage, "subagent-image", "", "Image ref for the subagent container (images.stubSubagent in values.yaml)")
-	flag.StringVar(&credproxyImage, "credproxy-image", "", "Image ref for the tide-credproxy sidecar (images.credProxy in values.yaml)")
-	flag.StringVar(&defaultFileTouchMode, "default-file-touch-mode", "warn", "Cluster-level file-touch validation mode (planAdmission.fileTouchMode in values.yaml; warn|strict)")
-	flag.IntVar(&rateLimitDefaultRPM, "rate-limit-default-rpm", 60, "Default requests-per-minute rate limit (rateLimits.defaults.requestsPerMinute in values.yaml)")
-	flag.IntVar(&rateLimitDefaultBurst, "rate-limit-default-burst", 10, "Default burst size for rate-limit buckets (rateLimits.defaults.burst in values.yaml)")
+	flag.StringVar(&subagentImage, "subagent-image", "",
+		"Image ref for the subagent container (images.stubSubagent in values.yaml)")
+	flag.StringVar(&credproxyImage, "credproxy-image", "",
+		"Image ref for the tide-credproxy sidecar (images.credProxy in values.yaml)")
+	flag.StringVar(&defaultFileTouchMode, "default-file-touch-mode", "warn",
+		"Cluster-level file-touch validation mode (planAdmission.fileTouchMode in values.yaml; warn|strict)")
+	flag.IntVar(&rateLimitDefaultRPM, "rate-limit-default-rpm", 60,
+		"Default requests-per-minute rate limit (rateLimits.defaults.requestsPerMinute in values.yaml)")
+	flag.IntVar(&rateLimitDefaultBurst, "rate-limit-default-burst", 10,
+		"Default burst size for rate-limit buckets (rateLimits.defaults.burst in values.yaml)")
 
 	// Phase 3 plan 03-09 — Helm env-var wiring. Set by the controller Deployment
 	// env block from charts/tide/values.yaml. Helpers in cmd/manager/env.go.
@@ -179,7 +188,8 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup") //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	setupLog := ctrl.Log.WithName("setup")
 
 	// Establish the manager's parent context early — used by both OTel
 	// init below and mgr.Start at the bottom. ctrl.SetupSignalHandler

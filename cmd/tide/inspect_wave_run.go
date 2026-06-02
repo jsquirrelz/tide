@@ -54,7 +54,9 @@ type taskRow struct {
 // tests directly. errOut defaults to os.Stderr from cobra's plumbing — see
 // inspectWaveRunWithErr for the explicit stderr-capture form used in tests
 // that need to assert the empty-wave message.
-func inspectWaveRun(ctx context.Context, c client.Client, ns, projectName string, waveFilter int, format string, out io.Writer) error {
+func inspectWaveRun(
+	ctx context.Context, c client.Client, ns, projectName string, waveFilter int, format string, out io.Writer,
+) error {
 	return inspectWaveRunWithErr(ctx, c, ns, projectName, waveFilter, format, out, io.Discard)
 }
 
@@ -62,7 +64,9 @@ func inspectWaveRun(ctx context.Context, c client.Client, ns, projectName string
 // "No tasks in wave N..." stderr message. Cobra passes cmd.ErrOrStderr()
 // from the adapter; the discard fallback above keeps the single-output
 // signature for the JSON-only path.
-func inspectWaveRunWithErr(ctx context.Context, c client.Client, ns, projectName string, waveFilter int, format string, out, errOut io.Writer) error {
+func inspectWaveRunWithErr(
+	ctx context.Context, c client.Client, ns, projectName string, waveFilter int, format string, out, errOut io.Writer,
+) error {
 	// List Tasks in the namespace; filter client-side by label vocabulary
 	// to avoid coupling the test harness to API-server selector parsing.
 	var list tidev1alpha1.TaskList
@@ -123,7 +127,7 @@ func inspectWaveRunWithErr(ctx context.Context, c client.Client, ns, projectName
 		return enc.Encode(rows)
 	default: // "human" or any other → tabwriter
 		tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "NAME\tSTATUS\tAGE\tATTEMPT\tSCHEDULED-IN-WAVE") // buffered; tw.Flush() below surfaces write errors
+		fmt.Fprintln(tw, "NAME\tSTATUS\tAGE\tATTEMPT\tSCHEDULED-IN-WAVE")
 		for _, r := range rows {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\n", r.Name, r.Status, r.Age, r.Attempt, r.Wave)
 		}

@@ -82,8 +82,9 @@ var forbiddenScopes = []struct {
 //   - valid/internal/subagent/anthropic — same import at the allowed harness site; must NOT fire
 var Analyzer = &analysis.Analyzer{
 	Name: "providerfirewall",
-	Doc:  "rejects github.com/anthropics/*, github.com/openai/*, etc. imports inside the orchestrator-side firewall boundary (SUB-05 / Pitfall 14)",
-	Run:  run,
+	Doc: "rejects github.com/anthropics/*, github.com/openai/*, etc. imports inside the " +
+		"orchestrator-side firewall boundary (SUB-05 / Pitfall 14)",
+	Run: run,
 }
 
 func run(pass *analysis.Pass) (any, error) {

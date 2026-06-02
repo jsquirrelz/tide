@@ -195,7 +195,7 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 	case "push":
 		return runPush(ctx, cfg, stderr)
 	default:
-		_, _ = fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push)\n", cfg.Mode) // diagnostic to stderr
+		fmt.Fprintf(stderr, "tide-push: unknown mode %q (want clone|push)\n", cfg.Mode)
 		return exitInvariant
 	}
 }
@@ -205,11 +205,11 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 // the Project's one-time setup.
 func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	if cfg.RepoURL == "" {
-		_, _ = fmt.Fprintf(stderr, "tide-push: clone mode requires --repo-url\n") // diagnostic to stderr
+		fmt.Fprintf(stderr, "tide-push: clone mode requires --repo-url\n")
 		return exitInvariant
 	}
 	if cfg.Workspace == "" {
-		_, _ = fmt.Fprintf(stderr, "tide-push: clone mode requires --workspace\n") // diagnostic to stderr
+		fmt.Fprintf(stderr, "tide-push: clone mode requires --workspace\n")
 		return exitInvariant
 	}
 

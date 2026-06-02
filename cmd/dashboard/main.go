@@ -79,15 +79,18 @@ func main() {
 	var metricsAddr string
 
 	flag.StringVar(&apiAddr, "api-bind-address", ":8080", "Bind address for the dashboard HTTP API (browser-facing)")
-	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Bind address for the manager-level health probes (cache-sync-gated)")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "Bind address for the manager metrics endpoint (0 disables; dashboard does not register custom metrics in v1.0)")
+	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081",
+		"Bind address for the manager-level health probes (cache-sync-gated)")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "0",
+		"Bind address for the manager metrics endpoint (0 disables; dashboard does not register custom metrics in v1.0)")
 
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-	setupLog := ctrl.Log.WithName("setup") //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	setupLog := ctrl.Log.WithName("setup")
 
 	signalCtx := ctrl.SetupSignalHandler()
 
@@ -126,7 +129,8 @@ func main() {
 	// 3. Construct the SSE fan-out hub. Plan 04-11 wires the informer
 	//    cache's watch events into Publish() and the SSE handlers
 	//    subscribe via Hub.Subscribe().
-	pubsubHub := hub.NewHub(setupLog.WithName("hub")) //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+	pubsubHub := hub.NewHub(setupLog.WithName("hub"))
 
 	// 4. Re-base the embedded SPA at the `dist/` sub-tree so HTTP file
 	//    paths like `/index.html` map to `dist/index.html` inside the
@@ -146,8 +150,9 @@ func main() {
 		Client:    mgr.GetClient(),
 		Hub:       pubsubHub,
 		Clientset: clientset,
-		Log:       setupLog.WithName("router"), //nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
-		SPAFS:     spaFS,
+		//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+		Log:   setupLog.WithName("router"),
+		SPAFS: spaFS,
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the
@@ -187,7 +192,9 @@ func main() {
 	//    manager lifecycle — Start() runs after the cache is up; ctx
 	//    cancellation on shutdown propagates through.
 	if err := mgr.Add(ctrlmgr.RunnableFunc(func(ctx context.Context) error {
-		return dashboardapi.BridgeInformerToHub(ctx, mgr.GetCache(), mgr.GetClient(), pubsubHub, setupLog.WithName("informer-bridge"))
+		//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
+		bridgeLog := setupLog.WithName("informer-bridge")
+		return dashboardapi.BridgeInformerToHub(ctx, mgr.GetCache(), mgr.GetClient(), pubsubHub, bridgeLog)
 	})); err != nil {
 		setupLog.Error(err, "unable to add informer bridge runnable")
 		os.Exit(1)

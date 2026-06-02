@@ -48,7 +48,8 @@ func parseArtifactRef(ref string) (namespace, project, path string, err error) {
 	}
 	namespace, project, path = parts[0], parts[1], parts[2]
 	if namespace == "" || project == "" || path == "" {
-		return "", "", "", fmt.Errorf("artifact ref %q has empty component (ns=%q project=%q path=%q)", ref, namespace, project, path)
+		return "", "", "", fmt.Errorf("artifact ref %q has empty component (ns=%q project=%q path=%q)",
+			ref, namespace, project, path)
 	}
 	return namespace, project, path, nil
 }

@@ -70,6 +70,10 @@ import (
 // main_test.go to redirect signal polling into a tempdir.
 var workspaceRoot = "/workspace"
 
+// leakEscapePath is the deliberate out-of-bounds write path used by the
+// exceed-output-paths test mode (HARN-05). Shared with main_test.go.
+const leakEscapePath = "/workspace/escape/leak.txt"
+
 // wait-for-signal polling cadence (D-D3) is locked at 500ms per CONTEXT.md /
 // RESEARCH §"Open Questions Q4 RESOLVED". The literal is inlined at
 // time.NewTicker call sites so the plan-acceptance grep
@@ -77,7 +81,8 @@ var workspaceRoot = "/workspace"
 
 func main() {
 	fs := flag.NewFlagSet("stub-subagent", flag.ExitOnError)
-	envelopePath := fs.String("envelope", "", "path to EnvelopeIn JSON (default: $TIDE_ENVELOPE_PATH or /workspace/envelopes/$TIDE_TASK_UID/in.json)")
+	envelopePath := fs.String("envelope", "",
+		"path to EnvelopeIn JSON (default: $TIDE_ENVELOPE_PATH or /workspace/envelopes/$TIDE_TASK_UID/in.json)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "stub-subagent: flag parse: %v\n", err)
 		os.Exit(2)
@@ -111,7 +116,7 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 	// Open + decode the envelope.
 	env, err := loadEnvelope(envelopePath)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "stub-subagent: envelope load: %v\n", err) // diagnostic to stderr; write error not actionable
+		fmt.Fprintf(stderr, "stub-subagent: envelope load: %v\n", err)
 		// Attempt a best-effort failure envelope if we can derive the outPath.
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
@@ -147,7 +152,7 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 		return dispatchWaitForSignal(ctx, env, outPath, stderr)
 
 	default:
-		_, _ = fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode) // diagnostic to stderr; write error not actionable
+		fmt.Fprintf(stderr, "stub-subagent: unknown testMode %q\n", testMode)
 		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 			APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 			Kind:        pkgdispatch.KindTaskEnvelopeOut,
@@ -210,7 +215,7 @@ func writeTerminationMessage(data []byte) {
 //	project   → Milestone "stub-milestone-1" with Spec {"projectRef": parentName}
 //	milestone → Phase     "stub-phase-1"     with Spec {"milestoneRef": parentName}
 //	phase     → Plan      "stub-plan-1"      with Spec {"phaseRef": parentName}
-//	plan      → Task      "stub-task-1"      with Spec {planRef, filesTouched, declaredOutputPaths, dev.testMode="success"}
+//	plan      → Task      "stub-task-1"      Spec {planRef, filesTouched, declaredOutputPaths, dev.testMode}
 //	task (leaf/unknown)   → empty ChildCRDs, exit 0
 //
 // parentName is read from env.Provider.Params["parentName"]; falls back to
@@ -232,7 +237,7 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 	case "project":
 		raw, err := json.Marshal(map[string]string{"projectRef": parentName})
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err) // diagnostic to stderr
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: marshal Milestone spec: %v\n", err)
 			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
 				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 				Kind:        pkgdispatch.KindTaskEnvelopeOut,
@@ -444,7 +449,7 @@ func dispatchHang(ctx context.Context) int {
 // /workspace/escape/leak.txt (outside DeclaredOutputPaths — deliberate
 // violation for HARN-05 harness tests), then writes a success out.json.
 func dispatchExceedOutputPaths(env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
-	leakPath := "/workspace/escape/leak.txt"
+	leakPath := leakEscapePath
 	_ = os.MkdirAll(filepath.Dir(leakPath), 0o755)
 	_ = os.WriteFile(leakPath, []byte("leaked"), 0o644)
 

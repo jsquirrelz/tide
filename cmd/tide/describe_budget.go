@@ -26,8 +26,9 @@ func newDescribeBudgetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "describe-budget <project>",
 		Short: "Show a Project's budget cap vs. running spend",
-		Long:  "tide describe-budget surfaces Project.Status.Budget (TokensSpent, CostSpentCents, WindowStart) against Project.Spec.Budget.AbsoluteCapCents. Default output is human-readable; -o json emits a structured object.",
-		Args:  cobra.ExactArgs(1),
+		Long: "tide describe-budget surfaces Project.Status.Budget (TokensSpent, CostSpentCents, WindowStart) " +
+			"against Project.Spec.Budget.AbsoluteCapCents. Default output is human-readable; -o json emits a structured object.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDescribeBudget(cmd, args)
 		},

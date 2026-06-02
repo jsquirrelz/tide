@@ -26,8 +26,9 @@ func newArtifactGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "artifact-get <namespace>/<project>/<path>",
 		Short: "Fetch a PVC artifact via an apiserver-proxied inspector pod",
-		Long:  "tide artifact-get streams a file from the per-Project PVC to stdout via a short-lived busybox inspector pod (pods/exec). Ref form: <namespace>/<project>/<relative-path>.",
-		Args:  cobra.ExactArgs(1),
+		Long: "tide artifact-get streams a file from the per-Project PVC to stdout via a short-lived " +
+			"busybox inspector pod (pods/exec). Ref form: <namespace>/<project>/<relative-path>.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runArtifactGet(cmd, args)
 		},

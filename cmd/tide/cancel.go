@@ -43,7 +43,9 @@ import (
 // cancelRun is the testable seam. Returns an error if --force is absent
 // (gate), prints a banner + deletes with foreground propagation if --force is
 // set, or enumerates children if --dry-run is also set.
-func cancelRun(ctx context.Context, c client.Client, ns, projectName string, force, dryRun bool, out, errOut io.Writer) error {
+func cancelRun(
+	ctx context.Context, c client.Client, ns, projectName string, force, dryRun bool, out, errOut io.Writer,
+) error {
 	if !force {
 		return errors.New(
 			"tide: cancel is destructive — pass --force to confirm cascading delete of project, children, and PVC",
@@ -59,7 +61,7 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 	}
 
 	if dryRun {
-		return cancelDryRun(ctx, c, ns, projectName, &proj, out, errOut)
+		return cancelDryRun(ctx, c, ns, projectName, out, errOut)
 	}
 
 	fmt.Fprintf(errOut, "Deleting project %s (foreground cascade)…\n", projectName)
@@ -73,7 +75,8 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 	// `/workspaces/<project.UID>/workspace` manually or via an external
 	// sweep Job.
 	fmt.Fprintf(errOut, "Project %s deleted. Children cascade via owner refs.\n", projectName)
-	fmt.Fprintf(errOut, "Note: the per-Project subPath on the shared tide-projects PVC is NOT cleaned automatically; remove %s/<project-uid>/workspace manually or via an external sweep Job.\n", "/workspaces")
+	fmt.Fprintf(errOut, "Note: the per-Project subPath on the shared tide-projects PVC is NOT cleaned "+
+		"automatically; remove %s/<project-uid>/workspace manually or via an external sweep Job.\n", "/workspaces")
 	return nil
 }
 
@@ -84,7 +87,9 @@ func cancelRun(ctx context.Context, c client.Client, ns, projectName string, for
 // WR-06 fix: errors from c.List MUST be surfaced — silently swallowing
 // (RBAC denial, apiserver timeout) made the operator see zero children
 // for a kind without knowing the listing failed.
-func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, proj *tidev1alpha1.Project, out, errOut io.Writer) error {
+func cancelDryRun(
+	ctx context.Context, c client.Client, ns, projectName string, out, errOut io.Writer,
+) error {
 	fmt.Fprintf(out, "tide cancel --dry-run\n")
 	fmt.Fprintf(out, "  namespace: %s\n", ns)
 	fmt.Fprintf(out, "  project: %s\n", projectName)
@@ -149,7 +154,8 @@ func cancelDryRun(ctx context.Context, c client.Client, ns, projectName string, 
 	}
 	fmt.Fprintf(out, "  PropagationPolicy: Foreground\n")
 	// WR-02 fix: finalizer is a no-op for PVC sweep; advertise honestly.
-	fmt.Fprintf(out, "  PVC cleanup: NOT automatic — operator must remove /workspaces/<project-uid>/workspace from the shared tide-projects PVC manually (or via an external sweep Job).\n")
+	fmt.Fprintf(out, "  PVC cleanup: NOT automatic — operator must remove /workspaces/<project-uid>/workspace "+
+		"from the shared tide-projects PVC manually (or via an external sweep Job).\n")
 	return nil
 }
 

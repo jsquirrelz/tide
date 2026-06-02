@@ -167,7 +167,9 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 // Project by the canonical tideproject.k8s/project label (per
 // internal/controller/plan_controller.go vocabulary). Returns the first
 // Milestone whose Status.Phase is "AwaitingApproval".
-func findAwaitingMilestone(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
+func findAwaitingMilestone(
+	ctx context.Context, c client.Client, ns, projectName string,
+) (client.Object, string, error) {
 	var list tidev1alpha1.MilestoneList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list milestones: %w", err)

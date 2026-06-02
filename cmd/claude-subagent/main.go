@@ -72,11 +72,11 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	}
 	out, runErr := newSubagent("claude", workspaceRoot).Run(ctx, env)
 	if runErr != nil {
-		_, _ = fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr) // diagnostic to stderr; write error not actionable
+		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
 		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
-		_, _ = fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err) // diagnostic to stderr
+		fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err)
 		return 2
 	}
 	return out.ExitCode
@@ -99,7 +99,7 @@ func failEnvelope(taskUID string, err error, exitCode int, result string) pkgdis
 }
 
 func failOut(stderr io.Writer, outPath, taskUID string, err error, exitCode int, result string) int {
-	_, _ = fmt.Fprintf(stderr, "claude-subagent: %v\n", err) // diagnostic to stderr; write error not actionable
+	fmt.Fprintf(stderr, "claude-subagent: %v\n", err)
 	_ = writeEnvelope(outPath, failEnvelope(taskUID, err, exitCode, result))
 	return exitCode
 }
