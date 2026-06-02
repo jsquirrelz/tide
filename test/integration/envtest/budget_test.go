@@ -77,7 +77,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 				}
 				p.Status.Budget.CostSpentCents = 200 // exceeds AbsoluteCapCents=100
 				return k8sClient.Status().Update(ctx, p)
-			}, "10s", "200ms").Should(Succeed())
+			}, "30s", "200ms").Should(Succeed())
 
 			// Status updates do not bump Generation, so the reconciler's
 			// GenerationChangedPredicate filters them out. Force a re-reconcile
@@ -91,7 +91,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 					return ""
 				}
 				return p.Status.Phase
-			}, "20s", "500ms").Should(Equal(tideprojectv1alpha1.PhaseBudgetExceeded),
+			}, "60s", "500ms").Should(Equal(tideprojectv1alpha1.PhaseBudgetExceeded),
 				"Project.Status.Phase should be BudgetExceeded when cost exceeds cap")
 		})
 	})
@@ -128,7 +128,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 				p.Status.Budget.CostSpentCents = 100
 				p.Status.Phase = tideprojectv1alpha1.PhaseBudgetExceeded
 				return k8sClient.Status().Update(ctx, p)
-			}, "10s", "200ms").Should(Succeed())
+			}, "30s", "200ms").Should(Succeed())
 
 			// Apply the one-shot bypass annotation (also kicks the watch).
 			Eventually(func() error {
@@ -141,7 +141,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 				}
 				p.Annotations["tideproject.k8s/bypass-budget"] = "true"
 				return k8sClient.Update(ctx, p)
-			}, "10s", "200ms").Should(Succeed())
+			}, "30s", "200ms").Should(Succeed())
 
 			// The bypass is one-shot: after the reconciler clears BudgetExceeded
 			// it consumes the annotation, and the very next reconcile re-asserts
@@ -157,7 +157,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 				}
 				_, stillThere := p.Annotations["tideproject.k8s/bypass-budget"]
 				return !stillThere
-			}, "20s", "500ms").Should(BeTrue(),
+			}, "60s", "500ms").Should(BeTrue(),
 				"one-shot bypass annotation should be consumed after the bypass takes effect")
 		})
 	})

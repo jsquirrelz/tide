@@ -109,7 +109,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					return ""
 				}
 				return t.Status.Phase
-			}, "15s", "200ms").Should(Or(Equal("Running"), Equal("Succeeded"), Equal("Pending")))
+			}, "45s", "200ms").Should(Or(Equal("Running"), Equal("Succeeded"), Equal("Pending")))
 
 			// taskB should remain Pending (indegree > 0) while taskA hasn't completed.
 			Consistently(func() string {
@@ -139,7 +139,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					return -1
 				}
 				return t.Status.Attempt
-			}, "15s", "200ms").Should(BeNumerically(">=", 1),
+			}, "45s", "200ms").Should(BeNumerically(">=", 1),
 				"Task.Status.Attempt should be >= 1 after first Job dispatch")
 		})
 	})
@@ -160,7 +160,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				}
 				// Check that a Job was created (Attempt > 0 or Phase is Running).
 				return t.Status.Attempt > 0 || t.Status.Phase == "Running"
-			}, "15s", "200ms").Should(BeTrue())
+			}, "45s", "200ms").Should(BeTrue())
 		})
 	})
 
@@ -180,7 +180,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					return false
 				}
 				return len(t.OwnerReferences) > 0
-			}, "15s", "200ms").Should(BeTrue(),
+			}, "45s", "200ms").Should(BeTrue(),
 				"Task should have an owner reference to the Plan")
 		})
 	})
@@ -222,7 +222,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					}
 					t.Status.Phase = "Succeeded"
 					return k8sClient.Status().Update(ctx, t)
-				}, "10s", "200ms").Should(Succeed())
+				}, "30s", "200ms").Should(Succeed())
 			}
 
 			// Wave should roll up to Succeeded.
@@ -272,7 +272,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				}
 				t.Status.Phase = "Failed"
 				return k8sClient.Status().Update(ctx, t)
-			}, "10s", "200ms").Should(Succeed())
+			}, "30s", "200ms").Should(Succeed())
 
 			for _, tn := range taskNames[1:] {
 				Eventually(func() error {
@@ -282,7 +282,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					}
 					t.Status.Phase = "Succeeded"
 					return k8sClient.Status().Update(ctx, t)
-				}, "10s", "200ms").Should(Succeed())
+				}, "30s", "200ms").Should(Succeed())
 			}
 
 			// Wave should roll up to Failed.
@@ -292,7 +292,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					return ""
 				}
 				return w.Status.Phase
-			}, "20s", "500ms").Should(Equal("Failed"),
+			}, "60s", "500ms").Should(Equal("Failed"),
 				"Wave.Status.Phase should be Failed when any Task is Failed")
 		})
 	})

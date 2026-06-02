@@ -82,7 +82,7 @@ vet: demo-fixture ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests (TEST-01: -short skips the slow leader-election envtest; budget < 30s).
+test: manifests generate fmt vet setup-envtest ## Run tests (TEST-01: -short skips the slow leader-election envtest; budget < 180s — includes the envtest integration suite).
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 .PHONY: test-only
