@@ -150,9 +150,9 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 
-test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). Target: ~90s. -ginkgo.flake-attempts=3 retries the whole contention-flaky class on slow CI runners (Ginkgo-only pkg, so the flag is valid here).
+test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). ~90s clean locally, but -timeout=10m gives headroom for -ginkgo.flake-attempts=3 retries on slow/contended CI runners (a 2m go-test timeout killed the suite mid-retry). The flag retries the contention-flaky class; Ginkgo-only pkg so the flag is valid here.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test ./test/integration/envtest/... -v -timeout=2m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
+		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
 
 test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Docker images and load them into the tide-test kind cluster.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
