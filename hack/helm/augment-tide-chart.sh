@@ -167,8 +167,8 @@ if ENVFROM_MARKER not in content:
 ARGS_MARKER = "# phase2-args-injected"
 PHASE2_ARGS_REPLACEMENT = """args:
           {{- toYaml .Values.controllerManager.manager.args | nindent 10 }}
-          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default "latest" }}
-          - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default "latest" }}
+          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default .Chart.AppVersion }}
+          - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default .Chart.AppVersion }}
           - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
           - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
           - --rate-limit-default-burst={{ .Values.rateLimits.defaults.burst | default 10 }}
@@ -220,9 +220,9 @@ if VOLUME_MARKER not in content:
 # leader-election tuning, D-B1 push image wiring).
 ENV3_MARKER = "# phase3-env-injected"
 ENV3_BLOCK = """        - name: TIDE_PUSH_IMAGE
-          value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default \"latest\" }}"
+          value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default .Chart.AppVersion }}"
         - name: CLAUDE_SUBAGENT_IMAGE
-          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default \"latest\" }}"
+          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default .Chart.AppVersion }}"
         - name: TIDE_DEFAULT_MODEL_MILESTONE
           value: "{{ .Values.subagent.levels.milestone.model | default \"claude-opus-4-7\" }}"
         - name: TIDE_DEFAULT_MODEL_PHASE
@@ -277,6 +277,27 @@ if ENV4_MARKER not in content:
     content = re.sub(
         r'(        # phase3-env-injected\n)',
         r'\1' + ENV4_BLOCK,
+        content,
+        count=1,
+    )
+
+# ── 8g: podAnnotations passthrough on the manager pod template ───────────────
+# helmify emits only the static `kubectl.kubernetes.io/default-container: manager`
+# annotation on the pod template and drops any operator-supplied podAnnotations.
+# Inject a `{{- with .Values.controllerManager.manager.podAnnotations }}` block
+# immediately after that line so Helm renders controllerManager.manager.podAnnotations
+# (e.g. the controller-args hash used to force a manager rollout on chart changes).
+# Idempotent: keyed on the podAnnotations Values path already being present.
+PODANN_MARKER = "with .Values.controllerManager.manager.podAnnotations"
+PODANN_BLOCK = """        {{- with .Values.controllerManager.manager.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+"""
+if PODANN_MARKER not in content:
+    # Anchor: the static default-container annotation line (8-space indent).
+    content = re.sub(
+        r'(        kubectl\.kubernetes\.io/default-container: manager\n)',
+        r'\1' + PODANN_BLOCK,
         content,
         count=1,
     )
