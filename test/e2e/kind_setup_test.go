@@ -306,30 +306,39 @@ func kindInstallCertManager() {
 	}
 }
 
-// kindBuildAndLoadImages builds the controller image (tag :test) + dashboard
-// image (placeholder Dockerfile is greenfield in Phase 4; we tag the existing
-// controller image as the dashboard since the dashboard binary embeds in the
-// same multi-stage container in v1.x). Phase 5 splits these into distinct
-// Dockerfiles + ghcr.io pushes. For now we satisfy the chart's image refs
-// with two `kind load docker-image` invocations against the same digest.
+// kindBuildAndLoadImages builds the controller image (from Dockerfile, which
+// produces /manager) and the dashboard image (from Dockerfile.dashboard, which
+// produces /dashboard), then kind-loads both tags into the e2e cluster.
 //
-// This is a known limitation captured in Phase 5 DIST-04 follow-up: ship
-// separate dashboard Dockerfile + Docker Hub publish. For Phase 4 smoke
-// purposes the chart needs SOMETHING to pull; tagging the existing manager
-// image is the minimal viable shim.
+// The two images MUST come from distinct Dockerfiles. The chart's
+// dashboard-deployment.yaml runs `/dashboard` as its container command, but the
+// manager image only ships `/manager`. Reusing the manager image for the
+// dashboard tag (the original Phase-4 shim) leaves the dashboard pod in
+// CrashLoopBackOff with "exec: /dashboard: not found", which never becomes
+// Ready and blocks helm `--wait` until the 5m deadline (see Dockerfile.dashboard's
+// own header for this exact trap). Dockerfile.dashboard's `go build ./cmd/dashboard`
+// embeds the committed Vite SPA via //go:embed all:dist (cmd/dashboard/embed/dist/),
+// so no Node/npm step is needed at build time.
 func kindBuildAndLoadImages() {
 	repoRoot, err := kindRepoRoot()
 	Expect(err).NotTo(HaveOccurred())
 
-	// Controller image — the existing Dockerfile builds /manager.
-	buildCmd := exec.CommandContext(kindE2ECtx, "docker", "build",
+	// Manager image (Dockerfile → /manager).
+	managerBuild := exec.CommandContext(kindE2ECtx, "docker", "build",
 		"-t", "controller:phase4-test",
-		"-t", "ghcr.io/jsquirrelz/tide-dashboard:phase4-test",
 		"-f", "Dockerfile", ".")
-	buildCmd.Dir = repoRoot
-	out, err := buildCmd.CombinedOutput()
-	if err != nil {
-		Fail(fmt.Sprintf("docker build failed: %v\n%s", err, out))
+	managerBuild.Dir = repoRoot
+	if out, bErr := managerBuild.CombinedOutput(); bErr != nil {
+		Fail(fmt.Sprintf("docker build (manager) failed: %v\n%s", bErr, out))
+	}
+
+	// Dashboard image (Dockerfile.dashboard → /dashboard, embeds the committed SPA).
+	dashboardBuild := exec.CommandContext(kindE2ECtx, "docker", "build",
+		"-t", "ghcr.io/jsquirrelz/tide-dashboard:phase4-test",
+		"-f", "Dockerfile.dashboard", ".")
+	dashboardBuild.Dir = repoRoot
+	if out, bErr := dashboardBuild.CombinedOutput(); bErr != nil {
+		Fail(fmt.Sprintf("docker build (dashboard) failed: %v\n%s", bErr, out))
 	}
 
 	// Load both tags into kind.
@@ -371,6 +380,11 @@ func kindApplyChart() {
 	out, err := helmCmd.CombinedOutput()
 	elapsed := time.Since(start)
 	if err != nil {
+		// Dump pod-level state BEFORE Fail() triggers AfterSuite teardown — the
+		// AfterSuite deletes tide-e2e-phase4 and the workflow's log-collection
+		// step only targets tide-test, so without this the evidence is lost on
+		// recurrence (mirrors dumpControllerDiagnostics in the integration suite).
+		dumpE2EControllerDiagnostics("helm upgrade --install failed")
 		Fail(fmt.Sprintf("helm upgrade --install failed after %s: %v\n%s", elapsed, err, out))
 	}
 	GinkgoWriter.Printf("helm install completed in %s\n", elapsed)
@@ -413,6 +427,60 @@ func kindCleanupCluster() {
 	if _, rmErr := exec.Command("docker", rmArgs...).CombinedOutput(); rmErr != nil {
 		GinkgoWriter.Printf("Warning: docker rm -f fallback failed: %v\n", rmErr)
 	}
+}
+
+// dumpE2EControllerDiagnostics emits pod-level state (deployments, pods, recent
+// events, current + previous-restart container logs) for the e2e controller
+// namespace to stdout. It is called on the helm-install failure path BEFORE
+// Fail() so the evidence survives AfterSuite's cluster teardown — the AfterSuite
+// deletes tide-e2e-phase4 and the nightly workflow's log-collection step targets
+// only tide-test, so otherwise a recurrence leaves no diagnostics. Adapted from
+// dumpControllerDiagnostics() in test/integration/kind/suite_test.go.
+//
+// Best-effort: every kubectl invocation tolerates errors (the cluster may be
+// partially up). Plain exec.Command (no ctx) is intentional — when this is
+// reached the suite ctx may already be cancelling.
+func dumpE2EControllerDiagnostics(reason string) {
+	ns := kindE2EControllerNamespace
+	hdr := "=== E2E CONTROLLER DIAGNOSTICS (" + reason + ") ns=" + ns + " ==="
+	fmt.Fprintln(os.Stdout, hdr)
+	GinkgoWriter.Println(hdr)
+
+	run := func(label string, args ...string) {
+		full := append([]string{"--kubeconfig", kindE2EKubeconfigPath}, args...)
+		out, err := exec.Command("kubectl", full...).CombinedOutput()
+		block := "--- " + label + " ---\n" + string(out)
+		if err != nil {
+			block += "(kubectl error: " + err.Error() + ")\n"
+		}
+		fmt.Fprintln(os.Stdout, block)
+		GinkgoWriter.Println(block)
+	}
+
+	run("deployments", "get", "deployments", "-n", ns, "-o", "wide")
+	run("describe deployments", "describe", "deployments", "-n", ns)
+	run("pods", "get", "pods", "-n", ns, "-o", "wide")
+	run("describe pods", "describe", "pods", "-n", ns)
+	run("events", "get", "events", "-n", ns, "--sort-by=.lastTimestamp")
+	// Manager logs (current + previous — CrashLoop leaves the failure only in --previous).
+	run("manager logs (current)", "logs", "-n", ns,
+		"-l", "control-plane=controller-manager", "--all-containers=true",
+		"--tail=200", "--prefix=true")
+	run("manager logs (previous)", "logs", "-n", ns,
+		"-l", "control-plane=controller-manager", "--all-containers=true",
+		"--previous=true", "--tail=200", "--prefix=true")
+	// Dashboard logs (current + previous) — the dashboard is the e2e-specific
+	// resource whose CrashLoop ("exec: /dashboard: not found") was Failure 3.
+	run("dashboard logs (current)", "logs", "-n", ns,
+		"-l", "control-plane=dashboard", "--all-containers=true",
+		"--tail=200", "--prefix=true")
+	run("dashboard logs (previous)", "logs", "-n", ns,
+		"-l", "control-plane=dashboard", "--all-containers=true",
+		"--previous=true", "--tail=200", "--prefix=true")
+
+	footer := "=== END E2E CONTROLLER DIAGNOSTICS ==="
+	fmt.Fprintln(os.Stdout, footer)
+	GinkgoWriter.Println(footer)
 }
 
 // kindRepoRoot returns the absolute path of the repo root (4 levels up from

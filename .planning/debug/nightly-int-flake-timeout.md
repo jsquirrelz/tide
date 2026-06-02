@@ -38,6 +38,12 @@ next_action: FIRST close the observability gap so the NEXT nightly run can disam
 - timestamp: 2026-06-02 — **FAILURE 2 ROOT CAUSE PINNED via dumpControllerDiagnostics() (run 26851857098).** `helm upgrade --install failed after 5m1.4s … context deadline exceeded`. Diagnostics `get pods -n tide-system` shows TWO pods: `tide-controller-manager-...-kg9wf 1/1 Running` (healthy, deployment READY 1/1 AVAILABLE 1) AND `tide-dashboard-795bf6f45d-5l78w 0/1 **ImagePullBackOff**`. helm `--wait` blocks until ALL release resources are Ready; the manager was fine, but the dashboard Deployment never became Ready → 5m deadline. The 5m timeout was a SYMPTOM, not the cause. **NOT a timeout-tightness problem.**
 - timestamp: 2026-06-02 — Dashboard image gap CONFIRMED at source: chart `dashboard.enabled: true` by default (charts/tide/values.yaml:240), image `ghcr.io/jsquirrelz/tide-dashboard` (values.yaml:243). But Makefile `test-int-kind-prep` builds/kind-loads only FOUR images (controller, stub-subagent, credproxy, push) — **NOT the dashboard** — and `helmControllerArgs()` overrides only those four (`tag=test`/`IfNotPresent`), leaving the dashboard on its chart-default image which is absent from the fresh CI kind node → ImagePullBackOff. The dashboard IS properly built+loaded+installed by the SEPARATE `make test-e2e-kind` target (Makefile:98-100,112; installs `dashboard.enabled=true`), which is nightly's second step. The Layer B `make test-int` suite (14 controller/CRD reconciliation specs) does not exercise the dashboard at all.
 
+- timestamp: 2026-06-02 — **make test-int FULLY GREEN in CI** (run 26853449717, commit 201ef1c): Layer A `Ran 29 of 29 in 91.4s`, Layer B kind `Ran 14 of 14 in 500.2s`. Failures 1 + 2 both closed. The dashboard-disable fix worked.
+- timestamp: 2026-06-02 — **FAILURE 3 surfaced + root-caused (same run).** With test-int green, the SECOND nightly step `make test-e2e-kind` failed: `[BeforeSuite] FAILED` at `test/e2e/kind_setup_test.go:374`, `helm upgrade --install failed after 5m1.2s … context deadline exceeded` → `Ran 0 of 6 Specs` → `--- FAIL: TestKindE2E`. This is a DISTINCT suite (cluster `tide-e2e-phase4`, package test/e2e) that legitimately installs `dashboard.enabled=true` (it tests the dashboard) and has NO diagnostics dump.
+- timestamp: 2026-06-02 — **FAILURE 3 ROOT CAUSE (confirmed by source, not hypothesis):** `kindBuildAndLoadImages()` (kind_setup_test.go:320-324) builds the dashboard tag `ghcr.io/jsquirrelz/tide-dashboard:phase4-test` from `-f Dockerfile` — the MANAGER Dockerfile, which produces `/manager`. But the chart's dashboard-deployment runs `/dashboard` as its container command. `Dockerfile.dashboard`'s own header documents this exact trap: "Reusing the manager image (which produces /manager) leaves the container in CrashLoopBackOff with 'exec: /dashboard: not found'." So the dashboard pod CrashLoops → never Ready → helm `--wait` 5m deadline. The dedicated `Dockerfile.dashboard` was created to fix this but `kindBuildAndLoadImages()` was never switched to it (stale Phase-4 "tag the manager image as the dashboard" shim).
+- timestamp: 2026-06-02 — Fix is self-contained, NO workflow/npm change needed: the Vite SPA dist IS committed (`git ls-files cmd/dashboard/embed/dist/` = 3 files: index.html + assets/*.js + *.css), so `//go:embed all:dist` (embed.go:39) + `Dockerfile.dashboard`'s `go build ./cmd/dashboard` embed the prebuilt SPA without npm. Nightly workflow has no node/npm and does not need it.
+- timestamp: 2026-06-02 — **FAILURE 3 FIX APPLIED** (test-harness only, no chart/workflow change). `kindBuildAndLoadImages()` now builds the manager from `Dockerfile` and the dashboard from `Dockerfile.dashboard` (two distinct `docker build` invocations, both tags still kind-loaded into `tide-e2e-phase4`); stale shim comment replaced. Added `dumpE2EControllerDiagnostics()` (adapted from the integration suite's `dumpControllerDiagnostics()`) called on the `kindApplyChart()` helm-fail path BEFORE `Fail()`, dumping deployments/pods/events + manager AND dashboard logs (current+previous; dashboard selector `control-plane=dashboard` confirmed against charts/tide/templates/dashboard-deployment.yaml) so evidence survives the e2e AfterSuite teardown. Local cheap checks GREEN: `gofmt -l` clean, `go vet -tags=kind_e2e ./test/e2e/...` clean, `go build -o /dev/null ./cmd/dashboard` ok (embed dist intact: 3 files), `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.56s), `docker buildx build --check -f Dockerfile.dashboard .` = no warnings, `git diff --quiet charts/` clean (no chart drift).
+
 ## Eliminated
 
 - hypothesis: "ART-01 / the kind helm-install is a v1 product regression" — ELIMINATED (pending re-verify): both layers are green locally (Layer A 29/29, Layer B 14/14, full `make test-int` exit 0) and the per-push `test`/`Tests`/`Lint` workflows are green on the same commit 0645e1a. Failures are confined to the cold-runner CI environment.
@@ -67,6 +73,16 @@ root_cause: |
   to the 5m deadline. The 5m timeout was the SYMPTOM, not the cause; raising it would never
   help. The dashboard is exercised only by the separate `make test-e2e-kind` target (which
   builds/loads/installs it); the Layer B suite's 14 controller/CRD specs never touch it.
+  FAILURE 3 (test-e2e-kind BeforeSuite helm --wait timeout): the e2e suite's
+  kindBuildAndLoadImages() built the dashboard tag from `-f Dockerfile` (the MANAGER
+  Dockerfile, which ships /manager), but the chart's dashboard-deployment runs
+  /dashboard. The dashboard pod CrashLoopBackOff'd ("exec: /dashboard: not found"),
+  never became Ready, and held helm `--wait` open to the 5m deadline. The dedicated
+  Dockerfile.dashboard (built precisely to fix this; binary /dashboard embeds the
+  committed Vite SPA via //go:embed all:dist) existed but kindBuildAndLoadImages() was
+  never switched to it — a stale Phase-4 "tag the manager image as the dashboard" shim.
+  Unlike Failure 2, the dashboard is NOT disabled here: the e2e suite legitimately tests
+  the dashboard, so the fix is to build the correct image, not to disable it.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
@@ -82,6 +98,18 @@ fix: |
   (dashboard.enabled=true) is intentionally LEFT UNTOUCHED — it is correct for real installs and
   for `make test-e2e-kind`. dumpControllerDiagnostics() (added the prior cycle) is KEPT in place
   as durable future-proofing; it was the tool that pinned this root cause.
+  FAILURE 3 (thorough, test-harness only — NO chart/workflow/npm change): in
+  test/e2e/kind_setup_test.go, split kindBuildAndLoadImages() into two docker builds —
+  manager from `Dockerfile` (controller:phase4-test) and dashboard from
+  `Dockerfile.dashboard` (ghcr.io/jsquirrelz/tide-dashboard:phase4-test) — keeping both
+  tags kind-loaded into tide-e2e-phase4. Replaced the now-inaccurate "tag the manager
+  image as the dashboard" comment block with a note that the dashboard builds from
+  Dockerfile.dashboard (binary /dashboard; embeds the committed SPA via //go:embed
+  all:dist). Added dumpE2EControllerDiagnostics() (mirrors the integration suite's
+  dumpControllerDiagnostics()) on the helm-install failure path, dumping
+  deployments/pods/events + manager and dashboard logs (current+previous) BEFORE Fail()
+  so evidence survives the e2e AfterSuite teardown (the workflow log-collection step only
+  targets tide-test). The chart and Dockerfile.dashboard themselves are untouched.
 verification: |
   Local cheap checks (where Failure 2 does NOT reproduce — heavy kind run skipped to avoid VM
   OOM): gofmt clean on suite_test.go; `go vet ./test/integration/kind/...` clean; kind test
@@ -95,3 +123,4 @@ verification: |
 files_changed:
   - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [prior cycle, commit 96a3b44]
   - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path [prior cycle]; --set dashboard.enabled=false [this cycle])
+  - test/e2e/kind_setup_test.go (kindBuildAndLoadImages builds dashboard from Dockerfile.dashboard; dumpE2EControllerDiagnostics on helm-fail path) [Failure 3, this cycle]
