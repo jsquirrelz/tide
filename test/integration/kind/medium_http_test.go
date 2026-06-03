@@ -22,7 +22,7 @@ limitations under the License.
 //
 // Coverage target (post-GREEN):
 //   - SC-5: CI coverage for the medium/http transport path (hermetic stub-subagent
-//     + real git-http server image, exercising go-git HTTP transport without LLM cost).
+//   - real git-http server image, exercising go-git HTTP transport without LLM cost).
 package kind_integration
 
 import (
