@@ -2,22 +2,35 @@
 #
 # This sample lets operators run TIDE against real Claude (Haiku 4.5, cost-disciplined
 # per D-B1) with a hard $5 cap — no external public repo dependency (D-B3). The
-# targetRepo is a local-only file:// git remote bootstrapped on `demo-remote-pvc`
-# by the demo-remote-init Job (Phase 5 D-B3 / RESEARCH §"Topic 4 Option b").
+# targetRepo is an in-cluster http:// git remote served by the tide-git-http-server
+# Deployment (git http-backend CGI + nginx), backed by the demo-remote-pvc populated
+# by the demo-remote-init Job. All git transport is pure-Go (go-git HTTP) — no git
+# binary in core images required.
 #
 # APPLY ORDER (do NOT apply this file alone — see README.md):
 #   1. namespace.yaml
 #   2. demo-remote-pvc.yaml
-#   3. demo-remote-init-job.yaml         (waits for completion before #4)
-#   4. kubectl create secret tide-secrets ANTHROPIC_API_KEY + GIT_PAT
-#   5. project.yaml                      (THIS file)
+#   3. per-namespace-resources.yaml      (tide-projects PVC + tide-subagent SA)
+#   4. Mirror tide-signing-key Secret from tide-system (see per-namespace-resources.yaml)
+#   5. demo-remote-init-job.yaml         (init Job populates the bare repo on demo-remote-pvc)
+#      kubectl wait --for=condition=Complete job/demo-remote-init \
+#        -n tide-sample-medium --timeout=2m
+#   6. git-http-server-deployment.yaml   (after init Job completes — RWO PVC ordering)
+#      kubectl wait --for=condition=Available deployment/git-http-server \
+#        -n tide-sample-medium --timeout=2m
+#   7. kubectl create secret generic tide-secrets \
+#        --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+#        --from-literal=GIT_PAT="" \   # empty — anonymous in-cluster http:// push
+#        -n tide-sample-medium
+#   8. project.yaml                      (THIS file)
+#   9. kubectl wait --for=jsonpath='{.status.phase}'=Complete \
+#        project/medium-project -n tide-sample-medium --timeout=30m
 #
-# Schema notes (root-cause fix landed 2026-05-23):
-#   - ProjectSpec.OutcomePrompt is now a first-class Spec field — read directly
-#     by the planner subagent. Previously (briefly) carried as
-#     `tideproject.k8s/outcome-prompt` annotation in Wave 3.
-#   - targetRepo CEL validator accepts `file:///` URLs alongside http(s) + SSH.
-#   - GitConfig.RepoURL Pattern accepts `file:///` URLs alongside http(s).
+# Schema notes:
+#   - ProjectSpec.OutcomePrompt is a first-class Spec field read by the planner subagent.
+#   - targetRepo uses http:// in-cluster URL (file:// rejected by CEL validator in Phase 8).
+#   - GIT_PAT can be empty — tide-push push mode GIT_PAT guard is scheme-conditional
+#     (Phase 8 08-05 Task 3): empty PAT is accepted for anonymous http:// remotes.
 ---
 apiVersion: tideproject.k8s/v1alpha1
 kind: Project
@@ -29,9 +42,11 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: medium
 spec:
-  # D-B3 local-only git remote. Now accepted by the CEL validator (relaxed
-  # 2026-05-23 root-cause fix — file:/// added alongside http(s) + SSH).
-  targetRepo: file:///demo-remote.git
+  # In-cluster anonymous git remote served by git-http-server Deployment + ClusterIP Service.
+  # Transport: go-git HTTP (pure-Go, no git binary in tide-push or claude-subagent images).
+  # Service DNS: http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git
+  # Short form (same namespace): http://git-http-server/demo-remote.git
+  targetRepo: http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git
 
   # Medium-sample outcome prompt — small enough to fit comfortably under the
   # $5 cap (D-B1) yet substantive enough to exercise TIDE's clone → plan →
@@ -65,9 +80,9 @@ spec:
     Pass criterion: `go test ./...` is green inside the cloned working tree.
 
   # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
-  # The Secret is created BEFORE this CRD is applied (README.md step 4).
-  # Same Secret carries GIT_PAT (unused for file:// but the schema requires
-  # the GitConfig.CredsSecretRef field).
+  # The Secret is created BEFORE this CRD is applied (README.md step 7).
+  # Same Secret carries GIT_PAT="" (empty — anonymous in-cluster http:// push
+  # is accepted by the scheme-conditional guard in cmd/tide-push push mode).
   providerSecretRef: tide-secrets
 
   # D-B1: $5 cap for the medium sample. If hit, dispatch halts with
@@ -94,10 +109,10 @@ spec:
   # per-Task / final-Project commits to a per-run branch on this remote.
   # Branch shape: tide/run-medium-project-<unix-ts>. NEVER pushes to main.
   #
-  # The same `tide-secrets` Secret carries GIT_PAT; the value can be empty
-  # for file:// (no auth required), but the schema mandates the field.
+  # The same `tide-secrets` Secret carries GIT_PAT="" (empty, accepted for
+  # anonymous http:// remotes by the scheme-conditional guard in tide-push).
   git:
-    repoURL: file:///demo-remote.git
+    repoURL: http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git
     credsSecretRef: tide-secrets
 
   # All gates set to `auto` so the medium sample runs end-to-end without

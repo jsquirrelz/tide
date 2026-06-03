@@ -240,18 +240,9 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exitInvariant
 	}
 
-	// Invariant 2: GIT_PAT present (D-B1 — only the push Job pod sees
-	// the PAT). Read once into a local variable; never log it.
-	pat := os.Getenv("GIT_PAT")
-	if pat == "" {
-		writePushEnvelope(cfg, "", exitInvariant, "missing-creds")
-		fmt.Fprintf(stderr, "tide-push: GIT_PAT env is empty\n")
-		return exitInvariant
-	}
-
 	// Invariant 3: commit message non-empty (W11 — orchestrator-supplied
 	// boundary message). Empty == programmer error in the calling
-	// reconciler.
+	// reconciler. Checked before PlainOpen (cheap pre-condition).
 	if cfg.CommitMessage == "" {
 		writePushEnvelope(cfg, "", exitInvariant, "missing-commit-message")
 		fmt.Fprintf(stderr, "tide-push: push mode requires --commit-message (W11)\n")
@@ -271,6 +262,42 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tide-push: PlainOpen %s failed: %v\n", worktreeDir, err)
 		return exitGenericFail
 	}
+
+	// Invariant 2 (D-B1): GIT_PAT required for authenticated remotes
+	// (https:// production, git@ SSH). Not required for anonymous in-cluster
+	// http:// push. Origin URL determines the requirement.
+	//
+	// T-08-05-03 mitigation: production TIDE installations use https:// (CEL
+	// enforced at admission); the demo uses http://. The scheme-conditional
+	// guard makes the production contract explicit without blocking anonymous
+	// in-cluster demo pushes.
+	//
+	// Read GIT_PAT once into a local variable; never log it.
+	pat := os.Getenv("GIT_PAT")
+
+	// Determine whether the push remote requires authentication by reading the
+	// origin remote URL from the open repo config. This is the standard go-git
+	// pattern for accessing remote config from an open repository (resolved
+	// Open Question #2 from 08-RESEARCH.md).
+	requirePAT := true // safe default: require PAT unless we can prove otherwise
+	if repoConfig, cfgErr := repo.Config(); cfgErr != nil {
+		// Config() failure means the worktree may be corrupted. Fall back to
+		// the safe default (requirePAT=true = existing behavior preserved).
+		fmt.Fprintf(stderr, "tide-push: repo.Config() failed (worktree may be corrupted): %v\n", cfgErr)
+	} else if originRemote, ok := repoConfig.Remotes["origin"]; ok && len(originRemote.URLs) > 0 {
+		remoteURL := originRemote.URLs[0]
+		// Require PAT only for HTTPS or SSH (git@) remotes. Anonymous http://
+		// in-cluster remotes (demo git-http-server) do not require auth.
+		requirePAT = strings.HasPrefix(remoteURL, "https://") || strings.HasPrefix(remoteURL, "git@")
+	}
+	// If origin remote is missing or has no URLs: requirePAT stays true (safe default).
+
+	if requirePAT && pat == "" {
+		writePushEnvelope(cfg, "", exitInvariant, "missing-creds")
+		fmt.Fprintf(stderr, "tide-push: GIT_PAT env is empty (required for https:// and git@ remotes)\n")
+		return exitInvariant
+	}
+
 	wt, err := repo.Worktree()
 	if err != nil {
 		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree")
