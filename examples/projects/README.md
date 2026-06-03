@@ -22,22 +22,24 @@ remote, then to **large** for the full v1 acceptance ritual on this TIDE repo.
 
 | Sample            | Cost  | LLM                       | Target                                              | Run with                                                |
 | ----------------- | ----- | ------------------------- | --------------------------------------------------- | ------------------------------------------------------- |
-| [small](small/)   | $0    | stub-subagent (canned)    | placeholder `file://` path (ignored by stub)        | `kubectl apply -f examples/projects/small/`             |
-| [medium](medium/) | ~$5   | Claude (cheap model)      | local-only `file://` git remote (in-cluster init)   | apply PVC + init Job + project.yaml (see medium/README) |
+| [small](small/)   | $0    | stub-subagent (canned)    | non-routable `https://git.example.internal` sentinel (ignored by stub) | `kubectl apply -f examples/projects/small/`             |
+| [medium](medium/) | ~$5   | Claude (cheap model)      | in-cluster `http://` git remote (git-http-server Service)              | apply namespace + PVCs + init Job + git-http-server + project.yaml (see medium/README) |
 | [large](large/)   | ~$25  | Claude (real model)       | THIS TIDE repo (`github.com/jsquirrelz/tide.git`)   | `make acceptance-v1` (maintainer ritual; plan 05-15)    |
 
 **small** is the `make dry-run-v1` target (DIST-05) — $0, stub-subagent canned
 envelopes, repeatable without burning API quota. The stub-subagent ignores
-`targetRepo` entirely, so the placeholder `file:///tmp/no-such-repo` value is
-load-bearing-by-virtue-of-being-ignored: the smoke test exercises the K8s
+`targetRepo` entirely, so the RFC 2606 sentinel `https://git.example.internal/stub/no-such-repo.git`
+value is load-bearing-by-virtue-of-being-ignored: the smoke test exercises the K8s
 plumbing (CRD admission, controller dispatch, Pod lifecycle) without any
 network or LLM cost.
 
 **medium** is the first taste of real LLM-driven planning. The sample applies a
 PVC + init Job (driven by `cmd/tide-demo-init`, plan 05-12) which bootstraps a
-fresh local-only git remote from `examples/tide-demo-fixture/`. TIDE clones
-from that local remote, plans, commits artifacts back, and pushes — all
-contained on the operator's own machine. Zero external dependencies.
+bare git repository from `examples/tide-demo-fixture/`, then an in-cluster HTTP
+git server (`git-http-server` Deployment) serves that repo over `http://` inside
+the cluster. TIDE clones from that in-cluster remote, plans, commits artifacts
+back, and pushes — using the same pure-Go HTTP transport as production HTTPS.
+Zero external dependencies.
 
 **large** IS the v1 acceptance test (BOOT-04). It targets THIS TIDE repo and
 drives TIDE to author the scaffold for `internal/subagent/openai/` mirroring
@@ -51,7 +53,7 @@ cluster, secrets, watch, and evidence capture).
 | Sample | kind cluster | TIDE charts installed | ANTHROPIC_API_KEY Secret | git push creds Secret |
 | ------ | ------------ | --------------------- | ------------------------ | --------------------- |
 | small  | yes          | yes                   | no                       | no                    |
-| medium | yes          | yes                   | yes                      | no (file:// is local) |
+| medium | yes          | yes                   | yes                      | no (anonymous in-cluster http://) |
 | large  | yes          | yes                   | yes                      | yes (GitHub PAT)      |
 
 See [docs/INSTALL.md](../../docs/INSTALL.md) for the cluster + chart install

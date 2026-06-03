@@ -1,107 +1,226 @@
-# medium — ~$5 mini Claude (local-only git remote)
+# medium — ~$5 real Claude (in-cluster HTTP git remote)
 
 **Audience:** Operators trying TIDE with real LLM dispatch at ~$5 cost, with no
 external repo dependency.
 
-**Status:** v1.0; local-only `file://` git remote bootstrapped by
-`cmd/tide-demo-init/` running as an in-cluster Job (Phase 5 D-B3 /
-RESEARCH §"Topic 4 Option b" — D-B3 user decision: no external public
-fixture repo for v1).
+**Status:** v1.0; in-cluster HTTP git remote served by the `git-http-server`
+Deployment inside `tide-sample-medium`. The demo-remote-init Job populates the
+bare repo on a PVC; the git-http server bridges that PVC to the HTTP transport
+layer so TIDE's core images (which carry no git binary) can clone and push
+over pure-Go HTTP. Phase 5 D-B3 / RESEARCH §"Topic 4 Option b" decision
+preserved: no external public fixture repo for v1.
 
-## Scope of this doc
+## Overview
 
-- What this sample does (clone → plan → execute → push, all local)
-- Why it's the middle of the cost spectrum (small $0 → medium $5 → large $25)
-- The 7-step apply sequence (the most important section — order matters)
-- What you'll observe + cleanup
-- Pitfall 9 reminder (namespace prefix collisions)
-- Schema-gap notes (file:// targetRepo, outcomePrompt annotation)
+The medium sample drives TIDE to clone a fixture repository, plan a small
+bounded outcome (add `FormattedNow() string` alongside the existing
+`Greeting(name)` function), dispatch the resulting Task DAG via real Claude
+(`claude-haiku-4-5`), and push the artifacts back on a per-run branch.
 
-## What this does
+Unlike the small ($0 stub) sample, this sample uses real LLM calls and a
+real git round-trip — but the entire git transport stays inside the cluster.
+The git remote is an in-cluster HTTP server (`git-http-server`) that serves
+the fixture repo over `http://`, exercising the same pure-Go HTTP transport
+that production HTTPS uses. Zero external dependencies.
 
-Applying this sample drives TIDE to:
+**Cost:** ~$5. The hard `$5` cap (`Project.Spec.budget.absoluteCapCents: 500`)
+bounds the worst case.
 
-1. Clone the local-only bare repo at `file:///demo-remote.git` (populated by
-   the `demo-remote-init` Job from `examples/tide-demo-fixture/`).
-2. Plan a small, bounded outcome: add `FormattedNow() string` alongside the
-   existing `Greeting(name)` function, with a unit test that round-trips
-   through `time.Parse(time.RFC3339, ...)`.
-3. Dispatch the resulting Task DAG via real Claude (`claude-haiku-4-5`,
-   cost-disciplined per D-B1).
-4. Push the resulting artifacts (PLAN.md + Task diffs) back to the same
-   local bare repo on a per-run branch `tide/run-medium-project-<unix-ts>`.
+**Wall time:** roughly **5–10 minutes** from final `kubectl apply` to
+`Status=Complete`, dominated by Claude round-trips.
 
-Wall time: roughly **5–10 minutes** from final `kubectl apply` to
-`Status=Complete`, dominated by Claude round-trips. The hard $5 cap
-(`Project.Spec.budget.absoluteCapCents: 500`) bounds the worst case.
+## Architecture
 
-## Why local-only (D-B3)
+Three components work in sequence:
 
-The medium sample is the proof point that TIDE works end-to-end with real
-Claude WITHOUT depending on a publicly-hosted git repo. Operators see the
-full clone → plan → execute → push loop run entirely on their own machine:
+### (a) demo-remote-init Job
 
-- No GitHub / GitLab credentials needed for the targetRepo.
-- No network round-trips for git ops (the `file://` transport is local).
-- Repeatable in air-gapped clusters once the container images are
-  pre-pulled.
+The `demo-remote-init` Job (image: `ghcr.io/jsquirrelz/tide-demo-init:1.0.0`)
+runs at setup time. It populates a bare git repository on `demo-remote-pvc`
+using a `file://` push *internal to the init pod*. This is the only place
+`file://` is used — and the only image that carries a system git binary for
+that reason.
 
-Per D-B3 the user explicitly rejected hosting a `github.com/jsquirrelz/tide-demo-fixture`
-fixture repo for v1 — the in-repo `examples/tide-demo-fixture/` + the
-in-cluster bootstrap Job (`cmd/tide-demo-init/`) is the v1 mechanism.
+### (b) git-http-server Deployment
+
+The `git-http-server` Deployment (image:
+`ghcr.io/jsquirrelz/tide-git-http-server:1.0.0`) mounts `demo-remote-pvc`
+at `/srv/git/` and serves the bare repo over HTTP using `git-http-backend`
+(CGI) + nginx + fcgiwrap.
+
+The Service DNS name inside the cluster is:
+```
+http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git
+```
+
+Or simply within the same namespace:
+```
+http://git-http-server/demo-remote.git
+```
+
+### (c) Controller Jobs (distroless — no git binary)
+
+The controller's clone Job, Task executor Jobs, and push Job use **go-git
+HTTP transport (pure-Go)**. They clone and push via the git-http-server
+Service over `http://`. No system git binary is present in these images.
+
+**The controller's clone and push Jobs do NOT mount demo-remote-pvc — they
+reach the repo via HTTP through the git-http-server Service.** The PVC is
+accessed only by the init Job (write once at setup) and the git-http-server
+Deployment (read/write via the HTTP server).
 
 ## Prerequisites
 
 - A Kubernetes cluster with TIDE installed (CRDs + controller chart).
   See [`docs/INSTALL.md`](../../../docs/INSTALL.md) for the full install
-  recipe.
+  recipe. cert-manager is required for TIDE's webhook TLS.
 - `ANTHROPIC_API_KEY` exported in your shell (the secret-create step
   below reads it from the environment).
-- A storage class that satisfies `ReadWriteOnce` for the small
-  `demo-remote-pvc` (default for most clusters; see
-  [`docs/rwx-drivers.md`](../../../docs/rwx-drivers.md) for matrix).
-- The `ghcr.io/jsquirrelz/tide-demo-init:v1.0.0` image must be pullable
-  by your cluster (or pre-loaded into kind via `kind load docker-image`).
+- A storage class that satisfies `ReadWriteOnce` for `demo-remote-pvc`
+  (default for most clusters; see
+  [`docs/rwx-drivers.md`](../../../docs/rwx-drivers.md) for the matrix).
+- `kubectl` configured against your target cluster.
+- `docker` (for building the git-http-server image if not pre-pulled).
+- The following images pullable by your cluster (or pre-loaded into kind):
+  - `ghcr.io/jsquirrelz/tide-demo-init:1.0.0`
+  - `ghcr.io/jsquirrelz/tide-git-http-server:1.0.0`
 
-## Setup (in order)
+## Apply Sequence (9 steps — order matters)
 
-The order matters. The init Job must complete before the Project applies;
-otherwise the controller's clone Job will race against the bare repo
-not yet existing and fail with `CloneFailed`.
+The RWO PVC (`demo-remote-pvc`) can only be mounted by one pod at a time
+on most single-node clusters. **The init Job must complete and release the
+PVC mount before the git-http server starts.** Follow the steps below in
+order.
 
 ```bash
 # 1. Namespace.
 kubectl apply -f examples/projects/medium/namespace.yaml
 
-# 2. Small auxiliary PVC for the local-only bare repo.
+# 2. PVC for the git-http server bare repo.
+#    (demo-remote-pvc — shared between init Job and git-http server,
+#    but never mounted simultaneously — see step 5 note.)
 kubectl apply -f examples/projects/medium/demo-remote-pvc.yaml
 
-# 3. Init Job — runs cmd/tide-demo-init/ to create the bare repo.
-kubectl apply -f examples/projects/medium/demo-remote-init-job.yaml
+# 3. Per-namespace resources:
+#    - tide-projects PVC (controller workspace)
+#    - tide-subagent ServiceAccount
+#    (The Helm chart provisions these in tide-system; the medium sample
+#    needs them in tide-sample-medium as well.)
+kubectl apply -f examples/projects/medium/per-namespace-resources.yaml
 
-# 4. Wait for the init Job to complete.
+# 4. Mirror the signing-key Secret from tide-system.
+#    The signing key is cluster-unique and is provisioned by the chart in
+#    tide-system only. Extract and apply it to tide-sample-medium.
+SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system \
+  -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-signing-key
+  namespace: tide-sample-medium
+type: Opaque
+data:
+  TIDE_SIGNING_KEY: ${SIGNING_KEY}
+EOF
+
+# 5. Init Job — populates the bare repo on demo-remote-pvc.
+#    Wait for Complete before proceeding (step 6).
+#
+#    WHY: demo-remote-pvc is ReadWriteOnce. If the init Job pod and the
+#    git-http server pod try to mount the same RWO PVC at the same time,
+#    the second pod stays Pending ("Unable to attach or mount volumes").
+#    Waiting for Complete ensures the init pod has terminated and released
+#    the mount before the server starts.
+kubectl apply -f examples/projects/medium/demo-remote-init-job.yaml
 kubectl wait --for=condition=Complete job/demo-remote-init \
   -n tide-sample-medium --timeout=2m
 
-# 5. Secret carrying ANTHROPIC_API_KEY (for the planner subagent) and
-#    GIT_PAT (placeholder — file:// transport doesn't actually use it,
-#    but the schema requires the field).
+# 6. git-http server — serves the bare repo over HTTP.
+#    Only starts after step 5 ensures the PVC is free.
+kubectl apply -f examples/projects/medium/git-http-server-deployment.yaml
+kubectl wait --for=condition=Available deployment/git-http-server \
+  -n tide-sample-medium --timeout=2m
+
+# 7. Secret carrying ANTHROPIC_API_KEY (for the planner/executor subagents)
+#    and GIT_PAT (empty — anonymous in-cluster http:// push doesn't require
+#    credentials; git-http-backend accepts push when http.receivepack=true).
 kubectl create secret generic tide-secrets \
   --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   --from-literal=GIT_PAT="" \
   -n tide-sample-medium
 
-# 6. Apply the Project CRD. TIDE picks it up and the controller starts
-#    the clone Job (mounting the same demo-remote-pvc as the init Job),
+# 8. Apply the Project CRD. TIDE picks it up; the controller starts the
+#    clone Job (pure-Go HTTP clone from http://git-http-server/demo-remote.git),
 #    then plans + dispatches the function-addition outcome.
 kubectl apply -f examples/projects/medium/project.yaml
 
-# 7. Wait for completion (bounded by ~15 min — well under the $5 cap's
+# 9. Wait for completion (bounded by ~15 min — well under the $5 cap's
 #    natural duration). Watch via `kubectl get project -w` in another
 #    terminal if you prefer.
 kubectl wait --for=jsonpath='{.status.phase}'=Complete \
   project/medium-project -n tide-sample-medium --timeout=30m
 ```
+
+## Minikube-Specific Notes
+
+### Stale image tag problem (minikube image load is NOT idempotent)
+
+`minikube image load` does **not** overwrite an existing image tag. If you
+rebuild an image, the old version remains in minikube's docker daemon under
+the same tag until you explicitly remove it first:
+
+```bash
+# Force-remove both tag forms before reloading:
+minikube ssh -- docker rmi -f ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+# Then reload the new build:
+minikube image load ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+```
+
+Apply the same pattern for `tide-push`, `tide-demo-init`, and
+`tide-claude-subagent` if you rebuild those images.
+
+### tide-projects PVC prewarm on kind (local-path provisioner)
+
+kind's `rancher.io/local-path` storage class uses `WaitForFirstConsumer` —
+the PVC won't bind until a Pod is actually scheduled. If your `kubectl wait`
+for the init Job shows the pod stuck Pending, prewarm the `tide-projects`
+PVC with a temporary busybox pod:
+
+```bash
+kubectl run prewarm --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"volumes":[{"name":"v","persistentVolumeClaim":{"claimName":"tide-projects"}}],"containers":[{"name":"c","image":"busybox:1.36","command":["sh","-c","exit 0"],"volumeMounts":[{"name":"v","mountPath":"/data"}]}]}}' \
+  -n tide-sample-medium
+kubectl wait --for=condition=Succeeded pod/prewarm -n tide-sample-medium --timeout=60s
+kubectl delete pod prewarm -n tide-sample-medium
+```
+
+## Verification
+
+After step 9 completes, inspect what TIDE wrote:
+
+```bash
+# Project status
+kubectl describe project/medium-project -n tide-sample-medium
+
+# Budget spend (should be well under 500 cents)
+kubectl get project medium-project -n tide-sample-medium \
+  -o jsonpath='{.status.budget.costSpentCents}'
+
+# Jobs dispatched
+kubectl get jobs -n tide-sample-medium
+
+# Init job logs (should show successful repo population)
+kubectl logs job/demo-remote-init -n tide-sample-medium
+
+# git-http server logs (shows HTTP clone/push requests from the controller)
+kubectl logs deployment/git-http-server -n tide-sample-medium
+```
+
+To inspect the artifacts TIDE wrote, exec into a pod that has git installed
+(or use `kubectl debug` against a temporary pod that mounts `demo-remote-pvc`)
+and run `git log tide/run-medium-project-*` to see the planner's `PLAN.md`
+and Task diffs on the per-run branch.
 
 ## What you'll observe
 
@@ -109,19 +228,13 @@ kubectl wait --for=jsonpath='{.status.phase}'=Complete \
   Job pod transition Pending → Running → Completed (~30s).
 - A planner Job pod follows: `kubectl get jobs -n tide-sample-medium`.
   The planner authors the phase brief + PLAN.md and pushes a boundary
-  commit to `tide/run-medium-project-<unix-ts>` on the local-only bare
-  repo.
+  commit to `tide/run-medium-project-<unix-ts>` on the in-cluster remote.
 - Per-Task executor Job pods run the function-addition tasks in waves
   (typically 1–2 waves for a 3–5 task plan).
 - A push Job stages the final commit (`tide: project complete`) and
-  pushes back to the same per-run branch.
+  pushes back to the same per-run branch via the git-http server.
 - `kubectl get project medium-project -n tide-sample-medium -o jsonpath='{.status.budget.costSpentCents}'`
   shows the running spend (well under 500).
-
-To inspect the artifacts TIDE wrote, exec into a Pod that mounts the same
-PVC (or use `kubectl debug` against a temporary one) and `git log
-tide/run-medium-project-*`. The cloned working tree under
-`/workspace/repo.git` carries the planner's `PLAN.md` and Task diffs.
 
 ## Budget cap behavior
 
@@ -143,9 +256,9 @@ kubectl delete namespace tide-sample-medium
 ```
 
 The namespace deletion cascades to the Project, all child CRDs (Phase,
-Plan, Task, Wave), the demo-remote-init Job, the demo-remote-pvc PVC,
-and the tide-secrets Secret via owner-refs (where applicable) and
-namespace-scoped lifecycle.
+Plan, Task, Wave), the demo-remote-init Job, the git-http-server Deployment,
+the demo-remote-pvc PVC, and the tide-secrets Secret via owner-refs (where
+applicable) and namespace-scoped lifecycle.
 
 ## Pitfall 9 reminder
 
@@ -157,18 +270,10 @@ sample convention (`tide-sample-small`, `tide-sample-medium`,
 
 ## Schema-gap notes (v1.0 → v1.x)
 
-Two v1.0 schema gaps to be aware of (documented in
+One v1.0 schema gap to be aware of (documented in
 `.planning/phases/05-distribution-self-hosting-acceptance/deferred-items.md`
 and carried forward from plan 05-11's large-sample experience):
 
-- **`targetRepo: file:///demo-remote.git`** is the medium sample's
-  contract value. The current CEL validator on `ProjectSpec.targetRepo`
-  accepts only `http(s)` / `git@` prefixes; the small sample
-  (`file:///tmp/no-such-repo`) is in the same boat and ships as-is. The
-  v1.x schema work extends the allow-list to include the `file://`
-  scheme. Until then, applying this Project CRD on a strict-CEL cluster
-  may require an admission bypass (Helm chart's `controllerManager.validatingWebhook.enabled=false`
-  for local dev).
 - **`outcomePrompt`** is carried as the `tideproject.k8s/outcome-prompt`
   annotation. The planner subagent reads the annotation off the Project
   CRD. v1.x promotes this to a first-class `Project.Spec.OutcomePrompt`
@@ -180,6 +285,7 @@ and carried forward from plan 05-11's large-sample experience):
 - [`examples/projects/small/README.md`](../small/README.md) — $0 stub-subagent smoke test
 - [`examples/projects/large/README.md`](../large/README.md) — $25 v1 acceptance ritual
 - [`cmd/tide-demo-init/README.md`](../../../cmd/tide-demo-init/README.md) — the bootstrap binary
+- [`images/tide-git-http-server/`](../../../images/tide-git-http-server/) — the in-cluster HTTP git server image
 - [`examples/tide-demo-fixture/`](../../tide-demo-fixture/) — source-of-truth seed content (MIT-licensed)
 - [`docs/project-authoring.md`](../../../docs/project-authoring.md) — Project.Spec field reference
 - [Phase 5 CONTEXT.md](../../../.planning/phases/05-distribution-self-hosting-acceptance/05-CONTEXT.md) — D-B1..D-B3 sample decisions

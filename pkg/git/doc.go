@@ -49,9 +49,16 @@ limitations under the License.
 // file:// remote URLs.
 //
 // The medium sample's demo remote is served over http:// by the in-cluster
-// git-http-backend server (images/tide-git-http-server), which exercises the
-// same pure-Go HTTP transport as production HTTPS — no git binary needed in
-// tide-push or claude-subagent for this path.
+// git-http-backend server (images/tide-git-http-server, a git-http-backend
+// CGI fronted by nginx), which exercises the same pure-Go HTTP transport as
+// production HTTPS — no git binary needed in tide-push or claude-subagent
+// for this path. For example, the medium sample's Project.Spec.TargetRepo is:
+//
+//	http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git
+//
+// The init Job (images/tide-demo-init) still uses file:// internally to
+// populate the bare repo on the PVC, which is why it retains a git binary;
+// the git-http-server then bridges that repo to the HTTP transport layer.
 //
 // Import firewall: this package MUST NOT import LLM SDKs of any vendor or
 // the TIDE CRD API types — pkg/git is provider-agnostic and CRD-agnostic.
