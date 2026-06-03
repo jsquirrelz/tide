@@ -123,13 +123,14 @@ split means a fresh cluster needs both, in order.
 kubectl logs -n tide-system deploy/tide-controller-manager --tail=100
 ```
 
-The stub-subagent image must be pullable (`ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0`).
+The stub-subagent image must be pullable (`ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0`).
+<!-- Canonical form: no-v prefix, matching chart appVersion 1.0.0 -->
 If the controller can't pull the image, the Project waits indefinitely. Verify
 your cluster has internet access or pre-load the image into the kind node:
 
 ```bash
-docker pull ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0
-kind load docker-image ghcr.io/jsquirrelz/tide-stub-subagent:v1.0.0 --name <kind-cluster-name>
+docker pull ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0
+kind load docker-image ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0 --name <kind-cluster-name>
 ```
 
 For the full troubleshooting table, see

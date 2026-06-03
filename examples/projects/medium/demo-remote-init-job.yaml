@@ -39,7 +39,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: tide-demo-init
-          image: ghcr.io/jsquirrelz/tide-demo-init:v1.0.0
+          image: ghcr.io/jsquirrelz/tide-demo-init:1.0.0
           args:
             - --bootstrap-dir=/workspace/demo-remote.git
           volumeMounts:
