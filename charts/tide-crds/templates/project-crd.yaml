@@ -145,12 +145,12 @@ spec:
                     type: string
                   repoURL:
                     description: |-
-                      RepoURL is the URL of the target repo, e.g.,
-                      "https://github.com/owner/repo.git" (production) or
-                      "file:///workspace/demo-remote/repo.git" (local-only demo per Phase 5 D-B3
-                      — medium sample bootstraps a bare repo on a PVC and points TIDE at it
-                      without any external git host). Pattern below allows http(s) + file:///.
-                    pattern: ^(https?://|file:///).+
+                      RepoURL is the URL of the target git remote. Supports http:// and https://
+                      (pure-Go go-git transport, production default) and SSH
+                      (git@host:owner/repo.git, documented with host-key caveats).
+                      file:// is NOT supported: go-git's file:// transport shells out to a
+                      system git binary absent from production images.
+                    pattern: ^(https?://|git@).+
                     type: string
                 required:
                 - credsSecretRef
@@ -389,18 +389,21 @@ spec:
               targetRepo:
                 description: |-
                   TargetRepo is the URL of the repo this Project operates on. Supports
-                  http(s) (production), SSH (`git@host:owner/repo.git`), and `file:///`
-                  URLs (Phase 5 D-B3 — local-only demo, medium sample bootstraps a bare
-                  repo on a PVC).
+                  http:// and https:// (pure-Go go-git transport, production default) and
+                  SSH (`git@host:owner/repo.git`, documented with host-key caveats).
+                  file:// is NOT supported: go-git's file:// transport requires a system
+                  git binary absent from production images.
                 minLength: 1
                 type: string
             required:
             - targetRepo
             type: object
             x-kubernetes-validations:
-            - message: targetRepo must be a http(s), SSH, or file:// git URL
-              rule: self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@')
-                || self.targetRepo.startsWith('file://')
+            - message: targetRepo must be an http(s) or SSH (git@) URL; file:// is not
+                a supported production transport (go-git's file:// transport requires
+                a system git binary absent from production images)
+              rule: self.targetRepo.startsWith('http://') || self.targetRepo.startsWith('https://')
+                || self.targetRepo.startsWith('git@')
           status:
             description: status defines the observed state of Project
             properties:

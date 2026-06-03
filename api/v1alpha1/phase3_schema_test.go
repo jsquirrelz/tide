@@ -224,14 +224,14 @@ func TestProjectCRDSchemaHasGitStatus(t *testing.T) {
 }
 
 // TestProjectCRDSchemaHasRepoURLPattern verifies the URL pattern for the
-// git.repoURL field landed in the regenerated CRD YAML. Pattern accepts both
-// http(s) (production) and file:/// (Phase 5 D-B3 local-only demo — relaxed
-// 2026-05-23 root-cause fix; the older `^https?://` form rejected file://).
+// git.repoURL field landed in the regenerated CRD YAML. Pattern accepts
+// http(s) (production) and SSH (git@) only; file:// is not a supported
+// production transport (08-03: CEL marker tightened, file:// removed).
 func TestProjectCRDSchemaHasRepoURLPattern(t *testing.T) {
 	crd := readProjectCRD(t)
-	re := regexp.MustCompile(`pattern:\s+\^\(https\?://\|file:///\)\.\+`)
+	re := regexp.MustCompile(`pattern:\s+\^\(https\?://\|git@\)\.\+`)
 	if !re.MatchString(crd) {
-		t.Errorf("project CRD YAML missing `pattern: ^(https?://|file:///).+` validation on repoURL — kubebuilder marker missing or stale")
+		t.Errorf("project CRD YAML missing `pattern: ^(https?://|git@).+` validation on repoURL — kubebuilder marker missing or stale (08-03: file:// removed from pattern)")
 	}
 }
 

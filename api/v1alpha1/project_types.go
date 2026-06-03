@@ -203,12 +203,12 @@ type LevelConfig struct {
 // HTTPS+PAT is the primary v1.0 path; SSH is documented with host-key caveats
 // per REQUIREMENTS.md ART-05 but defaults to HTTPS+PAT.
 type GitConfig struct {
-	// RepoURL is the URL of the target repo, e.g.,
-	// "https://github.com/owner/repo.git" (production) or
-	// "file:///workspace/demo-remote/repo.git" (local-only demo per Phase 5 D-B3
-	// — medium sample bootstraps a bare repo on a PVC and points TIDE at it
-	// without any external git host). Pattern below allows http(s) + file:///.
-	// +kubebuilder:validation:Pattern=`^(https?://|file:///).+`
+	// RepoURL is the URL of the target git remote. Supports http:// and https://
+	// (pure-Go go-git transport, production default) and SSH
+	// (git@host:owner/repo.git, documented with host-key caveats).
+	// file:// is NOT supported: go-git's file:// transport shells out to a
+	// system git binary absent from production images.
+	// +kubebuilder:validation:Pattern=`^(https?://|git@).+`
 	RepoURL string `json:"repoURL"`
 
 	// CredsSecretRef is the K8s Secret name (same-namespace) carrying the
@@ -269,12 +269,13 @@ type BudgetStatus struct {
 }
 
 // ProjectSpec defines the desired state of Project.
-// +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http') || self.targetRepo.startsWith('git@') || self.targetRepo.startsWith('file://')",message="targetRepo must be a http(s), SSH, or file:// git URL"
+// +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http://') || self.targetRepo.startsWith('https://') || self.targetRepo.startsWith('git@')",message="targetRepo must be an http(s) or SSH (git@) URL; file:// is not a supported production transport (go-git's file:// transport requires a system git binary absent from production images)"
 type ProjectSpec struct {
 	// TargetRepo is the URL of the repo this Project operates on. Supports
-	// http(s) (production), SSH (`git@host:owner/repo.git`), and `file:///`
-	// URLs (Phase 5 D-B3 — local-only demo, medium sample bootstraps a bare
-	// repo on a PVC).
+	// http:// and https:// (pure-Go go-git transport, production default) and
+	// SSH (`git@host:owner/repo.git`, documented with host-key caveats).
+	// file:// is NOT supported: go-git's file:// transport requires a system
+	// git binary absent from production images.
 	// +kubebuilder:validation:MinLength=1
 	TargetRepo string `json:"targetRepo"`
 
