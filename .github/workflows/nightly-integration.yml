@@ -85,6 +85,41 @@ jobs:
           make manifests generate fmt vet
           make setup-envtest
 
+      # SC-1 image smoke: verify that core images (tide-push, claude-subagent)
+      # do NOT ship the git binary (production transport is pure-Go HTTP/SSH),
+      # and that tide-demo-init DOES have git (used to bootstrap the bare repo
+      # on demo-remote-pvc). Build all three images fresh from the repo root so
+      # the check always reflects the current Dockerfiles, not a pulled registry
+      # tag. timeout-minutes: 10 bounds three sequential docker builds on a warm
+      # cache (cold first run ~5-7min; subsequent runs ~1-2min per image).
+      - name: SC-1 image smoke — verify git presence/absence in core images
+        timeout-minutes: 10
+        run: |
+          set -e
+          # Build the three images from the repo root using the canonical Dockerfiles.
+          docker build -t ghcr.io/jsquirrelz/tide-push:1.0.0 \
+            -f images/tide-push/Dockerfile .
+          docker build -t ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0 \
+            -f images/claude-subagent/Dockerfile .
+          docker build -t ghcr.io/jsquirrelz/tide-demo-init:1.0.0 \
+            -f images/tide-demo-init/Dockerfile .
+
+          # SC-1a: tide-push must NOT contain git (pure-Go go-git HTTP/SSH transport).
+          # `which git` exits 0 if found; `!` inverts so the step FAILS if git IS found.
+          echo "Checking tide-push has no git binary..."
+          ! docker run --rm --entrypoint which ghcr.io/jsquirrelz/tide-push:1.0.0 git
+          echo "PASS: git absent from tide-push"
+
+          # SC-1b: claude-subagent must NOT contain git.
+          echo "Checking claude-subagent has no git binary..."
+          ! docker run --rm --entrypoint which ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0 git
+          echo "PASS: git absent from claude-subagent"
+
+          # SC-1c: tide-demo-init MUST have git (used to bootstrap the bare repo).
+          echo "Checking tide-demo-init has git binary..."
+          docker run --rm --entrypoint git ghcr.io/jsquirrelz/tide-demo-init:1.0.0 --version
+          echo "PASS: git present in tide-demo-init"
+
       # Layer B kind integration tier (the kind half of TEST-02). The
       # `timeout 300s` inside `make test-int` bounds only the `go test`
       # invocation; image builds + kind cluster create are unbounded by design.
