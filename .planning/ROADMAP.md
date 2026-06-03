@@ -22,6 +22,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Gates, Observability, Dashboard, CLI** — Per-level gate policy, structured logs + Prometheus + OTel/OpenInference, two-DAG read-only dashboard, `tide` CLI
 - [ ] **Phase 5: Distribution & Self-Hosting Acceptance** — Helm chart, Apache 2.0, docs, external-operator dry-run, fresh kind + helm install + project apply drives this repo's next milestone
 - [ ] **Phase 6: v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation** — Multi-arch Docker image build + push for all 6 chart-referenced components, chart values.yaml tag-alignment SOT fix, dry-run-v1 cert-manager prereq fix, image-load fallback for local cluster acceptance, BOOT-04 end-to-end revalidation, README + INSTALL.md ship-state corrections
+- [x] **Phase 7: Project→Milestone Authoring & Self-Bootstrap** — Closes cascade-7: a bare Project authors its Milestone and drives the full five-level cascade to Complete; verified APPROVED 2026-05-31
+- [ ] **Phase 8: Medium-sample http transport & production git-transport policy** — Standardize production git on http(s)/SSH (pure-Go, no git binary); remove the broken `file://` demo path; rewrite the medium sample to serve its fixture over in-cluster `http://` so it actually works and mirrors production; revert the core-image git additions; add CI coverage. Closes a v1.0 ship-quality gap found in minikube validation 2026-06-03.
 
 ## Phase Details
 
@@ -352,3 +354,29 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 — all production code must be green)*
 - [ ] 07-06-PLAN.md — Final acceptance gate: make test-int (7+1/7 Layer B + 18/18 Layer A) + make acceptance-v1-smoke → Project=Complete (REQ-6)
+
+### Phase 8: Medium-sample http transport and production git-transport policy
+
+**Goal:** Make TIDE's production git-transport policy explicit and the medium ($5 real-Claude) sample actually work end-to-end on a real cluster, by standardizing on **http(s)/SSH** (go-git pure-Go, no `git` binary) and removing the broken `file://` demo path. Closes a v1.0 ship-quality gap discovered during minikube validation 2026-06-03: the medium sample never worked (the clone Job never mounts `demo-remote-pvc`, so `file:///demo-remote.git` is unreachable; the README documents a mount that doesn't exist in code; and all runtime images shipped git-less so even a reachable `file://` op would `exec: git`-fail).
+
+**Locked decisions (user, 2026-06-03):**
+- Production supports **only** http(s)/SSH for `targetRepo` (matches the github/gitlab/gitea portability constraint). `file://` is **not** a supported production transport.
+- Revert commit `93595b9`'s **core-image** git additions (`images/tide-push`, `images/claude-subagent` → git-less again). Keep git **only** in the demo git-http server image.
+- Rewrite the medium sample to serve its local fixture over **in-cluster `http://`** (a git-http-backend server pod + Service in `tide-sample-medium`) — still local/air-gapped (the original D-B3 "no external repo" goal), but exercising the same transport production uses. Rework `cmd/tide-demo-init` from a one-shot `file://` bootstrap into (or alongside) the http git server.
+
+**Depends on:** Phase 7
+
+**Success criteria:**
+1. `images/tide-push` + `images/claude-subagent` are git-less again (revert of `93595b9` core changes); only the demo git-server image carries git.
+2. Applying the documented medium sequence drives `Project status.phase=Complete` with **real Claude (Haiku)** on a single-node cluster, pushing a per-run branch to the in-cluster `http://` remote — **re-tested live on minikube**.
+3. `file://` explicitly unsupported: CEL `targetRepo` validator policy decided + implemented (reject vs document-only), AND the small/stub sample's `file:///tmp/no-such-repo` handled (stub ignores it, but a stricter CEL would reject at admission) — pick a valid sentinel the stub still ignores.
+4. Docs corrected: medium README's false "controller mounts demo-remote-pvc" claim; `pkg/git/doc.go` reframed (http(s)/SSH pure-Go supported; `file://` unsupported — not "no shell-out").
+5. CI coverage added for the medium/http real-dispatch path (or a hermetic proxy) so it can't silently rot again — medium was never in CI.
+6. Sample/chart image-tag inconsistency folded in: medium/large `project.yaml` + demo manifests request `:v1.0.0` (v-prefix) while chart appVersion + controller defaults use `:1.0.0` (no-v) — align them.
+
+**Release sequencing:** post-v1.0 ship-quality work. The held `v1.0.0` tag (`8a8e843`) predates this; it should move to include this fix before the public release is cut (user to confirm).
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
