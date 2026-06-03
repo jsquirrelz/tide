@@ -117,21 +117,36 @@ test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-f
 .PHONY: test-int test-int-fast test-int-kind-prep
 
 test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Requires Docker + kind.
-	# Debug session nightly-int-flake-timeout — Failure 1 fix: Layer A and Layer B
-	# are invoked SEPARATELY so the Ginkgo-only envtest package can carry
-	# -ginkgo.flake-attempts=3 (the contention-flaky class that the per-push
-	# `test-int-fast` already guards; ART-01 flaked on a cold 2-core nightly
-	# runner). The flag MUST NOT be passed to the kind package: it bundles plain
-	# go-tests (projects_pvc_test.go's helm-template contract tests) alongside the
-	# Ginkgo specs, and -ginkgo.flake-attempts errors on a mixed `go test` set.
+	# Debug session nightly-int-flake-timeout — Failure 1 + Failure 8 fixes: Layer A
+	# and Layer B are invoked SEPARATELY, and BOTH carry -ginkgo.flake-attempts=3 to
+	# ride out the same contention-flaky class on a cold 2-core nightly runner
+	# (Layer A flaked on ART-01 init-Job creation; Layer B flaked on the ART-06 push
+	# lease spec — push-Job-create + Eventually status poll). The per-push
+	# `test-int-fast` already guards Layer A this way.
+	#
+	# Why the flag is VALID on the kind package (corrects the prior comment here):
+	# -ginkgo.flake-attempts is registered by Ginkgo's test binary, and
+	# ./test/integration/kind/... is a SINGLE package that imports Ginkgo
+	# (suite_test.go calls RunSpecs). The CLAUDE.md "mixed package" gotcha refers to
+	# MULTI-package `go test ./...` sweeps spanning packages that DON'T import Ginkgo
+	# — there the flag is unknown to those binaries and go test errors "flag provided
+	# but not defined". A single Ginkgo-importing package does not hit that. The
+	# plain go-test contract tests in this package (projects_pvc_test.go's
+	# helm-template assertions) are UNAFFECTED: flake-attempts only retries Ginkgo
+	# specs; plain go-tests run once. (Empirically: `go test
+	# ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$$'` -> `ok ... [no
+	# tests to run]`.) This gives Layer B the same contention-flake protection as
+	# Layer A.
 	# Both invocations run under one shell so a failure in EITHER fails the target
-	# (set -e); the kind go-test timeout still owns the helm --wait window.
+	# (set -e); the kind go-test timeout still owns the helm --wait window, with
+	# ample headroom (KIND_GO_TEST_TIMEOUT=20m / INTEGRATION_TIMEOUT=30m cover Layer
+	# B's ~10m baseline plus up-to-3 retries of one flaked spec).
 	@set -e; \
 	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
 	echo "=== Layer A (envtest, Ginkgo-only, flake-attempts=3) ==="; \
 	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'; \
-	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests) ==="; \
-	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
+	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, flake-attempts=3) ==="; \
+	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v -ginkgo.flake-attempts=3
 
 test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). ~90s clean locally, but -timeout=10m gives headroom for -ginkgo.flake-attempts=3 retries on slow/contended CI runners (a 2m go-test timeout killed the suite mid-retry). The flag retries the contention-flaky class; Ginkgo-only pkg so the flag is valid here.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \

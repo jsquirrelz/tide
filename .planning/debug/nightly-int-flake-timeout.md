@@ -1,9 +1,9 @@
 ---
 slug: nightly-int-flake-timeout
-status: fix-applied-pending-ci-verify  # F7 fix applied; awaiting final green nightly
+status: fix-applied-pending-ci-verify  # F8 fix applied (Layer B flake-attempts=3); awaiting final green nightly
 trigger: "Nightly-integration workflow (run 26849997916, commit 0645e1a) is RED on two distinct CI-harness failures in `make test-int`. Neither reproduces locally (local: Layer A 29/29 + Layer B 14/14 green). Fix so nightly runs green; this gates the v1.0.0 release (tag held local-only at 8a8e843). FAILURE 1 — Layer A envtest flake (1 of 29): init_test.go:101 ART-01 'creates a tide-init-{UID} Job on the first reconcile' failed under CI contention; 28/29 passed. The per-push path (make test-int-fast) guards this contention-flaky class with -ginkgo.flake-attempts=3, but nightly's full make test-int runs the envtest layer WITHOUT flake-attempts (mixed go-test package — flag breaks non-Ginkgo pkgs). FAILURE 2 — Layer B kind BeforeSuite (suite_test.go:446): helm upgrade --install ... --wait --timeout 5m -> context deadline exceeded at 5m1s. Images ARE built + kind-loaded by Makefile test-int-kind-prep and installed pullPolicy=IfNotPresent (NOT ImagePull). Controller Deployment didn't reach Ready within 5m on the cold 2-core ubuntu-latest runner. OBSERVATION GAP: cannot tell 5m-too-tight vs real pod failure — post-failure `kind export logs` artifact was EMPTY because the suite's AfterSuite (suite_test.go:186) deletes the tide-test cluster BEFORE the workflow's failure-collection step (nightly-integration.yml:94-101) runs."
 created: 2026-06-02
-updated: 2026-06-03
+updated: 2026-06-03  # F8 fix applied
 phase: 07-project-to-milestone-authoring-and-self-bootstrap
 ---
 
@@ -24,7 +24,7 @@ phase: 07-project-to-milestone-authoring-and-self-bootstrap
 hypothesis:
 - SEVEN failures total; all root-caused with evidence and all fixes APPLIED. Failures 1-6 CI-CONFIRMED fixed: run 26859208579 (commit 32a9279) showed `Install kind` green (F6 curl hardening), `make test-int` green (F1+F2), and the kind_e2e Ginkgo suite `Ran 6 of 6 Specs … SUCCESS! 6 Passed | 0 Failed` (F3 dashboard image + F4 subagent wiring + F5 selector all proven). The ONLY remaining failure is F7 (the "exit != Ginkgo green" trap): the same `-tags=kind_e2e` test binary compiled BOTH `TestKindE2E` (kind_setup_test.go) AND the untagged `TestLiveE2E` (suite_test.go), so after TestKindE2E passed 6/6 the binary ran TestLiveE2E's SECOND `RunSpecs` -> Ginkgo "Rerunning Suite" guard -> `FAIL test/e2e` -> `make test-e2e-kind` exit 2. F7 FIX APPLIED this cycle (Option D): moved the `TestLiveE2E` RunSpecs entry point into a new `//go:build live_e2e` file (`test/e2e/live_suite_entry_test.go`) and kept suite_test.go UNTAGGED (as the no-tag package anchor for golangci-lint) but with NO Test func. Under kind_e2e only TestKindE2E now calls RunSpecs.
 
-next_action: Orchestrator dispatches a fresh `nightly-integration.yml` run (`gh workflow run nightly-integration.yml --ref main`) on the F7-fix commit and watches BOTH steps to green: `make test-int` AND `make test-e2e-kind`. With F1-F6 already CI-confirmed and F7 now fixed, this run should pass `make test-e2e-kind` cleanly — `TestKindE2E` 6/6 with NO spurious `TestLiveE2E` rerun (the second RunSpecs caller is now behind `//go:build live_e2e`, not compiled into the kind_e2e binary). If green end-to-end: ALL seven failures close, this debug session closes, and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship. Local verification of F7 already GREEN: kind_e2e/live_e2e/no-tag all compile, go vet clean under all three tag sets, the no-tag anchor still reports "no tests to run / ok" (lint-safe), gofmt clean, charts/ + hack/helm/ + .github/workflows/ untouched by this cycle. dumpControllerDiagnostics / dumpE2ESpecFailureDiagnostics hooks stay in place if any further blocker surfaces.
+next_action: FAILURE 8 FIX APPLIED (Layer B `-ginkgo.flake-attempts=3` added to the `make test-int` kind invocation; comment corrected). Orchestrator dispatches a fresh `nightly-integration.yml` run (`gh workflow run nightly-integration.yml --ref main`) on the F8-fix commit and watches BOTH steps to green: `make test-int` (Layer A AND Layer B now both flake-protected) AND `make test-e2e-kind`. With F1-F7 CI-confirmed and F8 now mirroring the F1/Layer A approach onto Layer B, this run should absorb any residual contention flake in either integration layer. If green end-to-end across both steps: ALL EIGHT failures close, this debug session closes, and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship. dumpControllerDiagnostics / dumpE2ESpecFailureDiagnostics hooks stay in place if any further blocker surfaces.
 
 ## Evidence
 
@@ -66,6 +66,12 @@ next_action: Orchestrator dispatches a fresh `nightly-integration.yml` run (`gh 
 - timestamp: 2026-06-03 — F7 fix decision = Option D (surgical, preserves the documented no-tag anchor invariant): MOVE only the `TestLiveE2E` RunSpecs entry point into a new `//go:build live_e2e`-tagged file; KEEP suite_test.go untagged (its vars + initLiveE2ESuite/teardownLiveE2ESuite/resolveKubeconfigPath helpers stay as the no-tag package anchor — they're already `//nolint:unused`, compile fine with no Test func). Result: under kind_e2e only TestKindE2E calls RunSpecs (clean); under live_e2e the moved entry + live_claude_test.go Describes run; under no-tag the package still compiles (lint-safe). Rejected the blunt `//go:build live_e2e` on suite_test.go itself: it would leave test/e2e with zero files under no-tag → "build constraints exclude all Go files" risk for golangci-lint (which typechecks under no tags) → could re-break the per-push Lint gate just fixed this session. Confirmed `make test`/`test-only` grep out /e2e (Makefile:86,90) so the unit tier is unaffected either way.
 
 - timestamp: 2026-06-03 — **FAILURE 7 FIX APPLIED** (Option D — test-harness only; NO chart/workflow/hack/helm change). Created NEW `test/e2e/live_suite_entry_test.go` under `//go:build live_e2e` holding the relocated `TestLiveE2E` RunSpecs entry point (dot-imports ginkgo for `Fail` + gomega for `RegisterFailHandler`, mirroring `TestKindE2E`). REMOVED `TestLiveE2E` from `test/e2e/suite_test.go`, which stays INTENTIONALLY UNTAGGED as the no-tag package anchor (keeps its const/var block + initLiveE2ESuite/teardownLiveE2ESuite/resolveKubeconfigPath helpers, all already `//nolint:unused`) but now has NO Test func — pruned the now-unused `testing` import and refreshed the package doc comment to document the split. Result: under `-tags=kind_e2e` only `TestKindE2E` calls RunSpecs (no rerun-guard trip); under `-tags=live_e2e` the moved `TestLiveE2E` + live_claude_test.go Describes run; under NO tags the package still compiles with zero tests (lint anchor preserved). Cheap local checks ALL GREEN: `gofmt -l` clean on both files; `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (sole RunSpecs = TestKindE2E, confirmed via `grep -rn 'func Test' test/e2e/*.go` + build-tag headers); `go test -tags=live_e2e -run '^$' ./test/e2e/...` compiles (TestLiveE2E present under live tag); `go test -count=1 -run '^$' ./test/e2e/...` (NO tags) -> `ok … no tests to run` (THE key regression check — the no-tag anchor holds, lint-safe); `go vet` clean under no-tag AND kind_e2e AND live_e2e; `git diff --quiet charts/` + `hack/helm/` + `.github/workflows/` all CLEAN. Heavy kind suite NOT run locally (OOM/non-reproducing). All diagnostics hooks KEPT.
+
+- timestamp: 2026-06-03 — **FAILURE 7 FIXED, CI-confirmed** (run 26859982568, commit edbe0e1): no more double-RunSpecs. Layer A `29 Passed | 0 Failed | 1 Flaked` (flake-attempts ABSORBED a contention flake — F1 working as designed). BUT `make test-int` failed on a NEW Layer B spec → Failure 8.
+- timestamp: 2026-06-03 — **FAILURE 8 (Layer B contention flake)**: `make test-int` Layer B = `13 Passed | 1 Failed` — `[FAIL] Push lease semantics (ART-06 / D-B5 / D-B6) Test 3: push Job failure → Status.Phase=PushLeaseFailed + LeaseFailureCount++ [kind]` (`--- FAIL: TestIntegrationKind`, Makefile:129 Error 1). Layer B passed 14/14 in runs #3/#6/#8, so this is an intermittent CONTENTION flake (push-Job-create + Eventually status poll on a cold 2-core runner), SAME CLASS as Failure 1 (Layer A ART-01) — NOT a product defect. Layer B currently has no flake-attempts protection.
+- timestamp: 2026-06-03 — Fix path for F8 VERIFIED VALID: the F1 commit left Layer B without `-ginkgo.flake-attempts` citing "mixed package", but that gotcha (CLAUDE.md) applies to multi-package `go test ./...` sweeps where SOME packages don't import ginkgo. `./test/integration/kind/...` is a SINGLE package that DOES import ginkgo (chaos_resume_test.go etc. → RunSpecs), so the flag is registered/valid there. Empirically confirmed: `go test ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$'` → `ok … [no tests to run]` (flag accepted, no "flag provided but not defined"). The plain go-tests in the package (projects_pvc_test.go contract tests) are unaffected — flake-attempts only retries Ginkgo specs. F8 fix = add `-ginkgo.flake-attempts=3` to the Layer B invocation in `make test-int` (mirrors F1/Layer A). NOTE: the CLAUDE.md gotcha wording should later be refined to "single ginkgo-importing package is fine; only multi-package ./... with non-ginkgo pkgs errors" (out of this session's scope).
+
+- timestamp: 2026-06-03 — **FAILURE 8 FIX APPLIED** (Makefile-only — NO charts/ / hack/helm/ change). Added `-ginkgo.flake-attempts=3` to the Layer B kind invocation in `make test-int` (`timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v -ginkgo.flake-attempts=3`), mirroring the F1/Layer A protection, and CORRECTED the stale comment block (was: "flag MUST NOT be passed to the kind package … errors on a mixed `go test` set") to explain the flag IS valid on this SINGLE Ginkgo-importing package (suite_test.go RunSpecs) — the CLAUDE.md gotcha only bites multi-package `./...` sweeps spanning non-Ginkgo pkgs. Cheap checks GREEN: re-ran `go test ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$'` -> `ok … [no tests to run]` (flag accepted); `make -n test-int` parses clean, resolved Layer B line carries the flag; `git diff --quiet charts/` + `git diff --quiet hack/helm/` both CLEAN; only Makefile changed. Timeout headroom confirmed (KIND_GO_TEST_TIMEOUT=20m / INTEGRATION_TIMEOUT=30m vs Layer B ~591s baseline + retries). Heavy kind suite NOT run locally (CI-environment-specific flake; local Layer B passes 14/14). Next: orchestrator dispatches a fresh nightly and watches BOTH steps green; if F8 was the last flake-class gap, the whole nightly should go green (Layer A + Layer B both flake-protected, e2e fixed).
 
 ## Eliminated
 
@@ -163,6 +169,22 @@ root_cause: |
   "untagged TestLiveE2E runs 0 specs and exits clean" reasoning only held while it was the SOLE
   RunSpecs caller; once the kind_e2e suite coexists in the same binary the guard fails the package.
   It surfaced only now because every prior run failed a kind_e2e spec before reaching TestLiveE2E.
+  FAILURE 8 (Layer B ART-06 push-lease contention flake; CI-harness flake, NOT a
+  product defect): in CI run 26859982568 (commit edbe0e1) — the run that CONFIRMED
+  F7 fixed (no double-RunSpecs) and showed Layer A absorbing a contention flake
+  cleanly (`29 Passed | 0 Failed | 1 Flaked`) — Layer B failed `13 Passed | 1 Failed`
+  on `Push lease semantics (ART-06 / D-B5 / D-B6) Test 3: push Job failure ->
+  Status.Phase=PushLeaseFailed + LeaseFailureCount++ [kind]` -> `--- FAIL:
+  TestIntegrationKind` -> `make: *** [Makefile:129] Error 1`. Layer B passed 14/14 in
+  runs #3, #6, AND #8, so this is an INTERMITTENT contention flake (push-Job-create +
+  Eventually status poll on a cold 2-core GitHub runner), the SAME CLASS as Failure 1
+  (Layer A ART-01). The F1 split had left Layer B WITHOUT `-ginkgo.flake-attempts`
+  citing the CLAUDE.md "mixed package" gotcha, but that gotcha applies to multi-package
+  `go test ./...` sweeps spanning non-Ginkgo packages — NOT to ./test/integration/kind/...,
+  which is a SINGLE package that imports Ginkgo (suite_test.go calls RunSpecs), so the
+  flag is registered/valid on its test binary. Empirically reconfirmed:
+  `go test ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$'` ->
+  `ok ... [no tests to run]` (flag accepted). Layer B had no contention-flake protection.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
@@ -255,6 +277,23 @@ fix: |
   leave test/e2e with ZERO no-tag files and risk the lint typecheck. Result: kind_e2e binary ->
   only TestKindE2E RunSpecs (no rerun-guard trip); live_e2e binary -> only TestLiveE2E RunSpecs +
   live_claude_test.go Describes; no-tag -> compiles, zero tests. All diagnostics hooks KEPT.
+  FAILURE 8 (thorough, mirrors the F1/Layer A approach; Makefile-only — NO
+  charts/ / hack/helm/ change): added `-ginkgo.flake-attempts=3` to the Layer B
+  invocation in the `make test-int` target (the `timeout $(INTEGRATION_TIMEOUT)
+  go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v`
+  line), giving Layer B the SAME contention-flake protection Layer A already has. This
+  retries only the flaked Ginkgo spec (up to 3 attempts); the plain go-test contract
+  tests in the package (projects_pvc_test.go's helm-template assertions) are unaffected
+  because flake-attempts only retries Ginkgo specs. Also CORRECTED the now-inaccurate
+  comment block above the invocation (which claimed the flag "MUST NOT be passed to the
+  kind package" / "errors on a mixed go test set") to explain that the flag IS valid on
+  this SINGLE Ginkgo-importing package — the CLAUDE.md gotcha is only about multi-package
+  `./...` sweeps spanning non-Ginkgo packages — and that this gives Layer B parity with
+  Layer A. Timeout headroom confirmed sufficient: KIND_GO_TEST_TIMEOUT=20m and
+  INTEGRATION_TIMEOUT=30m comfortably cover Layer B's ~10m (591s, run #9) baseline plus
+  up-to-3 retries of one flaked spec; no coverage reduced. The contention-flaky ART-06
+  push-lease product logic is correct (it passed 14/14 in three separate runs) — no
+  product change.
 verification: |
   Local cheap checks (where Failures 2/3/4 do NOT reproduce — heavy kind run skipped to avoid
   VM OOM): FAILURE 4 cycle — `gofmt -l test/e2e/{kind_setup_test.go,gate_flow_test.go,
@@ -281,8 +320,20 @@ verification: |
   hack/helm/`, `git diff --quiet .github/workflows/ci.yaml` all CLEAN (nightly workflow only).
   actionlint/yamllint not installed on this host (optional). No Go changes (tests never ran in
   the failing run, so no test-harness change is implicated by F6).
+  FAILURE 8 cycle (Makefile-only): RECONFIRMED the flag-acceptance check
+  `go test ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$'` ->
+  `ok ... [no tests to run]` (no "flag provided but not defined"); confirmed the kind
+  package imports Ginkgo (suite_test.go RunSpecs + chaos_resume_test.go etc.). `make -n
+  test-int` parses with no separator/missing errors and the resolved Layer B line now
+  reads `timeout 1800s go test ./test/integration/kind/... -v -timeout=20m -ginkgo.v
+  -ginkgo.flake-attempts=3`. `git diff --quiet charts/` + `git diff --quiet hack/helm/`
+  both CLEAN (Makefile-only change). gofmt/vet not applicable (no Go change). Heavy kind
+  suite NOT run locally (the flake is CI-environment-specific and does not reproduce on
+  the local VM, which passes Layer B 14/14). CI BAR (pending — run by orchestrator): a
+  fresh full nightly-integration.yml run GREEN end-to-end across BOTH steps, with Layer B
+  now absorbing the ART-06 contention flake the way Layer A already absorbs ART-01.
 files_changed:
-  - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [Failure 1, commit 96a3b44]
+  - Makefile (Failure 1: test-int split into flake-guarded Layer A + separate Layer B [commit 96a3b44]; Failure 8: added -ginkgo.flake-attempts=3 to the Layer B kind invocation + corrected the stale "flag MUST NOT be passed to the kind package" comment to explain the flag is valid on this single Ginkgo-importing package)
   - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path; --set dashboard.enabled=false) [Failures 1/2, prior cycles]
   - test/e2e/kind_setup_test.go (Failure 3: dashboard from Dockerfile.dashboard + dumpE2EControllerDiagnostics; Failure 4: kindE2EEnsureSubagentWiring SA+PVC+prewarm+signing-key helpers, stub-subagent+credproxy image build/load table, images.stubSubagent/credProxy chart overrides)
   - test/e2e/spec_diagnostics_test.go (dumpE2ESpecFailureDiagnostics spec-failure dump) [Failure 4 diagnostics, prior cycle]
