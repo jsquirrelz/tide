@@ -172,8 +172,16 @@ spec:
 		// test still exercises Pitfall 25 mitigation. A full Task-driven tail
 		// is Phase 5 acceptance scope.
 		By("locating the dashboard Pod for cancel-streaming validation")
+		// Select on control-plane=dashboard, NOT app.kubernetes.io/name=tide-dashboard.
+		// The chart's tide.labels helper appends app.kubernetes.io/name=tide AFTER the
+		// explicit tide-dashboard value in the dashboard pod template, and YAML last-key-wins,
+		// so the running pod's effective app.kubernetes.io/name label is "tide" (matching
+		// zero pods under the old selector). control-plane=dashboard is unique to the dashboard
+		// pod (the manager carries control-plane=controller-manager) and is NOT clobbered by
+		// the helper, so it is the unambiguous discriminator. (The dead tide-dashboard value is
+		// a benign chart smell, tracked as optional future cleanup; the chart is a fixed contract.)
 		podName := kindGetFirstPodName(kindE2EControllerNamespace,
-			"app.kubernetes.io/name=tide-dashboard")
+			"control-plane=dashboard")
 		Expect(podName).NotTo(BeEmpty(), "no dashboard Pod found for tail-cancel smoke")
 
 		By("spawning `kubectl logs --follow` against the dashboard Pod")

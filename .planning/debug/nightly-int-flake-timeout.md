@@ -22,9 +22,9 @@ phase: 07-project-to-milestone-authoring-and-self-bootstrap
 ## Current Focus
 
 hypothesis:
-- All four failures are now root-caused with runtime evidence. Failures 1, 2, 3 are FIXED + CI-confirmed. Failure 4 (the LAST blocker) had its root cause PROVEN in run 26857361275 and the thorough fix is APPLIED this cycle (see Resolution → Failure 4). Awaiting a fresh nightly to confirm the e2e suite reaches green end-to-end.
+- All FIVE failures are root-caused with runtime evidence. Failures 1, 2, 3, 4 are FIXED + CI-confirmed (F4 confirmed working in run 26858194135: 5 of 6 specs pass). Failure 5 (the LAST blocker) — the gate_flow `tide tail` spec found zero dashboard pods because its selector `app.kubernetes.io/name=tide-dashboard` is clobbered to `tide` by the tide.labels helper (YAML last-wins) — is root-caused at source via `helm template` and the thorough test-harness fix is APPLIED this cycle (selector -> `control-plane=dashboard`; see Resolution -> Failure 5). Awaiting a fresh nightly to confirm all 6 gate_flow specs reach green and the suite closes.
 
-next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and watches BOTH steps (`make test-int` AND `make test-e2e-kind`) to green. The Failure-4 fix mirrors the integration suite's per-namespace subagent wiring (tide-subagent SA + tide-projects PVC + prewarm + tide-signing-key Secret mirror) into the gate_flow test namespace `tide-e2e-gates`, AND builds+kind-loads the stub-subagent + credproxy images at `:phase4-test` with `images.stubSubagent`/`images.credProxy` `tag`+`pullPolicy=IfNotPresent` chart overrides. The spec-failure diagnostics hook (`dumpE2ESpecFailureDiagnostics`) is KEPT — if any further blocker surfaces it will show it. If the gate_flow specs now pass, this debug session closes and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship.
+next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and watches BOTH steps (`make test-int` AND `make test-e2e-kind`) to green. The Failure-5 fix is a one-line test-harness selector change in test/e2e/gate_flow_test.go (`app.kubernetes.io/name=tide-dashboard` -> `control-plane=dashboard`) so the `tide tail` Pitfall-25 spec can locate the dashboard pod (the old selector matched zero pods because the tide.labels helper overrides app.kubernetes.io/name to `tide` under YAML last-wins). With F1-F4 already CI-confirmed and F4's run showing 5 of 6 specs green, this should bring gate_flow to 6 of 6 and the suite fully green. If green end-to-end, this debug session closes and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship. The dumpE2ESpecFailureDiagnostics hook stays in place if any further blocker surfaces.
 
 ## Evidence
 
@@ -53,6 +53,11 @@ next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and wat
 - timestamp: 2026-06-03 — Complete F4 requirement set (from internal/dispatch/podjob/jobspec.go): a subagent Job in a Project namespace needs FOUR namespace-scoped resources the chart only creates in `.Release.Namespace` (tide-system): `tide-subagent` SA (jobspec.go:63,403), `tide-projects` PVC (jobspec.go:124, backend.go:200), `tide-signing-key` Secret (jobspec.go:294, credproxy sidecar envFrom), and the loadable subagent + credproxy images. The INTEGRATION suite already provides all of these for its namespace via `ensureSubagentSA(ns)` (suite_test.go:642), `ensureProjectsPVC(ns)` (:663) + PVC prewarm, the tide-signing-key mirror (:180), and test-int-kind-prep image load + helmControllerArgs `images.stubSubagent.tag=test`/`images.credProxy.tag=test` overrides. The e2e gate_flow test creates only the `tide-e2e-gates` namespace + the Project/Milestone — NONE of the subagent wiring. F4 fix = mirror the integration suite's per-namespace subagent wiring into the gate_flow test namespace + build/load/override stub-subagent + credproxy images in the e2e harness.
 
 - timestamp: 2026-06-03 — **FAILURE 4 FIX APPLIED** (test-harness only — NO chart/workflow/hack/helm change). Confirmed jobspec.go requirements at source before editing: PodSpec.ServiceAccountName = ServiceAccountSubagent "tide-subagent" (jobspec.go:403, const :63); PVC ClaimName = opts.PVCName "tide-projects" (jobspec.go:389); credproxy native-sidecar injected because the gate_flow Project sets providerSecretRef (credproxyEnabled gate jobspec.go:271), and its envFrom references the `tide-signing-key` Secret (jobspec.go:294). (A) `test/e2e/kind_setup_test.go`: new exported-within-package helper `kindE2EEnsureSubagentWiring(ns)` that provisions the tide-subagent SA (`kindE2EEnsureSubagentSA`), tide-projects PVC (`kindE2EEnsureProjectsPVC`) + ClaimBound prewarm via a busybox pause Pod (`kindE2EPVCPrewarm`, mirrors the integration suite's pvcPrewarmPod for kind's WaitForFirstConsumer local-path provisioner), and the tide-signing-key Secret mirrored from `tide-system` into the target ns (`kindE2EEnsureSigningKeySecret`). (B) `kindBuildAndLoadImages()` refactored into a table of {tag, dockerfile} builds that now ALSO builds + kind-loads the stub-subagent (images/stub-subagent/Dockerfile) and credproxy (images/credproxy/Dockerfile) images at the shared `:phase4-test` tag (new const `kindE2EImageTag`), alongside the existing manager (Dockerfile) + dashboard (Dockerfile.dashboard) builds. (C) `kindApplyChart()` adds `--set images.stubSubagent.tag=phase4-test --set images.stubSubagent.pullPolicy=IfNotPresent` and the same for `images.credProxy`, so the dispatched authoring Job uses the kind-loaded images instead of the chart-default `:<appVersion>` refs absent on the fresh CI node. (D) `gate_flow_test.go` BeforeAll calls `kindE2EEnsureSubagentWiring(testNamespace)` right after the `tide-e2e-gates` namespace is created and before the Project/Milestone apply. The `dumpE2ESpecFailureDiagnostics` AfterEach hook is KEPT. Cheap local checks GREEN: `gofmt -l` clean on all three files, `go vet -tags=kind_e2e ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.56s), `git diff --quiet charts/` + `git diff --quiet hack/helm/` both clean. Heavy kind suite NOT run locally (OOM, non-reproducing). Next: orchestrator triggers a fresh nightly to confirm gate_flow specs reach green; if a new blocker surfaces the spec-failure diagnostics will show it.
+
+- timestamp: 2026-06-03 — **FAILURE 4 FIX CONFIRMED WORKING + FAILURE 5 surfaced** (run 26858194135, commit f93e074). The subagent wiring fix worked: `Ran 6 of 6 Specs: 5 Passed | 1 Failed` (was 4 of 6 / 3 passed). Both gate-approval specs now PASS — the milestone Job ran to `Complete 1/1` using `stub-subagent:phase4-test` + `credproxy:phase4-test` sidecar; init pod Completed; phases dispatched. The CR cascade works end-to-end. ONE failure left.
+- timestamp: 2026-06-03 — **FAILURE 5 (last blocker) root-caused at source.** `gate_flow_test.go:177` (`It tide tail streams a pod log and cancels within 1s of SIGINT (Pitfall 25)`): `Expect(podName).NotTo(BeEmpty())` failed — `no dashboard Pod found for tail-cancel smoke`. The spec locates the dashboard pod via `kindGetFirstPodName(kindE2EControllerNamespace="tide-system", "app.kubernetes.io/name=tide-dashboard")` (gate_flow_test.go:158,235). ROOT CAUSE: `helm template charts/tide --set dashboard.enabled=true` shows the dashboard pod template has a DUPLICATE `app.kubernetes.io/name` key — explicit `tide-dashboard` followed by `tide` from the `tide.labels` helper; YAML last-key-wins so the pod's effective label is `app.kubernetes.io/name=tide`, NOT `tide-dashboard`. So the test selector matches zero pods. The Deployment works (its matchLabels is self-consistent under last-wins) and the 3 dashboard specs pass (they reach it via `svc/tide-dashboard`, not a pod-label lookup). This is a TEST-HARNESS selector bug, not a product/chart defect.
+- timestamp: 2026-06-03 — FAILURE 5 fix decision: change ONLY the test selector to `control-plane=dashboard` (uniquely identifies the dashboard pod; the manager is `control-plane=controller-manager`). Do NOT change the chart: (a) `app.kubernetes.io/name=tide` + `control-plane=<component>` is a valid Helm convention; (b) chart is a FIXED contract per CLAUDE.md; (c) a Deployment's selector is immutable — changing it would force a release reinstall and risks the helm-rbac-assert / contract tests. The duplicate `app.kubernetes.io/name` key in dashboard-deployment.yaml is a BENIGN chart smell (the dead `tide-dashboard` value) — noted as optional future cleanup, NOT fixed here.
+- timestamp: 2026-06-03 — **FAILURE 5 FIX APPLIED** (test-harness only — NO chart/workflow/hack/helm change). Verified at source via `helm template charts/tide --set dashboard.enabled=true`: the dashboard pod template (`spec.template.metadata.labels`) carries `control-plane: dashboard` as a UNIQUE non-clobbered label, while its `app.kubernetes.io/name: tide-dashboard` is immediately overridden to `tide` by the `tide.labels` helper (YAML last-key-wins). The manager pod carries `control-plane: controller-manager`, so `control-plane=dashboard` is unambiguous. CHANGE: in `test/e2e/gate_flow_test.go` the dashboard-pod lookup selector at the `tide tail` spec changed from `app.kubernetes.io/name=tide-dashboard` to `control-plane=dashboard`, with an 8-line comment explaining WHY (helper override + last-wins + unique discriminator). One-line selector swap; no behavior change to the SIGINT-cancel assertion. The chart and hack/helm/ are UNTOUCHED — the duplicate `app.kubernetes.io/name` key in dashboard-deployment.yaml remains as documented benign future-cleanup. Cheap local checks GREEN: `gofmt -l test/e2e/gate_flow_test.go` clean, `go vet -tags=kind_e2e ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.53s), `git diff --quiet charts/` + `git diff --quiet hack/helm/` both clean. Heavy kind suite NOT run locally (OOM, non-reproducing). `dumpE2ESpecFailureDiagnostics` AfterEach hook KEPT. Next: fresh nightly confirms all 6 gate_flow specs green → suite fully green → debug session closes → v1.0.0 release gate clears.
 
 ## Eliminated
 
@@ -113,6 +118,20 @@ root_cause: |
   cross-namespace-Project gap as the integration suite once had, just in the e2e runtime path.
   The chart correctly scopes these resources to .Release.Namespace for real single-namespace
   installs; wiring a cross-namespace test Project is the test harness's responsibility.
+  FAILURE 5 (test-e2e-kind gate_flow `tide tail` spec finds no dashboard Pod): root-caused
+  at source via `helm template charts/tide --set dashboard.enabled=true`. The spec located the
+  dashboard pod by selector `app.kubernetes.io/name=tide-dashboard`, but the dashboard pod
+  template (spec.template.metadata.labels) sets `app.kubernetes.io/name: tide-dashboard`
+  immediately followed by `app.kubernetes.io/name: tide` injected by the `tide.labels` helper.
+  YAML last-key-wins, so the RUNNING pod's effective label is `app.kubernetes.io/name=tide` —
+  the selector matched ZERO pods, `kindGetFirstPodName` returned "", and the NotTo(BeEmpty)
+  assertion failed ("no dashboard Pod found"). This only surfaced NOW because F4's wiring fix
+  let specs 1+2 pass, so the Ordered container no longer fail-fast-skipped this spec. The
+  Deployment itself works (its matchLabels is self-consistent under last-wins) and the 3
+  dashboard specs pass because they reach the dashboard via svc/tide-dashboard, not a pod-label
+  lookup. This is a TEST-HARNESS selector bug. The duplicate `app.kubernetes.io/name` key in
+  charts/tide/templates/dashboard-deployment.yaml (and its hack/helm/ source) is a BENIGN chart
+  smell (the dead tide-dashboard value) — optional future cleanup, NOT a product/chart defect.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
@@ -164,6 +183,19 @@ fix: |
   The dumpE2ESpecFailureDiagnostics AfterEach hook is KEPT (durable future-proofing; it proved
   the root cause). The chart and hack/helm/ are untouched — cross-namespace test wiring is the
   harness's job, exactly as the integration suite handles it.
+  FAILURE 5 (thorough, test-harness only — NO chart/workflow/hack/helm change): in
+  test/e2e/gate_flow_test.go, changed the dashboard-pod lookup selector in the `tide tail`
+  spec from `app.kubernetes.io/name=tide-dashboard` to `control-plane=dashboard`. That label
+  uniquely identifies the dashboard pod (the manager pod carries control-plane=controller-manager,
+  so the selector is unambiguous) and is NOT clobbered by the tide.labels helper. Added an
+  8-line comment explaining WHY (the app.kubernetes.io/name label resolves to "tide" via the
+  helper override + YAML last-wins; control-plane is the unique discriminator). One-line selector
+  swap — no behavior change to the SIGINT-cancel assertion. The chart is UNTOUCHED: the
+  app.kubernetes.io/name=tide + control-plane=<component> labeling is a valid Helm convention,
+  the chart is a FIXED contract, and a Deployment selector is immutable (changing it would force
+  a release reinstall and risk the helm-rbac-assert / helm-template contract tests). The dead
+  tide-dashboard key in dashboard-deployment.yaml is noted as benign future cleanup, not fixed here.
+  The dumpE2ESpecFailureDiagnostics AfterEach hook is KEPT.
 verification: |
   Local cheap checks (where Failures 2/3/4 do NOT reproduce — heavy kind run skipped to avoid
   VM OOM): FAILURE 4 cycle — `gofmt -l test/e2e/{kind_setup_test.go,gate_flow_test.go,
@@ -172,7 +204,13 @@ verification: |
   + `git diff --quiet hack/helm/` both CLEAN (test-harness-only). FAILURES 1/2/3 already proven
   GREEN in CI (run 26851857098 Layer A 29/29; run 26853449717 make test-int fully green; run
   26854475599 e2e BeforeSuite PASSED + 3 dashboard specs pass). FAILURE 4 fix shape validated by
-  the run-26857361275 diagnostics (missing SA proven). CI BAR (pending — run by orchestrator/user):
+  the run-26857361275 diagnostics (missing SA proven), then CONFIRMED WORKING in run 26858194135
+  (commit f93e074): Ran 6 of 6 Specs, 5 Passed | 1 Failed — both gate-approval specs pass, only
+  Failure 5 left. FAILURE 5 cycle — root cause verified by `helm template charts/tide --set
+  dashboard.enabled=true` (dashboard pod effective label app.kubernetes.io/name=tide; unique
+  control-plane=dashboard); `gofmt -l test/e2e/gate_flow_test.go` clean, `go vet -tags=kind_e2e
+  ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.53s),
+  `git diff --quiet charts/` + `git diff --quiet hack/helm/` both CLEAN. CI BAR (pending — run by orchestrator/user):
   a fresh full nightly-integration.yml run GREEN end-to-end on GitHub-hosted runners across BOTH
   steps — Layer B `make test-int` AND `make test-e2e-kind` (gate_flow specs reach AwaitingApproval
   → approve → leave AwaitingApproval). Trigger via `gh workflow run nightly-integration.yml --ref
@@ -183,4 +221,4 @@ files_changed:
   - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path; --set dashboard.enabled=false) [Failures 1/2, prior cycles]
   - test/e2e/kind_setup_test.go (Failure 3: dashboard from Dockerfile.dashboard + dumpE2EControllerDiagnostics; Failure 4: kindE2EEnsureSubagentWiring SA+PVC+prewarm+signing-key helpers, stub-subagent+credproxy image build/load table, images.stubSubagent/credProxy chart overrides)
   - test/e2e/spec_diagnostics_test.go (dumpE2ESpecFailureDiagnostics spec-failure dump) [Failure 4 diagnostics, prior cycle]
-  - test/e2e/gate_flow_test.go (Failure 4: BeforeAll calls kindE2EEnsureSubagentWiring before Project apply; AfterEach spec-failure dump kept)
+  - test/e2e/gate_flow_test.go (Failure 4: BeforeAll calls kindE2EEnsureSubagentWiring before Project apply; AfterEach spec-failure dump kept. Failure 5: dashboard-pod lookup selector changed app.kubernetes.io/name=tide-dashboard -> control-plane=dashboard with explanatory comment)
