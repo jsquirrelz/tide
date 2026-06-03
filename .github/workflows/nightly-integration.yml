@@ -49,9 +49,22 @@ jobs:
 
       - name: Install kind v0.31.0
         run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          # Failure-6 (nightly-int-flake-timeout, run 26858915802): a bare
+          # single-attempt `curl -Lo` against kind.sigs.k8s.io stalled at 0
+          # bytes on a transient CDN/redirect blip and failed the whole nightly
+          # BEFORE any test ran. Harden the download: --fail (error on HTTP>=400
+          # instead of writing an HTML error body to ./kind), retry transient
+          # failures (incl. connrefused / all errors), bound the connect, and
+          # keep -L for the release redirect. VERSION stays v0.31.0 (STACK.md pin).
+          curl -fsSL \
+            --retry 5 --retry-delay 3 --retry-all-errors --retry-connrefused \
+            --connect-timeout 30 \
+            -o ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          # Verify the download is a non-empty binary before installing it.
+          test -s ./kind
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
+          # Post-install smoke (kept): proves the binary is executable + correct version.
           kind version
 
       - name: Install Helm

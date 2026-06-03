@@ -22,9 +22,9 @@ phase: 07-project-to-milestone-authoring-and-self-bootstrap
 ## Current Focus
 
 hypothesis:
-- All FIVE failures are root-caused with runtime evidence. Failures 1, 2, 3, 4 are FIXED + CI-confirmed (F4 confirmed working in run 26858194135: 5 of 6 specs pass). Failure 5 (the LAST blocker) — the gate_flow `tide tail` spec found zero dashboard pods because its selector `app.kubernetes.io/name=tide-dashboard` is clobbered to `tide` by the tide.labels helper (YAML last-wins) — is root-caused at source via `helm template` and the thorough test-harness fix is APPLIED this cycle (selector -> `control-plane=dashboard`; see Resolution -> Failure 5). Awaiting a fresh nightly to confirm all 6 gate_flow specs reach green and the suite closes.
+- SIX failures total; all root-caused with evidence. Failures 1-5 are test-harness fixes (1/2/3 CI-confirmed green; 4 CI-confirmed working in run 26858194135 at 5 of 6 specs; 5 applied but NOT YET CI-verified because run 26858915802 died at `Install kind v0.31.0` BEFORE any test ran). Failure 6 is a CI-INFRA flake (not a test bug): the bare single-attempt `curl -Lo ./kind https://kind.sigs.k8s.io/dl/...` in nightly-integration.yml received 0 bytes on a transient CDN/redirect stall and failed the whole nightly with no retry/--fail. Fix APPLIED this cycle: hardened the kind-binary download with `curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-connrefused --connect-timeout 30` + a `test -s ./kind` non-empty check before install (see Resolution -> Failure 6). Awaiting a fresh nightly that finally exercises BOTH the hardened download AND the F5 selector fix end-to-end.
 
-next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and watches BOTH steps (`make test-int` AND `make test-e2e-kind`) to green. The Failure-5 fix is a one-line test-harness selector change in test/e2e/gate_flow_test.go (`app.kubernetes.io/name=tide-dashboard` -> `control-plane=dashboard`) so the `tide tail` Pitfall-25 spec can locate the dashboard pod (the old selector matched zero pods because the tide.labels helper overrides app.kubernetes.io/name to `tide` under YAML last-wins). With F1-F4 already CI-confirmed and F4's run showing 5 of 6 specs green, this should bring gate_flow to 6 of 6 and the suite fully green. If green end-to-end, this debug session closes and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship. The dumpE2ESpecFailureDiagnostics hook stays in place if any further blocker surfaces.
+next_action: Orchestrator triggers a fresh `nightly-integration.yml` run (`gh workflow run nightly-integration.yml --ref main`) and watches the `Install kind v0.31.0` step to green THEN both test steps (`make test-int` AND `make test-e2e-kind`) to green. The F6 fix is a workflow-only curl-hardening change in .github/workflows/nightly-integration.yml; the only bare remote download in the file (checkout/setup-go/setup-helm/upload-artifact are all pinned actions). This run is the FIRST to actually exercise the F5 selector fix (`control-plane=dashboard`) because every prior run either preceded F5 or died before tests ran. If green end-to-end: ALL six failures close, this debug session closes, and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship. dumpControllerDiagnostics / dumpE2ESpecFailureDiagnostics hooks stay in place if any further blocker surfaces.
 
 ## Evidence
 
@@ -58,6 +58,8 @@ next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and wat
 - timestamp: 2026-06-03 — **FAILURE 5 (last blocker) root-caused at source.** `gate_flow_test.go:177` (`It tide tail streams a pod log and cancels within 1s of SIGINT (Pitfall 25)`): `Expect(podName).NotTo(BeEmpty())` failed — `no dashboard Pod found for tail-cancel smoke`. The spec locates the dashboard pod via `kindGetFirstPodName(kindE2EControllerNamespace="tide-system", "app.kubernetes.io/name=tide-dashboard")` (gate_flow_test.go:158,235). ROOT CAUSE: `helm template charts/tide --set dashboard.enabled=true` shows the dashboard pod template has a DUPLICATE `app.kubernetes.io/name` key — explicit `tide-dashboard` followed by `tide` from the `tide.labels` helper; YAML last-key-wins so the pod's effective label is `app.kubernetes.io/name=tide`, NOT `tide-dashboard`. So the test selector matches zero pods. The Deployment works (its matchLabels is self-consistent under last-wins) and the 3 dashboard specs pass (they reach it via `svc/tide-dashboard`, not a pod-label lookup). This is a TEST-HARNESS selector bug, not a product/chart defect.
 - timestamp: 2026-06-03 — FAILURE 5 fix decision: change ONLY the test selector to `control-plane=dashboard` (uniquely identifies the dashboard pod; the manager is `control-plane=controller-manager`). Do NOT change the chart: (a) `app.kubernetes.io/name=tide` + `control-plane=<component>` is a valid Helm convention; (b) chart is a FIXED contract per CLAUDE.md; (c) a Deployment's selector is immutable — changing it would force a release reinstall and risks the helm-rbac-assert / contract tests. The duplicate `app.kubernetes.io/name` key in dashboard-deployment.yaml is a BENIGN chart smell (the dead `tide-dashboard` value) — noted as optional future cleanup, NOT fixed here.
 - timestamp: 2026-06-03 — **FAILURE 5 FIX APPLIED** (test-harness only — NO chart/workflow/hack/helm change). Verified at source via `helm template charts/tide --set dashboard.enabled=true`: the dashboard pod template (`spec.template.metadata.labels`) carries `control-plane: dashboard` as a UNIQUE non-clobbered label, while its `app.kubernetes.io/name: tide-dashboard` is immediately overridden to `tide` by the `tide.labels` helper (YAML last-key-wins). The manager pod carries `control-plane: controller-manager`, so `control-plane=dashboard` is unambiguous. CHANGE: in `test/e2e/gate_flow_test.go` the dashboard-pod lookup selector at the `tide tail` spec changed from `app.kubernetes.io/name=tide-dashboard` to `control-plane=dashboard`, with an 8-line comment explaining WHY (helper override + last-wins + unique discriminator). One-line selector swap; no behavior change to the SIGINT-cancel assertion. The chart and hack/helm/ are UNTOUCHED — the duplicate `app.kubernetes.io/name` key in dashboard-deployment.yaml remains as documented benign future-cleanup. Cheap local checks GREEN: `gofmt -l test/e2e/gate_flow_test.go` clean, `go vet -tags=kind_e2e ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.53s), `git diff --quiet charts/` + `git diff --quiet hack/helm/` both clean. Heavy kind suite NOT run locally (OOM, non-reproducing). `dumpE2ESpecFailureDiagnostics` AfterEach hook KEPT. Next: fresh nightly confirms all 6 gate_flow specs green → suite fully green → debug session closes → v1.0.0 release gate clears.
+
+- timestamp: 2026-06-03 — **FAILURE 6 (infra flake, NOT a test failure)** in run 26858915802 (commit 420f952): the `Install kind v0.31.0` workflow step FAILED at 5m11s before any test ran. `curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64` received 0 bytes the entire time (`0:00:07+ ... 0 0 0` — host unreachable/stalled). Transient network failure downloading the kind binary from kind.sigs.k8s.io; unrelated to the F1-F5 test-harness fixes (tests never executed). The bare single-attempt `curl` (nightly-integration.yml:50-55) has no retry/--fail, so a momentary CDN/redirect blip fails the whole nightly. FIX: harden the kind-install curl with retries + --fail (CI-reliability, same theme as this session). The F5 fix is unverified by this run (kind never installed) — the hardened re-run also re-tests F5.
 
 ## Eliminated
 
@@ -132,6 +134,17 @@ root_cause: |
   lookup. This is a TEST-HARNESS selector bug. The duplicate `app.kubernetes.io/name` key in
   charts/tide/templates/dashboard-deployment.yaml (and its hack/helm/ source) is a BENIGN chart
   smell (the dead tide-dashboard value) — optional future cleanup, NOT a product/chart defect.
+  FAILURE 6 (nightly CI-infra flake, NOT a test/product defect): run 26858915802
+  (commit 420f952) failed at the `Install kind v0.31.0` workflow step after 5m11s,
+  BEFORE any test executed. `curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.31.0/
+  kind-linux-amd64` (nightly-integration.yml, the sole bare remote download) received
+  0 bytes the entire time — kind.sigs.k8s.io was unreachable/stalled from the runner on
+  a transient CDN/redirect blip. The single-attempt curl had no `--retry` and no `--fail`,
+  so one momentary network glitch failed the whole nightly. This is orthogonal to the
+  F1-F5 test-harness fixes (tests never ran), so the F5 selector fix is also still
+  CI-unverified by this run. STACK.md's "pin kind node images by @sha256" guidance is
+  about the kind NODE image at cluster-create, NOT this kind BINARY download, so node-image
+  pinning is left alone; curl-retry on the binary fetch is the correct, minimal fix.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
@@ -196,6 +209,19 @@ fix: |
   a release reinstall and risk the helm-rbac-assert / helm-template contract tests). The dead
   tide-dashboard key in dashboard-deployment.yaml is noted as benign future cleanup, not fixed here.
   The dumpE2ESpecFailureDiagnostics AfterEach hook is KEPT.
+  FAILURE 6 (CI-reliability hardening, workflow-only — NO charts/ / hack/helm/ / ci.yaml
+  change): hardened the `Install kind v0.31.0` step in .github/workflows/nightly-integration.yml.
+  The download is now `curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors
+  --retry-connrefused --connect-timeout 30 -o ./kind https://kind.sigs.k8s.io/dl/v0.31.0/
+  kind-linux-amd64` — `--fail` errors on HTTP>=400 (instead of writing an HTML error body
+  to ./kind), the retry flags ride out transient CDN/redirect/connrefused blips (5 attempts,
+  3s apart, all error classes), `--connect-timeout 30` bounds a stalled connect, and `-L` is
+  kept for the release redirect. A `test -s ./kind` non-empty check guards the install before
+  `chmod +x` / `sudo mv`, and the existing `kind version` post-install smoke is kept. The kind
+  VERSION stays v0.31.0 (STACK.md pin). Scanned the rest of the workflow: this is the only bare
+  single-attempt remote download — checkout/setup-go/setup-helm/upload-artifact are pinned
+  GitHub Actions with their own resilience, so no other step needed hardening. The cert-manager
+  apply inside the suites is in test code via kubectl (out of scope, has its own handling).
 verification: |
   Local cheap checks (where Failures 2/3/4 do NOT reproduce — heavy kind run skipped to avoid
   VM OOM): FAILURE 4 cycle — `gofmt -l test/e2e/{kind_setup_test.go,gate_flow_test.go,
@@ -216,9 +242,16 @@ verification: |
   → approve → leave AwaitingApproval). Trigger via `gh workflow run nightly-integration.yml --ref
   main` and watch both steps. If anything recurs, dumpControllerDiagnostics() /
   dumpE2ESpecFailureDiagnostics() output will disambiguate.
+  FAILURE 6 cycle (workflow-only): `python3 -c "import yaml; yaml.safe_load(open('.github/
+  workflows/nightly-integration.yml'))"` parses OK; `grep -nE 'curl|wget'` confirms the
+  hardened kind curl is the only remote download; `git diff --quiet charts/`, `git diff --quiet
+  hack/helm/`, `git diff --quiet .github/workflows/ci.yaml` all CLEAN (nightly workflow only).
+  actionlint/yamllint not installed on this host (optional). No Go changes (tests never ran in
+  the failing run, so no test-harness change is implicated by F6).
 files_changed:
   - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [Failure 1, commit 96a3b44]
   - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path; --set dashboard.enabled=false) [Failures 1/2, prior cycles]
   - test/e2e/kind_setup_test.go (Failure 3: dashboard from Dockerfile.dashboard + dumpE2EControllerDiagnostics; Failure 4: kindE2EEnsureSubagentWiring SA+PVC+prewarm+signing-key helpers, stub-subagent+credproxy image build/load table, images.stubSubagent/credProxy chart overrides)
   - test/e2e/spec_diagnostics_test.go (dumpE2ESpecFailureDiagnostics spec-failure dump) [Failure 4 diagnostics, prior cycle]
   - test/e2e/gate_flow_test.go (Failure 4: BeforeAll calls kindE2EEnsureSubagentWiring before Project apply; AfterEach spec-failure dump kept. Failure 5: dashboard-pod lookup selector changed app.kubernetes.io/name=tide-dashboard -> control-plane=dashboard with explanatory comment)
+  - .github/workflows/nightly-integration.yml (Failure 6: harden `Install kind v0.31.0` curl with --fail/--retry/--connect-timeout + non-empty download check; workflow-only CI-reliability fix)
