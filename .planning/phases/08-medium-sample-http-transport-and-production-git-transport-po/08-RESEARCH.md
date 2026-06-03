@@ -680,22 +680,19 @@ git:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does go-git `BasicAuth{Password: ""}` work against anonymous git-http-backend?**
    - What we know: git-http-backend accepts push when `http.receivepack=true`; go-git always sets BasicAuth; the server ignores auth when not configured.
    - What's unclear: whether go-git ITSELF refuses to send a push with empty password before the request reaches the server.
-   - Recommendation: Verify with a 2-minute local test: `docker run --rm -p 8080:80 git-http-server` + `go run` a minimal go-git push client with empty Password.
+   - RESOLVED (partial — Assumption A3 remains): The server-side contract is verified (git-http-backend ignores auth headers when not configured). Whether go-git refuses to send a push with empty `BasicAuth.Password` at the library level is NOT yet verified against a live anonymous server. This is the highest-risk unverified claim in Phase 8 (Assumption A3). Plan 08-05 Task 1 must run a smoke verification (e.g. `docker run` the built image + a short go-git push from a test binary) to confirm empty-password push lands a ref BEFORE the live minikube path in 08-08 depends on it. If go-git refuses, pass `nil` auth instead of `&http.BasicAuth{}`. An automated check is added to `test/integration/kind/medium_http_test.go` as the first assertion the hermetic kind spec must make: "anonymous http push lands a ref" (wired by plan 08-07).
 
 2. **Can `cmd/tide-push` push mode read the remote URL to make the GIT_PAT guard conditional?**
    - What we know: push mode opens the worktree with `gogit.PlainOpen(worktreeDir)` and then calls `repo.PushContext`. The remote URL is in the repo's config.
-   - What's unclear: whether the push mode has a clean way to read `cfg.RepoURL` (it only has `--workspace`, `--branch`, etc. — not `--repo-url`).
-   - Recommendation: In `pkg/git/push.go`, add an `anon bool` parameter OR read remote URL from the open repo's config. Alternatively, use Option B (dummy placeholder GIT_PAT) to avoid any push mode change.
+   - RESOLVED: Plan 08-05 Task 3's scheme-conditional guard reads the origin remote URL via `repo.Config().Remotes["origin"].URLs[0]` after `gogit.PlainOpen` — this is the standard go-git pattern for reading the remote URL from an open repo without needing a `--repo-url` flag. The guard applies `strings.HasPrefix` on the extracted URL to decide whether PAT is required.
 
 3. **Do any Layer B test YAML fixtures use `file:///` targetRepo values?**
-   - What we know: the small sample uses it; medium sample uses it.
-   - What's unclear: whether integration test fixtures (test/integration/kind/testdata/, test/e2e/) use it.
-   - Recommendation: `grep -rn 'targetRepo.*file://' test/` — Wave 0 task.
+   - RESOLVED: `grep -rn 'targetRepo.*file://' test/` (run 2026-06-03) returns exactly one result: `test/integration/kind/testdata/bare-project.yaml:43`. No other test fixtures use `file://` targetRepo values. Plan 08-01 Task 1 migrates that fixture to the `https://git.example.internal/stub/no-such-repo.git` sentinel.
 
 ---
 
