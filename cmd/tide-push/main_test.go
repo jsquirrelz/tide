@@ -461,37 +461,153 @@ func TestRunCloneMode(t *testing.T) {
 	// clone mode, so there is nothing to assert here beyond the HEAD check above.
 }
 
-// ---------- Test 6: push mode, missing GIT_PAT ----------
+// ---------- Test 6: push mode, missing GIT_PAT with http:// remote ----------
+// Invariant 2 (D-B1) is now scheme-conditional: empty PAT is ACCEPTED for
+// anonymous in-cluster http:// remotes. This test verifies the http:// case
+// proceeds (no missing-creds exit) when GIT_PAT is empty.
 
-func TestRunPushModeRefusesMissingCreds(t *testing.T) {
+func TestRunPushModeHTTPRemoteAcceptsEmptyPAT(t *testing.T) {
 	base := t.TempDir()
 	bareSrc, _ := seedBareRepo(t, base)
-	branch := perRunBranch(t, "no-creds")
-	ws := setupWorkspace(t, bareSrc, branch)
+	branch := perRunBranch(t, "http-anon")
+	ws := setupWorkspaceWithRemoteURL(t, bareSrc, branch,
+		"http://git-http-server.tide-sample-medium.svc.cluster.local/demo-remote.git")
+
+	writeArtifact(t, ws, "artifacts/file-http.md", "# http anon\n")
 
 	cfg := pushConfig{
 		Mode:          "push",
 		Branch:        branch,
 		LastPushedSHA: "",
-		CommitMessage: "tide: plan x",
+		CommitMessage: "tide: http anon push",
+		ArtifactPaths: []string{"artifacts/file-http.md"},
+		Workspace:     ws,
+		ProjectUID:    "p6-http",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Explicitly NOT setting GIT_PAT — http:// remote must NOT require it.
+	os.Unsetenv("GIT_PAT")
+	var stderr bytes.Buffer
+	// NOTE: This will fail at the network push step (no real http server),
+	// but must NOT fail with exit 2 / missing-creds. Any exit other than 2
+	// with reason != "missing-creds" proves the guard was relaxed correctly.
+	exit := run(ctx, cfg, io.Discard, &stderr)
+	if exit == exitInvariant {
+		// Read the envelope if it exists to distinguish missing-creds from other invariants.
+		envPath := filepath.Join(ws, "envelopes", "push", "p6-http.json")
+		if data, readErr := os.ReadFile(envPath); readErr == nil {
+			var pr pushResult
+			if jsonErr := json.Unmarshal(data, &pr); jsonErr == nil && pr.Reason == "missing-creds" {
+				t.Fatalf("http:// remote with empty GIT_PAT should not exit missing-creds; exit=%d stderr=%s", exit, stderr.Bytes())
+			}
+		}
+		// If envelope doesn't exist or has a different reason, the invariant exit is
+		// from a different guard (e.g. network failure trying to push) — that's acceptable.
+	}
+	// Any non-invariant exit (or invariant exit from a non-missing-creds reason) is acceptable:
+	// the guard was relaxed. The test proves the scheme-conditional logic executes.
+}
+
+// ---------- Test 6b: push mode, missing GIT_PAT with https:// remote (must still fail) ----------
+// Invariant 2 (D-B1): GIT_PAT REQUIRED for https:// production remotes.
+// T-08-05-03 mitigation: the scheme-conditional guard must NOT relax for https://.
+
+func TestRunPushModeHTTPSRemoteRequiresPAT(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "https-creds")
+	ws := setupWorkspaceWithRemoteURL(t, bareSrc, branch,
+		"https://github.com/owner/repo.git")
+
+	cfg := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: https push",
 		ArtifactPaths: []string{},
 		Workspace:     ws,
-		ProjectUID:    "p6",
+		ProjectUID:    "p6b",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Explicitly NOT setting GIT_PAT.
+	// Empty GIT_PAT + https:// remote → must exit with missing-creds.
 	os.Unsetenv("GIT_PAT")
 	var stderr bytes.Buffer
 	exit := run(ctx, cfg, io.Discard, &stderr)
-	if exit != 2 {
-		t.Fatalf("exit=%d, want 2 (invariant); stderr=%s", exit, stderr.Bytes())
+	if exit != exitInvariant {
+		t.Fatalf("https:// + empty PAT: exit=%d want %d (exitInvariant); stderr=%s",
+			exit, exitInvariant, stderr.Bytes())
 	}
-	pr := readPushEnvelope(t, ws, "p6")
+	pr := readPushEnvelope(t, ws, "p6b")
 	if pr.Reason != "missing-creds" {
 		t.Errorf("envelope.reason = %q, want %q", pr.Reason, "missing-creds")
 	}
+}
+
+// ---------- Test 6c: push mode, missing GIT_PAT with git@ remote (must still fail) ----------
+// T-08-05-03 mitigation: git@ (SSH) remotes must still require GIT_PAT (treated as SSH key).
+
+func TestRunPushModeSSHRemoteRequiresPAT(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "ssh-creds")
+	ws := setupWorkspaceWithRemoteURL(t, bareSrc, branch,
+		"git@github.com:owner/repo.git")
+
+	cfg := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: ssh push",
+		ArtifactPaths: []string{},
+		Workspace:     ws,
+		ProjectUID:    "p6c",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Empty GIT_PAT + git@ remote → must exit with missing-creds.
+	os.Unsetenv("GIT_PAT")
+	var stderr bytes.Buffer
+	exit := run(ctx, cfg, io.Discard, &stderr)
+	if exit != exitInvariant {
+		t.Fatalf("git@ + empty PAT: exit=%d want %d (exitInvariant); stderr=%s",
+			exit, exitInvariant, stderr.Bytes())
+	}
+	pr := readPushEnvelope(t, ws, "p6c")
+	if pr.Reason != "missing-creds" {
+		t.Errorf("envelope.reason = %q, want %q", pr.Reason, "missing-creds")
+	}
+}
+
+// setupWorkspaceWithRemoteURL is like setupWorkspace but sets the worktree's
+// "origin" remote to remoteURL instead of the file:// bareSrc URL. This lets
+// tests verify scheme-conditional behavior without needing a live server.
+// The push will fail at the network layer for non-file URLs; the tests only
+// care about the pre-push guard behavior, not the actual push outcome.
+func setupWorkspaceWithRemoteURL(t *testing.T, bareSrc, branch, remoteURL string) string {
+	t.Helper()
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	// Re-open the worktree and change origin to the test remote URL.
+	wt := filepath.Join(ws, "worktrees", "run-"+branch)
+	repo, err := gogit.PlainOpen(wt)
+	if err != nil {
+		t.Fatalf("setupWorkspaceWithRemoteURL PlainOpen: %v", err)
+	}
+	if err := repo.DeleteRemote("origin"); err != nil {
+		t.Fatalf("setupWorkspaceWithRemoteURL DeleteRemote: %v", err)
+	}
+	if _, err := repo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{remoteURL},
+	}); err != nil {
+		t.Fatalf("setupWorkspaceWithRemoteURL CreateRemote %q: %v", remoteURL, err)
+	}
+	return ws
 }
 
 // ---------- Test 7: --commit-message + --artifact-paths exact message ----------
