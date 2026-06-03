@@ -25,3 +25,8 @@
 # This was added in Phase 04.1 Plan 14 UAT closeout when the dashboard image
 # was split out of the shared controller Dockerfile (Dockerfile.dashboard).
 !cmd/dashboard/embed/dist/**
+
+# Re-include tide-git-http-server config/entrypoint (Phase 8 in-cluster git-http server).
+# These are shell/nginx config files not matched by the Go/toml/tmpl patterns above.
+!images/tide-git-http-server/nginx.conf
+!images/tide-git-http-server/entrypoint.sh
