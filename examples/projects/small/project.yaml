@@ -29,12 +29,14 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: small
 spec:
-  # MEDIUM-7 placeholder: stub-subagent ignores targetRepo and returns canned
-  # success envelopes regardless. An unreachable `file://` path is safer than a
-  # real GitHub URL — a real URL could be transiently rate-limited or replaced,
-  # causing flaky dry-runs. The unreachable path is load-bearing-by-virtue-of-
-  # being-ignored — it proves the stub doesn't actually resolve targetRepo.
-  targetRepo: file:///tmp/no-such-repo
+  # RFC 2606 .example TLD sentinel — non-routable by design. The stub-subagent
+  # ignores targetRepo entirely and returns canned success envelopes regardless
+  # of this value (MEDIUM-7 design lock, verified in plan 06 main_test.go).
+  # https:// scheme is required: the Phase 8 CEL validator rejects file:// URLs
+  # because go-git's file:// transport shells out to a system git binary that is
+  # absent from production images. The .example TLD makes the sentinel's
+  # placeholder intent unmistakable — no real server exists at this host.
+  targetRepo: https://git.example.internal/stub/no-such-repo.git
 
   budget:
     # $0 — stub-subagent makes zero API calls. Hard cap of 0 is the strongest

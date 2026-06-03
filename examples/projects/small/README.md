@@ -10,7 +10,7 @@ release.
 **Scope of this doc:**
 
 - What this sample does (apply / observe / cleanup)
-- Why the targetRepo is a placeholder `file://` path
+- Why the targetRepo is an RFC 2606 `.example`-TLD https:// sentinel
 - Apply / watch / cleanup recipes
 - Troubleshooting reminder (CRDs first)
 
@@ -32,18 +32,19 @@ TIDE is wired correctly end-to-end.
 
 Typical wall time: **~1-2 minutes** from `kubectl apply` to `Status=Complete`.
 
-## On the placeholder targetRepo
+## On the sentinel targetRepo
 
-The Project's `spec.targetRepo` is `file:///tmp/no-such-repo` — a deliberately
-unreachable placeholder. The stub-subagent does NOT resolve `targetRepo`; it
-returns canned envelopes regardless of what's there (verified by the
-stub-subagent's unit test in plan 06 — MEDIUM-7 design lock).
+The Project's `spec.targetRepo` is `https://git.example.internal/stub/no-such-repo.git`
+— a deliberately unreachable RFC 2606 reserved-TLD placeholder. The stub-subagent
+does NOT resolve `targetRepo`; it returns canned envelopes regardless of what's
+there (verified by the stub-subagent's unit test in plan 06 — MEDIUM-7 design lock).
 
-A real GitHub URL would work too, but the unreachable path is safer for a
-smoke test: it can't be transiently rate-limited, it can't be replaced or
-removed, and the file:// scheme proves the controller doesn't accidentally
-try to clone the URL. A passing smoke test against an unreachable URL is
-strictly stronger evidence than a passing smoke test against `github.com/foo`.
+The `https://` scheme is required because the Phase 8 CEL validator now rejects
+`file://` URLs at admission: go-git's `file://` transport shells out to a system
+`git` binary that is absent from production images, making `file://` an unsupported
+production transport. The `.example` TLD is non-routable by design (RFC 2606),
+making the sentinel's placeholder intent unmistakable — no real server will ever
+resolve this host.
 
 If you ever see the controller log a network error or git-clone failure when
 running this sample, that's a regression — the stub-subagent should never

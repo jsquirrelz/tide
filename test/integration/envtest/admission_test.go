@@ -365,3 +365,84 @@ func isForbiddenOrBadRequest(err error) bool {
 		strings.Contains(err.Error(), "cyclic") ||
 		strings.Contains(err.Error(), "cycle")
 }
+
+// Project CEL targetRepo admission tests.
+//
+// GREEN after 08-03 lands — CEL marker change + controller-gen + make helm regenerates CRD schema.
+// Test A will be RED (file:// not yet rejected at admission) until the new XValidation marker
+// is codegen'd into the CRD. Tests B, C, D should be GREEN immediately (the current validator
+// already admits http(s) and git@ — this block just makes it explicit and adds regression cover).
+var _ = Describe("Project CEL targetRepo admission", Label("envtest"), func() {
+	ctx := context.Background()
+
+	var createdProjects []*tideprojectv1alpha1.Project
+
+	AfterEach(func() {
+		// Best-effort cleanup for successfully-created Projects.
+		for _, proj := range createdProjects {
+			_ = k8sClient.Delete(ctx, proj)
+		}
+		createdProjects = nil
+	})
+
+	// Helper: build a minimal Project with the given targetRepo.
+	// ProviderSecretRef is set to "any-secret" — CEL validation does not check
+	// the secret exists. Budget.AbsoluteCapCents=0 is valid (0 = disabled per
+	// sample notes). No spec.git block (D-04: git ops skipped when spec.git is nil).
+	newProject := func(name, targetRepo string) *tideprojectv1alpha1.Project {
+		return &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: admissionNamespace,
+			},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo:        targetRepo,
+				ProviderSecretRef: "any-secret",
+				Budget: tideprojectv1alpha1.BudgetConfig{
+					AbsoluteCapCents: 0,
+				},
+			},
+		}
+	}
+
+	// Test A: file:// targetRepo must be rejected.
+	// RED until 08-03 lands (CEL marker change + controller-gen + make helm regenerates CRD schema).
+	It("rejects a Project with targetRepo file:///tmp/test", func() {
+		proj := newProject(fmt.Sprintf("cel-reject-%d", GinkgoRandomSeed()), "file:///tmp/test")
+		err := k8sClient.Create(ctx, proj)
+		// RED until 08-03: the current CEL rule admits file:// so this assertion
+		// fails at runtime until the new XValidation marker is codegen'd.
+		// After 08-03: err must be non-nil AND IsInvalid AND contain the new message.
+		Expect(err).To(HaveOccurred(),
+			"file:// targetRepo must be rejected at admission (RED until 08-03 CEL marker change)")
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(),
+			"rejection must be an Invalid status error (CEL XValidation violation)")
+		Expect(err.Error()).To(ContainSubstring("file:// is not a supported production transport"),
+			"error message must reference the production transport constraint")
+		// No cleanup needed — object was not created.
+	})
+
+	// Test B: https:// sentinel must be accepted.
+	It("admits a Project with targetRepo https://git.example.internal/stub/no-such-repo.git", func() {
+		proj := newProject(fmt.Sprintf("cel-accept-https-%d", GinkgoRandomSeed()), "https://git.example.internal/stub/no-such-repo.git")
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed(),
+			"https:// targetRepo must be admitted at admission")
+		createdProjects = append(createdProjects, proj)
+	})
+
+	// Test C: http:// (in-cluster git-http server URL shape) must be accepted.
+	It("admits a Project with targetRepo http://git-http-server/demo-remote.git", func() {
+		proj := newProject(fmt.Sprintf("cel-accept-http-%d", GinkgoRandomSeed()), "http://git-http-server/demo-remote.git")
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed(),
+			"http:// targetRepo must be admitted at admission (in-cluster git server URL shape)")
+		createdProjects = append(createdProjects, proj)
+	})
+
+	// Test D: git@ SSH URL must be accepted.
+	It("admits a Project with targetRepo git@github.com:owner/repo.git", func() {
+		proj := newProject(fmt.Sprintf("cel-accept-ssh-%d", GinkgoRandomSeed()), "git@github.com:owner/repo.git")
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed(),
+			"git@ targetRepo must be admitted at admission (SSH URL shape)")
+		createdProjects = append(createdProjects, proj)
+	})
+})

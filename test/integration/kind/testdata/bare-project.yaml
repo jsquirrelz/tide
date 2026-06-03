@@ -40,7 +40,11 @@ metadata:
   name: bare-project
   namespace: bare-project-test
 spec:
-  targetRepo: "file:///tmp/no-such-repo"
+  # Sentinel: RFC 2606 .example TLD — non-routable by design. The stub-subagent
+  # ignores targetRepo entirely and returns canned envelopes regardless of this
+  # value. https:// scheme passes the Phase 8 CEL rule that rejects file:// URLs
+  # (file:// transport requires a system git binary absent from production images).
+  targetRepo: "https://git.example.internal/stub/no-such-repo.git"
   providerSecretRef: "tide-provider-secret"
   budget:
     absoluteCapCents: 0
