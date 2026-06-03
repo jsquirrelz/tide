@@ -22,7 +22,7 @@ limitations under the License.
 //     gated by `//go:build e2e`. Run via `make test-e2e`. No real Anthropic
 //     API call — exercises controller deployment + metrics + webhook CAs.
 //
-//  2. Live-Claude nightly `TestLiveE2E` (this file's entry point) + the
+//  2. Live-Claude nightly `TestLiveE2E` (in live_suite_entry_test.go) + the
 //     Ginkgo Describe in live_claude_test.go, gated by `//go:build live_e2e`.
 //     Run via `make test-e2e-live`. Makes ONE real Anthropic API call;
 //     skipped by default; double-gated by build tag AND ANTHROPIC_API_KEY env.
@@ -31,13 +31,22 @@ limitations under the License.
 //     target keeps the operator-friendly hyphenated name.
 //
 // This suite_test.go file is INTENTIONALLY un-tagged (compiled in every
-// build of test/e2e/...) so `go test ./test/e2e/...` succeeds with zero
-// specs when neither build tag is active — the test-int Makefile target
-// can sweep the tree without exploding on build-tag friction.
+// build of test/e2e/...) so the package always has at least one compilable
+// .go file under NO build tags. golangci-lint typechecks the tree under no
+// tags; without this anchor it would hit "build constraints exclude all Go
+// files in test/e2e" and break the Lint gate. It carries the live-E2E suite
+// state (vars + initLiveE2ESuite/teardownLiveE2ESuite/resolveKubeconfigPath
+// helpers) but NO Test entry point of its own — under no tags `go test`
+// reports "no tests to run" / ok, which is correct.
 //
-// When `-tags=live_e2e` is set, live_claude_test.go contributes its
-// Describe block to this same `package e2e`; the Describe registers a
-// spec which TestLiveE2E's RunSpecs invocation will pick up.
+// The RunSpecs entry point `TestLiveE2E` lives in live_suite_entry_test.go
+// behind `//go:build live_e2e`, deliberately separated so it is NOT compiled
+// into the kind_e2e binary alongside TestKindE2E's own RunSpecs (two RunSpecs
+// callers in one binary trips Ginkgo's "Rerunning Suite" guard — Failure 7).
+//
+// When `-tags=live_e2e` is set, live_claude_test.go contributes its Describe
+// block to this same `package e2e`; the Describe registers a spec which
+// TestLiveE2E's RunSpecs invocation will pick up.
 //
 // Prerequisite: a pre-existing Kubernetes cluster with TIDE installed
 // (helm install tide ./charts/tide -n tide-system). Unlike the Layer B
@@ -50,7 +59,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -93,21 +101,6 @@ var (
 	// Defaults to ~/.kube/config (via KUBECONFIG env or clientcmd defaults).
 	liveE2EKubeconfigPath string //nolint:unused // consumed only under -tags=live_e2e
 )
-
-// TestLiveE2E is the Ginkgo entry point for the live Claude nightly E2E suite.
-//
-// Always compiled (no build tag), but only contributes test cases when
-// `live_claude_test.go` (gated by `//go:build live_e2e`) is also compiled.
-// Without the tag, RunSpecs invokes with zero registered Describe blocks
-// and exits 0 with "Ran 0 of 0 Specs" — satisfies the build-tag-isolation
-// test in plan 03-11 task 1.
-//
-// Distinct from the kubebuilder `TestE2E` in e2e_suite_test.go (which is
-// gated by `//go:build e2e`); both can coexist when both tags are active.
-func TestLiveE2E(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Live Claude E2E Suite (TEST-03)")
-}
 
 // initLiveE2ESuite is invoked by live_claude_test.go's BeforeSuite (which
 // itself only registers when `-tags=live_e2e` is set). Factored out so the
