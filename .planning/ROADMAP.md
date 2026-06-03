@@ -376,7 +376,15 @@ Plans:
 
 **Release sequencing:** post-v1.0 ship-quality work. The held `v1.0.0` tag (`8a8e843`) predates this; it should move to include this fix before the public release is cut (user to confirm).
 
-**Plans:** 0 plans
+
+**Plans:** 8 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
+- [ ] 08-01-PLAN.md — Wave 0: fixture sentinel migration (bare-project.yaml, small/project.yaml) + CEL admission test scaffold + medium-http kind spec scaffold (Wave 1)
+- [ ] 08-02-PLAN.md — Revert 93595b9 core images to git-less: tide-push → distroless/static:nonroot; claude-subagent → remove apt-get git; pkg/git/doc.go partial reframe (Wave 1)
+- [ ] 08-03-PLAN.md — CEL targetRepo validator: reject file://; update GitConfig.RepoURL Pattern; make generate manifests + make helm; chart SOT clean (Wave 2)
+- [ ] 08-04-PLAN.md — Image tag alignment: :v1.0.0 → :1.0.0 in medium/demo-remote-init-job.yaml, medium/project.yaml, large/project.yaml, small/README.md (Wave 2)
+- [ ] 08-05-PLAN.md — git-http server image (images/tide-git-http-server/); medium sample manifests (git-http-server-deployment.yaml, per-namespace-resources.yaml); project.yaml http:// targetRepo; cmd/tide-push scheme-conditional GIT_PAT guard (Wave 3)
+- [ ] 08-06-PLAN.md — Docs correction: medium README 9-step sequence + false-mount claim removed; pkg/git/doc.go final reframe (Wave 3)
+- [ ] 08-07-PLAN.md — CI coverage: nightly-integration.yml SC-1 image-smoke step; medium_http_test.go real assertions (Wave 4)
+- [ ] 08-08-PLAN.md — Live minikube re-test checkpoint: real Claude Haiku medium run → Project=Complete; 08-VERIFICATION.md gate artifact (Wave 5)
