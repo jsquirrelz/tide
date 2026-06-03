@@ -1,0 +1,96 @@
+# examples/projects/medium/git-http-server-deployment.yaml — Phase 8 in-cluster git remote.
+#
+# The tide-git-http-server Deployment serves the bare git repository on
+# demo-remote-pvc over HTTP (smart HTTP protocol via git http-backend CGI).
+# This replaces the never-working file:// transport with an in-cluster http://
+# URL that exercises the same pure-Go go-git transport as production HTTPS.
+#
+# T-08-05-01 (Tampering): Service type is ClusterIP — the server is NOT
+# reachable from outside the cluster. Anonymous push intentional for demo only.
+#
+# T-08-05-04 (EoP): Container runs as nonroot UID 1000 (matches the image's
+# USER 1000 directive + Deployment securityContext).
+#
+# RWO ORDERING (Pitfall 3 mitigation): demo-remote-pvc is ReadWriteOnce.
+# The init Job and the server Deployment CANNOT hold the PVC mount simultaneously
+# on kind/minikube (local-path provisioner is node-local exclusive). Apply sequence:
+#   Step 5: kubectl wait --for=condition=Complete job/demo-remote-init -n tide-sample-medium --timeout=2m
+#   Step 6: kubectl apply -f examples/projects/medium/git-http-server-deployment.yaml
+# The init Job's Pod terminates after completion, releasing the PVC mount.
+# Only THEN does the server Deployment Pod start and mount the PVC.
+#
+# PVC mount path: The init Job populates the repo at /workspace/demo-remote.git.
+# The server Deployment mounts the same PVC at /srv/git/ (different mount path,
+# same storage), so the repo is served as /srv/git/demo-remote.git — matching
+# the GIT_PROJECT_ROOT in nginx.conf.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-http-server
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+    app.kubernetes.io/component: git-http-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-http-server
+  template:
+    metadata:
+      labels:
+        app: git-http-server
+        app.kubernetes.io/component: git-http-server
+        tideproject.k8s/sample: medium
+    spec:
+      containers:
+        - name: git-http-server
+          image: ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          volumeMounts:
+            # Mount demo-remote-pvc at /srv/git/ so the repo bootstrapped by the
+            # init Job at /workspace/demo-remote.git is served at /srv/git/demo-remote.git.
+            # (GIT_PROJECT_ROOT in nginx.conf is /srv/git)
+            - name: demo-remote
+              mountPath: /srv/git
+          securityContext:
+            # T-08-05-04: non-root enforcement at container level.
+            runAsUser: 1000
+            runAsNonRoot: true
+            # readOnlyRootFilesystem must be false — nginx writes pid/tmp files to
+            # /run/nginx/ and /var/lib/nginx/tmp/; fcgiwrap writes the Unix socket
+            # to /run/fcgi.sock. These are pre-created by the Dockerfile with
+            # nonroot ownership.
+            readOnlyRootFilesystem: false
+      volumes:
+        - name: demo-remote
+          persistentVolumeClaim:
+            claimName: demo-remote-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-http-server
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+    app.kubernetes.io/component: git-http-server
+spec:
+  # T-08-05-01 (Tampering) mitigation: ClusterIP (NOT NodePort or LoadBalancer).
+  # Only pods inside the cluster can reach this service. The anonymous push
+  # capability is intentional for this in-cluster demo context.
+  type: ClusterIP
+  selector:
+    app: git-http-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

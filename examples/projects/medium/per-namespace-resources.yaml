@@ -1,0 +1,60 @@
+# examples/projects/medium/per-namespace-resources.yaml — Phase 8 per-namespace deps.
+#
+# The TIDE Helm chart provisions tide-projects PVC + tide-subagent SA in tide-system.
+# A Project in a different namespace (tide-sample-medium) needs these resources mirrored
+# locally — the controller's reconciler expects them in the Project's namespace.
+#
+# Resources provided here:
+#   1. tide-projects PVC — workspace storage for clone/push/subagent Jobs
+#   2. tide-subagent SA  — identity for executor pods (D-G3 harness UID)
+#
+# Resource NOT provided here (must be manually mirrored from tide-system):
+#   3. tide-signing-key Secret — contains a cluster-unique signing key; must be
+#      copied from tide-system after Helm install (apply sequence step 4):
+#        SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system \
+#          -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+#        kubectl apply -f - <<EOF
+#        apiVersion: v1
+#        kind: Secret
+#        metadata:
+#          name: tide-signing-key
+#          namespace: tide-sample-medium
+#        type: Opaque
+#        data:
+#          TIDE_SIGNING_KEY: ${SIGNING_KEY}
+#        EOF
+#
+# kind/minikube note: The local-path storage class uses WaitForFirstConsumer binding.
+# The tide-projects PVC won't bind until a Pod is scheduled against it. For kind-based
+# installs, pre-warm with a busybox pod or let the clone Job trigger binding naturally.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+spec:
+  # ReadWriteMany is the production default (multiple Jobs can mount simultaneously).
+  # On kind/minikube with local-path provisioner (ReadWriteOnce only), this PVC
+  # will not bind. For kind-based testing, change to ReadWriteOnce and ensure
+  # only one Job mounts at a time (enforced by wave sequencing).
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+  # No RBAC annotations — the controller's Helm chart manages the ClusterRole binding.
+  # This SA is the identity that clone/push/subagent executor pods run as (D-G3).
