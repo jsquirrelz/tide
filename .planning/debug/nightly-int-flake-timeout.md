@@ -3,7 +3,7 @@ slug: nightly-int-flake-timeout
 status: fix-applied-pending-ci-verify
 trigger: "Nightly-integration workflow (run 26849997916, commit 0645e1a) is RED on two distinct CI-harness failures in `make test-int`. Neither reproduces locally (local: Layer A 29/29 + Layer B 14/14 green). Fix so nightly runs green; this gates the v1.0.0 release (tag held local-only at 8a8e843). FAILURE 1 — Layer A envtest flake (1 of 29): init_test.go:101 ART-01 'creates a tide-init-{UID} Job on the first reconcile' failed under CI contention; 28/29 passed. The per-push path (make test-int-fast) guards this contention-flaky class with -ginkgo.flake-attempts=3, but nightly's full make test-int runs the envtest layer WITHOUT flake-attempts (mixed go-test package — flag breaks non-Ginkgo pkgs). FAILURE 2 — Layer B kind BeforeSuite (suite_test.go:446): helm upgrade --install ... --wait --timeout 5m -> context deadline exceeded at 5m1s. Images ARE built + kind-loaded by Makefile test-int-kind-prep and installed pullPolicy=IfNotPresent (NOT ImagePull). Controller Deployment didn't reach Ready within 5m on the cold 2-core ubuntu-latest runner. OBSERVATION GAP: cannot tell 5m-too-tight vs real pod failure — post-failure `kind export logs` artifact was EMPTY because the suite's AfterSuite (suite_test.go:186) deletes the tide-test cluster BEFORE the workflow's failure-collection step (nightly-integration.yml:94-101) runs."
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-06-03
 phase: 07-project-to-milestone-authoring-and-self-bootstrap
 ---
 
@@ -22,10 +22,9 @@ phase: 07-project-to-milestone-authoring-and-self-bootstrap
 ## Current Focus
 
 hypothesis:
-- **Failure 1 (Layer A ART-01):** A contention-induced `Eventually`-timeout flake — the SAME class the per-push `test-int-fast` already mitigates with `-ginkgo.flake-attempts=3`. Nightly's full `make test-int` (Makefile:120) runs `go test ./test/integration/...` across a MIXED package set (Ginkgo envtest + kind specs AND plain go-tests like the helm-template contract tests), so `-ginkgo.flake-attempts` cannot be passed to that invocation (it errors "flag provided but not defined" on non-Ginkgo pkgs). Result: nightly Layer A runs WITHOUT the retry protection the fast path has → a single contention flake fails the whole package. NOT a product defect (ART-01 passes locally + per-push).
-- **Failure 2 (Layer B helm --wait timeout):** UNDETERMINED between (a) 5m `--wait` genuinely too tight for cold-runner: build 4 images + kind-load + cert-manager + manager pod scheduling/cert-issuance on a 2-core runner, vs (b) a real manager-pod failure (CrashLoop / webhook-cert wait / config). Cannot disambiguate without pod-level logs, which were destroyed by AfterSuite before collection.
+- All four failures are now root-caused with runtime evidence. Failures 1, 2, 3 are FIXED + CI-confirmed. Failure 4 (the LAST blocker) had its root cause PROVEN in run 26857361275 and the thorough fix is APPLIED this cycle (see Resolution → Failure 4). Awaiting a fresh nightly to confirm the e2e suite reaches green end-to-end.
 
-next_action: FIRST close the observability gap so the NEXT nightly run can disambiguate Failure 2's root cause — make the kind suite retain the cluster on failure (or collect pod logs/describe/events BEFORE AfterSuite teardown) so `helm`-timeout-vs-pod-failure becomes visible. Confirm whether the suite already supports `KEEP_KIND_CLUSTER` and whether AfterSuite honors it on failure. Only THEN decide Failure 2's true fix (raise `--wait` timeout + add a readiness-diagnostic dump, vs fix a real pod issue). In parallel, design Failure 1's fix: give nightly Layer A the same contention protection as the fast path WITHOUT passing `-ginkgo.flake-attempts` to the mixed package (e.g. split the envtest invocation in `make test-int` to a Ginkgo-only call with flake-attempts, like `test-int-fast` does, then run the remaining non-Ginkgo pkgs separately). Recommend thorough fixes only — NO skip/quarantine of ART-01, NO blanket timeout inflation without evidence. FAILURE 4 (this cycle, diagnostics-only): observability gap now CLOSED — spec-failure dump (`dumpE2ESpecFailureDiagnostics`) added to the kind_e2e gate_flow Ordered container via `AfterEach`+`CurrentSpecReport().Failed()`, dumping the `tide-e2e-gates` authoring Jobs/pods + CR ladder + milestone .status + controller-manager logs to stdout before teardown. Awaiting a fresh nightly to capture proof of WHY the milestone parks at Running (ImagePullBackOff of the dispatched authoring/subagent Job is the leading hypothesis). The real fix is DEFERRED to the next cycle, contingent on that evidence. No behavior/image/chart/timeout change this cycle.
+next_action: Orchestrator triggers a fresh `nightly-integration.yml` run and watches BOTH steps (`make test-int` AND `make test-e2e-kind`) to green. The Failure-4 fix mirrors the integration suite's per-namespace subagent wiring (tide-subagent SA + tide-projects PVC + prewarm + tide-signing-key Secret mirror) into the gate_flow test namespace `tide-e2e-gates`, AND builds+kind-loads the stub-subagent + credproxy images at `:phase4-test` with `images.stubSubagent`/`images.credProxy` `tag`+`pullPolicy=IfNotPresent` chart overrides. The spec-failure diagnostics hook (`dumpE2ESpecFailureDiagnostics`) is KEPT — if any further blocker surfaces it will show it. If the gate_flow specs now pass, this debug session closes and the v1.0.0 tag (held local-only at 8a8e843) is clear to ship.
 
 ## Evidence
 
@@ -50,11 +49,17 @@ next_action: FIRST close the observability gap so the NEXT nightly run can disam
 
 - timestamp: 2026-06-02 — **DIAGNOSTICS ADDED (observability-only cycle, NO behavior/image fix).** To capture definitive evidence for Failure 4 on the NEXT nightly: added a spec-failure-triggered dump to the kind_e2e suite. New helper `dumpE2ESpecFailureDiagnostics(reason, testNs)` in `test/e2e/spec_diagnostics_test.go` (mirrors the existing `dumpE2EControllerDiagnostics`/`dumpControllerDiagnostics` pattern; writes to stdout so it survives AfterSuite cluster teardown). Wired via an `AfterEach` in `gate_flow_test.go`'s Ordered container guarded by `CurrentSpecReport().Failed()`, scoped to the gate-flow test namespace `tide-e2e-gates` AND controller namespace `tide-system`; it fires BEFORE `AfterAll` deletes the ns. Dumps: `kubectl get jobs,pods -n tide-e2e-gates -o wide` (THE key signal — authoring Job ImagePullBackOff vs Running vs Completed), `describe pods` (pull errors/events), `get events --sort-by=.lastTimestamp`, the full CR ladder `get projects,milestones,phases,plans,tasks,waves -o wide` + `get milestones -o yaml` (so .status conditions reveal WHY it's parked), and `kubectl logs -n tide-system -l control-plane=controller-manager --all-containers --tail=300` (the reconcile decisions). Greppable `=== E2E SPEC-FAILURE DIAGNOSTICS ... ===` header/footer. NO image-loading / chart-arg / timeout / product change; charts/ + hack/helm/ untouched. Cheap local checks GREEN: `gofmt -l` clean, `go vet -tags=kind_e2e ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.55s), `git diff --quiet charts/` + `git diff --quiet hack/helm/` both clean. Next: orchestrator triggers a fresh nightly; the captured dump confirms/refutes the ImagePullBackOff-of-authoring-Job hypothesis, then a follow-up cycle applies the real fix.
 
+- timestamp: 2026-06-03 — **FAILURE 4 ROOT CAUSE PROVEN** via dumpE2ESpecFailureDiagnostics (run 26857361275, commit 8462595). The Milestone DID dispatch its planner Job (status: `message: Planner Job tide-milestone-...-1 dispatched`, `phase: Running` — controller logic is CORRECT), but the Job is stuck `Running 0/1` because: `Warning FailedCreate … pods "tide-milestone-...-1-" is forbidden: error looking up service account tide-e2e-gates/tide-subagent: serviceaccount "tide-subagent" not found`. So the planner Job cannot create its pod → milestone never settles → stuck at Running 60s. **My ImagePullBackOff hypothesis was WRONG as the FIRST blocker** — the actual first blocker is the missing `tide-subagent` ServiceAccount in the Project's namespace. (The Job image IS the chart-default `ghcr.io/jsquirrelz/tide-stub-subagent:1.0.0`, which the e2e harness does NOT load — so ImagePullBackOff would be the NEXT blocker once the SA exists. Both must be fixed.) This is why diagnostics-first mattered.
+- timestamp: 2026-06-03 — Complete F4 requirement set (from internal/dispatch/podjob/jobspec.go): a subagent Job in a Project namespace needs FOUR namespace-scoped resources the chart only creates in `.Release.Namespace` (tide-system): `tide-subagent` SA (jobspec.go:63,403), `tide-projects` PVC (jobspec.go:124, backend.go:200), `tide-signing-key` Secret (jobspec.go:294, credproxy sidecar envFrom), and the loadable subagent + credproxy images. The INTEGRATION suite already provides all of these for its namespace via `ensureSubagentSA(ns)` (suite_test.go:642), `ensureProjectsPVC(ns)` (:663) + PVC prewarm, the tide-signing-key mirror (:180), and test-int-kind-prep image load + helmControllerArgs `images.stubSubagent.tag=test`/`images.credProxy.tag=test` overrides. The e2e gate_flow test creates only the `tide-e2e-gates` namespace + the Project/Milestone — NONE of the subagent wiring. F4 fix = mirror the integration suite's per-namespace subagent wiring into the gate_flow test namespace + build/load/override stub-subagent + credproxy images in the e2e harness.
+
+- timestamp: 2026-06-03 — **FAILURE 4 FIX APPLIED** (test-harness only — NO chart/workflow/hack/helm change). Confirmed jobspec.go requirements at source before editing: PodSpec.ServiceAccountName = ServiceAccountSubagent "tide-subagent" (jobspec.go:403, const :63); PVC ClaimName = opts.PVCName "tide-projects" (jobspec.go:389); credproxy native-sidecar injected because the gate_flow Project sets providerSecretRef (credproxyEnabled gate jobspec.go:271), and its envFrom references the `tide-signing-key` Secret (jobspec.go:294). (A) `test/e2e/kind_setup_test.go`: new exported-within-package helper `kindE2EEnsureSubagentWiring(ns)` that provisions the tide-subagent SA (`kindE2EEnsureSubagentSA`), tide-projects PVC (`kindE2EEnsureProjectsPVC`) + ClaimBound prewarm via a busybox pause Pod (`kindE2EPVCPrewarm`, mirrors the integration suite's pvcPrewarmPod for kind's WaitForFirstConsumer local-path provisioner), and the tide-signing-key Secret mirrored from `tide-system` into the target ns (`kindE2EEnsureSigningKeySecret`). (B) `kindBuildAndLoadImages()` refactored into a table of {tag, dockerfile} builds that now ALSO builds + kind-loads the stub-subagent (images/stub-subagent/Dockerfile) and credproxy (images/credproxy/Dockerfile) images at the shared `:phase4-test` tag (new const `kindE2EImageTag`), alongside the existing manager (Dockerfile) + dashboard (Dockerfile.dashboard) builds. (C) `kindApplyChart()` adds `--set images.stubSubagent.tag=phase4-test --set images.stubSubagent.pullPolicy=IfNotPresent` and the same for `images.credProxy`, so the dispatched authoring Job uses the kind-loaded images instead of the chart-default `:<appVersion>` refs absent on the fresh CI node. (D) `gate_flow_test.go` BeforeAll calls `kindE2EEnsureSubagentWiring(testNamespace)` right after the `tide-e2e-gates` namespace is created and before the Project/Milestone apply. The `dumpE2ESpecFailureDiagnostics` AfterEach hook is KEPT. Cheap local checks GREEN: `gofmt -l` clean on all three files, `go vet -tags=kind_e2e ./test/e2e/...` exit 0, `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.56s), `git diff --quiet charts/` + `git diff --quiet hack/helm/` both clean. Heavy kind suite NOT run locally (OOM, non-reproducing). Next: orchestrator triggers a fresh nightly to confirm gate_flow specs reach green; if a new blocker surfaces the spec-failure diagnostics will show it.
+
 ## Eliminated
 
 - hypothesis: "ART-01 / the kind helm-install is a v1 product regression" — ELIMINATED (pending re-verify): both layers are green locally (Layer A 29/29, Layer B 14/14, full `make test-int` exit 0) and the per-push `test`/`Tests`/`Lint` workflows are green on the same commit 0645e1a. Failures are confined to the cold-runner CI environment.
 - hypothesis: "Layer B failed on ImagePullBackOff of the FOUR test-loaded images" — ELIMINATED: the controller/stub-subagent/credproxy/push images ARE kind-loaded by `test-int-kind-prep` and installed `IfNotPresent`; the manager pod ran 1/1 Ready. CORRECTION (run 26851857098): it WAS an ImagePullBackOff after all — but of the FIFTH, un-handled `tide-dashboard` image (not built/loaded by test-int-kind-prep, not overridden by helmControllerArgs), which blocked helm `--wait`. The "5m readiness deadline" framing was the symptom; the dashboard pull failure is the cause.
 - hypothesis: "Failure 2 is a too-tight 5m --wait on a cold runner (raise the timeout)" — ELIMINATED: the manager Deployment reached READY 1/1 well within the window; raising the timeout would never help because the dashboard pod can never pull its image on the fresh node. Fix is to remove the dashboard from the Layer B install, not inflate the timeout.
+- hypothesis: "Failure 4 is an ImagePullBackOff of the dispatched authoring Job (the FIRST blocker)" — ELIMINATED as the FIRST blocker (run 26857361275 proof): the planner Job pod never even got created — the `tide-subagent` ServiceAccount was missing in `tide-e2e-gates`, so the Job sat `Running 0/1` with `FailedCreate … serviceaccount "tide-subagent" not found` before any image pull was attempted. ImagePullBackOff would have been the NEXT blocker once the SA existed (the chart-default `:1.0.0` subagent/credproxy images are not on the node). The F4 fix addresses BOTH (SA+PVC+Secret wiring AND the image load+override), so neither blocker resurfaces.
 
 ## Resolution
 
@@ -89,6 +94,25 @@ root_cause: |
   never switched to it — a stale Phase-4 "tag the manager image as the dashboard" shim.
   Unlike Failure 2, the dashboard is NOT disabled here: the e2e suite legitimately tests
   the dashboard, so the fix is to build the correct image, not to disable it.
+  FAILURE 4 (test-e2e-kind gate_flow spec parks Milestone at Running): PROVEN via
+  dumpE2ESpecFailureDiagnostics (run 26857361275, commit 8462595). The gate_flow fixture
+  applies ONLY a Project + Milestone, so the controller must AUTHOR children by dispatching
+  a planner Job into the Project's namespace (tide-e2e-gates) to reach AwaitingApproval.
+  The controller did this correctly (Milestone status `message: Planner Job ... dispatched`,
+  phase Running), but the Job sat `Running 0/1` with `Warning FailedCreate … pods is
+  forbidden: error looking up service account tide-e2e-gates/tide-subagent: serviceaccount
+  "tide-subagent" not found`. A subagent Job (jobspec.go) needs FOUR namespace-scoped
+  resources the chart only templates in .Release.Namespace (tide-system): the tide-subagent
+  SA (jobspec.go:63/:403 — the PROVEN first blocker), the tide-projects PVC (jobspec.go:389),
+  the tide-signing-key Secret (jobspec.go:294, credproxy sidecar envFrom — the gate_flow
+  Project has providerSecretRef so credproxy IS injected, cascade-13), and loadable
+  stub-subagent + credproxy images. The e2e harness created the test namespace + Project/
+  Milestone but NONE of this wiring, while the integration suite already provides all of it
+  for its own namespace (ensureSubagentSA / ensureProjectsPVC + prewarm / ensureSigningKeySecret
+  / test-int-kind-prep image load + helmControllerArgs overrides). This is the SAME
+  cross-namespace-Project gap as the integration suite once had, just in the e2e runtime path.
+  The chart correctly scopes these resources to .Release.Namespace for real single-namespace
+  installs; wiring a cross-namespace test Project is the test harness's responsibility.
 fix: |
   FAILURE 1 (thorough, no quarantine): split `make test-int` (Makefile) into TWO separate
   go-test invocations under one `set -e` shell — (a) Layer A envtest as a Ginkgo-ONLY call
@@ -114,19 +138,49 @@ fix: |
   all:dist). Added dumpE2EControllerDiagnostics() (mirrors the integration suite's
   dumpControllerDiagnostics()) on the helm-install failure path, dumping
   deployments/pods/events + manager and dashboard logs (current+previous) BEFORE Fail()
-  so evidence survives the e2e AfterSuite teardown (the workflow log-collection step only
-  targets tide-test). The chart and Dockerfile.dashboard themselves are untouched.
+  so evidence survives the e2e AfterSuite teardown. The chart and Dockerfile.dashboard
+  themselves are untouched.
+  FAILURE 4 (thorough, test-harness only — NO chart/workflow/hack/helm change): mirror the
+  integration suite's per-namespace subagent wiring into the e2e gate_flow path.
+  (A) In test/e2e/kind_setup_test.go, added kindE2EEnsureSubagentWiring(ns) and its four
+  sub-helpers — kindE2EEnsureSubagentSA (tide-subagent SA), kindE2EEnsureProjectsPVC
+  (tide-projects RWO PVC), kindE2EPVCPrewarm (busybox pause Pod that mounts the PVC and waits
+  for ClaimBound, compensating for kind's WaitForFirstConsumer local-path provisioner; idempotent
+  no-op if already Bound), and kindE2EEnsureSigningKeySecret (reads the helm-created
+  tide-signing-key from tide-system and applies a copy into the target ns). Ported field-for-
+  field from the integration suite's ensureSubagentSA / ensureProjectsPVC / pvcPrewarmPod /
+  ensureSigningKeySecret, adapted to the kindE2E* names (kindE2EKubeconfigPath, kindE2ECtx,
+  kindE2EClient).
+  (B) Refactored kindBuildAndLoadImages() into a {tag, dockerfile} build table that now ALSO
+  builds + kind-loads the stub-subagent (images/stub-subagent/Dockerfile) and credproxy
+  (images/credproxy/Dockerfile) images at a shared `:phase4-test` tag (new const
+  kindE2EImageTag), alongside the existing manager + dashboard builds.
+  (C) kindApplyChart() now also passes `--set images.stubSubagent.tag=phase4-test
+  --set images.stubSubagent.pullPolicy=IfNotPresent` and the same for `images.credProxy`, so
+  the dispatched authoring Job uses the kind-loaded images instead of the chart-default
+  `:<appVersion>` refs absent on the fresh CI node.
+  (D) gate_flow_test.go BeforeAll calls kindE2EEnsureSubagentWiring(testNamespace) right after
+  the tide-e2e-gates namespace is created and before the Project/Milestone apply.
+  The dumpE2ESpecFailureDiagnostics AfterEach hook is KEPT (durable future-proofing; it proved
+  the root cause). The chart and hack/helm/ are untouched — cross-namespace test wiring is the
+  harness's job, exactly as the integration suite handles it.
 verification: |
-  Local cheap checks (where Failure 2 does NOT reproduce — heavy kind run skipped to avoid VM
-  OOM): gofmt clean on suite_test.go; `go vet ./test/integration/kind/...` clean; kind test
-  binary compiles (`go test -run '^$' ./test/integration/kind/...` ok, 0.589s); `git diff
-  --quiet charts/` CLEAN (no chart drift — fix is test-harness-only). FAILURE 1 already proven
-  GREEN in CI (run 26851857098, Layer A 29/29). FAILURE 2 fix shape validated by the pinned
-  diagnostics; CI BAR (pending — run by orchestrator/user): a fresh full nightly-integration.yml
-  run GREEN end-to-end on GitHub-hosted runners across BOTH steps — Layer B `make test-int` AND
-  `make test-e2e-kind`. Trigger via `gh workflow run nightly-integration.yml --ref main` and
-  watch both steps. If anything recurs, dumpControllerDiagnostics() output will disambiguate.
+  Local cheap checks (where Failures 2/3/4 do NOT reproduce — heavy kind run skipped to avoid
+  VM OOM): FAILURE 4 cycle — `gofmt -l test/e2e/{kind_setup_test.go,gate_flow_test.go,
+  spec_diagnostics_test.go}` clean; `go vet -tags=kind_e2e ./test/e2e/...` exit 0;
+  `go test -tags=kind_e2e -run '^$' ./test/e2e/...` compiles (0.56s); `git diff --quiet charts/`
+  + `git diff --quiet hack/helm/` both CLEAN (test-harness-only). FAILURES 1/2/3 already proven
+  GREEN in CI (run 26851857098 Layer A 29/29; run 26853449717 make test-int fully green; run
+  26854475599 e2e BeforeSuite PASSED + 3 dashboard specs pass). FAILURE 4 fix shape validated by
+  the run-26857361275 diagnostics (missing SA proven). CI BAR (pending — run by orchestrator/user):
+  a fresh full nightly-integration.yml run GREEN end-to-end on GitHub-hosted runners across BOTH
+  steps — Layer B `make test-int` AND `make test-e2e-kind` (gate_flow specs reach AwaitingApproval
+  → approve → leave AwaitingApproval). Trigger via `gh workflow run nightly-integration.yml --ref
+  main` and watch both steps. If anything recurs, dumpControllerDiagnostics() /
+  dumpE2ESpecFailureDiagnostics() output will disambiguate.
 files_changed:
-  - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [prior cycle, commit 96a3b44]
-  - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path [prior cycle]; --set dashboard.enabled=false [this cycle])
-  - test/e2e/kind_setup_test.go (kindBuildAndLoadImages builds dashboard from Dockerfile.dashboard; dumpE2EControllerDiagnostics on helm-fail path) [Failure 3, this cycle]
+  - Makefile (test-int split: flake-guarded Layer A + separate Layer B) [Failure 1, commit 96a3b44]
+  - test/integration/kind/suite_test.go (dumpControllerDiagnostics on helm-fail path; --set dashboard.enabled=false) [Failures 1/2, prior cycles]
+  - test/e2e/kind_setup_test.go (Failure 3: dashboard from Dockerfile.dashboard + dumpE2EControllerDiagnostics; Failure 4: kindE2EEnsureSubagentWiring SA+PVC+prewarm+signing-key helpers, stub-subagent+credproxy image build/load table, images.stubSubagent/credProxy chart overrides)
+  - test/e2e/spec_diagnostics_test.go (dumpE2ESpecFailureDiagnostics spec-failure dump) [Failure 4 diagnostics, prior cycle]
+  - test/e2e/gate_flow_test.go (Failure 4: BeforeAll calls kindE2EEnsureSubagentWiring before Project apply; AfterEach spec-failure dump kept)

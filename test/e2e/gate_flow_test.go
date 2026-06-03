@@ -54,6 +54,21 @@ var _ = Describe("Phase 4 Gate Flow E2E", Ordered, func() {
 		By("creating test namespace " + testNamespace)
 		Expect(kindApplyYAML(fmt.Sprintf("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n", testNamespace))).To(Succeed())
 
+		// Failure 4 fix: the gate_flow Milestone authors its children by
+		// dispatching a planner Job into THIS namespace. That Job's PodSpec
+		// references the tide-subagent SA, the tide-projects PVC, and (because
+		// the Project has a providerSecretRef → credproxy sidecar, cascade-13)
+		// the tide-signing-key Secret + the stub-subagent/credproxy images — all
+		// namespace-scoped resources the chart only templates in tide-system.
+		// Without the SA, Pod creation fails with FailedCreate
+		// "serviceaccount tide-subagent not found", the Job sits Running 0/1, and
+		// the Milestone never settles → parks at Running → this suite's first spec
+		// times out (proven in run 26857361275). Mirror the integration suite's
+		// per-namespace subagent wiring here (SA + PVC + prewarm + signing-key
+		// mirror); the images are kind-loaded + overridden in kind_setup_test.go.
+		By("provisioning per-namespace subagent wiring (SA + PVC + signing-key) in " + testNamespace)
+		kindE2EEnsureSubagentWiring(testNamespace)
+
 		By("applying a Project + Milestone with gates.milestone=approve")
 		// Minimal hierarchy: Secret + Project + Milestone. The reconciler
 		// chain (Phase 1-3) drives Milestone phase transitions; Phase 4

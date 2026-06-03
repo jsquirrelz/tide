@@ -53,6 +53,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -90,6 +91,21 @@ const (
 	// kindE2EBinDir is where built CLI binaries land. The dashboard image
 	// is built via `docker build` and loaded into kind directly.
 	kindE2EBinDir = "bin"
+
+	// kindE2EImageTag is the shared local tag stamped onto every image built
+	// + kind-loaded by kindBuildAndLoadImages(). All chart image overrides in
+	// kindApplyChart() reference this tag with pullPolicy=IfNotPresent so the
+	// dispatched Jobs use the loaded images instead of the chart-default
+	// :<appVersion> refs that are absent on the fresh CI kind node.
+	kindE2EImageTag = "phase4-test"
+
+	// kindE2EStubSubagentImage / kindE2ECredProxyImage are the subagent-side
+	// images a dispatched planner/executor Job needs once the per-namespace
+	// subagent wiring (SA + PVC + signing-key Secret) exists. The gate_flow
+	// Project has a providerSecretRef, so the credproxy sidecar IS injected
+	// (cascade-13) — both images must be present on the node.
+	kindE2EStubSubagentImage = "ghcr.io/jsquirrelz/tide-stub-subagent:" + kindE2EImageTag
+	kindE2ECredProxyImage    = "ghcr.io/jsquirrelz/tide-credproxy:" + kindE2EImageTag
 )
 
 var (
@@ -160,7 +176,7 @@ var _ = BeforeSuite(func() {
 	By("Installing cert-manager")
 	kindInstallCertManager()
 
-	By("Building + loading controller + dashboard images into kind")
+	By("Building + loading controller + dashboard + subagent images into kind")
 	kindBuildAndLoadImages()
 
 	By("Applying TIDE chart via helm install (dashboard.enabled=true)")
@@ -306,53 +322,71 @@ func kindInstallCertManager() {
 	}
 }
 
-// kindBuildAndLoadImages builds the controller image (from Dockerfile, which
-// produces /manager) and the dashboard image (from Dockerfile.dashboard, which
-// produces /dashboard), then kind-loads both tags into the e2e cluster.
+// kindBuildAndLoadImages builds + kind-loads every image the e2e suite needs:
 //
-// The two images MUST come from distinct Dockerfiles. The chart's
-// dashboard-deployment.yaml runs `/dashboard` as its container command, but the
-// manager image only ships `/manager`. Reusing the manager image for the
-// dashboard tag (the original Phase-4 shim) leaves the dashboard pod in
-// CrashLoopBackOff with "exec: /dashboard: not found", which never becomes
-// Ready and blocks helm `--wait` until the 5m deadline (see Dockerfile.dashboard's
-// own header for this exact trap). Dockerfile.dashboard's `go build ./cmd/dashboard`
-// embeds the committed Vite SPA via //go:embed all:dist (cmd/dashboard/embed/dist/),
-// so no Node/npm step is needed at build time.
+//   - controller (Dockerfile → /manager): the manager Deployment.
+//   - dashboard (Dockerfile.dashboard → /dashboard, embeds the committed SPA):
+//     the dashboard Deployment. The two images MUST come from distinct
+//     Dockerfiles — the chart's dashboard-deployment.yaml runs `/dashboard`,
+//     but the manager image only ships `/manager`. Reusing the manager image
+//     for the dashboard tag (the original Phase-4 shim) left the dashboard pod
+//     in CrashLoopBackOff with "exec: /dashboard: not found" (Failure 3).
+//   - stub-subagent (images/stub-subagent/Dockerfile) + credproxy
+//     (images/credproxy/Dockerfile): the subagent-side images a dispatched
+//     planner/executor Job runs. The gate_flow Milestone authors its children
+//     by dispatching a planner Job into the Project namespace; that Job runs
+//     the subagent container + (because the Project has a providerSecretRef)
+//     the credproxy native-sidecar (cascade-13). Without these loaded, the Job
+//     pod ImagePullBackOffs on the chart-default :<appVersion> refs that are
+//     absent on the fresh CI kind node, so the Milestone never settles and the
+//     gate_flow spec times out parked at Running (Failure 4). The integration
+//     suite's `make test-int-kind-prep` loads these same two images; we mirror
+//     it here. All four tags are kind-loaded into tide-e2e-phase4.
 func kindBuildAndLoadImages() {
 	repoRoot, err := kindRepoRoot()
 	Expect(err).NotTo(HaveOccurred())
 
-	// Manager image (Dockerfile → /manager).
-	managerBuild := exec.CommandContext(kindE2ECtx, "docker", "build",
-		"-t", "controller:phase4-test",
-		"-f", "Dockerfile", ".")
-	managerBuild.Dir = repoRoot
-	if out, bErr := managerBuild.CombinedOutput(); bErr != nil {
-		Fail(fmt.Sprintf("docker build (manager) failed: %v\n%s", bErr, out))
+	type imageBuild struct {
+		tag        string
+		dockerfile string
+	}
+	builds := []imageBuild{
+		// Manager image (Dockerfile → /manager).
+		{tag: "controller:" + kindE2EImageTag, dockerfile: "Dockerfile"},
+		// Dashboard image (Dockerfile.dashboard → /dashboard, embeds the committed SPA).
+		{tag: "ghcr.io/jsquirrelz/tide-dashboard:" + kindE2EImageTag, dockerfile: "Dockerfile.dashboard"},
+		// Subagent-side images for dispatched authoring/executor Jobs (Failure 4).
+		// Mirrors `make test-int-kind-prep` (Makefile:141-142).
+		{tag: kindE2EStubSubagentImage, dockerfile: "images/stub-subagent/Dockerfile"},
+		{tag: kindE2ECredProxyImage, dockerfile: "images/credproxy/Dockerfile"},
 	}
 
-	// Dashboard image (Dockerfile.dashboard → /dashboard, embeds the committed SPA).
-	dashboardBuild := exec.CommandContext(kindE2ECtx, "docker", "build",
-		"-t", "ghcr.io/jsquirrelz/tide-dashboard:phase4-test",
-		"-f", "Dockerfile.dashboard", ".")
-	dashboardBuild.Dir = repoRoot
-	if out, bErr := dashboardBuild.CombinedOutput(); bErr != nil {
-		Fail(fmt.Sprintf("docker build (dashboard) failed: %v\n%s", bErr, out))
+	for _, b := range builds {
+		buildCmd := exec.CommandContext(kindE2ECtx, "docker", "build",
+			"-t", b.tag, "-f", b.dockerfile, ".")
+		buildCmd.Dir = repoRoot
+		if out, bErr := buildCmd.CombinedOutput(); bErr != nil {
+			Fail(fmt.Sprintf("docker build %s (-f %s) failed: %v\n%s", b.tag, b.dockerfile, bErr, out))
+		}
 	}
 
-	// Load both tags into kind.
-	for _, img := range []string{"controller:phase4-test", "ghcr.io/jsquirrelz/tide-dashboard:phase4-test"} {
-		loadCmd := exec.CommandContext(kindE2ECtx, "kind", "load", "docker-image", img, "--name", kindE2EClusterName)
+	// Load every tag into kind.
+	for _, b := range builds {
+		loadCmd := exec.CommandContext(kindE2ECtx, "kind", "load", "docker-image", b.tag, "--name", kindE2EClusterName)
 		lOut, lErr := loadCmd.CombinedOutput()
 		if lErr != nil {
-			Fail(fmt.Sprintf("kind load docker-image %s failed: %v\n%s", img, lErr, lOut))
+			Fail(fmt.Sprintf("kind load docker-image %s failed: %v\n%s", b.tag, lErr, lOut))
 		}
 	}
 }
 
 // kindApplyChart helm-installs the chart with the Phase 4 dashboard enabled
-// and the test image tags loaded above.
+// and the test image tags loaded above. The subagent-side image overrides
+// (images.stubSubagent / images.credProxy) point the dispatched authoring Job
+// at the kind-loaded :phase4-test tags with pullPolicy=IfNotPresent so the Job
+// pod uses the local image instead of the chart-default :<appVersion> ref that
+// is absent on the fresh CI kind node (Failure 4). Mirrors the integration
+// suite's helmControllerArgs().
 func kindApplyChart() {
 	repoRoot, err := kindRepoRoot()
 	Expect(err).NotTo(HaveOccurred())
@@ -367,11 +401,20 @@ func kindApplyChart() {
 		"--create-namespace", "-n", kindE2EControllerNamespace,
 		"--kubeconfig", kindE2EKubeconfigPath,
 		"--set", "controllerManager.manager.image.repository=controller",
-		"--set", "controllerManager.manager.image.tag=phase4-test",
+		"--set", "controllerManager.manager.image.tag="+kindE2EImageTag,
 		"--set", "controllerManager.manager.image.pullPolicy=IfNotPresent",
 		"--set", "dashboard.enabled=true",
-		"--set", "dashboard.image.tag=phase4-test",
+		"--set", "dashboard.image.tag="+kindE2EImageTag,
 		"--set", "dashboard.image.pullPolicy=IfNotPresent",
+		// Subagent-side images for dispatched authoring/executor Jobs (Failure 4).
+		// The chart-default tags resolve to ghcr.io/jsquirrelz/tide-{stub-subagent,
+		// credproxy}:<appVersion>, which the fresh CI kind node cannot pull; the
+		// kind-loaded :phase4-test tags + IfNotPresent make the dispatched Job use
+		// the local image. Mirrors helmControllerArgs() in the integration suite.
+		"--set", "images.stubSubagent.tag="+kindE2EImageTag,
+		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
+		"--set", "images.credProxy.tag="+kindE2EImageTag,
+		"--set", "images.credProxy.pullPolicy=IfNotPresent",
 		// kind's default local-path provisioner only supports RWO.
 		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
 		"--wait", "--timeout", "5m",
@@ -518,6 +561,165 @@ func kindDeleteNamespace(ns string) {
 		"delete", "namespace", ns,
 		"--ignore-not-found=true", "--timeout=30s")
 	_, _ = cmd.CombinedOutput()
+}
+
+// kindE2EEnsureSubagentWiring provisions the four namespace-scoped resources a
+// dispatched subagent Job needs in a Project's namespace (Failure 4). The chart
+// templates these only in .Release.Namespace (= tide-system), but a cross-namespace
+// Project drives the controller to dispatch Jobs into the Project's own namespace;
+// wiring them there is the test harness's responsibility (exactly as the integration
+// suite does via ensureSubagentSA/ensureProjectsPVC/pvcPrewarmPod/ensureSigningKeySecret).
+//
+// Requirements confirmed against internal/dispatch/podjob/jobspec.go:
+//   - tide-subagent ServiceAccount (ServiceAccountSubagent, jobspec.go:63 / :403) —
+//     the PROVEN first blocker (Pod create FailedCreate "serviceaccount tide-subagent
+//     not found").
+//   - tide-projects PVC (opts.PVCName, jobspec.go:389; default "tide-projects") —
+//     mounted by every Job pod; prewarmed to ClaimBound for kind's
+//     WaitForFirstConsumer local-path provisioner.
+//   - tide-signing-key Secret (jobspec.go:294, credproxy sidecar envFrom) — mirrored
+//     from the controller namespace where helm created it.
+//
+// Idempotent + best-effort: SA/PVC/Secret applies tolerate "already exists"; the PVC
+// prewarm short-circuits if the claim is already Bound.
+func kindE2EEnsureSubagentWiring(ns string) {
+	kindE2EEnsureSubagentSA(ns)
+	kindE2EEnsureProjectsPVC(ns)
+	kindE2EPVCPrewarm(ns)
+	kindE2EEnsureSigningKeySecret(ns)
+}
+
+// kindE2EEnsureSubagentSA creates the tide-subagent ServiceAccount in ns.
+// Every subagent Job's PodSpec references it by name (jobspec.go ServiceAccountSubagent
+// = "tide-subagent"); without it Pod creation fails with
+// `serviceaccount "tide-subagent" not found`. D-A4: no Role/RoleBinding — subagent
+// pods have zero K8s verbs. Idempotent (apply tolerates already-exists).
+func kindE2EEnsureSubagentSA(ns string) {
+	saYAML := fmt.Sprintf(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: %s
+automountServiceAccountToken: true
+`, ns)
+	if err := kindApplyYAML(saYAML); err != nil {
+		GinkgoWriter.Printf("kindE2EEnsureSubagentSA(%q): %v\n", ns, err)
+	}
+}
+
+// kindE2EEnsureProjectsPVC creates the tide-projects PVC in ns. Every subagent Job
+// mounts it by name (jobspec.go opts.PVCName, default "tide-projects"); without it
+// pods stay Pending with `persistentvolumeclaim "tide-projects" not found`. RWO matches
+// the helm override for kind's single-node local-path provisioner.
+func kindE2EEnsureProjectsPVC(ns string) {
+	pvcYAML := fmt.Sprintf(`apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: %s
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+`, ns)
+	if err := kindApplyYAML(pvcYAML); err != nil {
+		GinkgoWriter.Printf("kindE2EEnsureProjectsPVC(%q): %v\n", ns, err)
+	}
+}
+
+// kindE2EPVCPrewarm schedules a one-shot pause Pod mounting the namespace-local
+// tide-projects PVC, waits for it to reach ClaimBound, then deletes the Pod. This
+// compensates for kind's default rancher.io/local-path StorageClass
+// (volumeBindingMode: WaitForFirstConsumer) — the PVC stays Pending until a consuming
+// Pod is scheduled. Mirrors the integration suite's pvcPrewarmPod(). Idempotent: if the
+// PVC is already Bound it returns immediately (cheap Get only).
+func kindE2EPVCPrewarm(ns string) {
+	existing := &corev1.PersistentVolumeClaim{}
+	if err := kindE2EClient.Get(kindE2ECtx, client.ObjectKey{
+		Name:      "tide-projects",
+		Namespace: ns,
+	}, existing); err != nil {
+		GinkgoWriter.Printf("kindE2EPVCPrewarm: tide-projects PVC in %q not yet visible (%v); scheduling prewarm Pod\n", ns, err)
+	} else if existing.Status.Phase == corev1.ClaimBound {
+		GinkgoWriter.Printf("kindE2EPVCPrewarm: tide-projects PVC in %q already Bound; skipping prewarm\n", ns)
+		return
+	}
+
+	podYAML := fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: tide-projects-prewarm
+  namespace: %s
+spec:
+  restartPolicy: Never
+  containers:
+    - name: pause
+      image: busybox:1.36
+      command: ["sleep", "60"]
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: tide-projects
+`, ns)
+	if err := kindApplyYAML(podYAML); err != nil {
+		GinkgoWriter.Printf("kindE2EPVCPrewarm(%q): apply prewarm pod: %v\n", ns, err)
+	}
+
+	Eventually(func() corev1.PersistentVolumeClaimPhase {
+		pvc := &corev1.PersistentVolumeClaim{}
+		if err := kindE2EClient.Get(kindE2ECtx, client.ObjectKey{
+			Name:      "tide-projects",
+			Namespace: ns,
+		}, pvc); err != nil {
+			return ""
+		}
+		return pvc.Status.Phase
+	}, 60*time.Second, time.Second).Should(Equal(corev1.ClaimBound),
+		"tide-projects PVC in namespace %q must reach Bound after prewarm Pod scheduled", ns)
+
+	prewarm := &corev1.Pod{}
+	prewarm.Name = "tide-projects-prewarm"
+	prewarm.Namespace = ns
+	if err := kindE2EClient.Delete(kindE2ECtx, prewarm); err != nil {
+		GinkgoWriter.Printf("kindE2EPVCPrewarm: best-effort delete of prewarm Pod in %q returned %v (non-fatal)\n", ns, err)
+	}
+}
+
+// kindE2EEnsureSigningKeySecret mirrors the helm-created tide-signing-key Secret
+// from the controller namespace into ns. Every credproxy sidecar references it via
+// envFrom (jobspec.go:294) in its own Pod namespace; without the copy pods fail to
+// start with `secret "tide-signing-key" not found`. Mirrors the integration suite's
+// ensureSigningKeySecret().
+func kindE2EEnsureSigningKeySecret(ns string) {
+	cmd := exec.CommandContext(kindE2ECtx, "kubectl",
+		"--kubeconfig", kindE2EKubeconfigPath,
+		"get", "secret", "tide-signing-key",
+		"-n", kindE2EControllerNamespace,
+		"-o", "jsonpath={.data.TIDE_SIGNING_KEY}")
+	out, err := cmd.Output()
+	if err != nil {
+		GinkgoWriter.Printf("kindE2EEnsureSigningKeySecret: could not read tide-signing-key from %q: %v\n", kindE2EControllerNamespace, err)
+		return
+	}
+	keyData := strings.TrimSpace(string(out))
+	if keyData == "" {
+		GinkgoWriter.Printf("kindE2EEnsureSigningKeySecret: secret %s/tide-signing-key has empty TIDE_SIGNING_KEY\n", kindE2EControllerNamespace)
+		return
+	}
+	secretYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-signing-key
+  namespace: %s
+type: Opaque
+data:
+  TIDE_SIGNING_KEY: %s
+`, ns, keyData)
+	if err := kindApplyYAML(secretYAML); err != nil {
+		GinkgoWriter.Printf("kindE2EEnsureSigningKeySecret(%q): %v\n", ns, err)
+	}
 }
 
 // kindRunCLI invokes the built tide CLI binary, capturing stdout + stderr +
