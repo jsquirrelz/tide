@@ -34,19 +34,24 @@ limitations under the License.
 // --force-with-lease against Project.Status.git.lastPushedSHA, this is the
 // structural mitigation for Pitfall 13 (TIDE-overwrites-human-commits).
 //
-// Transport dependency on a system git binary — IMPORTANT. go-git/v5's
-// HTTP(S) and SSH transports are pure-Go (Go's crypto/tls, no CA bundle, no
-// /bin/git). Its file:// transport is NOT pure-Go: a file:// clone/fetch/push
-// shells out to the system git binary (git-upload-pack / git-receive-pack) at
-// runtime. The worktree-add path (worktree.go) PlainClones the local bare repo
-// over a file:// URL, and the demo/medium-sample bootstrap pushes over file://,
-// so ANY runtime image that exercises those paths MUST ship a system git on
-// $PATH. The git-op images (tide-demo-init, tide-push, claude-subagent) install
-// git for exactly this reason; credproxy performs no git ops and stays
-// git-less. Images that only ever use HTTPS/SSH remotes need no system git.
-// (See debug session file-transport-git-missing for the v1.0 regression where
-// the distroless/static images shipped without git and failed file:// ops with
-// `exec: "git": executable file not found in $PATH`.)
+// Transport support. go-git/v5's HTTPS and SSH transports are pure-Go —
+// they use Go's crypto/tls and require no system git binary in any runtime
+// image. Production images (tide-push, claude-subagent) use only HTTP(S) or
+// SSH remotes and carry no git binary.
+//
+// file:// is NOT a supported production transport. go-git's file:// transport
+// is NOT pure-Go: a file:// clone/fetch/push shells out to the system git
+// binary (git-upload-pack / git-receive-pack) at runtime, which is absent
+// from production images. file:// is used only internally by
+// images/tide-demo-init, which carries a system git binary (apk add git) for
+// exactly that purpose: it populates the bare repo on the demo PVC via a
+// file:// push within the init pod. Production images must not be given
+// file:// remote URLs.
+//
+// The medium sample's demo remote is served over http:// by the in-cluster
+// git-http-backend server (images/tide-git-http-server), which exercises the
+// same pure-Go HTTP transport as production HTTPS — no git binary needed in
+// tide-push or claude-subagent for this path.
 //
 // Import firewall: this package MUST NOT import LLM SDKs of any vendor or
 // the TIDE CRD API types — pkg/git is provider-agnostic and CRD-agnostic.
