@@ -34,9 +34,19 @@ limitations under the License.
 // --force-with-lease against Project.Status.git.lastPushedSHA, this is the
 // structural mitigation for Pitfall 13 (TIDE-overwrites-human-commits).
 //
-// No /bin/git shell-out. The package depends on go-git/v5 only — pure-Go,
-// works on distroless/static, no system git binary needed in the push Job
-// image. Compatible with K8s pod images that don't ship a system git.
+// Transport dependency on a system git binary — IMPORTANT. go-git/v5's
+// HTTP(S) and SSH transports are pure-Go (Go's crypto/tls, no CA bundle, no
+// /bin/git). Its file:// transport is NOT pure-Go: a file:// clone/fetch/push
+// shells out to the system git binary (git-upload-pack / git-receive-pack) at
+// runtime. The worktree-add path (worktree.go) PlainClones the local bare repo
+// over a file:// URL, and the demo/medium-sample bootstrap pushes over file://,
+// so ANY runtime image that exercises those paths MUST ship a system git on
+// $PATH. The git-op images (tide-demo-init, tide-push, claude-subagent) install
+// git for exactly this reason; credproxy performs no git ops and stays
+// git-less. Images that only ever use HTTPS/SSH remotes need no system git.
+// (See debug session file-transport-git-missing for the v1.0 regression where
+// the distroless/static images shipped without git and failed file:// ops with
+// `exec: "git": executable file not found in $PATH`.)
 //
 // Import firewall: this package MUST NOT import LLM SDKs of any vendor or
 // the TIDE CRD API types — pkg/git is provider-agnostic and CRD-agnostic.

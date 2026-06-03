@@ -36,19 +36,30 @@ COPY examples/tide-demo-fixture/ cmd/tide-demo-init/fixture/
 RUN if [ -f cmd/tide-demo-init/fixture/go.mod ]; then mv cmd/tide-demo-init/fixture/go.mod cmd/tide-demo-init/fixture/go.mod.txt; fi
 RUN if [ -f cmd/tide-demo-init/fixture/go.sum ]; then mv cmd/tide-demo-init/fixture/go.sum cmd/tide-demo-init/fixture/go.sum.txt; fi
 
-# Static binary: no CGO, stripped symbols for a smaller image. go-git/v5
-# is pure-Go and works on distroless/static (no /bin/git shell-out, no
-# CA bundle needed — file:// transports are local-only).
+# Static binary: no CGO, stripped symbols for a smaller image. The go-git/v5
+# HTTP(S)/SSH transports are pure-Go, but its file:// transport is NOT: a
+# file:// push/clone shells out to the system git binary (git-upload-pack /
+# git-receive-pack) at runtime. tide-demo-init PushContexts the embedded
+# fixture to a file:// bare repo on the shared PVC, so the runtime image
+# MUST ship /usr/bin/git (see runtime stage below). The old distroless/static
+# base carried no git and failed with `exec: "git": executable file not
+# found in $PATH` (debug session file-transport-git-missing).
 RUN CGO_ENABLED=0 GOOS=linux go build \
       -ldflags="-s -w" \
       -o /out/tide-demo-init \
       ./cmd/tide-demo-init
 
 # Stage 2: minimal runtime image.
-# distroless/static:nonroot lets the container runtime enforce USER 1000
-# cleanly across all OCI runtimes (matches images/tide-push/Dockerfile +
-# images/stub-subagent/Dockerfile pattern).
-FROM gcr.io/distroless/static:nonroot
+# alpine (not distroless/static) because tide-demo-init's file:// push shells
+# out to the system git binary; distroless has no package manager and no git.
+# alpine's apk-managed git pulls its own helper deps (git-remote-*, templates)
+# correctly — far less fragile than hand-assembling a static git into
+# distroless. We recreate the non-root UID 1000 contract that distroless
+# provided out of the box (D-G3 subagent harness UID).
+FROM alpine:3.21
+
+RUN apk add --no-cache git \
+    && adduser -D -u 1000 nonroot
 
 COPY --from=builder /out/tide-demo-init /usr/local/bin/tide-demo-init
 

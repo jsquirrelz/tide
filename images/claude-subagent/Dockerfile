@@ -36,7 +36,19 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 # v2.1.139. The signed-token credential is injected at K8s Pod-spec time by
 # the credproxy sidecar (Phase 2 D-C1..C4) — never baked into the image.
 # Host configuration directories are not bind-mounted (CLAUDE.md anti-pattern).
+#
+# git: the subagent harness clones the per-Project bare repo over a file://
+# URL (pkg/git worktree PlainClone, D-B4) — and go-git's file:// transport is
+# NOT pure-Go; it shells out to the system git binary at runtime. node:22-slim
+# (Debian) ships no git, so it must be apt-installed here, or the clone fails
+# with `exec: "git": executable file not found in $PATH` (debug session
+# file-transport-git-missing). --no-install-recommends keeps the layer lean.
 FROM node:22-slim
+
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.142
 
