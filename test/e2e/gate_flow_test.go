@@ -93,6 +93,21 @@ spec:
 		Expect(kindApplyYAML(yaml)).To(Succeed())
 	})
 
+	// On ANY spec failure in this Ordered container, dump the gate-flow test
+	// namespace (authoring Jobs/pods, CR ladder, Milestone .status) plus the
+	// controller-manager logs to stdout BEFORE AfterAll deletes the namespace
+	// and AfterSuite tears the cluster down. This is the only path that captures
+	// runtime evidence for a spec-level failure (e.g. the Milestone parked at
+	// Running) — the BeforeSuite-only dumpE2EControllerDiagnostics never fires
+	// for an It() timeout. Observability only; changes no product behavior.
+	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			dumpE2ESpecFailureDiagnostics(
+				"gate_flow spec failed: "+CurrentSpecReport().LeafNodeText,
+				testNamespace)
+		}
+	})
+
 	AfterAll(func() {
 		kindDeleteNamespace(testNamespace)
 	})
