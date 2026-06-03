@@ -23,15 +23,11 @@ COPY internal/gitleaks/ internal/gitleaks/
 COPY cmd/tide-push/ cmd/tide-push/
 
 # Static binary: no CGO, stripped symbols for a smaller image. go-git/v5's
-# HTTP(S) transport is pure-Go (uses Go's crypto/tls, no CA bundle needed),
-# and gitleaks v8 is pure-Go. BUT go-git's file:// transport is NOT pure-Go:
-# it shells out to the system git binary (git-upload-pack / git-receive-pack)
-# at runtime. tide-push pushes over whatever remote the Project declares,
-# which for the medium sample is a file:// bare repo on the shared PVC, so
-# the runtime image MUST ship /usr/bin/git (see runtime stage below). The old
-# distroless/static base carried no git and failed with `exec: "git":
-# executable file not found in $PATH` (debug session
-# file-transport-git-missing).
+# HTTPS and SSH transports are pure-Go (Go's crypto/tls, no CA bundle, no
+# /bin/git shell-out); gitleaks v8 is also pure-Go. tide-push ONLY pushes
+# over http(s) or SSH remotes (Phase 8+). The medium sample's remote is an
+# in-cluster HTTP git server (images/tide-git-http-server) — no file://
+# transport is used by tide-push in production.
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
@@ -39,20 +35,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
       ./cmd/tide-push
 
 # Stage 2: minimal runtime image.
-# alpine (not distroless/static) because tide-push's file:// push shells out
-# to the system git binary; distroless has no package manager and no git.
-# alpine's apk-managed git pulls its own helper deps (git-remote-*, templates)
-# correctly — far less fragile than hand-assembling a static git into
-# distroless. We recreate the non-root UID 1000 contract that distroless
-# provided out of the box (D-G3 subagent harness UID).
-FROM alpine:3.21
-
-RUN apk add --no-cache git \
-    && adduser -D -u 1000 nonroot
+# distroless/static:nonroot is the correct base for tide-push: go-git's
+# HTTP(S) and SSH transports are pure-Go — no system git binary needed at
+# runtime. The in-cluster git-http-backend server (images/tide-git-http-server)
+# is the demo-only transport bridge; tide-push speaks to it over HTTP (pure-Go).
+# distroless/static:nonroot provides a minimal read-only filesystem with no
+# shell, no package manager, and runs as UID 65532 (nonroot) by default —
+# satisfying D-G3 without an explicit USER directive.
+FROM gcr.io/distroless/static:nonroot
 
 COPY --from=builder /out/tide-push /usr/local/bin/tide-push
-
-# Run as non-root UID 1000 — matches D-G3 subagent harness UID.
-USER 1000
 
 ENTRYPOINT ["/usr/local/bin/tide-push"]
