@@ -380,8 +380,8 @@ Plans:
 **Plans:** 8 plans
 
 Plans:
-- [ ] 08-01-PLAN.md — Wave 0: fixture sentinel migration (bare-project.yaml, small/project.yaml) + CEL admission test scaffold + medium-http kind spec scaffold (Wave 1)
-- [ ] 08-02-PLAN.md — Revert 93595b9 core images to git-less: tide-push → distroless/static:nonroot; claude-subagent → remove apt-get git; pkg/git/doc.go partial reframe (Wave 1)
+- [x] 08-01-PLAN.md — Wave 0: fixture sentinel migration (bare-project.yaml, small/project.yaml) + CEL admission test scaffold + medium-http kind spec scaffold (Wave 1)
+- [x] 08-02-PLAN.md — Revert 93595b9 core images to git-less: tide-push → distroless/static:nonroot; claude-subagent → remove apt-get git; pkg/git/doc.go partial reframe (Wave 1)
 - [ ] 08-03-PLAN.md — CEL targetRepo validator: reject file://; update GitConfig.RepoURL Pattern; make generate manifests + make helm; chart SOT clean (Wave 2)
 - [ ] 08-04-PLAN.md — Image tag alignment: :v1.0.0 → :1.0.0 in medium/demo-remote-init-job.yaml, medium/project.yaml, large/project.yaml, small/README.md (Wave 2)
 - [ ] 08-05-PLAN.md — git-http server image (images/tide-git-http-server/); medium sample manifests (git-http-server-deployment.yaml, per-namespace-resources.yaml); project.yaml http:// targetRepo; cmd/tide-push scheme-conditional GIT_PAT guard (Wave 3)
