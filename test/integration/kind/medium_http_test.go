@@ -24,7 +24,7 @@ limitations under the License.
 //
 // Coverage target:
 //   - SC-5: CI coverage for the medium/http transport path (hermetic stub-subagent
-//     + real git-http server image, exercising go-git HTTP transport without LLM cost).
+//   - real git-http server image, exercising go-git HTTP transport without LLM cost).
 package kind_integration
 
 import (
@@ -144,7 +144,7 @@ spec:
           image: %s
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 80
+            - containerPort: 8080
               protocol: TCP
           volumeMounts:
             - name: demo-remote
@@ -172,7 +172,7 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 80
+      targetPort: 8080
       protocol: TCP
 `, ns, mediumHTTPServerImage, ns)
 }

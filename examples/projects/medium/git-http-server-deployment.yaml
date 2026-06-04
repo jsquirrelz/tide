@@ -50,7 +50,10 @@ spec:
         - name: git-http-server
           image: ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
           ports:
-            - containerPort: 80
+            # nginx listens on 8080 (nonroot UID 1000 cannot bind privileged
+            # port 80). The Service maps port 80 → targetPort 8080, so the
+            # http://git-http-server/demo-remote.git URL is unchanged.
+            - containerPort: 8080
               protocol: TCP
           volumeMounts:
             # Mount demo-remote-pvc at /srv/git/ so the repo bootstrapped by the
@@ -64,8 +67,8 @@ spec:
             runAsNonRoot: true
             # readOnlyRootFilesystem must be false — nginx writes pid/tmp files to
             # /run/nginx/ and /var/lib/nginx/tmp/; fcgiwrap writes the Unix socket
-            # to /run/fcgi.sock. These are pre-created by the Dockerfile with
-            # nonroot ownership.
+            # to /run/nginx/fcgi.sock (nonroot-owned; /run itself is root-owned).
+            # These are pre-created by the Dockerfile with nonroot ownership.
             readOnlyRootFilesystem: false
       volumes:
         - name: demo-remote
@@ -92,5 +95,5 @@ spec:
   ports:
     - name: http
       port: 80
-      targetPort: 80
+      targetPort: 8080
       protocol: TCP

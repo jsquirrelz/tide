@@ -29,7 +29,7 @@ RUN apk add --no-cache git git-daemon nginx fcgiwrap spawn-fcgi \
 COPY images/tide-git-http-server/nginx.conf /etc/nginx/nginx.conf
 COPY --chmod=755 images/tide-git-http-server/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-EXPOSE 80
+EXPOSE 8080
 
 # Run as non-root UID 1000 — matches D-G3 subagent harness UID.
 # T-08-05-04 mitigation: non-root container user.
