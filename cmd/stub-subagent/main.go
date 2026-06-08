@@ -331,10 +331,44 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 			})
 			return 2
 		}
+		// Mirror the real runner's children/<name>.json convention (anthropic/subagent.go:427):
+		// write the Task spec as a prompt artifact file so the executor can read it at dispatch
+		// time, and stamp SourcePath so the materializer can satisfy Task.Spec.PromptPath
+		// (MinLength=1 — defect #10b / T-09-04 mitigation).
+		const taskChildName = "stub-task-1.json"
+		const taskSourcePath = "children/" + taskChildName
+		childrenDir := filepath.Join(workspaceRoot, "children")
+		if mkErr := os.MkdirAll(childrenDir, 0o755); mkErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: mkdir children: %v\n", mkErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      mkErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		if wErr := os.WriteFile(filepath.Join(childrenDir, taskChildName), raw, 0o644); wErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write children/stub-task-1.json: %v\n", wErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      wErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
 		children = append(children, pkgdispatch.ChildCRDSpec{
-			Kind: "Task",
-			Name: "stub-task-1",
-			Spec: runtime.RawExtension{Raw: raw},
+			Kind:       "Task",
+			Name:       "stub-task-1",
+			SourcePath: taskSourcePath,
+			Spec:       runtime.RawExtension{Raw: raw},
 		})
 
 	default:
