@@ -180,6 +180,51 @@ metadata:
 	ensureSubagentSA(ns)
 	ensureProjectsPVC(ns)
 	ensureSigningKeySecret(ns)
+	// Phase 09 plan 09-06: tide-reporter SA + Role + RoleBinding for the reader Job.
+	ensureReporterSARBAC(ns)
 	// Cascade-11: pre-bind WaitForFirstConsumer PVC for Pod-less fixtures (push-lease).
 	pvcPrewarmPod(ns)
+}
+
+// ensureReporterSARBAC creates the tide-reporter ServiceAccount + Role +
+// RoleBinding in the given namespace. The tide-reporter reader Job runs in the
+// project namespace; without this SA the Job Pod cannot start.
+//
+// Mirrors ensureSubagentSA but with RBAC: create+get on the five TIDE CRD Kinds
+// (T-09-07 least-privilege mitigation). The chart's reporter-rbac.yaml only
+// installs these into .Release.Namespace and .Values.projectNamespaces; per-test
+// namespaces need the manual equivalent.
+func ensureReporterSARBAC(ns string) {
+	rbacYAML := fmt.Sprintf(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: %s
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: %s
+rules:
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: %s
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: %s
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+`, ns, ns, ns, ns)
+	_ = applyYAML(rbacYAML)
 }

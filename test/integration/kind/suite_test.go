@@ -478,6 +478,8 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
 		"--set", "images.credProxy.tag=test",
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
+		"--set", "images.tideReporter.tag=test",
+		"--set", "images.tideReporter.pullPolicy=IfNotPresent",
 		"--set-string", "controllerManager.manager.podAnnotations.tideproject\\.k8s/restart-nonce=" + rolloutNonce,
 		// Override the chart's default accessModes [ReadWriteMany] to [ReadWriteOnce]
 		// because kind's default rancher.io/local-path provisioner only supports
