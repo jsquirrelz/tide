@@ -25,17 +25,18 @@ import (
 )
 
 // TestLoadPromptTemplate_HappyPath verifies that LoadPromptTemplate returns a
-// non-nil *template.Template for each of the four shipped {level,role} combos
+// non-nil *template.Template for each of the five shipped {level,role} combos
 // and that the template renders against a populated EnvelopeIn without error
 // and produces non-empty output.
 //
-// Table-driven across all four (level, role) combinations: milestone/phase/plan
-// planners plus the task executor. Matches plan 03-05 Task 1 Test 6.
+// Table-driven across all five (level, role) combinations: project/milestone/
+// phase/plan planners plus the task executor. Matches plan 03-05 Task 1 Test 6.
 func TestLoadPromptTemplate_HappyPath(t *testing.T) {
 	tests := []struct {
 		role  string
 		level string
 	}{
+		{role: "planner", level: "project"},
 		{role: "planner", level: "milestone"},
 		{role: "planner", level: "phase"},
 		{role: "planner", level: "plan"},

@@ -33,12 +33,19 @@ import (
 var templateFS embed.FS
 
 // LoadPromptTemplate returns the compiled-in Go text/template for the given
-// (role, level) tuple. v1 ships four templates:
+// (role, level) tuple. v1 ships five templates — one per orchestrator-dispatched
+// planner/executor level (project, milestone, phase, plan, task):
 //
+//   - role="planner",  level="project"    → templates/project_planner.tmpl
 //   - role="planner",  level="milestone"  → templates/milestone_planner.tmpl
 //   - role="planner",  level="phase"      → templates/phase_planner.tmpl
 //   - role="planner",  level="plan"       → templates/plan_planner.tmpl
 //   - role="executor", level="task"       → templates/task_executor.tmpl
+//
+// The project-level planner authors the Milestone from Project.Spec.outcome —
+// mirroring the stub-subagent's case "project" project→Milestone authoring
+// (cmd/stub-subagent/main.go). The level set MUST stay project→milestone→phase
+// →plan→task (CLAUDE.md: "Don't collapse levels or invent new ones").
 //
 // Filename convention is "<level>_<role>.tmpl" — see PATTERNS.md
 // §"internal/subagent/common/prompt_templates.go (NEW)". The template is

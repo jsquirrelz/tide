@@ -1,112 +1,138 @@
----
-slug: real-claude-authoring-path
-status: open
-opened: 2026-06-08
-opened_by: phase-08 live SC-2 validation
-severity: high
-blocks: v1.0.0 release (real-Claude authoring has never run end-to-end)
-related: file-transport-git-missing (resolved), phase-08 08-VERIFICATION.md
----
 
-# Real-Claude authoring path — chain of pre-existing defects
+### 3. Real claude-subagent ships no `project_planner.tmpl` — FIXED (uncommitted; tests green, live-verified)
 
-## Symptom
+After fix #2 the planner gets PAST param validation and into the anthropic
+runner's prompt-render step (step 3), then dies with:
+`anthropic subagent: load prompt template (role="planner", level="project"):
+common: load prompt template "templates/project_planner.tmpl": template:
+pattern matches no files`.
 
-The real `claude-subagent` planner/executor pods fail **before any LLM call**
-when driving a Project with `--subagent-image=…tide-claude-subagent:1.0.0`.
-Surfaced during Phase 8's SC-2 live minikube re-test (2026-06-08). CI never
-caught any of this because CI dispatches **only** the `stub-subagent`, which
-tolerates the controller's envelope/param conventions. The large ($25) sample
-is the only other real-Claude surface and is **not CI-gated** (D-A4) — so the
-real-Claude authoring path appears to have **never run end-to-end**.
+- **Producer:** `ProjectReconciler.reconcilePlannerDispatch` dispatches a
+  planner Job at `level="project"` (`internal/controller/project_controller.go:710`,
+  `BuildPlannerEnvelope("project", project, project, …)`). A Project's planner
+  authors the Milestone (Project → Milestone), mirroring the stub's
+  `case "project"` at `cmd/stub-subagent/main.go:235` which emits a Milestone
+  ChildCRD.
+- **Consumer (real):** `internal/subagent/common/prompt_templates.go:59` resolves
+  `level="project"` → `templates/project_planner.tmpl`. The `go:embed
+  templates/*.tmpl` set shipped only FOUR templates — no `project_planner.tmpl`.
+- **Contract conflict:** the orchestrator dispatches FIVE planner/executor levels
+  (project, milestone, phase, plan, task) but the real subagent's embedded
+  template set covered only FOUR.
 
-This is **orthogonal to Phase 8** (transport policy + http:// medium wiring).
-Phase 8's transport deliverable is validated independently (the http:// clone
-Job succeeds; see 08-VERIFICATION.md).
+**Resolution (fix-shape option a, per user decision 2026-06-08):** Added
+`internal/subagent/common/templates/project_planner.tmpl` — a project-level
+planner prompt that authors exactly ONE Milestone child-CRD from the project
+outcome prompt, modeled on `milestone_planner.tmpl`/`phase_planner.tmpl` idioms
+and the stub's `case "project"` project→Milestone contract. Levels UNCHANGED
+(project→milestone→phase→plan→task; no collapse, no alias). Updated the loader
+doc comment in `prompt_templates.go` (now enumerates five templates) and the
+template-coverage test `TestLoadPromptTemplate_HappyPath` (added
+`{planner, project}` row; "four"→"five"). `go test
+./internal/subagent/common/... ./internal/subagent/anthropic/...
+./cmd/claude-subagent/...` all green.
 
-## Environment to reproduce (live, still up)
+**Live-verified (2026-06-08):** rebuilt claude-subagent image (host
+`sha256:5236aa8f275c…`), deleted leftover Errored planner pod (released the
+stale image), `docker rmi -f` the stale `63296e8c1422` in minikube, reloaded
+the fresh tag, re-applied medium-project. New planner pod
+`tide-project-e6431d61-…` ran the **real Claude (Haiku) agent loop** and
+**exited 0** with real token usage (inputTokens=25171, outputTokens=3801,
+cacheRead=70422). The `template: pattern matches no files` error returns **0**.
+Reaching a real LLM call is the first time the real authoring path has ever
+executed end-to-end through prompt render. **Note:** `estimatedCostCents` came
+back 0 in the envelope despite real token usage (see defect #6) — the run did
+bill real tokens at the proxy, the cost-accounting in the envelope is a
+separate downstream defect.
 
-- minikube (context `minikube`, K8s v1.33.7). TIDE in `tide-system`.
-- Controller patched at runtime to `--subagent-image=ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0`
-  (deployment arg index 5; **runtime patch only — NOT persisted to the chart**;
-  a `helm upgrade` would revert it. The chart sources `--subagent-image` from
-  `images.stubSubagent`, so a real-Claude install needs that arg set to the
-  claude image OR left empty to fall back to `CLAUDE_SUBAGENT_IMAGE`).
-- `tide-sample-medium` namespace fully staged: git-http-server (Available),
-  `demo-remote-pvc`, `tide-projects` PVC, `tide-subagent` + `tide-push` SAs,
-  `tide-secrets` (real ANTHROPIC_API_KEY + empty GIT_PAT), `tide-signing-key`.
-- Repro: `kubectl apply -f examples/projects/medium/project.yaml` →
-  the `tide-project-*` planner Job fails in ~12s. (Cost stays $0 — fails
-  pre-LLM.)
+### 4. Project outcome prompt never threaded into `EnvelopeIn.Prompt` — OPEN (NEW FIX-SHAPE FORK)
 
-## Confirmed defects (in discovery order)
+The real planner ran but Claude reported the prompt was EMPTY
+(`"prompt": ""`) and emitted an `EMPTY_PROMPT` warning, authoring only a
+generic placeholder milestone. The stub masked this — it emits canned
+children and never reads `.Prompt`.
 
-### 1. claude-subagent envelope-path default — FIXED (commit 6dcffe6)
+- **Producer:** `BuildPlannerEnvelope` (`internal/controller/dispatch_helpers.go:158`)
+  constructs `EnvelopeIn` with **no `Prompt:` field assignment at all** (lines
+  159-169). The project reconciler additionally passes the prompt arg as the
+  empty string literal `""` (`project_controller.go:710`,
+  `BuildPlannerEnvelope("project", project, project, attempt, "", …)`) — and
+  `BuildPlannerEnvelope`'s signature doesn't even have a prompt parameter; the
+  `""` is the `token` arg. So `EnvelopeIn.Prompt` is ALWAYS empty at every
+  level, not just project.
+- **Source of truth:** `Project.Spec.OutcomePrompt` (CRD field
+  `spec.outcomePrompt`) IS populated on the medium CR. It needs to flow into
+  `EnvelopeIn.Prompt` for the project planner (and an appropriately-scoped
+  prompt at milestone/phase/plan/task levels too).
 
-`cmd/claude-subagent/main.go` defaulted `--envelope-path` to
-`/workspace/envelopes/in.json`, but the controller writes (and `stub-subagent`
-reads) `/workspace/envelopes/$TIDE_TASK_UID/in.json`, and passes **no**
-`--envelope-path` arg. Error was:
-`harness: open envelope "/workspace/envelopes/in.json": no such file or directory`.
-Fix aligned claude-subagent's resolution to the stub
-(flag → `$TIDE_ENVELOPE_PATH` → per-task-uid path). **Done.**
+**Fix options (design call):**
+- (a) Thread `project.Spec.OutcomePrompt` into `EnvelopeIn.Prompt` inside
+  `BuildPlannerEnvelope` (it already takes `project *Project`). Narrowest fix
+  for the project level; milestone/phase/plan planners would inherit the same
+  outcome prompt unless level-specific prompt assembly is added.
+- (b) Add a `prompt string` parameter to `BuildPlannerEnvelope` and have each
+  reconciler pass the level-appropriate prompt (project→outcomePrompt;
+  milestone→outcome + MILESTONE.md context; etc.). Cleaner level semantics,
+  touches all four planner-dispatch call sites.
+- (c) Assemble the prompt entirely inside `BuildPlannerEnvelope` from
+  `project.Spec.OutcomePrompt` + level + parent context. Most encapsulated.
 
-### 2. `Provider.Params` overloaded with dispatch metadata (`parentName`) — OPEN
+NOTE: this is coupled to defect #5 — even with a real prompt, the controller
+won't get a Milestone unless the runner returns ChildCRDs.
 
-After fix #1 the planner reaches the anthropic runner and dies with:
-`anthropic subagent: unknown param "parentName" (allowed: temperature, thinking_budget, top_p, top_k)`.
+### 5. Anthropic runner never parses `ChildCRDs` from Claude's output — OPEN (NEW FIX-SHAPE FORK)
 
-- **Producer:** `internal/controller/dispatch_helpers.go:178` injects
-  `envIn.Provider.Params["parentName"] = parent.GetName()` so the **stub** planner
-  can build child-CRD refs (`projectRef`/`milestoneRef`/…). The stub reads it at
-  `cmd/stub-subagent/main.go:229`.
-- **Rejector:** `internal/subagent/anthropic/subagent.go:166` treats
-  `Provider.Params` as **model parameters only** and hard-rejects any key outside
-  the allowlist (`subagent.go:65-67`: temperature, thinking_budget, top_p, top_k).
-- **Contract conflict:** the controller overloads `Provider.Params` with BOTH
-  model params (for the real runner) AND dispatch metadata (for the stub). The
-  two subagents disagree on what `Provider.Params` means.
+The planner exited 0, but `kubectl get milestone -n tide-sample-medium` shows
+**no Milestone materialized**; the Project is stuck `Running`
+(AuthoringPlanner=True). Claude DID emit a Milestone CRD — as fenced ```json
+inside the `result` TEXT — but `EnvelopeOut.ChildCRDs` is empty.
 
-**Fix options (decide in the debug session — design call):**
-- (a) anthropic runner ignores (skips) non-model keys instead of erroring — most
-  forgiving, but loses the strict-validation safety for genuine typos.
-- (b) anthropic runner allowlists `parentName` explicitly (passes it through /
-  ignores it) — narrow, but more dispatch-metadata keys may exist or appear.
-- (c) controller stops overloading `Provider.Params`: move `parentName` (and any
-  other dispatch metadata) to a dedicated EnvelopeIn metadata field both
-  subagents read — cleanest contract, largest change (envelope schema + both
-  subagents + controller).
+- **Consumer (controller):** `handleProjectJobCompletion`
+  (`project_controller.go:783`) reads `EnvelopeOut` and only materializes when
+  `len(envOut.ChildCRDs) > 0` (line 813). The path is correct and waiting.
+- **Producer (real runner):** `Anthropic.Run`
+  (`internal/subagent/anthropic/subagent.go:243-263`) assembles `EnvelopeOut`
+  with `Result`, `Usage`, `ExitCode`, `Reason` — but **never sets `ChildCRDs`**.
+  It does not parse the model's structured output into typed `ChildCRDSpec`
+  values. The stub masks this because the stub builds `ChildCRDs` directly in
+  Go (`dispatchPlannerSuccess`) and never calls an LLM.
+- **Contract conflict:** the controller's planner→child materialization
+  contract requires `EnvelopeOut.ChildCRDs`; the real runner produces only
+  free-text `Result`. Nothing extracts the model's emitted CRD JSON into the
+  envelope.
 
-Recommend (c) long-term; (a)/(b) unblock fastest. The real planner likely does
-not even need `parentName` (it authors from the outcome prompt, not canned refs
-like the stub) — so the runner ignoring it (option a/b) may be functionally
-sufficient.
+**Fix options (design call):**
+- (a) Have the project_planner.tmpl instruct Claude to write the Milestone CRD
+  to a known PVC path (e.g. via a tool/Write), and have the runner read that
+  file into `ChildCRDs` — file-handoff contract. Robust, but needs a
+  tool-write convention + path validation.
+- (b) Parse a structured block out of the model's final `result` text (e.g. a
+  fenced ```json envelope or a sentinel-delimited region) into `ChildCRDs`
+  inside `Anthropic.Run` / `ParseStream`. No tool dependency, but brittle to
+  model formatting drift.
+- (c) Use the claude CLI's structured-output / tool-call mechanism to emit
+  typed child-CRD specs the runner deserializes directly. Most robust, largest
+  change to the runner + template + possibly the CLI invocation flags.
+
+This is the deepest unverified link — it gates whether ANY real run can
+materialize a child and proceed. Likely repeats at milestone/phase/plan
+(every planner level needs ChildCRDs) and at task (executor needs artifacts).
+
+### 6. `estimatedCostCents` = 0 despite real token usage — OPEN (lower priority; likely accounting)
+
+The exit-0 envelope reported `inputTokens=25171, outputTokens=3801,
+cacheRead=70422, cacheCreation=16626` but `estimatedCostCents: 0`. The DoD
+requires `costSpentCents > 0`. Either the per-model price table isn't wired for
+Haiku, or the cost is computed elsewhere (controller-side from usage) and not
+in the envelope. Investigate after #4/#5 unblock a full run — defer until a
+Milestone materializes.
 
 ### 3+. Downstream (UNVERIFIED — expect more)
 
-The planner has never gotten past param validation, so nothing downstream of the
-real anthropic `Run()` is proven: does the claude binary/CLI exist + work in the
-image? does the runner emit a valid `ChildCRDs` envelope the controller can
-materialize? do executor (task-level) pods work? do per-level model picks
-resolve? **Treat each as unverified until a real run reaches `Complete`.**
-
-## Definition of done
-
-`kubectl apply -f examples/projects/medium/project.yaml` drives
-`project/medium-project` to `status.phase=Complete` with real Claude (Haiku),
-a per-run `tide/run-medium-project-*` branch pushed to the in-cluster http://
-remote, and `status.budget.costSpentCents > 0` (real tokens billed, under the
-$5 cap). Then update 08-VERIFICATION.md SC-2 → fully PASS, and unblock the
-v1.0.0 retag.
-
-## Notes / guardrails
-
-- Fixes belong on `main` via GSD (`/gsd-debug` then commit). The claude-subagent
-  and/or controller images must be rebuilt + `minikube image load` (rmi the stale
-  tag first — `minikube image load` is NOT idempotent).
-- The chart's default install wiring (`--subagent-image` ← `images.stubSubagent`)
-  means **no operator gets real Claude by default** — worth deciding whether
-  that's intended (stub-by-default is reasonable for a $0 smoke, but the medium/
-  large samples' `spec.subagent.image: claude-subagent` is silently ignored,
-  which is misleading). Consider honoring `Project.Spec.Subagent.Image` as an
-  override, or documenting the install-time `--subagent-image` requirement.
+Now that the real anthropic `Run()` executes the agent loop and exits 0, the
+remaining unverified links are: ChildCRDs extraction (#5), prompt threading
+(#4), cost accounting (#6), then — once a Milestone exists — milestone/phase/
+plan planner dispatches (same #4/#5 shapes recur per level), task executor
+pods, the per-run `tide/run-medium-project-*` branch push to the in-cluster
+http:// remote, and per-level model resolution. **Treat each as unverified
+until a real run reaches `Complete`.**
