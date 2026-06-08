@@ -35,16 +35,34 @@ Each file MUST be a single JSON object with this exact shape:
   {
     "kind": "Task",
     "name": "task-NN-<slug>",
-    "spec": { "planRef": "<this plan's name>", "dependsOn": [],
-              "filesTouched": [], "prompt": "<the task instruction>" }
+    "spec": {
+      "planRef": "<this plan's name>",
+      "dependsOn": [],
+      "filesTouched": ["path/to/file_a.go", "path/to/file_b.go"],
+      "declaredOutputPaths": ["path/to/file_a.go", "path/to/file_b.go"],
+      "prompt": "<the full executor instruction for this task>"
+    }
   }
 
 - "kind" MUST be the string "Task".
 - "name" is the metadata.name; keep it unique and DNS-safe.
-- "spec" is the Task CRD spec. planRef wires the Task to this Plan; dependsOn
-  is the declared task DAG; filesTouched is the exhaustive file set; prompt is
-  the executor instruction. Waves are NOT inputs — they are derived by layered
-  Kahn over the dependsOn edges you emit here. Do not declare waves.
+- "spec" is the Task CRD spec. ALL of the following are REQUIRED and MUST be
+  non-empty — a Task missing any of them is REJECTED by the orchestrator:
+    - "planRef" wires the Task to this Plan (this plan's name).
+    - "filesTouched" is the exhaustive, NON-EMPTY list of repo files this task
+      will create or modify (at least one path).
+    - "declaredOutputPaths" is the NON-EMPTY list of output artifact paths the
+      executor must produce — normally the same repo files as filesTouched (at
+      least one path). The harness validates the executor's output against this
+      set, so it must not be empty.
+    - "prompt" is the FULL executor instruction for this task: a complete,
+      self-contained description of exactly what code to write, in which files,
+      to satisfy this plan. Write it as if briefing an engineer with no other
+      context. This text is the durable executor artifact — the orchestrator
+      reads it straight from this file at dispatch time.
+- "dependsOn" is the declared task DAG (sibling task names; may be empty for a
+  single-task plan). Waves are NOT inputs — they are derived by layered Kahn
+  over the dependsOn edges you emit here. Do not declare waves.
 
 Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
