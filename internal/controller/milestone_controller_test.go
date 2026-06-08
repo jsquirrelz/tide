@@ -256,6 +256,121 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
+	It("Test 4 (debug #9): does NOT Succeed while a materialized child Phase is still pending; Succeeds once it Succeeds", func() {
+		// The premature-succession bug lives on the AUTO milestone-gate path
+		// (the medium sample uses gates.milestone=auto). The BeforeEach Project
+		// has no gates → Approve, which parks at AwaitingApproval before the
+		// boundary check; create a dedicated auto-gated Project for this case.
+		const autoProjectName = "test-proj-ms-auto9"
+		const autoMilestoneName = "test-ms-auto9"
+		autoProj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+				Gates: tideprojectv1alpha1.Gates{Milestone: tideprojectv1alpha1.GatePolicy("auto")},
+			},
+		}
+		Expect(k8sClient.Create(ctx, autoProj)).To(Succeed())
+		waitForCacheSync(autoProjectName, "default", &tideprojectv1alpha1.Project{})
+		DeferCleanup(func() {
+			p := &tideprojectv1alpha1.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: autoProjectName, Namespace: "default"}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+			m := &tideprojectv1alpha1.Milestone{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, m); err == nil {
+				m.Finalizers = nil
+				_ = k8sClient.Update(ctx, m)
+				_ = k8sClient.Delete(ctx, m)
+			}
+		})
+
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: autoMilestoneName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: autoProjectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
+
+		phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: autoMilestoneName}
+		rawSpec, err := json.Marshal(phaseSpec)
+		Expect(err).NotTo(HaveOccurred())
+
+		envReader := newMapEnvReader()
+		r := &MilestoneReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+		}
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha1.Milestone
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &got)
+		}, "5s", "100ms").Should(Succeed())
+
+		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:  string(got.UID),
+			ExitCode: 0,
+			ChildCRDs: []pkgdispatch.ChildCRDSpec{
+				{Kind: "Phase", Name: "child-phase-pending", Spec: runtime.RawExtension{Raw: rawSpec}},
+			},
+		})
+
+		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
+		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+
+		// handleJobCompletion materializes the child Phase. Because the child
+		// Phase is NOT yet Succeeded, the Milestone must requeue, NOT Succeed.
+		// Drive reconciles (each re-runs handleJobCompletion) until the child
+		// Phase materializes; the materializing reconcile also exercises the new
+		// requeue guard.
+		Eventually(func(g Gomega) {
+			res, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}})
+			g.Expect(rerr).NotTo(HaveOccurred())
+			var phase tideprojectv1alpha1.Phase
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-pending", Namespace: "default"}, &phase)).To(Succeed())
+			// With a materialized-but-pending child Phase, the reconcile must
+			// requeue rather than patch the Milestone Succeeded.
+			g.Expect(res.RequeueAfter).To(BeNumerically(">", 0), "Milestone should requeue while child Phase pending")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Milestone has NOT reached Succeeded while the child Phase is pending.
+		var after tideprojectv1alpha1.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &after)).To(Succeed())
+		Expect(after.Status.Phase).NotTo(Equal("Succeeded"), "Milestone must not Succeed while child Phase pending")
+
+		// Patch the child Phase to Succeeded, then reconcile: Milestone Succeeds.
+		var child tideprojectv1alpha1.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-pending", Namespace: "default"}, &child)).To(Succeed())
+		patch := client.MergeFrom(child.DeepCopy())
+		child.Status.Phase = "Succeeded"
+		Expect(mgrClient.Status().Patch(ctx, &child, patch)).To(Succeed())
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 3)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha1.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &after)).To(Succeed())
+			g.Expect(after.Status.Phase).To(Equal("Succeeded"))
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
 	It("Test 3: rejects bad child Kind and patches Status.Phase=Failed", func() {
 		ms := &tideprojectv1alpha1.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},

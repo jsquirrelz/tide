@@ -404,6 +404,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// cascade-11: race-free idempotency guard at the materialization point —
 	// skip authoring when a child Phase (by spec.milestoneRef, or IsControlledBy
 	// fallback) already exists, then CONTINUE to gate/boundary/complete handling.
+	justMaterialized := false
 	if len(envOut.ChildCRDs) > 0 {
 		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, ms)
 		if gErr != nil {
@@ -413,6 +414,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ms, envOut.ChildCRDs); mErr != nil {
 				return r.patchMilestoneFailed(ctx, ms, "ChildCRDMaterializationFailed", mErr.Error())
 			}
+			justMaterialized = true
 		}
 	}
 
@@ -445,11 +447,15 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// child Phases have just been MATERIALIZED — not yet Succeeded — so the
 	// short-circuit returns false on first entry, and the push only fires on
 	// a subsequent reconcile (Owns(&Phase{}) re-enqueues when child status
-	// updates). On the no-boundary path we still proceed to patchMilestoneSucceeded
-	// to preserve the existing gate-test fixtures that assert immediate
-	// Succeeded on auto-gate (the milestone level's own Job completion is a
-	// sufficient signal for parent-Status=Succeeded; the push semantic is
-	// what's tightened, not the level transition).
+	// updates).
+	//
+	// Debug #9 (mirrors Phase 04.1, phase_controller.go): when child Phases
+	// exist but are NOT all Succeeded yet, requeue rather than patching
+	// Milestone=Succeeded — otherwise the Milestone (and the Project rolling up
+	// MilestonesSucceeded) reaches terminal status while the Phase→Plan→Task→
+	// executor cascade is still in flight, with no run branch pushed. The
+	// Milestone reaches Succeeded only once all child Phases Succeed, keeping the
+	// level controllers symmetric.
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ms, "Phase")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -458,11 +464,35 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
 			return ctrl.Result{}, err
 		}
+	} else if justMaterialized || r.hasChildPhases(ctx, ms) {
+		// Children exist but not all Succeeded — requeue and wait. justMaterialized
+		// covers the same-reconcile case where the child Phase was just created and
+		// the cached client may not yet list it (otherwise we would wrongly fall
+		// through to patchMilestoneSucceeded before the boundary can ever be seen).
+		logger.V(1).Info("boundary push deferred: child Phases pending", "milestone", ms.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: child Phases not all Succeeded yet", "milestone", ms.Name)
+		logger.V(1).Info("boundary push skipped: milestone has no child Phases", "milestone", ms.Name)
 	}
 
 	return r.patchMilestoneSucceeded(ctx, ms)
+}
+
+// hasChildPhases reports whether any Phase is owned by this Milestone. Debug #9
+// (mirrors PhaseReconciler.hasChildPlans / Phase 04.1).
+func (r *MilestoneReconciler) hasChildPhases(ctx context.Context, ms *tideprojectv1alpha1.Milestone) bool {
+	var phaseList tideprojectv1alpha1.PhaseList
+	if err := r.List(ctx, &phaseList, client.InNamespace(ms.Namespace)); err != nil {
+		return false
+	}
+	for i := range phaseList.Items {
+		for _, ref := range phaseList.Items[i].OwnerReferences {
+			if ref.Kind == "Milestone" && ref.UID == ms.UID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha1.Milestone) (ctrl.Result, error) {
