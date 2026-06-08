@@ -1,4 +1,4 @@
-# examples/projects/medium/per-namespace-resources.yaml — Phase 8 per-namespace deps.
+# examples/projects/medium/per-namespace-resources.yaml — Phase 8/9 per-namespace deps.
 #
 # The TIDE Helm chart provisions tide-projects PVC + tide-subagent SA in tide-system.
 # A Project in a different namespace (tide-sample-medium) needs these resources mirrored
@@ -14,6 +14,12 @@
 #      mirrored here too (a missing tide-push SA makes the clone/push Jobs fail with
 #      "FailedCreate: serviceaccount \"tide-push\" not found" and the git round-trip
 #      never runs).
+#   4. tide-reporter SA + Role + RoleBinding — identity for the controller's in-namespace
+#      reader Job (cmd/tide-reporter, plan 09-04). The Role grants `create` + `get` on
+#      the five TIDE child CRD Kinds so the reader Job can materialize Milestone/Phase/
+#      Plan/Task/Wave CRs from the planner's out.json (defects #11/#12 fix). The chart
+#      provisions this in tide-system; the reader Jobs run as `tide-reporter` in the
+#      Project's namespace, so it must be mirrored here too.
 #
 # Resource NOT provided here (must be manually mirrored from tide-system):
 #   3. tide-signing-key Secret — contains a cluster-unique signing key; must be
@@ -112,4 +118,52 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: tide-push
+    namespace: tide-sample-medium
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+  # Identity for the controller's in-namespace reader Job (cmd/tide-reporter, plan 09-04).
+  # The reader Job reads out.json from the project-namespace PVC and materializes child
+  # CRDs via the K8s API. Mirrors tide-system/tide-reporter provisioned by the chart.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+rules:
+  # Least-privilege: create child CRDs + get parent for ownerRef resolution.
+  # Mirrors the tide-reporter Role in tide-system (verbs: create, get on 5 TIDE Kinds).
+  # T-09-07 mitigation: NO list/watch/update/delete/patch, NO secrets, NO core resources.
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
     namespace: tide-sample-medium
