@@ -11,10 +11,12 @@ automountServiceAccountToken: true
 # This SA runs the per-dispatch tide-reporter Job that reads out.json from the
 # project-namespace PVC and materializes child CRDs via the K8s API (defects #11/#12 fix).
 #
-# Least-privilege: create + get on the five TIDE child Kinds only.
-# NO list/watch/update/delete/patch, NO secrets, NO core resources, NO projects.
-# (T-09-07 mitigation: reporter has no need to read secrets, list objects, or mutate
-# anything other than the five child CRDs it creates.)
+# Least-privilege: create + get + list on the five TIDE child Kinds, plus get on
+# the parent Project for UID resolution. (list backs the materializer idempotency
+# guard; projects/get is read-only.)
+# NO watch/update/delete/patch, NO secrets, NO core resources, NO project mutation.
+# (T-09-07 mitigation: reporter cannot read secrets, watch/mutate objects, or
+# create/modify anything other than the five child CRDs it materializes.)
 #
 # The reader Job runs in the PROJECT namespace (not tide-system), so the SA must exist
 # in each project namespace. The per-namespace fan-out below mirrors
@@ -28,12 +30,21 @@ metadata:
   labels:
     {{- include "tide.labels" . | nindent 4 }}
 rules:
-  # Least-privilege: create child CRDs + get parent for ownerRef resolution.
-  # T-09-07 mitigation: NO list/watch/update/delete/patch, NO secrets,
-  # NO core resources, NO projects (human-applied).
+  # Least-privilege: create + get + list the five child Kinds. list is required
+  # by the materializer's idempotency guard (it lists children by parent-ref);
+  # get + create are the materialize ops. (09-07 fix: list was missing.)
   - apiGroups: ["tideproject.k8s"]
     resources: ["milestones", "phases", "plans", "tasks", "waves"]
-    verbs: ["create", "get"]
+    verbs: ["create", "get", "list"]
+  # get parent Project for UID resolution. A Project-level reporter (materializing
+  # the Milestone child) must read its parent Project; the other parent Kinds
+  # (Milestone/Phase/Plan) are already covered by the child rule above. Read-only —
+  # Projects are human-applied and never created/mutated by the reporter.
+  # (09-07 fix: projects/get was missing → Project-level reporter Job failed.)
+  # T-09-07 mitigation retained: NO watch/update/delete/patch, NO secrets, NO core resources.
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -69,11 +80,14 @@ metadata:
   labels:
     {{- include "tide.labels" $ | nindent 4 }}
 rules:
-  # Per-namespace mirror: same least-privilege rule as the .Release.Namespace Role above.
+  # Per-namespace mirror: same least-privilege rules as the .Release.Namespace Role above.
   # The reader Job runs in the project namespace ({{ $ns }}); the SA must exist here.
   - apiGroups: ["tideproject.k8s"]
     resources: ["milestones", "phases", "plans", "tasks", "waves"]
-    verbs: ["create", "get"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

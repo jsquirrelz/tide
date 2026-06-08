@@ -143,12 +143,18 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: medium
 rules:
-  # Least-privilege: create child CRDs + get parent for ownerRef resolution.
-  # Mirrors the tide-reporter Role in tide-system (verbs: create, get on 5 TIDE Kinds).
-  # T-09-07 mitigation: NO list/watch/update/delete/patch, NO secrets, NO core resources.
+  # Least-privilege: create + get + list child CRDs (list backs the materializer
+  # idempotency guard), plus get the parent Project for UID resolution.
+  # Mirrors the tide-reporter Role in tide-system (chart SOT hack/helm/reporter-rbac.yaml).
+  # 09-07 fix: list on child kinds + get on projects were both missing → the
+  # Project-level reporter Job failed (cannot get projects / cannot list milestones).
+  # T-09-07 mitigation retained: NO watch/update/delete/patch, NO secrets, NO core resources.
   - apiGroups: ["tideproject.k8s"]
     resources: ["milestones", "phases", "plans", "tasks", "waves"]
-    verbs: ["create", "get"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
