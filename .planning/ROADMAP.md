@@ -388,3 +388,25 @@ Plans:
 - [x] 08-06-PLAN.md — Docs correction: medium README 9-step sequence + false-mount claim removed; pkg/git/doc.go final reframe (Wave 3)
 - [x] 08-07-PLAN.md — CI coverage: nightly-integration.yml SC-1 image-smoke step; medium_http_test.go real assertions (Wave 4)
 - [x] 08-08-PLAN.md — Live minikube re-test checkpoint: real Claude Haiku medium run → Project=Complete; 08-VERIFICATION.md gate artifact (Wave 5)
+
+### Phase 9: Cross-namespace envelope return (in-namespace reporter)
+
+**Goal:** Enable the Manager (in `tide-system`) to receive planner/executor authoring results across namespaces. Root cause (debug session `real-claude-authoring-path`, defects #11/#12): PVCs are namespace-local, so the Manager cannot read the `out.json` that subagent pods write to the project-namespace PVC — the "Manager-reads-PVC" premise was always wrong cross-namespace (masked by the termination message while envelopes stayed <4KB). DECIDED architecture (V1): a trusted, RBAC-scoped **in-namespace TIDE reporter** reads the subagent's `out.json` from the local same-namespace PVC and **creates child CRs directly via the K8s API** (ownerRef → same-namespace parent); the Manager watches them appear. Never put blobs in etcd; tiny status (usage/git/exitCode/reason) rides the 4KB termination message; verbose `result` stays on the namespace PVC as audit. This phase **gates the v1.0.0 retag**.
+
+**Requirements**: derive during planning. Success criteria:
+1. Trusted in-namespace reporter creates child CRDs via the K8s API; the Manager no longer reads the project-namespace PVC for envelope-out (materialization moves to the reporter; CEL admission still guards CRDs).
+2. Executor sources its prompt **in-pod** from its own namespace PVC (`PromptPath`) — fixing #10b's cross-namespace prompt read (committed but latent on `main` at `1f8fc86`).
+3. Tiny status returns via the termination message; verbose `result` stays on the namespace PVC as the audit artifact.
+4. `examples/projects/medium` drives to a **legitimate** `status.phase=Complete` with real Claude (Haiku): all descendants Succeeded, per-run `tide/run-*` branch pushed to the in-cluster `http://` remote with real authored code, `costSpentCents > 0` under the cap.
+5. Defect #6 resolved — `costSpentCents`/budget surfaced on Project status.
+6. Phase 8 SC-2 closed; v1.0.0 retag unblocked.
+
+**Scope boundary:** EXCLUDES the editable/re-appliable "envelopes as first-class artifacts" developer experience and the clobbering / which-fields-are-authoritative question — deliberately deferred to a SUBSEQUENT phase.
+
+**Open design forks for planning/research:** (a) how the reporter runs relative to the sandboxed subagent — extend the credproxy sidecar vs. a dedicated reporter container vs. a Manager-spawned reader Job; (b) reporter-creates-CRs-directly (V1) vs. Manager-materializes-from-reporter-written-status.
+
+**Depends on:** Phase 8
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
