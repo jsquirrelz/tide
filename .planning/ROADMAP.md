@@ -406,7 +406,13 @@ Plans:
 **Open design forks for planning/research:** (a) how the reporter runs relative to the sandboxed subagent — extend the credproxy sidecar vs. a dedicated reporter container vs. a Manager-spawned reader Job; (b) reporter-creates-CRs-directly (V1) vs. Manager-materializes-from-reporter-written-status.
 
 **Depends on:** Phase 8
-**Plans:** 0 plans
+**Plans:** 7 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 9 to break down)
+- [ ] 09-01-PLAN.md — Cost surfacing (#6): per-model price table in anthropic runner; EstimatedCostCents computed (REQ-09-05)
+- [ ] 09-02-PLAN.md — TerminationStub (<4KB tiny status) + both subagent shims write it; stub Task children carry SourcePath (REQ-09-03)
+- [ ] 09-03-PLAN.md — In-pod executor prompt read via EnvelopeIn.PromptPath; remove Manager cross-ns read (#10b) (REQ-09-02)
+- [ ] 09-04-PLAN.md — Lift materialization + spec-ref guard + allowlist into internal/reporter; least-privilege tide-reporter RBAC (chart SOT + medium) (REQ-09-01)
+- [ ] 09-05-PLAN.md — cmd/tide-reporter reader-Job binary: local out.json read → K8s-API child-CR create; image + envtest (REQ-09-01)
+- [ ] 09-06-PLAN.md — Manager spawns reader Job on dispatch completion; drop inline materialize from 4 handlers; reporter image plumbing + Layer B (REQ-09-01)
+- [ ] 09-07-PLAN.md — Live real-Claude medium-sample legitimate Complete; flip Phase 8 SC-2 to PASS; record v1.0.0 retag unblocked (REQ-09-04, REQ-09-06) [checkpoint]
