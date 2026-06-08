@@ -266,6 +266,11 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: parse stream: %w", parseErr)
 	}
 
+	// Compute cost from the per-model price table before assembling EnvelopeOut.
+	// EstimatedCostCents flows into budget.RollUpUsage → Project.Status.budget.
+	// This call stays in internal/subagent/anthropic/ (provider firewall, D-C1).
+	usage.EstimatedCostCents = estimatedCostCents(in.Provider.Model, usage)
+
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 		Kind:        pkgdispatch.KindTaskEnvelopeOut,
