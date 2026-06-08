@@ -100,3 +100,29 @@ API, same-namespace out.json read, tiny status rides the termination message).
 The remaining work is succession-gating (B) + cost-rollup wiring (C). Both block
 a LEGITIMATE Complete (DoD: all descendants Succeeded + costSpentCents > 0).
 v1.0.0 retag stays blocked until 09-07 records a legitimate Complete.
+
+## 09-08 re-run (2026-06-08): Phase-9 fixes VALIDATED; next layer surfaced
+
+Phase-9 deliverables PROVEN working end-to-end on the live medium run:
+- Succession gate (Defect B): Project/Milestone/Phase/Plan all stayed Running while
+  descendants pending — NO premature succession. Cascade drove correctly to Task level
+  + derived Waves. The exact 09-07 bug (Project=Complete while Plans Running) did NOT recur.
+- Cost rollup (Defect C): status.budget populated and climbed across planner levels
+  (8c→24c→45c; tokensSpent 25760→104933). costSpentCents > 0 confirmed.
+- Reporter mechanism + RBAC (Defect A): all reporter Jobs Complete, no RBAC errors.
+
+NEXT-LAYER blocker (orthogonal to Phase 9 — task-executor/git layer, pre-existing,
+first exposed now that a run legitimately reaches task execution):
+- task-01 Failed: `EnsureWorktree: add worktree ... branch=: git worktree: empty branch`.
+  The claude-subagent reads its branch from branch.txt beside in.json
+  (cmd/claude-subagent/main.go:readBranch); the run branch is project.Status.Git.BranchName
+  (tide/run-<project>-<unix>). The task-dispatch envelope-write path did not populate
+  branch.txt for the task → empty branch → worktree add fails.
+- clone error: `clone failed: ... repository already exists` — clone not idempotent on the
+  shared tide-projects PVC (likely stale workspace state from prior runs; a clean DoD run
+  may need a fresh/cleaned workspace PVC).
+
+These are NOT Phase-9 (cross-namespace envelope return) scope. Recommend a separate
+gap/phase for task-executor branch propagation (branch.txt) + clone idempotency +
+clean-workspace handling. Phase-9's mechanism is validated; the v1.0.0 retag DoD
+(full legitimate Complete) remains blocked on this task-layer work.
