@@ -43,10 +43,16 @@
 ### Cost surfacing (#6)
 - Resolve `costSpentCents` / budget surfacing on Project status so the medium run reports `costSpentCents > 0` (the DoD requires it).
 
-### Claude's Discretion (resolve in RESEARCH.md + planning; genuine forks — checkpoint with user)
-- **How the reporter runs relative to the sandboxed subagent:** extend the credproxy sidecar (already a trusted in-pod component) vs. a dedicated reporter container (needs after-main-exit coordination) vs. a Manager-spawned reader Job in the project namespace (decoupled, +1 Job/dispatch). Research the tradeoffs and the K8s-idiomatic option; surface for a user decision.
-- **Reporter-creates-CRs-directly (V1)** vs. reporter-patches-parent-status-and-Manager-materializes (V2 fallback). V1 is the chosen direction; confirm feasibility (ownerRefs are namespace-local — parent and children share the namespace, so this works) and whether any Manager-side materialization logic must move.
-- Per-namespace RBAC shape for child-CRD creation (mirror the existing per-namespace SA pattern: `tide-subagent`, `tide-push`).
+### Reporter execution model — RESOLVED 2026-06-08 (user picked Option C)
+- **Manager-spawned reader Job.** On dispatch-Job completion, the Manager spawns a short-lived reader Job in the *project* namespace with its OWN least-privilege ServiceAccount (CR-create verbs on Milestone/Phase/Plan/Task); it reads `out.json` from the local same-namespace PVC, creates the child CRs (ownerRef → same-namespace parent), then exits. The Manager watches the children appear.
+- **Why C (decision-shaping constraint):** Kubernetes has NO per-container ServiceAccount — all containers in a pod share one SA. An in-pod reporter (Options A/B) would expose CR-create verbs to the sandboxed subagent container (mitigable only via `automountServiceAccountToken:false` + per-container token projection — subtle), and native-sidecar termination is best-effort (SIGKILL race could kill the reporter mid-CR-create). Option C gives the reporter its own SA by construction and runs to completion independently. Cost accepted: +1 short Job per dispatch (pod churn + seconds of latency).
+- The dispatch Job's termination message still carries the tiny status (usage/git/exitCode/reason) for the Manager's budget rollup + failure classification; the reader Job handles only childCRD creation. `out.json` (incl. verbose result) stays on the namespace PVC.
+
+### Still Claude's Discretion (resolve in planning per RESEARCH.md)
+- Materialization relocation: `MaterializeChildCRDs` + `childKindAllowlist` + the `childrenAlreadyMaterialized` spec-parent-ref idempotency guard (NOT ownerRef — cascade-9/10/11 lesson) move into the reader-Job binary; the Manager keeps its `Owns()` watches and stops materializing. CEL admission still guards the CRDs.
+- Per-namespace RBAC: a reporter SA + Role/RoleBinding (least-privilege create on the child kinds), mirroring how `tide-subagent`/`tide-push` SAs are provisioned (chart + medium per-namespace-resources.yaml).
+- Cost (#6): per-model price table in `internal/subagent/anthropic/` (the runner never computes `EstimatedCostCents` today → `RollUpUsage` accumulates zero); confirm Haiku model ID + current prices.
+- Stub compatibility: the reader Job must consume BOTH stub- and real-authored `out.json`; confirm/add `SourcePath` on stub Task children (PromptPath MinLength=1).
 </decisions>
 
 <canonical_refs>
