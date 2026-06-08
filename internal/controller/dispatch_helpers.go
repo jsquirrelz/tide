@@ -42,13 +42,12 @@ import (
 	"fmt"
 	"maps"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
-	"github.com/jsquirrelz/tide/internal/owner"
+	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -69,21 +68,10 @@ type ProviderDefaults struct {
 	Models map[string]string
 }
 
-// childKindAllowlist is the T-308 mitigation gate: only these Kinds may
-// pass through MaterializeChildCRDs. Anything else returns an error
-// before any K8s API call is made. The set matches the five TIDE CRD
-// Kinds; non-TIDE Kinds (Pod, ConfigMap, Job, etc.) MUST never reach
-// server-side-create from a planner pod's emitted ChildCRDs envelope
-// (subagent pod has zero K8s verbs per Phase 2 D-A4 â the envelope is
-// the only channel from the subagent process into the cluster's typed
-// CRD graph).
-var childKindAllowlist = map[string]bool{
-	"Milestone": true,
-	"Phase":     true,
-	"Plan":      true,
-	"Task":      true,
-	"Wave":      true,
-}
+// childKindAllowlist is a package-local alias for the allowlist that now lives in
+// internal/reporter. Call sites within internal/controller reference it via this
+// delegator so callers need not be updated in this plan.
+var childKindAllowlist = reporter.ChildKindAllowlist
 
 // ResolveProvider walks Project.Spec.Subagent precedence chain for the
 // given level (D-C2). Returns a ProviderSpec with Vendor pinned to
@@ -207,171 +195,16 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 	return envIn, data, nil
 }
 
-// childrenAlreadyMaterialized reports whether the parent already has >=1
-// child CRD of its expected child kind in the parent's namespace, matched
-// by the parent-specRef field (Phase.spec.milestoneRef / Plan.spec.phaseRef /
-// Task.spec.planRef / Milestone.spec.projectRef), with metav1.IsControlledBy
-// as a belt-and-suspenders fallback.
-//
-// cascade-11: the cascade-10 spec-ref idempotency guard covered only the
-// fresh-dispatch path (reconcilePlannerDispatch). The handleJobCompletion â
-// MaterializeChildCRDs path was UNGUARDED, so a Milestone that dispatched its
-// planner Job before its sibling Phase was visible (multi-doc kubectl apply
-// race) would, on planner-Job completion, unconditionally materialize a
-// spurious stub child subtree. Guarding dispatch is racy against not-yet-applied
-// siblings; the guard must live at the race-free materialization point. The
-// parent-specRef is set synchronously at child-apply time (race-free); ownerRef
-// is set asynchronously by the child's reconciler, so IsControlledBy is only a
-// fallback. This is the symmetric completion of the dispatch guards at
-// milestone_controller.go:245 and phase_controller.go:206.
-//
-// bare-Project / genuine self-bootstrap is unaffected: at the first materialize
-// the parent has 0 existing children of the expected kind â guard returns false
-// â the genuine first child is materialized once; a later reconcile finds it by
-// specRef â idempotent skip.
-//
-// parent must be one of *Project, *Milestone, *Phase, or *Plan. Any other type
-// (or a List error) returns (false, err-or-nil) so the caller proceeds to
-// materialize â fail-open preserves bare-Project bootstrap.
+// childrenAlreadyMaterialized delegates to reporter.ChildrenAlreadyMaterialized.
+// The guard logic lives in internal/reporter so cmd/tide-reporter can import it;
+// the controller callers remain unchanged (plan 09-04).
 func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent metav1.Object) (bool, error) {
-	ns := parent.GetNamespace()
-	name := parent.GetName()
-
-	switch p := parent.(type) {
-	case *tideprojectv1alpha1.Project:
-		var children tideprojectv1alpha1.MilestoneList
-		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
-			return false, fmt.Errorf("idempotency: list milestones: %w", err)
-		}
-		for i := range children.Items {
-			if children.Items[i].Spec.ProjectRef == name || metav1.IsControlledBy(&children.Items[i], p) {
-				return true, nil
-			}
-		}
-	case *tideprojectv1alpha1.Milestone:
-		var children tideprojectv1alpha1.PhaseList
-		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
-			return false, fmt.Errorf("idempotency: list phases: %w", err)
-		}
-		for i := range children.Items {
-			if children.Items[i].Spec.MilestoneRef == name || metav1.IsControlledBy(&children.Items[i], p) {
-				return true, nil
-			}
-		}
-	case *tideprojectv1alpha1.Phase:
-		var children tideprojectv1alpha1.PlanList
-		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
-			return false, fmt.Errorf("idempotency: list plans: %w", err)
-		}
-		for i := range children.Items {
-			if children.Items[i].Spec.PhaseRef == name || metav1.IsControlledBy(&children.Items[i], p) {
-				return true, nil
-			}
-		}
-	case *tideprojectv1alpha1.Plan:
-		var children tideprojectv1alpha1.TaskList
-		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
-			return false, fmt.Errorf("idempotency: list tasks: %w", err)
-		}
-		for i := range children.Items {
-			if children.Items[i].Spec.PlanRef == name || metav1.IsControlledBy(&children.Items[i], p) {
-				return true, nil
-			}
-		}
-	default:
-		// Unknown parent type â fail open (proceed to materialize). Should
-		// not happen; the four reconcilers pass concrete typed pointers.
-		return false, nil
-	}
-	return false, nil
+	return reporter.ChildrenAlreadyMaterialized(ctx, c, parent)
 }
 
-// MaterializeChildCRDs server-side-creates child CRDs from
-// EnvelopeOut.ChildCRDs.
-//
-// Each child is allocated to its concrete *tideprojectv1alpha1 pointer
-// based on Kind (only the allowlist-approved Kinds advance to creation â
-// T-308 mitigation). The child's Spec is decoded from child.Spec.Raw via
-// json.Unmarshal directly into the typed Spec field. ObjectMeta.Name is
-// child.Name; Namespace is the parent's namespace. OwnerRef is set via
-// internal/owner.EnsureOwnerRef (which enforces same-namespace per
-// Pitfall 23 and sets Controller=true / BlockOwnerDeletion=true).
-//
-// AlreadyExists on Create is treated as idempotent success (mirrors
-// Phase 2 task_controller.go:397-403 SUB-03 / Pitfall F watch-lag race
-// handling). Any other error short-circuits the loop and returns â
-// callers should patch their parent's Status.Phase=Failed.
+// MaterializeChildCRDs delegates to reporter.MaterializeChildCRDs.
+// The materialization machinery lives in internal/reporter so cmd/tide-reporter
+// can import it without a back-edge to internal/controller (plan 09-04).
 func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.Scheme, parent metav1.Object, children []pkgdispatch.ChildCRDSpec) error {
-	// Pre-flight: enforce Kind allowlist BEFORE any K8s API call.
-	// Any rejected Kind aborts the whole batch (planner contract
-	// violation â the envelope is poisoned; refuse to materialize any
-	// of it).
-	for _, child := range children {
-		if !childKindAllowlist[child.Kind] {
-			return fmt.Errorf("MaterializeChildCRDs: kind %q not in allowlist (allowed: Milestone, Phase, Plan, Task, Wave); refusing to create — T-308 mitigation", child.Kind)
-		}
-	}
-
-	for _, child := range children {
-		var obj client.Object
-		switch child.Kind {
-		case "Milestone":
-			ms := &tideprojectv1alpha1.Milestone{}
-			if err := json.Unmarshal(child.Spec.Raw, &ms.Spec); err != nil {
-				return fmt.Errorf("MaterializeChildCRDs: unmarshal Milestone %q spec: %w", child.Name, err)
-			}
-			obj = ms
-		case "Phase":
-			ph := &tideprojectv1alpha1.Phase{}
-			if err := json.Unmarshal(child.Spec.Raw, &ph.Spec); err != nil {
-				return fmt.Errorf("MaterializeChildCRDs: unmarshal Phase %q spec: %w", child.Name, err)
-			}
-			obj = ph
-		case "Plan":
-			pl := &tideprojectv1alpha1.Plan{}
-			if err := json.Unmarshal(child.Spec.Raw, &pl.Spec); err != nil {
-				return fmt.Errorf("MaterializeChildCRDs: unmarshal Plan %q spec: %w", child.Name, err)
-			}
-			obj = pl
-		case "Task":
-			tk := &tideprojectv1alpha1.Task{}
-			if err := json.Unmarshal(child.Spec.Raw, &tk.Spec); err != nil {
-				return fmt.Errorf("MaterializeChildCRDs: unmarshal Task %q spec: %w", child.Name, err)
-			}
-			// Wire the executor instruction artifact (defect #10b): the prompt is
-			// NOT inline on the Task spec — it lives at .spec.prompt inside the
-			// originating children/<name>.json on the PVC. The subagent stamped
-			// that file's workspace-relative path onto child.SourcePath; copy it to
-			// PromptPath so the controller reads the prompt fresh at each dispatch.
-			// PromptPath is required (MinLength=1) at the API boundary, so a missing
-			// SourcePath fails Create with a clear validation error rather than
-			// silently dispatching an empty-prompt executor (the #4 class).
-			tk.Spec.PromptPath = child.SourcePath
-			obj = tk
-		case "Wave":
-			wv := &tideprojectv1alpha1.Wave{}
-			if err := json.Unmarshal(child.Spec.Raw, &wv.Spec); err != nil {
-				return fmt.Errorf("MaterializeChildCRDs: unmarshal Wave %q spec: %w", child.Name, err)
-			}
-			obj = wv
-		default:
-			// Unreachable â allowlist was checked above. Defensive.
-			return fmt.Errorf("MaterializeChildCRDs: kind %q unreachable after allowlist", child.Kind)
-		}
-
-		obj.SetName(child.Name)
-		obj.SetNamespace(parent.GetNamespace())
-
-		if err := owner.EnsureOwnerRef(obj, parent, scheme); err != nil {
-			return fmt.Errorf("MaterializeChildCRDs: ensure owner ref on %s/%s: %w", child.Kind, child.Name, err)
-		}
-
-		if err := c.Create(ctx, obj); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("MaterializeChildCRDs: create %s/%s: %w", child.Kind, child.Name, err)
-			}
-			// AlreadyExists: idempotent success (SUB-03 / Pitfall F).
-		}
-	}
-	return nil
+	return reporter.MaterializeChildCRDs(ctx, c, scheme, parent, children)
 }
