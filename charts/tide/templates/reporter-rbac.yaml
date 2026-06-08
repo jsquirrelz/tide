@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+automountServiceAccountToken: true
+# Phase 9 plan 09-04 (T-09-07 mitigation / Option C reader Job):
+# tide-reporter is a DISTINCT identity from tide-subagent (zero-verb SA) and tide-push.
+# This SA runs the per-dispatch tide-reporter Job that reads out.json from the
+# project-namespace PVC and materializes child CRDs via the K8s API (defects #11/#12 fix).
+#
+# Least-privilege: create + get on the five TIDE child Kinds only.
+# NO list/watch/update/delete/patch, NO secrets, NO core resources, NO projects.
+# (T-09-07 mitigation: reporter has no need to read secrets, list objects, or mutate
+# anything other than the five child CRDs it creates.)
+#
+# The reader Job runs in the PROJECT namespace (not tide-system), so the SA must exist
+# in each project namespace. The per-namespace fan-out below mirrors
+# per-namespace-rolebinding.yaml's range .Values.projectNamespaces pattern.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+rules:
+  # Least-privilege: create child CRDs + get parent for ownerRef resolution.
+  # T-09-07 mitigation: NO list/watch/update/delete/patch, NO secrets,
+  # NO core resources, NO projects (human-applied).
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tide.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+{{- range $ns := .Values.projectNamespaces }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tide.labels" $ | nindent 4 }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tide.labels" $ | nindent 4 }}
+rules:
+  # Per-namespace mirror: same least-privilege rule as the .Release.Namespace Role above.
+  # The reader Job runs in the project namespace ({{ $ns }}); the SA must exist here.
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tide.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: {{ $ns }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+{{- end }}

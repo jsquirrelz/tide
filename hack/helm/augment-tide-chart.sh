@@ -118,6 +118,12 @@ cp "${HACK_DIR}/serviceaccount-subagent.yaml" "${CHART_DIR}/templates/serviceacc
 #     namespace. Documents cross-namespace caveat in its own comment block.
 cp "${HACK_DIR}/push-rbac.yaml" "${CHART_DIR}/templates/push-rbac.yaml"
 
+# 6b. reporter-rbac.yaml — NEW template for the tide-reporter ServiceAccount + Role +
+#     RoleBinding (Phase 9 plan 09-04 / T-09-07 mitigation). Dedicated SA for the
+#     in-namespace reader Job (Option C). Least-privilege: create+get on 5 TIDE CRD
+#     Kinds only. Per-namespace fan-out via .Values.projectNamespaces range.
+cp "${HACK_DIR}/reporter-rbac.yaml" "${CHART_DIR}/templates/reporter-rbac.yaml"
+
 # 7. projects-pvc.yaml — Single shared tide-projects ReadWriteMany PVC (Blocker #2/#3
 #    fix — single-shared-PVC + subPath architecture, RESEARCH.md OQ#2 RESOLVED).
 #    resource-policy: keep preserves in-flight workspace state across helm uninstall.
