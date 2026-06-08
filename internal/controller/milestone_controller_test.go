@@ -265,9 +265,13 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		// Manager reads only the tiny status from the completed planner Job
 		// (no ChildCRDs — materialization moved to the reporter Job, REQ-09-01).
+		// Plan 09-08: set ChildCount=1 so the uniform ChildCount gate expects 1
+		// child Phase; without it the gate would treat the milestone as a leaf and
+		// Succeed immediately without waiting for the reporter to materialize the child.
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
-			TaskUID:  string(got.UID),
-			ExitCode: 0,
+			TaskUID:    string(got.UID),
+			ExitCode:   0,
+			ChildCount: 1,
 		})
 
 		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)

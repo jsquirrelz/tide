@@ -322,10 +322,15 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// gate + boundary-push logic regardless — those are envelope-independent.
 	// Phase 04.1: previously a nil EnvReader short-circuited to patchSucceeded,
 	// which skipped the boundary push trigger.
+	var out pkgdispatch.EnvelopeOut
+	envReadOK := false
 	if r.EnvReader != nil {
-		if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID)); err != nil {
-			return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", err.Error())
+		var readErr error
+		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID))
+		if readErr != nil {
+			return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", readErr.Error())
 		}
+		envReadOK = true
 	} else {
 		logger.V(1).Info("no env reader; skipping tiny-status read", "phase", ph.Name)
 	}
@@ -379,14 +384,48 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 
 	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE patchSucceeded.
 	//
-	// CR-03 fix: gate the push on gates.BoundaryDetected so the push only
-	// fires when all child Plans have actually Succeeded.
-	//
-	// Phase 04.1: when child Plans exist but are NOT all Succeeded yet, requeue
-	// rather than patching Phase=Succeeded — otherwise the Phase reaches
-	// terminal status before the boundary push ever fires (which races with
-	// child-Plan completion in tests and skips push in production when child
-	// Plans complete after the Phase's planner Job).
+	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession replaces the
+	// prior missing guard that caused the Phase to fall straight through to
+	// patchPhaseSucceeded while its child Plans were still being materialized
+	// by the reporter Job (the root cause of the premature-succession race).
+	// Gate (mirrors milestone_controller.go):
+	//   expected == 0            → succeed (genuine leaf: planner authored no Plans)
+	//   observed < expected      → requeue 5s (reporter still materializing)
+	//   observed >= expected     → BoundaryDetected? push+succeed : requeue 5s
+	// When EnvReader is nil, fall back to the prior hasChildPlans behavior so
+	// non-Option-C / unit-test paths keep working.
+	if envReadOK {
+		// Option-C path: gate on out.ChildCount from tiny status.
+		expected := out.ChildCount
+		if expected == 0 {
+			// Genuine leaf — planner authored no Plan children.
+			logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
+			return r.patchPhaseSucceeded(ctx, ph)
+		}
+		observed := r.countChildPlans(ctx, ph)
+		if observed < expected {
+			logger.V(1).Info("requeue: reporter still materializing Plan children",
+				"phase", ph.Name, "expected", expected, "observed", observed)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// observed >= expected: check if all Succeeded.
+		detected, derr := gates.BoundaryDetected(ctx, r.Client, ph, "Plan")
+		if derr != nil {
+			return ctrl.Result{}, derr
+		}
+		if detected {
+			if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+				return ctrl.Result{}, err
+			}
+			return r.patchPhaseSucceeded(ctx, ph)
+		}
+		logger.V(1).Info("boundary push deferred: Plan children exist but not all Succeeded",
+			"phase", ph.Name, "expected", expected, "observed", observed)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Fallback: EnvReader is nil (non-Option-C / unit-test path). Use the prior
+	// hasChild-based behavior (mirrors milestone_controller.go fallback).
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ph, "Plan")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -396,30 +435,37 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 			return ctrl.Result{}, err
 		}
 	} else if r.hasChildPlans(ctx, ph) {
-		// Children exist but not all Succeeded — requeue and wait.
-		logger.V(1).Info("boundary push deferred: child Plans pending", "phase", ph.Name)
+		logger.V(1).Info("boundary push deferred: child Plans pending (fallback)", "phase", ph.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: phase has no child Plans", "phase", ph.Name)
+		logger.V(1).Info("boundary push skipped: phase has no child Plans (fallback)", "phase", ph.Name)
 	}
 
 	return r.patchPhaseSucceeded(ctx, ph)
 }
 
 // hasChildPlans reports whether any Plan is owned by this Phase. Phase 04.1.
+// Used by the nil-EnvReader fallback path in handleJobCompletion.
 func (r *PhaseReconciler) hasChildPlans(ctx context.Context, ph *tideprojectv1alpha1.Phase) bool {
+	return r.countChildPlans(ctx, ph) > 0
+}
+
+// countChildPlans returns the number of Plans owned by this Phase (plan 09-08).
+// Used by the ChildCount-gated succession path to compare observed vs expected children.
+func (r *PhaseReconciler) countChildPlans(ctx context.Context, ph *tideprojectv1alpha1.Phase) int {
 	var planList tideprojectv1alpha1.PlanList
 	if err := r.List(ctx, &planList, client.InNamespace(ph.Namespace)); err != nil {
-		return false
+		return 0
 	}
+	count := 0
 	for i := range planList.Items {
 		for _, ref := range planList.Items[i].OwnerReferences {
 			if ref.Kind == "Phase" && ref.UID == ph.UID {
-				return true
+				count++
 			}
 		}
 	}
-	return false
+	return count
 }
 
 func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideprojectv1alpha1.Phase) (ctrl.Result, error) {

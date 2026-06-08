@@ -609,6 +609,22 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	return ctrl.Result{}, nil
 }
 
+// countChildMilestones returns the number of Milestones owned by this Project (plan 09-08).
+// Used by the ChildCount-gated succession path in handleProjectJobCompletion.
+func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *tideprojectv1alpha1.Project) int {
+	var msList tideprojectv1alpha1.MilestoneList
+	if err := r.List(ctx, &msList, client.InNamespace(project.Namespace)); err != nil {
+		return 0
+	}
+	count := 0
+	for i := range msList.Items {
+		if metav1.IsControlledBy(&msList.Items[i], project) {
+			count++
+		}
+	}
+	return count
+}
+
 // checkProjectComplete returns true (and patches Status.Phase=Complete) when
 // BoundaryDetected reports all owned Milestones have reached Succeeded.
 // Returns false without patching when no Milestones exist yet (childless guard).
@@ -804,12 +820,19 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Read tiny status from the dispatch Job's termination message for budget
 	// rollup and failure classification. The ChildCRDs field is NOT used here —
 	// materialization has moved to the reporter Job (REQ-09-01).
+	// Plan 09-08: capture out so we can gate on out.ChildCount below.
+	var out pkgdispatch.EnvelopeOut
+	envReadOK := false
 	if r.EnvReader != nil {
 		// project is both the top-level object and its own "parent" at this level;
 		// use project.UID as both projectUID and parentUID (the envelope is keyed by
 		// the parent's UID, and the Project IS the parent at the project level).
-		if _, err := r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID)); err != nil {
-			logger.Error(err, "project planner envelope tiny-status read failed (non-fatal)", "project", project.Name)
+		var readErr error
+		out, readErr = r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID))
+		if readErr != nil {
+			logger.Error(readErr, "project planner envelope tiny-status read failed (non-fatal)", "project", project.Name)
+		} else {
+			envReadOK = true
 		}
 	} else {
 		logger.V(1).Info("no env reader; skipping tiny-status read", "project", project.Name)
@@ -829,22 +852,41 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Idempotent check: if reporter Job already exists, materialization is in
 	// flight or complete — skip Create (T-09-13 mitigation: re-fire safety).
 	var existingReporterJob batchv1.Job
-	if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: project.Namespace}, &existingReporterJob); gErr == nil {
+	if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: project.Namespace}, &existingReporterJob); gErr != nil {
+		if !apierrors.IsNotFound(gErr) {
+			return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+		}
+		reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
+			ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+		if cErr := r.Create(ctx, reporterJob); cErr != nil {
+			if !apierrors.IsAlreadyExists(cErr) {
+				return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+			}
+			// AlreadyExists: idempotent success (T-09-13).
+		} else {
+			logger.Info("spawned reporter Job", "job", reporterJobName, "project", project.Name)
+		}
+	} else {
 		logger.V(1).Info("reporter Job already exists; skipping spawn", "job", reporterJobName)
-		return ctrl.Result{}, nil
-	} else if !apierrors.IsNotFound(gErr) {
-		return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 	}
 
-	reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
-		ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
-	if cErr := r.Create(ctx, reporterJob); cErr != nil {
-		if !apierrors.IsAlreadyExists(cErr) {
-			return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession. Gate:
+	//   expected == 0            → return (checkProjectComplete handles leaf case
+	//                              on next reconcile via BoundaryDetected)
+	//   observed < expected      → requeue 5s (reporter still materializing Milestones)
+	//   observed >= expected     → return (checkProjectComplete will detect all-Succeeded)
+	// When EnvReader is nil or read failed, fall back to returning nil and letting
+	// checkProjectComplete handle succession on next reconcile via Owns watch.
+	if envReadOK {
+		expected := out.ChildCount
+		if expected > 0 {
+			observed := r.countChildMilestones(ctx, project)
+			if observed < expected {
+				logger.V(1).Info("requeue: reporter still materializing Milestone children",
+					"project", project.Name, "expected", expected, "observed", observed)
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
 		}
-		// AlreadyExists: idempotent success (T-09-13).
-	} else {
-		logger.Info("spawned reporter Job", "job", reporterJobName, "project", project.Name)
 	}
 
 	// D-02: no gate at Project→Milestone level — auto-proceed.

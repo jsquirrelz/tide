@@ -193,6 +193,16 @@ type EnvelopeOut struct {
 	// don't touch git (e.g. planner Jobs whose output is consumed only via
 	// child-CRD materialization) don't serialize a "git: null" placeholder.
 	Git *GitOutput `json:"git,omitempty"`
+
+	// ChildCount is the number of child CRDs the planner authored. When
+	// reading the tiny termination-message status (PodStatusEnvelopeReader),
+	// this field is populated from the TerminationStub.ChildCount JSON key so
+	// planner controllers can perform race-free succession gating without also
+	// carrying the full ChildCRDs payloads (plan 09-08 Defect B). Zero for
+	// executor-level dispatches and genuine leaf planners. When reading a full
+	// out.json via FilesystemEnvelopeReader the field falls back to
+	// len(ChildCRDs) in the planner controllers (non-Option-C path).
+	ChildCount int `json:"childCount,omitempty"`
 }
 
 // GitOutput carries git-side output fields a dispatch produces, populated by
