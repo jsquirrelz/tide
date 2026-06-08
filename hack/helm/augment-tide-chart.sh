@@ -256,6 +256,35 @@ if ENV3_MARKER not in content:
         count=1,
     )
 
+# ── 8e2: Phase 09 plan 09-06 — TIDE_REPORTER_IMAGE env injection ─────────────
+# Adds TIDE_REPORTER_IMAGE env var on the manager container. Read by
+# cmd/manager/main.go via envOrDefault (TIDE_REPORTER_IMAGE) and threaded into
+# all four planner reconcilers' ReporterImage field (REQ-09-01 — Option C
+# in-namespace reporter Job architecture).
+ENV9_MARKER = "# phase9-reporter-env-injected"
+ENV9_BLOCK = """        - name: TIDE_REPORTER_IMAGE
+          value: "{{ .Values.images.tideReporter.repository }}:{{ .Values.images.tideReporter.tag | default .Chart.AppVersion }}"
+        # phase9-reporter-env-injected
+"""
+if ENV9_MARKER not in content:
+    # Insert immediately after the Phase 4 OTel block (after phase4-env-injected marker).
+    # If phase4 marker is not present (chart has not yet been augmented), insert after
+    # the phase3 marker instead.
+    if "# phase4-env-injected" in content:
+        content = re.sub(
+            r'(        # phase4-env-injected\n)',
+            r'\1' + ENV9_BLOCK,
+            content,
+            count=1,
+        )
+    else:
+        content = re.sub(
+            r'(        # phase3-env-injected\n)',
+            r'\1' + ENV9_BLOCK,
+            content,
+            count=1,
+        )
+
 # ── 8f: Phase 4 plan 04-14 — OTel env-var injection ─────────────────────────
 # Adds OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG,
 # OTEL_SERVICE_NAME on the manager container. Read by internal/otelinit at boot

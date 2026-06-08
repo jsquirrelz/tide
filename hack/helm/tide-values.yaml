@@ -164,6 +164,16 @@ images:
     repository: ghcr.io/jsquirrelz/tide-claude-subagent
     tag: ""
     pullPolicy: IfNotPresent
+  # Phase 09 plan 09-06 (REQ-09-01): in-namespace reporter image. The reader Job
+  # runs in the project namespace as tide-reporter SA, reads out.json from the PVC,
+  # and materializes child CRDs via the K8s API (Option C architecture).
+  # Wired to controller via TIDE_REPORTER_IMAGE env var on the manager Deployment.
+  # When empty, the spawn site skips Job creation (same as TIDE_PUSH_IMAGE skip in
+  # boundary_push.go). In production, prefer pinning by @sha256 digest.
+  tideReporter:
+    repository: ghcr.io/jsquirrelz/tide-reporter
+    tag: ""
+    pullPolicy: IfNotPresent
 
 # Phase 3 plan 03-09 (D-C4): per-level subagent defaults. Resolution chain at
 # dispatch time (in MilestoneReconciler / PhaseReconciler / PlanReconciler before

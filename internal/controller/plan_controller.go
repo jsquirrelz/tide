@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,6 +87,11 @@ type PlanReconciler struct {
 	// TidePushImage is the image ref for the tide-push container used by
 	// the W-2 boundary push trigger (plan 04-06).
 	TidePushImage string
+
+	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
+	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
+	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
+	ReporterImage string
 
 	// HelmProviderDefaults carry Helm-chart provider/model defaults (Phase 3).
 	HelmProviderDefaults ProviderDefaults
@@ -347,9 +353,15 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	return ctrl.Result{}, true, nil
 }
 
-// handlePlannerJobCompletion materializes Task child CRDs from
-// EnvelopeOut.ChildCRDs and clears the Running phase so the Phase 2 Wave
-// path can pick up on the next reconcile.
+// handlePlannerJobCompletion reads tiny status from the completed planner Job,
+// spawns the tide-reporter reader Job to materialize Task child CRDs from the
+// PVC-side out.json, and clears the Running phase so the Phase 2 Wave path can
+// pick up on the next reconcile.
+//
+// Materialization is now the reporter Job's job (Phase 09 plan 09-06, REQ-09-01).
+// Children (Tasks + Waves) arrive via the existing Owns watches once the reporter
+// creates them. The reporter also stamps ValidationState=Validated in a follow-up
+// reconcile when child Tasks are observed (reconcileWaveMaterialization gate).
 //
 // Note: This does NOT create Waves — the existing reconcileWaveMaterialization
 // handles that once the admission webhook stamps ValidationState=Validated.
@@ -361,6 +373,9 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		projectUID = string(project.UID)
 	}
 
+	// Read tiny status from the dispatch Job's termination message for budget
+	// rollup and failure classification. ChildCRDs are NOT used here —
+	// materialization has moved to the reporter Job (REQ-09-01).
 	if r.EnvReader == nil {
 		logger.Info("no env reader; clearing Running phase to let Wave path proceed")
 		patch := client.MergeFrom(plan.DeepCopy())
@@ -369,8 +384,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		return ctrl.Result{}, nil
 	}
 
-	envOut, err := r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
-	if err != nil {
+	if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID)); err != nil {
 		patch := client.MergeFrom(plan.DeepCopy())
 		plan.Status.Phase = "Failed"
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
@@ -386,39 +400,47 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		return ctrl.Result{}, nil
 	}
 
-	if len(envOut.ChildCRDs) > 0 {
-		// cascade-11: race-free idempotency guard at the materialization point —
-		// skip authoring when a child Task (by spec.planRef, or IsControlledBy
-		// fallback) already exists, then CONTINUE to ValidationState/Wave handling.
-		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, plan)
-		if gErr != nil {
-			return ctrl.Result{}, gErr
-		}
-		if !already {
-			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, plan, envOut.ChildCRDs); mErr != nil {
-				patch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.Phase = "Failed"
-				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha1.ConditionFailed,
-					Status:             metav1.ConditionTrue,
-					Reason:             "ChildCRDMaterializationFailed",
-					Message:            mErr.Error(),
-					LastTransitionTime: metav1.Now(),
-				})
-				if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
-					return ctrl.Result{}, pErr
-				}
-				return ctrl.Result{}, nil
+	// Spawn the tide-reporter reader Job in the project namespace (Option C).
+	// The reporter reads out.json from the PVC and materializes Task children.
+	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
+	// T-09-13: idempotent — AlreadyExists on Create is success.
+	reporterSpawned := false
+	if r.ReporterImage != "" && project != nil {
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
+		pvcName := defaultSharedPVCName
+		var existingReporterJob batchv1.Job
+		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: plan.Namespace}, &existingReporterJob); gErr != nil {
+			if !apierrors.IsNotFound(gErr) {
+				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
+			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
+				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+			if cErr := r.Create(ctx, reporterJob); cErr != nil {
+				if !apierrors.IsAlreadyExists(cErr) {
+					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+				}
+				// AlreadyExists: reporter was already spawned in a prior reconcile.
+				reporterSpawned = true
+			} else {
+				logger.Info("spawned reporter Job", "job", reporterJobName, "plan", plan.Name)
+				reporterSpawned = true
+			}
+		} else {
+			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
+			reporterSpawned = true
 		}
+	} else if r.ReporterImage == "" {
+		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
+	}
 
-		// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
-		// proceeds past the gate at line 535. The admission webhook stamps Validated
-		// at CREATE time for plans authored via the webhook path; for plans authored
-		// by the planner Job (production dispatch path) the webhook has already run
-		// but the controller must re-stamp here because the planner Job materializes
-		// Tasks after admission. This is the correct seam: Tasks are now present,
-		// the DAG is definitionally valid for $0-stub execution.
+	// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
+	// proceeds past the gate. The admission webhook stamps Validated at CREATE time
+	// for plans authored via the webhook path; for plans authored by the planner Job
+	// (production dispatch path) the webhook has already run but the controller must
+	// re-stamp here because Tasks are materialized after admission (by the reporter).
+	// Stamp when the reporter was spawned (or unconfigured — stub/test path). This is
+	// the correct seam: the reporter Job is in flight, Tasks will appear shortly.
+	if reporterSpawned || r.ReporterImage == "" {
 		valPatch := client.MergeFrom(plan.DeepCopy())
 		plan.Status.ValidationState = "Validated"
 		if err := r.Status().Patch(ctx, plan, valPatch); err != nil {

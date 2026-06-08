@@ -176,6 +176,14 @@ func main() {
 	// env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
 	tidePushImage := envOrDefault("TIDE_PUSH_IMAGE", "ghcr.io/jsquirrelz/tide-push:v0.1.0-dev")
 
+	// TIDE_REPORTER_IMAGE → four reconcilers' ReporterImage field (Phase 09 plan 09-06).
+	// The tide-reporter reader Job reads out.json from the project-namespace PVC and
+	// materializes child CRDs via the K8s API (Option C architecture). When empty,
+	// the spawn site logs an Info message and skips Job creation (mirrors TIDE_PUSH_IMAGE
+	// skip in boundary_push.go:80-88). Override via Helm values.images.tideReporter.
+	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override via Helm.
+	reporterImage := envOrDefault("TIDE_REPORTER_IMAGE", "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev")
+
 	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override
 	// via Helm values.claudeSubagentImage (which sets CLAUDE_SUBAGENT_IMAGE on the
 	// controller env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
@@ -354,6 +362,8 @@ func main() {
 		SubagentImage:        subagentImage,
 		CredproxyImage:       credproxyImage,
 		HelmProviderDefaults: helmProviderDefaults,
+		// Phase 09 plan 09-06: reader Job image.
+		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
@@ -380,6 +390,8 @@ func main() {
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
 		SubagentImage:  subagentImage,
+		// Phase 09 plan 09-06: reader Job image.
+		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -402,6 +414,8 @@ func main() {
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
 		SubagentImage:  subagentImage,
+		// Phase 09 plan 09-06: reader Job image.
+		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -423,6 +437,8 @@ func main() {
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
 		SubagentImage:  subagentImage,
+		// Phase 09 plan 09-06: reader Job image.
+		ReporterImage: reporterImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)
