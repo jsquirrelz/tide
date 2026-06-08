@@ -56,3 +56,47 @@ the Phase lost it (Plans appeared ~1s after the fall-through). Fix: gate the 'no
 ## Secondary observations
 - Reporter RBAC (plan 09-04) was missing 'get projects' (parent UID resolution) AND 'list' on child kinds (idempotency guard lists children). Both patched live during this run; MUST land in SOT + chart + medium sample.
 - status.budget == {} on the real path — defect #6 cost rollup may not surface via the tiny-status termination message; needs investigation.
+
+## Confirmed root causes (3 defects surfaced by 09-07 live acceptance)
+
+### Defect A — reporter RBAC (FIXED, committed c1be68c)
+tide-reporter Role (plan 09-04) missing `get projects` + `list` on child kinds.
+Fixed in chart SOT + template + medium sample.
+
+### Defect B — premature succession race (Option-C async materialization)
+The 4 level controllers are INCONSISTENT in how they wait after spawning the
+async reporter Job:
+- milestone: one-shot `justMaterialized` (true only on the spawn reconcile) → races on the 2nd reconcile
+- phase: NO guard → falls straight through to patchSucceeded (this is the one that lost the race in the run)
+- plan: `reporterSpawned` early-return
+- project: separate path
+Because the reporter creates children asynchronously, "no children visible" is
+ambiguous (leaf vs reporter-not-done-yet). Levels succeed before descendants exist.
+
+FIX (race-free, uses data the Manager already reads): add `ChildCount int` to
+pkg/dispatch.TerminationStub; NewTerminationStub sets it = len(out.ChildCRDs)
+(the shims already call NewTerminationStub → no shim change). Each level
+controller reads ChildCount (expected) from the tiny status and gates succession:
+  expected == 0            -> succeed (genuine leaf)
+  observedChildren < expected -> requeue (reporter still materializing)
+  observedChildren >= expected -> BoundaryDetected (all Succeeded?) -> push+succeed else requeue
+This removes the timing/cache race entirely and replaces the inconsistent
+justMaterialized/hasChild/reporterSpawned guards with one uniform rule.
+
+### Defect C — cost rollup dropped on the Option-C path (budget={})
+cmd/manager wires podjob.PodStatusEnvelopeReader (reads tiny status from the
+dispatch Job termination message — correct). But the controllers call
+`if _, err := r.EnvReader.ReadOut(...)` and DISCARD the returned EnvelopeOut —
+they read it only for error classification and never RollUpUsage into
+Project.Status.budget.costSpentCents. So defect #6's EstimatedCostCents (now
+present in the tiny status Usage) is never surfaced → status.budget == {}.
+
+FIX: capture the ReadOut result and roll Usage up to Project.Status.budget
+(costSpentCents) on the dispatch-completion path, same as the pre-09-06 inline path did.
+
+## Net
+The cross-namespace reporter MECHANISM works (children materialize via the K8s
+API, same-namespace out.json read, tiny status rides the termination message).
+The remaining work is succession-gating (B) + cost-rollup wiring (C). Both block
+a LEGITIMATE Complete (DoD: all descendants Succeeded + costSpentCents > 0).
+v1.0.0 retag stays blocked until 09-07 records a legitimate Complete.
