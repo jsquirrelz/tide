@@ -183,23 +183,50 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	}
 	renderedPrompt := promptBuf.String()
 
-	// 4. Build the claude CLI invocation. The --bare flag is REQUIRED per
-	// RESEARCH Â§"Critical new finding" â it skips auto-discovery of the
-	// host claude config dir, .mcp.json, hooks, skills, plugins, and any
-	// project CLAUDE-doc auto-memory. Hermetic by construction.
+	// 4a. Compute + create the per-Task events dir BEFORE the args build: the
+	// claude invocation scopes its write capability to this dir via --add-dir
+	// (defect #7), and the planner child-CRD handoff (defect #5) writes to
+	// <eventsDir>/children/ -- the same dir readChildCRDs scans below.
+	eventsDir := filepath.Join(a.opts.WorkspaceRoot, "envelopes", in.TaskUID)
+	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
+		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: mkdir events dir %q: %w", eventsDir, err)
+	}
+
+	// 4b. Build the claude CLI invocation.
+	//   - --bare is REQUIRED per RESEARCH "Critical new finding": it skips
+	//     auto-discovery of the host claude config dir, .mcp.json, hooks,
+	//     skills, plugins, and any project CLAUDE-doc auto-memory. Hermetic by
+	//     construction.
+	//   - --permission-mode acceptEdits (defect #7) is the only headless mode
+	//     that auto-approves the Write/Edit tools; without it the planner
+	//     child-CRD Write is denied ("sandbox restrictions") and no children/
+	//     dir is ever created. bypassPermissions is sandbox-only; text-scraping
+	//     of Result was rejected for #5.
+	//   - --add-dir eventsDir (defect #7) scopes the granted write capability to
+	//     the per-Task dir only (minimal privilege -- NOT the whole workspace);
+	//     readChildCRDs traversal/Kind/empty-name guards remain the second line
+	//     of defense.
+	//   - The rendered prompt is delivered via STDIN, not as the -p positional
+	//     arg (defect #8): a large planner prompt as one argv entry risks Linux
+	//     MAX_ARG_STRLEN (128 KiB). claude -p reads the prompt from stdin when
+	//     the positional is omitted (stdin cap is 10 MB). There is no
+	//     --prompt-file flag in the pinned CLI.
 	args := []string{
-		"-p", renderedPrompt,
+		"-p",
 		"--model", in.Provider.Model,
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		"--permission-mode", "acceptEdits",
+		"--add-dir", eventsDir,
 		"--bare",
 	}
 	cmd := a.execFunc(ctx, a.opts.ClaudeBinary, args...)
+	cmd.Stdin = strings.NewReader(renderedPrompt)
 
 	// 5. Credproxy env wiring (Phase 2 D-C1..C4). ANTHROPIC_API_KEY carries
-	// the HMAC-signed token, NEVER the raw API key â the real key lives
-	// only in the credproxy sidecar's Secret mount.
+	// the HMAC-signed token, NEVER the raw API key -- the real key lives
+	// only in the credproxy sidecar Secret mount.
 	cmd.Env = append(cmd.Environ(),
 		"ANTHROPIC_BASE_URL="+in.ProxyEndpoint,
 		"ANTHROPIC_API_KEY="+in.SignedToken,
@@ -209,10 +236,6 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	// 6. Create the events.jsonl audit log. Phase 4 OpenInference parsing
 	// reads this file untouched; we tee every line through ParseStream as
 	// it arrives.
-	eventsDir := filepath.Join(a.opts.WorkspaceRoot, "envelopes", in.TaskUID)
-	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
-		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: mkdir events dir %q: %w", eventsDir, err)
-	}
 	eventsPath := filepath.Join(eventsDir, "events.jsonl")
 	eventsFile, err := os.Create(eventsPath)
 	if err != nil {

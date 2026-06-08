@@ -251,3 +251,105 @@ func newFakeExecAnthropic(t *testing.T, workspaceRoot, fixtureContent string) *A
 	}
 	return a
 }
+
+// TestRun_PromptViaStdinAndPermissionFlags locks in the defect #7 + #8 fixes:
+//   - #8: the rendered prompt is NOT passed as the `-p` positional argv entry
+//     (which risks Linux MAX_ARG_STRLEN for large planner prompts) — it is
+//     delivered via STDIN. So renderedPrompt must be absent from cmd.Args and
+//     present on cmd.Stdin.
+//   - #7: the invocation grants the headless Write/Edit capability scoped to
+//     the per-Task events dir, i.e. `--permission-mode acceptEdits` and
+//     `--add-dir <eventsDir>` appear in cmd.Args, while `--bare` is retained.
+//
+// The fake exec captures the args, drains stdin into a temp file (proving the
+// prompt was delivered there), then emits the canned stream-json on stdout so
+// the parse path still completes.
+func TestRun_PromptViaStdinAndPermissionFlags(t *testing.T) {
+	tmp := t.TempDir()
+
+	fixturePath := filepath.Join(tmp, "fixture.jsonl")
+	if err := os.WriteFile(fixturePath, []byte(fixtureStreamJSON), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdinCapturePath := filepath.Join(tmp, "captured-stdin.txt")
+
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude", // overridden via execFunc
+		WorkspaceRoot: tmp,
+	})
+
+	var capturedArgs []string
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		capturedArgs = append([]string(nil), args...)
+		// Drain stdin -> capture file, then emit the fixture on stdout so the
+		// parser still sees a well-formed stream. Run() sets cmd.Stdin after
+		// this returns, so the spawned shell receives the rendered prompt.
+		script := "cat > " + stdinCapturePath + "; cat " + fixturePath
+		return exec.CommandContext(ctx, "bash", "-c", script)
+	}
+
+	in := envelopeFixture("uid-stdin-flags")
+	const wantPrompt = "THIS-IS-THE-RENDERED-PROMPT-SENTINEL"
+	in.Prompt = wantPrompt // task executor template echoes nothing structural; sentinel just needs to render
+
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("ExitCode: got %d want 0 (reason=%q)", out.ExitCode, out.Reason)
+	}
+
+	// (a) renderedPrompt must NOT be a positional argv entry. The bare "-p"
+	// flag is present, but no element of Args may carry the prompt sentinel.
+	joined := strings.Join(capturedArgs, "\x00")
+	if strings.Contains(joined, wantPrompt) {
+		t.Errorf("rendered prompt leaked into cmd.Args (defect #8 regression): %v", capturedArgs)
+	}
+	if !containsArg(capturedArgs, "-p") {
+		t.Errorf("expected bare -p flag in args, got %v", capturedArgs)
+	}
+
+	// (b) the prompt must have been delivered via stdin.
+	stdinData, rerr := os.ReadFile(stdinCapturePath)
+	if rerr != nil {
+		t.Fatalf("read captured stdin: %v", rerr)
+	}
+	if !strings.Contains(string(stdinData), wantPrompt) {
+		t.Errorf("rendered prompt not delivered via stdin; captured=%q", string(stdinData))
+	}
+
+	// (c) headless write capability flags, scoped to the per-Task events dir,
+	// with --bare retained.
+	wantEventsDir := filepath.Join(tmp, "envelopes", in.TaskUID)
+	assertFlagPair(t, capturedArgs, "--permission-mode", "acceptEdits")
+	assertFlagPair(t, capturedArgs, "--add-dir", wantEventsDir)
+	if !containsArg(capturedArgs, "--bare") {
+		t.Errorf("--bare flag dropped (hermeticity regression): %v", capturedArgs)
+	}
+}
+
+// containsArg reports whether want appears as a standalone element of args.
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// assertFlagPair asserts that flag is immediately followed by value in args.
+func assertFlagPair(t *testing.T, args []string, flag, value string) {
+	t.Helper()
+	for i, a := range args {
+		if a == flag {
+			if i+1 < len(args) && args[i+1] == value {
+				return
+			}
+			t.Errorf("flag %q present but not followed by %q (args=%v)", flag, value, args)
+			return
+		}
+	}
+	t.Errorf("flag %q missing from args=%v", flag, args)
+}
