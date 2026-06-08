@@ -353,3 +353,193 @@ func assertFlagPair(t *testing.T, args []string, flag, value string) {
 	}
 	t.Errorf("flag %q missing from args=%v", flag, args)
 }
+
+// writeChildPromptJSON writes a prompt artifact in the children JSON format at
+// the given path. The artifact matches childPromptFile: {"spec":{"prompt":"<p>"}}.
+func writeChildPromptJSON(t *testing.T, path, prompt string) {
+	t.Helper()
+	data := []byte(`{"kind":"Task","name":"task-01","spec":{"prompt":"` + prompt + `"}}`)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir for prompt artifact: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write prompt artifact: %v", err)
+	}
+}
+
+// TestPromptPath_HappyPath asserts that when in.PromptPath is set and the artifact
+// exists under WorkspaceRoot, Run reads the artifact and renders {{.Prompt}} from it.
+func TestPromptPath_HappyPath(t *testing.T) {
+	tmp := t.TempDir()
+	const wantPrompt = "implement FormattedNow as specified"
+
+	// Write the prompt artifact at <WorkspaceRoot>/envelopes/planner-uid/children/task-01.json
+	artifactPath := filepath.Join(tmp, "envelopes", "planner-uid", "children", "task-01.json")
+	writeChildPromptJSON(t, artifactPath, wantPrompt)
+
+	stdinCapturePath := filepath.Join(tmp, "captured-stdin.txt")
+	fixturePath := filepath.Join(tmp, "fixture.jsonl")
+	if err := os.WriteFile(fixturePath, []byte(fixtureStreamJSON), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: tmp,
+	})
+	// Capture stdin so we can verify the prompt was populated from the artifact.
+	script := "cat > " + stdinCapturePath + "; cat " + fixturePath
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "bash", "-c", script)
+	}
+
+	in := envelopeFixture("uid-promptpath-happy")
+	in.Prompt = ""                                                           // empty — must be populated from PromptPath
+	in.PromptPath = "envelopes/planner-uid/children/task-01.json"           // workspace-relative
+
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("ExitCode: got %d want 0 (reason=%q)", out.ExitCode, out.Reason)
+	}
+	// The artifact's .spec.prompt must have been delivered via stdin.
+	stdinData, rerr := os.ReadFile(stdinCapturePath)
+	if rerr != nil {
+		t.Fatalf("read captured stdin: %v", rerr)
+	}
+	if !strings.Contains(string(stdinData), wantPrompt) {
+		t.Errorf("artifact prompt not delivered via stdin; captured=%q", string(stdinData))
+	}
+}
+
+// TestPromptPath_AbsoluteRejected asserts that an absolute PromptPath is rejected
+// before any file read (traversal defense T-09-05).
+func TestPromptPath_AbsoluteRejected(t *testing.T) {
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: t.TempDir(),
+	})
+	in := envelopeFixture("uid-abs")
+	in.Prompt = ""
+	in.PromptPath = "/etc/passwd"
+
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("want error for absolute PromptPath, got nil")
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Errorf("error should mention 'absolute'; got %q", err.Error())
+	}
+}
+
+// TestPromptPath_TraversalRejected asserts that a "../escape" PromptPath is
+// rejected (traversal defense T-09-05).
+func TestPromptPath_TraversalRejected(t *testing.T) {
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: t.TempDir(),
+	})
+	in := envelopeFixture("uid-traversal")
+	in.Prompt = ""
+	in.PromptPath = "../../../../etc/passwd"
+
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("want error for traversal PromptPath, got nil")
+	}
+	if !strings.Contains(err.Error(), "..") && !strings.Contains(err.Error(), "traversal") && !strings.Contains(err.Error(), "workspace") {
+		t.Errorf("error should indicate traversal rejection; got %q", err.Error())
+	}
+}
+
+// TestPromptPath_OutsideRootRejected asserts that a resolved path outside
+// WorkspaceRoot is rejected (second-line traversal defense).
+func TestPromptPath_OutsideRootRejected(t *testing.T) {
+	tmp := t.TempDir()
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: filepath.Join(tmp, "workspace"),
+	})
+	in := envelopeFixture("uid-outside")
+	in.Prompt = ""
+	// A clean relative path that happens to resolve outside the workspace root
+	// because WorkspaceRoot is a sub-dir of tmp: sibling/ escapes workspace/.
+	in.PromptPath = "../sibling/evil.json"
+
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("want error for out-of-root PromptPath, got nil")
+	}
+}
+
+// TestPromptPath_EmptySpecPromptRejected asserts that an artifact with an
+// empty .spec.prompt causes a hard error (no silent empty-prompt dispatch, #4 class).
+func TestPromptPath_EmptySpecPromptRejected(t *testing.T) {
+	tmp := t.TempDir()
+	// Write artifact with empty spec.prompt.
+	artifactPath := filepath.Join(tmp, "envelopes", "empty", "task.json")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte(`{"spec":{"prompt":""}}`), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: tmp,
+	})
+	in := envelopeFixture("uid-emptyspec")
+	in.Prompt = ""
+	in.PromptPath = "envelopes/empty/task.json"
+
+	_, err := a.Run(context.Background(), in)
+	if err == nil {
+		t.Fatal("want error for empty .spec.prompt, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error should mention 'empty'; got %q", err.Error())
+	}
+}
+
+// TestPromptPath_EmptyPath_PlannerPath asserts that when PromptPath is empty
+// and Prompt is non-empty (planner path), Run uses in.Prompt unchanged.
+func TestPromptPath_EmptyPath_PlannerPath(t *testing.T) {
+	tmp := t.TempDir()
+	fixturePath := filepath.Join(tmp, "fixture.jsonl")
+	if err := os.WriteFile(fixturePath, []byte(fixtureStreamJSON), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdinCapturePath := filepath.Join(tmp, "stdin.txt")
+
+	a := New(Options{
+		ClaudeBinary:  "/nonexistent/claude",
+		WorkspaceRoot: tmp,
+	})
+	script := "cat > " + stdinCapturePath + "; cat " + fixturePath
+	a.execFunc = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "bash", "-c", script)
+	}
+
+	const plannerPrompt = "PLANNER-OUTCOME-SENTINEL"
+	in := envelopeFixture("uid-planner-path")
+	in.Prompt = plannerPrompt
+	in.PromptPath = "" // planner path: PromptPath empty, Prompt set directly
+
+	out, err := a.Run(context.Background(), in)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("ExitCode: got %d want 0", out.ExitCode)
+	}
+	stdinData, rerr := os.ReadFile(stdinCapturePath)
+	if rerr != nil {
+		t.Fatalf("read captured stdin: %v", rerr)
+	}
+	if !strings.Contains(string(stdinData), plannerPrompt) {
+		t.Errorf("planner prompt not in stdin; captured=%q", string(stdinData))
+	}
+}

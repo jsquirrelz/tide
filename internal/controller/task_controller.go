@@ -87,10 +87,6 @@ type TaskReconcilerDeps struct {
 	SubagentImage  string
 	CredproxyImage string
 	EnvReader      podjob.EnvelopeReader
-	// PromptReader reads the per-Task executor prompt artifact fresh from the PVC
-	// at Task.Spec.PromptPath each dispatch (defect #10b). Separate from EnvReader
-	// because it needs the Manager PVC mount, not the pod termination message.
-	PromptReader podjob.PromptReader
 	Recorder     record.EventRecorder
 }
 
@@ -1056,23 +1052,19 @@ func (r *TaskReconciler) buildEnvelopeIn(ctx context.Context, task *tideprojectv
 		dev = &pkgdispatch.Dev{TestMode: task.Spec.Dev.TestMode}
 	}
 
-	// Defect #10b: the executor instruction is a first-class PVC artifact, not an
-	// inline spec field. Read it FRESH from the children/<name>.json the Task was
-	// materialized from (Task.Spec.PromptPath) so an edit to that file re-applies
-	// on re-dispatch. An empty/missing prompt is a hard error — dispatching an
-	// empty-prompt executor is exactly the #4 class this fix closes.
-	prompt, err := r.Deps.PromptReader.ReadPrompt(ctx, string(project.UID), task.Spec.PromptPath)
-	if err != nil {
-		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("read task prompt at %q: %w", task.Spec.PromptPath, err)
-	}
-
+	// Defect #10b fix: stamp PromptPath on EnvelopeIn so the executor reads its
+	// own prompt in-pod from the project-namespace PVC. The Manager MUST NOT
+	// read the prompt cross-namespace (the old ReadPrompt call was the bug:
+	// the Manager's /workspaces PVC is tide-system-local; the executor's PVC is
+	// namespace-local to the project). The in-pod anthropic runner now owns the
+	// read, which is same-namespace and therefore correct.
 	envIn := pkgdispatch.EnvelopeIn{
 		APIVersion:          pkgdispatch.APIVersionV1Alpha1,
 		Kind:                pkgdispatch.KindTaskEnvelopeIn,
 		TaskUID:             string(task.UID),
 		Role:                "executor",
 		Level:               "task",
-		Prompt:              prompt,
+		PromptPath:          task.Spec.PromptPath,
 		FilesTouched:        task.Spec.FilesTouched,
 		DependsOn:           task.Spec.DependsOn,
 		DeclaredOutputPaths: task.Spec.DeclaredOutputPaths,

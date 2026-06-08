@@ -170,6 +170,22 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		}
 	}
 
+	// 2.5. In-pod prompt read (defect #10b fix). If PromptPath is set, read the
+	// executor prompt artifact from the local namespace PVC and populate in.Prompt
+	// so step 3's template render resolves {{.Prompt}} correctly. This is the
+	// same-namespace read: the executor pod mounts the project PVC at WorkspaceRoot
+	// via subPath {project.UID}/workspace, so PromptPath is workspace-relative
+	// directly under WorkspaceRoot (NOT <root>/<uid>/workspace — the subPath
+	// already places the pod inside the project subtree). T-09-05 traversal defense:
+	// absolute paths and "../" escapes are rejected before any OS read.
+	if in.PromptPath != "" {
+		prompt, err := readPromptArtifact(a.opts.WorkspaceRoot, in.PromptPath)
+		if err != nil {
+			return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: read prompt artifact: %w", err)
+		}
+		in.Prompt = prompt
+	}
+
 	// 3. Render the prompt template. Template content uses the EnvelopeIn
 	// shape as its execution context, so {{.Level}}, {{.TaskUID}},
 	// {{.Provider.Model}}, etc. are addressable.
@@ -433,4 +449,55 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 		children = append(children, spec)
 	}
 	return children, nil
+}
+
+// promptArtifact is the minimal shape readPromptArtifact decodes from the
+// children JSON file. It mirrors the ChildCRDSpec {kind,name,spec} envelope
+// but only decodes spec.prompt so unrelated spec fields are ignored.
+type promptArtifact struct {
+	Spec struct {
+		Prompt string `json:"prompt"`
+	} `json:"spec"`
+}
+
+// readPromptArtifact reads the executor prompt from the workspace-relative
+// promptPath under base (the in-pod WorkspaceRoot). It mirrors the traversal
+// defense from FilesystemEnvelopeReader.ReadPrompt but uses base directly —
+// the executor pod mounts the project PVC at WorkspaceRoot via subPath
+// {project.UID}/workspace, so PromptPath is relative to WorkspaceRoot itself
+// (NOT <WorkspaceRoot>/<uid>/workspace). T-09-05 mitigations:
+//
+//   - empty promptPath → error
+//   - absolute promptPath → rejected
+//   - filepath.Clean then ".." prefix check → traversal rejected
+//   - resolved full path must stay under base (second-line defense)
+//   - empty .spec.prompt → error (defect #4 class: no silent empty-prompt dispatch)
+func readPromptArtifact(base, promptPath string) (string, error) {
+	if promptPath == "" {
+		return "", fmt.Errorf("empty promptPath")
+	}
+	if filepath.IsAbs(promptPath) {
+		return "", fmt.Errorf("promptPath %q must be workspace-relative, not absolute", promptPath)
+	}
+	clean := filepath.Clean(promptPath)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("promptPath %q escapes the workspace (rejected: traversal defense)", promptPath)
+	}
+	full := filepath.Join(base, clean)
+	// Second-line defense: resolved path must remain under base.
+	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("promptPath %q resolves outside the workspace (rejected)", promptPath)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("read prompt artifact %q: %w", full, err)
+	}
+	var pa promptArtifact
+	if err := json.Unmarshal(data, &pa); err != nil {
+		return "", fmt.Errorf("parse prompt artifact %q: %w", full, err)
+	}
+	if pa.Spec.Prompt == "" {
+		return "", fmt.Errorf("prompt artifact %q has empty .spec.prompt", full)
+	}
+	return pa.Spec.Prompt, nil
 }

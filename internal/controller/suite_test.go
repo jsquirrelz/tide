@@ -111,36 +111,6 @@ func (m *mapEnvReader) ReadOut(_ context.Context, _, taskUID string) (pkgdispatc
 	return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no envelope out for task UID %q", taskUID)
 }
 
-// fakePromptReader is an in-memory PromptReader for tests (defect #10b). It
-// returns a canned non-empty prompt for any path unless a specific path is set,
-// so dispatch tests that don't care about prompt content still get a valid
-// EnvelopeIn.Prompt. Path-specific tests can SetPrompt or SetErr.
-type fakePromptReader struct {
-	byPath  map[string]string
-	errs    map[string]error
-	fallthr string
-}
-
-func newFakePromptReader() *fakePromptReader {
-	return &fakePromptReader{
-		byPath:  make(map[string]string),
-		errs:    make(map[string]error),
-		fallthr: "do the task as specified in the plan",
-	}
-}
-
-func (f *fakePromptReader) SetPrompt(path, prompt string) { f.byPath[path] = prompt }
-func (f *fakePromptReader) SetErr(path string, err error) { f.errs[path] = err }
-
-func (f *fakePromptReader) ReadPrompt(_ context.Context, _, promptPath string) (string, error) {
-	if err, ok := f.errs[promptPath]; ok {
-		return "", err
-	}
-	if p, ok := f.byPath[promptPath]; ok {
-		return p, nil
-	}
-	return f.fallthr, nil
-}
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
