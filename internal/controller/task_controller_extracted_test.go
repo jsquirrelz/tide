@@ -85,7 +85,6 @@ func TestGateChecks_TerminalShortCircuit(t *testing.T) {
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
-			PromptReader:   newFakePromptReader(),
 		},
 	}
 
@@ -359,7 +358,6 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
-			PromptReader:   newFakePromptReader(),
 		},
 	}
 
@@ -428,7 +426,6 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
-			PromptReader:   newFakePromptReader(),
 		},
 	}
 
@@ -498,7 +495,6 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
-			PromptReader:   newFakePromptReader(),
 		},
 	}
 
@@ -602,13 +598,12 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 	t.Logf("CR-03 regression: RequeueAfter = %s (sentinel correctly translated)", result.RequeueAfter)
 }
 
-// TestBuildEnvelopeIn_PromptFromPVC covers defect #10b: buildEnvelopeIn reads the
-// executor instruction fresh from the PVC artifact at Task.Spec.PromptPath (via
-// PromptReader) and threads it into EnvelopeIn.Prompt. An empty/unreadable prompt
-// is a hard error so an empty-prompt executor is never dispatched (the #4 class).
-func TestBuildEnvelopeIn_PromptFromPVC(t *testing.T) {
+// TestBuildEnvelopeIn_PromptPath covers defect #10b fix: buildEnvelopeIn now stamps
+// EnvelopeIn.PromptPath from Task.Spec.PromptPath instead of reading the prompt
+// cross-namespace off the Manager PVC. The Manager no longer holds a PromptReader;
+// the in-pod anthropic runner reads the prompt artifact same-namespace in-pod.
+func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	const promptPath = "envelopes/planner-uid/children/task-01.json"
-	const wantPrompt = "implement FormattedNow per the plan"
 
 	task := &tideprojectv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-prompt", Namespace: "default", UID: types.UID("uid-prompt")},
@@ -626,9 +621,6 @@ func TestBuildEnvelopeIn_PromptFromPVC(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(task, project).Build()
 
-	pr := newFakePromptReader()
-	pr.SetPrompt(promptPath, wantPrompt)
-
 	r := &TaskReconciler{
 		Client: fakeClient,
 		Scheme: s,
@@ -638,24 +630,20 @@ func TestBuildEnvelopeIn_PromptFromPVC(t *testing.T) {
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
 			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
-			PromptReader:   pr,
 		},
 	}
 
-	t.Run("prompt threaded from PVC", func(t *testing.T) {
+	t.Run("PromptPath stamped on EnvelopeIn", func(t *testing.T) {
 		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok")
 		if err != nil {
 			t.Fatalf("buildEnvelopeIn: %v", err)
 		}
-		if envIn.Prompt != wantPrompt {
-			t.Errorf("EnvelopeIn.Prompt = %q, want %q", envIn.Prompt, wantPrompt)
+		if envIn.PromptPath != promptPath {
+			t.Errorf("EnvelopeIn.PromptPath = %q, want %q", envIn.PromptPath, promptPath)
 		}
-	})
-
-	t.Run("read error is a hard failure", func(t *testing.T) {
-		pr.SetErr(promptPath, errors.New("boom"))
-		if _, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok"); err == nil {
-			t.Fatal("buildEnvelopeIn: want error on prompt read failure, got nil")
+		// Prompt must be empty — the Manager no longer reads it cross-namespace.
+		if envIn.Prompt != "" {
+			t.Errorf("EnvelopeIn.Prompt = %q, want empty (in-pod read via PromptPath)", envIn.Prompt)
 		}
 	})
 }

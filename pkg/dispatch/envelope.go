@@ -57,7 +57,22 @@ type EnvelopeIn struct {
 	Level string `json:"level"`
 
 	// Prompt is the full prompt body the subagent should act on.
+	// For executor dispatches this field is empty — the executor reads the
+	// prompt in-pod from PromptPath off its own namespace PVC (defect #10b).
+	// For planner dispatches (role="planner") this field carries the resolved
+	// outcome prompt directly (the outcome prompt is not a PVC artifact).
 	Prompt string `json:"prompt"`
+
+	// PromptPath is the workspace-relative path of the executor prompt artifact
+	// on the per-Project namespace PVC (e.g.
+	// "envelopes/<plannerUID>/children/task-01.json"). Non-empty only for
+	// executor dispatches (role="executor"). The in-pod anthropic runner reads
+	// the .spec.prompt field from this artifact and renders it as {{.Prompt}}
+	// in the compiled-in prompt template. The Manager MUST NOT read this path
+	// cross-namespace; the read happens in-pod so it uses the executor's own
+	// namespace PVC (defect #10b). Traversal-defended in-pod: absolute paths
+	// and "../" escapes are rejected before the read.
+	PromptPath string `json:"promptPath,omitempty"`
 
 	// FilesTouched is the set of repo-relative paths this task is expected to
 	// read or write. Used by the harness for output-path validation (HARN-05)
