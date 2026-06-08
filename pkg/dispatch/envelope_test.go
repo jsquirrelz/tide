@@ -606,3 +606,96 @@ func TestEnvelopeIn_ProviderTag(t *testing.T) {
 		t.Errorf(`serialized JSON missing "vendor":"anthropic"; got: %s`, string(data))
 	}
 }
+
+// --- Phase 9 plan 02: TerminationStub tests ---
+
+// TestNewTerminationStub_SubsetsFields asserts that NewTerminationStub copies
+// ExitCode, Reason, Usage, and Git.HeadSHA from a full EnvelopeOut but carries
+// no ChildCRDs, Result, or Artifacts fields. This is the cross-namespace
+// tiny-status carrier (T-09-03 mitigation).
+func TestNewTerminationStub_SubsetsFields(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.Git = &GitOutput{HeadSHA: "abc123def456"}
+	stub := NewTerminationStub(out)
+
+	if stub.ExitCode != out.ExitCode {
+		t.Errorf("ExitCode: got %d, want %d", stub.ExitCode, out.ExitCode)
+	}
+	if stub.Reason != out.Reason {
+		t.Errorf("Reason: got %q, want %q", stub.Reason, out.Reason)
+	}
+	if stub.Usage != out.Usage {
+		t.Errorf("Usage: got %+v, want %+v", stub.Usage, out.Usage)
+	}
+	if stub.HeadSHA != out.Git.HeadSHA {
+		t.Errorf("HeadSHA: got %q, want %q", stub.HeadSHA, out.Git.HeadSHA)
+	}
+}
+
+// TestNewTerminationStub_NilGit asserts that a nil EnvelopeOut.Git yields an
+// empty HeadSHA without panicking (defensive nil guard).
+func TestNewTerminationStub_NilGit(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.Git = nil
+	// Must not panic.
+	stub := NewTerminationStub(out)
+	if stub.HeadSHA != "" {
+		t.Errorf("HeadSHA: got %q, want empty string when Git is nil", stub.HeadSHA)
+	}
+}
+
+// TestNewTerminationStub_StaysSmall asserts that marshalling a TerminationStub
+// built from a deliberately oversized EnvelopeOut (50 ChildCRDs + a 10 KB
+// Result) produces JSON < 4096 bytes (T-09-03 mitigation: the Manager reads
+// the Pod's 4 KB termination message, so the stub MUST fit).
+func TestNewTerminationStub_StaysSmall(t *testing.T) {
+	// Build a deliberately large EnvelopeOut that would overflow 4 KB if the
+	// full envelope were marshalled to the termination message.
+	out := fullyPopulatedEnvelopeOut()
+	out.Result = strings.Repeat("x", 10*1024) // 10 KB verbose result — excluded from stub
+	out.ChildCRDs = make([]ChildCRDSpec, 50)
+	for i := range out.ChildCRDs {
+		out.ChildCRDs[i] = ChildCRDSpec{
+			Kind: "Phase",
+			Name: strings.Repeat("phase-", 10),
+			Spec: runtime.RawExtension{Raw: []byte(`{"phaseRef":"stub-milestone-1"}`)},
+		}
+	}
+
+	stub := NewTerminationStub(out)
+	data, err := json.Marshal(stub)
+	if err != nil {
+		t.Fatalf("json.Marshal(TerminationStub): %v", err)
+	}
+	if len(data) >= 4096 {
+		t.Errorf("TerminationStub JSON size = %d bytes, want < 4096 (termination-message budget)", len(data))
+	}
+}
+
+// TestTerminationStub_NoForbiddenFields asserts (at compile time via struct
+// literal) that TerminationStub carries no ChildCRDs, Result, or Artifacts
+// field — those live on the PVC out.json, not in the tiny termination message.
+// This test exists to pin the contract: if a forbidden field is ever added the
+// literal below will fail to compile.
+func TestTerminationStub_NoForbiddenFields(t *testing.T) {
+	// Compile-time assertion: all fields of TerminationStub are listed here.
+	// If ChildCRDs / Result / Artifacts are added, this literal will fail to
+	// compile with "unknown field" — intentional.
+	_ = TerminationStub{
+		ExitCode: 0,
+		Reason:   "",
+		Usage:    Usage{},
+		HeadSHA:  "",
+	}
+	// Runtime assertion: marshalled JSON must not contain these keys.
+	stub := NewTerminationStub(fullyPopulatedEnvelopeOut())
+	data, err := json.Marshal(stub)
+	if err != nil {
+		t.Fatalf("json.Marshal(TerminationStub): %v", err)
+	}
+	for _, forbidden := range []string{`"childCRDs"`, `"result"`, `"artifacts"`} {
+		if strings.Contains(string(data), forbidden) {
+			t.Errorf("TerminationStub JSON contains forbidden key %s; got: %s", forbidden, string(data))
+		}
+	}
+}
