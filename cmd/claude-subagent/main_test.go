@@ -265,6 +265,54 @@ func TestClaudeSubagentMain_InvokesEnsureWorktreeBeforeRun(t *testing.T) {
 	}
 }
 
+// TestClaudeSubagentMain_PassesEnvBranchToWorktree is the 09-09 regression guard:
+// the executor's worktree branch must come from EnvelopeIn.Branch (in.json), not the
+// never-written branch.txt. A previous build passed an empty branch → EnsureWorktree
+// failed with "git worktree: empty branch" on every real-Claude task.
+func TestClaudeSubagentMain_PassesEnvBranchToWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	fixturePath := writeFixture(t, tmp, fixtureStreamJSON)
+	const wantBranch = "tide/run-medium-project-1780956333"
+
+	var gotBranch string
+	origEW := ensureWorktreeFunc
+	t.Cleanup(func() { ensureWorktreeFunc = origEW })
+	ensureWorktreeFunc = func(in pkgdispatch.EnvelopeIn, workspaceRoot, branch string) error {
+		gotBranch = branch
+		return nil
+	}
+	origSA := newSubagent
+	t.Cleanup(func() { newSubagent = origSA })
+	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+		return anthropic.NewWithExec(
+			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
+			func(ctx context.Context, name string, args ...string) *exec.Cmd {
+				return exec.CommandContext(ctx, "bash", "-c", "cat "+fixturePath)
+			},
+		)
+	}
+
+	envelopePath := filepath.Join(tmp, "envelopes", "t-branch", "in.json")
+	env := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "t-branch",
+		Role:       "executor",
+		Level:      "task",
+		Branch:     wantBranch,
+		Provider:   pkgdispatch.ProviderSpec{Vendor: "anthropic", Model: "claude-sonnet-4-6"},
+	}
+	writeEnvelopeInFile(t, envelopePath, env)
+
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), envelopePath, tmp, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code: got %d, want 0; stderr=%s", code, stderr.String())
+	}
+	if gotBranch != wantBranch {
+		t.Errorf("worktree branch = %q, want %q (must come from EnvelopeIn.Branch, not branch.txt)", gotBranch, wantBranch)
+	}
+}
+
 // TestClaudeSubagentMain_IgnoresDevTestMode asserts that even when env.Dev is
 // populated, the shim does NOT switch on Dev.TestMode — it always goes
 // through anthropic.New().Run(). Behavior is identical to the happy-path.

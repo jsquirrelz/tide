@@ -1065,6 +1065,7 @@ func (r *TaskReconciler) buildEnvelopeIn(ctx context.Context, task *tideprojectv
 		Role:                "executor",
 		Level:               "task",
 		PromptPath:          task.Spec.PromptPath,
+		Branch:              project.Status.Git.BranchName,
 		FilesTouched:        task.Spec.FilesTouched,
 		DependsOn:           task.Spec.DependsOn,
 		DeclaredOutputPaths: task.Spec.DeclaredOutputPaths,

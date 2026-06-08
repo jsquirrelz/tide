@@ -74,6 +74,14 @@ type EnvelopeIn struct {
 	// and "../" escapes are rejected before the read.
 	PromptPath string `json:"promptPath,omitempty"`
 
+	// Branch is the per-run git branch (project.Status.Git.BranchName, format
+	// "tide/run-<project>-<unix>") the executor checks out its isolated worktree
+	// onto. Non-empty only for executor dispatches (role="executor"); planner
+	// dispatches short-circuit worktree creation (harness.EnsureWorktree). The
+	// in-pod executor reads this from in.json — the single source of truth for
+	// the worktree branch (09-09: replaced the never-written branch.txt).
+	Branch string `json:"branch,omitempty"`
+
 	// FilesTouched is the set of repo-relative paths this task is expected to
 	// read or write. Used by the harness for output-path validation (HARN-05)
 	// and by the Plan admission webhook for file-touch consistency checks

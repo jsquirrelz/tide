@@ -28,7 +28,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -82,7 +81,7 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	if err != nil {
 		return failOut(stderr, outPath, "", err, 2, "invalid-envelope")
 	}
-	if err := ensureWorktreeFunc(env, workspaceRoot, readBranch(envelopePath)); err != nil {
+	if err := ensureWorktreeFunc(env, workspaceRoot, env.Branch); err != nil {
 		return failOut(stderr, outPath, env.TaskUID, err, 1, "worktree-setup-failed")
 	}
 	out, runErr := newSubagent("claude", workspaceRoot).Run(ctx, env)
@@ -95,14 +94,6 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 		return 2
 	}
 	return out.ExitCode
-}
-
-func readBranch(envelopePath string) string {
-	data, err := os.ReadFile(filepath.Join(filepath.Dir(envelopePath), "branch.txt"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimRight(string(data), "\r\n")
 }
 
 func failEnvelope(taskUID string, err error, exitCode int, result string) pkgdispatch.EnvelopeOut {

@@ -614,8 +614,12 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 			PromptPath:          promptPath,
 		},
 	}
+	const runBranch = "tide/run-proj-prompt-1700000000"
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-prompt", Namespace: "default", UID: types.UID("proj-uid")},
+		Status: tideprojectv1alpha1.ProjectStatus{
+			Git: tideprojectv1alpha1.GitStatus{BranchName: runBranch},
+		},
 	}
 
 	s := fakeSchemeWithAll(t)
@@ -644,6 +648,18 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 		// Prompt must be empty — the Manager no longer reads it cross-namespace.
 		if envIn.Prompt != "" {
 			t.Errorf("EnvelopeIn.Prompt = %q, want empty (in-pod read via PromptPath)", envIn.Prompt)
+		}
+	})
+
+	// 09-09: the executor's worktree branch is threaded via EnvelopeIn.Branch
+	// from project.Status.Git.BranchName (replaces the never-written branch.txt).
+	t.Run("Branch stamped from project run branch", func(t *testing.T) {
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "tok")
+		if err != nil {
+			t.Fatalf("buildEnvelopeIn: %v", err)
+		}
+		if envIn.Branch != runBranch {
+			t.Errorf("EnvelopeIn.Branch = %q, want %q (executor worktree branch must be non-empty)", envIn.Branch, runBranch)
 		}
 	})
 }
