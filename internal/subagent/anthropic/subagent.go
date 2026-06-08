@@ -294,7 +294,12 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	// the controller materializes server-side. No text-scraping of Result.
 	// Executors (Role=="executor") emit no children; skip the read entirely.
 	if in.Role == "planner" {
-		children, readErr := readChildCRDs(filepath.Join(eventsDir, "children"))
+		// relPrefix is the workspace-relative children dir
+		// ("envelopes/<TaskUID>/children") stamped onto each child's SourcePath so
+		// the controller can set Task.Spec.PromptPath without knowing this pod's
+		// absolute PVC mount (defect #10b — prompt-as-PVC-artifact).
+		relPrefix := filepath.Join("envelopes", in.TaskUID, "children")
+		children, readErr := readChildCRDs(filepath.Join(eventsDir, "children"), relPrefix)
 		if readErr != nil {
 			// A malformed/poisoned children dir is a task-level failure, not a
 			// dispatch-level crash: the agent loop completed, but its structural
@@ -350,7 +355,7 @@ var childKindAllowlist = map[string]bool{
 //   - Kind allowlist: every spec's Kind must be in childKindAllowlist.
 //   - Name required: a child with an empty Name is rejected (the controller
 //     uses it as metadata.name).
-func readChildCRDs(childrenDir string) ([]pkgdispatch.ChildCRDSpec, error) {
+func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, error) {
 	entries, err := os.ReadDir(childrenDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -417,6 +422,9 @@ func readChildCRDs(childrenDir string) ([]pkgdispatch.ChildCRDSpec, error) {
 		if spec.Name == "" {
 			return nil, fmt.Errorf("child file %q has empty name", name)
 		}
+		// Stamp the workspace-relative origin path so the controller can wire
+		// Task.Spec.PromptPath → this artifact (defect #10b). Not model-authored.
+		spec.SourcePath = filepath.Join(relPrefix, name)
 		children = append(children, spec)
 	}
 	return children, nil

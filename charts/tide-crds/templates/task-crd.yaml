@@ -125,14 +125,26 @@ spec:
                 description: PlanRef is the name of the owning Plan (same namespace).
                 minLength: 1
                 type: string
-              promptRef:
-                description: PromptRef is the name of a ConfigMap carrying the prompt
-                  (optional).
+              promptPath:
+                description: |-
+                  PromptPath is the PVC-relative path (under the per-Project workspace root)
+                  to the durable children/task-NN.json artifact this Task was materialized
+                  from. The executor instruction lives at .spec.prompt inside that file; the
+                  controller reads it FRESH from the PVC on every dispatch (buildEnvelopeIn →
+                  EnvelopeIn.Prompt). Editing the children file and re-dispatching re-applies
+                  the edit with nothing to clobber — the file is the source of truth, not a
+                  cached CRD body. The materializer always sets this; a Task without it is
+                  undispatchable, so it is required at the API boundary (MinLength=1).
+  
+                  Path is workspace-relative (e.g. "envelopes/<plannerUID>/children/task-01.json")
+                  so it resolves under both the controller PVC mount and the executor pod mount.
+                minLength: 1
                 type: string
             required:
             - declaredOutputPaths
             - filesTouched
             - planRef
+            - promptPath
             type: object
           status:
             description: status defines the observed state of Task

@@ -54,6 +54,29 @@ type EnvelopeReader interface {
 	ReadOut(ctx context.Context, projectUID, taskUID string) (pkgdispatch.EnvelopeOut, error)
 }
 
+// PromptReader reads a per-Task executor prompt artifact from the per-Project PVC.
+// Defect #10b: the prompt is a first-class PVC artifact (the children/<name>.json
+// the Task was materialized from), not an inline CRD field. Kept separate from
+// EnvelopeReader because reading the prompt requires the Manager's PVC mount,
+// whereas EnvelopeOut is read from the completed pod's termination message —
+// PodStatusEnvelopeReader cannot serve ReadPrompt.
+type PromptReader interface {
+	// ReadPrompt resolves promptPath (workspace-relative, e.g.
+	// "envelopes/<plannerUID>/children/task-01.json") under the per-Project
+	// workspace and returns the executor instruction (the .spec.prompt field of
+	// that children JSON). Read FRESH on every dispatch so an edit to the file
+	// re-applies on re-dispatch with nothing to clobber.
+	ReadPrompt(ctx context.Context, projectUID, promptPath string) (string, error)
+}
+
+// childPromptFile is the minimal shape ReadPrompt extracts the prompt from.
+// It mirrors ChildCRDSpec's {kind,name,spec} but only decodes spec.prompt.
+type childPromptFile struct {
+	Spec struct {
+		Prompt string `json:"prompt"`
+	} `json:"spec"`
+}
+
 // FilesystemEnvelopeReader reads the EnvelopeOut JSON from the local filesystem.
 // Used when the Manager pod has the shared tide-projects PVC mounted at WorkspaceRoot.
 //
@@ -79,6 +102,42 @@ func (r *FilesystemEnvelopeReader) ReadOut(_ context.Context, projectUID, taskUI
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("unmarshal envelope out %q: %w", path, err)
 	}
 	return out, nil
+}
+
+// ReadPrompt resolves a workspace-relative promptPath under
+// WorkspaceRoot/{projectUID}/workspace/ and returns the .spec.prompt field of the
+// referenced children JSON. Path-traversal-defended: promptPath is cleaned and
+// must stay within the project workspace; absolute paths and "../" escapes are
+// rejected so a poisoned PromptPath cannot read arbitrary host files.
+func (r *FilesystemEnvelopeReader) ReadPrompt(_ context.Context, projectUID, promptPath string) (string, error) {
+	if promptPath == "" {
+		return "", fmt.Errorf("read prompt: empty promptPath for project %s", projectUID)
+	}
+	if filepath.IsAbs(promptPath) {
+		return "", fmt.Errorf("read prompt: promptPath %q must be workspace-relative, not absolute", promptPath)
+	}
+	clean := filepath.Clean(promptPath)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("read prompt: promptPath %q escapes the project workspace (rejected: traversal defense)", promptPath)
+	}
+	base := filepath.Join(r.WorkspaceRoot, projectUID, "workspace")
+	full := filepath.Join(base, clean)
+	// Second-line defense: the resolved path must remain under base.
+	if full != base && !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("read prompt: promptPath %q resolves outside the project workspace (rejected)", promptPath)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return "", fmt.Errorf("read prompt artifact %q: %w", full, err)
+	}
+	var pf childPromptFile
+	if err := json.Unmarshal(data, &pf); err != nil {
+		return "", fmt.Errorf("unmarshal prompt artifact %q: %w", full, err)
+	}
+	if pf.Spec.Prompt == "" {
+		return "", fmt.Errorf("prompt artifact %q has empty .spec.prompt", full)
+	}
+	return pf.Spec.Prompt, nil
 }
 
 // PodStatusEnvelopeReader reads EnvelopeOut JSON from the completed subagent

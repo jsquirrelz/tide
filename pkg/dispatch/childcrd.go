@@ -55,4 +55,13 @@ type ChildCRDSpec struct {
 	// Spec is the raw JSON-encoded child CRD Spec. Decoded into the typed
 	// schema by the orchestrator at server-side create time. Required.
 	Spec runtime.RawExtension `json:"spec"`
+
+	// SourcePath is set BY THE SUBAGENT (not the planner JSON) when a child file
+	// is read off the PVC: the workspace-relative path of the originating
+	// children/<name>.json artifact (e.g. "envelopes/<plannerUID>/children/task-01.json").
+	// The orchestrator copies this into Task.Spec.PromptPath at materialization so
+	// the executor instruction (.spec.prompt inside that file) can be read fresh
+	// from the PVC on every dispatch. Empty for non-Task children and for planner
+	// JSON that did not originate from a file read. Not authored by the model.
+	SourcePath string `json:"sourcePath,omitempty"`
 }

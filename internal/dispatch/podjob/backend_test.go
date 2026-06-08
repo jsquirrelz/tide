@@ -497,3 +497,70 @@ func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 		t.Errorf("Job %q has no OwnerReference to Task UID %q", wantJobName, task.UID)
 	}
 }
+
+// TestFilesystemEnvelopeReaderReadPrompt covers defect #10b: the prompt is read
+// fresh from the children/<name>.json PVC artifact at a workspace-relative
+// PromptPath, with path-traversal defense and an empty-prompt hard error.
+func TestFilesystemEnvelopeReaderReadPrompt(t *testing.T) {
+	root := t.TempDir()
+	projectUID := "project-uid-beta"
+	plannerUID := "planner-uid-beta"
+	promptPath := filepath.Join("envelopes", plannerUID, "children", "task-01.json")
+
+	full := filepath.Join(root, projectUID, "workspace", promptPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("MkdirAll children dir: %v", err)
+	}
+	body := `{"kind":"Task","name":"task-01-foo","spec":{"planRef":"plan-01","prompt":"implement FormattedNow"}}`
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+
+	reader := &FilesystemEnvelopeReader{WorkspaceRoot: root}
+
+	t.Run("happy path returns spec.prompt", func(t *testing.T) {
+		got, err := reader.ReadPrompt(context.Background(), projectUID, promptPath)
+		if err != nil {
+			t.Fatalf("ReadPrompt() error = %v", err)
+		}
+		if got != "implement FormattedNow" {
+			t.Fatalf("ReadPrompt() = %q, want %q", got, "implement FormattedNow")
+		}
+	})
+
+	t.Run("absolute path rejected", func(t *testing.T) {
+		if _, err := reader.ReadPrompt(context.Background(), projectUID, "/etc/passwd"); err == nil {
+			t.Fatal("ReadPrompt() with absolute path: want error, got nil")
+		}
+	})
+
+	t.Run("traversal escape rejected", func(t *testing.T) {
+		if _, err := reader.ReadPrompt(context.Background(), projectUID, "../../../../etc/passwd"); err == nil {
+			t.Fatal("ReadPrompt() with traversal: want error, got nil")
+		}
+	})
+
+	t.Run("empty promptPath rejected", func(t *testing.T) {
+		if _, err := reader.ReadPrompt(context.Background(), projectUID, ""); err == nil {
+			t.Fatal("ReadPrompt() with empty path: want error, got nil")
+		}
+	})
+
+	t.Run("empty spec.prompt is a hard error", func(t *testing.T) {
+		emptyPath := filepath.Join("envelopes", plannerUID, "children", "task-empty.json")
+		ef := filepath.Join(root, projectUID, "workspace", emptyPath)
+		if err := os.WriteFile(ef, []byte(`{"kind":"Task","name":"t","spec":{"prompt":""}}`), 0o644); err != nil {
+			t.Fatalf("write empty child: %v", err)
+		}
+		if _, err := reader.ReadPrompt(context.Background(), projectUID, emptyPath); err == nil {
+			t.Fatal("ReadPrompt() with empty spec.prompt: want error, got nil")
+		}
+	})
+
+	t.Run("missing file errors", func(t *testing.T) {
+		miss := filepath.Join("envelopes", plannerUID, "children", "task-404.json")
+		if _, err := reader.ReadPrompt(context.Background(), projectUID, miss); err == nil {
+			t.Fatal("ReadPrompt() with missing file: want error, got nil")
+		}
+	})
+}

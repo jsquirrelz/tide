@@ -338,6 +338,15 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			if err := json.Unmarshal(child.Spec.Raw, &tk.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Task %q spec: %w", child.Name, err)
 			}
+			// Wire the executor instruction artifact (defect #10b): the prompt is
+			// NOT inline on the Task spec — it lives at .spec.prompt inside the
+			// originating children/<name>.json on the PVC. The subagent stamped
+			// that file's workspace-relative path onto child.SourcePath; copy it to
+			// PromptPath so the controller reads the prompt fresh at each dispatch.
+			// PromptPath is required (MinLength=1) at the API boundary, so a missing
+			// SourcePath fails Create with a clear validation error rather than
+			// silently dispatching an empty-prompt executor (the #4 class).
+			tk.Spec.PromptPath = child.SourcePath
 			obj = tk
 		case "Wave":
 			wv := &tideprojectv1alpha1.Wave{}

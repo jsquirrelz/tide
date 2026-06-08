@@ -68,6 +68,7 @@ func newTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
 			EnvReader:      envReader,
+			PromptReader:   newFakePromptReader(),
 		},
 	}
 }
@@ -417,6 +418,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 					SubagentImage:  testSubagentImage,
 					CredproxyImage: testCredproxyImage,
 					EnvReader:      newMapEnvReader(),
+					PromptReader:   newFakePromptReader(),
 				},
 			}
 
@@ -503,6 +505,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 					SubagentImage:  testSubagentImage,
 					CredproxyImage: testCredproxyImage,
 					EnvReader:      newMapEnvReader(),
+					PromptReader:   newFakePromptReader(),
 				},
 			}
 

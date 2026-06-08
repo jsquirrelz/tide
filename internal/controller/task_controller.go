@@ -87,7 +87,11 @@ type TaskReconcilerDeps struct {
 	SubagentImage  string
 	CredproxyImage string
 	EnvReader      podjob.EnvelopeReader
-	Recorder       record.EventRecorder
+	// PromptReader reads the per-Task executor prompt artifact fresh from the PVC
+	// at Task.Spec.PromptPath each dispatch (defect #10b). Separate from EnvReader
+	// because it needs the Manager PVC mount, not the pod termination message.
+	PromptReader podjob.PromptReader
+	Recorder     record.EventRecorder
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -1036,7 +1040,7 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 
 // buildEnvelopeIn constructs and marshals the EnvelopeIn for this Task dispatch.
 // Translates api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
-func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha1.Task, _ *tideprojectv1alpha1.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+func (r *TaskReconciler) buildEnvelopeIn(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {
 		caps = pkgdispatch.Caps{
@@ -1052,12 +1056,23 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		dev = &pkgdispatch.Dev{TestMode: task.Spec.Dev.TestMode}
 	}
 
+	// Defect #10b: the executor instruction is a first-class PVC artifact, not an
+	// inline spec field. Read it FRESH from the children/<name>.json the Task was
+	// materialized from (Task.Spec.PromptPath) so an edit to that file re-applies
+	// on re-dispatch. An empty/missing prompt is a hard error — dispatching an
+	// empty-prompt executor is exactly the #4 class this fix closes.
+	prompt, err := r.Deps.PromptReader.ReadPrompt(ctx, string(project.UID), task.Spec.PromptPath)
+	if err != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("read task prompt at %q: %w", task.Spec.PromptPath, err)
+	}
+
 	envIn := pkgdispatch.EnvelopeIn{
 		APIVersion:          pkgdispatch.APIVersionV1Alpha1,
 		Kind:                pkgdispatch.KindTaskEnvelopeIn,
 		TaskUID:             string(task.UID),
 		Role:                "executor",
 		Level:               "task",
+		Prompt:              prompt,
 		FilesTouched:        task.Spec.FilesTouched,
 		DependsOn:           task.Spec.DependsOn,
 		DeclaredOutputPaths: task.Spec.DeclaredOutputPaths,
@@ -1067,9 +1082,9 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		Dev:                 dev,
 	}
 
-	data, err := json.Marshal(envIn)
-	if err != nil {
-		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal envelope in: %w", err)
+	data, mErr := json.Marshal(envIn)
+	if mErr != nil {
+		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal envelope in: %w", mErr)
 	}
 	return envIn, data, nil
 }

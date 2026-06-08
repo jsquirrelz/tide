@@ -47,7 +47,7 @@ func TestReadChildCRDs_PopulatesFromFixtures(t *testing.T) {
 		t.Fatalf("write notes: %v", err)
 	}
 
-	got, err := readChildCRDs(dir)
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err != nil {
 		t.Fatalf("readChildCRDs: %v", err)
 	}
@@ -63,12 +63,20 @@ func TestReadChildCRDs_PopulatesFromFixtures(t *testing.T) {
 	if !strings.Contains(string(got[0].Spec.Raw), "milestoneRef") {
 		t.Errorf("spec.Raw missing milestoneRef: %s", got[0].Spec.Raw)
 	}
+	// Defect #10b: each child carries its workspace-relative origin path so the
+	// controller can wire Task.Spec.PromptPath.
+	if got[0].SourcePath != "envelopes/test-uid/children/phase-01.json" {
+		t.Errorf("SourcePath[0] = %q, want envelopes/test-uid/children/phase-01.json", got[0].SourcePath)
+	}
+	if got[1].SourcePath != "envelopes/test-uid/children/phase-02.json" {
+		t.Errorf("SourcePath[1] = %q, want envelopes/test-uid/children/phase-02.json", got[1].SourcePath)
+	}
 }
 
 // Test: a missing children dir is zero children, not an error (a no-op planner
 // or executor-shaped run must not fail on a clean exit).
 func TestReadChildCRDs_MissingDirIsEmpty(t *testing.T) {
-	got, err := readChildCRDs(filepath.Join(t.TempDir(), "nonexistent"))
+	got, err := readChildCRDs(filepath.Join(t.TempDir(), "nonexistent"), "envelopes/test-uid/children")
 	if err != nil {
 		t.Fatalf("readChildCRDs on missing dir: %v", err)
 	}
@@ -82,7 +90,7 @@ func TestReadChildCRDs_RejectsDisallowedKind(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "children")
 	writeChild(t, dir, "evil.json", `{"kind":"Secret","name":"steal","spec":{}}`)
 
-	_, err := readChildCRDs(dir)
+	_, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err == nil {
 		t.Fatal("expected error for disallowed kind Secret, got nil")
 	}
@@ -97,7 +105,7 @@ func TestReadChildCRDs_RejectsEmptyName(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "children")
 	writeChild(t, dir, "noname.json", `{"kind":"Phase","name":"","spec":{}}`)
 
-	_, err := readChildCRDs(dir)
+	_, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err == nil {
 		t.Fatal("expected error for empty name, got nil")
 	}
@@ -124,7 +132,7 @@ func TestReadChildCRDs_RejectsSymlink(t *testing.T) {
 		t.Skipf("symlink unsupported on this platform: %v", err)
 	}
 
-	_, err := readChildCRDs(dir)
+	_, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err == nil {
 		t.Fatal("expected error for symlink entry, got nil")
 	}
@@ -138,7 +146,7 @@ func TestReadChildCRDs_RejectsMalformedJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "children")
 	writeChild(t, dir, "bad.json", `{not json`)
 
-	_, err := readChildCRDs(dir)
+	_, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err == nil {
 		t.Fatal("expected parse error for malformed JSON, got nil")
 	}

@@ -379,3 +379,51 @@ func TestMaterializeChildCRDsIdempotent(t *testing.T) {
 		_ = got
 	}
 }
+
+// TestMaterializeChildCRDsTaskPromptPath covers defect #10b: a Task child's
+// PromptPath is wired from ChildCRDSpec.SourcePath at materialization, even
+// though the model-authored spec carries no promptPath. The prompt itself stays
+// in the children file (read fresh at dispatch), not inline on the Task spec.
+func TestMaterializeChildCRDsTaskPromptPath(t *testing.T) {
+	c := fakeClientForTest(t)
+	scheme := runtime.NewScheme()
+	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	plan := &tideprojectv1alpha1.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("plan-uid-010b"),
+			Name:      "parent-plan",
+			Namespace: "default",
+		},
+	}
+
+	// Model-authored Task spec — note: NO promptPath here (the controller injects it).
+	taskSpec := tideprojectv1alpha1.TaskSpec{
+		PlanRef:             "parent-plan",
+		FilesTouched:        []string{"main.go"},
+		DeclaredOutputPaths: []string{"main.go"},
+	}
+	rawSpec, err := json.Marshal(taskSpec)
+	if err != nil {
+		t.Fatalf("Marshal task spec: %v", err)
+	}
+
+	const wantPath = "envelopes/plan-uid-010b/children/task-01.json"
+	children := []pkgdispatch.ChildCRDSpec{
+		{Kind: "Task", Name: "task-01-impl", Spec: runtime.RawExtension{Raw: rawSpec}, SourcePath: wantPath},
+	}
+
+	if err := MaterializeChildCRDs(context.Background(), c, scheme, plan, children); err != nil {
+		t.Fatalf("MaterializeChildCRDs: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Task
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "task-01-impl"}, &got); err != nil {
+		t.Fatalf("Get task: %v", err)
+	}
+	if got.Spec.PromptPath != wantPath {
+		t.Errorf("Task.Spec.PromptPath = %q, want %q (wired from SourcePath)", got.Spec.PromptPath, wantPath)
+	}
+}

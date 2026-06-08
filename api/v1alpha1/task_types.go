@@ -79,9 +79,19 @@ type TaskSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	FilesTouched []string `json:"filesTouched"`
 
-	// PromptRef is the name of a ConfigMap carrying the prompt (optional).
-	// +optional
-	PromptRef string `json:"promptRef,omitempty"`
+	// PromptPath is the PVC-relative path (under the per-Project workspace root)
+	// to the durable children/task-NN.json artifact this Task was materialized
+	// from. The executor instruction lives at .spec.prompt inside that file; the
+	// controller reads it FRESH from the PVC on every dispatch (buildEnvelopeIn →
+	// EnvelopeIn.Prompt). Editing the children file and re-dispatching re-applies
+	// the edit with nothing to clobber — the file is the source of truth, not a
+	// cached CRD body. The materializer always sets this; a Task without it is
+	// undispatchable, so it is required at the API boundary (MinLength=1).
+	//
+	// Path is workspace-relative (e.g. "envelopes/<plannerUID>/children/task-01.json")
+	// so it resolves under both the controller PVC mount and the executor pod mount.
+	// +kubebuilder:validation:MinLength=1
+	PromptPath string `json:"promptPath"`
 
 	// DeclaredOutputPaths declares the output artifact paths the subagent must produce
 	// (Phase 2+). Plan 06's harness output validator enforces against this set (HARN-05).

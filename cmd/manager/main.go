@@ -317,6 +317,10 @@ func main() {
 		Client:   mgr.GetAPIReader(),
 		Fallback: &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"},
 	}
+	// promptReader reads per-Task executor prompt artifacts off the Manager's PVC
+	// mount (defect #10b). It needs the mounted filesystem, so it is a direct
+	// FilesystemEnvelopeReader rather than the pod-termination-message reader.
+	promptReader := &podjob.FilesystemEnvelopeReader{WorkspaceRoot: "/workspaces"}
 	//    e. Dispatcher — wires PodJobBackend into both Plan and Task reconcilers' Phase 2
 	//       dispatch paths (cascade-8 fix per .planning/debug/credproxy-backoff-suppression.md).
 	//       Without this, plan_controller.go:121 and task_controller.go:167 short-circuit
@@ -453,6 +457,7 @@ func main() {
 			SubagentImage:  subagentImage,
 			CredproxyImage: credproxyImage,
 			EnvReader:      envReader,
+			PromptReader:   promptReader,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
