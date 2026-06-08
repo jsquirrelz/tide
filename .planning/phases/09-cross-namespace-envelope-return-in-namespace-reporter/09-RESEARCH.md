@@ -355,12 +355,12 @@ CI dispatches ONLY the stub `[VERIFIED: CONTEXT specifics line 80; ROADMAP Phase
 | Path traversal via PromptPath | Tampering | Reuse `ReadPrompt` traversal defense (abs-reject, ../-reject, base-prefix check) in-pod `[VERIFIED: backend.go:112-141]` |
 | Reporter over-privileged | Elevation | Least-privilege Role: create+get on 5 Kinds, nothing else |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **ServiceAccount sharing in B-main (THE blocker question)** — A single pod has one SA. B-main as one pod forces subagent + reporter to share it, leaking create-verbs to the subagent. *Recommendation:* this likely flips the fork to Option C (separate reporter Job with its own `tide-reporter` SA), OR accept B-main with a network-policy isolating the subagent from the apiserver. **Checkpoint with user.**
-2. **Exact Haiku model ID + current prices** — confirm against live pricing page + medium sample's resolved model at planning. (ASSUMPTION A3)
-3. **Stub Task children SourcePath** — confirm the stub sets `SourcePath` on Task children (needed for `PromptPath` MinLength=1) or add it.
-4. **MaterializeChildCRDs package location** — `cmd/tide-reporter` must import the move target; decide `internal/reporter` vs lifting into `pkg/dispatch` (import-firewall check: cmd may import internal; the reporter needs `api/v1alpha1` + `internal/owner` — both import-safe).
+1. **ServiceAccount sharing (THE blocker question) — RESOLVED → Option C.** A single pod has one SA, so an in-pod reporter (A/B) would leak CR-create verbs to the sandboxed subagent. User checkpointed 2026-06-08 and chose **Option C: a Manager-spawned reader Job with its own least-privilege `tide-reporter` SA** — the subagent SA stays zero-verb by construction, and the reader Job avoids the native-sidecar SIGKILL race. Locked in 09-CONTEXT.md.
+2. **Exact Haiku model ID + current prices — RESOLVED → `claude-haiku-4-5`.** Confirmed against `examples/projects/medium/project.yaml` (resolved model `claude-haiku-4-5`); price table keyed in plan 09-01 with ASSUMPTION A3 values ($1/M in, $5/M out → 100/500 cents-per-MTok). A table-miss fails loud (non-zero) so an ID/price drift surfaces immediately rather than silently zeroing cost.
+3. **Stub Task children SourcePath — RESOLVED → added in 09-02 Task 3.** Plan 09-02 adds `SourcePath` to the stub's authored Task children so `PromptPath` (MinLength=1) is satisfied on the stub path; the reader Job consumes both stub- and real-authored `out.json` identically.
+4. **MaterializeChildCRDs package location — RESOLVED → `internal/reporter`.** Materialization + `childKindAllowlist` + the spec-parent-ref `childrenAlreadyMaterialized` guard move to `internal/reporter` (plans 09-04/09-05); `cmd/tide-reporter` imports it (cmd→internal is import-firewall-safe; the package needs only `api/v1alpha1` + `internal/owner`, both import-safe).
 
 ## Sources
 
