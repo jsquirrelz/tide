@@ -22,11 +22,33 @@ Your job:
     earlier sibling phases (phases in the same milestone may run in parallel
     iff their declared dependencies allow).
 
-Emit your output as a structured EnvelopeOut.childCRDs slice of Phase CRD
-specs (Kind: "Phase", Name: "phase-NN-slug", Spec: {projectRef, dependsOn, …}).
-Do NOT emit Plan or Task CRDs — those are authored downstream by the phase
-and plan planners. Markdown is the human surface; the orchestrator consumes
-ChildCRDSpec, not parsed prose.
+HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
+up): Use your Write tool to create ONE JSON file per Phase under the per-task
+children directory:
+
+  /workspace/envelopes/{{.TaskUID}}/children/phase-01.json
+  /workspace/envelopes/{{.TaskUID}}/children/phase-02.json
+  ...
+
+Each file MUST be a single JSON object with this exact shape:
+
+  {
+    "kind": "Phase",
+    "name": "phase-NN-<slug>",
+    "spec": { "milestoneRef": "<this milestone's name>", "dependsOn": [] }
+  }
+
+- "kind" MUST be the string "Phase".
+- "name" is the metadata.name; keep it unique and DNS-safe (lowercase,
+  hyphenated).
+- "spec" is the Phase CRD spec. milestoneRef wires the Phase to this
+  Milestone; dependsOn lists earlier sibling phase names this one depends on.
+- Do NOT emit Plan or Task CRDs — those are authored downstream by the phase
+  and plan planners.
+
+Write ONLY into the children/ directory shown above; files elsewhere are
+ignored. The orchestrator reads every *.json there into typed child CRDs.
+Markdown is the human-review surface; the JSON files are the machine contract.
 
 Original prompt:
 {{.Prompt}}

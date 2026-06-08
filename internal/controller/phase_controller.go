@@ -228,7 +228,8 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	if plannerCaps.Iterations <= 0 {
 		plannerCaps.Iterations = 20
 	}
-	_, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", pkgdispatch.Caps{
+	plannerPrompt := outcomePromptOf(project)
+	_, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)

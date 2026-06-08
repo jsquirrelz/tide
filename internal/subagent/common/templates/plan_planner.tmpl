@@ -22,11 +22,33 @@ Your job:
     file-touch consistency with the owning phase brief — cycles are
     rejected at apply time, not at runtime.
 
-Emit your output as a structured EnvelopeOut.childCRDs slice of Task CRD
-specs (Kind: "Task", Name: "task-NN-slug", Spec: {planRef, dependsOn,
-filesTouched, prompt, …}). Waves are NOT inputs — they are derived by
-layered Kahn over the dependsOn edges you emit here. Do not attempt to
-declare waves.
+HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
+up): Use your Write tool to create ONE JSON file per Task under the per-task
+children directory:
+
+  /workspace/envelopes/{{.TaskUID}}/children/task-01.json
+  /workspace/envelopes/{{.TaskUID}}/children/task-02.json
+  ...
+
+Each file MUST be a single JSON object with this exact shape:
+
+  {
+    "kind": "Task",
+    "name": "task-NN-<slug>",
+    "spec": { "planRef": "<this plan's name>", "dependsOn": [],
+              "filesTouched": [], "prompt": "<the task instruction>" }
+  }
+
+- "kind" MUST be the string "Task".
+- "name" is the metadata.name; keep it unique and DNS-safe.
+- "spec" is the Task CRD spec. planRef wires the Task to this Plan; dependsOn
+  is the declared task DAG; filesTouched is the exhaustive file set; prompt is
+  the executor instruction. Waves are NOT inputs — they are derived by layered
+  Kahn over the dependsOn edges you emit here. Do not declare waves.
+
+Write ONLY into the children/ directory shown above; files elsewhere are
+ignored. The orchestrator reads every *.json there into typed child CRDs.
+Markdown is the human-review surface; the JSON files are the machine contract.
 
 Original prompt:
 {{.Prompt}}

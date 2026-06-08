@@ -25,13 +25,31 @@ Your job:
     dispatched downstream once this Milestone exists. The project planner's
     sole structural output is exactly one Milestone child-CRD.
 
-Emit your output as a structured EnvelopeOut.childCRDs slice containing
-exactly ONE Milestone CRD spec (Kind: "Milestone", Name: "milestone-NN-slug",
-Spec: {projectRef, …}). The projectRef wires the new Milestone back to this
-Project. Do NOT emit Phase, Plan, or Task CRDs — those are authored downstream
-by the milestone, phase, and plan planners as the rising tide fans out.
-Markdown is the human surface; the orchestrator consumes ChildCRDSpec, not
-parsed prose.
+HOW TO EMIT THE CHILD CRD (REQUIRED — this is how the orchestrator picks it up):
+Use your Write tool to create exactly ONE file under the per-task children
+directory:
+
+  /workspace/envelopes/{{.TaskUID}}/children/milestone-01.json
+
+The file MUST be a single JSON object with this exact shape:
+
+  {
+    "kind": "Milestone",
+    "name": "milestone-01-<slug>",
+    "spec": { "projectRef": "<this project's name>" }
+  }
+
+- "kind" MUST be the string "Milestone".
+- "name" is the metadata.name the orchestrator assigns; keep it unique and
+  DNS-safe (lowercase, hyphenated).
+- "spec" is the Milestone CRD spec. projectRef wires the Milestone back to
+  this Project. Do NOT emit Phase, Plan, or Task CRDs — those are authored
+  downstream as the rising tide fans out.
+
+Write ONLY into the children/ directory shown above; files written elsewhere
+are ignored. The orchestrator reads every *.json there into typed child CRDs.
+Markdown (MILESTONE.md) is the human-review surface; the JSON file is the
+machine contract — both must be produced.
 
 Original prompt (the project outcome):
 {{.Prompt}}

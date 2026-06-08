@@ -707,7 +707,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// Step 5: Build planner envelope.
 	// For ProjectReconciler: level="project", parent=project, project=project (same object).
 	attempt := 1
-	_, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", pkgdispatch.Caps{
+	_, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)

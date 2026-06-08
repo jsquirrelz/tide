@@ -21,11 +21,34 @@ Your job:
     and the (planned) set of files it expects to touch (the orchestrator's
     admission webhook validates file-touch consistency).
 
-Emit your output as a structured EnvelopeOut.childCRDs slice of Plan CRD
-specs (Kind: "Plan", Name: "plan-NN-slug", Spec: {phaseRef, dependsOn,
-wave, filesTouched, …}). Do NOT emit Task or Wave CRDs — those are the
-plan planner's output. Waves at this level are illustrative groupings; the
-authoritative execution wave is derived by Kahn over the eventual Task DAG.
+HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
+up): Use your Write tool to create ONE JSON file per Plan under the per-task
+children directory:
+
+  /workspace/envelopes/{{.TaskUID}}/children/plan-01.json
+  /workspace/envelopes/{{.TaskUID}}/children/plan-02.json
+  ...
+
+Each file MUST be a single JSON object with this exact shape:
+
+  {
+    "kind": "Plan",
+    "name": "plan-NN-<slug>",
+    "spec": { "phaseRef": "<this phase's name>", "dependsOn": [],
+              "filesTouched": [] }
+  }
+
+- "kind" MUST be the string "Plan".
+- "name" is the metadata.name; keep it unique and DNS-safe.
+- "spec" is the Plan CRD spec. phaseRef wires the Plan to this Phase;
+  dependsOn lists earlier sibling plan names; filesTouched is the planned
+  file set. Do NOT emit Task or Wave CRDs — those are the plan planner's
+  output. Waves at this level are illustrative groupings; the authoritative
+  execution wave is derived by Kahn over the eventual Task DAG.
+
+Write ONLY into the children/ directory shown above; files elsewhere are
+ignored. The orchestrator reads every *.json there into typed child CRDs.
+Markdown is the human-review surface; the JSON files are the machine contract.
 
 Original prompt:
 {{.Prompt}}

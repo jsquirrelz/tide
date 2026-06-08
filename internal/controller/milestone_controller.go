@@ -286,7 +286,8 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	if plannerCaps.Iterations <= 0 {
 		plannerCaps.Iterations = 20
 	}
-	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", pkgdispatch.Caps{
+	plannerPrompt := outcomePromptOf(project)
+	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)

@@ -127,7 +127,7 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 10}
 	defaults := ProviderDefaults{Models: map[string]string{"milestone": "claude-opus-4-7"}}
 
-	envIn, envBytes, err := BuildPlannerEnvelope("milestone", milestone, project, 1, "signed-token-abc", caps, "https://127.0.0.1:8443", defaults)
+	envIn, envBytes, err := BuildPlannerEnvelope("milestone", milestone, project, 1, "signed-token-abc", "author the first milestone", caps, "https://127.0.0.1:8443", defaults)
 	if err != nil {
 		t.Fatalf("BuildPlannerEnvelope: %v", err)
 	}
@@ -159,6 +159,10 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 		t.Errorf("Provider.Model = %q, want %q", envIn.Provider.Model, "claude-opus-4-7")
 	}
 
+	if envIn.Prompt != "author the first milestone" {
+		t.Errorf("Prompt = %q, want %q", envIn.Prompt, "author the first milestone")
+	}
+
 	// JSON round-trip.
 	var roundTrip pkgdispatch.EnvelopeIn
 	if err := json.Unmarshal(envBytes, &roundTrip); err != nil {
@@ -166,6 +170,51 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 	}
 	if roundTrip.TaskUID != envIn.TaskUID || roundTrip.Role != envIn.Role || roundTrip.Level != envIn.Level {
 		t.Errorf("round-trip mismatch: got %+v, want %+v", roundTrip, envIn)
+	}
+}
+
+// Test 4b: BuildPlannerEnvelope threads the supplied prompt into
+// EnvelopeIn.Prompt and keeps it distinct from the signed token (defect #4 —
+// the field was previously never assigned and the real Claude planner saw an
+// empty prompt). Covers JSON round-trip so the on-PVC envelope carries it.
+func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			OutcomePrompt: "Add a /healthz endpoint returning 200 OK.",
+		},
+	}
+	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 10}
+
+	envIn, envBytes, err := BuildPlannerEnvelope("project", project, project, 1, "tok-xyz", project.Spec.OutcomePrompt, caps, "https://127.0.0.1:8443", ProviderDefaults{})
+	if err != nil {
+		t.Fatalf("BuildPlannerEnvelope: %v", err)
+	}
+	if envIn.Prompt != "Add a /healthz endpoint returning 200 OK." {
+		t.Errorf("Prompt = %q, want outcome prompt", envIn.Prompt)
+	}
+	// token and prompt must not be conflated.
+	if envIn.SignedToken != "tok-xyz" {
+		t.Errorf("SignedToken = %q, want %q", envIn.SignedToken, "tok-xyz")
+	}
+	if envIn.Prompt == envIn.SignedToken {
+		t.Error("Prompt and SignedToken must be distinct fields")
+	}
+
+	var rt pkgdispatch.EnvelopeIn
+	if err := json.Unmarshal(envBytes, &rt); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if rt.Prompt != envIn.Prompt {
+		t.Errorf("round-trip Prompt = %q, want %q", rt.Prompt, envIn.Prompt)
+	}
+
+	// outcomePromptOf is nil-safe — a not-yet-resolved Project yields "".
+	if got := outcomePromptOf(nil); got != "" {
+		t.Errorf("outcomePromptOf(nil) = %q, want empty", got)
+	}
+	if got := outcomePromptOf(project); got != project.Spec.OutcomePrompt {
+		t.Errorf("outcomePromptOf(project) = %q, want %q", got, project.Spec.OutcomePrompt)
 	}
 }
 

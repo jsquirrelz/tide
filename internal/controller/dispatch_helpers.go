@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package controller — dispatch_helpers.go consolidates the three planner
+// Package controller â dispatch_helpers.go consolidates the three planner
 // dispatch helpers that all three up-stack reconcilers (Milestone, Phase,
 // Plan) share (Phase 3 D-A1 / D-A2 / D-A4). The helpers exist to keep the
-// reconciler bodies from drifting in lockstep — each reconciler is ~80-150
+// reconciler bodies from drifting in lockstep â each reconciler is ~80-150
 // LOC of NEW code instead of ~230 LOC because the shared bits live here.
 //
 //   - ResolveProvider walks the Project.Spec.Subagent precedence chain
-//     per D-C2: levels.{level}.{model,params} → Project default →
+//     per D-C2: levels.{level}.{model,params} â Project default â
 //     Helm-chart default.
 //
 //   - BuildPlannerEnvelope mirrors task_controller.go buildEnvelopeIn for
-//     planner-level dispatch — sets Role="planner", Level=<level>,
+//     planner-level dispatch â sets Role="planner", Level=<level>,
 //     populates Provider via ResolveProvider, and marshals to []byte.
 //
 //   - MaterializeChildCRDs server-side-creates child CRDs from
@@ -60,11 +60,11 @@ import (
 // model identifier. Both are filled at Manager startup from Helm values.
 type ProviderDefaults struct {
 	// Image is the default subagent image ref. Empty string means
-	// "no Helm default" — caller is responsible for surfacing this
+	// "no Helm default" â caller is responsible for surfacing this
 	// at Job creation time (a missing image is a config error).
 	Image string
 
-	// Models maps level→model. Missing key means "no Helm default for
+	// Models maps levelâmodel. Missing key means "no Helm default for
 	// that level".
 	Models map[string]string
 }
@@ -74,7 +74,7 @@ type ProviderDefaults struct {
 // before any K8s API call is made. The set matches the five TIDE CRD
 // Kinds; non-TIDE Kinds (Pod, ConfigMap, Job, etc.) MUST never reach
 // server-side-create from a planner pod's emitted ChildCRDs envelope
-// (subagent pod has zero K8s verbs per Phase 2 D-A4 — the envelope is
+// (subagent pod has zero K8s verbs per Phase 2 D-A4 â the envelope is
 // the only channel from the subagent process into the cluster's typed
 // CRD graph).
 var childKindAllowlist = map[string]bool{
@@ -87,16 +87,16 @@ var childKindAllowlist = map[string]bool{
 
 // ResolveProvider walks Project.Spec.Subagent precedence chain for the
 // given level (D-C2). Returns a ProviderSpec with Vendor pinned to
-// "anthropic" in v1.0 (per-vendor selection deferred — CONTEXT.md
+// "anthropic" in v1.0 (per-vendor selection deferred â CONTEXT.md
 // "Deferred Ideas"). Model and Params resolve via:
 //
-//	project.Spec.Subagent.Levels.<level>.Model →
-//	project.Spec.Subagent.Model →
-//	helmDefaults.Models[<level>] →
+//	project.Spec.Subagent.Levels.<level>.Model â
+//	project.Spec.Subagent.Model â
+//	helmDefaults.Models[<level>] â
 //	"" (caller surfaces missing-config error)
 //
 // Params merge: level Params copied first, then Project-level Params
-// inserted only for keys NOT already set at the level — i.e., level
+// inserted only for keys NOT already set at the level â i.e., level
 // wins on key conflict.
 func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDefaults ProviderDefaults) pkgdispatch.ProviderSpec {
 	// Helper to read per-level overrides.
@@ -127,14 +127,14 @@ func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDef
 		}
 	}
 
-	// Merge Params — level overrides Project defaults on key conflict.
+	// Merge Params â level overrides Project defaults on key conflict.
 	var params map[string]string
 	if levelCfg != nil && len(levelCfg.Params) > 0 {
 		params = make(map[string]string, len(levelCfg.Params))
 		maps.Copy(params, levelCfg.Params)
 	}
 	// (Project-level Params are not currently exposed on SubagentConfig
-	// — LevelConfig.Params is the per-level extension; if a future
+	// â LevelConfig.Params is the per-level extension; if a future
 	// schema bump adds a top-level Subagent.Params, merge here with
 	// "level wins on conflict" semantics.)
 
@@ -153,15 +153,39 @@ func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDef
 //
 // parent is the up-stack CRD whose UID stamps EnvelopeIn.TaskUID (the
 // field is named TaskUID for backward-compat with Phase 2's envelope
-// schema, but it carries the parent's UID at the planner level — the
+// schema, but it carries the parent's UID at the planner level â the
 // semantic is "the dispatch this envelope drives" regardless of level).
-func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha1.Project, attempt int, token string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults) (pkgdispatch.EnvelopeIn, []byte, error) {
+//
+// prompt is the level-appropriate prompt body the dispatching reconciler
+// supplies; it is assigned verbatim to EnvelopeIn.Prompt so the real
+// subagent's template render has the actual outcome to author against
+// (defect #4: prior to this the field was never set and the real Claude
+// planner saw an empty prompt). token and prompt are DISTINCT params â
+// token is the credproxy HMAC, prompt is the authoring instruction. The
+// project planner passes Project.Spec.OutcomePrompt; deeper planners pass
+// the same outcome (the parent artifact context â MILESTONE.md, the phase
+// brief, PLAN.md â lives on the PVC and the template instructs reading it,
+// and ParentName flows through EnvelopeIn.Dispatch).
+// outcomePromptOf returns project.Spec.OutcomePrompt, nil-safe: the deeper
+// reconcilers resolve the owning Project by walking the parent chain
+// (resolveProject / resolveProjectForPlan), which returns nil on a not-yet-
+// visible chain. A nil project yields "" — the same empty-prompt shape the
+// real subagent already guards (EMPTY_PROMPT warning) rather than a panic.
+func outcomePromptOf(project *tideprojectv1alpha1.Project) string {
+	if project == nil {
+		return ""
+	}
+	return project.Spec.OutcomePrompt
+}
+
+func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha1.Project, attempt int, token, prompt string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults) (pkgdispatch.EnvelopeIn, []byte, error) {
 	envIn := pkgdispatch.EnvelopeIn{
 		APIVersion:    pkgdispatch.APIVersionV1Alpha1,
 		Kind:          pkgdispatch.KindTaskEnvelopeIn,
 		TaskUID:       string(parent.GetUID()),
 		Role:          "planner",
 		Level:         level,
+		Prompt:        prompt,
 		Caps:          caps,
 		ProxyEndpoint: proxyEndpoint,
 		SignedToken:   token,
@@ -170,7 +194,7 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 
 	// Stamp parentName into the dedicated Dispatch metadata field so the stub
 	// planner can populate the child *Ref field (e.g. milestoneRef, phaseRef)
-	// without querying the K8s API — parent.GetName() is the authoritative
+	// without querying the K8s API â parent.GetName() is the authoritative
 	// source (T-07-03-03: parentName is metadata, not a secret). This is kept
 	// out of Provider.Params (model-parameters-only) so the anthropic runner's
 	// strict param allow-list is not tripped by dispatch metadata.
@@ -190,7 +214,7 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 // as a belt-and-suspenders fallback.
 //
 // cascade-11: the cascade-10 spec-ref idempotency guard covered only the
-// fresh-dispatch path (reconcilePlannerDispatch). The handleJobCompletion →
+// fresh-dispatch path (reconcilePlannerDispatch). The handleJobCompletion â
 // MaterializeChildCRDs path was UNGUARDED, so a Milestone that dispatched its
 // planner Job before its sibling Phase was visible (multi-doc kubectl apply
 // race) would, on planner-Job completion, unconditionally materialize a
@@ -202,13 +226,13 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 // milestone_controller.go:245 and phase_controller.go:206.
 //
 // bare-Project / genuine self-bootstrap is unaffected: at the first materialize
-// the parent has 0 existing children of the expected kind → guard returns false
-// → the genuine first child is materialized once; a later reconcile finds it by
-// specRef → idempotent skip.
+// the parent has 0 existing children of the expected kind â guard returns false
+// â the genuine first child is materialized once; a later reconcile finds it by
+// specRef â idempotent skip.
 //
 // parent must be one of *Project, *Milestone, *Phase, or *Plan. Any other type
 // (or a List error) returns (false, err-or-nil) so the caller proceeds to
-// materialize — fail-open preserves bare-Project bootstrap.
+// materialize â fail-open preserves bare-Project bootstrap.
 func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent metav1.Object) (bool, error) {
 	ns := parent.GetNamespace()
 	name := parent.GetName()
@@ -255,7 +279,7 @@ func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 			}
 		}
 	default:
-		// Unknown parent type — fail open (proceed to materialize). Should
+		// Unknown parent type â fail open (proceed to materialize). Should
 		// not happen; the four reconcilers pass concrete typed pointers.
 		return false, nil
 	}
@@ -266,7 +290,7 @@ func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 // EnvelopeOut.ChildCRDs.
 //
 // Each child is allocated to its concrete *tideprojectv1alpha1 pointer
-// based on Kind (only the allowlist-approved Kinds advance to creation —
+// based on Kind (only the allowlist-approved Kinds advance to creation â
 // T-308 mitigation). The child's Spec is decoded from child.Spec.Raw via
 // json.Unmarshal directly into the typed Spec field. ObjectMeta.Name is
 // child.Name; Namespace is the parent's namespace. OwnerRef is set via
@@ -275,12 +299,12 @@ func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 //
 // AlreadyExists on Create is treated as idempotent success (mirrors
 // Phase 2 task_controller.go:397-403 SUB-03 / Pitfall F watch-lag race
-// handling). Any other error short-circuits the loop and returns —
+// handling). Any other error short-circuits the loop and returns â
 // callers should patch their parent's Status.Phase=Failed.
 func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.Scheme, parent metav1.Object, children []pkgdispatch.ChildCRDSpec) error {
 	// Pre-flight: enforce Kind allowlist BEFORE any K8s API call.
 	// Any rejected Kind aborts the whole batch (planner contract
-	// violation — the envelope is poisoned; refuse to materialize any
+	// violation â the envelope is poisoned; refuse to materialize any
 	// of it).
 	for _, child := range children {
 		if !childKindAllowlist[child.Kind] {
@@ -322,7 +346,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			}
 			obj = wv
 		default:
-			// Unreachable — allowlist was checked above. Defensive.
+			// Unreachable â allowlist was checked above. Defensive.
 			return fmt.Errorf("MaterializeChildCRDs: kind %q unreachable after allowlist", child.Kind)
 		}
 

@@ -16,33 +16,36 @@ limitations under the License.
 
 // Package anthropic implements pkg/dispatch.Subagent against Anthropic's
 // Claude Code CLI. Per D-C1 (the provider firewall) all Anthropic-specific
-// code lives here, NOT in pkg/dispatch, pkg/controller, or pkg/dag — the
+// code lives here, NOT in pkg/dispatch, pkg/controller, or pkg/dag â the
 // firewall is enforced at build time by tools/analyzers/providerfirewall.
 //
-// HARN-06 decision (03-RESEARCH §"Alternatives Considered"): we shell out to
+// HARN-06 decision (03-RESEARCH Â§"Alternatives Considered"): we shell out to
 // the `claude` CLI rather than embedding the Anthropic Go SDK. The CLI bundles
 // the agent loop, hooks, MCP, skills, and bash/file tools that would otherwise
 // have to be re-implemented in Go. Phase 3 does not depend on the Anthropic
 // Go SDK module.
 //
 // CLAUDE.md anti-pattern guardrails baked in:
-//   - NEVER mount the host claude config dir — the --bare flag (RESEARCH
-//     §"Critical new finding") skips auto-discovery of hooks/skills/plugins/MCP
+//   - NEVER mount the host claude config dir â the --bare flag (RESEARCH
+//     Â§"Critical new finding") skips auto-discovery of hooks/skills/plugins/MCP
 //     and any CLAUDE-doc auto-memory, so the per-Pod runtime is hermetic.
-//   - NEVER use OAuth headless — claude-code#29983, #7100 break it. We pin
+//   - NEVER use OAuth headless â claude-code#29983, #7100 break it. We pin
 //     ANTHROPIC_API_KEY to the signed token minted by the controller and
 //     validated by the credproxy sidecar (Phase 2 D-C1..C4).
-//   - NEVER embed an LLM API key directly — the API key lives only in the
+//   - NEVER embed an LLM API key directly â the API key lives only in the
 //     credproxy sidecar; this binary sees a short-lived HMAC token.
 package anthropic
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/jsquirrelz/tide/internal/subagent/common"
@@ -51,11 +54,11 @@ import (
 
 // vendorSentinel is the Provider.Vendor value this binary accepts. The
 // envelope.Provider.Vendor field is the compile-time agreement between the
-// orchestrator-resolved provider triple and the running subagent image — if
+// orchestrator-resolved provider triple and the running subagent image â if
 // they disagree, we refuse to dispatch (Pitfall 14 mitigation).
 const vendorSentinel = "anthropic"
 
-// paramsAllowList enforces Q3 RESOLVED (03-RESEARCH §"Open Questions" line
+// paramsAllowList enforces Q3 RESOLVED (03-RESEARCH Â§"Open Questions" line
 // 933): unknown Provider.Params keys are rejected at startup. The fail-fast
 // posture catches typos at apply time rather than letting them silently
 // disappear into a passthrough. Add new keys here only after wiring the
@@ -137,11 +140,11 @@ func NewWithExec(opts Options, execFunc func(ctx context.Context, name string, a
 //  1. Fail-fast vendor check: refuse if in.Provider.Vendor != "anthropic".
 //  2. Fail-fast params allow-list (Q3): refuse unknown Provider.Params keys.
 //  3. Load + render the compiled-in prompt template via
-//     common.LoadPromptTemplate(in.Role, in.Level) — never read the host
+//     common.LoadPromptTemplate(in.Role, in.Level) â never read the host
 //     filesystem for prompt content (CLAUDE.md anti-pattern).
 //  4. Build `claude -p <rendered> --model <Provider.Model> --output-format
 //     stream-json --verbose --include-partial-messages --bare` (the --bare
-//     flag is REQUIRED per RESEARCH §"Critical new finding").
+//     flag is REQUIRED per RESEARCH Â§"Critical new finding").
 //  5. Wire credproxy env: ANTHROPIC_BASE_URL = in.ProxyEndpoint;
 //     ANTHROPIC_API_KEY = in.SignedToken (never the raw key);
 //     NODE_EXTRA_CA_CERTS = /etc/tide/proxy/ca.crt.
@@ -160,7 +163,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: refusing vendor=%q (expected %q)", in.Provider.Vendor, vendorSentinel)
 	}
 
-	// 2. Params allow-list fail-fast (Q3 RESOLVED — 03-RESEARCH line 933).
+	// 2. Params allow-list fail-fast (Q3 RESOLVED â 03-RESEARCH line 933).
 	for key := range in.Provider.Params {
 		if !paramsAllowList[key] {
 			return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: unknown param %q (allowed: temperature, thinking_budget, top_p, top_k)", key)
@@ -181,7 +184,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	renderedPrompt := promptBuf.String()
 
 	// 4. Build the claude CLI invocation. The --bare flag is REQUIRED per
-	// RESEARCH §"Critical new finding" — it skips auto-discovery of the
+	// RESEARCH Â§"Critical new finding" â it skips auto-discovery of the
 	// host claude config dir, .mcp.json, hooks, skills, plugins, and any
 	// project CLAUDE-doc auto-memory. Hermetic by construction.
 	args := []string{
@@ -195,7 +198,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	cmd := a.execFunc(ctx, a.opts.ClaudeBinary, args...)
 
 	// 5. Credproxy env wiring (Phase 2 D-C1..C4). ANTHROPIC_API_KEY carries
-	// the HMAC-signed token, NEVER the raw API key — the real key lives
+	// the HMAC-signed token, NEVER the raw API key â the real key lives
 	// only in the credproxy sidecar's Secret mount.
 	cmd.Env = append(cmd.Environ(),
 		"ANTHROPIC_BASE_URL="+in.ProxyEndpoint,
@@ -217,7 +220,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	}
 	defer func() { _ = eventsFile.Close() }() // best-effort event sink; close error is non-actionable cleanup
 
-	// 7. Pipe stdout → ParseStream(stdout, events.jsonl). Stderr surfaces
+	// 7. Pipe stdout â ParseStream(stdout, events.jsonl). Stderr surfaces
 	// as task-level Reason on non-zero exit.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -234,7 +237,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	waitErr := cmd.Wait()
 
 	// Decide exit code + reason. Order:
-	//   - parse error on the stream → dispatch-level (return err).
+	//   - parse error on the stream â dispatch-level (return err).
 	//   - wait error: task-level (ExitCode from exec.ExitError, Reason from stderr).
 	if parseErr != nil {
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: parse stream: %w", parseErr)
@@ -260,6 +263,27 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		return out, nil
 	}
 
+	// Planner file-handoff (defect #5): a planner dispatch (Role=="planner")
+	// authors child-CRD JSON files into <eventsDir>/children/*.json via the
+	// claude CLI's Write tool (the template instructs the exact path). The
+	// subagent pod has zero K8s verbs (Phase 2 D-A4) — this file handoff is the
+	// only channel from the model's output into EnvelopeOut.ChildCRDs, which
+	// the controller materializes server-side. No text-scraping of Result.
+	// Executors (Role=="executor") emit no children; skip the read entirely.
+	if in.Role == "planner" {
+		children, readErr := readChildCRDs(filepath.Join(eventsDir, "children"))
+		if readErr != nil {
+			// A malformed/poisoned children dir is a task-level failure, not a
+			// dispatch-level crash: the agent loop completed, but its structural
+			// output is unusable. Surface via ExitCode+Reason so the controller
+			// marks the parent Failed rather than retrying a clean dispatch.
+			out.ExitCode = 1
+			out.Reason = fmt.Sprintf("read child CRDs: %s", truncate(readErr.Error(), 256))
+			return out, nil
+		}
+		out.ChildCRDs = children
+	}
+
 	return out, nil
 }
 
@@ -270,4 +294,107 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "...(truncated)"
+}
+
+// childKindAllowlist is the runner-side T-308 mitigation mirror of the
+// controller's childKindAllowlist (internal/controller/dispatch_helpers.go).
+// Only these Kinds may flow from a planner's child-handoff files into
+// EnvelopeOut.ChildCRDs. A file declaring any other Kind poisons the whole
+// batch — the controller enforces the same allowlist again at materialize
+// time, but rejecting here gives a clearer task-level Reason and keeps a
+// non-TIDE Kind from ever reaching the cluster's typed CRD graph.
+var childKindAllowlist = map[string]bool{
+	"Milestone": true,
+	"Phase":     true,
+	"Plan":      true,
+	"Task":      true,
+	"Wave":      true,
+}
+
+// readChildCRDs reads the planner's child-CRD handoff files from childrenDir
+// (<workspaceRoot>/envelopes/<TaskUID>/children) and returns them as typed
+// []ChildCRDSpec, in deterministic filename order.
+//
+// Contract (defect #5, file-handoff option a):
+//   - Each *.json file in childrenDir is one ChildCRDSpec {kind, name, spec}.
+//   - A missing childrenDir is NOT an error — it yields zero children (the
+//     controller then surfaces the empty-output condition). This keeps an
+//     executor-shaped or no-op planner run from failing on a clean exit.
+//   - Path safety: only regular files whose resolved path stays within
+//     childrenDir are read. Symlinks and any entry escaping childrenDir are
+//     rejected (traversal defense) — the model's Write tool is constrained to
+//     the per-task dir, but the runner does not trust that.
+//   - Kind allowlist: every spec's Kind must be in childKindAllowlist.
+//   - Name required: a child with an empty Name is rejected (the controller
+//     uses it as metadata.name).
+func readChildCRDs(childrenDir string) ([]pkgdispatch.ChildCRDSpec, error) {
+	entries, err := os.ReadDir(childrenDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil // no handoff dir → zero children, not an error
+		}
+		return nil, fmt.Errorf("read children dir %q: %w", childrenDir, err)
+	}
+
+	// Canonical base for the traversal check. EvalSymlinks resolves the real
+	// directory so a symlinked childrenDir is still anchored correctly.
+	baseReal, err := filepath.EvalSymlinks(childrenDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve children dir %q: %w", childrenDir, err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names) // deterministic order for stable child materialization
+
+	children := make([]pkgdispatch.ChildCRDSpec, 0, len(names))
+	for _, name := range names {
+		full := filepath.Join(childrenDir, name)
+
+		// Traversal defense: reject any entry that is a symlink or whose
+		// resolved path escapes baseReal. Lstat (not Stat) so we inspect the
+		// link itself, not its target.
+		info, lerr := os.Lstat(full)
+		if lerr != nil {
+			return nil, fmt.Errorf("lstat child file %q: %w", name, lerr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("child file %q is a symlink (rejected: traversal defense)", name)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("child file %q is not a regular file (rejected)", name)
+		}
+		realPath, rerr := filepath.EvalSymlinks(full)
+		if rerr != nil {
+			return nil, fmt.Errorf("resolve child file %q: %w", name, rerr)
+		}
+		if realPath != baseReal && !strings.HasPrefix(realPath, baseReal+string(os.PathSeparator)) {
+			return nil, fmt.Errorf("child file %q resolves outside children dir (rejected: traversal defense)", name)
+		}
+
+		data, rderr := os.ReadFile(full)
+		if rderr != nil {
+			return nil, fmt.Errorf("read child file %q: %w", name, rderr)
+		}
+		var spec pkgdispatch.ChildCRDSpec
+		if jerr := json.Unmarshal(data, &spec); jerr != nil {
+			return nil, fmt.Errorf("parse child file %q: %w", name, jerr)
+		}
+		if !childKindAllowlist[spec.Kind] {
+			return nil, fmt.Errorf("child file %q declares disallowed kind %q (allowed: Milestone, Phase, Plan, Task, Wave)", name, spec.Kind)
+		}
+		if spec.Name == "" {
+			return nil, fmt.Errorf("child file %q has empty name", name)
+		}
+		children = append(children, spec)
+	}
+	return children, nil
 }
