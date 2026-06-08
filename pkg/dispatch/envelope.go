@@ -297,10 +297,15 @@ type Dev struct {
 // TerminationStub is the tiny cross-namespace status carrier written to the
 // dispatch Job's 4 KB termination message (Pod.status.containerStatuses[].
 // state.terminated.message). It carries ONLY the fields the Manager needs to
-// record Task completion without reading the PVC: ExitCode, Reason, Usage, and
-// the HeadSHA the run-branch was advanced to (if any). ChildCRDs and the
-// verbose Result are intentionally excluded — they stay on the namespace-local
-// PVC in out.json, which the in-namespace reporter Job reads (plan 09-05).
+// record Task completion without reading the PVC: ExitCode, Reason, Usage,
+// the HeadSHA the run-branch was advanced to (if any), and ChildCount — the
+// count of child CRDs the planner authored. ChildCRDs payloads and the verbose
+// Result are intentionally excluded — they stay on the namespace-local PVC in
+// out.json, which the in-namespace reporter Job reads (plan 09-05).
+//
+// ChildCount enables race-free succession gating (plan 09-08 Defect B): the
+// controller compares observed owned children against this expected count and
+// requeues until observed >= expected before declaring the level Succeeded.
 //
 // By construction this type MUST stay < 4 KB when marshalled; the test
 // TestNewTerminationStub_StaysSmall enforces this invariant.
@@ -321,22 +326,31 @@ type TerminationStub struct {
 	// push (executor-level, non-push Jobs). The Manager copies this into
 	// Project.Status.git.lastPushedSHA for the --force-with-lease fence.
 	HeadSHA string `json:"headSHA,omitempty"`
+
+	// ChildCount is the number of child CRDs the planner authored
+	// (len(EnvelopeOut.ChildCRDs)). Used by the four planner-level controllers
+	// as the "expected" child count for race-free succession gating: a level
+	// cannot Succeed until observed owned children >= ChildCount (plan 09-08).
+	// Zero for executor-level dispatches and genuine leaf planners.
+	ChildCount int `json:"childCount"`
 }
 
 // NewTerminationStub builds a TerminationStub from a full EnvelopeOut by
-// copying the tiny-status subset: ExitCode, Reason, Usage, and Git.HeadSHA.
-// ChildCRDs, Result, and Artifacts are deliberately excluded. A nil out.Git
-// is safe and produces an empty HeadSHA.
+// copying the tiny-status subset: ExitCode, Reason, Usage, Git.HeadSHA, and
+// ChildCount (= len(out.ChildCRDs)). ChildCRD payloads, Result, and Artifacts
+// are deliberately excluded. A nil out.Git is safe and produces an empty
+// HeadSHA. A nil or empty ChildCRDs slice produces ChildCount == 0.
 func NewTerminationStub(out EnvelopeOut) TerminationStub {
 	headSHA := ""
 	if out.Git != nil {
 		headSHA = out.Git.HeadSHA
 	}
 	return TerminationStub{
-		ExitCode: out.ExitCode,
-		Reason:   out.Reason,
-		Usage:    out.Usage,
-		HeadSHA:  headSHA,
+		ExitCode:   out.ExitCode,
+		Reason:     out.Reason,
+		Usage:      out.Usage,
+		HeadSHA:    headSHA,
+		ChildCount: len(out.ChildCRDs),
 	}
 }
 
