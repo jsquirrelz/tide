@@ -12,7 +12,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -23,7 +22,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -186,75 +184,20 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
-	It("Test 2: on Job completion materializes Phase children from EnvelopeOut.ChildCRDs", func() {
-		// Create Milestone.
-		ms := &tideprojectv1alpha1.Milestone{
-			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
-		}
-		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
-		}, "5s", "100ms").Should(Succeed())
-
-		// Pre-populate envelope reader with a phase ChildCRD.
-		phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName}
-		rawSpec, err := json.Marshal(phaseSpec)
-		Expect(err).NotTo(HaveOccurred())
-
-		envReader := newMapEnvReader()
-		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-		}
-
-		// Drive initial reconciles to create the Job.
-		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
-
-		// Fetch Milestone UID for envelope setup. Wait for cache to sync.
-		var got tideprojectv1alpha1.Milestone
-		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)
-		}, "5s", "100ms").Should(Succeed())
-
-		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
-			APIVersion: pkgdispatch.APIVersionV1Alpha1,
-			Kind:       pkgdispatch.KindTaskEnvelopeOut,
-			TaskUID:    string(got.UID),
-			ExitCode:   0,
-			ChildCRDs: []pkgdispatch.ChildCRDSpec{
-				{Kind: "Phase", Name: "child-phase-a", Spec: runtime.RawExtension{Raw: rawSpec}},
-			},
-		})
-
-		// Patch the Job to Succeeded.
-		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
-		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
-
-		// Reconcile to trigger handleJobCompletion.
-		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 3)).To(Succeed())
-
-		// Verify child Phase created.
-		Eventually(func(g Gomega) {
-			var phase tideprojectv1alpha1.Phase
-			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-a", Namespace: "default"}, &phase)).To(Succeed())
-			// Owner ref points at Milestone.
-			refs := phase.GetOwnerReferences()
-			var foundOwner bool
-			for _, ref := range refs {
-				if ref.Kind == "Milestone" && ref.UID == got.UID {
-					foundOwner = true
-				}
-			}
-			g.Expect(foundOwner).To(BeTrue(), "Phase should have Milestone owner ref")
-		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-	})
+	// NOTE (Phase 09 plan 09-06, REQ-09-01): the former "Test 2: materializes
+	// Phase children" and "Test 3: rejects bad child Kind" specs were removed.
+	// Under the Option-C reader-Job architecture the Manager no longer
+	// materializes children inline in handleJobCompletion — that work moved to
+	// the in-namespace tide-reporter Job. Their coverage now lives in:
+	//   - internal/reporter/materialize_test.go
+	//       TestMaterializeChildCRDsHappyPath        (child create + ownerRef)
+	//       TestMaterializeChildCRDsRejectsUnknownKind (Kind allowlist / bad Kind)
+	//   - test/integration/kind/reporter_pod_test.go  (Manager spawns reporter
+	//       Job → child Milestone/Phase appears, Layer B)
+	// The Manager-level invariant that still belongs here — "do not Succeed
+	// while a child Phase is pending" (debug #9) — is retained below, with the
+	// child Phase created directly (simulating what the reporter Job does)
+	// instead of relying on the removed inline materialization.
 
 	It("Test 4 (debug #9): does NOT Succeed while a materialized child Phase is still pending; Succeeds once it Succeeds", func() {
 		// The premature-succession bug lives on the AUTO milestone-gate path
@@ -301,10 +244,6 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
 		}, "5s", "100ms").Should(Succeed())
 
-		phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: autoMilestoneName}
-		rawSpec, err := json.Marshal(phaseSpec)
-		Expect(err).NotTo(HaveOccurred())
-
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
 			Client:         mgrClient,
@@ -324,29 +263,44 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &got)
 		}, "5s", "100ms").Should(Succeed())
 
+		// Manager reads only the tiny status from the completed planner Job
+		// (no ChildCRDs — materialization moved to the reporter Job, REQ-09-01).
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 			TaskUID:  string(got.UID),
 			ExitCode: 0,
-			ChildCRDs: []pkgdispatch.ChildCRDSpec{
-				{Kind: "Phase", Name: "child-phase-pending", Spec: runtime.RawExtension{Raw: rawSpec}},
-			},
 		})
 
 		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
 
-		// handleJobCompletion materializes the child Phase. Because the child
-		// Phase is NOT yet Succeeded, the Milestone must requeue, NOT Succeed.
-		// Drive reconciles (each re-runs handleJobCompletion) until the child
-		// Phase materializes; the materializing reconcile also exercises the new
-		// requeue guard.
+		// Simulate the reporter Job: create the child Phase as a controller-owned
+		// child of the Milestone, still PENDING (Status.Phase unset). Under Option C
+		// the in-namespace tide-reporter materializes this from out.json; the Manager
+		// only observes it via the Owns(&Phase{}) watch.
+		tru := true
+		childPhase := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "child-phase-pending",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         "tideproject.k8s/v1alpha1",
+					Kind:               "Milestone",
+					Name:               got.GetName(),
+					UID:                got.GetUID(),
+					Controller:         &tru,
+					BlockOwnerDeletion: &tru,
+				}},
+			},
+			Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: autoMilestoneName},
+		}
+		Expect(k8sClient.Create(ctx, childPhase)).To(Succeed())
+		waitForCacheSync("child-phase-pending", "default", &tideprojectv1alpha1.Phase{})
+
+		// With a materialized-but-pending child Phase, handleJobCompletion must
+		// requeue rather than patch the Milestone Succeeded (debug #9 guard).
 		Eventually(func(g Gomega) {
 			res, rerr := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}})
 			g.Expect(rerr).NotTo(HaveOccurred())
-			var phase tideprojectv1alpha1.Phase
-			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-pending", Namespace: "default"}, &phase)).To(Succeed())
-			// With a materialized-but-pending child Phase, the reconcile must
-			// requeue rather than patch the Milestone Succeeded.
 			g.Expect(res.RequeueAfter).To(BeNumerically(">", 0), "Milestone should requeue while child Phase pending")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
@@ -371,51 +325,4 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
-	It("Test 3: rejects bad child Kind and patches Status.Phase=Failed", func() {
-		ms := &tideprojectv1alpha1.Milestone{
-			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
-		}
-		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
-		}, "5s", "100ms").Should(Succeed())
-
-		envReader := newMapEnvReader()
-		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-		}
-
-		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
-
-		var got tideprojectv1alpha1.Milestone
-		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)).To(Succeed())
-
-		// Bad Kind: "Pod" — not in allowlist.
-		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
-			TaskUID:  string(got.UID),
-			ExitCode: 0,
-			ChildCRDs: []pkgdispatch.ChildCRDSpec{
-				{Kind: "Pod", Name: "evil", Spec: runtime.RawExtension{Raw: []byte(`{}`)}},
-			},
-		})
-
-		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
-		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
-
-		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 3)).To(Succeed())
-
-		Eventually(func(g Gomega) {
-			var msAfter tideprojectv1alpha1.Milestone
-			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &msAfter)).To(Succeed())
-			g.Expect(msAfter.Status.Phase).To(Equal("Failed"))
-		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-	})
 })
