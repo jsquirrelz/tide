@@ -157,6 +157,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 				DependsOn:           dependsOn,
 				FilesTouched:        filesTouched,
 				DeclaredOutputPaths: filesTouched,
+				PromptPath:          "envelopes/test/children/" + name + ".json",
 			},
 		}
 	}

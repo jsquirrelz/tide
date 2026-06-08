@@ -148,6 +148,8 @@ func makeTask(name, planRef string, dependsOn []string, projectName ...string) *
 			FilesTouched:        []string{"src/main.go"},
 			DeclaredOutputPaths: []string{"artifacts/out.txt"},
 			DependsOn:           dependsOn,
+			// PromptPath is required at the API boundary (defect #10b, MinLength=1).
+			PromptPath: "envelopes/test/children/" + name + ".json",
 		},
 	}
 	Expect(k8sClient.Create(context.Background(), t)).To(Succeed())

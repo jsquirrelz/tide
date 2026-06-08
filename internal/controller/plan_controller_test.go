@@ -69,6 +69,7 @@ func alphaThroughThetaFixture(planRef string) []string {
 				PlanRef:             planRef,
 				FilesTouched:        []string{fmt.Sprintf("src/%s.go", t.name)},
 				DeclaredOutputPaths: []string{fmt.Sprintf("artifacts/%s.txt", t.name)},
+				PromptPath:          fmt.Sprintf("envelopes/test/children/%s.json", t.name),
 			},
 		}
 		// Translate short names to full names in DependsOn.
@@ -418,6 +419,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 						PlanRef:             planName,
 						FilesTouched:        []string{"src/main.go"},
 						DeclaredOutputPaths: []string{"artifacts/out.txt"},
+						PromptPath:          "envelopes/test/children/" + name + ".json",
 					},
 				}
 				Expect(k8sClient.Create(ctx, t)).To(Succeed())
@@ -457,6 +459,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 					FilesTouched:        []string{"src/c.go"},
 					DeclaredOutputPaths: []string{"artifacts/c.txt"},
 					DependsOn:           []string{"persist03-a"},
+					PromptPath:          "envelopes/test/children/persist03-c.json",
 				},
 			}
 			Expect(k8sClient.Create(ctx, newTask)).To(Succeed())

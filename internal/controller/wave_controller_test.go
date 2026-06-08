@@ -72,6 +72,7 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 				PlanRef:             planRef,
 				FilesTouched:        []string{"src/main.go"},
 				DeclaredOutputPaths: []string{"artifacts/out.txt"},
+				PromptPath:          "envelopes/test/children/" + name + ".json",
 			},
 		}
 		Expect(k8sClient.Create(context.Background(), t)).To(Succeed())
