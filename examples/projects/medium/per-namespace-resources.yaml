@@ -6,7 +6,14 @@
 #
 # Resources provided here:
 #   1. tide-projects PVC — workspace storage for clone/push/subagent Jobs
-#   2. tide-subagent SA  — identity for executor pods (D-G3 harness UID)
+#   2. tide-subagent SA  — identity for the subagent (authoring/executor) pods (D-G3 harness UID)
+#   3. tide-push SA + Role + RoleBinding — identity for the controller's clone and
+#      push Jobs (cmd/tide-push). The Role grants `get` on Secrets so the push pod
+#      can read the git-creds Secret. The chart provisions this in tide-system; the
+#      clone/push Jobs run as `tide-push` in the Project's namespace, so it must be
+#      mirrored here too (a missing tide-push SA makes the clone/push Jobs fail with
+#      "FailedCreate: serviceaccount \"tide-push\" not found" and the git round-trip
+#      never runs).
 #
 # Resource NOT provided here (must be manually mirrored from tide-system):
 #   3. tide-signing-key Secret — contains a cluster-unique signing key; must be
@@ -57,4 +64,52 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: medium
   # No RBAC annotations — the controller's Helm chart manages the ClusterRole binding.
-  # This SA is the identity that clone/push/subagent executor pods run as (D-G3).
+  # This SA is the identity that the subagent (authoring/executor) pods run as (D-G3).
+  # NOTE: the controller's clone and push Jobs run as the separate `tide-push` SA
+  # defined below — NOT this one.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-push
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+  # Identity for the controller's clone Job (cmd/tide-push --mode=clone) and
+  # push Job (cmd/tide-push push mode). Mirrors tide-system/tide-push.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-push
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+rules:
+  # The push pod reads the git-creds Secret (GIT_PAT) referenced by the Project.
+  # Mirrors the tide-push Role in tide-system (verbs: get on secrets).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-push
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-push
+subjects:
+  - kind: ServiceAccount
+    name: tide-push
+    namespace: tide-sample-medium
