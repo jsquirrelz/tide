@@ -83,6 +83,11 @@ type PhaseReconciler struct {
 	// the W-2 boundary push trigger (plan 04-06).
 	TidePushImage string
 
+	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
+	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
+	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
+	ReporterImage string
+
 	// HelmProviderDefaults carry Helm-chart provider/model defaults.
 	HelmProviderDefaults ProviderDefaults
 

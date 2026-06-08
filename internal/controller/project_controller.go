@@ -162,6 +162,11 @@ type ProjectReconciler struct {
 	CredproxyImage       string
 	HelmProviderDefaults ProviderDefaults
 
+	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
+	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
+	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
+	ReporterImage string
+
 	// Recorder emits K8s Events for observable budget and bypass transitions
 	// (T-02-10-05 — audit trail for AbsoluteCapReached; T-02-10-01 — bypass).
 	Recorder record.EventRecorder
