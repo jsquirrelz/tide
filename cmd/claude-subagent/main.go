@@ -48,10 +48,25 @@ var ensureWorktreeFunc = harness.EnsureWorktree
 
 func main() {
 	fs := flag.NewFlagSet("claude-subagent", flag.ExitOnError)
-	envelopePath := fs.String("envelope-path", "/workspace/envelopes/in.json", "path to EnvelopeIn JSON")
+	envelopePath := fs.String("envelope-path", "", "path to EnvelopeIn JSON (default: $TIDE_ENVELOPE_PATH or /workspace/envelopes/$TIDE_TASK_UID/in.json)")
 	workspaceRoot := fs.String("workspace-root", "/workspace", "PVC mount root")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)
+	}
+	// Resolve envelope path: flag → $TIDE_ENVELOPE_PATH → per-task-uid default.
+	// This MUST match stub-subagent (cmd/stub-subagent/main.go) and the
+	// controller's write location, which is /workspace/envelopes/$TIDE_TASK_UID/in.json
+	// (the controller passes no --envelope-path arg, so it relies on this default).
+	// The previous hardcoded /workspace/envelopes/in.json default did not include
+	// the per-task-uid subdirectory, so the real claude planner/executor could never
+	// find its input envelope. Only surfaced in live real-Claude runs — CI exercises
+	// the stub, whose default already matched.
+	if *envelopePath == "" {
+		if p := os.Getenv("TIDE_ENVELOPE_PATH"); p != "" {
+			*envelopePath = p
+		} else {
+			*envelopePath = fmt.Sprintf("/workspace/envelopes/%s/in.json", os.Getenv("TIDE_TASK_UID"))
+		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
