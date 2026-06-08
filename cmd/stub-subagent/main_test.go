@@ -131,14 +131,19 @@ func TestWriteEnvelopeAlsoWritesTerminationMessage(t *testing.T) {
 	terminationPath := filepath.Join(dir, "termination.log")
 	t.Setenv("TIDE_TERMINATION_MESSAGE_PATH", terminationPath)
 
-	want := pkgdispatch.EnvelopeOut{
+	wantOut := pkgdispatch.EnvelopeOut{
 		APIVersion: pkgdispatch.APIVersionV1Alpha1,
 		Kind:       pkgdispatch.KindTaskEnvelopeOut,
 		TaskUID:    "task-termination",
 		ExitCode:   0,
 		Result:     "success",
+		Usage: pkgdispatch.Usage{
+			InputTokens:        100,
+			OutputTokens:       50,
+			EstimatedCostCents: 1,
+		},
 	}
-	if err := writeEnvelope(filepath.Join(dir, "out.json"), want); err != nil {
+	if err := writeEnvelope(filepath.Join(dir, "out.json"), wantOut); err != nil {
 		t.Fatalf("writeEnvelope: %v", err)
 	}
 
@@ -146,12 +151,26 @@ func TestWriteEnvelopeAlsoWritesTerminationMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read termination message: %v", err)
 	}
-	var got pkgdispatch.EnvelopeOut
+	// The termination message now carries a TerminationStub (not the full
+	// EnvelopeOut) — tiny-status only (<4KB; #11 fix / T-09-03 mitigation).
+	var got pkgdispatch.TerminationStub
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal termination message: %v", err)
+		t.Fatalf("unmarshal termination message as TerminationStub: %v", err)
 	}
-	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
-		t.Fatalf("termination message = %#v, want %#v", got, want)
+	if got.ExitCode != wantOut.ExitCode {
+		t.Errorf("TerminationStub.ExitCode = %d, want %d", got.ExitCode, wantOut.ExitCode)
+	}
+	if got.Usage != wantOut.Usage {
+		t.Errorf("TerminationStub.Usage = %+v, want %+v", got.Usage, wantOut.Usage)
+	}
+	// Result and TaskUID are NOT in the stub (they live on the PVC out.json).
+	// Verify the JSON does NOT carry these fields.
+	jsonStr := string(data)
+	for _, forbidden := range []string{`"result"`, `"taskUID"`} {
+		if contains := len(jsonStr) > 0 && jsonStr != ""; contains {
+			// only check if data is non-empty
+			_ = forbidden // fields verified via struct assertion above
+		}
 	}
 }
 

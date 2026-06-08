@@ -183,9 +183,10 @@ func loadEnvelope(path string) (pkgdispatch.EnvelopeIn, error) {
 	return env, nil
 }
 
-// writeEnvelope marshals out and writes it to path, creating parent dirs as
-// needed. Errors are ignored by callers using the "_" discard pattern; only
-// the best-effort attempt on envelope-load failure uses this.
+// writeEnvelope marshals out and writes it to path (the PVC out.json — audit
+// artifact + reporter Job input), creating parent dirs as needed. The
+// termination message carries only the tiny TerminationStub (<4KB), not the
+// full envelope. Errors are ignored by callers using the "_" discard pattern.
 func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
@@ -197,15 +198,19 @@ func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	writeTerminationMessage(data)
+	// Write only the tiny TerminationStub to the termination message path.
+	// The full envelope (with ChildCRDs) stays on the PVC; the stub is the
+	// cross-namespace tiny-status carrier read by the Manager (#11 fix).
+	writeTerminationMessage(pkgdispatch.NewTerminationStub(out))
 	return nil
 }
 
-func writeTerminationMessage(data []byte) {
+func writeTerminationMessage(stub pkgdispatch.TerminationStub) {
 	path := os.Getenv("TIDE_TERMINATION_MESSAGE_PATH")
 	if path == "" {
 		path = "/dev/termination-log"
 	}
+	data, _ := json.Marshal(stub)
 	_ = os.WriteFile(path, data, 0o644)
 }
 
