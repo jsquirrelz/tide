@@ -24,6 +24,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 6: v1.0 Image-Publish Pipeline & Ship-Readiness Revalidation** — Multi-arch Docker image build + push for all 6 chart-referenced components, chart values.yaml tag-alignment SOT fix, dry-run-v1 cert-manager prereq fix, image-load fallback for local cluster acceptance, BOOT-04 end-to-end revalidation, README + INSTALL.md ship-state corrections
 - [x] **Phase 7: Project→Milestone Authoring & Self-Bootstrap** — Closes cascade-7: a bare Project authors its Milestone and drives the full five-level cascade to Complete; verified APPROVED 2026-05-31
 - [ ] **Phase 8: Medium-sample http transport & production git-transport policy** — Standardize production git on http(s)/SSH (pure-Go, no git binary); remove the broken `file://` demo path; rewrite the medium sample to serve its fixture over in-cluster `http://` so it actually works and mirrors production; revert the core-image git additions; add CI coverage. Closes a v1.0 ship-quality gap found in minikube validation 2026-06-03.
+- [ ] **Phase 9: Cross-namespace envelope return (in-namespace reporter)** — MECHANISM DONE + validated live: trusted in-namespace `tide-reporter` Job materializes child CRs via the K8s API (fixes #11/#12 cross-namespace PVC read), tiny status on the termination message, in-pod executor prompt read (#10b), race-free ChildCount-gated succession + planner cost rollup (gap 09-08), EnvelopeIn.Branch threading (gap 09-09). SC-4/SC-6 (legitimate medium Complete + retag) deferred to Phase 10 — see its outcome note.
+- [ ] **Phase 10: Task-Execution Reliability** (INSERTED) — Fix the leaf task-execution/git layer the first legitimate run-to-task-execution exposed: clone idempotency, per-run workspace init/perms, executor worktree branch, malformed child-JSON robustness; OWNS the legitimate medium Complete + push + v1.0.0 retag unblock; plus the dashboard project-detail 404.
 
 ## Phase Details
 
@@ -415,4 +417,30 @@ Plans:
 - [x] 09-04-PLAN.md — Lift materialization + spec-ref guard + allowlist into internal/reporter; least-privilege tide-reporter RBAC (chart SOT + medium) (REQ-09-01)
 - [x] 09-05-PLAN.md — cmd/tide-reporter reader-Job binary: local out.json read → K8s-API child-CR create; image + envtest (REQ-09-01)
 - [x] 09-06-PLAN.md — Manager spawns reader Job on dispatch completion; drop inline materialize from 4 handlers; reporter image plumbing + Layer B (REQ-09-01)
-- [ ] 09-07-PLAN.md — Live real-Claude medium-sample legitimate Complete; flip Phase 8 SC-2 to PASS; record v1.0.0 retag unblocked (REQ-09-04, REQ-09-06) [checkpoint]
+- [ ] 09-07-PLAN.md — Live real-Claude medium-sample legitimate Complete; flip Phase 8 SC-2 to PASS; record v1.0.0 retag unblocked (REQ-09-04, REQ-09-06) [checkpoint] — BLOCKED: live acceptance reached real task execution and surfaced a task-execution-layer cascade (clone idempotency / workspace perms / malformed child JSON) that is OUT OF SCOPE for Phase 9 → moved to Phase 10. Re-run after Phase 10.
+- [x] 09-08-PLAN.md — [gap] Race-free ChildCount-gated succession across the 4 planner controllers (Defect B) + planner-level cost rollup to Project.Status.Budget (Defect C); validated live
+- [x] 09-09-PLAN.md — [gap] Thread per-run branch to the executor via EnvelopeIn.Branch (replaces never-written branch.txt → fixes empty-worktree-branch); merged + unit-tested
+
+**Phase 9 outcome (2026-06-08):** The cross-namespace envelope-return MECHANISM (SC-1/2/3/5, plus gap fixes B/C and the branch fix) is BUILT, merged, and VALIDATED live on minikube — the reporter materializes children via the K8s API, succession is race-free, and cost rolls up. SC-4/SC-6 (legitimate medium Complete + push, retag unblock) remain OPEN because the first run to legitimately reach task execution exposed a distinct task-execution-layer defect cascade → see Phase 10. v1.0.0 retag stays gated on Phase 10's E2E.
+
+### Phase 10: Task-Execution Reliability — Clone Idempotency, Per-Run Workspace, Push, Child-CRD Parse Robustness, Dashboard Detail (INSERTED)
+
+**Goal:** Make the leaf task-execution path actually drive `examples/projects/medium` to a LEGITIMATE end-to-end `status.phase=Complete` with real Claude (Haiku) over the in-cluster `http://` remote — closing the v1.0.0 ship gate. Phase 9 proved the cross-namespace orchestration mechanism end-to-end through every planning level; this phase fixes the task-execution/git/clone/LLM-output layer that the first legitimate run-to-task-execution exposed (all pre-existing, never caught because no run had reached real task execution before). This phase OWNS the medium DoD (Phase 9 SC-4/SC-6) and the v1.0.0 retag unblock.
+
+**Success Criteria** (what must be TRUE):
+1. **Clone is idempotent.** A clone into a workspace that already holds the bare repo (re-reconcile, Job retry, or warm PVC) succeeds (skip/fetch) instead of failing `repository already exists`; the clone Job's backoffLimit retries do not compound into a permanent Failed.
+2. **Per-run workspace is self-initializing.** A fresh/empty per-Project PVC slice is provisioned with correct ownership/permissions before first use so executor and push pods (nonroot) can `mkdir`/write under `/workspace` — no reliance on a manual PVC wipe or a one-time init; observed failure: `mkdir /workspace/envelopes/push: permission denied`.
+3. **Executor worktree branch is non-empty in-cluster** (carries the 09-09 `EnvelopeIn.Branch` fix forward) — confirmed live: a task executor checks out `tide/run-<project>-<unix>` and authors into its worktree.
+4. **Child-CRD parse robustness.** The planner tolerates or repairs malformed model-authored child JSON (observed: `parse child file "task-03.json": invalid character 'W'`), or constrains/validates the model output, so a single bad JSON file does not fail the whole planner dispatch; surfaces a clear, retriable error rather than a hard level failure.
+5. **Legitimate medium Complete + push** (inherits Phase 9 SC-4): all descendants Succeeded, per-run `tide/run-*` branch pushed to the in-cluster `http://` remote with real authored code, `costSpentCents > 0` under the cap.
+6. **Phase 8 SC-2 real-Claude leg flips DEFERRED→PASS; v1.0.0 retag UNBLOCKED** (retag/push stays user-gated, confirm-only).
+7. **Dashboard project detail renders** (observability follow-up): the dashboard's `/api/v1/projects/{name}` detail endpoint returns the project (it currently 404s while the list `/api/v1/projects` and `/projects/{name}/events` both 200 for the same project — the blank-panels symptom); the tree + detail panels populate for a live multi-namespace project.
+
+**Out of scope:** the editable/re-appliable "envelopes as first-class artifacts" DX + the clobbering/authoritative-fields question (still deferred, per Phase 9's boundary). Orphaned-Task finalizer-release-on-owner-deletion is a noted minor robustness item, include only if cheap.
+
+**Open forks for planning/research:** (a) clone idempotency — skip-if-exists vs fetch-into-existing vs clean-and-reclone; (b) per-run workspace perms — initContainer chown vs fsGroup on the pod securityContext vs an init Job; (c) child-JSON robustness — strict prompt/schema constraint vs tolerant parse+repair vs per-file isolation so one bad child doesn't fail the dispatch; (d) dashboard detail 404 — API handler bug vs cache-key mismatch.
+
+**Depends on:** Phase 9
+**Plans:** derive during planning
+
+**Evidence:** `.planning/debug/09-07-premature-succession-evidence.md` (live-run findings, all three task-execution defects + the dashboard symptom). Parked minikube is primed (fresh Phase-9 images, `TIDE_REPORTER_IMAGE` set, reporter RBAC fixed) for fast re-runs.
