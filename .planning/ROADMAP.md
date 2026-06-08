@@ -387,4 +387,4 @@ Plans:
 - [x] 08-05-PLAN.md — git-http server image (images/tide-git-http-server/); medium sample manifests (git-http-server-deployment.yaml, per-namespace-resources.yaml); project.yaml http:// targetRepo; cmd/tide-push scheme-conditional GIT_PAT guard (Wave 3)
 - [x] 08-06-PLAN.md — Docs correction: medium README 9-step sequence + false-mount claim removed; pkg/git/doc.go final reframe (Wave 3)
 - [x] 08-07-PLAN.md — CI coverage: nightly-integration.yml SC-1 image-smoke step; medium_http_test.go real assertions (Wave 4)
-- [ ] 08-08-PLAN.md — Live minikube re-test checkpoint: real Claude Haiku medium run → Project=Complete; 08-VERIFICATION.md gate artifact (Wave 5)
+- [x] 08-08-PLAN.md — Live minikube re-test checkpoint: real Claude Haiku medium run → Project=Complete; 08-VERIFICATION.md gate artifact (Wave 5)
