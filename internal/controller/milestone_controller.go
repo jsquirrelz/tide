@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -366,8 +367,15 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	return ctrl.Result{}, nil
 }
 
-// handleJobCompletion reads EnvelopeOut, materializes Phase child CRDs,
-// and patches Milestone.Status.Phase to a terminal state.
+// handleJobCompletion reads tiny status from the completed planner Job's
+// termination message (usage/git/exitCode/reason), spawns the tide-reporter
+// reader Job to materialize Phase child CRDs from the PVC-side out.json, and
+// patches Milestone.Status.Phase to a terminal state.
+//
+// Materialization is now the reporter Job's job (Phase 09 plan 09-06, REQ-09-01).
+// Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
+// T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
+// the reporter Job's own completion re-enqueues this reconciler.
 func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, _ *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -391,36 +399,47 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
 	}
 
-	// Phase 04.1: tolerate nil EnvReader — continue through gate logic with an
-	// empty envOut. Previously a nil EnvReader short-circuited to patchSucceeded
-	// which skipped gate decisions in test setups.
-	var envOut pkgdispatch.EnvelopeOut
+	// Read tiny status from the dispatch Job's termination message for budget
+	// rollup and failure classification. ChildCRDs are NOT used here — materialization
+	// has moved to the reporter Job (REQ-09-01). Tolerate nil EnvReader — continue
+	// through gate logic regardless (Phase 04.1 pattern).
 	if r.EnvReader != nil {
-		var err error
-		envOut, err = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
-		if err != nil {
+		if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID)); err != nil {
 			return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", err.Error())
 		}
 	} else {
-		logger.V(1).Info("no env reader; skipping envelope read", "milestone", ms.Name)
+		logger.V(1).Info("no env reader; skipping tiny-status read", "milestone", ms.Name)
 	}
 
-	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
-	// cascade-11: race-free idempotency guard at the materialization point —
-	// skip authoring when a child Phase (by spec.milestoneRef, or IsControlledBy
-	// fallback) already exists, then CONTINUE to gate/boundary/complete handling.
+	// Spawn the tide-reporter reader Job in the project namespace (Option C).
+	// The reporter reads out.json from the PVC and materializes Phase children.
+	// Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
+	// justMaterialized tracks the first-spawn for the boundary-wait logic below.
 	justMaterialized := false
-	if len(envOut.ChildCRDs) > 0 {
-		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, ms)
-		if gErr != nil {
-			return ctrl.Result{}, gErr
-		}
-		if !already {
-			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ms, envOut.ChildCRDs); mErr != nil {
-				return r.patchMilestoneFailed(ctx, ms, "ChildCRDMaterializationFailed", mErr.Error())
+	if r.ReporterImage != "" && project != nil {
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", ms.UID)
+		pvcName := defaultSharedPVCName
+		var existingReporterJob batchv1.Job
+		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: ms.Namespace}, &existingReporterJob); gErr != nil {
+			if !apierrors.IsNotFound(gErr) {
+				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
-			justMaterialized = true
+			// Not found — spawn it.
+			reporterJob := BuildReporterJob(ms, project, pvcName, string(ms.UID), "Milestone",
+				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+			if cErr := r.Create(ctx, reporterJob); cErr != nil {
+				if !apierrors.IsAlreadyExists(cErr) {
+					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+				}
+			} else {
+				logger.Info("spawned reporter Job", "job", reporterJobName, "milestone", ms.Name)
+				justMaterialized = true
+			}
+		} else {
+			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
+	} else if r.ReporterImage == "" {
+		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "milestone", ms.Name)
 	}
 
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to

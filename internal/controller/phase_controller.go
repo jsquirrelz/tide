@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -315,35 +316,46 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		projectUID = string(project.UID)
 	}
 
-	// Phase 04.1: read envelope only when EnvReader is wired. Continue through
+	// Read tiny status from the dispatch Job's termination message for budget
+	// rollup and failure classification. ChildCRDs are NOT used here —
+	// materialization has moved to the reporter Job (REQ-09-01). Continue through
 	// gate + boundary-push logic regardless — those are envelope-independent.
-	// Previously a nil EnvReader short-circuited to patchSucceeded, which
-	// skipped the boundary push trigger and caused test-suite races where the
-	// manager-loaded reconciler beat the test's reconciler to status.
-	var envOut pkgdispatch.EnvelopeOut
+	// Phase 04.1: previously a nil EnvReader short-circuited to patchSucceeded,
+	// which skipped the boundary push trigger.
 	if r.EnvReader != nil {
-		var err error
-		envOut, err = r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID))
-		if err != nil {
+		if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID)); err != nil {
 			return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", err.Error())
 		}
 	} else {
-		logger.V(1).Info("no env reader; skipping envelope read", "phase", ph.Name)
+		logger.V(1).Info("no env reader; skipping tiny-status read", "phase", ph.Name)
 	}
 
-	// cascade-11: race-free idempotency guard at the materialization point —
-	// skip authoring when a child Plan (by spec.phaseRef, or IsControlledBy
-	// fallback) already exists, then CONTINUE to gate/boundary handling.
-	if len(envOut.ChildCRDs) > 0 {
-		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, ph)
-		if gErr != nil {
-			return ctrl.Result{}, gErr
-		}
-		if !already {
-			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, ph, envOut.ChildCRDs); mErr != nil {
-				return r.patchPhaseFailed(ctx, ph, "ChildCRDMaterializationFailed", mErr.Error())
+	// Spawn the tide-reporter reader Job in the project namespace (Option C).
+	// The reporter reads out.json from the PVC and materializes Plan children.
+	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
+	// T-09-13: idempotent — AlreadyExists on Create is success.
+	if r.ReporterImage != "" && project != nil {
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", ph.UID)
+		pvcName := defaultSharedPVCName
+		var existingReporterJob batchv1.Job
+		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: ph.Namespace}, &existingReporterJob); gErr != nil {
+			if !apierrors.IsNotFound(gErr) {
+				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
+			reporterJob := BuildReporterJob(ph, project, pvcName, string(ph.UID), "Phase",
+				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+			if cErr := r.Create(ctx, reporterJob); cErr != nil {
+				if !apierrors.IsAlreadyExists(cErr) {
+					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+				}
+			} else {
+				logger.Info("spawned reporter Job", "job", reporterJobName, "phase", ph.Name)
+			}
+		} else {
+			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
+	} else if r.ReporterImage == "" {
+		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "phase", ph.Name)
 	}
 
 	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).

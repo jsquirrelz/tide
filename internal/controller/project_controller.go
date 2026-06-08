@@ -785,51 +785,72 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	return ctrl.Result{}, nil
 }
 
-// handleProjectJobCompletion reads EnvelopeOut from the completed planner Job
-// and calls MaterializeChildCRDs to create the Milestone CR owned by the Project.
-// Per D-02: no gate at the Project level — auto-proceed after materialization.
-// The Owns(&Milestone{}) watch re-enqueues the Project when the child Milestone
-// status changes, which triggers checkProjectComplete on the next reconcile.
+// handleProjectJobCompletion reads tiny status from the completed planner Job's
+// termination message (usage/git/exitCode/reason for budget rollup and failure
+// classification), then spawns the tide-reporter reader Job in the project
+// namespace to materialize child Milestone CRDs from the PVC-side out.json.
+//
+// Materialization is now the reporter Job's job (Phase 09 plan 09-06, REQ-09-01).
+// The Manager no longer reads ChildCRDs from the cross-namespace PVC; children
+// arrive via the existing Owns(&Milestone{}) watch once the reporter creates them.
+//
+// T-09-13 mitigation: spawn is idempotent — AlreadyExists on Create is treated
+// as success, so a re-enqueue from the reporter Job's own completion does no harm.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
 func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, _ *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	// Tolerate nil EnvReader — matches milestone pattern (test setups may omit it).
-	var envOut pkgdispatch.EnvelopeOut
+	// Read tiny status from the dispatch Job's termination message for budget
+	// rollup and failure classification. The ChildCRDs field is NOT used here —
+	// materialization has moved to the reporter Job (REQ-09-01).
 	if r.EnvReader != nil {
-		var err error
 		// project is both the top-level object and its own "parent" at this level;
 		// use project.UID as both projectUID and parentUID (the envelope is keyed by
 		// the parent's UID, and the Project IS the parent at the project level).
-		envOut, err = r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID))
-		if err != nil {
-			logger.Error(err, "project planner envelope read failed; proceeding without ChildCRDs", "project", project.Name)
+		if _, err := r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID)); err != nil {
+			logger.Error(err, "project planner envelope tiny-status read failed (non-fatal)", "project", project.Name)
 		}
 	} else {
-		logger.V(1).Info("no env reader; skipping envelope read", "project", project.Name)
+		logger.V(1).Info("no env reader; skipping tiny-status read", "project", project.Name)
 	}
 
-	// MaterializeChildCRDs enforces Kind allowlist (T-308 mitigation).
-	// Milestone is in the allowlist (dispatch_helpers.go:80).
-	// cascade-11: race-free idempotency guard at the materialization point —
-	// skip authoring when a child Milestone (by spec.projectRef, or
-	// IsControlledBy fallback) already exists, then CONTINUE to auto-proceed.
-	if len(envOut.ChildCRDs) > 0 {
-		already, gErr := childrenAlreadyMaterialized(ctx, r.Client, project)
-		if gErr != nil {
-			return ctrl.Result{}, gErr
+	// Spawn the tide-reporter reader Job in the project namespace (Option C).
+	// The reporter reads out.json from the namespace PVC and materializes Milestone
+	// children via the K8s API. Children arrive via the Owns(&Milestone{}) watch.
+	if r.ReporterImage == "" {
+		logger.Info("skipping reporter Job spawn: ReporterImage not configured", "project", project.Name)
+		return ctrl.Result{}, nil
+	}
+
+	pvcName := r.sharedPVCName()
+	reporterJobName := fmt.Sprintf("tide-reporter-%s", project.UID)
+
+	// Idempotent check: if reporter Job already exists, materialization is in
+	// flight or complete — skip Create (T-09-13 mitigation: re-fire safety).
+	var existingReporterJob batchv1.Job
+	if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: project.Namespace}, &existingReporterJob); gErr == nil {
+		logger.V(1).Info("reporter Job already exists; skipping spawn", "job", reporterJobName)
+		return ctrl.Result{}, nil
+	} else if !apierrors.IsNotFound(gErr) {
+		return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+	}
+
+	reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
+		ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+	if cErr := r.Create(ctx, reporterJob); cErr != nil {
+		if !apierrors.IsAlreadyExists(cErr) {
+			return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
 		}
-		if !already {
-			if mErr := MaterializeChildCRDs(ctx, r.Client, r.Scheme, project, envOut.ChildCRDs); mErr != nil {
-				return ctrl.Result{}, fmt.Errorf("project planner child CRD materialization failed: %w", mErr)
-			}
-		}
+		// AlreadyExists: idempotent success (T-09-13).
+	} else {
+		logger.Info("spawned reporter Job", "job", reporterJobName, "project", project.Name)
 	}
 
 	// D-02: no gate at Project→Milestone level — auto-proceed.
 	// The Owns(&Milestone{}) watch re-enqueues the Project when Milestone status
-	// changes, driving checkProjectComplete to fire on the next reconcile.
+	// changes (once the reporter Job creates the child), driving checkProjectComplete
+	// to fire on the next reconcile.
 	return ctrl.Result{}, nil
 }
 
