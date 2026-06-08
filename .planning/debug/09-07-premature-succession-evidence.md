@@ -126,3 +126,29 @@ These are NOT Phase-9 (cross-namespace envelope return) scope. Recommend a separ
 gap/phase for task-executor branch propagation (branch.txt) + clone idempotency +
 clean-workspace handling. Phase-9's mechanism is validated; the v1.0.0 retag DoD
 (full legitimate Complete) remains blocked on this task-layer work.
+
+## 09-09 re-run (2026-06-08): branch fix correct, but task-execution layer is a defect CASCADE
+
+The 09-09 EnvelopeIn.Branch fix is merged + unit-tested (buildEnvelopeIn stamps Branch;
+claude-subagent passes env.Branch). But the live re-run could NOT reach a task executor —
+it failed earlier with a cascade of task-execution-layer defects (all orthogonal to
+Phase 9; a separate phase's worth of work):
+
+1. Clone non-idempotent: `tide-push: clone failed: ... repository already exists` — even on
+   a FRESHLY wiped tide-projects PVC (the clone Job retries compound; bare repo never lands
+   cleanly). pkg/git.Clone (PlainCloneContext, bare) errors when destDir exists; needs
+   skip/fetch-if-exists idempotency + Job-retry handling.
+2. Fresh-PVC workspace permissions: `tide-push: mkdir /workspace/envelopes/push: permission
+   denied`. Recreating the PVC dropped workspace dir perms the prior init had set; the
+   workspace-perms setup is not self-healing per-run (init job assumption).
+3. Real-Claude malformed child JSON: the Plan planner FAILED parsing its OWN authored child:
+   `read child CRDs: parse child file "task-03.json": invalid character 'W' after object
+   key:value pair` (cost 27c, 22726 output tokens). LLM-output-robustness / child-CRD parse
+   hardening gap — the planner must tolerate or repair malformed model JSON, or constrain output.
+
+NET: Phase 9 (cross-namespace return) + 09-08 (succession + cost rollup) + 09-09 (branch) are
+all CORRECT and merged. The medium DoD (legitimate Complete + push) is blocked by the
+task-execution/git/clone/LLM-output layer — recommend a dedicated Phase 10 (task-execution
+reliability: clone idempotency + workspace-perms + push + child-CRD parse robustness), then
+re-run the DoD. v1.0.0 retag stays blocked. NOTE: wiping the PVC introduced issue #2; a clean
+run needs proper per-run workspace init, not a manual PVC wipe.
