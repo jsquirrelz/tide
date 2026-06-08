@@ -97,7 +97,24 @@ type EnvelopeIn struct {
 	// internal/subagent/{vendor}/ rejects an envelope whose Provider.Vendor
 	// does not match its compiled-in sentinel — fail-fast defense against
 	// image-tag-vs-envelope drift.
+	//
+	// Provider.Params carries MODEL parameters only (temperature, thinking_budget,
+	// …). It is NOT a general metadata bag — the anthropic runner hard-rejects
+	// any key outside its allow-list. Dispatch metadata the planner needs to
+	// build child-CRD refs lives in [EnvelopeIn.Dispatch], not here.
 	Provider ProviderSpec `json:"provider"`
+
+	// Dispatch carries orchestrator-side dispatch metadata the planner subagent
+	// reads to build child-CRD references (e.g. parentName → projectRef /
+	// milestoneRef / phaseRef / planRef) without querying the K8s API. It is
+	// distinct from Provider.Params, which is model-parameters-only: overloading
+	// Provider.Params with dispatch metadata tripped the anthropic runner's
+	// strict param allow-list. Pointer + omitempty so executor-level and
+	// real-Claude dispatches that don't consume it don't serialize a
+	// "dispatch: null" placeholder. Real Claude-backed subagent images may
+	// ignore this struct entirely — the real planner authors from the outcome
+	// prompt, not canned parent refs.
+	Dispatch *DispatchMeta `json:"dispatch,omitempty"`
 
 	// Dev carries test-fixture-only metadata injected by integration tests.
 	// Real Claude-backed subagent images MUST ignore this struct entirely
@@ -230,6 +247,21 @@ type Usage struct {
 	// the two prevents budget rollups from understating real spend on
 	// cache-warmup turns.
 	CacheCreationTokens int64 `json:"cacheCreationTokens"`
+}
+
+// DispatchMeta carries orchestrator-side dispatch metadata the planner subagent
+// reads to build child-CRD references without querying the K8s API. It is kept
+// separate from [ProviderSpec.Params] (model-parameters-only) so the anthropic
+// runner's strict param allow-list is not tripped by dispatch metadata. Real
+// Claude-backed subagent images may ignore this struct — the real planner
+// authors child CRDs from the outcome prompt, not canned parent refs.
+type DispatchMeta struct {
+	// ParentName is the up-stack CRD's metadata.name. The stub planner stamps
+	// it into the child CRD's parent-spec ref (projectRef / milestoneRef /
+	// phaseRef / planRef) so the controller can wire ownership without the
+	// subagent holding a K8s client (T-07-03-03: parentName is metadata, not a
+	// secret).
+	ParentName string `json:"parentName,omitempty"`
 }
 
 // Dev carries test-fixture-only metadata for the stub-subagent image. Real

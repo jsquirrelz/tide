@@ -218,17 +218,15 @@ func writeTerminationMessage(data []byte) {
 //	plan      → Task      "stub-task-1"      Spec {planRef, filesTouched, declaredOutputPaths, dev.testMode}
 //	task (leaf/unknown)   → empty ChildCRDs, exit 0
 //
-// parentName is read from env.Provider.Params["parentName"]; falls back to
+// parentName is read from env.Dispatch.ParentName; falls back to
 // "stub-parent" if absent (REQ-3 / 07-03-PLAN.md task 1).
 //
 // Wave CRDs are intentionally NOT emitted — waves are derived by PlanReconciler
 // (CLAUDE.md constraint: "Waves are derived, not declared").
 func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
 	parentName := "stub-parent"
-	if env.Provider.Params != nil {
-		if v, ok := env.Provider.Params["parentName"]; ok && v != "" {
-			parentName = v
-		}
+	if env.Dispatch != nil && env.Dispatch.ParentName != "" {
+		parentName = env.Dispatch.ParentName
 	}
 
 	var children []pkgdispatch.ChildCRDSpec

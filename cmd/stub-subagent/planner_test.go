@@ -58,10 +58,8 @@ func makePlannerEnvelope(t *testing.T, dir, level, parentName string) string {
 		Provider: pkgdispatch.ProviderSpec{
 			Vendor: "stub",
 			Model:  "stub",
-			Params: map[string]string{
-				"parentName": parentName,
-			},
 		},
+		Dispatch: &pkgdispatch.DispatchMeta{ParentName: parentName},
 		Caps: pkgdispatch.Caps{
 			WallClockSeconds: 600,
 			Iterations:       20,

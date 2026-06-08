@@ -92,6 +92,16 @@ func assertRoundTripIn(t *testing.T, in EnvelopeIn) {
 			t.Errorf("Provider.Params[%q]: got %q, want %q", k, got.Provider.Params[k], v)
 		}
 	}
+	// Dispatch pointer comparison.
+	if in.Dispatch == nil && got.Dispatch != nil {
+		t.Errorf("Dispatch: got %+v, want nil", got.Dispatch)
+	}
+	if in.Dispatch != nil && got.Dispatch == nil {
+		t.Errorf("Dispatch: got nil, want %+v", in.Dispatch)
+	}
+	if in.Dispatch != nil && got.Dispatch != nil && *in.Dispatch != *got.Dispatch {
+		t.Errorf("Dispatch: got %+v, want %+v", *got.Dispatch, *in.Dispatch)
+	}
 	// Dev pointer comparison.
 	if in.Dev == nil && got.Dev != nil {
 		t.Errorf("Dev: got %+v, want nil", got.Dev)
@@ -216,6 +226,9 @@ func fullyPopulatedEnvelopeIn() EnvelopeIn {
 			Model:  "claude-sonnet-4-6",
 			Params: map[string]string{"thinking-budget": "4096"},
 		},
+		Dispatch: &DispatchMeta{
+			ParentName: "milestone-foo",
+		},
 		Dev: &Dev{
 			TestMode: "success",
 		},
@@ -272,6 +285,23 @@ func TestEnvelopeIn_RoundTrip_OmitsDevWhenNil(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"dev"`) {
 		t.Errorf("serialized JSON contains \"dev\" key but Dev was nil; got: %s", string(data))
+	}
+}
+
+// TestEnvelopeIn_RoundTrip_OmitsDispatchWhenNil asserts that the serialized
+// JSON does NOT contain the key "dispatch" when the Dispatch field is nil
+// (omitempty contract — executor-level and real-Claude dispatches that don't
+// consume dispatch metadata must not be polluted with "dispatch: null").
+func TestEnvelopeIn_RoundTrip_OmitsDispatchWhenNil(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.Dispatch = nil
+
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"dispatch"`) {
+		t.Errorf("serialized JSON contains \"dispatch\" key but Dispatch was nil; got: %s", string(data))
 	}
 }
 
@@ -386,6 +416,14 @@ func TestEnvelopeIn_SubtestTable(t *testing.T) {
 			in: func() EnvelopeIn {
 				e := fullyPopulatedEnvelopeIn()
 				e.Dev = nil
+				return e
+			}(),
+		},
+		{
+			name: "NilDispatch",
+			in: func() EnvelopeIn {
+				e := fullyPopulatedEnvelopeIn()
+				e.Dispatch = nil
 				return e
 			}(),
 		},

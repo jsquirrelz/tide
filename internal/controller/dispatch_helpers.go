@@ -168,14 +168,13 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 		Provider:      ResolveProvider(project, level, helmDefaults),
 	}
 
-	// Inject parentName into Provider.Params so the stub (and real planner
-	// subagents) can populate the child *Ref field (e.g. milestoneRef, phaseRef)
+	// Stamp parentName into the dedicated Dispatch metadata field so the stub
+	// planner can populate the child *Ref field (e.g. milestoneRef, phaseRef)
 	// without querying the K8s API — parent.GetName() is the authoritative
-	// source (T-07-03-03: parentName is metadata, not a secret).
-	if envIn.Provider.Params == nil {
-		envIn.Provider.Params = make(map[string]string)
-	}
-	envIn.Provider.Params["parentName"] = parent.GetName()
+	// source (T-07-03-03: parentName is metadata, not a secret). This is kept
+	// out of Provider.Params (model-parameters-only) so the anthropic runner's
+	// strict param allow-list is not tripped by dispatch metadata.
+	envIn.Dispatch = &pkgdispatch.DispatchMeta{ParentName: parent.GetName()}
 
 	data, err := json.Marshal(envIn)
 	if err != nil {
