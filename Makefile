@@ -152,10 +152,12 @@ test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integrati
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
 
-test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Docker images and load them into the tide-test kind cluster.
+test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter Docker images and load them into the tide-test kind cluster.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-credproxy:test -f images/credproxy/Dockerfile .
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-push:test -f images/tide-push/Dockerfile .
+	# Phase 9 plan 09-05: build tide-reporter (Option-C in-namespace reader Job image).
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-reporter:test -f images/tide-reporter/Dockerfile .
 	$(CONTAINER_TOOL) build -t controller:test -f Dockerfile .
 	@if ! $(KIND) get clusters 2>/dev/null | grep -q "^tide-test$$"; then \
 		$(KIND) create cluster --name tide-test --config test/integration/kind/cluster.yaml; \
@@ -166,6 +168,8 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push Doc
 	# still reference the image; preload avoids ImagePullBackoff stalls).
 	# Equivalent literal command at make-time: kind load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
+	# Phase 9 plan 09-05: preload tide-reporter so reporter Job specs resolve without ImagePullBackoff.
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-reporter:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
 
 ##@ Live nightly E2E (TEST-03 — Phase 3 plan 03-11)
@@ -274,8 +278,8 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 	rm Dockerfile.cross
 
 .PHONY: docker-buildx-snapshot
-docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of all 6 component images (no push; IMAGE_TAG=$(IMAGE_TAG)).
-	@echo "Building all 6 component images for linux/amd64,linux/arm64 (no push; tag=$(IMAGE_TAG))..."
+docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of all 7 component images (no push; IMAGE_TAG=$(IMAGE_TAG)).
+	@echo "Building all 7 component images for linux/amd64,linux/arm64 (no push; tag=$(IMAGE_TAG))..."
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
 		-t ghcr.io/jsquirrelz/tide-controller:$(IMAGE_TAG) -f ./Dockerfile .
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
@@ -286,6 +290,8 @@ docker-buildx-snapshot: ## Phase 6 IMG-01 — local multi-arch snapshot build of
 		-t ghcr.io/jsquirrelz/tide-credproxy:$(IMAGE_TAG) -f images/credproxy/Dockerfile .
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
 		-t ghcr.io/jsquirrelz/tide-push:$(IMAGE_TAG) -f images/tide-push/Dockerfile .
+	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
+		-t ghcr.io/jsquirrelz/tide-reporter:$(IMAGE_TAG) -f images/tide-reporter/Dockerfile .
 	$(CONTAINER_TOOL) buildx build --platform linux/amd64,linux/arm64 \
 		-t ghcr.io/jsquirrelz/tide-claude-subagent:$(IMAGE_TAG) -f images/claude-subagent/Dockerfile .
 
