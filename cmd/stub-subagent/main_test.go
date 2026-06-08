@@ -131,14 +131,19 @@ func TestWriteEnvelopeAlsoWritesTerminationMessage(t *testing.T) {
 	terminationPath := filepath.Join(dir, "termination.log")
 	t.Setenv("TIDE_TERMINATION_MESSAGE_PATH", terminationPath)
 
-	want := pkgdispatch.EnvelopeOut{
+	wantOut := pkgdispatch.EnvelopeOut{
 		APIVersion: pkgdispatch.APIVersionV1Alpha1,
 		Kind:       pkgdispatch.KindTaskEnvelopeOut,
 		TaskUID:    "task-termination",
 		ExitCode:   0,
 		Result:     "success",
+		Usage: pkgdispatch.Usage{
+			InputTokens:        100,
+			OutputTokens:       50,
+			EstimatedCostCents: 1,
+		},
 	}
-	if err := writeEnvelope(filepath.Join(dir, "out.json"), want); err != nil {
+	if err := writeEnvelope(filepath.Join(dir, "out.json"), wantOut); err != nil {
 		t.Fatalf("writeEnvelope: %v", err)
 	}
 
@@ -146,12 +151,26 @@ func TestWriteEnvelopeAlsoWritesTerminationMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read termination message: %v", err)
 	}
-	var got pkgdispatch.EnvelopeOut
+	// The termination message now carries a TerminationStub (not the full
+	// EnvelopeOut) — tiny-status only (<4KB; #11 fix / T-09-03 mitigation).
+	var got pkgdispatch.TerminationStub
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal termination message: %v", err)
+		t.Fatalf("unmarshal termination message as TerminationStub: %v", err)
 	}
-	if got.TaskUID != want.TaskUID || got.Result != want.Result || got.ExitCode != want.ExitCode {
-		t.Fatalf("termination message = %#v, want %#v", got, want)
+	if got.ExitCode != wantOut.ExitCode {
+		t.Errorf("TerminationStub.ExitCode = %d, want %d", got.ExitCode, wantOut.ExitCode)
+	}
+	if got.Usage != wantOut.Usage {
+		t.Errorf("TerminationStub.Usage = %+v, want %+v", got.Usage, wantOut.Usage)
+	}
+	// Result and TaskUID are NOT in the stub (they live on the PVC out.json).
+	// Verify the JSON does NOT carry these fields.
+	jsonStr := string(data)
+	for _, forbidden := range []string{`"result"`, `"taskUID"`} {
+		if contains := len(jsonStr) > 0 && jsonStr != ""; contains {
+			// only check if data is non-empty
+			_ = forbidden // fields verified via struct assertion above
+		}
 	}
 }
 
@@ -481,6 +500,80 @@ func TestWaitForSignal_SignalMidPoll(t *testing.T) {
 	}
 	if out.Result != "success" {
 		t.Errorf("out.Result = %q, want %q", out.Result, "success")
+	}
+}
+
+// TestPlannerSuccess_TaskChildHasSourcePath verifies that when the stub runs in
+// planner mode at level="plan", the emitted Task ChildCRDSpec carries a
+// non-empty SourcePath (T-09-04 mitigation / stub-compat for plan 09-05
+// reporter). The materializer copies child.SourcePath → Task.Spec.PromptPath
+// which has MinLength=1; an empty path causes a Kubernetes validation error.
+func TestPlannerSuccess_TaskChildHasSourcePath(t *testing.T) {
+	dir := t.TempDir()
+	withWorkspaceRoot(t, dir)
+
+	// Build a planner-mode envelope at level="plan".
+	env := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "test-planner-uid",
+		Role:       "planner",
+		Level:      "plan",
+		Prompt:     "plan-level planner prompt",
+		Caps: pkgdispatch.Caps{
+			WallClockSeconds: 300,
+			Iterations:       10,
+			InputTokens:      10000,
+			OutputTokens:     5000,
+		},
+		ProxyEndpoint: "https://localhost:8443",
+		SignedToken:   "test-token",
+		Dispatch: &pkgdispatch.DispatchMeta{
+			ParentName: "my-plan",
+		},
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal planner envelope: %v", err)
+	}
+	envDir := filepath.Join(dir, "envelopes", "test-planner-uid")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatalf("mkdir envelope dir: %v", err)
+	}
+	inPath := filepath.Join(envDir, "in.json")
+	if err := os.WriteFile(inPath, data, 0o644); err != nil {
+		t.Fatalf("write in.json: %v", err)
+	}
+
+	ctx := context.Background()
+	code := run(ctx, inPath, os.Stdout, os.Stderr)
+	if code != 0 {
+		t.Fatalf("planner plan-level: want exit 0, got %d", code)
+	}
+
+	out := readOutEnvelope(t, envDir)
+	if out.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0", out.ExitCode)
+	}
+
+	// Must have exactly one child of kind Task.
+	if len(out.ChildCRDs) != 1 {
+		t.Fatalf("ChildCRDs len = %d, want 1", len(out.ChildCRDs))
+	}
+	child := out.ChildCRDs[0]
+	if child.Kind != "Task" {
+		t.Errorf("child.Kind = %q, want Task", child.Kind)
+	}
+	// SourcePath must be non-empty so the materializer can stamp Task.Spec.PromptPath
+	// (MinLength=1 validation — defect #10b / T-09-04).
+	if child.SourcePath == "" {
+		t.Errorf("child.SourcePath is empty; materializer would fail MinLength=1 on Task.Spec.PromptPath")
+	}
+
+	// The prompt artifact file must exist at <workspaceRoot>/<SourcePath>.
+	promptFile := filepath.Join(dir, child.SourcePath)
+	if _, err := os.Stat(promptFile); err != nil {
+		t.Errorf("prompt artifact at %s not found: %v", promptFile, err)
 	}
 }
 

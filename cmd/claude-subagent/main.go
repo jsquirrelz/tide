@@ -120,10 +120,16 @@ func failOut(stderr io.Writer, outPath, taskUID string, err error, exitCode int,
 }
 
 func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
+	// Write the full envelope to the PVC (audit artifact + reporter Job input).
+	// This is UNCHANGED — out.json on the PVC carries ChildCRDs + verbose Result.
 	if err := harness.WriteEnvelopeOut(path, out); err != nil {
 		return err
 	}
-	data, _ := json.Marshal(out)
+	// Write only the tiny TerminationStub to the termination message path.
+	// The stub carries ExitCode/Reason/Usage/HeadSHA and stays <4KB regardless
+	// of ChildCRDs or Result size (#11 root cause fix; T-09-03 mitigation).
+	stub := pkgdispatch.NewTerminationStub(out)
+	data, _ := json.Marshal(stub)
 	tp := os.Getenv("TIDE_TERMINATION_MESSAGE_PATH")
 	if tp == "" {
 		tp = "/dev/termination-log"

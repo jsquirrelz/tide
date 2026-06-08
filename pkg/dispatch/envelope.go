@@ -279,6 +279,52 @@ type Dev struct {
 	TestMode string `json:"testMode,omitempty"`
 }
 
+// TerminationStub is the tiny cross-namespace status carrier written to the
+// dispatch Job's 4 KB termination message (Pod.status.containerStatuses[].
+// state.terminated.message). It carries ONLY the fields the Manager needs to
+// record Task completion without reading the PVC: ExitCode, Reason, Usage, and
+// the HeadSHA the run-branch was advanced to (if any). ChildCRDs and the
+// verbose Result are intentionally excluded — they stay on the namespace-local
+// PVC in out.json, which the in-namespace reporter Job reads (plan 09-05).
+//
+// By construction this type MUST stay < 4 KB when marshalled; the test
+// TestNewTerminationStub_StaysSmall enforces this invariant.
+type TerminationStub struct {
+	// ExitCode mirrors EnvelopeOut.ExitCode: 0 = success, non-zero = failure.
+	ExitCode int `json:"exitCode"`
+
+	// Reason mirrors EnvelopeOut.Reason: structured failure code (e.g.
+	// "forced-failure", "cap-hit") when ExitCode != 0.
+	Reason string `json:"reason"`
+
+	// Usage mirrors EnvelopeOut.Usage: the token and cost tally for this
+	// dispatch, rolled up by the Manager into Project.Status.budget.
+	Usage Usage `json:"usage"`
+
+	// HeadSHA is the git HeadSHA from EnvelopeOut.Git.HeadSHA, flattened here
+	// to avoid a nested pointer. Empty when the dispatch did not produce a git
+	// push (executor-level, non-push Jobs). The Manager copies this into
+	// Project.Status.git.lastPushedSHA for the --force-with-lease fence.
+	HeadSHA string `json:"headSHA,omitempty"`
+}
+
+// NewTerminationStub builds a TerminationStub from a full EnvelopeOut by
+// copying the tiny-status subset: ExitCode, Reason, Usage, and Git.HeadSHA.
+// ChildCRDs, Result, and Artifacts are deliberately excluded. A nil out.Git
+// is safe and produces an empty HeadSHA.
+func NewTerminationStub(out EnvelopeOut) TerminationStub {
+	headSHA := ""
+	if out.Git != nil {
+		headSHA = out.Git.HeadSHA
+	}
+	return TerminationStub{
+		ExitCode: out.ExitCode,
+		Reason:   out.Reason,
+		Usage:    out.Usage,
+		HeadSHA:  headSHA,
+	}
+}
+
 // ValidateAPIVersionKind checks that apiVersion equals [APIVersionV1Alpha1]
 // and that kind equals expectedKind. It is the first call an envelope consumer
 // must make before accessing any other field (D-A3).

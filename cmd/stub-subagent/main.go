@@ -183,9 +183,10 @@ func loadEnvelope(path string) (pkgdispatch.EnvelopeIn, error) {
 	return env, nil
 }
 
-// writeEnvelope marshals out and writes it to path, creating parent dirs as
-// needed. Errors are ignored by callers using the "_" discard pattern; only
-// the best-effort attempt on envelope-load failure uses this.
+// writeEnvelope marshals out and writes it to path (the PVC out.json — audit
+// artifact + reporter Job input), creating parent dirs as needed. The
+// termination message carries only the tiny TerminationStub (<4KB), not the
+// full envelope. Errors are ignored by callers using the "_" discard pattern.
 func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
@@ -197,15 +198,19 @@ func writeEnvelope(path string, out pkgdispatch.EnvelopeOut) error {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	writeTerminationMessage(data)
+	// Write only the tiny TerminationStub to the termination message path.
+	// The full envelope (with ChildCRDs) stays on the PVC; the stub is the
+	// cross-namespace tiny-status carrier read by the Manager (#11 fix).
+	writeTerminationMessage(pkgdispatch.NewTerminationStub(out))
 	return nil
 }
 
-func writeTerminationMessage(data []byte) {
+func writeTerminationMessage(stub pkgdispatch.TerminationStub) {
 	path := os.Getenv("TIDE_TERMINATION_MESSAGE_PATH")
 	if path == "" {
 		path = "/dev/termination-log"
 	}
+	data, _ := json.Marshal(stub)
 	_ = os.WriteFile(path, data, 0o644)
 }
 
@@ -326,10 +331,44 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 			})
 			return 2
 		}
+		// Mirror the real runner's children/<name>.json convention (anthropic/subagent.go:427):
+		// write the Task spec as a prompt artifact file so the executor can read it at dispatch
+		// time, and stamp SourcePath so the materializer can satisfy Task.Spec.PromptPath
+		// (MinLength=1 — defect #10b / T-09-04 mitigation).
+		const taskChildName = "stub-task-1.json"
+		const taskSourcePath = "children/" + taskChildName
+		childrenDir := filepath.Join(workspaceRoot, "children")
+		if mkErr := os.MkdirAll(childrenDir, 0o755); mkErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: mkdir children: %v\n", mkErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      mkErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+		if wErr := os.WriteFile(filepath.Join(childrenDir, taskChildName), raw, 0o644); wErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write children/stub-task-1.json: %v\n", wErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      wErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
 		children = append(children, pkgdispatch.ChildCRDSpec{
-			Kind: "Task",
-			Name: "stub-task-1",
-			Spec: runtime.RawExtension{Raw: raw},
+			Kind:       "Task",
+			Name:       "stub-task-1",
+			SourcePath: taskSourcePath,
+			Spec:       runtime.RawExtension{Raw: raw},
 		})
 
 	default:
