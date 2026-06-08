@@ -841,33 +841,44 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the namespace PVC and materializes Milestone
 	// children via the K8s API. Children arrive via the Owns(&Milestone{}) watch.
+	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
+	isFirstCompletion := false
 	if r.ReporterImage == "" {
 		logger.Info("skipping reporter Job spawn: ReporterImage not configured", "project", project.Name)
-		return ctrl.Result{}, nil
+		// No reporter → treat as first completion for budget rollup.
+		isFirstCompletion = true
+	} else {
+		pvcName := r.sharedPVCName()
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", project.UID)
+
+		// Idempotent check: if reporter Job already exists, materialization is in
+		// flight or complete — skip Create (T-09-13 mitigation: re-fire safety).
+		var existingReporterJob batchv1.Job
+		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: project.Namespace}, &existingReporterJob); gErr != nil {
+			if !apierrors.IsNotFound(gErr) {
+				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+			}
+			isFirstCompletion = true
+			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
+				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+			if cErr := r.Create(ctx, reporterJob); cErr != nil {
+				if !apierrors.IsAlreadyExists(cErr) {
+					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+				}
+				// AlreadyExists: idempotent success (T-09-13).
+			} else {
+				logger.Info("spawned reporter Job", "job", reporterJobName, "project", project.Name)
+			}
+		} else {
+			logger.V(1).Info("reporter Job already exists; skipping spawn", "job", reporterJobName)
+		}
 	}
 
-	pvcName := r.sharedPVCName()
-	reporterJobName := fmt.Sprintf("tide-reporter-%s", project.UID)
-
-	// Idempotent check: if reporter Job already exists, materialization is in
-	// flight or complete — skip Create (T-09-13 mitigation: re-fire safety).
-	var existingReporterJob batchv1.Job
-	if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: project.Namespace}, &existingReporterJob); gErr != nil {
-		if !apierrors.IsNotFound(gErr) {
-			return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
+	if isFirstCompletion && envReadOK {
+		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+			logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
 		}
-		reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
-			ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
-		if cErr := r.Create(ctx, reporterJob); cErr != nil {
-			if !apierrors.IsAlreadyExists(cErr) {
-				return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
-			}
-			// AlreadyExists: idempotent success (T-09-13).
-		} else {
-			logger.Info("spawned reporter Job", "job", reporterJobName, "project", project.Name)
-		}
-	} else {
-		logger.V(1).Info("reporter Job already exists; skipping spawn", "job", reporterJobName)
 	}
 
 	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession. Gate:

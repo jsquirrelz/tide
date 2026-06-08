@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -410,6 +411,8 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// The reporter reads out.json from the PVC and materializes Task children.
 	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
+	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
+	isFirstCompletion := false
 	if r.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
 		pvcName := defaultSharedPVCName
@@ -418,6 +421,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			if !apierrors.IsNotFound(gErr) {
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
+			isFirstCompletion = true
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
 				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
@@ -431,7 +435,15 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
 	} else if r.ReporterImage == "" {
+		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
+	}
+
+	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
+	if isFirstCompletion && project != nil {
+		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+			logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
+		}
 	}
 
 	// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization

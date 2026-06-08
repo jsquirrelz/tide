@@ -199,6 +199,99 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 	// child Phase created directly (simulating what the reporter Job does)
 	// instead of relying on the removed inline materialization.
 
+	// Test 5 (plan 09-08 Defect C): planner-level Usage is rolled up to
+	// Project.Status.Budget.CostSpentCents after planner Job completes with
+	// non-zero EstimatedCostCents. Guards that the "budget = {}" bug does not
+	// recur (budget was never populated because the four planner controllers
+	// discarded the EnvelopeOut returned by ReadOut).
+	It("Test 5 (09-08 Defect C): rolls up planner Usage to Project.Status.Budget on Job completion", func() {
+		const budgetProjectName = "test-proj-ms-budget5"
+		const budgetMilestoneName = "test-ms-budget5"
+		budgetProj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: budgetProjectName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+				Gates: tideprojectv1alpha1.Gates{Milestone: tideprojectv1alpha1.GatePolicy("auto")},
+			},
+		}
+		Expect(k8sClient.Create(ctx, budgetProj)).To(Succeed())
+		waitForCacheSync(budgetProjectName, "default", &tideprojectv1alpha1.Project{})
+		DeferCleanup(func() {
+			ms := &tideprojectv1alpha1.Milestone{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, ms); err == nil {
+				ms.Finalizers = nil
+				_ = k8sClient.Update(ctx, ms)
+				_ = k8sClient.Delete(ctx, ms)
+			}
+			p := &tideprojectv1alpha1.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: budgetProjectName, Namespace: "default"}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+		})
+
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: budgetMilestoneName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: budgetProjectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
+
+		envReader := newMapEnvReader()
+		r := &MilestoneReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:      testSigningKey,
+		}
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha1.Milestone
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, &got)
+		}, "5s", "100ms").Should(Succeed())
+
+		// Set ChildCount=0 (leaf milestone) and a non-zero EstimatedCostCents.
+		const plannerCostCents = int64(7)
+		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(got.UID),
+			ExitCode:   0,
+			ChildCount: 0, // leaf
+			Usage: pkgdispatch.Usage{
+				InputTokens:        1000,
+				OutputTokens:       200,
+				EstimatedCostCents: plannerCostCents,
+			},
+		})
+
+		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
+		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+
+		// Reconcile: ChildCount=0 (leaf) → patchMilestoneSucceeded and rollup.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 3)).To(Succeed())
+
+		// Assert Project.Status.Budget.CostSpentCents >= plannerCostCents.
+		Eventually(func(g Gomega) {
+			var proj tideprojectv1alpha1.Project
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: budgetProjectName, Namespace: "default"}, &proj)).To(Succeed())
+			g.Expect(proj.Status.Budget.CostSpentCents).To(BeNumerically(">=", plannerCostCents),
+				"Project.Status.Budget.CostSpentCents must reflect planner spend (Defect C regression guard)")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
 	It("Test 4 (debug #9): does NOT Succeed while a materialized child Phase is still pending; Succeeds once it Succeeds", func() {
 		// The premature-succession bug lives on the AUTO milestone-gate path
 		// (the medium sample uses gates.milestone=auto). The BeforeEach Project

@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -421,6 +422,11 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
 	// T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
 	// the reporter Job's own completion re-enqueues this reconciler.
+	//
+	// isFirstCompletion tracks whether this is the initial observation of the planner
+	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
+	// once-per-completion budget rollup below (plan 09-08 Defect C).
+	isFirstCompletion := false
 	if r.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", ms.UID)
 		pvcName := defaultSharedPVCName
@@ -429,7 +435,8 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			if !apierrors.IsNotFound(gErr) {
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
-			// Not found — spawn it.
+			// Not found — spawn it (first completion observation).
+			isFirstCompletion = true
 			reporterJob := BuildReporterJob(ms, project, pvcName, string(ms.UID), "Milestone",
 				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
@@ -443,7 +450,19 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
 	} else if r.ReporterImage == "" {
+		// No reporter configured (stub/test path) — treat as first completion.
+		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "milestone", ms.Name)
+	}
+
+	// Plan 09-08 Defect C: roll up planner-level Usage to Project.Status.Budget
+	// exactly once per planner Job completion (guarded by isFirstCompletion).
+	// Task executors already roll up in task_controller.go; this adds the planner's
+	// own token/cost spend so Project.Status.Budget reflects the full planning cost.
+	if isFirstCompletion && envReadOK && project != nil {
+		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+			logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
+		}
 	}
 
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
