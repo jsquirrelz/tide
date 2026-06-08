@@ -682,10 +682,11 @@ func TestTerminationStub_NoForbiddenFields(t *testing.T) {
 	// If ChildCRDs / Result / Artifacts are added, this literal will fail to
 	// compile with "unknown field" — intentional.
 	_ = TerminationStub{
-		ExitCode: 0,
-		Reason:   "",
-		Usage:    Usage{},
-		HeadSHA:  "",
+		ExitCode:   0,
+		Reason:     "",
+		Usage:      Usage{},
+		HeadSHA:    "",
+		ChildCount: 0,
 	}
 	// Runtime assertion: marshalled JSON must not contain these keys.
 	stub := NewTerminationStub(fullyPopulatedEnvelopeOut())
@@ -697,5 +698,73 @@ func TestTerminationStub_NoForbiddenFields(t *testing.T) {
 		if strings.Contains(string(data), forbidden) {
 			t.Errorf("TerminationStub JSON contains forbidden key %s; got: %s", forbidden, string(data))
 		}
+	}
+}
+
+// TestNewTerminationStub_ChildCount asserts that NewTerminationStub sets
+// ChildCount = len(out.ChildCRDs): the planner's authored child count, carried
+// on the tiny termination-message status for race-free succession gating
+// (plan 09-08 Defect B).
+func TestNewTerminationStub_ChildCount(t *testing.T) {
+	// Non-zero ChildCRDs: ChildCount == len(ChildCRDs).
+	out := fullyPopulatedEnvelopeOut() // fullyPopulatedEnvelopeOut has 1 ChildCRD
+	stub := NewTerminationStub(out)
+	if stub.ChildCount != len(out.ChildCRDs) {
+		t.Errorf("ChildCount: got %d, want %d (len(ChildCRDs))", stub.ChildCount, len(out.ChildCRDs))
+	}
+
+	// Empty ChildCRDs: ChildCount == 0.
+	out2 := fullyPopulatedEnvelopeOut()
+	out2.ChildCRDs = nil
+	stub2 := NewTerminationStub(out2)
+	if stub2.ChildCount != 0 {
+		t.Errorf("ChildCount with nil ChildCRDs: got %d, want 0", stub2.ChildCount)
+	}
+
+	// Empty (non-nil) slice: ChildCount == 0.
+	out3 := fullyPopulatedEnvelopeOut()
+	out3.ChildCRDs = []ChildCRDSpec{}
+	stub3 := NewTerminationStub(out3)
+	if stub3.ChildCount != 0 {
+		t.Errorf("ChildCount with empty ChildCRDs slice: got %d, want 0", stub3.ChildCount)
+	}
+
+	// Many ChildCRDs: ChildCount matches.
+	out4 := fullyPopulatedEnvelopeOut()
+	out4.ChildCRDs = make([]ChildCRDSpec, 7)
+	stub4 := NewTerminationStub(out4)
+	if stub4.ChildCount != 7 {
+		t.Errorf("ChildCount with 7 ChildCRDs: got %d, want 7", stub4.ChildCount)
+	}
+}
+
+// TestNewTerminationStub_ChildCountJSON asserts that ChildCount serializes
+// under the "childCount" JSON key and the stub still stays < 4096 bytes with
+// ChildCount populated alongside a large EnvelopeOut.
+func TestNewTerminationStub_ChildCountJSON(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.Result = strings.Repeat("x", 10*1024) // 10 KB verbose result — excluded
+	out.ChildCRDs = make([]ChildCRDSpec, 50)  // 50 ChildCRDs — count only, not payloads
+	for i := range out.ChildCRDs {
+		out.ChildCRDs[i] = ChildCRDSpec{
+			Kind: "Phase",
+			Name: strings.Repeat("phase-", 10),
+			Spec: runtime.RawExtension{Raw: []byte(`{"phaseRef":"stub-milestone-1"}`)},
+		}
+	}
+
+	stub := NewTerminationStub(out)
+	if stub.ChildCount != 50 {
+		t.Errorf("ChildCount: got %d, want 50", stub.ChildCount)
+	}
+	data, err := json.Marshal(stub)
+	if err != nil {
+		t.Fatalf("json.Marshal(TerminationStub): %v", err)
+	}
+	if !strings.Contains(string(data), `"childCount":50`) {
+		t.Errorf(`serialized JSON missing "childCount":50; got: %s`, string(data))
+	}
+	if len(data) >= 4096 {
+		t.Errorf("TerminationStub JSON size = %d bytes, want < 4096 (termination-message budget)", len(data))
 	}
 }

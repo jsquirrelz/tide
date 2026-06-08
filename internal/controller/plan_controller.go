@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -376,7 +377,11 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// Read tiny status from the dispatch Job's termination message for budget
 	// rollup and failure classification. ChildCRDs are NOT used here —
 	// materialization has moved to the reporter Job (REQ-09-01).
+	// Plan 09-08: capture out so we can gate on out.ChildCount below.
+	var out pkgdispatch.EnvelopeOut
 	if r.EnvReader == nil {
+		// Fallback: no EnvReader (non-Option-C / unit-test path). Clear Running phase
+		// immediately and let the Wave path take over, mirroring prior behavior.
 		logger.Info("no env reader; clearing Running phase to let Wave path proceed")
 		patch := client.MergeFrom(plan.DeepCopy())
 		plan.Status.Phase = ""
@@ -384,14 +389,16 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		return ctrl.Result{}, nil
 	}
 
-	if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID)); err != nil {
+	var readErr error
+	out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
+	if readErr != nil {
 		patch := client.MergeFrom(plan.DeepCopy())
 		plan.Status.Phase = "Failed"
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha1.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "EnvelopeReadFailed",
-			Message:            err.Error(),
+			Message:            readErr.Error(),
 			LastTransitionTime: metav1.Now(),
 		})
 		if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
@@ -404,7 +411,8 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// The reporter reads out.json from the PVC and materializes Task children.
 	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
-	reporterSpawned := false
+	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
+	isFirstCompletion := false
 	if r.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
 		pvcName := defaultSharedPVCName
@@ -413,38 +421,54 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			if !apierrors.IsNotFound(gErr) {
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
+			isFirstCompletion = true
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
 				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
 				}
-				// AlreadyExists: reporter was already spawned in a prior reconcile.
-				reporterSpawned = true
 			} else {
 				logger.Info("spawned reporter Job", "job", reporterJobName, "plan", plan.Name)
-				reporterSpawned = true
 			}
 		} else {
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
-			reporterSpawned = true
 		}
 	} else if r.ReporterImage == "" {
+		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
 	}
 
+	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
+	if isFirstCompletion && project != nil {
+		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+			logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
+		}
+	}
+
 	// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
-	// proceeds past the gate. The admission webhook stamps Validated at CREATE time
-	// for plans authored via the webhook path; for plans authored by the planner Job
-	// (production dispatch path) the webhook has already run but the controller must
-	// re-stamp here because Tasks are materialized after admission (by the reporter).
-	// Stamp when the reporter was spawned (or unconfigured — stub/test path). This is
-	// the correct seam: the reporter Job is in flight, Tasks will appear shortly.
-	if reporterSpawned || r.ReporterImage == "" {
-		valPatch := client.MergeFrom(plan.DeepCopy())
-		plan.Status.ValidationState = "Validated"
-		if err := r.Status().Patch(ctx, plan, valPatch); err != nil {
-			return ctrl.Result{}, err
+	// proceeds past the gate. Stamp always when we have a valid tiny status (i.e.
+	// EnvReader succeeded) — the reporter Job is in flight, Tasks will appear shortly.
+	valPatch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.ValidationState = "Validated"
+	if err := r.Status().Patch(ctx, plan, valPatch); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession replaces the
+	// prior reporterSpawned early-return. Gate:
+	//   expected == 0            → clear Running immediately (genuine leaf: no Tasks)
+	//   observed < expected      → requeue 5s (reporter still materializing Tasks)
+	//   observed >= expected     → clear Running, let Wave path take over
+	// The plan controller does NOT call patchPlanSucceeded here — succession
+	// happens in reconcileWaveMaterialization once all Tasks complete.
+	expected := out.ChildCount
+	if expected > 0 {
+		observed := r.countChildTasks(ctx, plan)
+		if observed < expected {
+			logger.V(1).Info("requeue: reporter still materializing Task children",
+				"plan", plan.Name, "expected", expected, "observed", observed)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 		}
 	}
 
@@ -571,6 +595,24 @@ func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *ti
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// countChildTasks returns the number of Tasks owned by this Plan (plan 09-08).
+// Used by the ChildCount-gated succession path to compare observed vs expected children.
+func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv1alpha1.Plan) int {
+	var taskList tideprojectv1alpha1.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(plan.Namespace)); err != nil {
+		return 0
+	}
+	count := 0
+	for i := range taskList.Items {
+		for _, ref := range taskList.Items[i].OwnerReferences {
+			if ref.Kind == "Plan" && ref.UID == plan.UID {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 // resolveProjectForPlan walks Plan → Phase → Milestone → Project.

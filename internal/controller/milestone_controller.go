@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -403,10 +404,15 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// rollup and failure classification. ChildCRDs are NOT used here — materialization
 	// has moved to the reporter Job (REQ-09-01). Tolerate nil EnvReader — continue
 	// through gate logic regardless (Phase 04.1 pattern).
+	var out pkgdispatch.EnvelopeOut
+	envReadOK := false
 	if r.EnvReader != nil {
-		if _, err := r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID)); err != nil {
-			return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", err.Error())
+		var readErr error
+		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
+		if readErr != nil {
+			return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", readErr.Error())
 		}
+		envReadOK = true
 	} else {
 		logger.V(1).Info("no env reader; skipping tiny-status read", "milestone", ms.Name)
 	}
@@ -414,8 +420,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the PVC and materializes Phase children.
 	// Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
-	// justMaterialized tracks the first-spawn for the boundary-wait logic below.
-	justMaterialized := false
+	// T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
+	// the reporter Job's own completion re-enqueues this reconciler.
+	//
+	// isFirstCompletion tracks whether this is the initial observation of the planner
+	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
+	// once-per-completion budget rollup below (plan 09-08 Defect C).
+	isFirstCompletion := false
 	if r.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", ms.UID)
 		pvcName := defaultSharedPVCName
@@ -424,7 +435,8 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			if !apierrors.IsNotFound(gErr) {
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
-			// Not found — spawn it.
+			// Not found — spawn it (first completion observation).
+			isFirstCompletion = true
 			reporterJob := BuildReporterJob(ms, project, pvcName, string(ms.UID), "Milestone",
 				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
@@ -433,13 +445,24 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				}
 			} else {
 				logger.Info("spawned reporter Job", "job", reporterJobName, "milestone", ms.Name)
-				justMaterialized = true
 			}
 		} else {
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
 	} else if r.ReporterImage == "" {
+		// No reporter configured (stub/test path) — treat as first completion.
+		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "milestone", ms.Name)
+	}
+
+	// Plan 09-08 Defect C: roll up planner-level Usage to Project.Status.Budget
+	// exactly once per planner Job completion (guarded by isFirstCompletion).
+	// Task executors already roll up in task_controller.go; this adds the planner's
+	// own token/cost spend so Project.Status.Budget reflects the full planning cost.
+	if isFirstCompletion && envReadOK && project != nil {
+		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+			logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
+		}
 	}
 
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
@@ -465,21 +488,46 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// (so paused/rejected levels do not push) and BEFORE patchSucceeded
 	// (so the operator-visible Status.Phase=Succeeded happens after dispatch).
 	//
-	// CR-03 fix: gate the push on gates.BoundaryDetected so the push fires
-	// only when all child Phases have actually Succeeded (the spec's "all-
-	// children-Succeeded" boundary). At the moment handleJobCompletion runs,
-	// child Phases have just been MATERIALIZED — not yet Succeeded — so the
-	// short-circuit returns false on first entry, and the push only fires on
-	// a subsequent reconcile (Owns(&Phase{}) re-enqueues when child status
-	// updates).
-	//
-	// Debug #9 (mirrors Phase 04.1, phase_controller.go): when child Phases
-	// exist but are NOT all Succeeded yet, requeue rather than patching
-	// Milestone=Succeeded — otherwise the Milestone (and the Project rolling up
-	// MilestonesSucceeded) reaches terminal status while the Phase→Plan→Task→
-	// executor cascade is still in flight, with no run branch pushed. The
-	// Milestone reaches Succeeded only once all child Phases Succeed, keeping the
-	// level controllers symmetric.
+	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession replaces the
+	// inconsistent justMaterialized / hasChildPhases guards. The tiny status
+	// carries out.ChildCount = the planner's authored Phase count. Gate:
+	//   expected == 0            → succeed (genuine leaf: planner authored no Phases)
+	//   observed < expected      → requeue 5s (reporter still materializing)
+	//   observed >= expected     → BoundaryDetected? push+succeed : requeue 5s
+	// When EnvReader is nil, fall back to the prior hasChild-based behavior so
+	// non-Option-C / unit-test paths keep working.
+	if envReadOK {
+		// Option-C path: gate on out.ChildCount from tiny status.
+		expected := out.ChildCount
+		if expected == 0 {
+			// Genuine leaf — planner authored no Phase children.
+			logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
+			return r.patchMilestoneSucceeded(ctx, ms)
+		}
+		observed := r.countChildPhases(ctx, ms)
+		if observed < expected {
+			logger.V(1).Info("requeue: reporter still materializing Phase children",
+				"milestone", ms.Name, "expected", expected, "observed", observed)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// observed >= expected: check if all Succeeded.
+		detected, derr := gates.BoundaryDetected(ctx, r.Client, ms, "Phase")
+		if derr != nil {
+			return ctrl.Result{}, derr
+		}
+		if detected {
+			if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+				return ctrl.Result{}, err
+			}
+			return r.patchMilestoneSucceeded(ctx, ms)
+		}
+		logger.V(1).Info("boundary push deferred: Phase children exist but not all Succeeded",
+			"milestone", ms.Name, "expected", expected, "observed", observed)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Fallback: EnvReader is nil (non-Option-C / unit-test path). Use the prior
+	// hasChild-based behavior.
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ms, "Phase")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -488,35 +536,39 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
 			return ctrl.Result{}, err
 		}
-	} else if justMaterialized || r.hasChildPhases(ctx, ms) {
-		// Children exist but not all Succeeded — requeue and wait. justMaterialized
-		// covers the same-reconcile case where the child Phase was just created and
-		// the cached client may not yet list it (otherwise we would wrongly fall
-		// through to patchMilestoneSucceeded before the boundary can ever be seen).
-		logger.V(1).Info("boundary push deferred: child Phases pending", "milestone", ms.Name)
+	} else if r.hasChildPhases(ctx, ms) {
+		logger.V(1).Info("boundary push deferred: child Phases pending (fallback)", "milestone", ms.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: milestone has no child Phases", "milestone", ms.Name)
+		logger.V(1).Info("boundary push skipped: milestone has no child Phases (fallback)", "milestone", ms.Name)
 	}
 
 	return r.patchMilestoneSucceeded(ctx, ms)
 }
 
 // hasChildPhases reports whether any Phase is owned by this Milestone. Debug #9
-// (mirrors PhaseReconciler.hasChildPlans / Phase 04.1).
+// (mirrors PhaseReconciler.hasChildPlans / Phase 04.1). Used by the nil-EnvReader
+// fallback path in handleJobCompletion.
 func (r *MilestoneReconciler) hasChildPhases(ctx context.Context, ms *tideprojectv1alpha1.Milestone) bool {
+	return r.countChildPhases(ctx, ms) > 0
+}
+
+// countChildPhases returns the number of Phases owned by this Milestone (plan 09-08).
+// Used by the ChildCount-gated succession path to compare observed vs expected children.
+func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideprojectv1alpha1.Milestone) int {
 	var phaseList tideprojectv1alpha1.PhaseList
 	if err := r.List(ctx, &phaseList, client.InNamespace(ms.Namespace)); err != nil {
-		return false
+		return 0
 	}
+	count := 0
 	for i := range phaseList.Items {
 		for _, ref := range phaseList.Items[i].OwnerReferences {
 			if ref.Kind == "Milestone" && ref.UID == ms.UID {
-				return true
+				count++
 			}
 		}
 	}
-	return false
+	return count
 }
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha1.Milestone) (ctrl.Result, error) {

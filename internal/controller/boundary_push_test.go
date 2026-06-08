@@ -246,9 +246,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			// Get Milestone UID + set envelope-out, mark planner Job Succeeded.
 			var got tideprojectv1alpha1.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
+			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Phase
+			// before allowing succession. Without it the gate treats the milestone as a
+			// leaf and Succeeds immediately without triggering the boundary push.
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
-				TaskUID:  string(got.UID),
-				ExitCode: 0,
+				TaskUID:    string(got.UID),
+				ExitCode:   0,
+				ChildCount: 1,
 			})
 			plannerJobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 			Expect(makeFakeJobTerminal(ctx, mgrClient, plannerJobName, "default", true)).To(Succeed())
@@ -309,9 +313,11 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			var got tideprojectv1alpha1.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
+			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Plan.
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
-				TaskUID:  string(got.UID),
-				ExitCode: 0,
+				TaskUID:    string(got.UID),
+				ExitCode:   0,
+				ChildCount: 1,
 			})
 			plannerJobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
 			Expect(makeFakeJobTerminal(ctx, mgrClient, plannerJobName, "default", true)).To(Succeed())
@@ -428,7 +434,8 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			var got tideprojectv1alpha1.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
-			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
+			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Phase.
+			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0, ChildCount: 1})
 			Expect(makeFakeJobTerminal(ctx, mgrClient, fmt.Sprintf("tide-milestone-%s-1", got.UID), "default", true)).To(Succeed())
 
 			// CR-03 fix: create a Succeeded child Phase so BoundaryDetected returns true.
