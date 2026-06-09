@@ -147,7 +147,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			EnvReader:      envReader,
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoPhaseName, Namespace: "default"}, 5)).To(Succeed())

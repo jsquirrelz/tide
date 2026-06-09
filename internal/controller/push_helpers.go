@@ -200,7 +200,7 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 					SecurityContext: &corev1.PodSecurityContext{
 						FSGroup: new(int64(1000)),
 					},
-					Volumes:            volumes,
+					Volumes: volumes,
 					Containers: []corev1.Container{
 						{
 							Name:  pushContainerName,

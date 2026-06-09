@@ -41,9 +41,9 @@ import (
 
 // modelPrice holds per-model billing rates in US cents per one million tokens.
 type modelPrice struct {
-	inputCentsPerMTok     int64
-	outputCentsPerMTok    int64
-	cacheReadCentsPerMTok int64
+	inputCentsPerMTok      int64
+	outputCentsPerMTok     int64
+	cacheReadCentsPerMTok  int64
 	cacheWriteCentsPerMTok int64
 }
 
@@ -56,27 +56,27 @@ var priceTable = map[string]modelPrice{
 	// $1/M input, $5/M output; cache rates: write=1.25×input, read=0.10×input.
 	// RESEARCH §Cost Surfacing ASSUMPTION A3.
 	"claude-haiku-4-5": {
-		inputCentsPerMTok:     100,
-		outputCentsPerMTok:    500,
-		cacheReadCentsPerMTok: 10,
+		inputCentsPerMTok:      100,
+		outputCentsPerMTok:     500,
+		cacheReadCentsPerMTok:  10,
 		cacheWriteCentsPerMTok: 125,
 	},
 
 	// Chart per-level defaults for phase, plan, and top-level fallback.
 	// $3/M input, $15/M output; cache rates follow the same 1.25×/0.10× rule.
 	"claude-sonnet-4-6": {
-		inputCentsPerMTok:     300,
-		outputCentsPerMTok:    1500,
-		cacheReadCentsPerMTok: 30,
+		inputCentsPerMTok:      300,
+		outputCentsPerMTok:     1500,
+		cacheReadCentsPerMTok:  30,
 		cacheWriteCentsPerMTok: 375,
 	},
 
 	// Chart milestone-level default.
 	// $15/M input, $75/M output.
 	"claude-opus-4-7": {
-		inputCentsPerMTok:     1500,
-		outputCentsPerMTok:    7500,
-		cacheReadCentsPerMTok: 150,
+		inputCentsPerMTok:      1500,
+		outputCentsPerMTok:     7500,
+		cacheReadCentsPerMTok:  150,
 		cacheWriteCentsPerMTok: 1875,
 	},
 }
@@ -90,9 +90,9 @@ var conservativeTier = priceTable["claude-opus-4-7"]
 // nearest whole cent) for the given model and token usage.
 //
 // On a table miss the function:
-//   1. Logs a loud warning to stderr so the operator sees it in Pod logs.
-//   2. Falls back to the most-expensive known tier (conservativeTier) to
-//      ensure budget tracking never silently under-reports spend (T-09-01).
+//  1. Logs a loud warning to stderr so the operator sees it in Pod logs.
+//  2. Falls back to the most-expensive known tier (conservativeTier) to
+//     ensure budget tracking never silently under-reports spend (T-09-01).
 //
 // A zero-token usage for a known model returns 0 (no spend).
 func estimatedCostCents(model string, u pkgdispatch.Usage) int64 {

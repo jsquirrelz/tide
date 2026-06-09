@@ -254,7 +254,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			EnvReader:      envReader,
 			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
-			SigningKey:      testSigningKey,
+			SigningKey:     testSigningKey,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 5)).To(Succeed())

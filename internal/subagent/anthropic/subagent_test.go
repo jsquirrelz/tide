@@ -394,8 +394,8 @@ func TestPromptPath_HappyPath(t *testing.T) {
 	}
 
 	in := envelopeFixture("uid-promptpath-happy")
-	in.Prompt = ""                                                           // empty — must be populated from PromptPath
-	in.PromptPath = "envelopes/planner-uid/children/task-01.json"           // workspace-relative
+	in.Prompt = ""                                                // empty — must be populated from PromptPath
+	in.PromptPath = "envelopes/planner-uid/children/task-01.json" // workspace-relative
 
 	out, err := a.Run(context.Background(), in)
 	if err != nil {

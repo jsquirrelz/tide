@@ -87,7 +87,7 @@ type TaskReconcilerDeps struct {
 	SubagentImage  string
 	CredproxyImage string
 	EnvReader      podjob.EnvelopeReader
-	Recorder     record.EventRecorder
+	Recorder       record.EventRecorder
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).

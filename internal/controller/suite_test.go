@@ -111,7 +111,6 @@ func (m *mapEnvReader) ReadOut(_ context.Context, _, taskUID string) (pkgdispatc
 	return pkgdispatch.EnvelopeOut{}, fmt.Errorf("no envelope out for task UID %q", taskUID)
 }
 
-
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 

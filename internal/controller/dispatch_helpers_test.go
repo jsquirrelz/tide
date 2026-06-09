@@ -211,4 +211,3 @@ func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 		t.Errorf("outcomePromptOf(project) = %q, want %q", got, project.Spec.OutcomePrompt)
 	}
 }
-
