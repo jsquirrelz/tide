@@ -462,13 +462,14 @@ func main() {
 		// Phase 04.1 P3.2 — dispatch-tier deps consolidated into a carrier struct.
 		// Mirrors HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
 		Deps: controller.TaskReconcilerDeps{
-			Dispatcher:     dispatcher,
-			Budget:         budgetStore,
-			Defaults:       defaults,
-			SigningKey:     signingKey,
-			SubagentImage:  subagentImage,
-			CredproxyImage: credproxyImage,
-			EnvReader:      envReader,
+			Dispatcher:           dispatcher,
+			Budget:               budgetStore,
+			Defaults:             defaults,
+			SigningKey:           signingKey,
+			SubagentImage:        subagentImage,
+			CredproxyImage:       credproxyImage,
+			EnvReader:            envReader,
+			HelmProviderDefaults: helmProviderDefaults,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")

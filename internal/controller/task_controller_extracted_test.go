@@ -662,4 +662,23 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 			t.Errorf("EnvelopeIn.Branch = %q, want %q (executor worktree branch must be non-empty)", envIn.Branch, runBranch)
 		}
 	})
+
+	// Phase 11: the executor envelope must carry a resolved ProviderSpec
+	// (Vendor "anthropic" + the task-level model). Latent until a run first
+	// reached real task execution — the in-pod anthropic runner refuses an
+	// empty vendor ("refusing vendor=\"\"").
+	t.Run("Provider resolved with anthropic vendor and task model", func(t *testing.T) {
+		projWithModel := project.DeepCopy()
+		projWithModel.Spec.Subagent.Model = "claude-haiku-4-5"
+		envIn, _, err := r.buildEnvelopeIn(context.Background(), task, projWithModel, 1, "tok")
+		if err != nil {
+			t.Fatalf("buildEnvelopeIn: %v", err)
+		}
+		if envIn.Provider.Vendor != "anthropic" {
+			t.Errorf("EnvelopeIn.Provider.Vendor = %q, want %q", envIn.Provider.Vendor, "anthropic")
+		}
+		if envIn.Provider.Model != "claude-haiku-4-5" {
+			t.Errorf("EnvelopeIn.Provider.Model = %q, want %q", envIn.Provider.Model, "claude-haiku-4-5")
+		}
+	})
 }

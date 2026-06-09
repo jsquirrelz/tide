@@ -88,6 +88,10 @@ type TaskReconcilerDeps struct {
 	CredproxyImage string
 	EnvReader      podjob.EnvelopeReader
 	Recorder       record.EventRecorder
+	// HelmProviderDefaults carry Helm-chart provider/model defaults, mirroring
+	// the Milestone/Phase/Plan reconcilers. buildEnvelopeIn uses them to resolve
+	// the executor task's ProviderSpec (Vendor "anthropic" + the task-level model).
+	HelmProviderDefaults ProviderDefaults
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -1070,9 +1074,16 @@ func (r *TaskReconciler) buildEnvelopeIn(ctx context.Context, task *tideprojectv
 		DependsOn:           task.Spec.DependsOn,
 		DeclaredOutputPaths: task.Spec.DeclaredOutputPaths,
 		Caps:                caps,
-		ProxyEndpoint:       "https://127.0.0.1:8443",
-		SignedToken:         token,
-		Dev:                 dev,
+		// Resolve the executor's ProviderSpec the same way the planner
+		// reconcilers do (BuildPlannerEnvelope → ResolveProvider): Vendor pinned
+		// to "anthropic" + the task-level model. Without this the envelope's
+		// Provider is the zero value and the anthropic runner refuses the task
+		// ("refusing vendor=\"\""). Latent until a run first reached real task
+		// execution (the planner paths set Provider; this builder never did).
+		Provider:      ResolveProvider(project, "task", r.Deps.HelmProviderDefaults),
+		ProxyEndpoint: "https://127.0.0.1:8443",
+		SignedToken:   token,
+		Dev:           dev,
 	}
 
 	data, mErr := json.Marshal(envIn)
