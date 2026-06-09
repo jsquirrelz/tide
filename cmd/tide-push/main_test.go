@@ -690,24 +690,47 @@ func TestRunCloneProvisions(t *testing.T) {
 // With --integrate-task-branches and two pre-existing task branches in the
 // test repo, runPush calls IntegrateTaskBranches before staging artifacts;
 // both task branch files appear in the run branch after push.
+//
+// This test uses runClone with --run-branch to provision the workspace (so the
+// run worktree is a proper linked worktree off repo.git that can see task
+// branches), then pushes with --integrate-task-branches.
 
 func TestRunPushIntegrateBeforeStage(t *testing.T) {
 	base := t.TempDir()
 	bareSrc, _ := seedBareRepo(t, base)
 	branch := perRunBranch(t, "integrate")
+	ws := t.TempDir()
 
-	// Set up the push workspace (creates repo.git + worktrees/run-<branch>/).
-	ws := setupWorkspace(t, bareSrc, branch)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-	// Create two task branches in the bare repo, each with a unique file.
+	// Step 1: Clone and provision run worktree via runClone + --run-branch.
+	cloneCfg := pushConfig{
+		Mode:      "clone",
+		RepoURL:   "file://" + bareSrc,
+		Workspace: ws,
+		RunBranch: branch,
+	}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	// Step 2: Create two task branches in the workspace bare repo.
 	taskBranch1 := "tide/wt-uid1"
 	taskBranch2 := "tide/wt-uid2"
 	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch1, "task1.txt", "task1 content")
 	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch2, "task2.txt", "task2 content")
 
+	// Step 3: Write a planner artifact.
 	writeArtifact(t, ws, "artifacts/plan.md", "# plan\n")
 
-	cfg := pushConfig{
+	// The push remote must point at bareSrc so stderrAndRun can push there via
+	// file://. The run worktree (linked off repo.git) has origin pointing at
+	// bareSrc already (it was cloned from there). We need to push to bareSrc.
+	// Since the run worktree origin = bareSrc (inherited from clone), this works.
+
+	// Step 4: Push with --integrate-task-branches.
+	pushCfg := pushConfig{
 		Mode:                  "push",
 		Branch:                branch,
 		LastPushedSHA:         "",
@@ -717,15 +740,11 @@ func TestRunPushIntegrateBeforeStage(t *testing.T) {
 		Workspace:             ws,
 		ProjectUID:            "p-integrate",
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
-	if exit != 0 {
+	if exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat"); exit != 0 {
 		t.Fatalf("push with --integrate-task-branches exit=%d stderr=%s", exit, stderr)
 	}
 
-	// Verify both task branch files appear in the bare repo's run branch.
+	// Verify both task branch files appear in the bareSrc run branch.
 	bareRepo, err := gogit.PlainOpen(bareSrc)
 	if err != nil {
 		t.Fatalf("PlainOpen bareSrc: %v", err)

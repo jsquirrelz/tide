@@ -61,6 +61,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -80,15 +81,17 @@ import (
 // push-mode. The struct is passed by value into run() so tests can drive
 // it without setting os.Args.
 type pushConfig struct {
-	Mode          string   // "clone" | "push"
-	RepoURL       string   // clone-mode: remote URL
-	Branch        string   // push-mode: per-run branch (D-B6)
-	LastPushedSHA string   // push-mode: lease anchor (empty on first push)
-	CommitMessage string   // push-mode: W11 boundary commit message
-	ArtifactPaths []string // push-mode: workspace-relative paths to stage
-	LeaksConfig   string   // push-mode: optional gitleaks override TOML path
-	Workspace     string   // root, default "/workspace"
-	ProjectUID    string   // push-mode: keys the envelope output path
+	Mode                  string   // "clone" | "push"
+	RepoURL               string   // clone-mode: remote URL
+	Branch                string   // push-mode: per-run branch (D-B6)
+	LastPushedSHA         string   // push-mode: lease anchor (empty on first push)
+	CommitMessage         string   // push-mode: W11 boundary commit message
+	ArtifactPaths         []string // push-mode: workspace-relative paths to stage
+	LeaksConfig           string   // push-mode: optional gitleaks override TOML path
+	Workspace             string   // root, default "/workspace"
+	ProjectUID            string   // push-mode: keys the envelope output path
+	RunBranch             string   // clone-mode: per-run branch for EnsureRunBranch + run worktree (D-B6/B5); if non-empty, EnsureRunBranch + provision run worktree after clone
+	IntegrateTaskBranches []string // push-mode: task branch names to merge before staging artifacts (D-04)
 }
 
 // pushResult is the small JSON envelope written to
@@ -141,6 +144,8 @@ func main() {
 	leaksConfig := fs.String("leaks-config", "", "push-mode: optional gitleaks override TOML path")
 	workspace := fs.String("workspace", "/workspace", "workspace root")
 	projectUID := fs.String("project-uid", "", "push-mode: keys envelope output path")
+	runBranch := fs.String("run-branch", "", "clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
+	integrateTaskBranches := fs.String("integrate-task-branches", "", "push-mode: CSV of task branch names to merge before staging (D-04)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -148,15 +153,17 @@ func main() {
 	}
 
 	cfg := pushConfig{
-		Mode:          *mode,
-		RepoURL:       *repoURL,
-		Branch:        *branch,
-		LastPushedSHA: *lastPushedSHA,
-		CommitMessage: *commitMessage,
-		ArtifactPaths: splitCSV(*artifactPaths),
-		LeaksConfig:   *leaksConfig,
-		Workspace:     *workspace,
-		ProjectUID:    *projectUID,
+		Mode:                  *mode,
+		RepoURL:               *repoURL,
+		Branch:                *branch,
+		LastPushedSHA:         *lastPushedSHA,
+		CommitMessage:         *commitMessage,
+		ArtifactPaths:         splitCSV(*artifactPaths),
+		LeaksConfig:           *leaksConfig,
+		Workspace:             *workspace,
+		ProjectUID:            *projectUID,
+		RunBranch:             *runBranch,
+		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -219,6 +226,30 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tide-push: clone failed: %v\n", redactPAT(err.Error(), pat))
 		return classifyGitError(err)
 	}
+
+	// B5: if --run-branch is set, create the run branch ref in the bare repo
+	// via EnsureRunBranch and provision the run worktree via `git worktree add`.
+	// The linked worktree shares the object store with destDir so task branches
+	// pushed to destDir are visible for `git merge` in the integration step.
+	//
+	// runPush opens the run worktree with PlainOpenWithOptions(EnableDotGitCommonDir:true)
+	// so it correctly resolves HEAD through the commondir mechanism of linked worktrees.
+	if cfg.RunBranch != "" {
+		if err := pkggit.EnsureRunBranch(destDir, cfg.RunBranch); err != nil {
+			fmt.Fprintf(stderr, "tide-push: EnsureRunBranch: %v\n", err)
+			return exitGenericFail
+		}
+		runWorktreeDir := filepath.Join(cfg.Workspace, "worktrees", "run-"+cfg.RunBranch)
+		out, err := exec.Command("git", "-C", destDir, "worktree", "add", runWorktreeDir, cfg.RunBranch).CombinedOutput()
+		if err != nil {
+			// Idempotent: if worktree already exists, log and continue.
+			if !strings.Contains(string(out), "already") {
+				fmt.Fprintf(stderr, "tide-push: provision run worktree: %v: %s\n", err, string(out))
+				return exitGenericFail
+			}
+		}
+	}
+
 	return exitSuccess
 }
 
@@ -249,14 +280,30 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exitInvariant
 	}
 
+	// D-04: if --integrate-task-branches is set, merge each task branch into
+	// the run branch BEFORE staging planner artifacts. This ensures the
+	// boundary commit captures both executor-authored code and planner
+	// artifacts in one unified push.
+	if len(cfg.IntegrateTaskBranches) > 0 {
+		bareRepoPath := filepath.Join(cfg.Workspace, "repo.git")
+		if err := pkggit.IntegrateTaskBranches(bareRepoPath, cfg.Branch, cfg.IntegrateTaskBranches); err != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "integration-failed")
+			fmt.Fprintf(stderr, "tide-push: integrate task branches: %v\n", err)
+			return exitGenericFail
+		}
+	}
+
 	// Open the per-run worktree. The orchestrator's prior clone-mode Job
-	// populated <workspace>/repo.git; subsequent push Jobs find a working
-	// tree at <workspace>/worktrees/run-<branch>/ already provisioned by
-	// the harness (Phase 3 D-B4 — per-Task worktrees). For the push
-	// boundary the orchestrator stages all per-Task artifacts into a
-	// single per-run worktree.
+	// populated <workspace>/repo.git and provisioned a linked worktree at
+	// <workspace>/worktrees/run-<branch>/ via `git worktree add`.
+	// EnableDotGitCommonDir:true is required so go-git resolves the branch ref
+	// via the commondir mechanism used by linked git worktrees (without it,
+	// repo.Head() returns "reference not found" because the branch ref lives
+	// in the parent bare repo, not in the per-worktree .git directory).
 	worktreeDir := filepath.Join(cfg.Workspace, "worktrees", "run-"+cfg.Branch)
-	repo, err := gogit.PlainOpen(worktreeDir)
+	repo, err := gogit.PlainOpenWithOptions(worktreeDir, &gogit.PlainOpenOptions{
+		EnableDotGitCommonDir: true,
+	})
 	if err != nil {
 		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree")
 		fmt.Fprintf(stderr, "tide-push: PlainOpen %s failed: %v\n", worktreeDir, err)
