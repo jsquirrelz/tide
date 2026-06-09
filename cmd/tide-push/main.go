@@ -465,22 +465,68 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		}
 	}
 
-	// Commit. pkggit.Commit returns the new hash (W11 — single boundary
-	// commit per push). Author is the fixed TIDE-bot signature.
-	newHash, err := pkggit.Commit(wt, cfg.CommitMessage, tideBotSignature())
+	// Determine whether staging produced anything to commit. After the artifact
+	// copy+stage loop, the worktree may be clean for two reasons: (1) no
+	// --artifact-paths were supplied at all (a level boundary push whose only
+	// job is to land the already-integrated run branch on the remote — the
+	// phase/milestone/project boundaries never stage planner artifacts), or
+	// (2) the staged artifacts were byte-identical to what is already committed.
+	// In BOTH cases attempting pkggit.Commit fails with "cannot create empty
+	// commit: clean working tree" and the push never fires — the medium-DoD
+	// boundary-push defect. This mirrors commit 8e57348 ("per-wave integration
+	// job is merge-only — no empty boundary commit") at the project/milestone/
+	// phase boundary: skip the empty commit, but STILL push the run branch HEAD
+	// to the remote so the merged work actually leaves the cluster.
+	clean, err := worktreeClean(worktreeDir)
 	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "commit-failed")
-		fmt.Fprintf(stderr, "tide-push: commit failed: %v\n", err)
+		writePushEnvelope(cfg, "", exitGenericFail, "status-failed")
+		fmt.Fprintf(stderr, "tide-push: git status %s: %v\n", worktreeDir, err)
 		return exitGenericFail
 	}
 
-	// W10: compute the unified diff of the new commit against its parent
-	// via newCommit.Patch(oldCommit).String(). The Patch.String() output
-	// uses `+ ` / `- ` line prefixes that gitleaks rules can match.
-	diff, err := computeUnifiedDiff(repo, oldHash, newHash)
+	// newHash is the commit that will be pushed. On a clean tree it is the
+	// current HEAD (the run branch tip the integration merge already advanced);
+	// otherwise it is the new boundary commit.
+	newHash := oldHash
+	// scanBase is the parent the gitleaks diff is computed against. On a fresh
+	// boundary commit it is the pre-commit HEAD (oldHash). On a clean-tree push
+	// it is the last SHA already on the remote (cfg.LastPushedSHA) so only the
+	// newly-arriving content is scanned; if no remote anchor exists yet (first
+	// push of this run branch), scanBase falls back to oldHash, yielding an
+	// empty diff (HEAD vs HEAD) — the merged task commits were authored and
+	// committed in-cluster, never carrying secrets the executor introduced.
+	scanBase := oldHash
+
+	if clean {
+		fmt.Fprintf(stderr, "tide-push: clean working tree — nothing to commit; pushing already-integrated run branch %s\n", cfg.Branch)
+		if cfg.LastPushedSHA != "" {
+			if anchor := plumbing.NewHash(cfg.LastPushedSHA); !anchor.IsZero() {
+				if _, cerr := repo.CommitObject(anchor); cerr == nil {
+					scanBase = anchor
+				}
+			}
+		}
+	} else {
+		// Commit. pkggit.Commit returns the new hash (W11 — single boundary
+		// commit per push). Author is the fixed TIDE-bot signature.
+		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, tideBotSignature())
+		if cErr != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "commit-failed")
+			fmt.Fprintf(stderr, "tide-push: commit failed: %v\n", cErr)
+			return exitGenericFail
+		}
+		newHash = h
+	}
+
+	// W10: compute the unified diff of the pushed commit against scanBase via
+	// newCommit.Patch(oldCommit).String(). The Patch.String() output uses
+	// `+ ` / `- ` line prefixes that gitleaks rules can match. When
+	// newHash == scanBase (clean tree, no remote anchor) the diff is empty and
+	// the scan is a no-op — the push proceeds.
+	diff, err := computeUnifiedDiff(repo, scanBase, newHash)
 	if err != nil {
 		writePushEnvelope(cfg, "", exitGenericFail, "diff-failed")
-		fmt.Fprintf(stderr, "tide-push: compute diff %s..%s: %v\n", oldHash, newHash, err)
+		fmt.Fprintf(stderr, "tide-push: compute diff %s..%s: %v\n", scanBase, newHash, err)
 		return exitGenericFail
 	}
 
@@ -503,7 +549,9 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	}
 
 	// D-B6: push with --force-with-lease against cfg.LastPushedSHA.
-	// First push (lease="") omits the lease via pkggit.Push contract.
+	// First push (lease="") omits the lease via pkggit.Push contract. The
+	// push is idempotent: re-pushing an already-present run branch HEAD is a
+	// no-op fast-forward, so a retried boundary-push Job converges safely.
 	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
 		exit, reason := classifyPushError(err)
 		writePushEnvelope(cfg, newHash.String(), exit, reason)
@@ -540,6 +588,24 @@ func computeUnifiedDiff(repo *gogit.Repository, oldHash, newHash plumbing.Hash) 
 		return "", fmt.Errorf("patch %s..%s: %w", oldHash, newHash, err)
 	}
 	return patch.String(), nil
+}
+
+// worktreeClean reports whether the run worktree has no staged or unstaged
+// changes (`git status --porcelain` is empty). A clean tree at the boundary
+// push means the per-wave integration merge already advanced the run branch
+// and there is nothing new to commit — the boundary push must then skip the
+// (otherwise-empty) commit and push the existing HEAD. We shell out to git
+// rather than go-git's wt.Status(): go-git's status is materially slower on
+// large worktrees and, for a linked worktree opened with EnableDotGitCommonDir,
+// the porcelain command is the same primitive internal/harness.CommitWorktree
+// already relies on (D-03), keeping the empty-diff policy consistent across the
+// executor commit path and the boundary push path.
+func worktreeClean(worktreeDir string) (bool, error) {
+	out, err := exec.Command("git", "-C", worktreeDir, "status", "--porcelain").Output()
+	if err != nil {
+		return false, fmt.Errorf("git status --porcelain: %w", err)
+	}
+	return len(strings.TrimSpace(string(out))) == 0, nil
 }
 
 // copyIntoWorktree copies src to dst, creating parent dirs as needed.

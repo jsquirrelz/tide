@@ -988,3 +988,102 @@ func TestRunPushIntegrationOnlyNoArtifacts(t *testing.T) {
 		t.Errorf("taskA.txt not reachable from local run branch after integration-only merge: %v", err)
 	}
 }
+
+// TestRunPushBoundaryCleanTreePushesIntegratedBranch is the third medium-DoD
+// defect: a level-boundary push (phase/milestone/project) carries NO planner
+// artifacts and NO --integrate-task-branches — the per-wave integration job has
+// already merged every task branch into the run branch, leaving a clean working
+// tree. The boundary push must NOT attempt an empty commit (which fails with
+// "cannot create empty commit: clean working tree" and never reaches the push);
+// it must skip the commit and STILL push the already-integrated run branch to
+// the remote so the merged work leaves the cluster. Mirrors commit 8e57348's
+// "no empty commit" handling at the boundary-push path.
+func TestRunPushBoundaryCleanTreePushesIntegratedBranch(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "boundary-clean")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// Step 1: clone + provision the run worktree (origin resolves to bareSrc).
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	// Step 2: a task branch with a new file, then a per-wave integration push
+	// (integrate set, NO artifacts) that merges it into the run branch LOCALLY
+	// and does not push — exactly the wave-internal contract.
+	taskBranch := "tide/wt-uidB"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "taskB.txt", "task B content")
+	waveCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: integrate wave 1",
+		IntegrateTaskBranches: []string{taskBranch},
+		Workspace:             ws,
+		ProjectUID:            "p-boundary-clean",
+	}
+	if exit, stderr := stderrAndRun(t, ctx, waveCfg, "test-pat"); exit != 0 {
+		t.Fatalf("wave integration push exit=%d stderr=%s", exit, stderr)
+	}
+
+	// Precondition: the wave integration must NOT have pushed — the remote run
+	// branch should not exist yet (push happens only at the boundary).
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	if _, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false); err == nil {
+		t.Fatalf("run branch %q unexpectedly present on remote after integration-only push", branch)
+	}
+
+	// Step 3: the level boundary push — NO artifacts, NO integrate. The working
+	// tree is clean (merge already advanced HEAD). This is the path that
+	// previously failed "cannot create empty commit: clean working tree".
+	boundaryCfg := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		CommitMessage: "tide: phase phase-01-implement-formattednow authored",
+		Workspace:     ws,
+		ProjectUID:    "p-boundary-clean",
+	}
+	exit, stderr := stderrAndRun(t, ctx, boundaryCfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("boundary push on clean tree exit=%d (want 0); stderr=%s", exit, stderr)
+	}
+	if bytes.Contains(stderr, []byte("cannot create empty commit")) {
+		t.Errorf("boundary push attempted an empty commit: %s", stderr)
+	}
+
+	// The merged run branch must now exist on the remote and carry the task file.
+	bareRepo, err = gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("re-open bareSrc: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("run branch %q not pushed to remote by boundary push: %v", branch, err)
+	}
+	commit, err := bareRepo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	if _, err := commit.File("taskB.txt"); err != nil {
+		t.Errorf("taskB.txt not present on remote run branch after boundary push: %v", err)
+	}
+
+	// The push envelope must report success with a non-empty HEAD SHA.
+	pr := readPushEnvelope(t, ws, "p-boundary-clean")
+	if pr.ExitCode != 0 || pr.Reason != "" {
+		t.Errorf("push envelope exitCode=%d reason=%q, want 0/empty", pr.ExitCode, pr.Reason)
+	}
+	if pr.HeadSHA == "" {
+		t.Error("push envelope HeadSHA empty on clean-tree boundary push")
+	}
+	if pr.HeadSHA != ref.Hash().String() {
+		t.Errorf("envelope HeadSHA=%s but remote ref=%s", pr.HeadSHA, ref.Hash())
+	}
+}
