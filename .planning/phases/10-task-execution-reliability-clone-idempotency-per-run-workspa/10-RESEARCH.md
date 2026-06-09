@@ -407,17 +407,17 @@ No code change is required for either. The plan should include a "run medium DoD
 | A2 | The live medium-sample run 404 was observed without `?namespace=` from the frontend | Fork (d) | Medium — if the frontend does pass `?namespace=` and the 404 is from a different cause, the fix may be elsewhere; but the code bug exists regardless |
 | A3 | The observed `invalid character 'W'` error is trailing prose after `}`, not a mid-object unquoted value | Fork (c) | Medium — if mid-object, `json.Decoder` also fails and per-file isolation rescues siblings either way; only the extractor's effectiveness differs |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`Fetch` with empty PAT against anonymous in-cluster remote**
+1. **`Fetch` with empty PAT against anonymous in-cluster remote** — **RESOLVED (Phase 10 plan 10-01).**
    - What we know: `pkggit.Fetch` always populates `BasicAuth`; `pat == ""` is valid for public/anonymous remotes.
    - What's unclear: whether go-git sends a Basic auth header with empty password against `http://` anonymous servers (the in-cluster demo git-http-server).
-   - Recommendation: test `Clone` idempotency against the in-cluster `http://` remote with `pat=""` during the Phase 10 DoD run; add a `TestFetchAnonymous` unit test using `seedBareRepo` + local `file://` URL as a proxy.
+   - **RESOLVED:** plan 10-01 Task 1 step 2b skips `Fetch` when `pat == ""` (no empty-password BasicAuth header); `TestFetchAnonymous` validates the empty-PAT path with a local proxy; the in-cluster `http://` path is exercised in the 10-05 DoD run.
 
-2. **MCP `emit_child` tool as Phase 11 candidate**
+2. **MCP `emit_child` tool as Phase 11 candidate** — **RESOLVED (deferred to Phase 11 per CONTEXT.md).**
    - What we know: Anthropic's `strict: true` tool use applies constrained decoding against `input_schema`, providing mathematical format compliance. This eliminates the trailing-prose failure class entirely. The blocker is `--bare` suppressing `.mcp.json` and plugins.
    - What's unclear: whether the claude CLI supports injecting a custom MCP server via a flag (e.g., `--mcp-server`) without `--bare` being lifted, or whether an alternative hermeticity mechanism exists.
-   - Recommendation: track as Phase 11 work. Phase 10's `json.Decoder` extractor + prompt patch is a sound interim fix.
+   - **RESOLVED:** deferred to Phase 11 (user decision 2026-06-08). Phase 10 ships the `json.Decoder` tolerant-parse + per-file isolation + prompt patch as the interim fix.
 
 ## Sources
 
