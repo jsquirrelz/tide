@@ -16,6 +16,7 @@ Dockerfile.cross
 /tide-push
 /tide-reporter
 /stub-subagent
+/claude-subagent
 
 # goreleaser snapshot/release build output (plan 04-09 — D-C2)
 /dist/
