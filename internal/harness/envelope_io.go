@@ -21,9 +21,46 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
+
+// mkdirSharedAll creates dir and all parents, then makes the shared "envelopes"
+// directory subtree group-writable with the setgid bit so a pod running as a
+// different uid but sharing the per-Project PVC's fsGroup can create its own
+// subdir under it (Phase 10 warm-PVC fix). The planner/executor runs as uid
+// 1000 and would otherwise create /workspace/envelopes as 0755:1000 — the
+// tide-push Job (distroless nonroot uid 65532, supplementary group = fsGroup
+// 1000) then cannot mkdir under it ("permission denied").
+//
+// chmod is best-effort and scoped to the envelopes subtree: components owned by
+// another uid are left as-is (their owner heals them on its own run), and paths
+// with no "envelopes" segment keep the default 0755. setgid makes subdirs
+// inherit the fsGroup so the group ownership survives across differing-uid pods.
+func mkdirSharedAll(dir string) error {
+	if err := os.MkdirAll(dir, 0o775); err != nil {
+		return err
+	}
+	clean := filepath.Clean(dir)
+	hasEnvelopes := false
+	for _, seg := range strings.Split(clean, string(os.PathSeparator)) {
+		if seg == "envelopes" {
+			hasEnvelopes = true
+			break
+		}
+	}
+	if !hasEnvelopes {
+		return nil
+	}
+	for p := clean; ; p = filepath.Dir(p) {
+		_ = os.Chmod(p, 0o775|os.ModeSetgid) // best-effort across uid boundaries
+		if filepath.Base(p) == "envelopes" {
+			break
+		}
+	}
+	return nil
+}
 
 // ReadEnvelopeIn opens the file at path, JSON-decodes a [pkgdispatch.EnvelopeIn],
 // and validates the apiVersion/kind discriminator via
@@ -59,7 +96,7 @@ func ReadEnvelopeIn(path string) (pkgdispatch.EnvelopeIn, error) {
 // the PVC before creating the Task's K8s Job. The harness binary reads it back
 // via [ReadEnvelopeIn].
 func WriteEnvelopeIn(path string, env pkgdispatch.EnvelopeIn) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirSharedAll(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("harness: mkdirall for envelope-in %q: %w", path, err)
 	}
 	data, err := json.Marshal(env)
@@ -80,7 +117,7 @@ func WriteEnvelopeIn(path string, env pkgdispatch.EnvelopeIn) error {
 // result envelope to /workspace/envelopes/{task-uid}/out.json on the PVC.
 // The controller reads it back in handleJobCompletion (Plan 09).
 func WriteEnvelopeOut(path string, out pkgdispatch.EnvelopeOut) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := mkdirSharedAll(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("harness: mkdirall for envelope-out %q: %w", path, err)
 	}
 	data, err := json.Marshal(out)

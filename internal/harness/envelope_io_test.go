@@ -118,3 +118,60 @@ func TestWriteEnvelopeOut_CreatesAncestorDirs(t *testing.T) {
 		t.Error("output file was not created")
 	}
 }
+
+// TestWriteEnvelopeOut_SharedEnvelopesDirIsGroupWritable verifies the Phase 10
+// warm-PVC fix: the shared "envelopes" directory must be group-writable with the
+// setgid bit so a different-uid pod sharing the PVC's fsGroup (e.g. tide-push,
+// uid 65532) can create its own subdir under it. Also asserts a pre-existing
+// 0755 envelopes dir (warm PVC from a prior run) is healed, not left read-only.
+func TestWriteEnvelopeOut_SharedEnvelopesDirIsGroupWritable(t *testing.T) {
+	base := t.TempDir()
+	// Simulate a warm PVC: envelopes dir already exists, created 0755 by a
+	// prior run.
+	envelopes := filepath.Join(base, "envelopes")
+	if err := os.Mkdir(envelopes, 0o755); err != nil {
+		t.Fatalf("seed warm envelopes dir: %v", err)
+	}
+	outPath := filepath.Join(envelopes, "task-uid", "out.json")
+
+	out := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    "task-uid",
+		Result:     "success",
+	}
+	if err := WriteEnvelopeOut(outPath, out); err != nil {
+		t.Fatalf("WriteEnvelopeOut: %v", err)
+	}
+
+	// setgid is unsettable in some sandboxes (macOS /tmp dirs are group 'wheel'
+	// which the test user isn't a member of → chmod EPERM). On the real Linux
+	// PVC the dir's group is the fsGroup the process belongs to, so it applies.
+	// Probe support so the setgid assertion runs where the OS permits it.
+	setgidSupported := func() bool {
+		probe := filepath.Join(t.TempDir(), "p")
+		if err := os.Mkdir(probe, 0o755); err != nil {
+			return false
+		}
+		if os.Chmod(probe, 0o775|os.ModeSetgid) != nil {
+			return false
+		}
+		fi, err := os.Stat(probe)
+		return err == nil && fi.Mode()&os.ModeSetgid != 0
+	}()
+
+	for _, dir := range []string{envelopes, filepath.Join(envelopes, "task-uid")} {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			t.Fatalf("stat %s: %v", dir, err)
+		}
+		// Load-bearing property: group-writable so a different-uid fsGroup member
+		// (tide-push) can mkdir under the shared envelopes dir.
+		if fi.Mode()&0o020 == 0 {
+			t.Errorf("%s mode = %v, want group-writable (g+w)", dir, fi.Mode())
+		}
+		if setgidSupported && fi.Mode()&os.ModeSetgid == 0 {
+			t.Errorf("%s mode = %v, want setgid bit set", dir, fi.Mode())
+		}
+	}
+}
