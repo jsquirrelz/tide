@@ -612,6 +612,188 @@ func setupWorkspaceWithRemoteURL(t *testing.T, bareSrc, branch, remoteURL string
 
 // ---------- Test 7: --commit-message + --artifact-paths exact message ----------
 
+// ---------- Task 1 TDD: TestRunCloneModeNoRunBranchIsNoOp ----------
+// With no --run-branch flag, clone completes without error and no run worktree
+// is provisioned (backward-compatible behavior).
+
+func TestRunCloneModeNoRunBranchIsNoOp(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:      "clone",
+		RepoURL:   "file://" + bareSrc,
+		Workspace: ws,
+		// RunBranch intentionally absent (empty string).
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone with no --run-branch exit=%d stderr=%s", exit, stderr)
+	}
+
+	// No run worktree should exist at all.
+	worktreesDir := filepath.Join(ws, "worktrees")
+	if entries, err := os.ReadDir(worktreesDir); err == nil && len(entries) > 0 {
+		t.Errorf("expected no worktrees dir entries when --run-branch is absent; got %v", entries)
+	}
+}
+
+// ---------- Task 1 TDD: TestRunCloneProvisions ----------
+// With --run-branch=tide/run-test-123, after clone completes:
+// (a) the run branch ref exists in the bare repo,
+// (b) the run worktree directory exists.
+
+func TestRunCloneProvisions(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	const runBranch = "tide/run-test-123"
+	cfg := pushConfig{
+		Mode:      "clone",
+		RepoURL:   "file://" + bareSrc,
+		Workspace: ws,
+		RunBranch: runBranch,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone with --run-branch exit=%d stderr=%s", exit, stderr)
+	}
+
+	destDir := filepath.Join(ws, "repo.git")
+
+	// (a) Run branch ref must exist in the bare repo.
+	bareRepo, err := gogit.PlainOpen(destDir)
+	if err != nil {
+		t.Fatalf("PlainOpen bare repo: %v", err)
+	}
+	refName := plumbing.NewBranchReferenceName(runBranch)
+	if _, err := bareRepo.Reference(refName, false); err != nil {
+		t.Errorf("run branch ref %q not found after clone: %v", runBranch, err)
+	}
+
+	// (b) Run worktree directory must exist.
+	runWorktreeDir := filepath.Join(ws, "worktrees", "run-"+runBranch)
+	if _, err := os.Stat(runWorktreeDir); err != nil {
+		t.Errorf("run worktree directory %q not found after clone: %v", runWorktreeDir, err)
+	}
+}
+
+// ---------- Task 1 TDD: TestRunPushIntegrateBeforeStage ----------
+// With --integrate-task-branches and two pre-existing task branches in the
+// test repo, runPush calls IntegrateTaskBranches before staging artifacts;
+// both task branch files appear in the run branch after push.
+
+func TestRunPushIntegrateBeforeStage(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "integrate")
+
+	// Set up the push workspace (creates repo.git + worktrees/run-<branch>/).
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	// Create two task branches in the bare repo, each with a unique file.
+	taskBranch1 := "tide/wt-uid1"
+	taskBranch2 := "tide/wt-uid2"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch1, "task1.txt", "task1 content")
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch2, "task2.txt", "task2 content")
+
+	writeArtifact(t, ws, "artifacts/plan.md", "# plan\n")
+
+	cfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		LastPushedSHA:         "",
+		CommitMessage:         "tide: integrate test",
+		ArtifactPaths:         []string{"artifacts/plan.md"},
+		IntegrateTaskBranches: []string{taskBranch1, taskBranch2},
+		Workspace:             ws,
+		ProjectUID:            "p-integrate",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("push with --integrate-task-branches exit=%d stderr=%s", exit, stderr)
+	}
+
+	// Verify both task branch files appear in the bare repo's run branch.
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference %q: %v", branch, err)
+	}
+	commit, err := bareRepo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatalf("Tree: %v", err)
+	}
+	for _, fname := range []string{"task1.txt", "task2.txt"} {
+		if _, err := tree.File(fname); err != nil {
+			t.Errorf("file %q not found in run branch after integration: %v", fname, err)
+		}
+	}
+}
+
+// createTaskBranchWithFile creates a branch in the given bare repo with a
+// single new file, using the default branch as base.
+func createTaskBranchWithFile(t *testing.T, bareRepoPath, branchName, fileName, content string) {
+	t.Helper()
+	workDir := t.TempDir()
+	repo, err := gogit.PlainClone(workDir, false, &gogit.CloneOptions{
+		URL: "file://" + bareRepoPath,
+	})
+	if err != nil {
+		t.Fatalf("createTaskBranchWithFile PlainClone: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("createTaskBranchWithFile Worktree: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("createTaskBranchWithFile Head: %v", err)
+	}
+	refName := plumbing.NewBranchReferenceName(branchName)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(refName, head.Hash())); err != nil {
+		t.Fatalf("createTaskBranchWithFile SetReference: %v", err)
+	}
+	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: refName}); err != nil {
+		t.Fatalf("createTaskBranchWithFile Checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, fileName), []byte(content), 0o644); err != nil {
+		t.Fatalf("createTaskBranchWithFile WriteFile: %v", err)
+	}
+	if _, err := wt.Add(fileName); err != nil {
+		t.Fatalf("createTaskBranchWithFile Add: %v", err)
+	}
+	if _, err := wt.Commit("add "+fileName, &gogit.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "test@example.com", When: time.Now()},
+	}); err != nil {
+		t.Fatalf("createTaskBranchWithFile Commit: %v", err)
+	}
+	if err := repo.Push(&gogit.PushOptions{
+		RemoteName: "origin",
+		RefSpecs:   []config.RefSpec{config.RefSpec("+" + refName + ":" + refName)},
+	}); err != nil {
+		t.Fatalf("createTaskBranchWithFile Push: %v", err)
+	}
+}
+
 func TestRunPushModeWritesExactBoundaryCommitMessage(t *testing.T) {
 	base := t.TempDir()
 	bareSrc, _ := seedBareRepo(t, base)
