@@ -207,6 +207,47 @@ func run(ctx context.Context, cfg pushConfig, _ io.Writer, stderr io.Writer) int
 	}
 }
 
+// sharedFSGroup is the gid every TIDE dispatch/push pod shares via the pod
+// SecurityContext fsGroup (pinned to 1000 in internal/controller/push_helpers.go
+// and internal/dispatch/podjob/jobspec.go). The clone Job runs as uid 65532 but
+// is a member of this group; the executor (claude-subagent) runs as uid 1000
+// whose primary group is also this gid. Sharing the bare repo across those two
+// uids requires repo.git to be group-owned by this gid and group-writable.
+const sharedFSGroup = 1000
+
+// makeWorkspaceGroupShared makes the per-run workspace tree at root writable by
+// any pod sharing sharedFSGroup. The clone Job (uid 65532) creates several
+// subtrees under /workspace that the executor (claude-subagent, uid 1000) must
+// then write into: the bare repo at repo.git (per-task worktree branch refs,
+// objects, worktree admin files) AND the worktrees/ directory (the executor's
+// `git worktree add` creates worktrees/<taskUID>/ under it). go-git's clone and
+// `git worktree add` create these 0755 owned by uid 65532, so the executor hits
+// "Permission denied" — first on the branch ref under repo.git, then on the
+// leading directories under worktrees/. Group-sharing the whole workspace once
+// (rather than per-subtree) is the root fix. We add group rwX, set the setgid
+// bit on directories so cross-uid-created entries inherit the shared group, and
+// chgrp the tree to sharedFSGroup. Best-effort like the envelopes group-share
+// (internal/harness mkdirSharedAll, cascade B): per-entry chmod/chown failures
+// across uid boundaries are tolerated (the owning clone Job, a member of the
+// fsGroup, succeeds at runtime; non-member test/CI environments simply no-op;
+// the root mount point is often root-owned 0777 and is skipped harmlessly).
+func makeWorkspaceGroupShared(root string) error {
+	return filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // tolerate unreadable/transient entries; keep walking siblings
+		}
+		mode := info.Mode().Perm() | 0o060 // group read+write
+		if info.IsDir() {
+			mode |= 0o010 | os.ModeSetgid // group traverse + inherit group on new entries
+		}
+		// chgrp BEFORE chmod: a successful chown strips the setuid/setgid bits
+		// on Linux, so the chmod must run last to leave setgid intact.
+		_ = os.Chown(p, -1, sharedFSGroup) // best-effort chgrp to the shared fsGroup
+		_ = os.Chmod(p, mode)              // best-effort across uid boundaries
+		return nil
+	})
+}
+
 // runClone performs the initial bare clone of cfg.RepoURL into
 // <workspace>/repo.git. No envelope is written — clone-mode is only ever
 // the Project's one-time setup.
@@ -247,6 +288,18 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "tide-push: provision run worktree: %v: %s\n", err, string(out))
 				return exitGenericFail
 			}
+		}
+
+		// Group-share the whole per-run workspace so the executor
+		// (claude-subagent, uid 1000) can write the subtrees this clone Job
+		// created as uid 65532: the per-task worktree branch ref/objects/admin
+		// under repo.git, AND the worktrees/<taskUID>/ directory its
+		// `git worktree add` creates under worktrees/. Without this the executor
+		// fails first on "cannot lock ref 'refs/heads/tide/wt-<uid>'" and then on
+		// "could not create leading directories of '/workspace/worktrees/<uid>/.git'".
+		if err := makeWorkspaceGroupShared(cfg.Workspace); err != nil {
+			fmt.Fprintf(stderr, "tide-push: share workspace group perms: %v\n", err)
+			return exitGenericFail
 		}
 	}
 

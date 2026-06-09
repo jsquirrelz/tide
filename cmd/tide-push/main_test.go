@@ -28,6 +28,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -870,5 +871,64 @@ func TestRunPushModeWritesExactBoundaryCommitMessage(t *testing.T) {
 	}
 	if commit.Author.Email != "tide-bot@tideproject.k8s" {
 		t.Errorf("commit author email = %q, want %q", commit.Author.Email, "tide-bot@tideproject.k8s")
+	}
+}
+
+// TestMakeWorkspaceGroupShared verifies the permission-bit logic that lets the
+// executor (a different uid sharing the PVC fsGroup) write into the workspace
+// subtrees the clone Job created: every directory becomes group-writable +
+// setgid, and every file becomes group-writable. The chgrp to sharedFSGroup is
+// best-effort and environment-dependent (the test runner is rarely a member of
+// gid 1000), so the group ownership itself is not asserted here.
+func TestMakeWorkspaceGroupShared(t *testing.T) {
+	root := t.TempDir()
+	// A nested tree mimicking repo.git/refs/heads + worktrees/ + a file.
+	sub := filepath.Join(root, "repo.git", "refs", "heads")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir tree: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "worktrees"), 0o755); err != nil {
+		t.Fatalf("mkdir worktrees: %v", err)
+	}
+	f := filepath.Join(sub, "main")
+	if err := os.WriteFile(f, []byte("ref"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	if err := makeWorkspaceGroupShared(root); err != nil {
+		t.Fatalf("makeWorkspaceGroupShared: %v", err)
+	}
+
+	// Directories: group write (0o020), group exec (0o010), and setgid.
+	for _, d := range []string{root, filepath.Join(root, "repo.git"), filepath.Join(root, "worktrees"), sub} {
+		fi, err := os.Stat(d)
+		if err != nil {
+			t.Fatalf("stat %s: %v", d, err)
+		}
+		m := fi.Mode()
+		if m.Perm()&0o020 == 0 {
+			t.Errorf("dir %s not group-writable: %v", d, m.Perm())
+		}
+		if m.Perm()&0o010 == 0 {
+			t.Errorf("dir %s not group-traversable: %v", d, m.Perm())
+		}
+		// setgid (group inheritance for new entries) is the defense-in-depth
+		// layer; the critical bit for unblocking the executor is group-write +
+		// the chgrp. BSD chmod (macOS dev boxes) silently drops S_ISGID when the
+		// caller is not a member of the file's group, so only assert it on Linux
+		// — the cluster runtime where the clone Job (uid 65532) is a member of
+		// the fsGroup and setgid sticks.
+		if runtime.GOOS == "linux" && m&os.ModeSetgid == 0 {
+			t.Errorf("dir %s missing setgid: %v", d, m)
+		}
+	}
+
+	// File: group write.
+	fi, err := os.Stat(f)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if fi.Mode().Perm()&0o020 == 0 {
+		t.Errorf("file %s not group-writable: %v", f, fi.Mode().Perm())
 	}
 }
