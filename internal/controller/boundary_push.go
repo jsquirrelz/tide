@@ -23,6 +23,8 @@ import (
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
+	"github.com/jsquirrelz/tide/internal/owner"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // triggerBoundaryPush is the shared implementation invoked by every up-
@@ -62,6 +64,7 @@ func triggerBoundaryPush(
 	level string,
 	tidePushImage string,
 	sharedPVCName string,
+	integrateBranches []string,
 ) error {
 	logger := logf.FromContext(ctx)
 
@@ -110,11 +113,12 @@ func triggerBoundaryPush(
 	}
 
 	pushOpts := PushOptions{
-		TidePushImage:  tidePushImage,
-		Branch:         project.Status.Git.BranchName,
-		LastPushedSHA:  project.Status.Git.LastPushedSHA,
-		CommitMessage:  msg,
-		LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+		TidePushImage:         tidePushImage,
+		Branch:                project.Status.Git.BranchName,
+		LastPushedSHA:         project.Status.Git.LastPushedSHA,
+		CommitMessage:         msg,
+		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
+		IntegrateTaskBranches: integrateBranches,
 	}
 	pushJob := buildPushJob(project, pvcName, pushOpts, scheme)
 	if cErr := c.Create(ctx, pushJob); cErr != nil {
@@ -129,24 +133,91 @@ func triggerBoundaryPush(
 	return nil
 }
 
+// triggerWaveIntegrationJob dispatches a per-wave integration Job for the
+// given plan, project, and wave index. The Job runs tide-push --mode=push with
+// --integrate-task-branches set (no --artifact-paths) to merge wave k's task
+// branches into the run branch before wave k+1 executors are dispatched (D-02).
+//
+// Job name is deterministic: "tide-push-wave-<plan.UID>-<waveIndex>" so
+// idempotency relies on AlreadyExists at the K8s API level.
+//
+// Returns apierrors.IsAlreadyExists-tolerant: AlreadyExists is treated as
+// success (idempotent dispatch).
+func triggerWaveIntegrationJob(
+	ctx context.Context,
+	c client.Client,
+	scheme *runtime.Scheme,
+	plan *tideprojectv1alpha1.Plan,
+	project *tideprojectv1alpha1.Project,
+	waveIndex int,
+	branches []string,
+	tidePushImage string,
+) error {
+	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
+		return nil
+	}
+	if tidePushImage == "" {
+		return nil
+	}
+
+	pvcName := defaultSharedPVCName
+	jobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveIndex)
+	commitMsg := fmt.Sprintf("tide: integrate wave %d", waveIndex)
+
+	pushOpts := PushOptions{
+		TidePushImage:         tidePushImage,
+		Branch:                project.Status.Git.BranchName,
+		LastPushedSHA:         project.Status.Git.LastPushedSHA,
+		CommitMessage:         commitMsg,
+		IntegrateTaskBranches: branches,
+		// ArtifactPaths intentionally empty — integration-only push; no planner
+		// artifacts are staged until the plan-boundary push fires.
+		LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+	}
+
+	job := buildPushJob(project, pvcName, pushOpts, scheme)
+	// Override the deterministic name: wave integration jobs are named
+	// tide-push-wave-<plan.UID>-<waveIndex>, distinct from the plan-boundary
+	// tide-push-<project.UID> job.
+	job.Name = jobName
+	// Owner ref on Plan (not Project) so cleanup happens on Plan deletion.
+	_ = owner.EnsureOwnerRef(job, plan, scheme)
+
+	if cErr := c.Create(ctx, job); cErr != nil {
+		if !apierrors.IsAlreadyExists(cErr) {
+			return fmt.Errorf("create wave integration job %s: %w", jobName, cErr)
+		}
+		// AlreadyExists — idempotent success.
+	}
+	return nil
+}
+
 // maybeTriggerBoundaryPush is the MilestoneReconciler entry point. Invoked
 // from handleJobCompletion AFTER the gate-policy seam passes (so a paused
 // or rejected level NEVER pushes) and BEFORE patchMilestoneSucceeded
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
 func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, "")
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, "", nil)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
 func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, "")
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, "", nil)
 }
 
 // maybeTriggerBoundaryPush is the PlanReconciler entry point. Plan boundary
 // commit messages carry the only D-B2 shape with `+ executed` suffix
 // because Tasks have already executed by the time the Plan boundary
-// fires.
-func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, "")
+// fires. It collects the branch names of all Succeeded tasks and passes
+// them as IntegrateTaskBranches so the push Job runs D-04 integration
+// before staging planner artifacts.
+func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project, taskItems []tideprojectv1alpha1.Task) error {
+	var branches []string
+	for _, t := range taskItems {
+		if t.Status.Phase == "Succeeded" {
+			branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
+		}
+	}
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, "", branches)
 }

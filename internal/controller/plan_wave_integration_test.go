@@ -40,6 +40,33 @@ func fakeSchemeForWaveInteg(t *testing.T) *runtime.Scheme {
 	return s
 }
 
+// waveIntegProject returns a minimal Project with git config set, wired as
+// the owner of a Plan via the tideproject.k8s/project label. This lets
+// resolveProjectForPlan find the Project so triggerWaveIntegrationJob can
+// dispatch the integration Job.
+func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha1.Project {
+	t.Helper()
+	return &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			UID:       types.UID("proj-uid-wave-integ"),
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			TargetRepo: "https://github.com/example/test.git",
+			Git: &tideprojectv1alpha1.GitConfig{
+				RepoURL:        "https://github.com/example/test.git",
+				CredsSecretRef: "test-creds",
+			},
+		},
+		Status: tideprojectv1alpha1.ProjectStatus{
+			Git: tideprojectv1alpha1.GitStatus{
+				BranchName: "tide/run-test-1",
+			},
+		},
+	}
+}
+
 // buildPlanReconcilerForWaveInteg builds a PlanReconciler that operates on a
 // fake client with the field indexer for taskPlanRefIndexKey wired.
 func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs ...client.Object) (*PlanReconciler, client.Client) {
@@ -51,6 +78,7 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 			&tideprojectv1alpha1.Plan{},
 			&tideprojectv1alpha1.Task{},
 			&batchv1.Job{},
+			&tideprojectv1alpha1.Project{},
 		).
 		WithIndex(&tideprojectv1alpha1.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
 			task := obj.(*tideprojectv1alpha1.Task) //nolint:forcetypeassert
@@ -128,14 +156,21 @@ func findIntegrationJobForWave(jobs []batchv1.Job, planUID types.UID, waveIdx in
 // across five reconcile steps (steps a through e per the plan behavior block).
 func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	const planName = "wave-integ-plan"
+	const projectName = "wave-integ-proj"
 	scheme := fakeSchemeForWaveInteg(t)
 
+	// Project with git config — needed by triggerWaveIntegrationJob.
+	proj := waveIntegProject(t, projectName)
+	proj.Status.Git.BranchName = "tide/run-wave-integ-1"
+
 	// Plan with two waves: wave-0 (task1, task2, no deps) and wave-1 (task3 depends on task1).
+	// Label tideproject.k8s/project allows resolveProjectForPlan fast-path.
 	plan := &tideprojectv1alpha1.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-1"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
 		Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-1"},
 		Status: tideprojectv1alpha1.PlanStatus{
@@ -149,7 +184,18 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	// Wave-1 task: depends on task1, not yet Succeeded.
 	task3 := makeWaveIntegTask("task3", "uid-task3", planName, "Running", []string{"task1"})
 
-	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, plan, task1, task2, task3)
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2, task3)
+
+	// Patch Project status (WithStatusSubresource requires Status().Update for status).
+	var projGot tideprojectv1alpha1.Project
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: projectName, Namespace: "default"}, &projGot); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	projPatch := client.MergeFrom(projGot.DeepCopy())
+	projGot.Status.Git.BranchName = "tide/run-wave-integ-1"
+	if err := fc.Status().Patch(context.Background(), &projGot, projPatch); err != nil {
+		t.Fatalf("patch project status: %v", err)
+	}
 
 	planUID := plan.UID
 	integJobName := fmt.Sprintf("tide-push-wave-%s-1", planUID)
@@ -261,6 +307,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 			Name:      plan2Name,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-2"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
 		Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-2"},
 		Status: tideprojectv1alpha1.PlanStatus{
@@ -279,7 +326,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	if err := fc.Create(context.Background(), task5); err != nil {
 		t.Fatalf("step (e) create task5: %v", err)
 	}
-	// Patch plan2 status to Validated.
+	// Patch plan2 status to Validated (WithStatusSubresource strips status from Create).
 	var pp2 tideprojectv1alpha1.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &pp2); err != nil {
 		t.Fatalf("step (e) get plan2: %v", err)
@@ -288,6 +335,16 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	pp2.Status.ValidationState = "Validated"
 	if err := fc.Status().Patch(context.Background(), &pp2, pp2p); err != nil {
 		t.Fatalf("step (e) patch plan2 status: %v", err)
+	}
+	// Patch task4 status to Succeeded.
+	var t4 tideprojectv1alpha1.Task
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: "task4-e", Namespace: "default"}, &t4); err != nil {
+		t.Fatalf("step (e) get task4: %v", err)
+	}
+	t4p := client.MergeFrom(t4.DeepCopy())
+	t4.Status.Phase = "Succeeded"
+	if err := fc.Status().Patch(context.Background(), &t4, t4p); err != nil {
+		t.Fatalf("step (e) patch task4 status: %v", err)
 	}
 
 	// Step (e-i): dispatch the integration Job.

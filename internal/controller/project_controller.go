@@ -467,7 +467,15 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		return ctrl.Result{}, cloneErr
 	}
 	if apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
-		cloneJob := buildCloneJob(project, pvcName, CloneOptions{TidePushImage: r.TidePushImage}, r.Scheme)
+		cloneOpts := CloneOptions{TidePushImage: r.TidePushImage}
+		// B6: wire the run branch name so tide-push calls EnsureRunBranch + provisions
+		// the run worktree during clone (B5). project.Status.Git.BranchName is set by
+		// the ProjectReconciler before dispatching the clone Job (reconcilePhase3Lifecycle
+		// stamps BranchName in the same reconcile cycle that dispatches the clone Job).
+		if project.Status.Git.BranchName != "" {
+			cloneOpts.RunBranch = project.Status.Git.BranchName
+		}
+		cloneJob := buildCloneJob(project, pvcName, cloneOpts, r.Scheme)
 		if cErr := r.Create(ctx, cloneJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
 				return ctrl.Result{}, fmt.Errorf("create clone job: %w", cErr)

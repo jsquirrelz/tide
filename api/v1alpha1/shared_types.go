@@ -152,3 +152,15 @@ const (
 	// ReasonNoOwnerRef — no Project owner ref in the (bounded) owner-ref chain.
 	ReasonNoOwnerRef = "NoOwnerRef"
 )
+
+// Phase 11 condition + reason vocabulary — per-wave integration failure.
+// A wave integration Job (BackoffLimit exhausted) failed before wave k+1 could
+// be dispatched; the Plan is marked terminal Failed so dependents never dispatch
+// and the reconciler does not livelock.
+const (
+	// ReasonWaveIntegrationFailed — a per-wave integration Job (BackoffLimit
+	// exhausted) failed before wave k+1 could be dispatched. Plan is marked
+	// terminal Failed; subsequent reconcile cycles see Phase=="Failed" and
+	// exit early without requeueing.
+	ReasonWaveIntegrationFailed = "WaveIntegrationFailed"
+)
