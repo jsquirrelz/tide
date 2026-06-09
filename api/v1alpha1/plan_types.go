@@ -50,6 +50,14 @@ type PlanStatus struct {
 	// during DAG validation (populated when ValidationState=CycleDetected, Phase 2+).
 	// +optional
 	CycleEdges []string `json:"cycleEdges,omitempty"`
+
+	// IntegratedThroughWave records the highest 1-indexed wave number whose task
+	// branches have been fully integrated into the run branch. The per-wave
+	// integration trigger in reconcileWaveMaterialization gates on this field
+	// to avoid re-firing integration every reconcile cycle (D-02/SC-3).
+	// Zero means no waves have been integrated yet.
+	// +optional
+	IntegratedThroughWave int `json:"integratedThroughWave,omitempty"`
 }
 
 // +kubebuilder:object:root=true
