@@ -18,6 +18,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	gogit "github.com/go-git/go-git/v5"
@@ -48,8 +49,29 @@ func Clone(ctx context.Context, repoURL, destDir, pat string) (*gogit.Repository
 			Password: pat,
 		},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("git clone %s: %w", repoURL, err)
+	if err == nil {
+		return repo, nil
 	}
-	return repo, nil
+
+	// Idempotent path: a prior clone attempt (Job retry, second reconcile)
+	// already wrote the bare repo at destDir. Open it and optionally fetch so
+	// the caller always gets a usable, up-to-date repository.
+	if errors.Is(err, gogit.ErrRepositoryAlreadyExists) {
+		existing, openErr := gogit.PlainOpen(destDir)
+		if openErr != nil {
+			return nil, fmt.Errorf("git open existing %s: %w", destDir, openErr)
+		}
+		// Anonymous in-cluster http:// remotes may reject BasicAuth with an
+		// empty password (RESEARCH Pitfall 1). Skip Fetch when pat == "" to
+		// avoid accidental auth-header emission to public servers.
+		if pat == "" {
+			return existing, nil
+		}
+		if fetchErr := Fetch(ctx, existing, pat); fetchErr != nil {
+			return nil, fmt.Errorf("git fetch existing %s: %w", destDir, fetchErr)
+		}
+		return existing, nil
+	}
+
+	return nil, fmt.Errorf("git clone %s: %w", repoURL, err)
 }
