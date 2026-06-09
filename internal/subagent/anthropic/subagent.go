@@ -40,6 +40,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -405,12 +406,14 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 	sort.Strings(names) // deterministic order for stable child materialization
 
 	children := make([]pkgdispatch.ChildCRDSpec, 0, len(names))
+	var parseErrs []error
 	for _, name := range names {
 		full := filepath.Join(childrenDir, name)
 
 		// Traversal defense: reject any entry that is a symlink or whose
 		// resolved path escapes baseReal. Lstat (not Stat) so we inspect the
-		// link itself, not its target.
+		// link itself, not its target. These are security boundaries — hard-abort,
+		// NOT per-file-skip (T-10-03-A mitigation).
 		info, lerr := os.Lstat(full)
 		if lerr != nil {
 			return nil, fmt.Errorf("lstat child file %q: %w", name, lerr)
@@ -433,20 +436,51 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 		if rderr != nil {
 			return nil, fmt.Errorf("read child file %q: %w", name, rderr)
 		}
+
+		// Use json.Decoder instead of json.Unmarshal so trailing prose after the
+		// closing } is ignored (Decoder stops at end of first JSON value). This
+		// is the observed production failure class: model appended explanatory
+		// text after }. json.Unmarshal would return "invalid character 'W'...".
 		var spec pkgdispatch.ChildCRDSpec
-		if jerr := json.Unmarshal(data, &spec); jerr != nil {
-			return nil, fmt.Errorf("parse child file %q: %w", name, jerr)
+		dec := json.NewDecoder(bytes.NewReader(data))
+		if jerr := dec.Decode(&spec); jerr != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("parse child file %q: %w", name, jerr))
+			continue
 		}
+		// Double-object detection (T-10-03-B mitigation): attempt to decode a
+		// second value from the stream. If a second full JSON value parses
+		// successfully, the file contains two concatenated objects — reject it so
+		// the second ChildCRDSpec cannot be silently injected. Trailing prose
+		// (e.g. "With these tasks we will...") is NOT valid JSON, so the second
+		// Decode returns a syntax error and we ignore it — trailing prose is
+		// the observed production failure class and must be tolerated.
+		var extra interface{}
+		if extraErr := dec.Decode(&extra); extraErr == nil {
+			parseErrs = append(parseErrs, fmt.Errorf("child file %q contains extra content after JSON object", name))
+			continue
+		}
+		// Kind/name validation: correctness checks, not security boundaries —
+		// per-file-skip (append error + continue) so a bad kind/name in one file
+		// does not lose its valid siblings.
 		if !childKindAllowlist[spec.Kind] {
-			return nil, fmt.Errorf("child file %q declares disallowed kind %q (allowed: Milestone, Phase, Plan, Task, Wave)", name, spec.Kind)
+			parseErrs = append(parseErrs, fmt.Errorf("child file %q declares disallowed kind %q (allowed: Milestone, Phase, Plan, Task, Wave)", name, spec.Kind))
+			continue
 		}
 		if spec.Name == "" {
-			return nil, fmt.Errorf("child file %q has empty name", name)
+			parseErrs = append(parseErrs, fmt.Errorf("child file %q has empty name", name))
+			continue
 		}
 		// Stamp the workspace-relative origin path so the controller can wire
 		// Task.Spec.PromptPath → this artifact (defect #10b). Not model-authored.
 		spec.SourcePath = filepath.Join(relPrefix, name)
 		children = append(children, spec)
+	}
+	if len(parseErrs) > 0 {
+		// Return valid siblings alongside the joined parse errors. The caller
+		// (Run) treats a non-nil readErr as a task-level failure — children that
+		// parsed successfully are still surfaced so the error message can name
+		// exactly which file(s) failed.
+		return children, errors.Join(parseErrs...)
 	}
 	return children, nil
 }
