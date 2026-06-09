@@ -932,3 +932,59 @@ func TestMakeWorkspaceGroupShared(t *testing.T) {
 		t.Errorf("file %s not group-writable: %v", f, fi.Mode().Perm())
 	}
 }
+
+// TestRunPushIntegrationOnlyNoArtifacts covers the per-wave integration job:
+// --integrate-task-branches is set but there are NO planner artifacts. The merge
+// must advance the LOCAL run branch and the run MUST exit 0 — it must NOT fall
+// through to the boundary commit, which would fail with "cannot create empty
+// commit: clean working tree" (the medium DoD per-wave integration failure).
+func TestRunPushIntegrationOnlyNoArtifacts(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "integ-only")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	taskBranch := "tide/wt-uidA"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "taskA.txt", "task A content")
+
+	// Push with integration but NO artifacts — the per-wave integration case.
+	pushCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: integrate wave 1",
+		ArtifactPaths:         nil,
+		IntegrateTaskBranches: []string{taskBranch},
+		Workspace:             ws,
+		ProjectUID:            "p-integ-only",
+	}
+	exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("integration-only push exit=%d (want 0); stderr=%s", exit, stderr)
+	}
+
+	// The merge must have advanced the LOCAL run branch (workspace repo.git),
+	// making the task file reachable from the run branch tip.
+	localRepo, err := gogit.PlainOpen(filepath.Join(ws, "repo.git"))
+	if err != nil {
+		t.Fatalf("PlainOpen local repo.git: %v", err)
+	}
+	ref, err := localRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("local run branch ref %q: %v", branch, err)
+	}
+	commit, err := localRepo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	if _, err := commit.File("taskA.txt"); err != nil {
+		t.Errorf("taskA.txt not reachable from local run branch after integration-only merge: %v", err)
+	}
+}

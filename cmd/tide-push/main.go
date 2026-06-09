@@ -357,6 +357,18 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "tide-push: integrate task branches: %v\n", err)
 			return exitGenericFail
 		}
+
+		// Per-wave integration-only mode: task branches were integrated but there
+		// are no planner artifacts to stage. The merge has already advanced the
+		// LOCAL run branch — the only thing the next wave's worktrees need, since
+		// they fork from it on the shared PVC. There is nothing to commit or push
+		// (attempting the boundary commit below would fail with "cannot create
+		// empty commit: clean working tree"). The remote push happens only at the
+		// final plan boundary, which carries planner artifacts. Exit success.
+		if len(cfg.ArtifactPaths) == 0 {
+			fmt.Fprintf(stderr, "tide-push: integration-only run — merged %d task branch(es) into %s locally; no artifacts to commit/push\n", len(cfg.IntegrateTaskBranches), cfg.Branch)
+			return exitSuccess
+		}
 	}
 
 	// Open the per-run worktree. The orchestrator's prior clone-mode Job
