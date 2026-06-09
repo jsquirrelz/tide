@@ -752,6 +752,28 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 			continue
 		}
 
+		// Integration only applies when a real git target + push image exist.
+		// Stub/test/no-remote projects have no run branch to integrate into —
+		// there is nothing to push, so this boundary must NOT block wave k+1
+		// dispatch (otherwise the no-op triggerWaveIntegrationJob would requeue
+		// forever and IntegratedThroughWave would never advance). Fall through to
+		// the normal label-stamp + Task-dispatch path below.
+		if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" || r.TidePushImage == "" {
+			continue
+		}
+
+		// PauseBetweenWaves (Plan 04-05) is the OUTER operator gate at this
+		// boundary: do not integrate a wave that is still awaiting operator
+		// approval. maybePauseForWaveApprove (downstream) sets the
+		// WaveOrLevelPaused condition and blocks Task dispatch via the
+		// wave-paused label. Once the operator approves, the wave-approved-<N>
+		// label is stamped and integration proceeds on a later reconcile —
+		// integrate-then-dispatch ordering is preserved past the gate.
+		if project.Spec.Gates.PauseBetweenWaves &&
+			plan.Labels[fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, waveNum)] != "true" {
+			continue
+		}
+
 		integJobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveNum)
 
 		// RESPONSIBILITY A: Check if integration Job exists.
