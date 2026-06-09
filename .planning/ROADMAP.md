@@ -472,13 +472,13 @@ Plans:
 **Open forks for planning/research:** (a) integration mechanism — `git merge` per-task branches in a per-run worktree vs ref-level fast-forward vs cherry-pick in DAG order; (b) integration timing — per-wave (so dependents see dependencies) vs all-at-push-boundary; (c) commit identity source (Helm values / env) and empty-diff handling; (d) does `tide-push` still author the planner-artifact boundary commit alongside the executor run branch, or are the two commit streams unified.
 
 **Depends on:** Phase 10
-**Plans:** 4 plans
+**Plans:** 2/4 plans executed
 
 Plans:
 
 **Wave 1** *(parallel — B3 harness commit and B4 integration are independent)*
-- [ ] 11-01-PLAN.md — B3: internal/harness/commit.go (CommitWorktree) + cmd/claude-subagent wiring (SC-2)
-- [ ] 11-02-PLAN.md — B4: pkg/git/integrate.go (IntegrateTaskBranches via git merge --no-ff) (SC-3)
+- [x] 11-01-PLAN.md — B3: internal/harness/commit.go (CommitWorktree) + cmd/claude-subagent wiring (SC-2)
+- [x] 11-02-PLAN.md — B4: pkg/git/integrate.go (IntegrateTaskBranches via git merge --no-ff) (SC-3)
 
 **Wave 2** *(blocked on Wave 1 — B5/B6 consume B4 IntegrateTaskBranches)*
 - [ ] 11-03-PLAN.md — B5+B6: tide-push clone provisions run-branch+worktree; runPush --integrate-task-branches; buildCloneJob --run-branch; PlanReconciler per-wave integration (SC-1, SC-4, SC-5)
