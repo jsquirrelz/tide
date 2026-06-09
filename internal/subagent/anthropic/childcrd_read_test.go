@@ -141,16 +141,85 @@ func TestReadChildCRDs_RejectsSymlink(t *testing.T) {
 	}
 }
 
-// Test: malformed JSON in a child file surfaces a parse error (poisoned batch).
+// Test: malformed JSON in a child file surfaces a parse error (per-file
+// isolation contract): a single bad file returns zero children AND a non-nil
+// error naming the bad file.
 func TestReadChildCRDs_RejectsMalformedJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "children")
 	writeChild(t, dir, "bad.json", `{not json`)
 
-	_, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
 	if err == nil {
 		t.Fatal("expected parse error for malformed JSON, got nil")
 	}
 	if !strings.Contains(err.Error(), "parse child file") {
 		t.Errorf("error = %v, want parse-error message", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(children) = %d, want 0 (only bad file present)", len(got))
+	}
+}
+
+// Test: valid JSON followed by trailing prose (the observed production failure
+// class: model appended explanatory text after the closing }) is parsed
+// successfully — json.Decoder stops at end of first JSON value.
+func TestReadChildCRDs_TrailingProse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "children")
+	body := `{"kind":"Task","name":"task-01-init","spec":{"planRef":"plan-01"}}` +
+		"\nWith these tasks we will implement the feature."
+	writeChild(t, dir, "task-01.json", body)
+
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	if err != nil {
+		t.Fatalf("expected nil error for trailing prose, got: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(children) = %d, want 1", len(got))
+	}
+	if got[0].Name != "task-01-init" {
+		t.Errorf("Name = %q, want task-01-init", got[0].Name)
+	}
+}
+
+// Test: per-file isolation — a directory with one valid file and one malformed
+// file returns the valid sibling AND a non-nil error naming only the bad file.
+func TestReadChildCRDs_PartialParse(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "children")
+	writeChild(t, dir, "task-01.json", `{"kind":"Task","name":"task-01-init","spec":{"planRef":"plan-01"}}`)
+	// Malformed: valid JSON through the "name" field value then terminates mid-object.
+	writeChild(t, dir, "task-02.json", `{"kind":"Task","name":"task-02-W`)
+
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	if err == nil {
+		t.Fatal("expected non-nil error for partial parse, got nil")
+	}
+	if !strings.Contains(err.Error(), "task-02.json") {
+		t.Errorf("error = %v, want it to name task-02.json", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(children) = %d, want 1 (task-01 must be returned despite task-02 error)", len(got))
+	}
+	if got[0].Name != "task-01-init" {
+		t.Errorf("Name = %q, want task-01-init", got[0].Name)
+	}
+}
+
+// Test: a file containing two concatenated JSON objects (double-object
+// injection) is detected via dec.More() and treated as a per-file parse error.
+func TestReadChildCRDs_DoubleObject(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "children")
+	// Two valid JSON objects concatenated with no whitespace between them.
+	body := `{"kind":"Task","name":"task-01-init","spec":{}}{"kind":"Task","name":"task-02-extra","spec":{}}`
+	writeChild(t, dir, "task-01.json", body)
+
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	if err == nil {
+		t.Fatal("expected non-nil error for double-object file, got nil")
+	}
+	if !strings.Contains(err.Error(), "extra content") {
+		t.Errorf("error = %v, want 'extra content' message", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(children) = %d, want 0 (double-object file must be skipped)", len(got))
 	}
 }
