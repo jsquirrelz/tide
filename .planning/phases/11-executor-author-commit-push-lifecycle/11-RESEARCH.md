@@ -477,17 +477,15 @@ repo, err := gogit.PlainOpen(worktreeDir)
 
 **If this table is empty after planner review of A1:** All claims in this research were verified or cited — no user confirmation needed.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does `Task.status` have a `Git.HeadSHA` field?**
-   - What we know: `EnvelopeOut.Git *GitOutput` carries `HeadSHA` [VERIFIED: pkg/dispatch/envelope.go:203]. The reporter creates child CRDs via the K8s API. `TerminationStub.HeadSHA` is populated [VERIFIED: pkg/dispatch/envelope.go:346]. The controller may or may not surface it to `task.Status`.
-   - What's unclear: Whether `api/v1alpha1/task_types.go` has a `Status.Git.HeadSHA` field. If absent, the integration step (B4) can still work by computing `TaskBranchName(taskUID)` directly without reading HeadSHA from status.
-   - Recommendation: Planner should grep `api/v1alpha1/task_types.go` for `Git` or `HeadSHA` before designing B6. If absent, integration uses `TaskBranchName()` directly and B6 is simpler.
+   - **RESOLVED (2026-06-09, orchestrator grep): NO.** `api/v1alpha1/task_types.go` has no `Status.Git` field. `api/v1alpha1/project_types.go` has `GitStatus{BranchName, LastPushedSHA}` on `Project.Status.Git` (the push lease + run-branch source). Integration (B4) resolves branches via `TaskBranchName(taskUID)` directly; B6 may add `Task.Status.Git.HeadSHA` only if needed (currently unnecessary).
+   - Original context: `EnvelopeOut.Git *GitOutput` carries `HeadSHA` [VERIFIED: pkg/dispatch/envelope.go:203]; `TerminationStub.HeadSHA` populated [VERIFIED: pkg/dispatch/envelope.go:346].
 
 2. **Integration job vs integration step inside push job?**
-   - What we know: `triggerBoundaryPush` dispatches one Job per plan boundary. The push job already has PVC access and the git CLI. Adding `--integrate-task-branches=<CSV>` to the push job args is the minimal-new-code approach.
-   - What's unclear: Whether per-wave integration needs a separate Job (to fire at wave completion, not just at plan boundary), or whether a two-pass approach (integrate at plan boundary before planner artifact commit) satisfies SC-3.
-   - Recommendation: Implement as a pre-step in the push Job (`--integrate-task-branches` flag) plus a wave-completion trigger in the plan/wave reconciler. This keeps the surface change minimal.
+   - **RESOLVED (2026-06-09, D-04 + per-wave fork fix): BOTH — step inside push job AND a per-wave trigger.** Per D-04 the push job runs `IntegrateTaskBranches` as a `--integrate-task-branches` pre-step before the planner-artifact boundary commit. Per D-02 (locked per-wave, user-confirmed thorough fix 2026-06-09) the PlanReconciler ALSO triggers integration of wave k-1's branches before wave k+1 task materialization, tracked via an `IntegratedWaves`-style status field so it doesn't re-fire every reconcile. Both reuse the same `IntegrateTaskBranches` + push-job infrastructure.
+   - Original context: `triggerBoundaryPush` dispatches one Job per plan boundary; the push job already has PVC access + git CLI.
 
 ## Sources
 
