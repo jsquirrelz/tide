@@ -197,6 +197,9 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: pushSAName,
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: new(int64(1000)),
+					},
 					Volumes:            volumes,
 					Containers: []corev1.Container{
 						{
@@ -275,6 +278,9 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: pushSAName,
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: new(int64(1000)),
+					},
 					Volumes: []corev1.Volume{
 						{
 							Name: pushWorkspaceVolume,
