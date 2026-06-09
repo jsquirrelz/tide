@@ -4,14 +4,17 @@
  *   Covers useTasks() + useTaskDetail() hooks:
  *     1. useTasks happy path — initial fetchPlan resolves; tasks
  *        populated; statuses coerced to StatusValue via STATUS_TABLE.
- *     2. useTasks SSE refresh — FakeEventSource emits a Task event for
+ *     2. useTasks namespace forwarding (debug #14) — the project namespace
+ *        rides the fetchPlan/fetchTask URL as a query param so non-default
+ *        namespaces resolve instead of 404-ing to an empty render.
+ *     3. useTasks SSE refresh — FakeEventSource emits a Task event for
  *        the active planRef; after 250ms debounce, fetchPlan called a
  *        2nd time.
- *     3. useTasks plan change — re-rendering with a new planName fires
+ *     4. useTasks plan change — re-rendering with a new planName fires
  *        the fetch for the new plan name.
- *     4. useTaskDetail null taskName — result.current === null and
+ *     5. useTaskDetail null taskName — result.current === null and
  *        fetchTask is NOT called.
- *     5. useTaskDetail SSE filter — event for a different taskName does
+ *     6. useTaskDetail SSE filter — event for a different taskName does
  *        NOT trigger a re-fetch.
  *
  *   The FakeEventSource stub is the same pattern sse.test.ts established
@@ -148,7 +151,7 @@ describe("useTasks (plan 04-17)", () => {
   it("happy path: fetches the plan, coerces statuses, sorts tasks", async () => {
     const fn = stubFetch(samplePlanDetail);
     const { result } = renderHook(() =>
-      useTasks("prj-1", "auth-plan"),
+      useTasks("prj-1", "default", "auth-plan"),
     );
 
     // Drain pending microtasks so the initial fetchPlan resolves into
@@ -171,9 +174,25 @@ describe("useTasks (plan 04-17)", () => {
     expect(plan?.activeDispatchWave).toBe(1);
   });
 
+  it("debug #14: forwards the project namespace as a query param", async () => {
+    const fn = stubFetch(samplePlanDetail);
+    renderHook(() => useTasks("prj-1", "tide-sample-medium", "auth-plan"));
+
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    const calledUrl = String(fn.mock.calls[0][0]);
+    // The plan fetch MUST carry the namespace; without it the backend
+    // defaults to "default" and a non-default-namespace plan 404s → 0 tasks.
+    expect(calledUrl).toContain("/api/v1/plans/auth-plan");
+    expect(calledUrl).toContain("namespace=tide-sample-medium");
+  });
+
   it("SSE refresh: Task event in same planRef triggers debounced re-fetch", async () => {
     const fn = stubFetch(samplePlanDetail);
-    renderHook(() => useTasks("prj-1", "auth-plan"));
+    renderHook(() => useTasks("prj-1", "default", "auth-plan"));
 
     // Drain initial fetch.
     await act(async () => {
@@ -204,13 +223,24 @@ describe("useTasks (plan 04-17)", () => {
     });
 
     expect(fn).toHaveBeenCalledTimes(2);
+    // The debounced re-fetch must ALSO carry the namespace.
+    const refetchUrl = String(fn.mock.calls[1][0]);
+    expect(refetchUrl).toContain("namespace=default");
   });
 
   it("plan change: re-rendering with a new planName fires a fetch for the new plan", async () => {
     const fn = stubFetch(samplePlanDetail);
     const { rerender } = renderHook(
-      ({ p, pl }: { p: string | null; pl: string | null }) => useTasks(p, pl),
-      { initialProps: { p: "prj-1", pl: "plan-a" } },
+      ({
+        p,
+        ns,
+        pl,
+      }: {
+        p: string | null;
+        ns: string | null;
+        pl: string | null;
+      }) => useTasks(p, ns, pl),
+      { initialProps: { p: "prj-1", ns: "default", pl: "plan-a" } },
     );
 
     await act(async () => {
@@ -219,7 +249,7 @@ describe("useTasks (plan 04-17)", () => {
     expect(fn).toHaveBeenCalledTimes(1);
 
     // Re-render with a different plan name → new fetchPlan call.
-    rerender({ p: "prj-1", pl: "plan-b" });
+    rerender({ p: "prj-1", ns: "default", pl: "plan-b" });
 
     await act(async () => {
       await flushPromises();
@@ -236,7 +266,7 @@ describe("useTaskDetail (plan 04-17)", () => {
   it("null taskName: returns null without firing fetchTask", async () => {
     const fn = stubFetch(sampleTaskDetail);
     const { result } = renderHook(() =>
-      useTaskDetail("prj-1", null),
+      useTaskDetail("prj-1", "default", null),
     );
 
     // Give the effect a microtask to run; verify no fetch fired.
@@ -248,9 +278,23 @@ describe("useTaskDetail (plan 04-17)", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
+  it("debug #14: forwards the project namespace as a query param", async () => {
+    const fn = stubFetch(sampleTaskDetail);
+    renderHook(() => useTaskDetail("prj-1", "tide-sample-medium", "t-007"));
+
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    const calledUrl = String(fn.mock.calls[0][0]);
+    expect(calledUrl).toContain("/api/v1/tasks/t-007");
+    expect(calledUrl).toContain("namespace=tide-sample-medium");
+  });
+
   it("SSE filter: Task event for a different name does NOT re-fetch", async () => {
     const fn = stubFetch(sampleTaskDetail);
-    renderHook(() => useTaskDetail("prj-1", "t-007"));
+    renderHook(() => useTaskDetail("prj-1", "default", "t-007"));
 
     // Drain initial fetch.
     await act(async () => {

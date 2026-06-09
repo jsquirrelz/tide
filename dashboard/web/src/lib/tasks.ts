@@ -1,16 +1,27 @@
 /*
  * tasks.ts (plan 04-17)
  *
- *   `useTasks(projectName, planName)` and
- *   `useTaskDetail(projectName, taskName)` — the two hooks App.tsx wires
- *   into ExecutionDAGView and TaskDetailDrawer respectively.
+ *   `useTasks(projectName, namespace, planName)` and
+ *   `useTaskDetail(projectName, namespace, taskName)` — the two hooks
+ *   App.tsx wires into ExecutionDAGView and TaskDetailDrawer respectively.
  *
  *   Both follow the same composition pattern:
  *     1. fetch the rich detail via the new lib/api.ts helpers (fetchPlan
- *        / fetchTask) on initial mount + on name change.
+ *        / fetchTask) on initial mount + on name change. The selected
+ *        project's `namespace` is forwarded to the REST call so plans/tasks
+ *        in a non-`default` namespace resolve (debug #14: omitting it let
+ *        the backend default to "default" → 404 → empty render).
  *     2. compose useSSEStream against the project-events SSE URL with an
  *        `onMessage` callback that filters by `kind` + `planRef` / `name`
  *        and schedules a debounced (250ms) re-fetch.
+ *
+ *   Namespace note (debug #14): the REST endpoints (/plans/{name},
+ *   /tasks/{name}) default a missing `namespace` query param to "default"
+ *   server-side, so the namespace MUST be forwarded for non-default
+ *   projects. The SSE events endpoint (/projects/{name}/events) does NOT
+ *   share this footgun — its handler lists across all namespaces and
+ *   matches by name when namespace is empty, and the event hub is keyed by
+ *   Project name only. So only fetchPlan/fetchTask need the namespace.
  *
  *   SSE composition note (plan 04-17 deferral): useSSEStream is invoked
  *   UNCONDITIONALLY with a synthetic non-cluster URL ("/dev/null/no-project")
@@ -112,6 +123,7 @@ function taskDetailJSONToData(t: TaskDetailJSON): TaskDetailData {
 
 export function useTasks(
   projectName: string | null,
+  namespace: string | null,
   planName: string | null,
 ): TasksResult {
   const [plan, setPlan] = useState<ExecutionPlanData | null>(null);
@@ -124,12 +136,17 @@ export function useTasks(
   // current plan name without re-constructing the EventSource.
   const planNameRef = useRef<string | null>(planName);
   planNameRef.current = planName;
+  // Track the latest namespace the same way so the stable runFetch closure
+  // always forwards the current project's namespace without re-creating the
+  // callback (debug #14).
+  const namespaceRef = useRef<string | null>(namespace);
+  namespaceRef.current = namespace;
 
   // Triggers a fetch + state update. Wrapped so the SSE callback can
   // call it without depending on planName through the closure (the
   // planNameRef keeps the filter coherent).
   const runFetch = useCallback((name: string) => {
-    fetchPlan(name)
+    fetchPlan(name, namespaceRef.current ?? undefined)
       .then((p) => {
         // Stale-response guard: drop the result if planName has changed
         // since the fetch was kicked off.
@@ -144,7 +161,7 @@ export function useTasks(
       });
   }, []);
 
-  // Initial fetch + reset on planName / projectName change.
+  // Initial fetch + reset on planName / projectName / namespace change.
   useEffect(() => {
     // Clear any pending debounce timer from a previous planName.
     if (debounceRef.current) {
@@ -162,7 +179,7 @@ export function useTasks(
         debounceRef.current = null;
       }
     };
-  }, [projectName, planName, runFetch]);
+  }, [projectName, namespace, planName, runFetch]);
 
   // SSE: refresh-trigger only. The minimal projection lacks dependsOn/
   // waveIndex; we re-fetch the rich shape via fetchPlan on every relevant
@@ -195,15 +212,21 @@ export function useTasks(
 
 export function useTaskDetail(
   projectName: string | null,
+  namespace: string | null,
   taskName: string | null,
 ): TaskDetailResult {
   const [task, setTask] = useState<TaskDetailData | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const taskNameRef = useRef<string | null>(taskName);
   taskNameRef.current = taskName;
+  // See useTasks: forward the current project's namespace through a ref so
+  // the stable runFetch closure resolves tasks in non-default namespaces
+  // (debug #14).
+  const namespaceRef = useRef<string | null>(namespace);
+  namespaceRef.current = namespace;
 
   const runFetch = useCallback((name: string) => {
-    fetchTask(name)
+    fetchTask(name, namespaceRef.current ?? undefined)
       .then((t) => {
         // Stale-response guard.
         if (taskNameRef.current !== name) return;
@@ -230,7 +253,7 @@ export function useTaskDetail(
         debounceRef.current = null;
       }
     };
-  }, [projectName, taskName, runFetch]);
+  }, [projectName, namespace, taskName, runFetch]);
 
   useSSEStream(projectEventsURL(projectName), {
     onMessage: (e: MessageEvent) => {

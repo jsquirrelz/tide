@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppShell from "./components/AppShell";
 import Header from "./components/Header";
@@ -19,14 +19,24 @@ import { useTaskDetail, useTasks } from "./lib/tasks";
  * Top-level dashboard component (plan 04-13 + plan 04-17 wiring).
  *
  *   Hooks composed (plan 04-17 — last-mile wiring):
- *     useProjects()                 — fetches /api/v1/projects once + on refetch
- *     useTasks(project, plan)       — fetches /api/v1/plans/{plan} on planName change;
- *                                     SSE on /projects/{project}/events triggers debounced refetch
- *     useTaskDetail(project, task)  — fetches /api/v1/tasks/{task} on taskName change;
- *                                     same SSE refresh-trigger pattern.
+ *     useProjects()                       — fetches /api/v1/projects once + on refetch
+ *     useTasks(project, ns, plan)         — fetches /api/v1/plans/{plan}?namespace={ns}
+ *                                           on planName change; SSE on
+ *                                           /projects/{project}/events triggers debounced refetch
+ *     useTaskDetail(project, ns, task)    — fetches /api/v1/tasks/{task}?namespace={ns}
+ *                                           on taskName change; same SSE refresh-trigger pattern.
  *   The placeholder defaults from the pre-04-17 wiring are gone; selectedProject
  *   is null until either useProjects defaults it to projects[0].name or the
  *   operator picks one from <ProjectPicker>.
+ *
+ *   Namespace threading (debug #14): the plan/task REST endpoints default a
+ *   missing `namespace` query param to "default" server-side. Without
+ *   forwarding the selected project's namespace, plans/tasks in a non-default
+ *   namespace (tide-sample-medium, tide-sample-small, …) 404 and render as 0
+ *   tasks / 0 waves. We derive the namespace from the projects list (each
+ *   ProjectSummary carries {name, namespace, phase}) and pass it into both
+ *   hooks. The SSE events endpoint is namespace-agnostic (lists all namespaces
+ *   by name), so it needs no namespace.
  *
  *   Renders:
  *     - AppShell chrome (plan 04-12)
@@ -63,8 +73,26 @@ export default function App() {
     loading: projectsLoading,
     error: projectsError,
   } = useProjects();
-  const executionPlan = useTasks(selectedProject, selectedPlan);
-  const taskDetail = useTaskDetail(selectedProject, selectedTask);
+
+  // Debug #14: resolve the selected project's namespace from the projects
+  // list so the plan/task fetches target the right namespace. Null until a
+  // project is selected (or the list hasn't landed) — the hooks pass
+  // undefined through to fetchPlan/fetchTask in that case.
+  const selectedNamespace = useMemo(
+    () => projects.find((p) => p.name === selectedProject)?.namespace ?? null,
+    [projects, selectedProject],
+  );
+
+  const executionPlan = useTasks(
+    selectedProject,
+    selectedNamespace,
+    selectedPlan,
+  );
+  const taskDetail = useTaskDetail(
+    selectedProject,
+    selectedNamespace,
+    selectedTask,
+  );
 
   // Default selectedProject to the first project once useProjects resolves.
   // Operators with a single-project cluster never see the picker; multi-

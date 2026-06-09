@@ -929,3 +929,84 @@ DoD check: a real medium run must reach Project=Complete AND the
 `tide/run-medium-project-*` branch must be present on the in-cluster http://
 remote (`demo-remote.git`). Rebuild + reload the **tide-push image** before that
 re-verify. The #13b succession-vs-push-gate question is open for a user decision.
+
+---
+
+## DASHBOARD DEFECT (2026-06-09): #14 — dashboard shows 0 tasks / 0 waves for non-`default`-namespace projects — FIXED (frontend tests + build green; committed)
+
+Separate from the authoring-path / push cascade above. Surfaced during live
+validation of the medium ($5 real-Claude) sample, which runs in
+`tide-sample-medium` (a NON-`default` namespace).
+
+### 14. Frontend hooks omit the namespace → backend defaults to "default" → 404 → empty render — FIXED
+
+**Live evidence (in-cluster curl, OBSERVE FIRST — not hypothesized):**
+- `GET /api/v1/plans/plan-01-implement-formatted-now?namespace=tide-sample-medium`
+  → **200** WITH both task cards (correct).
+- `GET /api/v1/plans/plan-01-implement-formatted-now` (NO namespace) → **404**.
+
+**Root cause (CONFIRMED by reading the code):**
+- Backend: `cmd/dashboard/api/plans.go:83-85` and `tasks.go:98-100` default a
+  missing `namespace` query param to `"default"` (correct for single-namespace
+  deploys).
+- Frontend: `dashboard/web/src/lib/tasks.ts` — `useTasks(projectName, planName)`
+  called `fetchPlan(name)` (line 132) and `useTaskDetail(projectName, taskName)`
+  called `fetchTask(name)` (line 206) **WITHOUT the namespace arg**.
+  `fetchPlan`/`fetchTask` (lib/api.ts) DO support an optional namespace via
+  `withNamespace`, but the hooks never passed it → request omits namespace →
+  backend defaults to `"default"` → 404 → the hook's `.catch()` silently swallows
+  it → empty render (0 tasks, 0 waves). Masked whenever the namespace IS
+  `"default"` (why CI/dev fixtures never caught it).
+
+**Fix (frontend only — the backend default is CORRECT and was NOT changed):**
+1. `useTasks` and `useTaskDetail` gained a `namespace: string | null` parameter
+   (signatures now `(projectName, namespace, planName)` /
+   `(projectName, namespace, taskName)`, matching the existing
+   `useProjects(namespace?)` style). The namespace is held in a ref
+   (`namespaceRef`) so the stable `runFetch` closure forwards the CURRENT
+   namespace without re-creating the callback or the EventSource, and is added
+   to the effect deps so a namespace change re-fetches. `runFetch` now calls
+   `fetchPlan(name, namespaceRef.current ?? undefined)` /
+   `fetchTask(name, namespaceRef.current ?? undefined)`.
+2. `App.tsx` derives the namespace from the projects list
+   (`projects.find(p => p.name === selectedProject)?.namespace`, memoized as
+   `selectedNamespace`) — `useProjects()` returns `ProjectSummary[]` shaped
+   `{name, namespace, phase, …}` — and threads it into both hooks.
+
+**Decisions on the directive's secondary items:**
+- **SSE / events path: NO change needed (verified, not assumed).** The events
+  endpoint `/api/v1/projects/{name}/events` does NOT share the default-"default"
+  footgun: `cmd/dashboard/api/events_sse.go:236-262` (`projectExists`) lists
+  across ALL namespaces and matches by name when `namespace` is empty, and the
+  event hub (`informer_bridge.go`, "keyed by the owning Project name") subscribes
+  by Project name only — namespace-agnostic. So only `fetchPlan`/`fetchTask`
+  needed the namespace.
+- **Backend default-to-"default": LEFT AS-IS** (per directive option). It is
+  correct for single-namespace deploys; the frontend not forwarding the namespace
+  was the actual bug. Changing it would break `default`-namespace deploys.
+
+**Tests (vitest):** added two `debug #14` cases to
+`dashboard/web/src/lib/tasks.test.ts` asserting `useTasks`/`useTaskDetail` issue
+the fetch WITH `namespace=tide-sample-medium` in the URL, plus a `namespace=`
+assertion on the SSE-debounced re-fetch. Updated the 5 existing hook call sites
+to the new 3-arg signature.
+
+**Verification (observed):** `npm run test` (dashboard/web) → **139 passed
+(21 files)**, including 7 in tasks.test.ts; the `<500KB` bundle-size gate test
+passed. `npm run build` (tsc -b + vite) → green, bundle **468.90 kB** (< 500 KB).
+Copied `dashboard/web/dist` → `cmd/dashboard/embed/dist`; `go build ./cmd/dashboard`
+exit 0 (embedded SPA reflects the fix).
+
+**SECONDARY OBSERVATION (flagged, NOT fixed — separate defect, out of scope):**
+live Waves have `Status.TaskRefs == <none>` (empty), so the plan handler's
+`waveByTask` map is empty and every task falls through to `waveIndex=0` — the
+execution DAG collapses all tasks into wave 0. This does NOT cause the 0-tasks
+symptom (that is the 404) and is a DIFFERENT code path (the plan/wave controller
+populating `Wave.Status.TaskRefs`, not the dashboard frontend). Flagged as a
+candidate separate defect; NOT scoped into the namespace fix.
+
+**IMAGE REBUILD for live re-verify:** this fix is entirely in the dashboard SPA
+(embedded into `cmd/dashboard`). The **tide-dashboard image**
+(`ghcr.io/jsquirrelz/tide-dashboard:1.0.0`, built from `Dockerfile.dashboard`)
+is the ONLY image affected — it must be rebuilt + reloaded to live re-verify.
+The controller, subagent, and tide-push images are NOT affected by #14.
