@@ -34,16 +34,29 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
       -o /out/tide-push \
       ./cmd/tide-push
 
-# Stage 2: minimal runtime image.
-# distroless/static:nonroot is the correct base for tide-push: go-git's
-# HTTP(S) and SSH transports are pure-Go — no system git binary needed at
-# runtime. The in-cluster git-http-backend server (images/tide-git-http-server)
-# is the demo-only transport bridge; tide-push speaks to it over HTTP (pure-Go).
-# distroless/static:nonroot provides a minimal read-only filesystem with no
-# shell, no package manager, and runs as UID 65532 (nonroot) by default —
-# satisfying D-G3 without an explicit USER directive.
-FROM gcr.io/distroless/static:nonroot
+# Stage 2: minimal runtime image WITH the git binary.
+# The remote clone/push TRANSPORT remains pure-Go go-git (HTTP/SSH) — no git
+# binary is needed for that. But Phase 11 added LOCAL git operations that run
+# inside tide-push and DO shell out to the git CLI (go-git/v5 exposes neither):
+#   - B5 runClone: `git worktree add` to provision the per-run run-branch worktree
+#   - B4 IntegrateTaskBranches: `git merge --no-ff` to integrate per-task branches
+# distroless/static has no package manager, so the runtime base is alpine + apk
+# git (mirrors the claude-subagent cascade-C fix, 314afd8; the static
+# CGO_ENABLED=0 binary runs fine on musl). We recreate the uid 65532 (nonroot)
+# the prior distroless:nonroot base ran as, to keep the pod securityContext +
+# PVC fsGroup expectations intact (D-G3).
+FROM alpine:3.21
+
+RUN apk add --no-cache git \
+    # The per-run repo/worktree on the shared PVC may be owned by a different
+    # uid than 65532 (clone/executor uids differ); git 2.35+ refuses such repos
+    # as "dubious ownership". Trust all paths at the system level (mirrors the
+    # claude-subagent cascade-D fix, 5b9d4ca).
+    && git config --system --add safe.directory '*' \
+    && adduser -D -H -u 65532 nonroot
 
 COPY --from=builder /out/tide-push /usr/local/bin/tide-push
+
+USER 65532:65532
 
 ENTRYPOINT ["/usr/local/bin/tide-push"]
