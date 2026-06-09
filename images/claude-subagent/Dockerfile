@@ -37,13 +37,17 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 # the credproxy sidecar (Phase 2 D-C1..C4) — never baked into the image.
 # Host configuration directories are not bind-mounted (CLAUDE.md anti-pattern).
 #
-# No system git needed: the subagent harness clones the per-Project repo using
-# go-git's HTTP transport (pure-Go, no /bin/git shell-out). The medium sample's
-# demo remote is served by the in-cluster git-http-backend server
-# (images/tide-git-http-server), which the harness reaches over http:// — the
-# same pure-Go transport production HTTPS uses. node:22-slim ships no git and
-# none is needed (Phase 8+).
+# git IS required at the executor (task) level: EnsureWorktree shells out to the
+# git CLI's `git worktree add` (pkg/git/worktree.go — go-git/v5 does not expose
+# linked worktrees). Clone still uses go-git's pure-Go HTTP transport, but the
+# per-Task worktree the executor authors into needs the real git binary, so
+# node:22-slim (Debian) gets git installed. Prior to Phase 10 no executor ever
+# ran end-to-end, so this gap stayed latent.
 FROM node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.142
 
