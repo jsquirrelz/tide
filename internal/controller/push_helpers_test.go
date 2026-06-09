@@ -406,3 +406,60 @@ func TestBuildCloneJobArgs(t *testing.T) {
 		}
 	}
 }
+
+// ---------- Task 2 TDD: buildCloneJob --run-branch ----------
+
+// TestBuildCloneJobRunBranchArg asserts that buildCloneJob with a non-empty
+// CloneOptions.RunBranch produces a --run-branch=<value> arg in the Job container.
+func TestBuildCloneJobRunBranchArg(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := CloneOptions{
+		TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+		RunBranch:     "tide/run-test-1",
+	}
+	job := buildCloneJob(project, "tide-projects", opts, scheme)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	joined := strings.Join(args, " ")
+	want := "--run-branch=tide/run-test-1"
+	if !slices.Contains(args, want) {
+		t.Errorf("buildCloneJob: args missing %q (got: %s)", want, joined)
+	}
+}
+
+// TestBuildCloneJobNoRunBranch asserts backward-compat: when RunBranch is empty,
+// no --run-branch arg is added to the Job container args.
+func TestBuildCloneJobNoRunBranch(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}
+	job := buildCloneJob(project, "tide-projects", opts, scheme)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	joined := strings.Join(args, " ")
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--run-branch") {
+			t.Errorf("buildCloneJob with empty RunBranch: unexpected --run-branch arg (got: %s)", joined)
+		}
+	}
+}
+
+// TestBuildPushJobIntegrateTaskBranches asserts that buildPushJob with
+// PushOptions.IntegrateTaskBranches set produces a
+// --integrate-task-branches=<CSV> arg in the Job container.
+func TestBuildPushJobIntegrateTaskBranches(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := PushOptions{
+		TidePushImage:         "ghcr.io/jsquirrelz/tide-push:test",
+		Branch:                "tide/run-demo-1747200000",
+		CommitMessage:         "tide: integrate test",
+		IntegrateTaskBranches: []string{"tide/wt-a", "tide/wt-b"},
+	}
+	job := buildPushJob(project, "tide-projects", opts, scheme)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	joined := strings.Join(args, " ")
+	want := "--integrate-task-branches=tide/wt-a,tide/wt-b"
+	if !slices.Contains(args, want) {
+		t.Errorf("buildPushJob: args missing %q (got: %s)", want, joined)
+	}
+}
