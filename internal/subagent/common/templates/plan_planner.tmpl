@@ -66,6 +66,12 @@ Each file MUST be a single JSON object with this exact shape:
 
 Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
+
+IMPORTANT: Each JSON file MUST contain ONLY the JSON object — nothing before
+the opening { and nothing after the closing }. No prose, no markdown fences,
+no explanation. The file is read by a machine that fails on any character
+outside the JSON object.
+
 Markdown is the human-review surface; the JSON files are the machine contract.
 
 Original prompt:
