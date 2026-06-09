@@ -64,6 +64,12 @@ type PushOptions struct {
 	// override TOML mounted into the Job at /etc/tide/gitleaks-config.toml.
 	// When empty, tide-push falls back to its embedded default ruleset.
 	LeaksConfigMap string
+
+	// IntegrateTaskBranches is the ordered list of per-task branch names to merge
+	// into the run branch before staging planner artifacts (D-04/D-02). The push job
+	// receives these as --integrate-task-branches=<CSV>.
+	// Empty means no integration step is run (milestone/phase boundaries).
+	IntegrateTaskBranches []string
 }
 
 // CloneOptions carries the clone-mode arguments. Clone is a one-time op
@@ -73,6 +79,12 @@ type CloneOptions struct {
 	// TidePushImage is the image ref for the tide-push container (same
 	// image as push-mode — the binary dispatches on --mode).
 	TidePushImage string
+
+	// RunBranch is the per-run branch name (D-B6 format `tide/run-<project>-<unix>`).
+	// When non-empty, the clone Job passes --run-branch to tide-push so it
+	// calls EnsureRunBranch + provisions the run worktree after the bare clone.
+	// Empty means no run branch is provisioned (backward-compat).
+	RunBranch string
 }
 
 // pushSAName is the dedicated ServiceAccount for the tide-push Job pod.
@@ -142,6 +154,11 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 		// WR-04 fix: use strings.Join (stdlib O(n)) instead of the
 		// custom joinCSV which built the CSV via O(n²) string concat.
 		args = append(args, "--artifact-paths="+strings.Join(opts.ArtifactPaths, ","))
+	}
+	if len(opts.IntegrateTaskBranches) > 0 {
+		// D-04: pass --integrate-task-branches=<CSV> so tide-push merges
+		// per-task branches into the run branch before staging planner artifacts.
+		args = append(args, "--integrate-task-branches="+strings.Join(opts.IntegrateTaskBranches, ","))
 	}
 
 	volumes := []corev1.Volume{
@@ -264,6 +281,12 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 		"--mode=clone",
 		"--repo-url=" + project.Spec.Git.RepoURL,
 		"--workspace=/workspace",
+	}
+	if opts.RunBranch != "" {
+		// B6: pass --run-branch so tide-push calls EnsureRunBranch + provisions
+		// the run worktree during the clone phase (B5). This ensures the run
+		// worktree exists before any executor wave is dispatched.
+		args = append(args, "--run-branch="+opts.RunBranch)
 	}
 
 	job := &batchv1.Job{

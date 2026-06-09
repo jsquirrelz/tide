@@ -50,6 +50,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/pool"
 	"github.com/jsquirrelz/tide/pkg/dag"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 const planFinalizer = "tideproject.k8s/plan-cleanup"
@@ -506,7 +507,10 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// boundary requires firing the push from a separate seam in the wave-
 	// materialization path on task-status updates (out of REVIEW-FIX scope).
 	// Documented in 04-REVIEW-FIX.md.
-	if err := r.maybeTriggerBoundaryPush(ctx, plan, project); err != nil {
+	// At planner-Job completion time, Tasks do not yet exist (the planner just
+	// materialized them). Pass nil task branches — D-04 integration only runs
+	// after Tasks have Succeeded (handled in reconcileWaveMaterialization).
+	if err := r.maybeTriggerBoundaryPush(ctx, plan, project, nil); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -617,6 +621,16 @@ func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv
 
 // resolveProjectForPlan walks Plan → Phase → Milestone → Project.
 func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tideprojectv1alpha1.Plan) *tideprojectv1alpha1.Project {
+	// Fast path: if the Plan carries the tideproject.k8s/project label (stamped
+	// by stampTaskLabels), use it directly to avoid the Phase→Milestone→Project
+	// chain walk. This is the same label fast-path resolveProjectName uses.
+	if projectName, ok := plan.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+		var p tideprojectv1alpha1.Project
+		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: projectName}, &p); err == nil {
+			return &p
+		}
+	}
+
 	if plan.Spec.PhaseRef == "" {
 		return nil
 	}
@@ -699,6 +713,105 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	// Step 4: Materialize Waves (independent of Project resolution — DAG-only).
 	if err := r.materializeWaves(ctx, plan, taskList.Items, layers); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Step 4b: Per-wave integration gate (D-02 / SC-3 / Plan 11-03).
+	// For each wave boundary (wave k → wave k+1), we must ensure wave k's
+	// task branches are integrated into the run branch before wave k+1 executors
+	// are dispatched. Three responsibilities, checked in order each reconcile:
+	//
+	//   RESPONSIBILITY A — Completion gate / failure detection (check FIRST):
+	//   If an integration Job already exists for wave k+1, check its status:
+	//   - Failed > 0: permanently failed → mark Plan Failed (no livelock)
+	//   - Succeeded > 0: stamp IntegratedThroughWave = k+1 and continue
+	//   - Otherwise (running): return requeue to wait for completion
+	//
+	//   RESPONSIBILITY B — Dispatch:
+	//   If no integration Job exists, all wave-k tasks are Succeeded, and
+	//   IntegratedThroughWave < k+1: dispatch the integration Job and requeue.
+	//
+	//   RESPONSIBILITY C — Gate:
+	//   materializeWaves is called above; the per-wave integration field
+	//   gates task dispatch inside materializeWaves (enforced there).
+	//   Here we block if any wave boundary requires integration.
+
+	// Resolve project for wave integration jobs (need Project for push job spec).
+	project := r.resolveProjectForPlan(ctx, plan)
+
+	taskByName := make(map[string]*tideprojectv1alpha1.Task, len(taskList.Items))
+	for i := range taskList.Items {
+		taskByName[taskList.Items[i].Name] = &taskList.Items[i]
+	}
+
+	// Iterate each wave boundary k → k+1. Skip the last wave (no k+1 to gate on).
+	for k := 0; k < len(layers)-1; k++ {
+		waveNum := k + 1 // 1-indexed wave number
+
+		// If already integrated through this wave, skip to next boundary.
+		if plan.Status.IntegratedThroughWave >= waveNum {
+			continue
+		}
+
+		integJobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveNum)
+
+		// RESPONSIBILITY A: Check if integration Job exists.
+		var integJob batchv1.Job
+		getErr := r.Get(ctx, types.NamespacedName{Name: integJobName, Namespace: plan.Namespace}, &integJob)
+		if getErr == nil {
+			// Job exists — check terminal status.
+			// IMPORTANT: check Failed BEFORE Succeeded==0 to avoid livelock.
+			if integJob.Status.Failed > 0 {
+				// Permanently failed (BackoffLimit exhausted) → terminal Plan failure.
+				return r.patchPlanFailed(ctx, plan,
+					tideprojectv1alpha1.ReasonWaveIntegrationFailed,
+					fmt.Sprintf("wave %d integration job %s failed (BackoffLimit exhausted)", waveNum, integJobName))
+			}
+			if integJob.Status.Succeeded > 0 {
+				// Integration complete — stamp IntegratedThroughWave and continue loop.
+				patch := client.MergeFrom(plan.DeepCopy())
+				plan.Status.IntegratedThroughWave = waveNum
+				if err := r.Status().Patch(ctx, plan, patch); err != nil {
+					return ctrl.Result{}, fmt.Errorf("patch IntegratedThroughWave=%d: %w", waveNum, err)
+				}
+				continue
+			}
+			// Job is still running (Succeeded==0, Failed==0): block wave k+1 dispatch.
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		if !apierrors.IsNotFound(getErr) {
+			return ctrl.Result{}, fmt.Errorf("get wave integration job %s: %w", integJobName, getErr)
+		}
+
+		// RESPONSIBILITY B: No Job found — dispatch if all wave-k tasks Succeeded.
+		allWaveKSucceeded := true
+		for _, name := range layers[k] {
+			t := taskByName[name]
+			if t == nil || t.Status.Phase != "Succeeded" {
+				allWaveKSucceeded = false
+				break
+			}
+		}
+		if !allWaveKSucceeded {
+			// Wave k not yet complete — nothing to integrate yet.
+			continue
+		}
+
+		// Collect wave-k task branch names.
+		var branches []string
+		for _, name := range layers[k] {
+			t := taskByName[name]
+			if t != nil {
+				branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
+			}
+		}
+
+		// Dispatch the integration Job.
+		if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage); err != nil {
+			return ctrl.Result{}, err
+		}
+		// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).
+		// Do NOT stamp IntegratedThroughWave here — the Job has not yet completed.
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Step 5: Resolve the project name for Task label stamping.
