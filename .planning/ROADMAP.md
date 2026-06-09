@@ -441,13 +441,13 @@ Plans:
 **Open forks for planning/research:** (a) clone idempotency — skip-if-exists vs fetch-into-existing vs clean-and-reclone; (b) per-run workspace perms — initContainer chown vs fsGroup on the pod securityContext vs an init Job; (c) child-JSON robustness — strict prompt/schema constraint vs tolerant parse+repair vs per-file isolation so one bad child doesn't fail the dispatch; (d) dashboard detail 404 — API handler bug vs cache-key mismatch.
 
 **Depends on:** Phase 9
-**Plans:** 5 plans
+**Plans:** 4/5 plans executed
 
 Plans:
-- [ ] 10-01-PLAN.md — Clone idempotency: detect ErrRepositoryAlreadyExists → PlainOpen → Fetch; TestCloneIdempotent + TestFetchAnonymous (Wave 1)
-- [ ] 10-02-PLAN.md — Per-run workspace perms: FSGroup=1000 on buildCloneJob + buildPushJob PodSecurityContext; TestBuildCloneJobFSGroup + TestBuildPushJobFSGroup (Wave 1)
-- [ ] 10-03-PLAN.md — Child-CRD parse robustness: json.Decoder + dec.More() + per-file isolation in readChildCRDs; prompt constraint; TestReadChildCRDs_* (Wave 1)
-- [ ] 10-04-PLAN.md — Dashboard project-detail 404: cross-namespace fallback in Get; buildDetail helper; TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces (Wave 1)
+- [x] 10-01-PLAN.md — Clone idempotency: detect ErrRepositoryAlreadyExists → PlainOpen → Fetch; TestCloneIdempotent + TestFetchAnonymous (Wave 1)
+- [x] 10-02-PLAN.md — Per-run workspace perms: FSGroup=1000 on buildCloneJob + buildPushJob PodSecurityContext; TestBuildCloneJobFSGroup + TestBuildPushJobFSGroup (Wave 1)
+- [x] 10-03-PLAN.md — Child-CRD parse robustness: json.Decoder + dec.More() + per-file isolation in readChildCRDs; prompt constraint; TestReadChildCRDs_* (Wave 1)
+- [x] 10-04-PLAN.md — Dashboard project-detail 404: cross-namespace fallback in Get; buildDetail helper; TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces (Wave 1)
 - [ ] 10-05-PLAN.md — Medium DoD re-run: build+load Phase-10 images; live medium-sample run → Project=Complete + push + costSpentCents>0; record 10-VERIFICATION.md gate artifact (Wave 2) [checkpoint]
 
 **Evidence:** `.planning/debug/09-07-premature-succession-evidence.md` (live-run findings, all three task-execution defects + the dashboard symptom). Parked minikube is primed (fresh Phase-9 images, `TIDE_REPORTER_IMAGE` set, reporter RBAC fixed) for fast re-runs.

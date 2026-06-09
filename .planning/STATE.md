@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
 status: executing
-stopped_at: "UPDATE 2026-06-08 (session 2): Phase 09 mechanism FULLY VALIDATED live + two gap fixes merged. 09-08 (ChildCount-gated succession + planner cost rollup) and 09-09 (EnvelopeIn.Branch threading, replaces never-written branch.txt) both merged + unit-tested green. Live medium re-runs PROVED: no premature succession (levels stay Running until observed children >= authored count), cost rolls up (costSpentCents climbed to 71c), reporter mechanism + RBAC correct. BUT the medium DoD (legitimate Complete + push) is BLOCKED by a task-execution-layer CASCADE (orthogonal to Phase 9, never exposed before because no run legitimately reached task execution): (1) clone non-idempotent ('repository already exists' even on fresh PVC); (2) workspace-perms not self-healing per-run ('mkdir /workspace/envelopes/push: permission denied' after PVC wipe); (3) real-Claude authored MALFORMED child JSON (plan planner: 'parse child file task-03.json: invalid character'). RECOMMEND: dedicated Phase 10 (task-execution reliability: clone idempotency + per-run workspace init/perms + push + child-CRD parse robustness), then re-run DoD. v1.0.0 retag STILL BLOCKED. Parked minikube has fresh Phase-9 images (controller ce2c1a46, claude-subagent bb2ffdb3, reporter 9b6fcd24) + TIDE_REPORTER_IMAGE set + reporter RBAC fixed. Evidence: .planning/debug/09-07-premature-succession-evidence.md. PRIOR: Phase 09 plans 09-01..06 DONE+merged+green (cross-namespace reporter MECHANISM built & verified: in-namespace tide-reporter Job materializes children via K8s API, same-ns out.json read, tiny-status on termination msg, in-pod prompt read #10b, price table #6). 09-07 live acceptance on parked minikube (fresh Phase-9 images: controller a4a0c3d5, claude-subagent 3361e05b, reporter 9b6fcd24; TIDE_REPORTER_IMAGE set) RAN and surfaced 3 defects: (A) reporter RBAC missing get-projects + list-children — FIXED+committed c1be68c (SOT+chart+medium); (B) premature-succession race — 4 level controllers inconsistent post-reporter-spawn wait (phase has NO guard, lost the race → Project hit Complete while Plans Running); (C) cost rollup dropped — controllers discard ReadOut Usage → budget={}. Run STOPPED (spend halted). Fix design for B+C in .planning/debug/09-07-premature-succession-evidence.md. Phase 09 NOT complete; v1.0.0 retag STILL BLOCKED until 09-07 records a legitimate Complete (all descendants Succeeded + costSpentCents>0). NEXT: gap-closure plan for B+C, rebuild/reload/re-run."
-last_updated: "2026-06-08T17:38:47.834Z"
-last_activity: 2026-06-08 -- Phase 09 execution started
+stopped_at: "Phase 7 COMPLETE + verified APPROVED. Full make test-int GREEN (Layer A 29/29 + Layer B 14/14, MAKE_EXIT=0); $0 acceptance = Project Complete (ACC_EXIT=0). Closed this session: gate-flow test race (f8812ef), cascade-11 materialize guard (3468de9), cascade-12 chart image tags (3edceb7), cascade-13 credproxy gate (55d898a), podAnnotations chart restore (922e01a). cascade-7 closed; v1.0 ship-ready. Annotated LOCAL tag v1.0.0 created — NOT pushed (awaiting user confirmation)."
+last_updated: "2026-06-09T00:44:39.248Z"
+last_activity: 2026-06-09 -- Phase 10 execution started
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 2
-  total_plans: 27
-  completed_plans: 19
-  percent: 70
+  total_plans: 33
+  completed_plans: 26
+  percent: 79
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-12)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 09 — cross-namespace-envelope-return-in-namespace-reporter
+**Current focus:** Phase 10 — task-execution-reliability-clone-idempotency-per-run-workspa
 
 ## Current Position
 
-Phase: 09 (cross-namespace-envelope-return-in-namespace-reporter) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 09
-Last activity: 2026-06-08 -- Phase 09 execution started
+Phase: 10 (task-execution-reliability-clone-idempotency-per-run-workspa) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 10
+Last activity: 2026-06-09 -- Phase 10 execution started
 
 Progress: [██████████] 100%
 
