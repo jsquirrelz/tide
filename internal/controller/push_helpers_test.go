@@ -339,6 +339,53 @@ func TestBuildPushJobWithArtifacts(t *testing.T) {
 	}
 }
 
+// ---------- FSGroup tests (SC-2 / Plan 10-02) ----------
+
+// TestBuildCloneJobFSGroup asserts buildCloneJob sets PodSecurityContext.FSGroup
+// to 1000 so kubelet chowns the PVC mount at pod startup, enabling nonroot
+// containers to mkdir/write under /workspace without extra containers.
+func TestBuildCloneJobFSGroup(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}
+	job := buildCloneJob(project, "tide-projects", opts, scheme)
+
+	sc := job.Spec.Template.Spec.SecurityContext
+	if sc == nil {
+		t.Fatal("buildCloneJob: pod spec has no SecurityContext (expected FSGroup=1000)")
+	}
+	if sc.FSGroup == nil {
+		t.Fatal("buildCloneJob: SecurityContext.FSGroup is nil (expected 1000)")
+	}
+	if *sc.FSGroup != 1000 {
+		t.Errorf("buildCloneJob: SecurityContext.FSGroup = %d, want 1000", *sc.FSGroup)
+	}
+}
+
+// TestBuildPushJobFSGroup asserts buildPushJob sets PodSecurityContext.FSGroup
+// to 1000 so kubelet chowns the PVC mount at pod startup, enabling nonroot
+// containers to mkdir/write under /workspace without extra containers.
+func TestBuildPushJobFSGroup(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := PushOptions{
+		TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+		Branch:        "tide/run-demo-1747200000",
+	}
+	job := buildPushJob(project, "tide-projects", opts, scheme)
+
+	sc := job.Spec.Template.Spec.SecurityContext
+	if sc == nil {
+		t.Fatal("buildPushJob: pod spec has no SecurityContext (expected FSGroup=1000)")
+	}
+	if sc.FSGroup == nil {
+		t.Fatal("buildPushJob: SecurityContext.FSGroup is nil (expected 1000)")
+	}
+	if *sc.FSGroup != 1000 {
+		t.Errorf("buildPushJob: SecurityContext.FSGroup = %d, want 1000", *sc.FSGroup)
+	}
+}
+
 // ---------- Test 8: buildCloneJob args ----------
 
 func TestBuildCloneJobArgs(t *testing.T) {
