@@ -413,6 +413,44 @@ func TestBudgetSummary(t *testing.T) {
 	}
 }
 
+// TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces covers SC-7:
+// GET /api/v1/projects/{name} without a ?namespace= query param must find a
+// project that lives in a non-default namespace (e.g. tide-sample-medium).
+// Before the fix, the handler defaulted namespace="default" and 404'd.
+// After the fix, a cross-namespace List finds the first matching project by
+// name and returns its full detail with HTTP 200.
+func TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces(t *testing.T) {
+	_, router := newHandler(t,
+		newProject("medium-project", "tide-sample-medium", "Running"),
+	)
+
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	// No ?namespace= query param — exercises the cross-namespace fallback.
+	resp, err := http.Get(srv.URL + "/api/v1/projects/medium-project")
+	if err != nil {
+		t.Fatalf("GET medium-project (no namespace param): %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d; body: %s", resp.StatusCode, body)
+	}
+
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got["name"] != "medium-project" {
+		t.Errorf("name=%v, want medium-project", got["name"])
+	}
+	if got["namespace"] != "tide-sample-medium" {
+		t.Errorf("namespace=%v, want tide-sample-medium", got["namespace"])
+	}
+}
+
 // TestListProjectsActiveMilestoneCountCrossNamespace is the WR-10 regression
 // test: projects in different namespaces that happen to share a name must
 // NOT cross-contaminate each other's activeMilestoneCount via the hoisted

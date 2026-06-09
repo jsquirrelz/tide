@@ -172,29 +172,59 @@ func (h *ProjectsHandler) activeMilestoneCountsByProject(ctx context.Context, op
 // projectDetail with embedded Milestone/Phase/Plan children for the
 // PlanningDAGView render. 404 with JSON body when the project doesn't
 // exist; 500 with JSON body on apiserver errors.
+//
+// SC-7 fix: when ?namespace= is absent, performs a cross-namespace List and
+// returns the first project whose Name matches. This mirrors the all-namespace
+// behavior of List — so the dashboard's "click through from list to detail"
+// path works for projects in any namespace (e.g. tide-sample-medium).
 func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	name := chi.URLParam(r, "name")
 	namespace := r.URL.Query().Get("namespace")
-	if namespace == "" {
-		namespace = "default"
-	}
 
-	var p tidev1alpha1.Project
-	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
-		if apierrors.IsNotFound(err) {
-			writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
+	if namespace != "" {
+		// Fast path: namespace explicitly provided — direct lookup.
+		var p tidev1alpha1.Project
+		if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
+			if apierrors.IsNotFound(err) {
+				writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
+				return
+			}
+			h.Log.Error(err, "get project failed", "name", name, "namespace", namespace)
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
 			return
 		}
-		h.Log.Error(err, "get project failed", "name", name, "namespace", namespace)
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
+		writeJSON(w, http.StatusOK, h.buildDetail(ctx, &p))
 		return
 	}
 
-	count, _ := h.countActiveMilestones(ctx, &p)
+	// Cross-namespace fallback: list all projects and find the first by name.
+	// This is the SC-7 fix — the dashboard's List endpoint searches all
+	// namespaces; Get must behave consistently when ?namespace= is absent.
+	var projects tidev1alpha1.ProjectList
+	if err := h.Client.List(ctx, &projects); err != nil {
+		h.Log.Error(err, "list projects for cross-namespace Get failed", "name", name)
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
+		return
+	}
+	for i := range projects.Items {
+		if projects.Items[i].Name == name {
+			writeJSON(w, http.StatusOK, h.buildDetail(ctx, &projects.Items[i]))
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
+}
+
+// buildDetail builds the projectDetail response for a known Project p.
+// All child List calls use client.InNamespace(p.Namespace) — never any outer
+// namespace variable — so the result is always scoped to the project's
+// actual namespace. (RESEARCH Pitfall 4: child lists must use p.Namespace.)
+func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha1.Project) projectDetail {
+	count, _ := h.countActiveMilestones(ctx, p)
 
 	detail := projectDetail{
-		projectSummary: summarize(&p, count),
+		projectSummary: summarize(p, count),
 	}
 
 	// Milestones — filtered by Spec.ProjectRef == p.Name.
@@ -258,7 +288,7 @@ func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, detail)
+	return detail
 }
 
 // countActiveMilestones counts milestones owned by `p` whose Status.Phase
