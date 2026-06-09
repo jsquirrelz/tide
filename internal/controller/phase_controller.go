@@ -186,7 +186,10 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, nil
+			// Planner Job is gone (TTL/GC) but the level is still Running: the planner
+			// already completed and its envelope lives on the PVC keyed by UID, not on
+			// the Job. Fall through to completion so succession fires instead of parking.
+			return r.handleJobCompletion(ctx, ph, nil)
 		}
 		if isJobTerminal(&job) {
 			return r.handleJobCompletion(ctx, ph, &job)

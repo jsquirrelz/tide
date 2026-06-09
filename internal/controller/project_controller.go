@@ -711,7 +711,10 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, nil
+			// Planner Job is gone (TTL/GC) but the level is still Running: the planner
+			// already completed and its envelope lives on the PVC keyed by UID, not on
+			// the Job. Fall through to completion so succession fires instead of parking.
+			return r.handleProjectJobCompletion(ctx, project, nil)
 		}
 		if isJobTerminal(&job) {
 			return r.handleProjectJobCompletion(ctx, project, &job)
