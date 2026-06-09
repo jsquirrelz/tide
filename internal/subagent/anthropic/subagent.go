@@ -437,6 +437,13 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 			return nil, fmt.Errorf("read child file %q: %w", name, rderr)
 		}
 
+		// Escape raw control characters that the model left unescaped inside
+		// string literals (Phase 10 medium-DoD cascade: multi-line title/desc
+		// values produced literal '\n'/'\t' bytes → "invalid character '\\n' in
+		// string literal"). Control chars OUTSIDE strings are valid JSON
+		// whitespace and are left untouched, so pretty-printed JSON still parses.
+		data = sanitizeJSONStringControls(data)
+
 		// Use json.Decoder instead of json.Unmarshal so trailing prose after the
 		// closing } is ignored (Decoder stops at end of first JSON value). This
 		// is the observed production failure class: model appended explanatory
@@ -483,6 +490,79 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 		return children, errors.Join(parseErrs...)
 	}
 	return children, nil
+}
+
+// sanitizeJSONStringControls escapes raw ASCII control characters (U+0000–
+// U+001F) that appear INSIDE JSON string literals, leaving everything else —
+// including control chars used as structural whitespace between tokens —
+// byte-for-byte unchanged. LLM-authored child specs routinely contain literal
+// newlines/tabs inside multi-line title/description values; the JSON spec
+// requires those to be escaped, so a verbatim decode fails with "invalid
+// character '\n' in string literal". This makes such files decodable without
+// altering valid JSON (the escape of an already-valid document is a no-op).
+//
+// The scan tracks string-literal state with a backslash-escape toggle so a
+// quote that closes a string is distinguished from an escaped quote inside one.
+func sanitizeJSONStringControls(data []byte) []byte {
+	// Fast path: a document with no control bytes at all (e.g. compact
+	// single-line JSON) is already spec-valid — return it untouched.
+	hasControl := false
+	for _, b := range data {
+		if b < 0x20 {
+			hasControl = true
+			break
+		}
+	}
+	if !hasControl {
+		return data
+	}
+
+	out := make([]byte, 0, len(data)+16)
+	inString := false
+	escaped := false
+	for _, b := range data {
+		if !inString {
+			out = append(out, b)
+			if b == '"' {
+				inString = true
+			}
+			continue
+		}
+		// Inside a string literal.
+		if escaped {
+			out = append(out, b)
+			escaped = false
+			continue
+		}
+		switch {
+		case b == '\\':
+			out = append(out, b)
+			escaped = true
+		case b == '"':
+			out = append(out, b)
+			inString = false
+		case b < 0x20:
+			// Raw control char inside a string → escape it.
+			switch b {
+			case '\n':
+				out = append(out, '\\', 'n')
+			case '\r':
+				out = append(out, '\\', 'r')
+			case '\t':
+				out = append(out, '\\', 't')
+			case '\b':
+				out = append(out, '\\', 'b')
+			case '\f':
+				out = append(out, '\\', 'f')
+			default:
+				const hex = "0123456789abcdef"
+				out = append(out, '\\', 'u', '0', '0', hex[b>>4], hex[b&0xf])
+			}
+		default:
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // promptArtifact is the minimal shape readPromptArtifact decodes from the

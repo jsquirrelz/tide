@@ -72,6 +72,10 @@ the opening { and nothing after the closing }. No prose, no markdown fences,
 no explanation. The file is read by a machine that fails on any character
 outside the JSON object.
 
+IMPORTANT: Every string value MUST be valid JSON — escape any newline as \n,
+tab as \t, and double-quote as \". Do NOT put a raw (literal) line break inside
+a quoted string; keep multi-line descriptions on one line using \n escapes.
+
 Markdown is the human-review surface; the JSON files are the machine contract.
 
 Original prompt:

@@ -204,6 +204,51 @@ func TestReadChildCRDs_PartialParse(t *testing.T) {
 	}
 }
 
+// Test: defect A (Phase 10 medium DoD cascade) — the model emits a child-CRD
+// with a literal raw newline INSIDE a JSON string value (e.g. a multi-line
+// title/description), which is invalid JSON ("invalid character '\n' in string
+// literal"). readChildCRDs must tolerate raw control characters inside string
+// literals by escaping them before decoding, so the valid task still
+// materializes. Reproduces the exact tide-sample-medium plan-planner failure.
+func TestReadChildCRDs_RawNewlineInStringValue(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "children")
+	// Literal newline (and a tab) inside the "title" string value.
+	body := "{\"kind\":\"Task\",\"name\":\"task-01-init\",\"spec\":{\"planRef\":\"plan-01\",\"title\":\"Add config\nloader\twith defaults\"}}"
+	writeChild(t, dir, "task-01.json", body)
+
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	if err != nil {
+		t.Fatalf("expected nil error for raw newline in string value, got: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(children) = %d, want 1", len(got))
+	}
+	if got[0].Name != "task-01-init" {
+		t.Errorf("Name = %q, want task-01-init", got[0].Name)
+	}
+	// The escaped control chars must survive into the carried spec bytes.
+	if !strings.Contains(string(got[0].Spec.Raw), `Add config\nloader`) {
+		t.Errorf("spec = %q, want it to carry escaped newline in title", string(got[0].Spec.Raw))
+	}
+}
+
+// Test: defect A guard — control characters OUTSIDE string literals
+// (pretty-printed / multi-line structural JSON) are valid JSON whitespace and
+// must continue to parse unchanged after sanitization.
+func TestReadChildCRDs_PrettyPrintedStillParses(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "children")
+	body := "{\n  \"kind\": \"Task\",\n  \"name\": \"task-01-init\",\n  \"spec\": {\n\t\"planRef\": \"plan-01\"\n  }\n}"
+	writeChild(t, dir, "task-01.json", body)
+
+	got, err := readChildCRDs(dir, "envelopes/test-uid/children")
+	if err != nil {
+		t.Fatalf("expected nil error for pretty-printed JSON, got: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "task-01-init" {
+		t.Fatalf("got %d children (want 1, name task-01-init)", len(got))
+	}
+}
+
 // Test: a file containing two concatenated JSON objects (double-object
 // injection) is detected via dec.More() and treated as a per-file parse error.
 func TestReadChildCRDs_DoubleObject(t *testing.T) {
