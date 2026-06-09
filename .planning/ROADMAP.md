@@ -25,7 +25,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Project→Milestone Authoring & Self-Bootstrap** — Closes cascade-7: a bare Project authors its Milestone and drives the full five-level cascade to Complete; verified APPROVED 2026-05-31
 - [ ] **Phase 8: Medium-sample http transport & production git-transport policy** — Standardize production git on http(s)/SSH (pure-Go, no git binary); remove the broken `file://` demo path; rewrite the medium sample to serve its fixture over in-cluster `http://` so it actually works and mirrors production; revert the core-image git additions; add CI coverage. Closes a v1.0 ship-quality gap found in minikube validation 2026-06-03.
 - [ ] **Phase 9: Cross-namespace envelope return (in-namespace reporter)** — MECHANISM DONE + validated live: trusted in-namespace `tide-reporter` Job materializes child CRs via the K8s API (fixes #11/#12 cross-namespace PVC read), tiny status on the termination message, in-pod executor prompt read (#10b), race-free ChildCount-gated succession + planner cost rollup (gap 09-08), EnvelopeIn.Branch threading (gap 09-09). SC-4/SC-6 (legitimate medium Complete + retag) deferred to Phase 10 — see its outcome note.
-- [ ] **Phase 10: Task-Execution Reliability** (INSERTED) — Fix the leaf task-execution/git layer the first legitimate run-to-task-execution exposed: clone idempotency, per-run workspace init/perms, executor worktree branch, malformed child-JSON robustness; OWNS the legitimate medium Complete + push + v1.0.0 retag unblock; plus the dashboard project-detail 404.
+- [ ] **Phase 10: Task-Execution Reliability** (INSERTED) — Fix the leaf task-execution/git layer the first legitimate run-to-task-execution exposed: clone idempotency, per-run workspace init/perms, executor worktree branch, malformed child-JSON robustness; OWNS the legitimate medium Complete + push + v1.0.0 retag unblock; plus the dashboard project-detail 404. — 4 surgical fixes LANDED + 4 further cascades fixed in the DoD run; the executor author→commit→push lifecycle (cascade E) is routed to Phase 11.
+- [ ] **Phase 11: Executor Author→Commit→Push Lifecycle** (INSERTED) — Wire the never-connected executor authoring path so a Task executor's worktree changes are committed and the per-run `tide/run-*` branch is pushed with real authored code. Builds on Phase 10's landed foundation (B1 `EnsureRunBranch` + B2 real linked worktrees). OWNS the legitimate medium Complete + push + v1.0.0 retag unblock (inherited from Phase 10).
 
 ## Phase Details
 
@@ -448,6 +449,37 @@ Plans:
 - [x] 10-02-PLAN.md — Per-run workspace perms: FSGroup=1000 on buildCloneJob + buildPushJob PodSecurityContext; TestBuildCloneJobFSGroup + TestBuildPushJobFSGroup (Wave 1)
 - [x] 10-03-PLAN.md — Child-CRD parse robustness: json.Decoder + dec.More() + per-file isolation in readChildCRDs; prompt constraint; TestReadChildCRDs_* (Wave 1)
 - [x] 10-04-PLAN.md — Dashboard project-detail 404: cross-namespace fallback in Get; buildDetail helper; TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces (Wave 1)
-- [ ] 10-05-PLAN.md — Medium DoD re-run: build+load Phase-10 images; live medium-sample run → Project=Complete + push + costSpentCents>0; record 10-VERIFICATION.md gate artifact (Wave 2) [checkpoint]
+- [ ] 10-05-PLAN.md — Medium DoD re-run: build+load Phase-10 images; live medium-sample run → Project=Complete + push + costSpentCents>0; record 10-VERIFICATION.md gate artifact (Wave 2) [checkpoint] — BLOCKED (gate_decision: BLOCKED, 10-VERIFICATION.md): the run reached real executor launch and surfaced 4 NEW cascades (all FIXED this session: child-CRD literal-newline parse, envelopes-dir perms, git-in-image, git safe.directory) then hit the never-wired executor author→commit→push lifecycle (cascade E) → routed to Phase 11. costSpentCents>0 confirmed (defect #6 fixed); SC-2 FSGroup confirmed live.
 
-**Evidence:** `.planning/debug/09-07-premature-succession-evidence.md` (live-run findings, all three task-execution defects + the dashboard symptom). Parked minikube is primed (fresh Phase-9 images, `TIDE_REPORTER_IMAGE` set, reporter RBAC fixed) for fast re-runs.
+**Evidence:** `.planning/debug/09-07-premature-succession-evidence.md` + `10-VERIFICATION.md` (this session's 4-cascade fixes + the executor-lifecycle design analysis). Parked minikube primed; images rebuilt (controller/tide-push/claude-subagent) but the B2 worktree change is committed-only — rebuild claude-subagent before the next run.
+
+**Phase 10 outcome (2026-06-09):** The 4 surgical fixes (10-01..04) LANDED + green. The DoD re-run (10-05) closed 4 further cascades and proved the full planning cascade + executor launch + cost rollup, but the medium DoD (legitimate Complete + pushed `tide/run-*` branch) is NOT met — the executor author→commit→push lifecycle was never wired end-to-end (two parallel models — artifact-file vs worktree-authoring — built in Phase 3 but never connected). gate_decision: BLOCKED. The lifecycle is OWNED by Phase 11; v1.0.0 retag stays gated on it. Foundation pieces B1 (`EnsureRunBranch`) + B2 (real linked worktrees) already landed on `main`.
+
+### Phase 11: Executor Author→Commit→Push Lifecycle (INSERTED)
+
+**Goal:** Make a Task executor's authored code reach the remote — close the seam between the two parallel models built in Phase 3 but never connected end-to-end (artifact-file vs worktree-authoring). The medium DoD re-run (Phase 10's 10-05) proved the full planning cascade + executor launch + cost rollup but could not produce a pushed `tide/run-*` branch because: the run branch was named but never created as a ref; the per-run worktree `tide-push` opens was never provisioned; and there was no bridge from per-task worktree commits → the pushed run branch. This phase OWNS the legitimate medium Complete + push (Phase 9 SC-4/SC-6, Phase 10 SC-5/SC-6) and the v1.0.0 retag unblock. Decided approach: **Option B** (proper end-state, chosen 2026-06-08). Foundation already landed on `main`: **B1** `pkg/git.EnsureRunBranch` (e880a5a) + **B2** real linked worktrees via `git worktree add -b` (f639340).
+
+**Success Criteria** (what must be TRUE):
+1. **Run branch exists before any executor.** The clone Job (or an equivalent PVC-attached step) creates `refs/heads/tide/run-<project>-<unix>` at the bare repo's default HEAD via `EnsureRunBranch` (B1, wired) — executor worktree-add no longer fails `couldn't find remote ref`.
+2. **Executor commits its worktree.** After the claude CLI authors into the per-task linked worktree (B2, on branch `tide/wt-<taskUID>`), the harness commits all changes with a configured TIDE identity and records the resulting `HeadSHA` in the out envelope (B3). A task that authored nothing surfaces an explicit empty-diff result rather than a false success.
+3. **Per-task branches integrate into the run branch** in wave/DAG order without losing commits — independent wave-siblings merge cleanly; dependents see their dependencies' commits (B4).
+4. **tide-push provisions + pushes.** Clone mode provisions the run branch (+ the per-run worktree it opens); push mode pushes the integrated run branch with the D-B6 `--force-with-lease` lease against `Status.Git.LastPushedSHA` (B5).
+5. **Controller wiring.** The run-branch name flows to the clone Job; integration is triggered before the final push; `EnvelopeIn.Branch` continues to thread to executors (B6).
+6. **Legitimate medium Complete + push** (inherits Phase 9 SC-4 / Phase 10 SC-5): all descendants Succeeded, `tide/run-*` pushed to the in-cluster `http://` remote with real authored code, `costSpentCents > 0` under cap. Phase 8 SC-2 flips DEFERRED→PASS; **v1.0.0 retag UNBLOCKED** (retag/push stays user-gated, confirm-only per MEMORY.md 2026-06-03 option a).
+
+**Out of scope:** schema-constrained MCP `emit_child` airtight child-CRD fix (separate later phase, blocked by `claude --bare`); editable/re-appliable "envelopes as first-class artifacts" DX.
+
+**Open forks for planning/research:** (a) integration mechanism — `git merge` per-task branches in a per-run worktree vs ref-level fast-forward vs cherry-pick in DAG order; (b) integration timing — per-wave (so dependents see dependencies) vs all-at-push-boundary; (c) commit identity source (Helm values / env) and empty-diff handling; (d) does `tide-push` still author the planner-artifact boundary commit alongside the executor run branch, or are the two commit streams unified.
+
+**Depends on:** Phase 10
+**Plans:** TBD (run `/gsd-plan-phase 11`)
+
+Plans:
+- [ ] B1 (DONE on main, e880a5a) — `pkg/git.EnsureRunBranch` create run-branch ref at default HEAD (idempotent)
+- [ ] B2 (DONE on main, f639340) — `AddWorktree` → real `git worktree add -b tide/wt-<uid> <path> <runBranch>` (linked worktrees)
+- [ ] B3 — Executor commit step in the harness (git add -A + commit, TIDE identity, HeadSHA) + cmd/claude-subagent wiring
+- [ ] B4 — Integration: merge per-task branches into the run branch (wave/DAG order)
+- [ ] B5 — tide-push: clone-mode provisions run-branch+worktree (EnsureRunBranch); push-mode pushes the run branch with the D-B6 lease
+- [ ] B6 — Controller wiring: run-branch → clone Job; trigger integration before final push
+
+**Evidence:** `10-VERIFICATION.md` (gate_decision: BLOCKED — the 4 cascades closed in the 10-05 run + the full executor-lifecycle design analysis + the B1–B6 component breakdown this phase executes).
