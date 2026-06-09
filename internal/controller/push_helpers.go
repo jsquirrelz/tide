@@ -216,6 +216,19 @@ func buildPushJob(project *tideprojectv1alpha1.Project, pvcName string, opts Pus
 					ServiceAccountName: pushSAName,
 					SecurityContext: &corev1.PodSecurityContext{
 						FSGroup: new(int64(1000)),
+						// RunAsUser MUST accompany RunAsGroup — the docker/CRI runtime
+						// rejects the sandbox ("runAsGroup is specified without a
+						// runAsUser") otherwise. 65532 is the tide-push image's nonroot
+						// user (D-G3); set explicitly here so the pod-level RunAsGroup
+						// is valid.
+						RunAsUser: new(int64(65532)),
+						// RunAsGroup pins the primary gid to 1000 so files this Job
+						// writes on the shared PVC are group-owned 1000, matching the
+						// executor (which also runs RunAsGroup=1000). Cross-uid PVC
+						// sharing between the clone/push Job (uid 65532) and the
+						// executor (uid 1000) requires a shared PRIMARY group; fsGroup
+						// is supplemental-only and does not set the gid of created files.
+						RunAsGroup: new(int64(1000)),
 					},
 					Volumes: volumes,
 					Containers: []corev1.Container{
@@ -303,6 +316,19 @@ func buildCloneJob(project *tideprojectv1alpha1.Project, pvcName string, opts Cl
 					ServiceAccountName: pushSAName,
 					SecurityContext: &corev1.PodSecurityContext{
 						FSGroup: new(int64(1000)),
+						// RunAsUser MUST accompany RunAsGroup — the docker/CRI runtime
+						// rejects the sandbox ("runAsGroup is specified without a
+						// runAsUser") otherwise. 65532 is the tide-push image's nonroot
+						// user (D-G3); set explicitly here so the pod-level RunAsGroup
+						// is valid.
+						RunAsUser: new(int64(65532)),
+						// RunAsGroup pins the primary gid to 1000 so files this Job
+						// writes on the shared PVC are group-owned 1000, matching the
+						// executor (which also runs RunAsGroup=1000). Cross-uid PVC
+						// sharing between the clone/push Job (uid 65532) and the
+						// executor (uid 1000) requires a shared PRIMARY group; fsGroup
+						// is supplemental-only and does not set the gid of created files.
+						RunAsGroup: new(int64(1000)),
 					},
 					Volumes: []corev1.Volume{
 						{

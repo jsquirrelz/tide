@@ -243,7 +243,27 @@ func TestBuildJobSpec_FsGroup1000_RunAsUser1000_OnAllContainers(t *testing.T) {
 		t.Errorf("pod FSGroup = %d; want 1000", *spec.SecurityContext.FSGroup)
 	}
 
-	// Check all containers have runAsUser=1000
+	// Pod-level RunAsGroup pins the primary gid to 1000 so executor-authored
+	// files on the shared PVC are group-owned 1000 (not gid 0), letting the
+	// tide-push integration/push Job (uid 65532, group 1000) write them.
+	if spec.SecurityContext.RunAsGroup == nil {
+		t.Fatal("pod SecurityContext.RunAsGroup is nil; want 1000")
+	}
+	if *spec.SecurityContext.RunAsGroup != 1000 {
+		t.Errorf("pod RunAsGroup = %d; want 1000", *spec.SecurityContext.RunAsGroup)
+	}
+	// RunAsUser MUST accompany RunAsGroup at the pod level or the docker/CRI
+	// runtime rejects the sandbox ("runAsGroup is specified without a runAsUser").
+	if spec.SecurityContext.RunAsUser == nil || *spec.SecurityContext.RunAsUser != 1000 {
+		t.Errorf("pod RunAsUser = %v; want 1000 (required alongside RunAsGroup)", spec.SecurityContext.RunAsUser)
+	}
+
+	// Check all containers have runAsUser=1000 AND runAsGroup=1000. RunAsGroup
+	// must be set at the CONTAINER level too (not only pod level): empirically,
+	// a container that sets RunAsUser without RunAsGroup created files as gid 0
+	// (root) — breaking cross-uid writes for the tide-push Job. The
+	// envelope-writer init container that creates /workspace/envelopes needs gid
+	// 1000 so the push Job (uid 65532, group 1000) can write under it.
 	containers := append(spec.InitContainers, spec.Containers...)
 	for _, c := range containers {
 		if c.SecurityContext == nil || c.SecurityContext.RunAsUser == nil {
@@ -252,6 +272,9 @@ func TestBuildJobSpec_FsGroup1000_RunAsUser1000_OnAllContainers(t *testing.T) {
 		}
 		if *c.SecurityContext.RunAsUser != 1000 {
 			t.Errorf("container %q RunAsUser = %d; want 1000", c.Name, *c.SecurityContext.RunAsUser)
+		}
+		if c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 1000 {
+			t.Errorf("container %q RunAsGroup = %v; want 1000 (gid-0 files break cross-uid PVC writes)", c.Name, c.SecurityContext.RunAsGroup)
 		}
 	}
 }

@@ -360,6 +360,12 @@ func TestBuildCloneJobFSGroup(t *testing.T) {
 	if *sc.FSGroup != 1000 {
 		t.Errorf("buildCloneJob: SecurityContext.FSGroup = %d, want 1000", *sc.FSGroup)
 	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 1000 {
+		t.Errorf("buildCloneJob: SecurityContext.RunAsGroup = %v, want 1000 (shared primary gid for cross-uid PVC writes)", sc.RunAsGroup)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 65532 {
+		t.Errorf("buildCloneJob: SecurityContext.RunAsUser = %v, want 65532 (required alongside RunAsGroup)", sc.RunAsUser)
+	}
 }
 
 // TestBuildPushJobFSGroup asserts buildPushJob sets PodSecurityContext.FSGroup
@@ -383,6 +389,12 @@ func TestBuildPushJobFSGroup(t *testing.T) {
 	}
 	if *sc.FSGroup != 1000 {
 		t.Errorf("buildPushJob: SecurityContext.FSGroup = %d, want 1000", *sc.FSGroup)
+	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 1000 {
+		t.Errorf("buildPushJob: SecurityContext.RunAsGroup = %v, want 1000 (shared primary gid for cross-uid PVC writes)", sc.RunAsGroup)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 65532 {
+		t.Errorf("buildPushJob: SecurityContext.RunAsUser = %v, want 65532 (required alongside RunAsGroup)", sc.RunAsUser)
 	}
 }
 
@@ -461,5 +473,26 @@ func TestBuildPushJobIntegrateTaskBranches(t *testing.T) {
 	want := "--integrate-task-branches=tide/wt-a,tide/wt-b"
 	if !slices.Contains(args, want) {
 		t.Errorf("buildPushJob: args missing %q (got: %s)", want, joined)
+	}
+}
+
+// TestBuildInitJobGroupShared asserts the per-run workspace init Job creates the
+// shared /workspace dirs group-owned by gid 1000 and setgid, so later cross-uid
+// pods (planner/executor uid 1000, tide-push uid 65532) can all write under
+// envelopes/, repo/, artifacts/. The init Job is the FIRST writer; if it leaves
+// the parent dirs gid 0 / non-setgid, the tide-push Job fails 'mkdir
+// /workspace/envelopes/push: permission denied'.
+func TestBuildInitJobGroupShared(t *testing.T) {
+	project := fixtureProject()
+	r := &ProjectReconciler{}
+	job := r.buildInitJob(project, "tide-projects")
+
+	c := job.Spec.Template.Spec.Containers[0]
+	if c.SecurityContext == nil || c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 1000 {
+		t.Errorf("buildInitJob: container RunAsGroup = %v, want 1000", c.SecurityContext)
+	}
+	joined := strings.Join(c.Command, " ")
+	if !strings.Contains(joined, "chmod 2775") {
+		t.Errorf("buildInitJob: command missing 'chmod 2775' (setgid group-shared dirs); got: %s", joined)
 	}
 }

@@ -268,6 +268,19 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return classifyGitError(err)
 	}
 
+	// Mark the bare repo as group-shared so every subsequent git write — by the
+	// executor (uid 1000) committing in its worktree, and by the integration/push
+	// Job (uid 65532) merging — creates group-writable objects and refs. Both run
+	// with primary gid 1000 (RunAsGroup), so core.sharedRepository=group lets them
+	// write into each other's object/ref dirs. Set immediately after Clone, before
+	// EnsureRunBranch + worktree-add, so those writes are group-shared too. git's
+	// umask alone (0755 objects) would otherwise block the cross-uid merge with
+	// "insufficient permission for adding an object to repository database".
+	if out, err := exec.Command("git", "-C", destDir, "config", "core.sharedRepository", "group").CombinedOutput(); err != nil {
+		fmt.Fprintf(stderr, "tide-push: set core.sharedRepository: %v: %s\n", err, string(out))
+		return exitGenericFail
+	}
+
 	// B5: if --run-branch is set, create the run branch ref in the bare repo
 	// via EnsureRunBranch and provision the run worktree via `git worktree add`.
 	// The linked worktree shares the object store with destDir so task branches

@@ -1003,6 +1003,7 @@ func (r *ProjectReconciler) buildInitJob(project *tideprojectv1alpha1.Project, p
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	runAsUser := int64(1000)
+	runAsGroup := int64(1000)
 	fsGroup := int64(1000)
 	allowPrivEsc := false
 	subPath := fmt.Sprintf("%s/workspace", project.UID)
@@ -1037,10 +1038,20 @@ func (r *ProjectReconciler) buildInitJob(project *tideprojectv1alpha1.Project, p
 							Image: initJobBusyboxImage,
 							Command: []string{
 								"sh", "-c",
-								"mkdir -p /workspace/repo /workspace/artifacts /workspace/envelopes && chmod 0775 /workspace/repo /workspace/artifacts /workspace/envelopes",
+								// chmod 2775 (setgid) so the shared workspace dirs are
+								// group-writable AND new entries created under them by
+								// other-uid pods (planner/executor uid 1000, tide-push uid
+								// 65532) inherit the shared gid 1000. Without setgid the
+								// tide-push Job cannot mkdir /workspace/envelopes/push.
+								"mkdir -p /workspace/repo /workspace/artifacts /workspace/envelopes && chmod 2775 /workspace/repo /workspace/artifacts /workspace/envelopes",
 							},
 							SecurityContext: &corev1.SecurityContext{
-								RunAsUser:                &runAsUser,
+								RunAsUser: &runAsUser,
+								// RunAsGroup pins the primary gid to 1000 so the shared
+								// dirs this init Job creates are group-owned 1000, not gid
+								// 0 — the root cause of the tide-push 'mkdir /workspace/
+								// envelopes/push: permission denied' cross-uid failure.
+								RunAsGroup:               &runAsGroup,
 								ReadOnlyRootFilesystem:   new(false),
 								AllowPrivilegeEscalation: &allowPrivEsc,
 								Capabilities: &corev1.Capabilities{

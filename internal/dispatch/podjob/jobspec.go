@@ -249,6 +249,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                new(int64(1000)),
+			RunAsGroup:               new(int64(1000)),
 			RunAsNonRoot:             new(true),
 			AllowPrivilegeEscalation: new(false),
 			ReadOnlyRootFilesystem:   new(true),
@@ -318,6 +319,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		},
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                new(int64(1000)),
+			RunAsGroup:               new(int64(1000)),
 			RunAsNonRoot:             new(true),
 			AllowPrivilegeEscalation: new(false),
 			ReadOnlyRootFilesystem:   new(true),
@@ -367,6 +369,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		// D-C4: raw API key is NOT in subagent's env or EnvFrom.
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:                new(int64(1000)),
+			RunAsGroup:               new(int64(1000)),
 			RunAsNonRoot:             new(true),
 			AllowPrivilegeEscalation: new(false),
 			// Note: ReadOnlyRootFilesystem is false for subagent — it writes to /workspace.
@@ -403,6 +406,18 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		ServiceAccountName: ServiceAccountSubagent,
 		SecurityContext: &corev1.PodSecurityContext{
 			FSGroup: new(int64(1000)),
+			// RunAsUser MUST accompany RunAsGroup at the pod level — the docker/CRI
+			// runtime rejects the sandbox ("runAsGroup is specified without a
+			// runAsUser") otherwise. Matches the per-container RunAsUser=1000.
+			RunAsUser: new(int64(1000)),
+			// RunAsGroup pins the primary gid to 1000 (matching fsGroup) so files
+			// the executor authors on the shared PVC are group-owned 1000, not gid
+			// 0. Without it, RunAsUser=1000 alone leaves the primary group at root,
+			// and the tide-push integration/push Job (uid 65532, member of group
+			// 1000 via fsGroup) cannot write the executor's gid-0 files
+			// (repo.git objects, /workspace/envelopes). Cross-uid PVC sharing needs
+			// a shared PRIMARY group, which fsGroup (supplemental only) does not give.
+			RunAsGroup: new(int64(1000)),
 		},
 		InitContainers: initContainers,
 		Containers:     []corev1.Container{subagent},
