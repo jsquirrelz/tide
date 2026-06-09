@@ -1,10 +1,10 @@
 ---
-status: resolved
+status: live-reverify-pending
 trigger: "the phase→milestone→project succession + boundary-push trigger"
 created: 2026-06-09
 updated: 2026-06-09
-resolution: fixed
-fix_commit: 546e84e
+resolution: fixed-pending-live-reverify  # original stall FIXED (546e84e); 546e84e's fall-through exposed a coupled second root cause (EnvelopeReadFailed on the GC'd-Job path) now ALSO fixed in code + unit-verified; live Project=Complete + boundary push still pending operator re-verify
+fix_commit: 546e84e  # + second-root-cause fix committed separately (see Second Root Cause section)
 ---
 
 # Debug: phase→milestone→project succession + boundary-push stall
@@ -154,3 +154,92 @@ target the bug.
 Live re-verification on the parked minikube run (UID 18bff5a7) is left for the next
 medium run with the rebuilt controller image — the unit layer proves the
 succession path is now reachable when the planner Job is absent at every level.
+
+
+---
+
+## SECOND ROOT CAUSE (exposed by live re-verify of 546e84e) — FIXED in code + unit-verified; LIVE Complete still PENDING
+
+**Live re-verify of 546e84e (rebuilt :1.0.0 controller, ns `tide-sample-medium`):**
+the original succession stall is **FIXED** — the previously-frozen Phase and
+Milestone immediately drove out of the NotFound dead-end. But the fall-through
+exposed a **coupled next-layer defect**:
+
+- Phase `phase-01-implement-formatted-now` → **Failed**, condition
+  `reason=EnvelopeReadFailed, status=True`:
+  `read envelope out ".../envelopes/2173dd7b-.../out.json": no such file or directory`
+- Milestone also **Failed** (same class). Project still `Running`.
+- Plan + all 3 Tasks remain `Succeeded` — the work genuinely completed.
+
+### Root cause (CONFIRMED against code — Observe First, not on hypothesis alone)
+
+On 546e84e's planner-Job-NotFound-while-Running fall-through path, the completion
+handler re-reads the planner's `out.json` envelope from the per-run PVC. But once
+the planner Job is TTL-GC'd, that per-run envelope artifact can be **gone** (the
+path is wiped by the Project's clone/init re-creation loop — the coupled secondary
+symptom documented at line 108 above). The handlers then HARD-FAILED on the
+unreadable envelope:
+
+- `phase_controller.go:335` → `return r.patchPhaseFailed(ctx, ph, "EnvelopeReadFailed", ...)`
+- `milestone_controller.go:416` → `return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", ...)`
+
+This `return` fires BEFORE the reporter-spawn, the budget rollup, and the
+children-based succession gate (Phase 412-440 / Milestone 502-530, and their
+`envReadOK==false` fallback at Phase 442-459 / Milestone 532-549). So a level whose
+children ALL Succeeded was falsely marked **Failed** purely because the planner's
+own envelope re-read failed.
+
+**Key confirmation:** at the Phase and Milestone planner levels the envelope read is
+used ONLY for budget rollup + `ChildCount` — there is NO `out.ExitCode`-based
+subagent-failure classification at these levels (the only failure path from the
+envelope was `EnvelopeReadFailed` itself). So making the read non-fatal loses no
+genuine-failure detection: a real planner failure surfaces as ABSENT children, which
+the boundary gate already handles by deferring/not-succeeding.
+
+**Asymmetry that pointed straight at the fix:** the **Project** level
+(`project_controller.go:843-847`) ALREADY treats the read as non-fatal (logs
+`non-fatal`, continues with `envReadOK=false`) — which is exactly why the user
+observed **Project still Running, not Failed**. Phase and Milestone were the two
+outliers that hard-failed.
+
+### Fix (mirror the Project level — non-fatal envelope read, defer to children gate)
+
+In `phase_controller.go` and `milestone_controller.go` `handleJobCompletion`, on
+`EnvReader.ReadOut` error: log non-fatal and continue with `envReadOK=false`
+(instead of `patchPhaseFailed`/`patchMilestoneFailed`). The terminal outcome is then
+derived from CHILDREN state via the existing `envReadOK==false` fallback
+(`BoundaryDetected` / `hasChild*`): children Succeeded → push + succeed; pending →
+requeue; none → leaf-succeed. Cost rollup is already gated on `envReadOK` (so it is
+skipped — tolerated-as-absent — when the envelope is unreadable, never a hard-fail).
+The Project level was already correct and is unchanged.
+
+### Tests (prove Job-absent + envelope-absent + children-Succeeded → Succeeds, not Fails)
+
+Extended `internal/controller/planner_job_absent_test.go` with two envtest specs
+(Milestone + Phase): planner Job ABSENT + envelope ABSENT (no `SetOut` → `ReadOut`
+errors) + one owner-ref'd child (Phase/Plan) already `Succeeded` → assert the level
+reaches `Succeeded`, NOT `Failed`. The shared `makeProject` now sets
+`Gates{Milestone:"auto", Phase:"auto"}` so the succession path is reached (the
+default Approve policy otherwise parks at `AwaitingApproval` before the gate — see
+`milestone_controller.go:474`). The three original absent-Job specs (assert reporter
+spawns) stay green.
+
+### Verification (observed, not on faith)
+
+- `make build` → exit **0** (controller-gen produced no CRD/chart drift — pure
+  controller logic + test change, no API type change).
+- `go test ./internal/controller/...` (-short, KUBEBUILDER_ASSETS set) → `ok`
+  (29.9s); full run **98 Passed / 0 Failed / 1 Skipped** (the `-short` leader-election skip).
+- Focused run of the two new specs → `ok` (9.0s), both pass.
+- First test draft caught a real fixture bug (milestone parked at `AwaitingApproval`
+  on the default Approve gate) → fixed by setting auto gates; re-run green.
+- `make test` (full unit tier) → exit **0**, every package `ok`, zero `--- FAIL`/`FAIL`.
+- `gofmt -l` clean; `go vet ./internal/controller/... ./api/... ./cmd/...` exit 0.
+
+### STILL PENDING — live re-verify (operator)
+
+Rebuild + reload + roll the controller, re-apply/observe the medium run, and confirm
+**Project reaches `Complete` + the boundary push fires** (per-run
+`tide/run-medium-project-*` branch lands on the in-cluster `http://` remote;
+`costSpentCents > 0`). Until that live Complete is observed, this session is
+`live-reverify-pending`, NOT resolved.

@@ -76,6 +76,10 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
+				// Auto gates so the milestone/phase succession path is reached
+				// (the default gate policy is Approve, which parks at AwaitingApproval
+				// before the boundary/succession code — see milestone_controller.go:474).
+				Gates: tideprojectv1alpha1.Gates{Milestone: "auto", Phase: "auto"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
@@ -246,5 +250,177 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
 
 		expectReporterSpawned(ctx, mgrClient, string(got.UID))
+	})
+
+	// Second root cause (debug real-claude-authoring-path): on the Job-absent
+	// fall-through path the planner's out.json may already be gone (its per-run
+	// PVC artifact wiped by the clone/init re-creation loop), so the completion
+	// handler's envelope re-read fails. Previously Phase/Milestone HARD-FAILED with
+	// EnvelopeReadFailed even though all children Succeeded — a false Failed on a
+	// genuinely-complete level. The fix makes the read non-fatal (mirroring the
+	// Project level): defer to the children-based succession gate. These two specs
+	// drive Job-absent + envelope-absent + all-children-Succeeded and assert the
+	// level reaches Succeeded, NOT Failed.
+	It("Milestone: succeeds (not fails) when planner Job AND envelope are absent but child Phase Succeeded", func() {
+		const projectName = "test-proj-envabsent-ms"
+		const milestoneName = "test-ms-envabsent"
+		makeProject(projectName)
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(milestoneName, "default", &tideprojectv1alpha1.Milestone{})
+		DeferCleanup(func() {
+			cleanup(&tideprojectv1alpha1.Phase{}, "child-phase-envabsent")
+			cleanup(&tideprojectv1alpha1.Milestone{}, milestoneName)
+			cleanup(&tideprojectv1alpha1.Project{}, projectName)
+			deleteAllJobs()
+		})
+
+		envReader := newMapEnvReader()
+		r := &MilestoneReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			ReporterImage:  testReporterImage,
+			// TidePushImage intentionally empty: the boundary push is skipped so the
+			// spec stays focused on succession, not the push Job (boundary_push.go:79-90).
+		}
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha1.Milestone
+		Eventually(func(g Gomega) {
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)).To(Succeed())
+			g.Expect(got.Status.Phase).To(Equal("Running"))
+		}, "5s", "100ms").Should(Succeed())
+
+		// Materialize a controller-owned child Phase already Succeeded — the proof
+		// of completion that the children-based gate reads.
+		tru := true
+		childPhase := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "child-phase-envabsent",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         "tideproject.k8s/v1alpha1",
+					Kind:               "Milestone",
+					Name:               got.GetName(),
+					UID:                got.GetUID(),
+					Controller:         &tru,
+					BlockOwnerDeletion: &tru,
+				}},
+			},
+			Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName},
+		}
+		Expect(k8sClient.Create(ctx, childPhase)).To(Succeed())
+		waitForCacheSync("child-phase-envabsent", "default", &tideprojectv1alpha1.Phase{})
+		var cp tideprojectv1alpha1.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-envabsent", Namespace: "default"}, &cp)).To(Succeed())
+		cpPatch := client.MergeFrom(cp.DeepCopy())
+		cp.Status.Phase = "Succeeded"
+		Expect(mgrClient.Status().Patch(ctx, &cp, cpPatch)).To(Succeed())
+
+		// Job ABSENT, envelope ABSENT (no SetOut → ReadOut returns an error).
+		deletePlannerJob(ctx, mgrClient, fmt.Sprintf("tide-milestone-%s-1", got.UID))
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha1.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &after)).To(Succeed())
+			g.Expect(after.Status.Phase).To(Equal("Succeeded"),
+				"Milestone must Succeed via children-based gate, not Fail on the unreadable planner envelope")
+		}, "5s", "100ms").Should(Succeed())
+	})
+
+	It("Phase: succeeds (not fails) when planner Job AND envelope are absent but child Plan Succeeded", func() {
+		const projectName = "test-proj-envabsent-ph"
+		const milestoneName = "test-ms-envabsent-ph"
+		const phaseName = "test-phase-envabsent"
+		makeProject(projectName)
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(milestoneName, "default", &tideprojectv1alpha1.Milestone{})
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
+		DeferCleanup(func() {
+			cleanup(&tideprojectv1alpha1.Plan{}, "child-plan-envabsent")
+			cleanup(&tideprojectv1alpha1.Phase{}, phaseName)
+			cleanup(&tideprojectv1alpha1.Milestone{}, milestoneName)
+			cleanup(&tideprojectv1alpha1.Project{}, projectName)
+			deleteAllJobs()
+		})
+
+		envReader := newMapEnvReader()
+		r := &PhaseReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			ReporterImage:  testReporterImage,
+			// TidePushImage intentionally empty (see milestone spec above).
+		}
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha1.Phase
+		Eventually(func(g Gomega) {
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
+			g.Expect(got.Status.Phase).To(Equal("Running"))
+		}, "5s", "100ms").Should(Succeed())
+
+		tru := true
+		childPlan := &tideprojectv1alpha1.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "child-plan-envabsent",
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         "tideproject.k8s/v1alpha1",
+					Kind:               "Phase",
+					Name:               got.GetName(),
+					UID:                got.GetUID(),
+					Controller:         &tru,
+					BlockOwnerDeletion: &tru,
+				}},
+			},
+			Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
+		}
+		Expect(k8sClient.Create(ctx, childPlan)).To(Succeed())
+		waitForCacheSync("child-plan-envabsent", "default", &tideprojectv1alpha1.Plan{})
+		var cpl tideprojectv1alpha1.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-plan-envabsent", Namespace: "default"}, &cpl)).To(Succeed())
+		cplPatch := client.MergeFrom(cpl.DeepCopy())
+		cpl.Status.Phase = "Succeeded"
+		Expect(mgrClient.Status().Patch(ctx, &cpl, cplPatch)).To(Succeed())
+
+		// Job ABSENT, envelope ABSENT (no SetOut → ReadOut returns an error).
+		deletePlannerJob(ctx, mgrClient, fmt.Sprintf("tide-phase-%s-1", got.UID))
+
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha1.Phase
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+			g.Expect(after.Status.Phase).To(Equal("Succeeded"),
+				"Phase must Succeed via children-based gate, not Fail on the unreadable planner envelope")
+		}, "5s", "100ms").Should(Succeed())
 	})
 })

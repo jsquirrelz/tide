@@ -413,9 +413,17 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		var readErr error
 		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
 		if readErr != nil {
-			return r.patchMilestoneFailed(ctx, ms, "EnvelopeReadFailed", readErr.Error())
+			// Non-fatal: the planner envelope on the PVC may be unreadable on the
+			// Job-absent (TTL/GC) fall-through path — its per-run artifact can be
+			// wiped by the clone/init re-creation loop. The envelope is used only
+			// for budget rollup and ChildCount; the authoritative succession signal
+			// is the children's existence + Succeeded state. Mirror the Project
+			// level: log and continue with envReadOK=false so the children-based
+			// boundary gate (not a re-read of the planner envelope) decides outcome.
+			logger.Error(readErr, "milestone planner envelope tiny-status read failed (non-fatal); deferring to children-based succession", "milestone", ms.Name)
+		} else {
+			envReadOK = true
 		}
-		envReadOK = true
 	} else {
 		logger.V(1).Info("no env reader; skipping tiny-status read", "milestone", ms.Name)
 	}
