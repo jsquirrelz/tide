@@ -143,6 +143,68 @@ func TestCloneSucceeds(t *testing.T) {
 	}
 }
 
+// TestCloneIdempotent verifies that Clone called twice on the same destDir
+// returns nil error on the second call and a non-nil repository. This is the
+// critical property for clone Job retries (backoffLimit=2): attempt-1 writes
+// repo.git, attempt-2 must succeed rather than returning ErrRepositoryAlreadyExists.
+func TestCloneIdempotent(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+
+	destDir := filepath.Join(t.TempDir(), "dest.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	url := "file://" + bareSrc
+	pat := "any-pat-ignored-for-file-url"
+
+	// First clone — must succeed.
+	repo1, err := Clone(ctx, url, destDir, pat)
+	if err != nil {
+		t.Fatalf("Clone (first): %v", err)
+	}
+	if repo1 == nil {
+		t.Fatal("Clone (first) returned nil repo without error")
+	}
+
+	// Second clone on the same destDir — must also succeed.
+	repo2, err := Clone(ctx, url, destDir, pat)
+	if err != nil {
+		t.Fatalf("Clone (second, idempotent): %v", err)
+	}
+	if repo2 == nil {
+		t.Fatal("Clone (second) returned nil repo without error")
+	}
+
+	// Storer must be accessible — basic sanity that the repo is usable.
+	if repo2.Storer == nil {
+		t.Error("Clone (second) returned repo with nil Storer")
+	}
+}
+
+// TestFetchAnonymous verifies that Clone with an empty PAT succeeds against a
+// local bare repo. This proxies the anonymous in-cluster http:// remote path:
+// no BasicAuth header should be emitted when pat == "".
+func TestFetchAnonymous(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+
+	destDir := filepath.Join(t.TempDir(), "dest.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Empty PAT — Clone must not fail with authentication errors.
+	repo, err := Clone(ctx, "file://"+bareSrc, destDir, "" /* empty PAT */)
+	if err != nil {
+		t.Fatalf("Clone with empty PAT: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("Clone with empty PAT returned nil repo without error")
+	}
+}
+
 // TestCloneFailsOnUnreachableURL exercises the error path: a context with
 // a short deadline against an unused port should surface a non-nil error
 // well within the test's outer timeout.
