@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/jsquirrelz/tide/internal/harness"
 	"github.com/jsquirrelz/tide/internal/subagent/anthropic"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -44,6 +45,9 @@ var newSubagent = func(claudeBinary, workspaceRoot string) anthropicRunner {
 	return anthropic.New(anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: workspaceRoot})
 }
 var ensureWorktreeFunc = harness.EnsureWorktree
+var commitWorktreeFunc = func(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
+	return harness.CommitWorktree(worktreeDir, taskUID)
+}
 
 func main() {
 	fs := flag.NewFlagSet("claude-subagent", flag.ExitOnError)
@@ -88,6 +92,19 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	if runErr != nil {
 		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
 		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")
+	}
+	if runErr == nil && env.Role == "executor" {
+		worktreeDir := filepath.Join(workspaceRoot, "worktrees", env.TaskUID)
+		hash, isEmpty, commitErr := commitWorktreeFunc(worktreeDir, env.TaskUID)
+		if commitErr != nil {
+			out = failEnvelope(env.TaskUID, commitErr, 1, "commit-failed")
+		} else if isEmpty {
+			out.ExitCode = 1
+			out.Result = "empty-diff"
+			out.Reason = "executor produced no changes in worktree"
+		} else {
+			out.Git = &pkgdispatch.GitOutput{HeadSHA: hash.String()}
+		}
 	}
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "claude-subagent: write out.json: %v\n", err)

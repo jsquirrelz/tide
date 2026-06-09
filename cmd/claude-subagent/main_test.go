@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/jsquirrelz/tide/internal/subagent/anthropic"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -237,6 +238,12 @@ func TestClaudeSubagentMain_InvokesEnsureWorktreeBeforeRun(t *testing.T) {
 			},
 		)
 	}
+	// Override the commit seam — this test exercises call ordering, not commit behavior.
+	origCW := commitWorktreeFunc
+	t.Cleanup(func() { commitWorktreeFunc = origCW })
+	commitWorktreeFunc = func(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
+		return plumbing.NewHash("aabbccdd" + strings.Repeat("0", 32)), false, nil
+	}
 
 	envelopePath := filepath.Join(tmp, "envelopes", "t-order", "in.json")
 	env := pkgdispatch.EnvelopeIn{
@@ -290,6 +297,12 @@ func TestClaudeSubagentMain_PassesEnvBranchToWorktree(t *testing.T) {
 				return exec.CommandContext(ctx, "bash", "-c", "cat "+fixturePath)
 			},
 		)
+	}
+	// Override the commit seam — this test exercises branch-passing, not commit behavior.
+	origCW := commitWorktreeFunc
+	t.Cleanup(func() { commitWorktreeFunc = origCW })
+	commitWorktreeFunc = func(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
+		return plumbing.NewHash("aabbccdd" + strings.Repeat("0", 32)), false, nil
 	}
 
 	envelopePath := filepath.Join(tmp, "envelopes", "t-branch", "in.json")
