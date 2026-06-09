@@ -47,7 +47,14 @@ FROM node:22-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # The per-Project repo (/workspace/repo.git) is cloned by the tide-push Job
+    # (uid 65532) but the executor runs as uid 1000 — git 2.35+ refuses a repo
+    # it does not own ("detected dubious ownership"). The pod is the trust
+    # boundary (hermetic, single-purpose), so mark all repos safe at the system
+    # level. This covers our `git worktree add` shell-out AND any git the claude
+    # CLI itself runs inside the worktree (whose .git points back to repo.git).
+    && git config --system --add safe.directory '*'
 
 RUN --mount=type=cache,target=/root/.npm npm install -g @anthropic-ai/claude-code@2.1.142
 
