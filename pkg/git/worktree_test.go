@@ -19,12 +19,34 @@ package git
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
 )
+
+// gitRun runs a git subcommand in dir and fails the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// gitOut runs a git subcommand in dir and returns trimmed stdout, failing on error.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	out, err := exec.Command("git", full...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // TestAddWorktreeBasic clones a seeded bare repo and creates a per-Task
 // worktree from it; verifies the returned path contains a checked-out
@@ -60,9 +82,10 @@ func TestAddWorktreeBasic(t *testing.T) {
 		t.Errorf("AddWorktree dir = %q; want %q", wtDir, wantPrefix)
 	}
 
-	// A non-bare clone has a .git subdirectory.
-	if info, err := os.Stat(filepath.Join(wtDir, ".git")); err != nil || !info.IsDir() {
-		t.Errorf("expected .git directory in worktree %q: err=%v", wtDir, err)
+	// A linked worktree has a .git FILE (a gitdir: pointer back to the bare
+	// repo's worktrees/ metadata), not a .git directory.
+	if _, err := os.Stat(filepath.Join(wtDir, ".git")); err != nil {
+		t.Errorf("expected .git in worktree %q: err=%v", wtDir, err)
 	}
 
 	// The seed README.md should be checked out in the worktree.
@@ -70,9 +93,10 @@ func TestAddWorktreeBasic(t *testing.T) {
 		t.Errorf("expected README.md in worktree: %v", err)
 	}
 
-	// The worktree should be a valid go-git repo.
-	if _, err := gogit.PlainOpen(wtDir); err != nil {
-		t.Errorf("PlainOpen worktree: %v", err)
+	// The worktree is checked out on the per-Task branch forked from runBranch.
+	got := gitOut(t, wtDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if want := TaskBranchName("task-uid-abc"); got != want {
+		t.Errorf("worktree HEAD branch = %q; want %q", got, want)
 	}
 }
 
@@ -107,39 +131,20 @@ func TestAddWorktreeDistinct(t *testing.T) {
 		t.Fatalf("worktrees collided: %q == %q", wtA, wtB)
 	}
 
-	// Each worktree's .git/index is its own file (the index-isolation
-	// property D-B4 commits to). Compare file inode / content cheaply by
-	// modifying wtA and observing wtB unchanged.
-	repoA, err := gogit.PlainOpen(wtA)
-	if err != nil {
-		t.Fatalf("PlainOpen A: %v", err)
-	}
-	wtAW, err := repoA.Worktree()
-	if err != nil {
-		t.Fatalf("Worktree A: %v", err)
-	}
+	// Each linked worktree owns an independent index (the isolation property
+	// D-B4 commits to). Stage a file in A and confirm B's status never sees it.
 	if err := os.WriteFile(filepath.Join(wtA, "a-only.txt"), []byte("a\n"), 0o644); err != nil {
 		t.Fatalf("write a-only: %v", err)
 	}
-	if _, err := wtAW.Add("a-only.txt"); err != nil {
-		t.Fatalf("wtAW.Add: %v", err)
+	gitRun(t, wtA, "add", "a-only.txt")
+
+	if statusB := gitOut(t, wtB, "status", "--porcelain"); strings.Contains(statusB, "a-only.txt") {
+		t.Errorf("a-only.txt leaked into worktree B status: %q", statusB)
 	}
 
-	// Worktree B's status should NOT show a-only.txt (independent index).
-	repoB, err := gogit.PlainOpen(wtB)
-	if err != nil {
-		t.Fatalf("PlainOpen B: %v", err)
-	}
-	wtBW, err := repoB.Worktree()
-	if err != nil {
-		t.Fatalf("Worktree B: %v", err)
-	}
-	statusB, err := wtBW.Status()
-	if err != nil {
-		t.Fatalf("wtBW.Status: %v", err)
-	}
-	if _, ok := statusB["a-only.txt"]; ok {
-		t.Errorf("a-only.txt leaked into worktree B status: %+v", statusB["a-only.txt"])
+	// And the two worktrees are on distinct per-Task branches.
+	if bA, bB := gitOut(t, wtA, "rev-parse", "--abbrev-ref", "HEAD"), gitOut(t, wtB, "rev-parse", "--abbrev-ref", "HEAD"); bA == bB {
+		t.Errorf("worktrees share branch %q; want distinct per-Task branches", bA)
 	}
 }
 
