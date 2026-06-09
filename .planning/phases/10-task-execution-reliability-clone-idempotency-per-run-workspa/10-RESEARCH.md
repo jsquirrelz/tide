@@ -12,7 +12,7 @@ Fork (a) — clone idempotency: `pkg/git/Clone()` calls `gogit.PlainCloneContext
 
 Fork (b) — per-run workspace permissions: `buildCloneJob` and `buildPushJob` in `internal/controller/push_helpers.go` emit no `securityContext` on the pod spec. The planner/executor job builder `internal/dispatch/podjob/BuildJobSpec` already sets `FSGroup: 1000` on its `PodSecurityContext` — the push/clone builders missed it. The fix is adding `PodSecurityContext{FSGroup: ptr.To(int64(1000))}` in the binary (not in values.yaml, which is a fixed chart contract). [VERIFIED: codebase read of `push_helpers.go`, `internal/dispatch/podjob/jobspec.go`, `charts/tide/values.yaml`]
 
-Fork (c) — child-CRD parse robustness: `readChildCRDs` in `internal/subagent/anthropic/subagent.go` returns on the first `json.Unmarshal` error, losing all valid children alongside the bad file. The planner prompt template (`internal/subagent/common/templates/plan_planner.tmpl`) is clear and well-structured but does not prevent an LLM from writing trailing prose after a closing `}`. The fix is per-file isolation (skip-bad-log-continue, not abort-all) combined with a prompt patch that wraps the JSON in a markdown code fence instruction. [VERIFIED: codebase read of `subagent.go`, `plan_planner.tmpl`, `childcrd_read_test.go`]
+Fork (c) — child-CRD parse robustness: `readChildCRDs` in `internal/subagent/anthropic/subagent.go` returns on the first `json.Unmarshal` error, losing all valid children alongside the bad file. A full format comparison (JSON, YAML, XML, TOML, plain-text, MCP tool-call) was conducted against the observed failure. The verdict is: keep JSON as the file format, add a `json.Decoder`-based balanced-brace extractor in `readChildCRDs` to tolerate the observed trailing-prose failure class, and tighten the prompt. YAML is a worse default for this shape; MCP tool-call is the right long-term fix but is out of Phase-10 scope due to the `--bare` flag constraint. [VERIFIED: codebase reads + external research; see section below]
 
 Fork (d) — dashboard project-detail 404: `ProjectsHandler.Get` (line in `cmd/dashboard/api/projects.go`) defaults `namespace = "default"` when the `?namespace=` query param is absent, while `ProjectsHandler.List` uses all-namespaces by default. A multi-namespace project (`tide-sample-medium`) 404s on the detail call because the namespace mismatch makes the `client.Get` miss. The fix is a cross-namespace lookup fallback in `Get` that mirrors the `List` semantics. [VERIFIED: codebase read of `cmd/dashboard/api/projects.go`, `cmd/dashboard/router.go`, existing test `TestGetProjectWithChildren`]
 
@@ -24,7 +24,7 @@ Fork (d) — dashboard project-detail 404: `ProjectsHandler.Get` (line in `cmd/d
 |------------|-------------|----------------|-----------|
 | Clone idempotency | API / Backend (pkg/git) | cmd/tide-push (caller) | git operations live in pkg/git; caller (runClone) picks up the fix transparently |
 | Workspace permissions | API / Backend (job builder) | Kubernetes kubelet | FSGroup is a pod-spec field emitted by the controller binary; kubelet applies chown at mount time |
-| Child-CRD parse robustness | API / Backend (subagent runner) | Prompt template | Primary: per-file error isolation in Go code; secondary: prompt guidance to prevent malformed output |
+| Child-CRD parse robustness | API / Backend (subagent runner) | Prompt template | Primary: tolerant parse + per-file error isolation in Go code; secondary: prompt guidance to prevent malformed output |
 | Dashboard detail 404 | Frontend Server (dashboard API) | — | Pure Go handler bug in chi route handler; no frontend change needed |
 
 ## Standard Stack
@@ -35,7 +35,7 @@ Fork (d) — dashboard project-detail 404: `ProjectsHandler.Get` (line in `cmd/d
 |---------|---------|---------|--------------|
 | github.com/go-git/go-git/v5 | v5.19.0 | git operations | Already vendored; `PlainOpen` + `FetchContext` are stable APIs used in `pkg/git/fetch.go` |
 | k8s.io/utils/ptr | bundled with controller-runtime | typed pointer helpers | `ptr.To(int64(1000))` already used in `internal/dispatch/podjob/jobspec.go` |
-| encoding/json | stdlib | JSON parse | Already used throughout |
+| encoding/json | stdlib | JSON parse | Already used throughout; `json.Decoder` enables tolerant extraction |
 | sigs.k8s.io/controller-runtime/pkg/client | v0.24.x | K8s client | Already used in dashboard handlers |
 
 **No new dependencies required for any of the four fixes.** [VERIFIED: go.mod inspection via existing imports in affected files]
@@ -127,43 +127,101 @@ Note: `ptr.To` is already imported via `k8s.io/utils/ptr` in `jobspec.go`; `push
 
 ## Fork (c): Child-CRD Parse Robustness
 
-### Current Behavior
+### Observed Error Analysis
 
-`readChildCRDs` in `internal/subagent/anthropic/subagent.go` iterates over `*.json` files in the children dir. On `json.Unmarshal` failure for any file, it returns the error immediately (line 437-438):
+The live failure: `parse child file "task-03.json": invalid character 'W' after object key:value pair`
 
-```go
-if jerr := json.Unmarshal(data, &spec); jerr != nil {
-    return nil, fmt.Errorf("parse child file %q: %w", name, jerr)
-}
-```
+The character `'W'` is a word character — it can only appear after a key:value pair if:
 
-This aborts the entire read: all children are lost even if only `task-03.json` was malformed. The calling path in the same file (lines 324-332) surfaces this as `out.ExitCode = 1` and `out.Reason = "read child CRDs: parse child file..."`, making the planner dispatch fail entirely. The evidence from the live run: `parse child file "task-03.json": invalid character 'W' after object key:value pair` — 22726 output tokens consumed, 27c spent, entire dispatch wasted.
+1. **Trailing prose after the closing `}`** — the model wrote the JSON object correctly, then appended a sentence starting with `W` (e.g., `"With these tasks..."`) after the `}`. `json.Unmarshal` reads the whole buffer; any non-whitespace after the final `}` is `invalid character 'W'`. This is the most probable failure class: the model's Write tool call included explanatory text appended to the file after the object.
 
-The root cause is likely LLM-generated trailing prose after the closing `}` of the JSON object, or an embedded natural-language field value that itself contains `"key": value` without proper quoting. The `plan_planner.tmpl` instructs the model to write a single JSON object per file and provides a schema — the instruction is clear, but the model violated it.
+2. **Unquoted natural-language value followed by inline prose** — the `"prompt"` field contains free-form text, and the model wrote something like `"prompt": With task-03 we will...` (missing the opening quote). This produces the same error at the first character of the unquoted string.
+
+Both classes arise from the same root cause: the model treated the file as a conversational artifact (with prose reasoning) rather than a bare machine contract. The arXiv "Let Me Speak Freely?" study (2408.02442) documents a 10-15% reasoning quality penalty under strict format constraints, and the two-step pattern — reason freely, then format — is their recommendation. The planner writes a PLAN.md (the reasoning artifact) and ALSO child JSON files (the machine contract); mixing them in one step creates exactly this failure class.
+
+**What recovery survives which class:**
+
+| Recovery mechanism | Trailing prose after `}` | Mid-object unquoted value |
+|--------------------|--------------------------|--------------------------|
+| `strings.TrimSpace` then `json.Unmarshal` | No — trailing prose is not whitespace | No |
+| Extract first balanced `{...}` block then unmarshal | Yes — prose after `}` is stripped | No — unquoted value breaks the scan |
+| `json.Decoder` + `DisallowUnknownFields(false)` | Yes — Decoder stops at end of first value | No |
+| Per-file isolation (skip + log) | Partial recovery — siblings succeed | Partial recovery — siblings succeed |
+| Prompt tightening | Reduces frequency | Reduces frequency |
+
+The balanced-brace extractor survives trailing prose but NOT mid-object corruption. Per-file isolation is the necessary second layer: it rescues the N-1 valid siblings regardless of which failure class hit the bad file.
+
+### Format Comparison
+
+Architecture constraints that bound the evaluation:
+
+- **`ChildCRDSpec.Spec` is `runtime.RawExtension`** — an opaque JSON blob that the controller decodes to a typed CRD spec at materialization time. Any format that is not JSON-native requires a JSON intermediate step for the `Spec` field; it cannot be escaped. [VERIFIED: `pkg/dispatch/childcrd.go:57`]
+- **Files are written by the model's Write tool** — not by a constrained API response. Provider-native structured output (Anthropic's `output_config.format` schema mode) is not reachable here; it requires an API call shape, not a file Write.
+- **`--bare` disables `.mcp.json` and plugins** — an `emit_child` MCP tool would require the claude CLI to load a custom MCP server, which `--bare` explicitly suppresses. [VERIFIED: `subagent.go:215-216` comments]
+- **`gopkg.in/yaml.v3` and `sigs.k8s.io/yaml` are already transitive deps** — YAML parsing has zero new-dependency cost. [VERIFIED: `go.mod:24,174`]
+- **Prefill is NOT supported on Claude Sonnet 4.6** — the model used in TIDE's v1 concrete impl. Anthropic's docs state explicitly: "Prefilling is not supported on... Claude Sonnet 4.6." [CITED: platform.claude.com/docs/en/docs/test-and-evaluate/strengthen-guardrails/increase-consistency]
+
+| Format | LLM authoring reliability | Tolerates trailing prose | Nesting fit for ChildCRDSpec | Go parse-robustness + recovery | Schema-validatable | Phase-10 cost |
+|--------|--------------------------|--------------------------|-----------------------------|---------------------------------|--------------------|---------------|
+| **JSON (current)** | MEDIUM — model frequently appends prose; hard-fails on any character after `}`. `invalid character 'W'` is the observed failure. No tolerant mode in stdlib. | No without extractor; Yes with balanced-brace extractor | GOOD — `runtime.RawExtension` is JSON-native; no intermediate step needed | `json.Decoder` stops at end of first object, ignoring trailer. Per-file isolation handles siblings. | Yes — JSON Schema or struct tags | LOW — one function change + prompt patch |
+| **YAML** | LOW-MEDIUM — indentation sensitivity is a second failure dimension absent from JSON. Models produce incorrect indentation especially in multi-line string values (the `prompt` field is typically 500-2000 chars). Norway problem: bare `NO` → `false`; `on`/`off`/`yes`/`no` → bool. Colon-in-string without quoting breaks parse. Research shows JSON-to-YAML output decreases syntax accuracy vs JSON-to-JSON. | YAML is line-oriented; trailing prose after the document end (`---`) would be a new document, not an error — but the model would need to emit the terminator correctly, which it often doesn't. | POOR for `runtime.RawExtension` — the `Spec` field must be JSON bytes (`raw []byte`); YAML unmarshal via `gopkg.in/yaml.v3` into `RawExtension` requires a YAML→JSON re-encoding step, adding complexity and a second failure surface. | `gopkg.in/yaml.v3` is available (no new dep), but YAML parse errors are often more cryptic than JSON. Per-file isolation applies equally. | Partial — YAML Schema exists but tooling is less mature in Go ecosystem | MEDIUM — YAML→JSON bridge for `RawExtension`, rewrite prompt schema example, update all tests |
+| **XML** | MEDIUM — Anthropic's official prompt engineering docs recommend XML tags for structuring Claude's *input* and its *responses within a conversation*, and Claude is trained on XML. But XML as a *file format for nested structured data with string fields containing arbitrary prose* has different failure modes: the model may omit CDATA wrapping for the `prompt` field (which contains characters like `<`, `>`, `&`), producing malformed XML. | XML is tolerant of content after the closing tag only if the parser is lenient; stdlib `encoding/xml` is strict. | POOR for `Spec` — same intermediate-step problem as YAML; `runtime.RawExtension` expects JSON bytes. XML→JSON conversion for `Spec` is unavoidable. | `encoding/xml` (stdlib, no new dep). However, XML parse errors on unescaped `<` in `prompt` text are hard to recover from. | XSD-based schema validation is possible but no Go XSD library in the dependency tree | HIGH — prompt schema rewrite, CDATA handling, XML→JSON bridge, test updates |
+| **TOML** | LOW — TOML multi-line strings require `"""` delimiters; models frequently emit single-quoted or bare strings for the `prompt` field. TOML has weak ecosystem familiarity for most models. | TOML parsers stop at first error; no trailing-content tolerance | POOR — same JSON-intermediate problem for `RawExtension`. TOML does not natively express raw bytes. | `github.com/pelletier/go-toml/v2` is a transitive dep (go.mod:113) but indirect; would become a direct dep. | TOML schema validation not standard | HIGH — format unfamiliar to model, intermediate encoding step, new direct dep import |
+| **Plain-text / delimited** | LOW — flat key=value or pipe-delimited structures cannot express the nested `spec` object without inventing a bespoke micro-format. Models drift from bespoke schemas. | High tolerance if delimiters are line-based | POOR — fundamentally flat; nesting requires inventing JSON-inside-plain-text, which defeats the purpose | Hand-rolled parser; no stdlib support for the bespoke schema | None | HIGH — inventing and maintaining a custom format |
+| **MCP tool-call (`emit_child`)** | HIGH — Anthropic's `strict: true` tool use applies constrained decoding (compiled grammar) against the `input_schema`, guaranteeing schema compliance with mathematical certainty. No trailing prose possible: tool call parameters are JSON-schema-enforced at token generation time. | Not applicable — constrained decoding prevents the failure class entirely | EXCELLENT — `input_schema` can express the exact `ChildCRDSpec` shape including nested `spec` object | No Go-side parse ambiguity: the tool call arguments arrive as valid JSON by construction | Yes — `input_schema` IS the schema | HIGH — requires `--bare`-compatible MCP injection (architectural change to CLI invocation; deferred) |
+
+**Verdict:** JSON is the correct default format for Phase 10. The case against switching to YAML or XML rests on three independent constraints: (1) `runtime.RawExtension` demands JSON bytes for the `Spec` field regardless of outer format — any non-JSON format adds a mandatory intermediate re-encoding step that creates a second failure surface; (2) YAML's indentation sensitivity and implicit type coercion (Norway problem, boolean strings) introduce failure modes that are *absent* from JSON and that are particularly likely to fire inside the `prompt` field, which contains multi-line free-form text; (3) XML requires CDATA for the `prompt` field's arbitrary characters, and models routinely omit it. MCP tool-call is the definitively correct long-term fix but cannot be implemented within `--bare` mode without a non-trivial CLI invocation architecture change.
 
 ### Options
 
 | Option | Benefit | Downside |
 |--------|---------|---------|
-| Per-file isolation (skip-bad, log, continue) | Valid children (task-01, task-02) succeed; only bad files are skipped | Partial children may produce an incomplete task graph; the orchestrator must detect count mismatch |
-| Strict abort-all (current behavior) | Surfaces the error immediately | Wastes the entire dispatch; all valid children lost |
-| JSON repair / `json.Decoder` lenient mode | Could recover from trailing prose | Go's `encoding/json` has no built-in repair; third-party libs add complexity |
-| Prompt constraint + retry | Prevent the malformed output upstream | LLMs are probabilistic; cannot guarantee; needs a fallback |
-| Prompt patch + per-file isolation (layered) | Belt-and-suspenders | Combines prevention (prompt) with recovery (per-file error surface) |
+| Balanced-brace extractor + per-file isolation (recommended) | Survives the observed trailing-prose failure class; siblings always recovered | Does not survive mid-object unquoted value; prompt patch is the second line of defense for that class |
+| Per-file isolation only (no extractor) | Simple; siblings always recovered | The bad file still fails; a 1-of-N failure wastes the whole task slot even if siblings are valid |
+| Strict abort-all (current behavior) | Surfaces the error immediately | Wastes the entire dispatch on a single bad file |
+| Switch to YAML | Slightly more resilient to trailing prose (line-oriented) | Indentation + Norway + `RawExtension` bridge; more failure modes than it solves |
+| Switch to XML | Claude is XML-trained; tolerant of some extra content | CDATA required for `prompt`; `RawExtension` bridge; net worse than JSON |
+| MCP `emit_child` tool | Eliminates the failure class entirely | Requires `--bare`-compatible MCP injection; out of Phase-10 scope |
+| Prompt constraint only | No code change | LLMs are probabilistic; cannot guarantee; needs a Go-side fallback |
 
 ### Recommendation
 
-**Layered approach: per-file isolation + prompt constraint + retriable error surface.**
+**Keep JSON. Add a tolerant extractor in `readChildCRDs` + per-file isolation + prompt patch.**
 
-1. **Per-file isolation in `readChildCRDs`**: on `json.Unmarshal` failure for a specific file, record the error in a `[]parseErr` slice and continue to the next file. Return the valid children AND a dedicated `PartialParseError` (wrapping the per-file errors) so the caller can distinguish "all good" from "some bad" from "all bad". Update the calling path (lines 324-332) to surface a retriable error when `PartialParseError` contains parse failures, rather than treating it as a hard stop.
+Three changes, all in Phase-10 scope:
 
-2. **Prompt patch in `plan_planner.tmpl`**: add an explicit constraint in the "HOW TO EMIT THE CHILD CRDS" section:
-   - "The file MUST contain ONLY the JSON object — no prose, no markdown, no explanation before or after the `{...}` block."
-   - Consider adding a JSON schema reference (the full `spec` field names are already listed; just emphasize no trailing text).
+**1. Tolerant JSON extraction in `readChildCRDs`** (in `internal/subagent/anthropic/subagent.go`):
 
-3. **`ExitCode` as retriable vs hard failure**: the current caller marks the whole dispatch `ExitCode=1` on any parse error. With per-file isolation, the controller can retry the planner dispatch if all parse errors are for files that are JSON-syntactically invalid (recoverable via re-dispatch) as opposed to kind-allowlist violations (which would recur on retry). Mark parse failures as `ExitCode=2` (retriable) vs allowlist violations as `ExitCode=1` (permanent), so the reconciler's existing error-classification logic can route accordingly.
+Use `json.NewDecoder(bytes.NewReader(data)).Decode(&spec)` instead of `json.Unmarshal(data, &spec)`. `json.Decoder.Decode` reads exactly one JSON value from the stream and stops; any bytes after the closing `}` are not read and do not cause an error. This is stdlib `encoding/json` — no new dependency. This directly survives the observed failure class (trailing prose after `}`).
 
-The `TestReadChildCRDs_RejectsMalformedJSON` test in `childcrd_read_test.go` currently expects a hard error return. It must be updated to expect per-file isolation behavior (valid siblings returned + error slice). [VERIFIED: `subagent.go:437-438` hard-abort; `plan_planner.tmpl` prompt text; `childcrd_read_test.go:145` existing malformed-JSON test]
+```go
+dec := json.NewDecoder(bytes.NewReader(data))
+dec.DisallowUnknownFields() // keep strict on field names
+if jerr := dec.Decode(&spec); jerr != nil {
+    // per-file: record error, continue to next file
+    parseErrs = append(parseErrs, fmt.Errorf("parse child file %q: %w", name, jerr))
+    continue
+}
+```
+
+Note: `DisallowUnknownFields` is optional here — the security boundary is the kind allowlist and name check, not field strictness. The planner may add forward-compatible fields. Omit `DisallowUnknownFields` to avoid spurious rejections on future spec fields.
+
+**2. Per-file isolation**: record errors in a `[]error` slice and continue. After the loop, if `len(parseErrs) > 0`, set `out.ExitCode = 1` with a reason listing the bad files by name. The valid siblings are still returned in `out.ChildCRDs`. The controller sees a failed dispatch AND a non-empty child list — it can surface the exact bad files in the Task status without losing the valid work.
+
+The traversal-defense hard-aborts (symlink rejection, path-escape check) MUST remain hard-abort — they are a security boundary, not a format issue.
+
+**3. Prompt patch in `plan_planner.tmpl`**: add an explicit constraint after the JSON schema example:
+
+```
+IMPORTANT: Each file MUST contain ONLY the JSON object — nothing before
+the opening { and nothing after the closing }. No prose, no markdown fences,
+no explanation. The file is read by a machine that fails on any character
+outside the JSON object.
+```
+
+**Phase-10 scope call:** The MCP `emit_child` tool approach (which would eliminate the failure class at token-generation time via constrained decoding) is deferred. It requires changing the CLI invocation to pass a custom MCP server while preserving `--bare` hermeticity — that is an architectural change beyond Phase 10's defect-fix scope. Record it as a Phase 11 candidate.
+
+The `TestReadChildCRDs_RejectsMalformedJSON` test in `childcrd_read_test.go` currently expects a hard error return. It must be updated to: (a) expect per-file isolation (valid siblings returned + error for the bad file), and (b) add a case with trailing prose after `}` asserting that the file parses successfully with `json.Decoder`. [VERIFIED: `subagent.go:437-438` hard-abort with `json.Unmarshal`; `plan_planner.tmpl` prompt text; `pkg/dispatch/childcrd.go:57` — `Spec runtime.RawExtension`; `go.mod:24,174` — yaml deps already transitive; Anthropic docs on prefill not supported for Sonnet 4.6; arXiv 2408.02442 on format restriction penalties]
 
 ## Fork (d): Dashboard Project-Detail 404
 
@@ -264,11 +322,15 @@ No code change is required for either. The plan should include a "run medium DoD
 
 ### Pitfall 3: Per-File Isolation Must Not Lose Traversal Defense
 **What goes wrong:** Loosening the error return in `readChildCRDs` for parse errors might accidentally loosen the traversal defense (symlink/path-escape checks). These are separate branches.
-**How to avoid:** The `return nil, fmt.Errorf(...)` for traversal violations must remain hard-abort. Only the `json.Unmarshal` and `json.Unmarshal`-surface kind/name validation failures become per-file-skip.
+**How to avoid:** The `return nil, fmt.Errorf(...)` for traversal violations must remain hard-abort. Only the `json.Decoder.Decode` failure and kind/name validation failures become per-file-skip.
 
 ### Pitfall 4: Dashboard Get Must Use p.Namespace for Child Listing
 **What goes wrong:** After the all-namespace fallback finds a Project in `tide-sample-medium`, the child List calls (`h.Client.List(ctx, &ms, client.InNamespace(p.Namespace))`) must use `p.Namespace`, not the original (empty) `namespace` variable.
 **How to avoid:** Refactor the detail-build logic into a shared helper `buildDetail(ctx, p)` that is called from both the explicit-namespace path and the cross-namespace fallback path. The helper always uses `p.Namespace`.
+
+### Pitfall 5: `json.Decoder` Does Not Validate Extra Fields by Default
+**What goes wrong:** Switching from `json.Unmarshal` to `json.Decoder.Decode` removes the implicit "whole-buffer" validation. A file with two valid JSON objects concatenated would decode only the first, silently ignoring the second.
+**How to avoid:** After `dec.Decode(&spec)`, call `dec.More()` — if it returns true, a second token exists; treat this as a parse error (unexpected extra content). This catches double-object files while still tolerating trailing prose.
 
 ## Don't Hand-Roll
 
@@ -276,7 +338,8 @@ No code change is required for either. The plan should include a "run medium DoD
 |---------|-------------|-------------|-----|
 | Idempotent clone | Custom PVC-wipe + reclone logic | `gogit.PlainOpen` + `pkggit.Fetch` | Already implemented in `pkg/git/fetch.go`; network-refreshes the repo |
 | Per-run dir ownership | initContainer with `chown -R` | `fsGroup` on PodSecurityContext | Kubelet applies at mount time; no extra container or image pull |
-| JSON repair for LLM output | Custom tokenizer/repair loop | Per-file skip + prompt constraint | Repair is fragile; skip-and-continue gives partial results; prompt reduces frequency |
+| Tolerant JSON parse for LLM trailing prose | Custom balanced-brace scanner | `json.NewDecoder(...).Decode(...)` | stdlib `json.Decoder.Decode` stops at end of first JSON value by design; zero new deps |
+| LLM format-compliance guarantee | Prompt engineering alone | MCP `emit_child` tool with `input_schema` (Phase 11) | Only constrained decoding at token generation time provides mathematical certainty; prompt reduces frequency, not eliminates |
 
 ## Validation Architecture
 
@@ -296,8 +359,9 @@ No code change is required for either. The plan should include a "run medium DoD
 | SC-1 | Clone into existing repo returns nil | unit | `go test ./pkg/git/ -run TestCloneIdempotent` | ❌ Wave 0 |
 | SC-1 | Clone Job retry sequence succeeds | unit | `go test ./cmd/tide-push/ -run TestCloneMode` | ✅ (extend) |
 | SC-2 | Push/clone pods get FSGroup=1000 | unit | `go test ./internal/controller/ -run TestBuildCloneJobFSGroup` | ❌ Wave 0 |
+| SC-4 | Trailing prose after `}` does not abort parse | unit | `go test ./internal/subagent/anthropic/ -run TestReadChildCRDs_TrailingProse` | ❌ Wave 0 |
 | SC-4 | Malformed child JSON does not abort valid siblings | unit | `go test ./internal/subagent/anthropic/ -run TestReadChildCRDs_PartialParse` | ❌ Wave 0 |
-| SC-4 | Existing malformed JSON test updated | unit | `go test ./internal/subagent/anthropic/ -run TestReadChildCRDs_RejectsMalformedJSON` | ✅ (update) |
+| SC-4 | Existing malformed JSON test updated for per-file behavior | unit | `go test ./internal/subagent/anthropic/ -run TestReadChildCRDs_RejectsMalformedJSON` | ✅ (update) |
 | SC-7 | `GET /api/v1/projects/{name}` without namespace finds cross-ns project | unit | `go test ./cmd/dashboard/api/ -run TestGetProjectWithoutNamespace` | ❌ Wave 0 |
 
 ### Sampling Rate
@@ -308,7 +372,7 @@ No code change is required for either. The plan should include a "run medium DoD
 ### Wave 0 Gaps
 - [ ] `pkg/git/clone_test.go` — add `TestCloneIdempotent` (calls `Clone` twice on same destDir, asserts nil error second call)
 - [ ] `internal/controller/push_helpers_test.go` — add `TestBuildCloneJobFSGroup` / `TestBuildPushJobFSGroup` asserting `PodSecurityContext.FSGroup == 1000`
-- [ ] `internal/subagent/anthropic/childcrd_read_test.go` — add `TestReadChildCRDs_PartialParse` (valid task-01.json + malformed task-02.json → task-01 returned + error for task-02); update `TestReadChildCRDs_RejectsMalformedJSON` to match new per-file behavior
+- [ ] `internal/subagent/anthropic/childcrd_read_test.go` — add `TestReadChildCRDs_TrailingProse` (valid JSON + trailing "With..." → successful parse); add `TestReadChildCRDs_PartialParse` (valid task-01.json + malformed task-02.json → task-01 returned + error for task-02); update `TestReadChildCRDs_RejectsMalformedJSON` to match new per-file behavior; add `TestReadChildCRDs_DoubleObject` (two JSON objects concatenated → error via `dec.More()` check)
 - [ ] `cmd/dashboard/api/projects_test.go` — add `TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces` (project in non-default namespace, no `?namespace=` param, expect 200)
 
 ## Environment Availability
@@ -324,7 +388,7 @@ No code change is required for either. The plan should include a "run medium DoD
 
 | ASVS Category | Applies | Standard Control |
 |---------------|---------|-----------------|
-| V5 Input Validation | yes (child JSON) | `json.Unmarshal` + kind allowlist in `readChildCRDs` — maintained in per-file-skip path |
+| V5 Input Validation | yes (child JSON) | `json.Decoder.Decode` + kind allowlist + `dec.More()` double-object check in `readChildCRDs` — all maintained in per-file-skip path |
 | V6 Cryptography | no | — |
 
 ### Known Threat Patterns for this phase
@@ -333,6 +397,7 @@ No code change is required for either. The plan should include a "run medium DoD
 |---------|--------|---------------------|
 | Traversal via malformed child JSON filename | Tampering | Traversal defense (symlink reject, path-escape check) remains a hard-abort; only parse errors become per-file-skip |
 | FSGroup chown exposes PVC data to other pods | Information Disclosure | Per-Project PVC subPath isolation (`{project.UID}/workspace`) already enforced at mount time; FSGroup does not cross subPath boundaries |
+| Double-object injection in child file | Tampering | `dec.More()` check after decode catches concatenated objects; treated as a parse error |
 
 ## Assumptions Log
 
@@ -340,6 +405,7 @@ No code change is required for either. The plan should include a "run medium DoD
 |---|-------|---------|---------------|
 | A1 | `ptr.To[int64]` is importable in `push_helpers.go` via `k8s.io/utils/ptr` (same dep as jobspec.go) | Fork (b) | Low — `k8s.io/utils` is already a transitive dep; if not directly listed, use `func() *int64 { v:=int64(1000); return &v }()` |
 | A2 | The live medium-sample run 404 was observed without `?namespace=` from the frontend | Fork (d) | Medium — if the frontend does pass `?namespace=` and the 404 is from a different cause, the fix may be elsewhere; but the code bug exists regardless |
+| A3 | The observed `invalid character 'W'` error is trailing prose after `}`, not a mid-object unquoted value | Fork (c) | Medium — if mid-object, `json.Decoder` also fails and per-file isolation rescues siblings either way; only the extractor's effectiveness differs |
 
 ## Open Questions
 
@@ -348,10 +414,10 @@ No code change is required for either. The plan should include a "run medium DoD
    - What's unclear: whether go-git sends a Basic auth header with empty password against `http://` anonymous servers (the in-cluster demo git-http-server).
    - Recommendation: test `Clone` idempotency against the in-cluster `http://` remote with `pat=""` during the Phase 10 DoD run; add a `TestFetchAnonymous` unit test using `seedBareRepo` + local `file://` URL as a proxy.
 
-2. **Partial-parse vs retry threshold in the controller**
-   - What we know: the reconciler marks a planner dispatch failed on `ExitCode=1`; currently no retry logic distinguishes parse-error from allowlist-violation.
-   - What's unclear: whether the controller should auto-retry a planner that returned `PartialParseError` (some valid children, some bad).
-   - Recommendation: for Phase 10, surface the partial-parse as a failed level (fail-fast); the plan author gets a clear error and can re-trigger manually. Full retry logic can be a Phase 11 improvement.
+2. **MCP `emit_child` tool as Phase 11 candidate**
+   - What we know: Anthropic's `strict: true` tool use applies constrained decoding against `input_schema`, providing mathematical format compliance. This eliminates the trailing-prose failure class entirely. The blocker is `--bare` suppressing `.mcp.json` and plugins.
+   - What's unclear: whether the claude CLI supports injecting a custom MCP server via a flag (e.g., `--mcp-server`) without `--bare` being lifted, or whether an alternative hermeticity mechanism exists.
+   - Recommendation: track as Phase 11 work. Phase 10's `json.Decoder` extractor + prompt patch is a sound interim fix.
 
 ## Sources
 
@@ -360,8 +426,10 @@ No code change is required for either. The plan should include a "run medium DoD
 - [VERIFIED: codebase] `pkg/git/fetch.go` — `Fetch()` implementation, `PlainOpen` + `FetchContext` pattern
 - [VERIFIED: codebase] `internal/controller/push_helpers.go` — `buildCloneJob`, `buildPushJob` — no SecurityContext
 - [VERIFIED: codebase] `internal/dispatch/podjob/jobspec.go:403-406` — `FSGroup: new(int64(1000))` working pattern
-- [VERIFIED: codebase] `internal/subagent/anthropic/subagent.go:437-438` — hard-abort on parse error
+- [VERIFIED: codebase] `internal/subagent/anthropic/subagent.go:437-438` — hard-abort on parse error with `json.Unmarshal`
 - [VERIFIED: codebase] `internal/subagent/common/templates/plan_planner.tmpl` — prompt JSON schema
+- [VERIFIED: codebase] `pkg/dispatch/childcrd.go:57` — `Spec runtime.RawExtension` (JSON-native; non-JSON outer formats require bridge)
+- [VERIFIED: codebase] `go.mod:24,174` — `gopkg.in/yaml.v3` and `sigs.k8s.io/yaml` are transitive deps (YAML has zero new-dep cost)
 - [VERIFIED: codebase] `cmd/dashboard/api/projects.go` — `Get` handler `namespace = "default"` default
 - [VERIFIED: codebase] `cmd/dashboard/router.go` — route registration
 - [VERIFIED: codebase] `cmd/claude-subagent/main.go:84` — `env.Branch` threaded to `EnsureWorktree`
@@ -369,14 +437,21 @@ No code change is required for either. The plan should include a "run medium DoD
 - [VERIFIED: go-git source] `go-git/v5@v5.19.0/repository.go:58` — `ErrRepositoryAlreadyExists` sentinel
 
 ### Secondary (MEDIUM confidence)
+- [CITED: platform.claude.com/docs/en/docs/test-and-evaluate/strengthen-guardrails/increase-consistency] — Anthropic official: prefill not supported on Sonnet 4.6; XML tags recommended for prompt structure (not file format); constrained decoding via structured outputs is the guarantee mechanism
+- [CITED: platform.claude.com/docs/en/build-with-claude/structured-outputs] — Anthropic official: strict tool use applies constrained decoding; `output_config.format` requires API call shape (not applicable to file-write scenario)
+- [CITED: arxiv.org/abs/2408.02442] — "Let Me Speak Freely?": stricter format constraints → greater reasoning degradation; two-step (reason free, then format) recommended; JSON-mode worst for reasoning tasks
 - [CITED: .planning/debug/09-07-premature-succession-evidence.md] — live runtime evidence for all three task-execution defects; exact error strings
+
+### Tertiary (LOW confidence — for context, not used as decision drivers)
+- [WebSearch: dasroot.net/posts/2026/05/structured-output-llms-json-breaks-analyzed/] — 288-call log of JSON failures; trailing prose and unescaped characters are top failure modes
+- [WebSearch: webcrawlerapi.com/blog/json-vs-yaml-choosing-the-right-format-for-llm-prompts] — JSON-to-YAML output decreases syntax accuracy vs JSON-to-JSON
 
 ## Metadata
 
 **Confidence breakdown:**
 - Fork (a) clone idempotency: HIGH — code read directly; go-git sentinel verified in module cache
 - Fork (b) workspace perms: HIGH — missing SecurityContext confirmed by direct read; working pattern in same codebase
-- Fork (c) child-JSON robustness: HIGH — hard-abort at exact line confirmed; prompt template read
+- Fork (c) child-JSON robustness: HIGH — hard-abort at exact line confirmed; format comparison grounded in codebase constraints (RawExtension, --bare, Sonnet 4.6 prefill restriction) + cited research; `json.Decoder` behavior is stdlib-documented
 - Fork (d) dashboard 404: HIGH — handler bug at exact line confirmed; test behavior cross-checked
 
 **Research date:** 2026-06-08
