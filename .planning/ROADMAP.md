@@ -472,14 +472,18 @@ Plans:
 **Open forks for planning/research:** (a) integration mechanism — `git merge` per-task branches in a per-run worktree vs ref-level fast-forward vs cherry-pick in DAG order; (b) integration timing — per-wave (so dependents see dependencies) vs all-at-push-boundary; (c) commit identity source (Helm values / env) and empty-diff handling; (d) does `tide-push` still author the planner-artifact boundary commit alongside the executor run branch, or are the two commit streams unified.
 
 **Depends on:** Phase 10
-**Plans:** TBD (run `/gsd-plan-phase 11`)
+**Plans:** 4 plans
 
 Plans:
-- [ ] B1 (DONE on main, e880a5a) — `pkg/git.EnsureRunBranch` create run-branch ref at default HEAD (idempotent)
-- [ ] B2 (DONE on main, f639340) — `AddWorktree` → real `git worktree add -b tide/wt-<uid> <path> <runBranch>` (linked worktrees)
-- [ ] B3 — Executor commit step in the harness (git add -A + commit, TIDE identity, HeadSHA) + cmd/claude-subagent wiring
-- [ ] B4 — Integration: merge per-task branches into the run branch (wave/DAG order)
-- [ ] B5 — tide-push: clone-mode provisions run-branch+worktree (EnsureRunBranch); push-mode pushes the run branch with the D-B6 lease
-- [ ] B6 — Controller wiring: run-branch → clone Job; trigger integration before final push
+
+**Wave 1** *(parallel — B3 harness commit and B4 integration are independent)*
+- [ ] 11-01-PLAN.md — B3: internal/harness/commit.go (CommitWorktree) + cmd/claude-subagent wiring (SC-2)
+- [ ] 11-02-PLAN.md — B4: pkg/git/integrate.go (IntegrateTaskBranches via git merge --no-ff) (SC-3)
+
+**Wave 2** *(blocked on Wave 1 — B5/B6 consume B4 IntegrateTaskBranches)*
+- [ ] 11-03-PLAN.md — B5+B6: tide-push clone provisions run-branch+worktree; runPush --integrate-task-branches; buildCloneJob --run-branch; PlanReconciler per-wave integration (SC-1, SC-4, SC-5)
+
+**Wave 3** *(blocked on Wave 2 — DoD requires B3–B6 all landed and images rebuilt)*
+- [ ] 11-04-PLAN.md — DoD re-run: rebuild + reload 3 images; medium sample → Project=Complete; 11-VERIFICATION.md gate artifact (SC-6) [checkpoint]
 
 **Evidence:** `10-VERIFICATION.md` (gate_decision: BLOCKED — the 4 cascades closed in the 10-05 run + the full executor-lifecycle design analysis + the B1–B6 component breakdown this phase executes).
