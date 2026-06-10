@@ -1160,3 +1160,79 @@ fresh seeds correct but is not required to recover an existing repo.
 
 **Scope note:** the #13b PushFailed-condition/succession-gate work is OUT OF
 SCOPE here (separate dispatch) and was NOT touched.
+
+
+---
+
+### 16. Dashboard execution-DAG collapses every task into wave 0 — FIXED (committed fe3bce2)
+
+User considers a non-functional dashboard a v1.0.0 blocker. Root cause was
+confirmed by live investigation (`Wave.Status.TaskRefs` + `Wave.Status.Phase`
+both `<none>` for all waves; tasks correctly labeled
+`tideproject.k8s/wave-index` 0/1/2) and re-verified against the code.
+
+**Root cause (controller wiring omission — same CR-01 class):**
+`cmd/manager/main.go` constructed the `WaveReconciler` (was lines 446-452)
+**without** setting `Dispatcher:`, while all five other reconcilers
+(Project/Milestone/Phase/Plan/Task) wire `Dispatcher: dispatcher`. The
+`WaveReconciler` HAS a `Dispatcher` field (`wave_controller.go:61`) and its
+`Reconcile` gates the observational roll-up on `if r.Dispatcher != nil`
+(`wave_controller.go:125`); otherwise it falls to the step-6 scaffold that sets
+a "Wave scaffolded; dispatcher not wired" Ready condition and never populates
+`Status.Phase` / `Status.TaskRefs`. With `r.Dispatcher` nil in production, the
+roll-up never ran → empty `TaskRefs` → the dashboard plan handler
+(`cmd/dashboard/api/plans.go:115-123`) built an empty `waveByTask` map and every
+task fell through to `waveIndex=0`. Wave.Status is observation-only (Plan
+succession reads Tasks, not Waves), so blast radius is dashboard-only — which is
+why every prior run still completed green. The WaveReconciler was simply MISSED
+in the CR-01 pass that wired the other five.
+
+**Fix (committed fe3bce2; the minimal, pattern-consistent wiring):** added
+`Dispatcher: dispatcher,` to the `WaveReconciler` construction in
+`cmd/manager/main.go` (mirrors the other five reconcilers; the `dispatcher` var
+already exists). `reconcileObservational` is purely observational and never
+creates Jobs, so wiring the real dispatcher only unblocks the gate.
+
+**Design decision (the `r.Dispatcher != nil` gate on a purely-observational
+roll-up):** kept the gate, did NOT decouple it. The gate is the established
+Dispatcher-seam pattern across ALL six reconcilers (the deliberate
+Phase-2-vs-scaffold switch the CR-01 / Phase-04.1 passes wired consistently).
+Removing it from just Wave would make Wave inconsistent with the other five and
+over-scope a wiring omission into a pattern change. The wiring fix restores
+function and matches the pattern — that is the right minimal change.
+
+**Regression guard (the existing test MASKED this):** the wave envtest/unit
+test sets `Dispatcher: &stubDispatcher{}` by hand
+(`wave_controller_test.go:134`), and `cmd/manager/wiring_test.go`'s
+`TestReconcilerWiringComplete` is tautological (each case builds a fresh struct
+literal with the field set, then asserts non-nil — it inspects nothing about
+what `main()` wires) AND omits Wave from its matrix entirely. So nothing caught
+the production omission. Added `cmd/manager/wave_dispatcher_wiring_test.go`:
+`TestMainWiresDispatcherOnGatedReconcilers` parses `main.go`'s AST and asserts
+that EVERY Dispatcher-gated reconciler
+(Project/Milestone/Phase/Plan/Wave) is constructed with a `Dispatcher:` field.
+Chosen over a unit "reconcileObservational populates under production wiring"
+test because it directly guards the exact bug class (a future reconciler that
+gates on Dispatcher but is left unwired) and is AST-based, so it is robust to
+formatting/comments rather than brittle. PROVEN: it FAILS on the buggy tree
+(Dispatcher line removed) and PASSES once wired.
+
+**Verify (real output, exit codes):**
+- `make build` → exit 0 (ran `manifests generate fmt vet`; produced no CRD diff).
+- `git diff --quiet charts/` → CLEAN; `git diff --quiet config/crd/` → CLEAN
+  (wiring-only; no api/CRD change, as expected).
+- `go test ./internal/controller/...` → `ok ... 49.7s`, exit 0.
+- `make test` → every package `ok`, zero `--- FAIL`/`FAIL`, `MAKE_TEST_EXIT`
+  empty (= 0). `gofmt -l` clean; `go vet ./cmd/manager/ ./internal/controller/`
+  exit 0.
+- New guard: FAILS on buggy tree, PASSES on fixed tree (verified by temporarily
+  removing the Dispatcher line).
+
+**IMAGE REBUILD: controller image ONLY (`cmd/manager`).** Confirmed: the
+dashboard backend (`cmd/dashboard/api/plans.go`) already maps tasks→waves via
+`Wave.Status.TaskRefs` and the frontend is already correct (#14). The controller
+populates `Status.TaskRefs` once this fix ships; nothing else needs a rebuild.
+
+**Files changed:** `cmd/manager/main.go` (wiring + comment),
+`cmd/manager/wave_dispatcher_wiring_test.go` (new regression guard).
+**Committed atomically as fe3bce2; NOT pushed.**
