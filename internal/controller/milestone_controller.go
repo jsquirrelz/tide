@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -106,6 +107,10 @@ type MilestoneReconciler struct {
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
+
+	// Recorder emits K8s Events for observable parent-ref-resolution failures
+	// (defect #17). Nil-safe: every use is guarded by r.Recorder != nil.
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=milestones,verbs=get;list;watch;create;update;patch;delete
@@ -149,6 +154,11 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		var parent tideprojectv1alpha1.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: milestone.Namespace, Name: milestone.Spec.ProjectRef}, &parent); err != nil {
 			if client.IgnoreNotFound(err) == nil {
+				// defect #17: parent Project named by spec.projectRef does not
+				// exist. Previously a SILENT Requeue (no condition, no event).
+				// Surface it on Status + a Warning Event, then keep requeuing so
+				// it self-heals if the parent later appears.
+				r.surfaceParentRefUnresolved(ctx, &milestone, "Project", milestone.Spec.ProjectRef)
 				return ctrl.Result{Requeue: true}, nil
 			}
 			return ctrl.Result{}, err
@@ -651,6 +661,30 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 	return ctrl.Result{}, nil
 }
 
+// surfaceParentRefUnresolved makes a parent-ref-NotFound stall observable
+// (defect #17). It sets ConditionParentUnresolved (status False, reason
+// ParentRefNotFound, message naming the missing parent) and emits a Warning
+// Event, then returns — the caller keeps requeuing so the Milestone self-heals
+// if the parent appears later. Best-effort: a Status().Update failure is logged
+// but not propagated, so the requeue still fires.
+func (r *MilestoneReconciler) surfaceParentRefUnresolved(ctx context.Context, ms *tideprojectv1alpha1.Milestone, parentKind, parentRef string) {
+	logger := logf.FromContext(ctx)
+	msg := fmt.Sprintf("parent %s %q (spec.projectRef) not found in namespace %q; requeuing until it appears", parentKind, parentRef, ms.Namespace)
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionParentUnresolved,
+		Status:             metav1.ConditionFalse,
+		Reason:             tideprojectv1alpha1.ReasonParentRefNotFound,
+		Message:            msg,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Update(ctx, ms); err != nil {
+		logger.V(1).Info("surfaceParentRefUnresolved: status update failed (will retry on requeue)", "error", err)
+	}
+	if r.Recorder != nil {
+		r.Recorder.Event(ms, corev1.EventTypeWarning, tideprojectv1alpha1.ReasonParentRefNotFound, msg)
+	}
+}
+
 // SetupWithManager wires Owns(&Job{}) and Owns(&Phase{}) per D-A2, plus a
 // namespace-filter predicate per AUTH-02. Plan 04-05: also wires
 // AnnotationChangedPredicate via a self-Watches handler so operator
@@ -660,6 +694,10 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 // (no Generation bump, no annotation change) is not filtered, which would
 // stall dispatch under the manager's auto-reconcile.
 func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Recorder == nil {
+		//nolint:staticcheck // SA1019: GetEventRecorderFor returns record.EventRecorder (the Recorder field type).
+		r.Recorder = mgr.GetEventRecorderFor("milestone-controller")
+	}
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
 			return true

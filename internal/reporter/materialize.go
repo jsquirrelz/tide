@@ -138,6 +138,36 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 	return false, nil
 }
 
+// stampParentRef overrides the child's parent-reference spec field with the
+// authoritative name of the parent the reporter is actually creating it under.
+//
+// defect #17: the planner LLM authors the parent-ref as free text and can
+// mis-number it (observed live: a Phase authored under
+// Milestone/milestone-01-time-formatting carried spec.milestoneRef=
+// "milestone-02-time-formatting"). The phase controller resolves the parent
+// via spec.milestoneRef → NotFound → silent infinite requeue, wedging the whole
+// subtree. The reporter already knows the real parent (it sets the ownerRef to
+// it via EnsureOwnerRef); the parent-ref is load-bearing (field-indexed:
+// taskPlanRefIndexKey on .spec.planRef; idempotency guards match by
+// milestoneRef/phaseRef/planRef/projectRef) so it must be CORRECT, not removed.
+// Stamping it from the real parent name — overriding whatever the LLM authored —
+// prevents the entire mismatched-parent-ref class at the create site, the same
+// way ownerRef is already authoritative rather than LLM-trusted.
+func stampParentRef(obj client.Object, parentName string) {
+	switch o := obj.(type) {
+	case *tideprojectv1alpha1.Milestone:
+		o.Spec.ProjectRef = parentName
+	case *tideprojectv1alpha1.Phase:
+		o.Spec.MilestoneRef = parentName
+	case *tideprojectv1alpha1.Plan:
+		o.Spec.PhaseRef = parentName
+	case *tideprojectv1alpha1.Task:
+		o.Spec.PlanRef = parentName
+		// Wave has no parent-ref spec field (it is derived, not declared) —
+		// nothing to stamp.
+	}
+}
+
 // MaterializeChildCRDs server-side-creates child CRDs from
 // EnvelopeOut.ChildCRDs.
 //
@@ -147,7 +177,9 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 // json.Unmarshal directly into the typed Spec field. ObjectMeta.Name is
 // child.Name; Namespace is the parent's namespace. OwnerRef is set via
 // internal/owner.EnsureOwnerRef (which enforces same-namespace per
-// Pitfall 23 and sets Controller=true / BlockOwnerDeletion=true).
+// Pitfall 23 and sets Controller=true / BlockOwnerDeletion=true). The
+// child's parent-reference spec field is stamped from the real parent name
+// (defect #17) — the LLM-authored value is never trusted.
 //
 // AlreadyExists on Create is treated as idempotent success (mirrors
 // Phase 2 task_controller.go:397-403 SUB-03 / Pitfall F watch-lag race
@@ -213,6 +245,11 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 
 		obj.SetName(child.Name)
 		obj.SetNamespace(parent.GetNamespace())
+
+		// defect #17: stamp the parent-ref from the REAL parent, overriding the
+		// LLM-authored value, before EnsureOwnerRef. ownerRef and parent-ref now
+		// agree on the same authoritative parent.
+		stampParentRef(obj, parent.GetName())
 
 		if err := owner.EnsureOwnerRef(obj, parent, scheme); err != nil {
 			return fmt.Errorf("MaterializeChildCRDs: ensure owner ref on %s/%s: %w", child.Kind, child.Name, err)

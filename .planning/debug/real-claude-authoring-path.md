@@ -1236,3 +1236,102 @@ populates `Status.TaskRefs` once this fix ships; nothing else needs a rebuild.
 **Files changed:** `cmd/manager/main.go` (wiring + comment),
 `cmd/manager/wave_dispatcher_wiring_test.go` (new regression guard).
 **Committed atomically as fe3bce2; NOT pushed.**
+
+---
+
+## DEFECT #17 — mismatched LLM-authored parent-ref silently wedges a phase (FIXED; committed; NOT pushed)
+
+**Observed live (during the dashboard run; NON-DETERMINISTIC — the run only
+completed because a CR was hand-patched):** a phase silently wedged forever —
+`status.phase=<none>`, ZERO status conditions, NO planner Job, only a single
+optimistic-lock error at creation then total silence (no requeue logs). The whole
+cascade stalled below the milestone.
+
+**Confirmed root cause (observed, not hypothesized):**
+- The real-Claude milestone planner authored its child phase with a MISMATCHED
+  parent reference: `phase.spec.milestoneRef = "milestone-02-time-formatting"`
+  while the actual milestone is `"milestone-01-time-formatting"` (the phase's
+  ownerRef was correctly `Milestone/milestone-01-time-formatting`). The LLM
+  mis-numbered the ref (authored milestone-01 but referenced milestone-02).
+- The in-namespace reporter materializes child CRs from the planner's LLM-authored
+  ChildCRDs and set the ownerRef CORRECTLY (to the real parent), but PASSED THE
+  LLM-AUTHORED `spec.milestoneRef` THROUGH VERBATIM
+  (`internal/reporter/materialize.go` — the only live create-site, via
+  `cmd/tide-reporter/main.go:193`).
+- The phase controller step 4 resolved the parent via `spec.milestoneRef`:
+  `r.Get(milestoneRef)` → NotFound → `return ctrl.Result{Requeue: true}, nil`
+  (`phase_controller.go` step 4) — SILENT infinite requeue: no log, no status, no
+  event. Hence the invisible stall.
+- PROOF: `kubectl patch` of `spec.milestoneRef` → `milestone-01-time-formatting`
+  immediately dispatched the planner Job and unblocked the cascade.
+- Same class as the child-CRD-robustness work (project_child_crd_json_mandated):
+  the airtight fix is schema-constrained authoring; the V1 fix is to NOT TRUST the
+  LLM's free-text parent ref.
+
+**Fix (two parts; root-cause fix, user-chosen):**
+
+1. **PRIMARY — stamp the parent-ref at materialization
+   (`internal/reporter/materialize.go`).** New `stampParentRef(obj, parent.GetName())`
+   runs after unmarshalling the typed child and before `EnsureOwnerRef`,
+   OVERRIDING whatever the LLM authored, for EVERY parent→child relationship:
+   milestone→phase = `MilestoneRef`; phase→plan = `PhaseRef`; plan→task =
+   `PlanRef`; project→milestone = `ProjectRef`. (Wave has no parent-ref spec field
+   — it is derived, not declared — so nothing to stamp.) The parent-ref is
+   load-bearing (field-indexed: `taskPlanRefIndexKey` on `.spec.planRef`;
+   idempotency guards match by milestoneRef/phaseRef/planRef/projectRef), so it is
+   set CORRECT, not removed. ownerRef and parent-ref now agree on the same
+   authoritative parent. This is the SINGLE live create-site (the controller-side
+   `MaterializeChildCRDs` in `dispatch_helpers.go` delegates to the same function),
+   so it covers both paths.
+
+2. **DEFENSE-IN-DEPTH — surface the stall instead of silently requeuing.** In the
+   phase and milestone controllers' step-4 parent-ref resolution (the two that
+   previously did the SILENT `return ctrl.Result{Requeue: true}, nil`), on
+   NotFound now call a new `surfaceParentRefUnresolved` helper that sets
+   `ConditionParentUnresolved` (Status=False, Reason=`ParentRefNotFound`, message
+   naming the missing ref) AND emits a Warning Event, THEN keeps the requeue (so it
+   self-heals if the parent appears later). New reason constant
+   `ReasonParentRefNotFound` in `api/v1alpha1/shared_types.go` (reuses the existing
+   `ConditionParentUnresolved` condition type from Phase 04.1). Recorder wired
+   nil-safe via lazy `GetEventRecorderFor` in each `SetupWithManager` (mirrors the
+   existing ProjectReconciler/TaskReconciler pattern; no main.go change needed).
+   The plan→phase and task→plan resolution sites use a different pre-existing
+   pattern (log `V(1)` + skip owner-ref, no stall) and are made moot by part 1
+   stamping the ref correctly; they were not converted to avoid over-scoping a
+   behavior change to a non-buggy path.
+
+**Tests:**
+- `internal/reporter/materialize_test.go::TestMaterializeChildCRDsStampsParentRef`
+  — table, one row per relationship (project→milestone, milestone→phase,
+  phase→plan, plan→task): authored parent-ref is WRONG; created child's parent-ref
+  equals the ACTUAL parent name.
+- `internal/controller/parentref_surface_test.go` — Phase and Milestone whose
+  parent-ref is unresolvable get `ConditionParentUnresolved`
+  (False / `ParentRefNotFound`, message names the missing ref) + Requeue, not a
+  silent requeue. Existing controller + reporter tests stay green.
+
+**Verify (real output, exit codes):**
+- `make build` → `MAKE_BUILD_EXIT=0` (ran manifests/generate/fmt/vet).
+- `git diff --quiet config/crd/` and `charts/` → BOTH CLEAN (logic + condition
+  constants only; no CRD field change, as expected).
+- `go test ./internal/controller/... ./internal/reporter/... ./api/... ./cmd/...`
+  → every package `ok`, `GO_TEST_EXIT=0`.
+- `make test` → every package `ok`, zero `--- FAIL`/`FAIL`, `MAKE_TEST_EXIT=0`.
+- `gofmt -l` clean; `go vet` exit 0; `golangci-lint` on the changed files
+  (`internal/reporter/...`, my new `parentref_surface_test.go`) → 0 issues (the
+  remaining repo-wide lint findings are all pre-existing in untouched files).
+
+**IMAGE REBUILD (confirmed):**
+- **REPORTER image (`cmd/tide-reporter`)** — for part 1 (parent-ref stamping at
+  materialization; the reporter Job is the live create-site).
+- **CONTROLLER image (`cmd/manager`)** — for part 2 (phase + milestone controller
+  surface-the-stall + new condition/reason vocabulary).
+- No subagent rebuild (the planner template/runner is unchanged; the fix is on the
+  trust boundary, not the authoring side). No CRD/chart re-apply (no schema change).
+
+**Files changed:** `internal/reporter/materialize.go` (+ test),
+`internal/controller/phase_controller.go`,
+`internal/controller/milestone_controller.go`,
+`api/v1alpha1/shared_types.go`,
+`internal/controller/parentref_surface_test.go` (new).
+**Committed atomically; NOT pushed.**

@@ -165,9 +165,21 @@ const (
 // Closes the silent mis-routing bug class in multi-Project namespaces where
 // the prior fallback `projectList.Items[0]` would adopt whichever Project
 // sorted first.
+//
+// Debug defect #17 reuses ConditionParentUnresolved (with ReasonParentRefNotFound)
+// for the symmetric direct-parent case: a level controller resolving its parent
+// via the spec parent-ref (Phase.spec.milestoneRef / Milestone.spec.projectRef /
+// Plan.spec.phaseRef / Task.spec.planRef) gets NotFound. Previously the Phase and
+// Milestone controllers returned a SILENT `Requeue: true` — no condition, no
+// event — so a mismatched parent-ref (LLM mis-numbered the ref) wedged the whole
+// subtree invisibly. Surfacing the condition + a Warning Event makes the stall
+// visible in `kubectl get -o yaml` and events while still requeuing so it
+// self-heals if the parent later appears.
 const (
 	// ConditionParentUnresolved is set on a Task or Plan when its parent
-	// Project cannot be resolved by label or owner-chain walk.
+	// Project cannot be resolved by label or owner-chain walk; also set on a
+	// Phase or Milestone (defect #17) when its direct parent-ref resolves to
+	// NotFound.
 	ConditionParentUnresolved = "ParentUnresolved"
 
 	// ReasonNoProjectLabel — no tideproject.k8s/project label on the resource.
@@ -175,6 +187,12 @@ const (
 
 	// ReasonNoOwnerRef — no Project owner ref in the (bounded) owner-ref chain.
 	ReasonNoOwnerRef = "NoOwnerRef"
+
+	// ReasonParentRefNotFound — the resource's direct parent-ref (defect #17:
+	// Phase.spec.milestoneRef / Milestone.spec.projectRef) names a parent that
+	// does not exist in the namespace. Surfaced (condition False + Warning Event)
+	// before requeuing so the stall is observable rather than silent.
+	ReasonParentRefNotFound = "ParentRefNotFound"
 )
 
 // Phase 11 condition + reason vocabulary — per-wave integration failure.

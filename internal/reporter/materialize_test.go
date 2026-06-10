@@ -236,3 +236,104 @@ func TestMaterializeChildCRDsTaskPromptPath(t *testing.T) {
 		t.Errorf("Task.Spec.PromptPath = %q, want %q (wired from SourcePath)", got.Spec.PromptPath, wantPath)
 	}
 }
+
+// TestMaterializeChildCRDsStampsParentRef covers defect #17: the planner LLM can
+// author a MISMATCHED parent-ref (observed live: a Phase authored under
+// Milestone/milestone-01 carried spec.milestoneRef="milestone-02"). The
+// materializer must STAMP the parent-ref field from the ACTUAL parent it creates
+// the child under (the same parent it sets the ownerRef to), overriding whatever
+// the LLM wrote — so the level controller resolves the parent and the cascade
+// does not silently wedge. One row per parent->child relationship.
+func TestMaterializeChildCRDsStampsParentRef(t *testing.T) {
+	tests := []struct {
+		name       string
+		parent     client.Object
+		childKind  string
+		childName  string
+		rawSpec    []byte // authored spec carrying the WRONG ref
+		wantRefOf  func(obj client.Object) string
+		realParent string
+	}{
+		{
+			name:       "project->milestone",
+			parent:     &tideprojectv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{UID: "proj-uid", Name: "project-01", Namespace: "default"}},
+			childKind:  "Milestone",
+			childName:  "milestone-01",
+			rawSpec:    mustJSON(t, tideprojectv1alpha1.MilestoneSpec{ProjectRef: "project-99-wrong"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Milestone).Spec.ProjectRef },
+			realParent: "project-01",
+		},
+		{
+			name:       "milestone->phase",
+			parent:     &tideprojectv1alpha1.Milestone{ObjectMeta: metav1.ObjectMeta{UID: "ms-uid", Name: "milestone-01-time-formatting", Namespace: "default"}},
+			childKind:  "Phase",
+			childName:  "phase-01",
+			rawSpec:    mustJSON(t, tideprojectv1alpha1.PhaseSpec{MilestoneRef: "milestone-02-time-formatting"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Phase).Spec.MilestoneRef },
+			realParent: "milestone-01-time-formatting",
+		},
+		{
+			name:       "phase->plan",
+			parent:     &tideprojectv1alpha1.Phase{ObjectMeta: metav1.ObjectMeta{UID: "ph-uid", Name: "phase-01", Namespace: "default"}},
+			childKind:  "Plan",
+			childName:  "plan-01",
+			rawSpec:    mustJSON(t, tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-77-wrong"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Plan).Spec.PhaseRef },
+			realParent: "phase-01",
+		},
+		{
+			name:       "plan->task",
+			parent:     &tideprojectv1alpha1.Plan{ObjectMeta: metav1.ObjectMeta{UID: "pl-uid", Name: "plan-01", Namespace: "default"}},
+			childKind:  "Task",
+			childName:  "task-01",
+			rawSpec:    mustJSON(t, tideprojectv1alpha1.TaskSpec{PlanRef: "plan-42-wrong", FilesTouched: []string{"main.go"}, DeclaredOutputPaths: []string{"main.go"}}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Task).Spec.PlanRef },
+			realParent: "plan-01",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fakeClientForTest(t)
+			scheme := runtime.NewScheme()
+			if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatalf("AddToScheme: %v", err)
+			}
+
+			children := []pkgdispatch.ChildCRDSpec{
+				{Kind: tc.childKind, Name: tc.childName, Spec: runtime.RawExtension{Raw: tc.rawSpec}, SourcePath: "envelopes/x/children/" + tc.childName + ".json"},
+			}
+			if err := MaterializeChildCRDs(context.Background(), c, scheme, tc.parent, children); err != nil {
+				t.Fatalf("MaterializeChildCRDs: %v", err)
+			}
+
+			var got client.Object
+			switch tc.childKind {
+			case "Milestone":
+				got = &tideprojectv1alpha1.Milestone{}
+			case "Phase":
+				got = &tideprojectv1alpha1.Phase{}
+			case "Plan":
+				got = &tideprojectv1alpha1.Plan{}
+			case "Task":
+				got = &tideprojectv1alpha1.Task{}
+			}
+			if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: tc.childName}, got); err != nil {
+				t.Fatalf("Get %s/%s: %v", tc.childKind, tc.childName, err)
+			}
+
+			if ref := tc.wantRefOf(got); ref != tc.realParent {
+				t.Errorf("parent-ref = %q, want %q (must be stamped from the ACTUAL parent, not the LLM-authored wrong value)", ref, tc.realParent)
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	return b
+}
