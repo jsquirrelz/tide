@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import { ToastProvider } from "../ToastContainer";
 
 import ProjectNode from "../ProjectNode";
@@ -28,10 +29,14 @@ function makeProps<T>(data: T, selected = false) {
 }
 
 function renderWithCtx(node: React.ReactNode, onClick: (name: string) => void = () => undefined) {
+  // <Handle> inside TideNodeShell reads the React Flow zustand store, so the
+  // node tree must mount under a <ReactFlowProvider> even in isolation.
   return render(
-    <ToastProvider>
-      <NodeClickContext.Provider value={onClick}>{node}</NodeClickContext.Provider>
-    </ToastProvider>,
+    <ReactFlowProvider>
+      <ToastProvider>
+        <NodeClickContext.Provider value={onClick}>{node}</NodeClickContext.Provider>
+      </ToastProvider>
+    </ReactFlowProvider>,
   );
 }
 
@@ -91,24 +96,24 @@ describe("Custom Nodes — Test 1: 5 node kinds render with kind-icon + StatusBa
     expect(screen.getByText("04-dashboard")).toBeInTheDocument();
   });
 
-  it("PlanNode renders ListTree icon + StatusBadge + summary line", () => {
+  it("PlanNode renders ListTree icon + StatusBadge + click affordance summary", () => {
     renderWithCtx(
       <PlanNode
         {...makeProps({
           name: "04-13",
           status: "Dispatching",
-          tasksCount: 6,
-          waveCount: 3,
         })}
       />,
     );
     expect(document.querySelector('[data-icon="ListTree"]')).not.toBeNull();
     expect(screen.getByTestId("status-badge-Dispatching")).toBeInTheDocument();
-    expect(screen.getByText("6 tasks · 3 waves")).toBeInTheDocument();
+    // PlanNode shows a click affordance, not fake task/wave counts — the
+    // Planning DAG payload carries no counts (Execution pane owns them).
+    expect(screen.getByText("view execution →")).toBeInTheDocument();
     expect(screen.getByText("04-13")).toBeInTheDocument();
   });
 
-  it("TaskNode renders Square icon + StatusBadge + summary line", () => {
+  it("TaskNode renders SquareTerminal icon + StatusBadge + summary line", () => {
     renderWithCtx(
       <TaskNode
         {...makeProps({
@@ -119,7 +124,7 @@ describe("Custom Nodes — Test 1: 5 node kinds render with kind-icon + StatusBa
         })}
       />,
     );
-    expect(document.querySelector('[data-icon="Square"]')).not.toBeNull();
+    expect(document.querySelector('[data-icon="SquareTerminal"]')).not.toBeNull();
     expect(screen.getByTestId("status-badge-Running")).toBeInTheDocument();
     expect(screen.getByText("wave 2 · attempt 1")).toBeInTheDocument();
     expect(screen.getByText("t1")).toBeInTheDocument();
@@ -221,8 +226,6 @@ describe("Custom Nodes — Test 4: click handler via NodeClickContext", () => {
         {...makeProps({
           name: "04-13",
           status: "Running",
-          tasksCount: 6,
-          waveCount: 3,
         })}
       />,
       onClick,

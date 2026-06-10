@@ -3,11 +3,12 @@ import type { Node, NodeProps } from "@xyflow/react";
 
 import TideNodeShell from "./TideNodeShell";
 import type { StatusValue } from "./StatusBadge";
+import { pluralize } from "../lib/pluralize";
 
 /**
  * <ProjectNode> — top-level node in the Planning DAG (UI-SPEC §5).
  *
- *   Width: 280px · Min height: 80px · Kind icon: Layers
+ *   Width: 360px · Min height: 92px · Kind icon: Layers
  *   Header label: "project/<name>"
  *   Summary line: "<m> milestones · <p> phases · <q> plans"
  */
@@ -30,10 +31,11 @@ export default function ProjectNode({ data, selected }: NodeProps<ProjectNodeTyp
       status={data.status}
       icon={Layers}
       iconName="Layers"
-      summary={`${data.milestonesCount} milestones · ${data.phasesCount} phases · ${data.plansCount} plans`}
+      summary={`${pluralize(data.milestonesCount, "milestone")} · ${pluralize(data.phasesCount, "phase")} · ${pluralize(data.plansCount, "plan")}`}
       selected={selected}
-      width={280}
-      minHeight={80}
+      width={360}
+      minHeight={92}
+      handleAxis="vertical"
       /* CR-04 fix: Project nodes in the Planning DAG are not clickable —
        * clicking would call setSelectedPlan(projectName) which has no
        * matching Plan and pollutes the right pane. */

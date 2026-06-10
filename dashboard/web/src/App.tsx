@@ -58,6 +58,25 @@ import { useTaskDetail, useTasks } from "./lib/tasks";
  *   a window.location.hash watcher (browser-native History API per UI-SPEC
  *   §Plan-click-swaps-right-pane — no router library).
  */
+/**
+ * A 28px header strip labelling each DAG pane (UI-SPEC — pane labels). Mono
+ * 12px semibold muted text over a subtle bottom border.
+ */
+function PaneHeader({ label }: { label: string }) {
+  return (
+    <div
+      className="flex h-7 shrink-0 items-center border-b border-[var(--color-border-subtle)] px-3 text-[var(--color-text-muted)]"
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: "12px",
+        fontWeight: 600,
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
 export default function App() {
   // Plan 04-17: selectedProject starts null; useProjects defaults it to
   // projects[0].name once the list lands (single-project clusters never
@@ -156,30 +175,36 @@ export default function App() {
   } else {
     body = (
       <div className="grid h-full grid-cols-2 gap-2 p-4">
-        <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
+        <div className="flex flex-col overflow-hidden rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
+          <PaneHeader label="PLANNING" />
           {/* selectedProject is guaranteed non-null in this branch: the
               auto-default useEffect picks projects[0].name once
               projects.length > 0, which is the same gate as this branch. */}
-          <PlanningDAGView
-            projectName={selectedProject ?? ""}
-            onPlanClick={onPlanClick}
-          />
-        </div>
-        <div className="rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
-          {selectedPlan ? (
-            <ExecutionDAGView
-              planName={selectedPlan}
-              plan={executionPlan}
-              onTaskClick={onTaskClick}
+          <div className="min-h-0 flex-1">
+            <PlanningDAGView
+              projectName={selectedProject ?? ""}
+              onPlanClick={onPlanClick}
             />
-          ) : (
-            <div
-              className="flex h-full items-center justify-center text-[var(--color-text-muted)]"
-              style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
-            >
-              Select a plan to view its execution DAG
-            </div>
-          )}
+          </div>
+        </div>
+        <div className="flex flex-col overflow-hidden rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
+          <PaneHeader label="EXECUTION" />
+          <div className="min-h-0 flex-1">
+            {selectedPlan ? (
+              <ExecutionDAGView
+                planName={selectedPlan}
+                plan={executionPlan}
+                onTaskClick={onTaskClick}
+              />
+            ) : (
+              <div
+                className="flex h-full items-center justify-center text-[var(--color-text-muted)]"
+                style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
+              >
+                Select a plan to view its execution DAG
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );

@@ -1,7 +1,16 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
 
 const THEME_KEY = "tide.dashboard.theme";
 type Theme = "system" | "dark" | "light";
+
+// Icon reflecting the current theme setting (UI-SPEC §Header). The cycle order
+// is system → dark → light; the glyph signals the current setting, not the next.
+const THEME_ICON: Record<Theme, LucideIcon> = {
+  system: Monitor,
+  dark: Moon,
+  light: Sun,
+};
 
 export type HeaderProps = {
   /** Slot for ConnectionStatusIndicator — populated by App.tsx. */
@@ -60,6 +69,8 @@ export default function Header({ connectionStatus, projectPicker }: HeaderProps)
     setTheme((prev) => (prev === "system" ? "dark" : prev === "dark" ? "light" : "system"));
   }, []);
 
+  const ThemeIcon = THEME_ICON[theme];
+
   return (
     <header
       className="flex h-12 items-center justify-between border-b border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] px-4"
@@ -81,10 +92,10 @@ export default function Header({ connectionStatus, projectPicker }: HeaderProps)
           type="button"
           onClick={cycleTheme}
           aria-label={`Theme: ${theme}. Click to change.`}
-          className="rounded border border-[var(--color-border-subtle)] bg-transparent px-2 py-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-overlay)]"
+          className="inline-flex rounded border border-[var(--color-border-subtle)] bg-transparent px-2 py-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-overlay)]"
           style={{ fontSize: "var(--text-label)", fontWeight: 600 }}
         >
-          {theme}
+          <ThemeIcon size={14} aria-hidden="true" />
         </button>
       </div>
     </header>

@@ -1,9 +1,11 @@
 import {
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -65,6 +67,17 @@ function coerce(phase: string): StatusValue {
     : "Pending";
 }
 
+// Edge presentation: React Flow's default edges are near-invisible on the dark
+// theme. Give every edge a visible stroke + arrowhead off the border tokens.
+const EDGE_STROKE = "var(--color-border-strong)";
+const EDGE_STYLE = { stroke: EDGE_STROKE, strokeWidth: 1.5 } as const;
+const EDGE_MARKER = {
+  type: MarkerType.ArrowClosed,
+  color: EDGE_STROKE,
+  width: 16,
+  height: 16,
+} as const;
+
 /**
  * Build the @xyflow node + edge arrays from a ProjectDetail payload.
  * Each level becomes a typed Node<DataShape, kind>. Plans are leaves.
@@ -89,8 +102,8 @@ function buildPlanningGraph(detail: ProjectDetail): {
     type: "project",
     position: { x: 0, y: 0 },
     data: projectData as unknown as Record<string, unknown>,
-    width: 280,
-    height: 80,
+    width: 360,
+    height: 92,
   });
 
   for (const m of detail.milestones) {
@@ -112,10 +125,16 @@ function buildPlanningGraph(detail: ProjectDetail): {
       type: "milestone",
       position: { x: 0, y: 0 },
       data: data as unknown as Record<string, unknown>,
-      width: 240,
-      height: 72,
+      width: 340,
+      height: 84,
     });
-    edges.push({ id: `${projectId}->${id}`, source: projectId, target: id });
+    edges.push({
+      id: `${projectId}->${id}`,
+      source: projectId,
+      target: id,
+      style: EDGE_STYLE,
+      markerEnd: EDGE_MARKER,
+    });
   }
   for (const ph of detail.phases) {
     const id = `phase:${ph.name}`;
@@ -130,38 +149,40 @@ function buildPlanningGraph(detail: ProjectDetail): {
       type: "phase",
       position: { x: 0, y: 0 },
       data: data as unknown as Record<string, unknown>,
-      width: 200,
-      height: 64,
+      width: 320,
+      height: 76,
     });
     edges.push({
       id: `milestone:${ph.parent}->${id}`,
       source: `milestone:${ph.parent}`,
       target: id,
+      style: EDGE_STYLE,
+      markerEnd: EDGE_MARKER,
     });
   }
   for (const pl of detail.plans) {
     const id = `plan:${pl.name}`;
+    // The projectDetail payload carries no task/wave counts; PlanNode renders
+    // a "view execution →" affordance instead, and the Execution pane is the
+    // source of truth for per-plan counts.
     const data: PlanNodeData = {
       name: pl.name,
       status: coerce(pl.phase),
-      // Counts not in the projectDetail payload — placeholder values for v1.0.
-      // Plan 04-16's SSE stream will hydrate task counts incrementally; for
-      // now we render 0/0 rather than fail the type check.
-      tasksCount: 0,
-      waveCount: 0,
     };
     nodes.push({
       id,
       type: "plan",
       position: { x: 0, y: 0 },
       data: data as unknown as Record<string, unknown>,
-      width: 180,
-      height: 56,
+      width: 300,
+      height: 72,
     });
     edges.push({
       id: `phase:${pl.parent}->${id}`,
       source: `phase:${pl.parent}`,
       target: id,
+      style: EDGE_STYLE,
+      markerEnd: EDGE_MARKER,
     });
   }
 
@@ -193,6 +214,7 @@ function PlanningDAGViewInner({
   const layoutBatchRef = useRef(0);
   const lastPositionedBatchRef = useRef(-1);
   const ready = useNodesInitialized();
+  const { fitView } = useReactFlow();
 
   // Fetch + build graph on projectName change. Tests can short-circuit by
   // passing `initialData` directly.
@@ -231,6 +253,17 @@ function PlanningDAGViewInner({
     setFlickerReady(true);
   }, [ready, nodes, edges, setNodes]);
 
+  // Re-fit once the dagre-positioned nodes have painted. The `fitView` prop
+  // fits on init against the opacity-0 nodes still stacked at (0,0), so the
+  // final layout ends up off-center; this re-centers on the real positions.
+  useEffect(() => {
+    if (!flickerReady) return;
+    const id = requestAnimationFrame(() =>
+      fitView({ padding: 0.2, maxZoom: 1 }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [flickerReady, fitView]);
+
   const nodeTypes = useMemo(() => planningNodeTypes, []);
 
   return (
@@ -248,7 +281,9 @@ function PlanningDAGViewInner({
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          // maxZoom 1 keeps the whole linear DAG visible: without it, fitView
+          // zooms a sparse 4-node chain past 1.8x and pushes lower nodes off-screen.
+          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           // Read-only graph — the dashboard never edits the DAG, only views it.
           nodesDraggable={false}
           nodesConnectable={false}

@@ -3,11 +3,12 @@ import type { Node, NodeProps } from "@xyflow/react";
 
 import TideNodeShell from "./TideNodeShell";
 import type { StatusValue } from "./StatusBadge";
+import { pluralize } from "../lib/pluralize";
 
 /**
  * <PhaseNode> — third level in the Planning DAG (UI-SPEC §5).
  *
- *   Width: 200px · Min height: 64px · Kind icon: Compass
+ *   Width: 320px · Min height: 76px · Kind icon: Compass
  *   Header label: "<name>"
  *   Summary line: "<q> plans"
  */
@@ -28,10 +29,11 @@ export default function PhaseNode({ data, selected }: NodeProps<PhaseNodeType>) 
       status={data.status}
       icon={Compass}
       iconName="Compass"
-      summary={`${data.plansCount} plans`}
+      summary={pluralize(data.plansCount, "plan")}
       selected={selected}
-      width={200}
-      minHeight={64}
+      width={320}
+      minHeight={76}
+      handleAxis="vertical"
       /* CR-04 fix: Phase nodes in Planning DAG are not clickable. */
       clickable={false}
     />

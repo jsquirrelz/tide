@@ -1,4 +1,5 @@
 import { type KeyboardEvent, type ReactNode, useCallback } from "react";
+import { Handle, Position } from "@xyflow/react";
 import type { LucideIcon } from "lucide-react";
 
 import { clsx } from "../lib/clsx";
@@ -9,10 +10,19 @@ import { useNodeClick } from "./NodeClickContext";
  * Shared visual shell for all 5 custom nodes (UI-SPEC §5).
  *
  *   ┌────────────────────────────────────────────┐
- *   │ <icon> <header>            <StatusBadge>   │
+ *   │ <icon> <header>                            │
  *   │ ────────────────────────────────────────── │
- *   │ <summary line>                             │
+ *   │ <StatusBadge>  <summary line>              │
  *   └────────────────────────────────────────────┘
+ *
+ * The title row owns the full node width so long names truncate as late as
+ * possible; the StatusBadge moves down to lead the summary row.
+ *
+ * Edge attachment: React Flow custom nodes need <Handle> components in the DOM
+ * for edges to connect. We render an invisible target/source pair (the graph is
+ * read-only, isConnectable={false}) on the axis the laying-out direction uses —
+ * vertical (Top/Bottom) for the Planning DAG (dagre TB), horizontal (Left/Right)
+ * for the Execution DAG (dagre LR).
  *
  * Border / hover / selected / failed styling per UI-SPEC §5:
  *   - Base: 1px --color-border-subtle / --color-surface-raised.
@@ -28,6 +38,18 @@ import { useNodeClick } from "./NodeClickContext";
  * via "red/purple-adjacent" iconography. We treat it as failed-border too so
  * the visual signal is consistent.
  */
+
+// Handles must occupy the DOM (React Flow attaches edges to them) but show
+// nothing — collapse to a 1px transparent point with no border.
+const HANDLE_STYLE = {
+  width: 1,
+  height: 1,
+  minWidth: 0,
+  minHeight: 0,
+  opacity: 0,
+  background: "transparent",
+  border: "none",
+} as const;
 
 const FAILED_STATUSES = new Set<string>([
   "Failed",
@@ -76,6 +98,12 @@ export type TideNodeShellProps = {
    * right-pane plan selection.
    */
   clickable?: boolean;
+  /**
+   * Axis the edge handles attach on. "vertical" (Top/Bottom) matches the
+   * Planning DAG's dagre TB layout; "horizontal" (Left/Right) matches the
+   * Execution DAG's dagre LR layout. Defaults to "vertical".
+   */
+  handleAxis?: "vertical" | "horizontal";
 };
 
 export default function TideNodeShell({
@@ -90,6 +118,7 @@ export default function TideNodeShell({
   width,
   minHeight,
   clickable = true,
+  handleAxis = "vertical",
 }: TideNodeShellProps) {
   const onNodeClick = useNodeClick();
 
@@ -108,6 +137,13 @@ export default function TideNodeShell({
   );
 
   const isFailed = FAILED_STATUSES.has(status);
+
+  // Read-only graph: handles exist only so edges have attachment anchors.
+  // They must be in the DOM but invisible (no dots, no connect affordance).
+  const targetPosition =
+    handleAxis === "horizontal" ? Position.Left : Position.Top;
+  const sourcePosition =
+    handleAxis === "horizontal" ? Position.Right : Position.Bottom;
 
   // Tailwind v4 arbitrary-value classes for tokens; the Tailwind compiler
   // emits these as raw CSS variable references.
@@ -148,40 +184,56 @@ export default function TideNodeShell({
         minHeight: `${minHeight}px`,
       }}
     >
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span data-icon={iconName} className="inline-flex shrink-0 text-[var(--color-text-muted)]">
-            <Icon size={14} aria-hidden="true" />
-          </span>
-          <span
-            className="truncate text-[var(--color-text-primary)]"
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "13px",
-              fontWeight: 600,
-            }}
-          >
-            {headerLabel}
-          </span>
-        </div>
-        <StatusBadge status={status} />
+      {/* Invisible edge-attachment handles (read-only graph). */}
+      <Handle
+        type="target"
+        position={targetPosition}
+        isConnectable={false}
+        style={HANDLE_STYLE}
+      />
+      {/* Header row — icon + title only; title gets the full node width. */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <span data-icon={iconName} className="inline-flex shrink-0 text-[var(--color-text-muted)]">
+          <Icon size={14} aria-hidden="true" />
+        </span>
+        <span
+          // Native tooltip: tight node widths truncate long names, so hover
+          // reveals the full header label.
+          title={headerLabel}
+          className="min-w-0 flex-1 truncate text-[var(--color-text-primary)]"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "13px",
+            fontWeight: 600,
+          }}
+        >
+          {headerLabel}
+        </span>
       </div>
       {/* Divider */}
       <div
         aria-hidden="true"
         className="h-px bg-[var(--color-border-subtle)]"
       />
-      {/* Summary line */}
+      {/* Summary row — StatusBadge leads, then the summary text. */}
       <div
-        className="px-3 py-2 text-[var(--color-text-muted)]"
+        className="flex items-center gap-2 px-3 py-2 text-[var(--color-text-muted)]"
         style={{
           fontSize: "12px",
           lineHeight: 1.3,
         }}
       >
-        {summary}
+        <span className="shrink-0">
+          <StatusBadge status={status} />
+        </span>
+        <span className="min-w-0 truncate">{summary}</span>
       </div>
+      <Handle
+        type="source"
+        position={sourcePosition}
+        isConnectable={false}
+        style={HANDLE_STYLE}
+      />
     </div>
   );
 }

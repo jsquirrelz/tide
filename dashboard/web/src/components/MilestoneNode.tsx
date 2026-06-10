@@ -3,11 +3,12 @@ import type { Node, NodeProps } from "@xyflow/react";
 
 import TideNodeShell from "./TideNodeShell";
 import type { StatusValue } from "./StatusBadge";
+import { pluralize } from "../lib/pluralize";
 
 /**
  * <MilestoneNode> — second level in the Planning DAG (UI-SPEC §5).
  *
- *   Width: 240px · Min height: 72px · Kind icon: Flag
+ *   Width: 340px · Min height: 84px · Kind icon: Flag
  *   Header label: "<name>"
  *   Summary line: "<p> phases · <q> plans"
  */
@@ -29,10 +30,11 @@ export default function MilestoneNode({ data, selected }: NodeProps<MilestoneNod
       status={data.status}
       icon={Flag}
       iconName="Flag"
-      summary={`${data.phasesCount} phases · ${data.plansCount} plans`}
+      summary={`${pluralize(data.phasesCount, "phase")} · ${pluralize(data.plansCount, "plan")}`}
       selected={selected}
-      width={240}
-      minHeight={72}
+      width={340}
+      minHeight={84}
+      handleAxis="vertical"
       /* CR-04 fix: Milestone nodes in Planning DAG are not clickable. */
       clickable={false}
     />

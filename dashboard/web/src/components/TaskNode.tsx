@@ -1,4 +1,4 @@
-import { Square } from "lucide-react";
+import { SquareTerminal } from "lucide-react";
 import type { Node, NodeProps } from "@xyflow/react";
 
 import TideNodeShell from "./TideNodeShell";
@@ -7,7 +7,7 @@ import type { StatusValue } from "./StatusBadge";
 /**
  * <TaskNode> — leaf node in the Execution DAG (UI-SPEC §5).
  *
- *   Width: 160px · Min height: 48px · Kind icon: Square (filled when running)
+ *   Width: 260px · Min height: 64px · Kind icon: SquareTerminal
  *   Header label: "<name>"
  *   Summary line: "wave <N> · attempt <K>"
  *
@@ -29,12 +29,13 @@ export default function TaskNode({ data, selected }: NodeProps<TaskNodeType>) {
       name={data.name}
       headerLabel={data.name}
       status={data.status}
-      icon={Square}
-      iconName="Square"
+      icon={SquareTerminal}
+      iconName="SquareTerminal"
       summary={`wave ${data.waveIndex} · attempt ${data.attempt}`}
       selected={selected}
-      width={160}
-      minHeight={48}
+      width={260}
+      minHeight={64}
+      handleAxis="horizontal"
     />
   );
 }

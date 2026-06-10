@@ -1,9 +1,12 @@
 import {
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
+  ViewportPortal,
   useNodesInitialized,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Edge,
   type Node,
 } from "@xyflow/react";
@@ -24,9 +27,9 @@ import type { StatusValue } from "./StatusBadge";
  *
  *   Layout: dagre left-right (rankdir LR). Wave bands are *presentational*
  *   — tasks belong to waves by `pkg/dag.ComputeWaves`, not by @xyflow
- *   parent containment. We render each wave's <WaveBackground> SVG band
- *   at z-index 0 with a computed bounds rect over the wave's task column;
- *   task nodes overlay above.
+ *   parent containment. We render each wave's <WaveBackground> band inside
+ *   React Flow's <ViewportPortal> (so it shares the pan/zoom transform and
+ *   sits in flow coordinates) at z-index 0; task nodes overlay above.
  *
  *   Cross-wave edges use type "smoothstep" per RESEARCH §610 — intra-wave
  *   edges fall through to React Flow's default (default).
@@ -58,8 +61,19 @@ export type ExecutionDAGViewProps = {
 };
 
 const PADDING = 24;
-const TASK_WIDTH = 160;
-const TASK_HEIGHT = 48;
+const TASK_WIDTH = 260;
+const TASK_HEIGHT = 64;
+
+// Edge presentation — match PlanningDAGView: React Flow's default edges are
+// near-invisible on the dark theme.
+const EDGE_STROKE = "var(--color-border-strong)";
+const EDGE_STYLE = { stroke: EDGE_STROKE, strokeWidth: 1.5 } as const;
+const EDGE_MARKER = {
+  type: MarkerType.ArrowClosed,
+  color: EDGE_STROKE,
+  width: 16,
+  height: 16,
+} as const;
 
 function buildExecutionGraph(plan: ExecutionPlanData): {
   nodes: Node[];
@@ -91,6 +105,8 @@ function buildExecutionGraph(plan: ExecutionPlanData): {
         id: `${dep}->${t.name}`,
         source: dep,
         target: t.name,
+        style: EDGE_STYLE,
+        markerEnd: EDGE_MARKER,
       });
     }
   }
@@ -210,6 +226,7 @@ function ExecutionDAGViewInner({
   const ready = useNodesInitialized();
   const layoutBatchRef = useRef(0);
   const lastPositionedBatchRef = useRef(-1);
+  const { fitView } = useReactFlow();
 
   // Build graph from plan prop. Two distinct effect ticks (mount + layout)
   // give Pitfall 26 mitigation its transitional state.
@@ -245,6 +262,17 @@ function ExecutionDAGViewInner({
     setFlickerReady(true);
   }, [ready, nodes, edges, waveMap, setNodes]);
 
+  // Re-fit after the dagre-positioned nodes paint (the init `fitView` prop
+  // fits against the opacity-0 nodes still at (0,0), leaving the real layout
+  // off-center). Re-centering also keeps every wave band in view.
+  useEffect(() => {
+    if (!flickerReady) return;
+    const id = requestAnimationFrame(() =>
+      fitView({ padding: 0.2, maxZoom: 1 }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [flickerReady, fitView]);
+
   const nodeTypes = useMemo(() => executionNodeTypes, []);
 
   return (
@@ -255,35 +283,6 @@ function ExecutionDAGViewInner({
         data-flicker-ready={flickerReady ? "true" : "false"}
         className="h-full w-full relative"
       >
-        {/*
-          Wave bands render in a z=0 SVG layer behind the @xyflow nodes
-          (z=10+ inside the ReactFlow renderer). Per RESEARCH §609 we
-          ship raw SVG rectangles rather than @xyflow `parentNode`
-          containment, because tasks belong to a wave by computation,
-          not by parent-child.
-        */}
-        <svg
-          data-z-layer="wave-background"
-          style={{
-            position: "absolute",
-            inset: 0,
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-          aria-hidden="true"
-        >
-          {bands.map((b) => (
-            <WaveBackground
-              key={b.waveIndex}
-              waveIndex={b.waveIndex}
-              bounds={b.bounds}
-              taskCount={b.taskCount}
-              isActiveDispatch={plan?.activeDispatchWave === b.waveIndex}
-              /* WR-13 fix: drive failed-band styling from member task statuses. */
-              failedCount={b.failedCount}
-            />
-          ))}
-        </svg>
         {/*
           Hidden edge metadata for tests — DOM markers carrying the edge
           type so test assertions can inspect cross-wave routing without
@@ -310,12 +309,38 @@ function ExecutionDAGViewInner({
           onEdgesChange={onEdgesChange}
           nodeTypes={nodeTypes}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          // maxZoom 1: keep all waves visible rather than zooming into one.
+          fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={true}
           panOnDrag
-        />
+        >
+          {/*
+            Wave bands render INSIDE the React Flow viewport via
+            <ViewportPortal> so they share the pan/zoom transform and sit in
+            flow coordinates — aligned with the dagre-laid-out task nodes.
+            (Previously an absolute SVG outside the transformed viewport, the
+            bands floated at the origin and dragged fitView's zoom way out.)
+            Tasks belong to a wave by computation, not @xyflow parent
+            containment, so the bands are positioned divs at z-index 0.
+          */}
+          <ViewportPortal>
+            <div data-z-layer="wave-background">
+              {bands.map((b) => (
+                <WaveBackground
+                  key={b.waveIndex}
+                  waveIndex={b.waveIndex}
+                  bounds={b.bounds}
+                  taskCount={b.taskCount}
+                  isActiveDispatch={plan?.activeDispatchWave === b.waveIndex}
+                  /* WR-13 fix: drive failed-band styling from member task statuses. */
+                  failedCount={b.failedCount}
+                />
+              ))}
+            </div>
+          </ViewportPortal>
+        </ReactFlow>
       </div>
     </NodeClickContext.Provider>
   );
