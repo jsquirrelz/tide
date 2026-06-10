@@ -184,7 +184,7 @@ kubectl create secret generic tide-anthropic-creds \
     --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
 ```
 
-The Project CRD references this Secret via `spec.subagent.credsSecretRef`. The controller pod itself **never sees the key** — it's mounted via `envFrom: secretRef:` directly into the subagent Job pod's container (the same pattern used for git PATs; see [docs/git-hosts.md](git-hosts.md) for the equivalent threat-model argument).
+The Project CRD references this Secret via the top-level `spec.providerSecretRef` (the convenience alias for `spec.secretRefs.anthropicAPIKey`) — NOT under `spec.subagent`. The controller pod itself **never sees the key** — it's mounted via `envFrom: secretRef:` directly into the subagent Job pod's container (the same pattern used for git PATs; see [docs/git-hosts.md](git-hosts.md) for the equivalent threat-model argument).
 
 **Never paste the raw key into a YAML manifest** — using `--from-literal` keeps the key out of source control and out of `helm install --dry-run` output. See [docs/project-authoring.md](project-authoring.md) for which `Project.Spec` fields reference this Secret.
 
@@ -201,7 +201,10 @@ kubectl create secret generic tide-git-creds \
     --from-literal=GIT_PAT="$GIT_PAT"
 ```
 
-Reference from the Project CRD:
+A **complete real-world Project** wires the provider key, the subagent image + model,
+a real budget cap, and the git push target. Field names matter — copy this shape (see
+[docs/project-authoring.md](project-authoring.md) for every field + the medium/large
+samples):
 
 ```yaml
 apiVersion: tideproject.k8s/v1alpha1
@@ -210,12 +213,71 @@ metadata:
   name: my-project
   namespace: tide-sample-medium
 spec:
+  outcomePrompt: "<what you want TIDE to build, in plain prose>"
+  targetRepo: https://github.com/my-org/my-repo.git   # CEL: http(s):// or git@ only — file:// is rejected
+  providerSecretRef: tide-anthropic-creds              # top-level; carries ANTHROPIC_API_KEY
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0   # REAL Claude (omit → falls back to the chart's claude image, NOT the stub)
+    model: claude-haiku-4-5                            # cheap default; override per level below
+    levels:
+      milestone: { model: claude-sonnet-4-6 }          # stronger model for planning bounds task count
+      phase:     { model: claude-sonnet-4-6 }
+      plan:      { model: claude-sonnet-4-6 }
+      task:      { model: claude-haiku-4-5 }            # mechanical task execution — cheap
+  budget:
+    absoluteCapCents: 2500                             # $25 hard cap. NEVER 0 in production (0 = unlimited).
   git:
-    repoURL: https://github.com/my-org/my-repo.git
-    credsSecretRef: tide-git-creds
+    repoURL: https://github.com/my-org/my-repo.git     # push target (same as targetRepo for a single-repo run)
+    credsSecretRef: tide-git-creds                     # carries GIT_PAT (push-scoped)
 ```
 
+Before applying a real Project, the Project's namespace must be bootstrapped with the
+per-namespace resources (subagent ServiceAccount, RWX workspace PVC, signing key, push/
+reporter RBAC) — see **[Bootstrapping a Project namespace](#bootstrapping-a-project-namespace)**
+below. And read the **[Production checklist](production.md)** before pointing TIDE at a
+repo that matters.
+
 **Per-host PAT scope guidance** — minimally-scoped fine-grained tokens for GitHub, GitLab, and Gitea — lives in [docs/git-hosts.md](git-hosts.md). That doc also covers SSH (deferred to v1.x), `gitleaks` per-Project overrides, and the manual smoke recipe for verifying a `tide/run-*` branch landed on your remote.
+
+## Bootstrapping a Project namespace
+
+The Helm chart provisions the workspace PVC, the subagent/push/reporter ServiceAccounts,
+and their RBAC **in `tide-system`**. A Project that runs in a *different* namespace (the
+recommended pattern — one namespace per Project/tenant) needs those same resources
+**mirrored into the Project's namespace**, or the clone/subagent/push/reporter Jobs fail
+to schedule (e.g. `serviceaccount "tide-push" not found`, or the reporter can't create
+child CRDs). The required set per namespace:
+
+| Resource | Purpose |
+|----------|---------|
+| `tide-projects` PVC | Shared workspace for clone/subagent/push Jobs. **Production: `ReadWriteMany`** (multiple Jobs mount it concurrently) — needs an RWX StorageClass (see [docs/rwx-drivers.md](rwx-drivers.md)). On kind/minikube (RWO only) use `ReadWriteOnce`; wave sequencing keeps mounts serial. |
+| `tide-subagent` SA | Identity the authoring/executor subagent pods run as. |
+| `tide-push` SA + Role + RoleBinding | Identity for clone/push Jobs; Role grants `get` on Secrets (to read the git-creds Secret). |
+| `tide-reporter` SA + Role + RoleBinding | Identity for the in-namespace reader Job; Role grants `create/get/list` on the 5 child CRD kinds + `get` on projects. |
+| `tide-signing-key` Secret | Cluster-unique signing key — **copied from `tide-system`** (not generated per namespace). |
+
+The bundled `examples/projects/medium/per-namespace-resources.yaml` is the canonical
+template (and documents the RWX/signing-key notes inline). To prep your own namespace,
+copy it and substitute the namespace, then copy the signing key from `tide-system`:
+
+```bash
+export NS=my-project-ns
+kubectl create namespace "$NS"
+
+# 1. PVC + SAs + RBAC (edit the namespace, or sed the sample template):
+sed "s/tide-sample-medium/$NS/g" examples/projects/medium/per-namespace-resources.yaml \
+  | kubectl apply -f -
+
+# 2. Copy the cluster signing key from tide-system into the Project namespace:
+kubectl get secret tide-signing-key -n tide-system -o yaml \
+  | sed "s/namespace: tide-system/namespace: $NS/" \
+  | kubectl apply -f -
+```
+
+> **RWX requirement:** the workspace PVC must be `ReadWriteMany` for a real run (concurrent
+> wave tasks + clone/push mount it at once). If your cluster has no RWX StorageClass, see
+> [docs/rwx-drivers.md](rwx-drivers.md) for supported drivers. RWO works only for serialized
+> single-mount kind/minikube testing.
 
 ## First Project apply
 
@@ -223,14 +285,14 @@ The small sample uses the **$0 stub-subagent** — it exercises TIDE's full disp
 
 ```bash
 kubectl apply -f examples/projects/small/project.yaml
-kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small \
-    --timeout=10m
+kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small-project \
+    -n tide-sample-small --timeout=10m
 ```
 
 Expected output:
 
 ```
-project.tideproject.k8s/small condition met
+project.tideproject.k8s/small-project condition met
 ```
 
 This is also the timer-stop signal for the `make dry-run-v1` CI gate (see [docs/live-e2e.md](live-e2e.md) for the gate posture). If it completes on your install, the dispatch path is wired correctly end-to-end.
@@ -245,7 +307,7 @@ TIDE is opinionated. It's a good fit for some teams and a poor fit for others. T
 
 - **You run Kubernetes** and want agentic coding pipelines that compose with the K8s ecosystem (Helm, Prometheus, OTel, RBAC, namespaces-per-tenant). TIDE is K8s-native by design — no parallel control plane.
 - **You coordinate LLM dispatch across multiple developers** or a small platform team, and need shared observability, shared budget caps, shared gate policy. Single-developer workflows on a laptop don't justify the K8s overhead.
-- **Your org needs audited LLM cost caps** with hard halt-on-cap semantics (Phase 2 D-D2 + Phase 04.1 P4.1 rolling-window reset). TIDE's `Project.Spec.budget.costCeilingCents` is a real circuit-breaker, not a soft warning.
+- **Your org needs audited LLM cost caps** with hard halt-on-cap semantics (Phase 2 D-D2 + Phase 04.1 P4.1 rolling-window reset). TIDE's `Project.Spec.budget.absoluteCapCents` is a real circuit-breaker, not a soft warning. **Note:** the cap is only enforced when `> 0` — `absoluteCapCents: 0` means *unlimited*, not "no spend" (see [docs/project-authoring.md](project-authoring.md) and the production checklist below). Always set a real cap in production.
 
 ### No, if:
 
@@ -328,6 +390,7 @@ Exits `0` if the image is published and publicly accessible; non-zero if absent 
 
 ## Next steps
 
+- **[docs/production.md](production.md)** — READ BEFORE a real-Claude run against a repo you care about: repo-safety contract, budget safety, cluster sizing, gates, v1.0 limitations, pre-flight checklist.
 - **[docs/project-authoring.md](project-authoring.md)** — author your first Project; walks the 3-sample cost spectrum (small / medium / large).
 - **[docs/dashboard.md](dashboard.md)** — port-forward + ingress recipes; SSE behind reverse proxies.
 - **[docs/cli.md](cli.md)** — `tide` CLI verbs reference (`tide approve`, `tide resume`, `tide cancel`).

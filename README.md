@@ -1,12 +1,19 @@
 ## Quickstart
 
-Four commands. $0 LLM cost. Tests the dispatch path end-to-end via the stub-subagent. Detailed install steps + per-OS prerequisites are in [docs/INSTALL.md](docs/INSTALL.md).
+$0 LLM cost — tests the dispatch path end-to-end via the stub-subagent. Detailed install steps + per-OS prerequisites are in [docs/INSTALL.md](docs/INSTALL.md). For a **real-Claude run against your own repo, do NOT start here** — read the [production checklist](docs/production.md) first.
 
 ```bash
 kind create cluster --name tide-demo
+
+# cert-manager is required first — the tide chart's webhook + metrics Certificates need it.
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.20.2/cert-manager.yaml
+kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=120s
+
 helm install tide-crds oci://ghcr.io/jsquirrelz/tide-charts/tide-crds --version 1.0.0 -n tide-system --create-namespace
 helm install tide oci://ghcr.io/jsquirrelz/tide-charts/tide --version 1.0.0 -n tide-system
-kubectl apply -f examples/projects/small/project.yaml
+
+# Apply the $0 stub sample (raw URL — the OCI install path doesn't clone the repo):
+kubectl apply -f https://raw.githubusercontent.com/jsquirrelz/tide/v1.0.0/examples/projects/small/project.yaml
 ```
 
 ```text
