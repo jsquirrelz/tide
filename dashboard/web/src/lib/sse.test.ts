@@ -20,7 +20,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
-import { MAX_SSE_EVENTS, useSSEStream, useTaskLog } from "./sse";
+import {
+  MAX_SSE_EVENTS,
+  SSE_PROJECT_EVENT_TYPES,
+  useSSEStream,
+  useTaskLog,
+} from "./sse";
 
 // FakeEventSource captures construction args and exposes hooks to pump
 // open/message/error events from the test.
@@ -39,12 +44,25 @@ class FakeEventSource {
   onopen: ((e: Event) => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: Event) => void) | null = null;
+  // Named-event listeners registered via addEventListener — the real
+  // EventSource fires these for `event: <name>` frames. The backend names
+  // every project event (`project.update`, …), so the hook MUST bind here.
+  listeners = new Map<string, Set<(e: MessageEvent) => void>>();
 
   constructor(url: string, init?: EventSourceInit) {
     this.url = url;
     this.init = init;
     FakeEventSource.constructorCalls.push({ url, init });
     FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, fn: (e: MessageEvent) => void) {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(fn);
   }
 
   close() {
@@ -64,6 +82,15 @@ class FakeEventSource {
       lastEventId: msg.lastEventId,
     });
     this.onmessage?.(evt);
+  }
+  // Dispatch a NAMED event (e.g. "project.update") to the addEventListener
+  // handlers — mirrors the real EventSource routing the backend depends on.
+  _emitNamed(type: string, msg: FakeMessage) {
+    const evt = new MessageEvent(type, {
+      data: msg.data,
+      lastEventId: msg.lastEventId,
+    });
+    this.listeners.get(type)?.forEach((fn) => fn(evt));
   }
   _emitError() {
     this.readyState = 2;
@@ -120,6 +147,45 @@ describe("useSSEStream (Test 1)", () => {
     // first socket must have been closed exactly once.
     unmount();
     expect(es.closeCalls).toBe(1);
+  });
+
+  // Live-update regression: the backend emits NAMED events
+  // (`project.update`, `plan.create`, …), NOT unnamed `message` frames. The
+  // hook MUST bind its handler to every named type via addEventListener or no
+  // consumer ever receives data and nothing live-updates.
+  it("fires onMessage + grows events for a NAMED event (project.update)", () => {
+    const onMessage = vi.fn();
+    const { result } = renderHook(() =>
+      useSSEStream("/api/v1/projects/p-named/events", { onMessage }),
+    );
+    const es = FakeEventSource.instances[0];
+    act(() => es._emitOpen());
+
+    // The hook must have registered the handler for every project event type.
+    for (const type of SSE_PROJECT_EVENT_TYPES) {
+      expect(es.listeners.has(type)).toBe(true);
+    }
+
+    // Dispatch a named event — NOT an unnamed `message` frame.
+    act(() =>
+      es._emitNamed("project.update", {
+        data: '{"kind":"Project","name":"p-named"}',
+        lastEventId: "7",
+      }),
+    );
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(result.current.events.length).toBe(1);
+    expect(result.current.totalReceived).toBe(1);
+    expect(result.current.lastEventId).toBe(7);
+  });
+
+  // Empty url = disabled stream: no EventSource is constructed (used by
+  // PlanningDAGView when no project is selected so tests / the idle state
+  // don't spawn sockets or trip the reconnect loop).
+  it("does NOT open a connection for an empty url", () => {
+    renderHook(() => useSSEStream(""));
+    expect(FakeEventSource.constructorCalls.length).toBe(0);
   });
 
   // CR-05 + WR-05 regression test: useSSEStream MUST cap its retained

@@ -54,12 +54,22 @@ class FakeEventSource {
   onopen: ((e: Event) => void) | null = null;
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: Event) => void) | null = null;
+  listeners = new Map<string, Set<(e: MessageEvent) => void>>();
 
   constructor(url: string, init?: EventSourceInit) {
     this.url = url;
     this.init = init;
     FakeEventSource.constructorCalls.push({ url, init });
     FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, fn: (e: MessageEvent) => void) {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(fn);
   }
 
   close() {

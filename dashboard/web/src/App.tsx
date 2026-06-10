@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppShell from "./components/AppShell";
 import Header from "./components/Header";
-import ConnectionStatusIndicator from "./components/ConnectionStatusIndicator";
+import ConnectionStatusIndicator, {
+  type ConnectionState,
+} from "./components/ConnectionStatusIndicator";
 import { ToastProvider } from "./components/ToastContainer";
 import PlanningDAGView from "./components/PlanningDAGView";
 import ExecutionDAGView from "./components/ExecutionDAGView";
@@ -14,6 +16,7 @@ import LoadingState from "./components/LoadingState";
 import ErrorState from "./components/ErrorState";
 import { useProjects } from "./lib/projects";
 import { useTaskDetail, useTasks } from "./lib/tasks";
+import type { SSEState } from "./lib/sse";
 
 /**
  * Top-level dashboard component (plan 04-13 + plan 04-17 wiring).
@@ -85,6 +88,10 @@ export default function App() {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [streamingTask, setStreamingTask] = useState<string | null>(null);
+  // Real project-events SSE connection state, driven up from PlanningDAGView.
+  // Starts "connecting" so the header pill shows activity before the first
+  // project resolves.
+  const [connState, setConnState] = useState<SSEState>("connecting");
 
   // Plan 04-17 hook wiring (replaces the pre-04-17 placeholder defaults).
   const {
@@ -160,6 +167,22 @@ export default function App() {
     setStreamingTask(null);
   }, []);
 
+  // Map the 4-state SSE stream onto the indicator's 3-state vocabulary. The
+  // pill has no distinct "connecting" — pre-connection and mid-reconnect both
+  // read as "reconnecting" (a pulsing dot). With no project selected the
+  // stream sits at "connecting"/"reconnecting", which is the intended idle look.
+  const connectionState: ConnectionState = useMemo(() => {
+    switch (connState) {
+      case "connected":
+        return "connected";
+      case "offline":
+        return "offline";
+      case "connecting":
+      case "reconnecting":
+        return "reconnecting";
+    }
+  }, [connState]);
+
   // Body branching (UI-SPEC §13/§14/§15):
   //   - projectsError       → ErrorState ERR1 (backend-unreachable)
   //   - initial load        → LoadingState L1 (initial)
@@ -184,6 +207,7 @@ export default function App() {
             <PlanningDAGView
               projectName={selectedProject ?? ""}
               onPlanClick={onPlanClick}
+              onConnectionStateChange={setConnState}
             />
           </div>
         </div>
@@ -215,7 +239,7 @@ export default function App() {
       <AppShell
         header={
           <Header
-            connectionStatus={<ConnectionStatusIndicator state="connected" />}
+            connectionStatus={<ConnectionStatusIndicator state={connectionState} />}
             projectPicker={
               <ProjectPicker projects={projects.map((p) => ({ name: p.name, namespace: p.namespace, phase: p.phase }))} value={selectedProject} onChange={setSelectedProject} />
             }

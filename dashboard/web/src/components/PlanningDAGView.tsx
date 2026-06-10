@@ -10,7 +10,7 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import ProjectNode, { type ProjectNodeData } from "./ProjectNode";
 import MilestoneNode, { type MilestoneNodeData } from "./MilestoneNode";
@@ -19,6 +19,8 @@ import PlanNode, { type PlanNodeData } from "./PlanNode";
 import { NodeClickContext } from "./NodeClickContext";
 import { applyDagreLayout } from "../lib/layout";
 import { fetchProject, type ProjectDetail } from "../lib/api";
+import { useSSEStream, type SSEState } from "../lib/sse";
+import { projectEventsURL } from "../lib/tasks";
 import type { StatusValue } from "./StatusBadge";
 
 /**
@@ -28,11 +30,12 @@ import type { StatusValue } from "./StatusBadge";
  *     Project → Milestone → Phase → Plan
  *
  *   Layout: dagre top-down (rankdir TB).
- *   For v1.0 the view fetches initial data on mount and re-fetches when
- *   `projectName` changes. Plan 04-16 wires SSE (`useProjectEvents`) into
- *   the same node/edge state; the seam is the `useEffect` that calls
- *   `fetchProject` — that effect will be replaced by a hook that streams
- *   incremental updates.
+ *   The view fetches initial data on mount and re-fetches when `projectName`
+ *   changes. It also subscribes to the project-events SSE stream
+ *   (`/api/v1/projects/{name}/events`) via useSSEStream and debounces a
+ *   `runFetch` on every planning-relevant event (Project/Milestone/Phase/Plan)
+ *   so the pane live-updates without a manual refresh. Task/Wave events are
+ *   ignored here — they only change the execution pane (useTasks owns those).
  *
  *   Pitfall 26 mitigation (RESEARCH §567-579): on data change, new nodes
  *   are inserted with `style.opacity: 0`. The `useNodesInitialized` hook
@@ -44,6 +47,12 @@ export type PlanningDAGViewProps = {
   onPlanClick: (planName: string) => void;
   /** Optional initial data — primarily for tests to bypass fetch. */
   initialData?: ProjectDetail;
+  /**
+   * Reports the underlying project-events SSE connection state up to App so
+   * the header connection pill reflects the real stream instead of a
+   * hardcoded value. Fires on every state transition.
+   */
+  onConnectionStateChange?: (state: SSEState) => void;
 };
 
 // Map any backend phase string into the StatusBadge union; unknown phase
@@ -197,15 +206,23 @@ const planningNodeTypes = {
   plan: PlanNode,
 } as const;
 
+// Debounce window for SSE-triggered refetches — mirrors useTasks in
+// lib/tasks.ts. Planning events (Project/Milestone/Phase/Plan create/update)
+// can burst as a milestone fans out; collapse N events into one refetch.
+const REFETCH_DEBOUNCE_MS = 250;
+// Wire-shape `kind` values whose changes alter the PLANNING graph. Task/Wave
+// events only change the execution pane (useTasks owns those), so they're
+// ignored here to avoid pointless refetches.
+const PLANNING_KINDS = new Set(["Project", "Milestone", "Phase", "Plan"]);
+
 function PlanningDAGViewInner({
   projectName,
   onPlanClick,
   initialData,
+  onConnectionStateChange,
 }: PlanningDAGViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, _setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  // _setEdges retained for future SSE-driven edge updates (plan 04-16).
-  void _setEdges;
   const [flickerReady, setFlickerReady] = useState(false);
   // Sentinel: increments on each fresh data load so the layout effect
   // knows it has a new batch to position; bumping prevents an
@@ -213,28 +230,67 @@ function PlanningDAGViewInner({
   // x=0/y=0 after layout would otherwise re-trigger the effect).
   const layoutBatchRef = useRef(0);
   const lastPositionedBatchRef = useRef(-1);
+  // Active SSE-debounce timer; cleared on cleanup. Mirrors useTasks.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ready = useNodesInitialized();
   const { fitView } = useReactFlow();
 
-  // Fetch + build graph on projectName change. Tests can short-circuit by
-  // passing `initialData` directly.
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      const data = initialData ?? (await fetchProject(projectName));
-      if (cancelled) return;
-      const { nodes: ns, edges: es } = buildPlanningGraph(data);
-      // Pitfall 26 mitigation: insert with opacity 0; flips to 1 after layout.
-      layoutBatchRef.current += 1;
-      setNodes(ns.map((n) => ({ ...n, style: { ...n.style, opacity: 0 } })));
-      _setEdges(es);
-      setFlickerReady(false);
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+  // Fetch + build graph for the current project. Wrapped so both the
+  // projectName-change effect and the SSE onMessage callback can invoke it.
+  // Tests can short-circuit by passing `initialData` directly.
+  const runFetch = useCallback(async () => {
+    const data = initialData ?? (await fetchProject(projectName));
+    const { nodes: ns, edges: es } = buildPlanningGraph(data);
+    // Pitfall 26 mitigation: insert with opacity 0; flips to 1 after layout.
+    setNodes(ns.map((n) => ({ ...n, style: { ...n.style, opacity: 0 } })));
+    _setEdges(es);
+    layoutBatchRef.current += 1;
+    setFlickerReady(false);
   }, [projectName, initialData, setNodes, _setEdges]);
+
+  // Initial fetch + refetch on projectName change.
+  useEffect(() => {
+    void runFetch();
+  }, [runFetch]);
+
+  // SSE: refresh-trigger only. The minimal event projection lacks the full
+  // hierarchy; we re-fetch the rich ProjectDetail on every planning-relevant
+  // event (debounced 250ms). Empty url when no project is selected → the
+  // stream is disabled (useSSEStream skips construction on an empty url).
+  const stream = useSSEStream(
+    projectName ? projectEventsURL(projectName) : "",
+    {
+      onMessage: (e: MessageEvent) => {
+        let parsed: { kind?: string } = {};
+        try {
+          parsed = JSON.parse(String(e.data));
+        } catch {
+          return;
+        }
+        if (!parsed.kind || !PLANNING_KINDS.has(parsed.kind)) return;
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          debounceRef.current = null;
+          void runFetch();
+        }, REFETCH_DEBOUNCE_MS);
+      },
+    },
+  );
+
+  // Clear any pending debounce on unmount.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
+  }, []);
+
+  // Report connection-state transitions up to App for the header pill.
+  useEffect(() => {
+    onConnectionStateChange?.(stream.state);
+  }, [stream.state, onConnectionStateChange]);
 
   // After nodes mount + measure, run dagre TB layout, then flip opacity 1.
   // The batch sentinel ensures the effect fires exactly once per data load.

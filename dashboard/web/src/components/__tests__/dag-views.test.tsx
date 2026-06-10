@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 // Mock @xyflow's useNodesInitialized to flip true synchronously so layout
 // runs in the first effect tick — keeps the test deterministic without a
@@ -20,9 +20,46 @@ import ExecutionDAGView, {
 } from "../ExecutionDAGView";
 import type { ProjectDetail } from "../../lib/api";
 
+// PlanningDAGView now subscribes to the project-events SSE stream. jsdom has
+// no EventSource, so stub it. The fake routes named events
+// (`project.update`, …) to the addEventListener handlers the hook binds.
+type FakeMessage = { data: string; lastEventId?: string };
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  url: string;
+  onopen: ((e: Event) => void) | null = null;
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  onerror: ((e: Event) => void) | null = null;
+  listeners = new Map<string, Set<(e: MessageEvent) => void>>();
+  closed = false;
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener(type: string, fn: (e: MessageEvent) => void) {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(fn);
+  }
+  close() {
+    this.closed = true;
+  }
+  _emitNamed(type: string, msg: FakeMessage) {
+    const evt = new MessageEvent(type, {
+      data: msg.data,
+      lastEventId: msg.lastEventId,
+    });
+    this.listeners.get(type)?.forEach((fn) => fn(evt));
+  }
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function stubFetchOK<T>(payload: T) {
@@ -36,8 +73,13 @@ function stubFetchOK<T>(payload: T) {
   );
 }
 
-// Use beforeEach in tests below to stub fetch responses cleanly.
-beforeEach(() => undefined);
+beforeEach(() => {
+  FakeEventSource.instances = [];
+  vi.stubGlobal(
+    "EventSource",
+    FakeEventSource as unknown as typeof EventSource,
+  );
+});
 
 const PROJECT_PAYLOAD: ProjectDetail = {
   name: "my-project",
@@ -91,6 +133,57 @@ describe("PlanningDAGView — Test 1: hierarchy renders with ≥13 nodes and TB 
         "data-dagre-direction",
       ),
     ).toBe("TB");
+  });
+});
+
+describe("PlanningDAGView — SSE live-update: a planning event triggers a refetch", () => {
+  it("debounced refetch fires on a named Plan event; Task events are ignored", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => PROJECT_PAYLOAD,
+    });
+    vi.stubGlobal("fetch", fetchFn as unknown as typeof fetch);
+    vi.useFakeTimers();
+
+    try {
+      render(
+        <PlanningDAGView projectName="my-project" onPlanClick={() => undefined} />,
+      );
+
+      // Drain the initial fetch.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+
+      const es = FakeEventSource.instances[0];
+      expect(es).toBeDefined();
+
+      // A Task event must NOT trigger a planning refetch (execution-pane only).
+      act(() => {
+        es._emitNamed("task.update", {
+          data: JSON.stringify({ kind: "Task", name: "t-1" }),
+        });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+
+      // A Plan event triggers a debounced refetch.
+      act(() => {
+        es._emitNamed("plan.update", {
+          data: JSON.stringify({ kind: "Plan", name: "p2" }),
+        });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

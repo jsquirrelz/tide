@@ -77,7 +77,7 @@ const REFETCH_DEBOUNCE_MS = 250;
 // file-level deferral note above.
 const NO_PROJECT_SYNTHETIC_URL = "/dev/null/no-project";
 
-function projectEventsURL(projectName: string | null): string {
+export function projectEventsURL(projectName: string | null): string {
   if (!projectName) return NO_PROJECT_SYNTHETIC_URL;
   return `/api/v1/projects/${encodeURIComponent(projectName)}/events`;
 }

@@ -68,6 +68,23 @@ const MAX_RING_LINES = 5_000;
  */
 export const MAX_SSE_EVENTS = 1_000;
 
+/**
+ * Named SSE event types the dashboard backend emits on the project-events
+ * stream (cmd/dashboard/api/events_sse.go). The backend names every event
+ * `<kind>.<action>` — e.g. `project.create`, `plan.update`, `task.delete` —
+ * so the browser-native EventSource `onmessage` handler (which fires ONLY for
+ * unnamed `event: message` frames) never sees them. useSSEStream registers its
+ * handler for every name in this list via addEventListener so consumers
+ * actually receive data and the panes live-update.
+ */
+export const SSE_PROJECT_EVENT_TYPES: string[] = (
+  ["project", "milestone", "phase", "plan", "task", "wave"] as const
+).flatMap((kind) =>
+  (["create", "update", "delete"] as const).map(
+    (action) => `${kind}.${action}`,
+  ),
+);
+
 export type SSEStreamOptions = {
   /**
    * CR-05 fix: per-event callback fired synchronously for EVERY incoming
@@ -115,6 +132,10 @@ export function useSSEStream(
 
     const open = () => {
       if (unmountedRef.current) return;
+      // Empty url = disabled stream (e.g. PlanningDAGView with no project
+      // selected). Skip construction so tests and the no-project state don't
+      // spawn EventSources or trip the reconnect-backoff loop.
+      if (!url) return;
       const es = new EventSource(url);
       esRef.current = es;
 
@@ -125,7 +146,11 @@ export function useSSEStream(
         forceRender();
       };
 
-      es.onmessage = (e: MessageEvent) => {
+      // Shared message handler. The backend names every project event
+      // (`project.create`, `plan.update`, …), so binding `onmessage` alone
+      // would never fire — `onmessage` only catches unnamed `event: message`
+      // frames. We register this same handler for every named event below.
+      const handler = (e: MessageEvent) => {
         if (unmountedRef.current) return;
         // CR-05 fix: invoke the per-event callback FIRST (before any buffer
         // mutation) so derived consumers like useTaskLog observe every
@@ -159,6 +184,18 @@ export function useSSEStream(
         };
         forceRender();
       };
+
+      // Harmless fallback for unnamed frames (e.g. the log stream, which
+      // emits plain `event: message`).
+      es.onmessage = handler;
+      // Bind the same handler for every named project event the backend
+      // sends so the planning/execution panes live-update. These listeners
+      // are discarded together with the EventSource instance on close() —
+      // the unmount/error cleanup closes `es`, so no explicit
+      // removeEventListener is needed.
+      for (const type of SSE_PROJECT_EVENT_TYPES) {
+        es.addEventListener(type, handler as EventListener);
+      }
 
       es.onerror = () => {
         if (unmountedRef.current) return;
