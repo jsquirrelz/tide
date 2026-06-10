@@ -24,11 +24,20 @@ limitations under the License.
 // positioned at build time — see Build notes below). Used as an in-cluster
 // Job (`examples/projects/medium/demo-remote-init-job.yaml`) that runs
 // BEFORE the medium-sample Project is applied; the resulting bare repo on
-// `demo-remote-pvc` is what TIDE then clones via the medium-sample
-// `Project.Spec.targetRepo: file:///demo-remote.git`. Result: operators
-// run the medium sample with real Claude (~$5) against a fully local-only
-// git remote — no external public repo dependency (per D-B3 + RESEARCH
-// §"Topic 4 Option b").
+// `demo-remote-pvc` is what TIDE then clones via the in-cluster
+// `Project.Spec.targetRepo: http://git-http-server/demo-remote.git`.
+// Result: operators run the medium sample with real Claude (~$5) against a
+// fully in-cluster git remote — no external public repo dependency (per
+// D-B3 + RESEARCH §"Topic 4 Option b").
+//
+// The bare repo is created with `http.receivepack=true` so the
+// tide-git-http-server (git-http-backend CGI) advertises the receive-pack
+// service for anonymous in-cluster push. git-http-backend serves
+// receive-pack ONLY when the served repo's own config has
+// `http.receivepack` truthy — the nginx `GIT_HTTP_RECEIVE_PACK` fastcgi
+// param is NOT honored by git-http-backend (debug #15). Without this config
+// the boundary push of the per-run branch is rejected with "authorization
+// failed".
 //
 // Flags:
 //
@@ -180,7 +189,9 @@ func newInvariantError(format string, a ...any) error {
 //
 //  1. Validate dir is non-empty and does NOT already exist (refuse to
 //     overwrite — invariantError → exit 2).
-//  2. PlainInit(dir, true) to create the bare repo at dir.
+//  2. PlainInit(dir, true) to create the bare repo at dir, then enable
+//     http.receivepack=true so git-http-backend advertises receive-pack
+//     for anonymous in-cluster push (debug #15).
 //  3. Materialize the embedded fixture into a temp working dir.
 //  4. PlainInit(workdir, false) + Worktree().Add(.) + Worktree().Commit
 //     with the deterministic author signature.
@@ -221,6 +232,24 @@ func bootstrap(ctx context.Context, dir string) error {
 	// nil error AND nil repo we'd panic below; defensive nil check.
 	if bareRepo == nil {
 		return fmt.Errorf("git init --bare %s returned nil repo without error", dir)
+	}
+
+	// Enable anonymous receive-pack over HTTP (debug #15). git-http-backend
+	// advertises and serves the receive-pack service ONLY when the served
+	// repo's own config has http.receivepack truthy — the nginx
+	// GIT_HTTP_RECEIVE_PACK fastcgi param is a misconception git-http-backend
+	// does not honor. Without this, the tide-push boundary push of the per-run
+	// branch is rejected ("authorization failed"). Set it directly on the bare
+	// repo config so a fresh seed is push-ready with no external mutation. The
+	// tide-git-http-server entrypoint ALSO self-heals this on startup as a
+	// defense-in-depth backstop regardless of how the repo was seeded.
+	bareConfig, err := bareRepo.Config()
+	if err != nil {
+		return fmt.Errorf("read bare repo config %s: %w", dir, err)
+	}
+	bareConfig.Raw.SetOption("http", "", "receivepack", "true")
+	if err := bareRepo.SetConfig(bareConfig); err != nil {
+		return fmt.Errorf("set http.receivepack=true on bare repo %s: %w", dir, err)
 	}
 
 	// Step 3 — materialize the embedded fixture into a temp working dir.

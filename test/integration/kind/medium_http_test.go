@@ -313,6 +313,41 @@ var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
 			"git-http-backend info/refs response must contain 'git-upload-pack' (smart HTTP protocol)")
 
 		GinkgoWriter.Printf("medium-http-test: git smart HTTP verified (info/refs response contains git-upload-pack)\n")
+
+		// debug #15: verify ANONYMOUS PUSH is enabled. git-http-backend advertises
+		// the receive-pack service over info/refs?service=git-receive-pack ONLY when
+		// the served repo's config has http.receivepack=true (set by tide-demo-init
+		// at seed time + self-healed by the server entrypoint). If it is unset,
+		// git-http-backend returns 403 Forbidden and `wget -q` exits non-zero — which
+		// is exactly the "authorization failed" boundary-push failure observed live.
+		// This assertion fails CI if the receive-pack path regresses, instead of the
+		// prior silent pass (Spec 3 only asserted Project=Complete, which does NOT
+		// gate on push success — see debug #13b).
+		By("Verifying git-http-backend advertises receive-pack for anonymous push (debug #15)")
+		recvRefsURL := "http://git-http-server." + mediumHTTPNamespace + ".svc.cluster.local/demo-remote.git/info/refs?service=git-receive-pack"
+		var recvOutput string
+		Eventually(func() error {
+			wgetCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+				"run", "git-recv-smoke", "--rm", "-i",
+				"--restart=Never",
+				"--image=busybox:1.36",
+				"--namespace="+mediumHTTPNamespace,
+				"--", "wget", "-q", "-O-", recvRefsURL)
+			out, err := wgetCmd.CombinedOutput()
+			if err != nil {
+				// Non-zero exit here is the regression signal: a 403 from
+				// git-http-backend (receive-pack disabled) makes wget -q fail.
+				return fmt.Errorf("wget git-receive-pack info/refs failed (anonymous push likely disabled — http.receivepack not set?): %w\n%s", err, out)
+			}
+			recvOutput = string(out)
+			return nil
+		}, 2*time.Minute, 10*time.Second).Should(Succeed(),
+			"git-receive-pack info/refs endpoint must be reachable (anonymous push enabled)")
+
+		Expect(recvOutput).To(ContainSubstring("git-receive-pack"),
+			"git-http-backend info/refs response must advertise 'git-receive-pack' (anonymous push enabled via http.receivepack=true)")
+
+		GinkgoWriter.Printf("medium-http-test: anonymous push verified (info/refs advertises git-receive-pack)\n")
 	})
 
 	// -------------------------------------------------------------------------

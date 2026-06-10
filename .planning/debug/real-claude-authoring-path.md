@@ -1010,3 +1010,91 @@ candidate separate defect; NOT scoped into the namespace fix.
 (`ghcr.io/jsquirrelz/tide-dashboard:1.0.0`, built from `Dockerfile.dashboard`)
 is the ONLY image affected — it must be rebuilt + reloaded to live re-verify.
 The controller, subagent, and tide-push images are NOT affected by #14.
+
+---
+
+## DEFECT #15 (2026-06-09): anonymous http PUSH refused by the demo git server — FIXED (build + unit + local docker e2e green; LIVE RE-VERIFY PENDING)
+
+This is the LAST hop to land the run branch on the remote. With #13 fixed (the
+boundary push now correctly issues `git push` of the already-integrated run
+branch to the in-cluster http remote), the demo git server REJECTED the push —
+the FIRST time the http PUSH (receive-pack) path was ever exercised end-to-end.
+
+### 15. Demo bare repo lacks `http.receivepack=true` → git-http-backend refuses anonymous receive-pack — FIXED
+
+**Live evidence (OBSERVE FIRST):** tide-push log =
+`push failed (reason=auth-failed): authorization failed`. The medium sample is
+DESIGNED for anonymous in-cluster http push (`project.yaml`: `GIT_PAT=""`).
+
+**Root cause (CONFIRMED):** the git server
+(`ghcr.io/jsquirrelz/tide-git-http-server:1.0.0` = nginx + git-http-backend CGI
+via fcgiwrap) serves the receive-pack service ONLY when the served repo's OWN
+config has `http.receivepack` truthy. The bare repo `/srv/git/demo-remote.git`
+had it UNSET (its config was only `[core] bare=true`). The nginx
+`fastcgi_param GIT_HTTP_RECEIVE_PACK "true"` is a MISCONCEPTION —
+git-http-backend does NOT honor that CGI variable; it reads the repo's
+`http.receivepack` / `http.getanyfile` config. So anonymous push was refused →
+go-git surfaced it as `auth-failed`. (Clone/upload-pack worked because
+upload-pack is enabled by default.)
+
+**Fix (both SOT locations — defense in depth; SOT = `cmd/tide-demo-init/` +
+`images/tide-git-http-server/`, NOT rendered charts):**
+- **(a) seed-time, deterministic — `cmd/tide-demo-init/main.go`:** after
+  `gogit.PlainInit(dir, true)` the bootstrap now sets
+  `http.receivepack=true` on the bare repo via
+  `bareConfig.Raw.SetOption("http","","receivepack","true")` + `SetConfig`. A
+  fresh seed is push-ready with no external mutation.
+- **(b) startup self-heal, robust — `images/tide-git-http-server/entrypoint.sh`:**
+  before launching nginx, loops every `/srv/git/*.git` and runs
+  `git --git-dir=<repo> config http.receivepack true` (non-fatal; logs WARN on
+  failure). Self-heals repos seeded by an older tide-demo-init that predates (a),
+  regardless of how the repo was created. The PVC is mounted RW and the container
+  UID (1000) matches the demo-init writer, so the config write succeeds.
+- **Dead nginx config removed — `images/tide-git-http-server/nginx.conf`:** the
+  no-op `fastcgi_param GIT_HTTP_RECEIVE_PACK "true"` line was removed and replaced
+  with a corrected NOTE explaining git-http-backend uses the repo's
+  `http.receivepack` config, not a CGI variable.
+
+**Tests:**
+- `cmd/tide-demo-init/main_test.go` — new
+  `TestBootstrapEnablesAnonymousReceivePack`: asserts the bootstrapped bare repo
+  carries `http.receivepack=true` (both via `repo.Config()` and the on-disk
+  `config` file). Existing tide-demo-init tests unchanged + green.
+- `test/integration/kind/medium_http_test.go` (Layer B) — Spec 2 extended to
+  assert the receive-pack advert: an in-cluster wget of
+  `info/refs?service=git-receive-pack` must return 200 and contain
+  `git-receive-pack`. Previously the suite only smoke-checked upload-pack and
+  Spec 3 only asserted Project=Complete (which does NOT gate on push success per
+  #13b), so #15 passed CI silently. This assertion fails CI if receive-pack
+  regresses.
+
+**Verification (observed real output):**
+- `go generate ./cmd/tide-demo-init/...` + `go build ./cmd/tide-demo-init/` exit 0;
+  `go build ./...` exit 0; `go vet ./test/integration/kind/...` exit 0;
+  `gofmt -l` clean on all touched files.
+- `go test ./cmd/tide-demo-init/...` → `ok` (includes the new receive-pack test).
+- `sh -n images/tide-git-http-server/entrypoint.sh` OK.
+- **LOCAL DOCKER E2E (strongest):** built the git-http-server image, ran it
+  against a bare repo seeded WITHOUT `http.receivepack` (simulating an old seed).
+  Container log: `enabled http.receivepack on /srv/git/demo-remote.git`.
+  `info/refs?service=git-receive-pack` → **HTTP 200** advertising
+  `# service=git-receive-pack`. A real anonymous push
+  (`git push http://localhost/demo-remote.git HEAD:refs/heads/tide/run-debug15-test`)
+  → `* [new branch]`; `git ls-remote` confirmed
+  `refs/heads/tide/run-debug15-test` landed on the remote. The self-heal path
+  is proven independent of demo-init; the seed-time path is unit-covered.
+
+**IMAGE REBUILD for the live re-verify:** the fix touches TWO image binaries:
+- **tide-demo-init** (`ghcr.io/jsquirrelz/tide-demo-init:1.0.0`, from
+  `images/tide-demo-init/Dockerfile`) — rebuild so fresh seeds carry the config.
+- **tide-git-http-server** (`ghcr.io/jsquirrelz/tide-git-http-server:1.0.0`, from
+  `images/tide-git-http-server/Dockerfile`) — rebuild so the entrypoint
+  self-heals + the dead nginx param is gone.
+The controller (`cmd/manager`), subagent, and tide-push images are NOT affected
+by #15. NOTE: because the entrypoint self-heals on startup, rebuilding ONLY the
+git-http-server image is sufficient to unblock a push even against the EXISTING
+already-seeded bare repo on the parked cluster — the demo-init rebuild makes
+fresh seeds correct but is not required to recover an existing repo.
+
+**Scope note:** the #13b PushFailed-condition/succession-gate work is OUT OF
+SCOPE here (separate dispatch) and was NOT touched.

@@ -3,9 +3,11 @@
 #
 # Sequence:
 #   1. Ensure /run directory exists (socket dir for fcgiwrap, pid dir for nginx).
-#   2. Start fcgiwrap via spawn-fcgi on a Unix socket (world-writable so the
+#   2. Enable anonymous receive-pack (http.receivepack=true) on every repo under
+#      /srv/git so git-http-backend advertises the push service (debug #15).
+#   3. Start fcgiwrap via spawn-fcgi on a Unix socket (world-writable so the
 #      nginx nonroot worker process can connect — Pitfall 5 mitigation).
-#   3. Hand off to nginx (daemon off = process group leader, logs to stdout/stderr).
+#   4. Hand off to nginx (daemon off = process group leader, logs to stdout/stderr).
 #
 # The demo-remote-pvc is mounted at /srv/git/ by the Deployment. The init Job
 # (demo-remote-init-job.yaml) MUST complete before this Deployment pod starts,
@@ -19,6 +21,28 @@ set -e
 # container if /run is tmpfs-based). The Dockerfile pre-creates /run/nginx
 # with correct ownership, but /run itself may need the fcgi.sock parent.
 mkdir -p /run /run/nginx
+
+# Enable anonymous push (debug #15). git-http-backend advertises and serves the
+# receive-pack service ONLY when the served repo's own config has
+# http.receivepack truthy — the nginx GIT_HTTP_RECEIVE_PACK fastcgi param is a
+# misconception git-http-backend does not honor. Set it on every bare repo under
+# /srv/git so anonymous in-cluster push works deterministically on a fresh
+# deploy, regardless of how the repo was seeded (self-heals repos created by an
+# older tide-demo-init that predates the seed-time config). This is a no-op for a
+# repo already configured by tide-demo-init. The PVC is mounted read-write here,
+# and the container UID (1000) matches the demo-init writer, so the config write
+# succeeds. Failures are non-fatal: log and continue (the seed-time config in
+# tide-demo-init is the primary path).
+if [ -d /srv/git ]; then
+    for repo in /srv/git/*.git; do
+        [ -d "$repo" ] || continue
+        if git --git-dir="$repo" config http.receivepack true 2>/dev/null; then
+            echo "tide-git-http-server: enabled http.receivepack on $repo"
+        else
+            echo "tide-git-http-server: WARN could not set http.receivepack on $repo (push may be refused)" >&2
+        fi
+    done
+fi
 
 # Start fcgiwrap via spawn-fcgi on a Unix domain socket.
 # -s /run/nginx/fcgi.sock : socket path in a nonroot-owned dir. /run itself is

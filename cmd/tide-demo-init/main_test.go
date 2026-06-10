@@ -165,3 +165,48 @@ func TestBootstrapHappyPath(t *testing.T) {
 		t.Errorf("cloned main.go missing func Greeting; embedded fixture drift?\ngot:\n%s", string(data))
 	}
 }
+
+// TestBootstrapEnablesAnonymousReceivePack (debug #15) asserts the
+// bootstrapped bare repo carries http.receivepack=true in its config.
+// git-http-backend advertises and serves the receive-pack service ONLY
+// when the served repo's own config has http.receivepack truthy — the
+// nginx GIT_HTTP_RECEIVE_PACK fastcgi param is a no-op git-http-backend
+// does not honor. Without this option the boundary push of the per-run
+// branch to the in-cluster http:// remote is rejected ("authorization
+// failed"). This is the seed-time half of the fix (entrypoint.sh self-heals
+// the same option at startup as a backstop).
+func TestBootstrapEnablesAnonymousReceivePack(t *testing.T) {
+	tempdir := t.TempDir()
+	bareDir := filepath.Join(tempdir, "demo-remote.git")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := bootstrap(ctx, bareDir); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+
+	bareRepo, err := gogit.PlainOpen(bareDir)
+	if err != nil {
+		t.Fatalf("PlainOpen bare repo %q: %v", bareDir, err)
+	}
+	cfg, err := bareRepo.Config()
+	if err != nil {
+		t.Fatalf("bareRepo.Config: %v", err)
+	}
+	got := cfg.Raw.Section("http").Option("receivepack")
+	if got != "true" {
+		t.Errorf("bare repo http.receivepack = %q, want \"true\" (anonymous push would be refused by git-http-backend)", got)
+	}
+
+	// The raw on-disk config file must also carry it — Config() reflects the
+	// stored config, but assert the persisted file directly so a future change
+	// that only mutates the in-memory copy (without SetConfig) is caught.
+	raw, err := os.ReadFile(filepath.Join(bareDir, "config"))
+	if err != nil {
+		t.Fatalf("read bare repo config file: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(string(raw)), "receivepack = true") {
+		t.Errorf("on-disk bare repo config missing 'receivepack = true':\n%s", string(raw))
+	}
+}
