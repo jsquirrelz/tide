@@ -449,6 +449,14 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Wave,
 		ExecutorPool:            executorPool,
 		WatchNamespace:          watchNamespace,
+		// CR-01 fix (debug #16): Dispatcher must be assigned for the observational
+		// roll-up to fire — wave_controller.go:125 gates reconcileObservational on
+		// r.Dispatcher != nil. Without this the Wave never populates Status.Phase /
+		// Status.TaskRefs (it only sets the "dispatcher not wired" scaffold Ready
+		// condition), and the dashboard collapses every task into wave 0. The
+		// roll-up is purely observational and never creates Jobs, so wiring the
+		// real dispatcher here is safe — it only unblocks the gate.
+		Dispatcher: dispatcher,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Wave")
 		os.Exit(1)
