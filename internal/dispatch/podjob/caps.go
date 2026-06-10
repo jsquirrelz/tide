@@ -33,7 +33,7 @@ import (
 type JobKind string
 
 const (
-	JobKindExecutor JobKind = "executor" // Phase 2 task dispatch — 300s floor
+	JobKindExecutor JobKind = "executor" // Phase 2 task dispatch — 480s floor
 	JobKindPlanner  JobKind = "planner"  // Phase 3 planner dispatch — 600s floor
 )
 
@@ -42,7 +42,19 @@ const (
 // Sized to outlive image pull + scheduler delay + init container startup on a
 // cold cluster (Phase 2 WR-01; hoisted from internal/controller/task_controller.go
 // by Phase 04.1 P1.3).
-const executorCapsFloorSeconds int32 = 300
+//
+// Raised 300→480 after the wave1-executor-failure debug session: on the live
+// medium run a caps-unset dependent executor task (write a test against the
+// just-committed wave-0 function) ran its real-LLM tool loop past the 300s
+// floor and was killed by the Job's activeDeadlineSeconds (=floor+grace=360s)
+// with reason DeadlineExceeded, never writing out.json — surfacing downstream
+// as EnvelopeReadFailed / exitCode=-1. The quick wave-0 task (~163s) fit under
+// 360s, which is why the failure was intermittent and wave-dependent. 480s
+// (+60s grace = 540s deadline) gives a real executor task ~50% headroom over
+// the old cap while staying below the 600s planner floor (the drift guard in
+// caps_test.go requires planner > executor). Token-mint validity tracks this
+// same floor via DefaultCaps in task_controller.go, so the two stay aligned.
+const executorCapsFloorSeconds int32 = 480
 
 // plannerCapsFloorSeconds is the minimum wall-clock budget applied to planner
 // Jobs (milestone/phase/plan dispatch) when caps is nil or

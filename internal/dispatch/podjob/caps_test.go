@@ -36,21 +36,21 @@ func TestDefaultCaps(t *testing.T) {
 		wantInputTokens  int64
 		wantOutputTokens int64
 	}{
-		// Executor branch — 300s floor
+		// Executor branch — 480s floor
 		{
-			name:          "executor: nil caps → 300s floor",
+			name:          "executor: nil caps → 480s floor",
 			in:            nil,
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
-			name:          "executor: zero WallClockSeconds → 300s floor",
+			name:          "executor: zero WallClockSeconds → 480s floor",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: 0},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
-			name:          "executor: negative WallClockSeconds → 300s floor",
+			name:          "executor: negative WallClockSeconds → 480s floor",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: -1},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
@@ -68,14 +68,14 @@ func TestDefaultCaps(t *testing.T) {
 			wantWallClock: 600,
 		},
 		{
-			name:           "executor: zero WallClockSeconds + non-zero Iterations → 300s floor, Iterations preserved",
+			name:           "executor: zero WallClockSeconds + non-zero Iterations → 480s floor, Iterations preserved",
 			in:             &tidev1alpha1.Caps{WallClockSeconds: 0, Iterations: 50},
 			kind:           JobKindExecutor,
 			wantWallClock:  executorCapsFloorSeconds,
 			wantIterations: 50,
 		},
 		{
-			name:             "executor: zero WallClockSeconds + non-zero Token caps → 300s floor, tokens preserved",
+			name:             "executor: zero WallClockSeconds + non-zero Token caps → 480s floor, tokens preserved",
 			in:               &tidev1alpha1.Caps{WallClockSeconds: 0, InputTokens: 100000, OutputTokens: 50000},
 			kind:             JobKindExecutor,
 			wantWallClock:    executorCapsFloorSeconds,
@@ -144,7 +144,7 @@ func TestDefaultCaps(t *testing.T) {
 // equally to both consumers downstream of DefaultCaps), with Kind-appropriate
 // floors honored.
 func TestDefaultCaps_NilCapsDeadlineMatch(t *testing.T) {
-	// Executor branch — 300s floor + 60s grace = 360s
+	// Executor branch — 480s floor + 60s grace = 540s
 	capsForToken := DefaultCaps(nil, JobKindExecutor)
 	capsForJob := DefaultCaps(nil, JobKindExecutor)
 	tokenValidity := capsForToken.WallClockSeconds + DefaultWallClockGraceSeconds
