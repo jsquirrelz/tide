@@ -139,6 +139,14 @@ spec:
                 items:
                   type: string
                 type: array
+              integratedThroughWave:
+                description: |-
+                  IntegratedThroughWave records the highest 1-indexed wave number whose task
+                  branches have been fully integrated into the run branch. The per-wave
+                  integration trigger in reconcileWaveMaterialization gates on this field
+                  to avoid re-firing integration every reconcile cycle (D-02/SC-3).
+                  Zero means no waves have been integrated yet.
+                type: integer
               phase:
                 type: string
               validationState:

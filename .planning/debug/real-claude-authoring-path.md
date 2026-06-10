@@ -898,7 +898,7 @@ binary → the **tide-push image** must be rebuilt + reloaded. The controller
 strictly need a rebuild for #13 — though the cluster controller image may already
 be stale from prior work and warrant a refresh independently.
 
-### #13b FLAGGED (NOT decided — needs a user call): succession does not gate on push success
+### #13b RESOLVED (option c — surface non-terminal condition + bounded auto-retry): succession does not gate on push success
 
 **Observed:** the Project reached `Complete` even though its boundary push FAILED
 3/3 (BackoffLimitExceeded). Succession (Project→Milestone→Phase→Plan Succeeded
@@ -923,12 +923,74 @@ user:
   (e.g. `PushFailed=True`) without blocking Complete — visibility without a
   hard gate.
 
-**Status after #13:** the boundary-push execution bug is FIXED (build+tests
-green, committed). A FINAL live re-verify is still PENDING and is the gating
-DoD check: a real medium run must reach Project=Complete AND the
-`tide/run-medium-project-*` branch must be present on the in-cluster http://
-remote (`demo-remote.git`). Rebuild + reload the **tide-push image** before that
-re-verify. The #13b succession-vs-push-gate question is open for a user decision.
+**DECISION (2026-06-09): option (c) + bounded controller-driven auto-retry.**
+User chose to surface a non-terminal condition (do NOT block Complete) AND add a
+BOUNDED controller-driven auto-retry (chosen over manual re-trigger). Succession
+reaching Complete is correct and must NOT regress; the boundary push is
+idempotent (re-pushes the already-merged run branch), so re-attempts are safe;
+the recovery must be bounded (we had just fixed two infinite-loop defects).
+
+**ROOT CAUSE (code, confirmed by reading the project controller — Observe First):**
+`ProjectReconciler.reconcilePhase3Lifecycle` Step 0 (`checkProjectComplete`)
+returned `(true, nil)` and the caller short-circuited the WHOLE reconcile on
+Complete. So the Step-4 push-completion logic (`if Phase==Complete { ... }`) was
+effectively DEAD in the normal cascade — once the boundary push Job hit
+`BackoffLimitExceeded`, NOTHING re-attempted it, and Project=Complete was reported
+with no signal that the push never landed.
+
+**FIX (build + unit tests green; LIVE RE-VERIFY PENDING):**
+- **API (`api/v1alpha1`):** new `BoundaryPushStatus{Attempts int32,
+  LastAttemptTime *metav1.Time, LastError string}` on `ProjectStatus.BoundaryPush`
+  (re-derived from `.status` each reconcile so the bounded retry survives a
+  controller restart — no in-memory counter). New non-terminal condition
+  `ConditionBoundaryPushed="BoundaryPushed"` + reasons `Pushed`/`Pushing`/
+  `PushFailed` in `shared_types.go`. `make generate` + `make manifests` +
+  `make helm` regenerated DeepCopy + CRD + chart SOT (charts/ committed in the
+  SAME commit; `git diff --quiet charts/` clean post-commit; chart catch-up also
+  picked up the pre-existing `plan.status.integratedThroughWave` field).
+- **Controller (`internal/controller/project_controller.go`):**
+  `reconcilePhase3Lifecycle` Step 0 no longer short-circuits on Complete — it
+  fast-paths into the new `reconcileBoundaryPush` state machine. State machine
+  (project Complete; BoundaryPushed != True; Attempts < cap=5):
+  - push Job **Complete** → `BoundaryPushed=True/Pushed`, clear retry state,
+    STOP (no new Job);
+  - push Job **terminal-Failed** generic/BackoffLimitExceeded → background-delete
+    it, dispatch a FRESH Job, `Attempts++`, stamp `LastAttemptTime`, record
+    `LastError`, `BoundaryPushed=False/Pushing`, requeue with capped exponential
+    backoff (2m→4m→8m… cap 15m);
+  - push Job **pending/running** → requeue, do NOT create a second (strict
+    single-in-flight guard — the exact clone-loop pitfall class);
+  - **Attempts >= cap** → `BoundaryPushed=False/PushFailed`, emit a Warning
+    Event, STOP (bounded — no push-loop);
+  - leak/lease (exit 10/11) keep their existing operator-recovery halt phases
+    (`PushLeakBlocked`/`PushLeaseFailed`); a sticky-condition guard prevents the
+    Complete fast-path from re-incrementing them every reconcile.
+  Complete is NEVER gated on `BoundaryPushed`.
+- **Tests:** `internal/controller/project_boundary_push_test.go` (envtest) — failed
+  push under cap → delete + new Job + attempts++ + Pushing; Complete → Pushed +
+  retry state cleared + no new Job; attempts at cap → no new Job + PushFailed +
+  Event; Project still Complete regardless of push state; no concurrent push Jobs
+  with a Running Job present. Updated the pushresult Test 4 (unknown reason now
+  auto-retries instead of dead-ending at PushLeaseFailed).
+
+**Verification (observed exit codes):** `make build` exit 0; `go test
+./internal/controller/...` → `ok` (~30s, all green); `make test` (full unit tier)
+→ every package `ok`, zero `--- FAIL`/`FAIL`, MAKE_TEST_EXIT=0; `git diff --quiet
+charts/` consistent (regenerated in-commit); `gofmt -l` clean; `go vet ./...`
+clean. `go build ./cmd/dashboard ./cmd/manager` exit 0.
+
+**IMAGE REBUILD for the live re-verify:** the #13b fix adds Project status fields
++ controller logic in `cmd/manager`, so the **controller image**
+(`ghcr.io/jsquirrelz/tide-manager` / `cmd/manager`) MUST be rebuilt + reloaded,
+and the updated **Project CRD** (new `status.boundaryPush` + `BoundaryPushed`
+condition) must be applied to the cluster. The **dashboard image** (`cmd/dashboard`)
+also imports `api/v1alpha1` and was rebuilt for type-consistency (it does not
+render the new field yet, but must compile against the new status shape). The
+tide-push, subagent, demo-init, and git-http-server images are NOT affected by
+#13b (the tide-push #13 fix and the git-http-server #15 fix carry their own
+rebuild lists). A FINAL live re-verify remains the gating DoD check: a real medium
+run must reach Project=Complete AND the `tide/run-medium-project-*` branch must be
+present on the in-cluster http:// remote (`demo-remote.git`).
 
 ---
 

@@ -406,6 +406,32 @@ spec:
           status:
             description: status defines the observed state of Project
             properties:
+              boundaryPush:
+                description: |-
+                  BoundaryPush records the bounded auto-retry state of the project-level
+                  boundary push (debug defect #13b). NEVER gates Complete — surfaced via the
+                  non-terminal BoundaryPushed condition for observability + bounded recovery.
+                properties:
+                  attempts:
+                    description: |-
+                      Attempts is the number of boundary-push Jobs dispatched so far for this
+                      Project's run branch. The controller stops dispatching once Attempts
+                      reaches the in-controller cap (maxBoundaryPushAttempts) — bounded retry,
+                      no push-loop.
+                    format: int32
+                    type: integer
+                  lastAttemptTime:
+                    description: |-
+                      LastAttemptTime is the timestamp of the most recently dispatched boundary
+                      push attempt. Drives the capped exponential requeue backoff.
+                    format: date-time
+                    type: string
+                  lastError:
+                    description: |-
+                      LastError carries the most recent boundary-push failure reason (from the
+                      push-result envelope) for operator visibility. Cleared on success.
+                    type: string
+                type: object
               budget:
                 description: |-
                   Budget records running spend tallies (Phase 2+).

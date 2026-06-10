@@ -268,6 +268,33 @@ type BudgetStatus struct {
 	WindowStart *metav1.Time `json:"windowStart,omitempty"`
 }
 
+// BoundaryPushStatus records the bounded auto-retry state of the project-level
+// boundary push (debug defect #13b). The boundary push lands the already-
+// integrated run branch on the remote AFTER the Project reaches Complete; it is
+// observability + bounded recovery, NEVER a gate on Complete.
+//
+// PERSIST-02 / Pitfall 4: this is a per-project retry tally object, NOT an
+// aggregate schedule. Attempts is re-derived from .status on every reconcile so
+// the bounded retry survives a controller restart (no in-memory counter).
+type BoundaryPushStatus struct {
+	// Attempts is the number of boundary-push Jobs dispatched so far for this
+	// Project's run branch. The controller stops dispatching once Attempts
+	// reaches the in-controller cap (maxBoundaryPushAttempts) — bounded retry,
+	// no push-loop.
+	// +optional
+	Attempts int32 `json:"attempts,omitempty"`
+
+	// LastAttemptTime is the timestamp of the most recently dispatched boundary
+	// push attempt. Drives the capped exponential requeue backoff.
+	// +optional
+	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
+
+	// LastError carries the most recent boundary-push failure reason (from the
+	// push-result envelope) for operator visibility. Cleared on success.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+}
+
 // ProjectSpec defines the desired state of Project.
 // +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http://') || self.targetRepo.startsWith('https://') || self.targetRepo.startsWith('git@')",message="targetRepo must be an http(s) or SSH (git@) URL; file:// is not a supported production transport (go-git's file:// transport requires a system git binary absent from production images)"
 type ProjectSpec struct {
@@ -388,6 +415,12 @@ type ProjectStatus struct {
 	// per-project tally object, NOT an aggregate schedule.
 	// +optional
 	Git GitStatus `json:"git,omitempty"`
+
+	// BoundaryPush records the bounded auto-retry state of the project-level
+	// boundary push (debug defect #13b). NEVER gates Complete — surfaced via the
+	// non-terminal BoundaryPushed condition for observability + bounded recovery.
+	// +optional
+	BoundaryPush BoundaryPushStatus `json:"boundaryPush,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -101,6 +101,30 @@ const (
 	ConditionPushLeakBlocked = "PushLeakBlocked"
 )
 
+// Debug defect #13b — boundary-push observability + bounded auto-retry.
+//
+// ConditionBoundaryPushed is a NON-TERMINAL condition on the Project that
+// surfaces whether the already-integrated run branch has landed on the remote.
+// Complete is NEVER gated on this condition: the Project reaches Complete on the
+// control-plane succession roll-up (all Milestones Succeeded) independent of the
+// boundary push, and this condition tracks the push outcome separately so a
+// failed/never-landed push is observable without blocking succession.
+const (
+	// ConditionBoundaryPushed — True when the run branch is confirmed pushed
+	// (boundary push Job Complete); False while a push attempt is in flight /
+	// pending retry (Reason=Pushing) or once the bounded retry budget is
+	// exhausted (Reason=PushFailed).
+	ConditionBoundaryPushed = "BoundaryPushed"
+
+	// ReasonPushed — the run branch is confirmed on the remote.
+	ReasonPushed = "Pushed"
+	// ReasonPushing — a boundary push attempt is in flight or pending retry.
+	ReasonPushing = "Pushing"
+	// ReasonPushFailed — the bounded boundary-push retry budget is exhausted;
+	// the controller stops dispatching push Jobs and emits a Warning Event.
+	ReasonPushFailed = "PushFailed"
+)
+
 // Phase 4 condition + reason vocabulary additions — gate-policy seam at every
 // level boundary (plans 04-04, 04-05, 04-06). All four up-stack reconcilers
 // (Milestone/Phase/Plan/Task) set ConditionWaveOrLevelPaused with one of the

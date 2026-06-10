@@ -118,6 +118,23 @@ const (
 	// PhasePushLeaseFailed and triggers a retry push (Phase 3 D-B6, mirrors
 	// Phase 2 D-D4 budget-bypass annotation pattern).
 	bypassPushLeaseAnnotation = "tideproject.k8s/bypass-push-lease"
+
+	// maxBoundaryPushAttempts caps the controller-driven boundary-push
+	// auto-retry (debug defect #13b). Once Status.BoundaryPush.Attempts reaches
+	// this constant the controller STOPS dispatching push Jobs and sets
+	// BoundaryPushed=False/PushFailed — bounded recovery, never a push-loop.
+	// Small constant: a transient remote/auth/network failure clears well
+	// within 5 attempts; a persistent failure surfaces as PushFailed for the
+	// operator rather than looping forever.
+	maxBoundaryPushAttempts = 5
+
+	// boundaryPushBaseBackoff is the first capped-exponential requeue delay
+	// between boundary-push retries (2m → 4m → 8m → … capped at
+	// boundaryPushMaxBackoff). The push Job's own BackoffLimit handles
+	// in-Job pod retries; this is the controller-level inter-attempt spacing.
+	boundaryPushBaseBackoff = 2 * time.Minute
+	// boundaryPushMaxBackoff caps the capped-exponential requeue delay.
+	boundaryPushMaxBackoff = 15 * time.Minute
 )
 
 // ProjectReconciler reconciles a Project object at Standard depth (D-C1):
@@ -401,8 +418,24 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	logger := logf.FromContext(ctx)
 
 	// Step 0: Check if all owned Milestones have Succeeded → Complete.
-	if complete, err := r.checkProjectComplete(ctx, project); err != nil || complete {
+	// IMPORTANT (debug #13b): reaching Complete does NOT short-circuit the
+	// reconcile. Complete is the control-plane succession roll-up and is patched
+	// by checkProjectComplete on boundary detection; the boundary push (landing
+	// the run branch on the remote) is a SEPARATE concern handled by the bounded
+	// retry state machine in reconcileBoundaryPush. The pre-#13b code returned
+	// early on Complete, which left a failed boundary push with nothing to
+	// re-attempt it (and a hollow Complete with nothing on the remote) — exactly
+	// the #13b defect. So a Complete project fast-paths into the push state
+	// machine instead of returning.
+	complete, err := r.checkProjectComplete(ctx, project)
+	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if complete || project.Status.Phase == tideprojectv1alpha1.PhaseComplete {
+		// The control-plane succession is done. Run ONLY the bounded
+		// boundary-push retry state machine (debug #13b) — no further planner
+		// dispatch, branch init, or clone on a Complete project.
+		return r.reconcileBoundaryPush(ctx, project)
 	}
 
 	// Step 0b: Dispatch project-level planner Job (D-A2 5th dispatch site).
@@ -485,136 +518,319 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		logger.Info("created clone Job", "job", cloneJobName)
 	}
 
-	// Step 4: Push Job dispatch (D-B5 serialization). Deterministic name
-	// tide-push-<project-uid>; AlreadyExists is success (requeue trigger
-	// — push currently in flight, try again later).
-	// Plan 03-08 dispatches a push Job on any reconcile pass where a
-	// child Milestone is Succeeded (full level-boundary detection is
-	// a follow-up plan); for now, the controller stamps the push Job
-	// when Status.Phase=Complete via the buildPushJob path so the
-	// grep contract + state machine shape is provable.
-	if project.Status.Phase == tideprojectv1alpha1.PhaseComplete && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
-		pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
-		var existingPush batchv1.Job
-		pErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &existingPush)
-		if pErr != nil && !apierrors.IsNotFound(pErr) {
-			return ctrl.Result{}, pErr
+	// Step 4 (boundary push): handled by reconcileBoundaryPush via the
+	// Step-0 Complete fast-path above. A non-Complete project that reaches
+	// here has no run branch to push yet, so there is nothing to do.
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileBoundaryPush is the bounded, controller-driven boundary-push retry
+// state machine (debug defect #13b). It runs ONLY after the Project has reached
+// Complete (the control-plane succession roll-up). Complete is NEVER gated on
+// the push outcome — this method records a SEPARATE, non-terminal
+// BoundaryPushed condition + a bounded retry tally on Status.BoundaryPush.
+//
+// State machine (boundary reached; project is Complete):
+//
+//   - Push Job Complete                → BoundaryPushed=True/Pushed, clear retry
+//     state, STOP. The run branch is on the remote.
+//   - Attempts >= cap                  → BoundaryPushed=False/PushFailed, emit a
+//     Warning Event, STOP. Bounded — no push-loop.
+//   - Push Job leak-detected (exit 10) → PhasePushLeakBlocked (operator recovery
+//     path, unchanged from Phase 4 W-1); no auto-retry (a secret must be removed
+//     by hand). Mirrored into the BoundaryPushed=False condition.
+//   - Push Job lease-rejected (exit11) → PhasePushLeaseFailed (operator bypass
+//     annotation recovery path, unchanged); no auto-retry.
+//   - Push Job terminal-Failed (other / BackoffLimitExceeded) → delete the failed
+//     Job, create a fresh one, increment attempts, set lastAttemptTime,
+//     BoundaryPushed=False/Pushing, requeue with capped exponential backoff.
+//   - Push Job pending/running         → BoundaryPushed=False/Pushing, requeue;
+//     do NOT create a second Job (strict single-in-flight guard — the exact
+//     pitfall class that caused the clone-recreation loop).
+//   - No push Job yet                  → create the first one, increment
+//     attempts, BoundaryPushed=False/Pushing, requeue.
+//
+// Idempotency: the boundary push pushes the already-integrated run-branch HEAD
+// (per #13's tide-push fix), so re-creating the Job after a terminal failure
+// converges — a re-push of an already-present HEAD is a no-op fast-forward.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive arms; splitting obscures the contract
+func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	// No git target → nothing to push; nothing to observe.
+	if project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
+		return ctrl.Result{}, nil
+	}
+
+	// Already confirmed pushed — terminal success arm. Nothing further to do.
+	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed); c != nil &&
+		c.Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
+	}
+
+	// Operator-recovery halt arms (leak / lease). These are distinct, sticky
+	// outcomes with their own recovery surfaces (remove the secret; clear the
+	// bypass-push-lease annotation). Once set, the boundary-push state machine
+	// must NOT re-process them every reconcile — the Step-0 Complete fast-path
+	// re-asserts Phase=Complete on each pass, so without this guard the lease
+	// arm would re-increment LeaseFailureCount in a loop.
+	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionPushLeakBlocked); c != nil &&
+		c.Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
+	}
+	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionPushLeaseFailed); c != nil &&
+		c.Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
+	}
+
+	// Bounded-retry exhaustion arm. Re-derived from .status so the cap survives a
+	// controller restart (no in-memory counter). Only declare PushFailed once —
+	// guard on the existing condition reason so we don't re-emit the Event.
+	if project.Status.BoundaryPush.Attempts >= maxBoundaryPushAttempts {
+		if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed); c == nil ||
+			c.Reason != tideprojectv1alpha1.ReasonPushFailed {
+			if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
+				tideprojectv1alpha1.ReasonPushFailed,
+				fmt.Sprintf("Boundary push did not land after %d attempts; last error: %q",
+					project.Status.BoundaryPush.Attempts, project.Status.BoundaryPush.LastError)); err != nil {
+				return ctrl.Result{}, err
+			}
+			if r.Recorder != nil {
+				r.Recorder.Eventf(project, corev1.EventTypeWarning, tideprojectv1alpha1.ReasonPushFailed,
+					"Boundary push exhausted %d/%d attempts; run branch %q not on remote (last error: %q)",
+					project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts,
+					project.Status.Git.BranchName, project.Status.BoundaryPush.LastError)
+			}
+			tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "exhausted").Inc()
 		}
-		if apierrors.IsNotFound(pErr) {
-			msg, mErr := buildCommitMessage("project", "")
-			if mErr != nil {
-				return ctrl.Result{}, fmt.Errorf("build commit message: %w", mErr)
-			}
-			pushOpts := PushOptions{
-				TidePushImage:  r.TidePushImage,
-				Branch:         project.Status.Git.BranchName,
-				LastPushedSHA:  project.Status.Git.LastPushedSHA,
-				CommitMessage:  msg,
-				LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
-			}
-			pushJob := buildPushJob(project, pvcName, pushOpts, r.Scheme)
-			if cErr := r.Create(ctx, pushJob); cErr != nil {
-				if !apierrors.IsAlreadyExists(cErr) {
-					return ctrl.Result{}, fmt.Errorf("create push job: %w", cErr)
-				}
-				// AlreadyExists: idempotent success (D-B5 serialization —
-				// a push for this Project is already active).
-			}
-			logger.Info("created push Job", "job", pushJobName)
-		} else if isJobSucceeded(&existingPush) {
-			// Step 5a: Push succeeded — patch Status.Git.LastPushedSHA.
-			// The push-result envelope schema (plan 03-06's tide-push
-			// binary writes the head SHA into a result file) is wired
-			// in a follow-up plan; for now Plan 03-08 records the
-			// state-transition shape.
+		return ctrl.Result{}, nil
+	}
+
+	pvcName := r.sharedPVCName()
+	pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+	var existingPush batchv1.Job
+	pErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &existingPush)
+	if pErr != nil && !apierrors.IsNotFound(pErr) {
+		return ctrl.Result{}, pErr
+	}
+
+	// No push Job yet — create the first attempt.
+	if apierrors.IsNotFound(pErr) {
+		return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, project.Status.BoundaryPush.LastError)
+	}
+
+	// Push Job Complete — terminal success.
+	if isJobSucceeded(&existingPush) {
+		patch := client.MergeFrom(project.DeepCopy())
+		project.Status.Git.LeaseFailureCount = 0
+		project.Status.BoundaryPush.LastError = ""
+		if err := r.Status().Patch(ctx, project, patch); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionTrue,
+			tideprojectv1alpha1.ReasonPushed,
+			fmt.Sprintf("Run branch %q pushed to remote (job %s)", project.Status.Git.BranchName, pushJobName)); err != nil {
+			return ctrl.Result{}, err
+		}
+		tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "success").Inc()
+		logger.Info("boundary push landed on remote", "job", pushJobName, "branch", project.Status.Git.BranchName)
+		return ctrl.Result{}, nil
+	}
+
+	// Push Job terminal-Failed — classify, then either halt (leak/lease operator
+	// recovery) or auto-retry (generic/BackoffLimitExceeded).
+	if isJobFailed(&existingPush) {
+		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
+		reason := ""
+		if haveEnv {
+			reason = env.Reason
+		}
+
+		switch reason {
+		case "leak-detected":
+			// Operator recovery path (Phase 4 W-1) — no auto-retry; a secret
+			// must be removed from the staged diff by hand.
 			patch := client.MergeFrom(project.DeepCopy())
-			project.Status.Git.LeaseFailureCount = 0
+			project.Status.Phase = tideprojectv1alpha1.PhasePushLeakBlocked
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionPushLeakBlocked,
+				Status:             metav1.ConditionTrue,
+				Reason:             "LeakDetected",
+				Message:            fmt.Sprintf("Push Job %s blocked by gitleaks: secret pattern detected in diff", pushJobName),
+				LastTransitionTime: metav1.Now(),
+			})
+			project.Status.BoundaryPush.LastError = "leak-detected"
 			if err := r.Status().Patch(ctx, project, patch); err != nil {
 				return ctrl.Result{}, err
 			}
-			_ = project.Status.Git.LastPushedSHA // documented writeback path
-		} else if isJobFailed(&existingPush) {
-			// Step 5b: Push failed. Plan 04-06 W-1: split exit-10 (leak)
-			// from exit-11 (lease) via the push-result envelope's Reason
-			// field (cmd/tide-push writes to /dev/termination-log).
-			env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
-			reason := ""
-			if haveEnv {
-				reason = env.Reason
+			tidemetrics.SecretLeakBlockedTotal.WithLabelValues(project.Name, "", "").Inc()
+			tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "leak").Inc()
+			return ctrl.Result{}, nil
+
+		case "lease-rejected":
+			// Operator bypass-annotation recovery path (Phase 3) — no auto-retry.
+			patch := client.MergeFrom(project.DeepCopy())
+			project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
+			project.Status.Git.LeaseFailureCount++
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+				Status:             metav1.ConditionTrue,
+				Reason:             "LeaseRejected",
+				Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
+				LastTransitionTime: metav1.Now(),
+			})
+			project.Status.BoundaryPush.LastError = "lease-rejected"
+			if err := r.Status().Patch(ctx, project, patch); err != nil {
+				return ctrl.Result{}, err
 			}
+			tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
+			return ctrl.Result{}, nil
 
-			switch reason {
-			case "leak-detected":
-				// W-1 path: gitleaks blocked the push. Patch
-				// PhasePushLeakBlocked + Condition PushLeakBlocked
-				// True, and increment the operator-alertable counter
-				// (label set: {project, phase, plan} = 3; phase/plan
-				// empty at the Project boundary — documented).
-				patch := client.MergeFrom(project.DeepCopy())
-				project.Status.Phase = tideprojectv1alpha1.PhasePushLeakBlocked
-				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha1.ConditionPushLeakBlocked,
-					Status:             metav1.ConditionTrue,
-					Reason:             "LeakDetected",
-					Message:            fmt.Sprintf("Push Job %s blocked by gitleaks: secret pattern detected in diff", pushJobName),
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, project, patch); err != nil {
-					return ctrl.Result{}, err
-				}
-				tidemetrics.SecretLeakBlockedTotal.WithLabelValues(project.Name, "", "").Inc()
-				tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "leak").Inc()
-
-			case "lease-rejected":
-				// Existing Phase 3 path — preserve today's behavior so
-				// the bypass-push-lease annotation recovery still works.
-				patch := client.MergeFrom(project.DeepCopy())
-				project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
-				project.Status.Git.LeaseFailureCount++
-				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
-					Status:             metav1.ConditionTrue,
-					Reason:             "LeaseRejected",
-					Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, project, patch); err != nil {
-					return ctrl.Result{}, err
-				}
-				tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
-
-			default:
-				// Empty / unknown reason (or envelope read failed):
-				// fall back to PhasePushLeaseFailed so the existing
-				// recovery annotation tideproject.k8s/bypass-push-lease
-				// remains the operator-visible escape hatch (Plan 04-06
-				// task 1 explicit requirement).
-				patch := client.MergeFrom(project.DeepCopy())
-				project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
-				project.Status.Git.LeaseFailureCount++
-				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
-					Status:             metav1.ConditionTrue,
-					Reason:             "LeaseRejected",
-					Message:            fmt.Sprintf("Push Job %s failed (reason=%q; defaulting to lease-failure semantics)", pushJobName, reason),
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, project, patch); err != nil {
-					return ctrl.Result{}, err
-				}
-				if !haveEnv {
-					// Observability surface: envelope-read failed, push outcome
-					// indeterminate. Record under outcome=internal so an alert
-					// can fire on a sustained envelope-read failure rate.
-					tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "internal").Inc()
-				} else {
-					tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
-				}
+		default:
+			// Generic terminal failure (BackoffLimitExceeded / auth / transient
+			// remote). #13b bounded auto-retry: delete the failed Job and create
+			// a fresh one, incrementing the attempt tally. The cap guard at the
+			// top of this method stops the loop.
+			lastErr := reason
+			switch {
+			case !haveEnv:
+				lastErr = "envelope-unreadable"
+			case lastErr == "":
+				// Terminal failure with no specific reason — the
+				// BackoffLimitExceeded #13b class (e.g. empty commit / transient
+				// remote). Record a generic marker so the operator-visible
+				// LastError is never blank on a real failure.
+				lastErr = "push-failed"
 			}
+			if delErr := r.deleteFailedPushJob(ctx, &existingPush); delErr != nil {
+				return ctrl.Result{}, delErr
+			}
+			logger.Info("boundary push attempt failed; retrying",
+				"job", pushJobName, "attempt", project.Status.BoundaryPush.Attempts,
+				"cap", maxBoundaryPushAttempts, "lastError", lastErr)
+			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, lastErr)
 		}
 	}
 
-	return ctrl.Result{}, nil
+	// Push Job pending/running — single-in-flight guard. Do NOT create a second
+	// Job; surface the in-flight state and requeue on capped backoff.
+	if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
+		tideprojectv1alpha1.ReasonPushing,
+		fmt.Sprintf("Boundary push in flight (job %s, attempt %d/%d)",
+			pushJobName, project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts)); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: boundaryPushRequeue(project.Status.BoundaryPush.Attempts)}, nil
+}
+
+// dispatchBoundaryPush creates a fresh boundary-push Job, increments the bounded
+// attempt tally + stamps lastAttemptTime, sets BoundaryPushed=False/Pushing, and
+// requeues with capped exponential backoff. The Job pushes the already-
+// integrated run-branch HEAD (idempotent per #13), so a re-create after a
+// terminal failure converges.
+func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tideprojectv1alpha1.Project, pvcName, pushJobName, lastErr string) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+
+	msg, mErr := buildCommitMessage("project", "")
+	if mErr != nil {
+		return ctrl.Result{}, fmt.Errorf("build commit message: %w", mErr)
+	}
+	pushOpts := PushOptions{
+		TidePushImage:  r.TidePushImage,
+		Branch:         project.Status.Git.BranchName,
+		LastPushedSHA:  project.Status.Git.LastPushedSHA,
+		CommitMessage:  msg,
+		LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+	}
+	pushJob := buildPushJob(project, pvcName, pushOpts, r.Scheme)
+	if cErr := r.Create(ctx, pushJob); cErr != nil {
+		if !apierrors.IsAlreadyExists(cErr) {
+			return ctrl.Result{}, fmt.Errorf("create push job: %w", cErr)
+		}
+		// AlreadyExists: a deletion is still propagating (foreground) or a
+		// concurrent reconcile won the race. Do not double-count; requeue.
+		return ctrl.Result{RequeueAfter: boundaryPushRequeue(project.Status.BoundaryPush.Attempts)}, nil
+	}
+
+	now := metav1.Now()
+	patch := client.MergeFrom(project.DeepCopy())
+	project.Status.BoundaryPush.Attempts++
+	project.Status.BoundaryPush.LastAttemptTime = &now
+	project.Status.BoundaryPush.LastError = lastErr
+	if err := r.Status().Patch(ctx, project, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
+		tideprojectv1alpha1.ReasonPushing,
+		fmt.Sprintf("Boundary push dispatched (job %s, attempt %d/%d)",
+			pushJobName, project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts)); err != nil {
+		return ctrl.Result{}, err
+	}
+	tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "dispatched").Inc()
+	logger.Info("dispatched boundary push", "job", pushJobName,
+		"attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts)
+	return ctrl.Result{RequeueAfter: boundaryPushRequeue(project.Status.BoundaryPush.Attempts)}, nil
+}
+
+// deleteFailedPushJob deletes a terminally-failed boundary-push Job so the
+// deterministic tide-push-<uid> name is free for the bounded-retry replacement.
+//
+// Background propagation (not Foreground): the API server removes the Job object
+// immediately and reaps its Pods asynchronously. Foreground propagation would
+// leave the Job lingering behind a foreground finalizer until the GC controller
+// runs — which never happens under envtest — so the same-named recreate would
+// AlreadyExists forever. Background is correct here: the Pods are terminal and
+// the run-branch push is idempotent, so there is nothing to serialize against.
+func (r *ProjectReconciler) deleteFailedPushJob(ctx context.Context, job *batchv1.Job) error {
+	policy := metav1.DeletePropagationBackground
+	if err := r.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("delete failed boundary push job %s: %w", job.Name, err)
+	}
+	return nil
+}
+
+// setBoundaryPushedCondition patches the non-terminal BoundaryPushed condition.
+// It only writes when the (status, reason) actually changes so reconciles do not
+// churn LastTransitionTime.
+func (r *ProjectReconciler) setBoundaryPushedCondition(ctx context.Context, project *tideprojectv1alpha1.Project, status metav1.ConditionStatus, reason, message string) error {
+	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+	if existing != nil && existing.Status == status && existing.Reason == reason && existing.Message == message {
+		return nil
+	}
+	patch := client.MergeFrom(project.DeepCopy())
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionBoundaryPushed,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	return r.Status().Patch(ctx, project, patch)
+}
+
+// boundaryPushRequeue returns the capped-exponential inter-attempt delay:
+// 2m, 4m, 8m, … capped at boundaryPushMaxBackoff. attempts is the number of
+// attempts already made (>= 1 after the first dispatch).
+func boundaryPushRequeue(attempts int32) time.Duration {
+	if attempts < 1 {
+		return boundaryPushBaseBackoff
+	}
+	d := boundaryPushBaseBackoff
+	for i := int32(1); i < attempts; i++ {
+		d *= 2
+		if d >= boundaryPushMaxBackoff {
+			return boundaryPushMaxBackoff
+		}
+	}
+	if d > boundaryPushMaxBackoff {
+		return boundaryPushMaxBackoff
+	}
+	return d
 }
 
 // countChildMilestones returns the number of Milestones owned by this Project (plan 09-08).

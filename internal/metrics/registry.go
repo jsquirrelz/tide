@@ -73,8 +73,10 @@ var DispatchLatency *prometheus.HistogramVec
 var SecretLeakBlockedTotal *prometheus.CounterVec
 
 // PushJobsTotal counts every terminal push Job, broken down by outcome.
-// `outcome` ∈ {success, leak, lease, auth, internal}. Bounded cardinality
-// because outcomes are a closed enum surfaced by Phase 3 D-B2.
+// `outcome` ∈ {success, leak, lease, auth, internal, dispatched, exhausted}.
+// Bounded cardinality because outcomes are a closed enum surfaced by Phase 3
+// D-B2 + debug defect #13b (dispatched = a boundary-push attempt was created;
+// exhausted = the bounded boundary-push retry budget was reached).
 var PushJobsTotal *prometheus.CounterVec
 
 // BudgetOverrunsTotal counts the number of times a Project exceeded its

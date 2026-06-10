@@ -302,14 +302,14 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 		})
 	})
 
-	Describe("Test 4: unknown reason → falls back to PhasePushLeaseFailed", func() {
+	Describe("Test 4 (debug #13b): unknown reason → bounded auto-retry, not a dead-end", func() {
 		const projectName = "pushres-proj-3"
 
 		AfterEach(func() {
 			cleanupProject(projectName)
 		})
 
-		It("preserves bypass-push-lease annotation recovery path", func() {
+		It("on a generic terminal failure (empty reason), deletes the failed Job, dispatches a fresh one, increments attempts, and sets BoundaryPushed=False/Pushing (Complete is NOT regressed)", func() {
 			proj := makeProjectInPhaseComplete(projectName)
 			pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 			makePushJob(pushJobName, "default", proj.Name, proj.UID)
@@ -318,7 +318,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 				Kind:       "PushResult",
 				ProjectUID: string(proj.UID),
 				ExitCode:   1,
-				Reason:     "", // empty/unknown
+				Reason:     "", // empty/unknown — the BackoffLimitExceeded #13b class
 			})
 			markJobFailed(pushJobName, "default")
 
@@ -327,15 +327,26 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			r.SharedPVCName = "tide-projects-pushres-3"
 			ensurePVC(ctx, r.SharedPVCName, "default")
 
-			for range 5 {
+			// Classify the failed Job → background-delete it → dispatch a fresh one.
+			for range 3 {
 				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			}
 
 			Eventually(func(g Gomega) {
 				var got tideprojectv1alpha1.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed),
-					"unknown reason should fall back to PhasePushLeaseFailed (preserves bypass recovery path)")
+				// Succession not blocked: still Complete (no PushLeaseFailed dead-end).
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhaseComplete),
+					"unknown-reason boundary failure must NOT regress Complete")
+				// A fresh attempt was dispatched (attempts incremented, last error recorded).
+				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1),
+					"a fresh boundary-push attempt should have been dispatched")
+				g.Expect(got.Status.BoundaryPush.LastError).NotTo(BeEmpty())
+				// Non-terminal BoundaryPushed condition surfaces the in-flight retry.
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil(), "BoundaryPushed condition should be set")
+				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPushing))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
