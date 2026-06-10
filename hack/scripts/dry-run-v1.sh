@@ -70,7 +70,10 @@ docker run --rm \
   --network host \
   "${DRY_RUN_IMAGE}" bash -c "
     set -euo pipefail
-    apt-get update -qq && apt-get install -qq -y curl ca-certificates git
+    # docker.io provides the docker CLI — kind's 'docker info' needs it to reach
+    # the mounted host daemon socket (the sibling-container DinD pattern). Without
+    # it kind create cluster fails: exec: \"docker\": executable file not found.
+    apt-get update -qq && apt-get install -qq -y curl ca-certificates git docker.io
 
     # Pinned tool installs (match ci.yaml; D-D2)
     curl -fsSLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
