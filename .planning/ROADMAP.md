@@ -80,8 +80,8 @@ Plans:
 
 **Wave 3 — gap closure** *(from 13-VERIFICATION.md)*
 
-- [ ] 13-05-PLAN.md — CR-01 milestone nil-project guard + WR-03 resume time-fence (billing-resumed-at annotation, jobStart guard, distinct latch body) (DISPATCH-01, HALT-01)
-- [ ] 13-06-PLAN.md — WR-01 de-vacuate planner-level hold specs + promptPath fixture debt + WR-04 chart required guard (HALT-01, DISPATCH-02)
+- [x] 13-05-PLAN.md — CR-01 milestone nil-project guard + WR-03 resume time-fence (billing-resumed-at annotation, jobStart guard, distinct latch body) (DISPATCH-01, HALT-01)
+- [x] 13-06-PLAN.md — WR-01 de-vacuate planner-level hold specs + promptPath fixture debt + WR-04 chart required guard (HALT-01, DISPATCH-02)
 
 **Wave 4 — gap closure** *(blocked on Wave 3)*
 
@@ -143,7 +143,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
-| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 4/4 | Complete   | 2026-06-11 |
+| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 6/7 | In Progress|  |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
