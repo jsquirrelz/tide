@@ -101,7 +101,11 @@ docker run --rm \
     # host repo is in detached-HEAD state at the tag, and a plain clone would
     # otherwise land on the default branch (or nothing at all).
     if [ \"${DRY_RUN_REPO_URL}\" = \"/host-repo\" ]; then
-      git config --global --add safe.directory /host-repo
+      # '*' not a single path: the clone's upload-pack child resolves the
+      # source as /host-repo/.git, which a bare /host-repo entry does not
+      # cover ('detected dubious ownership in repository at /host-repo/.git').
+      # The container is throwaway, so the blanket exception is safe.
+      git config --global --add safe.directory '*'
       SRC_HEAD=\$(git -C /host-repo rev-parse HEAD)
       git clone /host-repo /workspace/tide
       git -C /workspace/tide checkout --detach \"\${SRC_HEAD}\"

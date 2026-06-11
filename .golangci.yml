@@ -31,7 +31,7 @@ linters:
       # these single-word tokens hurts switch/comparison readability without
       # adding safety. goconst still flags any OTHER repeated literal.
       ignore-string-values:
-        - '^(Pending|Running|Succeeded|Failed|AwaitingApproval|BudgetExceeded|PushLeaseFailed|PushLeakBlocked|milestone|Milestone|phase|Phase|plan|Plan|task|Task|wave|Wave|project|Project|default|strict|warn|subagent|true|false)$'
+        - '^(Pending|Running|Succeeded|Failed|AwaitingApproval|BudgetExceeded|PushLeaseFailed|PushLeakBlocked|Validated|milestone|Milestone|phase|Phase|plan|Plan|task|Task|wave|Wave|project|Project|default|strict|warn|subagent|true|false)$'
     errcheck:
       # The fmt.Fprint* family writes to stdout/stderr (CLI diagnostics, banners,
       # tabwriter buffers). A failed write to those is not actionable in this
