@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: — (v1.0.0 milestone complete; no active phase)
 Plan: —
 Status: Between milestones — run /gsd:new-milestone
-Last activity: 2026-06-11 -- Completed quick task 260610-vcp: K8s/Helm best-practices audit (docs/audit/)
+Last activity: 2026-06-11 -- Completed quick task 260610-x3d: dogfood Project CR manifests (examples/projects/dogfood/)
 
 Progress: [██████████] 100%
 
@@ -168,6 +168,7 @@ None yet.
 | 260530-hrc | Open Phase 6 — v1.0 image-publish pipeline + ship-readiness revalidation (ROADMAP row + STATE reframe + 06-FINDINGS.md + Phase 5 deferred-items back-reference) | 2026-05-30 | TBD | [260530-hrc-open-phase-6-v1-0-image-publish-pipeline](./quick/260530-hrc-open-phase-6-v1-0-image-publish-pipeline/) |
 | 260531-oek | Phase 7 cascade-12: chart-template dispatch image tags default to .Chart.AppVersion not "latest" (subagent/credproxy/push/claude) — fixes $0 acceptance ImagePullBackOff stall | 2026-05-31 | 3edceb7 | [260531-oek-fix-cascade-12-chart-template-dispatch-i](./quick/260531-oek-fix-cascade-12-chart-template-dispatch-i/) |
 | 260610-vcp | K8s/Helm best-practices audit — 76 classified findings (PASS/DRIFT/DEVIATION) in docs/audit/ as post-1.0 hardening backlog | 2026-06-11 | 2bffb70 | [260610-vcp-audit-codebase-against-k8s-helm-best-pra](./quick/260610-vcp-audit-codebase-against-k8s-helm-best-pra/) |
+| 260610-x3d | Draft the three TIDE-on-TIDE dogfood Project CR manifests (analytics, Codex runtime, dashboard Project editor) in examples/projects/dogfood/ + strict-decode guard test | 2026-06-11 | 15de022, 730b960 | [260610-x3d-draft-the-three-tide-on-tide-dogfood-pro](./quick/260610-x3d-draft-the-three-tide-on-tide-dogfood-pro/) |
 
 ## Session Continuity
 

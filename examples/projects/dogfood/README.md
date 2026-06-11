@@ -16,7 +16,7 @@ apply the next manifest only after the previous Project reaches `status.phase: C
 |---|----------|--------------|-----------|-----------|
 | 1 | `01-analytics-project.yaml` | `dogfood-analytics` | `tide-dogfood-analytics` | Builds the observability surfaces that make run 2 watchable |
 | 2 | `02-codex-runtime-project.yaml` | `dogfood-codex-runtime` | `tide-dogfood-codex` | Run 2's token/dispatch behavior is visible on run 1's new dashboard |
-| 3 | `03-project-editor-project.yaml` | `dogfood-project-editor` | `tide-dogfood-editor` | Run 3 can be authored through the dashboard surface run 3 itself builds |
+| 3 | `03-project-editor-project.yaml` | `dogfood-project-editor` | `tide-dogfood-editor` | Builds the editor surface that authors subsequent Project CRs — run 3's output creates run 4's input |
 
 ## Per-namespace prerequisites
 
