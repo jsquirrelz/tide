@@ -367,4 +367,105 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
+
+	// GATE-04 regression spec (Plan 12-03 Task 2) — run-1 finding-1: five phase
+	// planners fired ~1s after the milestone parked at AwaitingApproval, spending
+	// ~$0.64/planner before the operator had reviewed anything. This spec proves
+	// the D-02 descent hold: zero planner Jobs while the parent Milestone is parked.
+	Describe("GATE-04 — dispatch hold while parent Milestone awaiting approval", Label("gate04"), func() {
+		const projectName = "gate04-proj-ph"
+		const msName = "gate04-ms-ph"
+		const phaseName = "gate04-phase"
+
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("Phase dispatch held: zero planner Jobs while parent Milestone AwaitingApproval; Job created after approval", func() {
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{Phase: gates.PolicyAuto})
+
+			// Manually park the Milestone at AwaitingApproval (simulating the gate hook
+			// in milestone_controller.go). The Phase under test must see this status.
+			var ms tideprojectv1alpha1.Milestone
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)).To(Succeed())
+			msPatch := client.MergeFrom(ms.DeepCopy())
+			ms.Status.Phase = "AwaitingApproval"
+			Expect(mgrClient.Status().Patch(ctx, &ms, msPatch)).To(Succeed())
+			Eventually(func() string {
+				var got tideprojectv1alpha1.Milestone
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
+					return ""
+				}
+				return got.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("AwaitingApproval"))
+
+			// Create the Phase with MilestoneRef pointing at the parked Milestone.
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
+
+			envReader := newMapEnvReader()
+			r := &PhaseReconciler{
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      envReader,
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+			}
+
+			// Drive 3 consecutive reconciles while parent is parked.
+			// The D-02 hold must prevent ANY planner Job creation.
+			var jobsBefore batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsBefore, client.InNamespace("default"))
+			jobCountBefore := len(jobsBefore.Items)
+
+			for range 3 {
+				_, _ = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: phaseName, Namespace: "default"}})
+			}
+
+			// Assert: Phase stays at "" (held — not AwaitingApproval; Pitfall 5 guard).
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).To(Equal(""),
+					"held child must stay at Status.Phase='' (not AwaitingApproval) while parent is parked (Pitfall 5)")
+			}, 2*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// Assert: no new planner Jobs created while parent parked.
+			var jobsAfter batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
+			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+				"no planner Jobs should be created while parent Milestone is AwaitingApproval (GATE-04 / run-1 finding-1)")
+
+			// Now approve the Milestone (simulate: patch Status.Phase=Running).
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)).To(Succeed())
+			approvePatch := client.MergeFrom(ms.DeepCopy())
+			ms.Status.Phase = "Running"
+			Expect(mgrClient.Status().Patch(ctx, &ms, approvePatch)).To(Succeed())
+			Eventually(func() string {
+				var got tideprojectv1alpha1.Milestone
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
+					return ""
+				}
+				return got.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Running"))
+
+			// Drive the Phase reconciler — hold is now released.
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
+
+			// Assert: planner Job now exists (dispatch unblocked).
+			var phaseAfterApproval tideprojectv1alpha1.Phase
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &phaseAfterApproval)).To(Succeed())
+			jobName := fmt.Sprintf("tide-phase-%s-1", phaseAfterApproval.UID)
+			Eventually(func() error {
+				var job batchv1.Job
+				return mgrClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"planner Job must be created after parent Milestone is approved (D-02 hold released)")
+		})
+	})
 })

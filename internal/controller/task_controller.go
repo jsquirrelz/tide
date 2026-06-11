@@ -315,6 +315,21 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 
+	// D-02 descent hold: if the parent Plan is parked at AwaitingApproval,
+	// hold Job dispatch here. Position: AFTER resolveProject (so ParentUnresolved
+	// handling still wins) and BEFORE budget/indegree/dispatch (so a held task
+	// spends nothing). The Task stays at Status.Phase="" so tide approve's
+	// findAwaitingTask cannot target a held child instead of the parked parent
+	// (12-RESEARCH.md Pitfall 5). NotFound parent is transient informer lag —
+	// checkParentApproval returns (false, nil) and dispatch continues.
+	if held, hErr := checkParentApproval(ctx, r.Client, task.Namespace, task.Spec.PlanRef, "Plan"); hErr != nil {
+		return taskGateResult{}, hErr
+	} else if held {
+		logf.FromContext(ctx).V(1).Info("dispatch held: parent Plan awaiting approval",
+			"task", task.Name, "plan", task.Spec.PlanRef)
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
+	}
+
 	// Step 4: Budget gate.
 	if project.Status.Phase == "BudgetExceeded" && !budget.IsBypassed(project, time.Now()) {
 		patch := client.MergeFrom(task.DeepCopy())
