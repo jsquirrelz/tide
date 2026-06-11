@@ -134,6 +134,13 @@ type BuildOptions struct {
 	// the same helper, preventing token-validity vs Job-deadline drift).
 	// nil → DefaultCaps applies the Kind-appropriate floor automatically.
 	Caps *tidev1alpha1.Caps
+
+	// PricingOverridesJSON is the D-02 transport: raw validated JSON forwarded
+	// opaquely to the subagent container as TIDE_PRICING_OVERRIDES_JSON. The
+	// manager does not interpret prices — it passes the validated string through.
+	// Non-empty → env var stamped on the container. Empty → env var absent.
+	// Populated at the controller call site in Plan 14-05 (not in this plan).
+	PricingOverridesJSON string
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -341,6 +348,15 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			MountPath: "/workspace",
 			SubPath:   subPath,
 		},
+	}
+	// D-02: stamp TIDE_PRICING_OVERRIDES_JSON only when the operator has configured
+	// pricing overrides. Prices are public list rates (T-14-03: accept, not secret);
+	// the env var is absent when not configured to keep the PodSpec clean.
+	if opts.PricingOverridesJSON != "" {
+		subagentEnv = append(subagentEnv, corev1.EnvVar{
+			Name:  "TIDE_PRICING_OVERRIDES_JSON",
+			Value: opts.PricingOverridesJSON,
+		})
 	}
 	// cascade-13: only wire the localhost-credproxy plumbing (base-url + cert trust + cert
 	// mount) when credproxy is actually injected. Without it, SSL_CERT_FILE would point at an

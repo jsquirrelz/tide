@@ -824,3 +824,79 @@ func TestPlannerJobName_Format(t *testing.T) {
 		}
 	}
 }
+
+// ---- Phase 14 D-02: TIDE_PRICING_OVERRIDES_JSON env transport ----
+
+// TestBuildJobSpec_PricingOverridesJSON_PresentWhenSet verifies that a non-empty
+// BuildOptions.PricingOverridesJSON stamps TIDE_PRICING_OVERRIDES_JSON on both
+// JobKindExecutor and JobKindPlanner subagent containers (D-02 transport).
+func TestBuildJobSpec_PricingOverridesJSON_PresentWhenSet(t *testing.T) {
+	const pricingJSON = `{"claude-haiku-4-5":{"inputCentsPerMTok":200,"outputCentsPerMTok":1000}}`
+
+	cases := map[string]BuildOptions{
+		"executor": func() BuildOptions {
+			o := buildTestOptions()
+			o.PricingOverridesJSON = pricingJSON
+			return o
+		}(),
+		"planner": func() BuildOptions {
+			o := buildPlannerTestOptions()
+			o.PricingOverridesJSON = pricingJSON
+			return o
+		}(),
+	}
+
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			job := BuildJobSpec(opts)
+			containers := job.Spec.Template.Spec.Containers
+			if len(containers) == 0 {
+				t.Fatal("no containers in pod spec")
+			}
+			subagent := containers[0]
+			var found bool
+			var gotVal string
+			for _, e := range subagent.Env {
+				if e.Name == "TIDE_PRICING_OVERRIDES_JSON" {
+					found = true
+					gotVal = e.Value
+				}
+			}
+			if !found {
+				t.Errorf("%s: subagent missing TIDE_PRICING_OVERRIDES_JSON env var when PricingOverridesJSON is set", name)
+			}
+			if gotVal != pricingJSON {
+				t.Errorf("%s: TIDE_PRICING_OVERRIDES_JSON = %q; want %q", name, gotVal, pricingJSON)
+			}
+		})
+	}
+}
+
+// TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty verifies that an empty
+// BuildOptions.PricingOverridesJSON does NOT stamp TIDE_PRICING_OVERRIDES_JSON
+// on the subagent container (D-02 transport — clean PodSpec when not configured).
+func TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty(t *testing.T) {
+	cases := map[string]BuildOptions{
+		"executor": buildTestOptions(),        // PricingOverridesJSON is zero value = ""
+		"planner":  buildPlannerTestOptions(), // same
+	}
+
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			if opts.PricingOverridesJSON != "" {
+				t.Fatalf("%s: test fixture invariant broken: expected empty PricingOverridesJSON", name)
+			}
+			job := BuildJobSpec(opts)
+			containers := job.Spec.Template.Spec.Containers
+			if len(containers) == 0 {
+				t.Fatal("no containers in pod spec")
+			}
+			subagent := containers[0]
+			for _, e := range subagent.Env {
+				if e.Name == "TIDE_PRICING_OVERRIDES_JSON" {
+					t.Errorf("%s: subagent should NOT carry TIDE_PRICING_OVERRIDES_JSON when PricingOverridesJSON is empty", name)
+				}
+			}
+		})
+	}
+}
