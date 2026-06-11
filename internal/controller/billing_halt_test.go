@@ -136,7 +136,7 @@ func TestSetBillingHaltIfNeeded_SetsCondition(t *testing.T) {
 		Build()
 
 	reason := "claude exit 1: API Error: 400 Your credit balance is too low to access the Anthropic API."
-	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason); err != nil {
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, time.Time{}); err != nil {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
@@ -178,7 +178,7 @@ func TestSetBillingHaltIfNeeded_NonBillingReason_NoOp(t *testing.T) {
 		WithStatusSubresource(project).
 		Build()
 
-	if err := setBillingHaltIfNeeded(context.Background(), c, project, "forced-failure"); err != nil {
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, "forced-failure", time.Time{}); err != nil {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestSetBillingHaltIfNeeded_NilProject_NoOp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	// Must not panic
-	if err := setBillingHaltIfNeeded(context.Background(), c, nil, "claude exit 1: credit balance"); err != nil {
+	if err := setBillingHaltIfNeeded(context.Background(), c, nil, "claude exit 1: credit balance", time.Time{}); err != nil {
 		t.Fatalf("expected nil error for nil project; got %v", err)
 	}
 }

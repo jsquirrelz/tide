@@ -25,7 +25,13 @@ limitations under the License.
 // halt prevents NEW dispatch; in-flight sessions complete (or fail) naturally.
 //
 // D-06: Recovery is via `tide resume` (cmd/tide/resume.go), which calls
-// meta.RemoveStatusCondition unconditionally. No auto-probe of provider balance.
+// meta.RemoveStatusCondition unconditionally and stamps AnnotationBillingResumedAt
+// (RFC3339) on the Project metadata. No auto-probe of provider balance.
+// setBillingHaltIfNeeded checks this annotation: if the failing Job's
+// CreationTimestamp predates the resume timestamp the evidence is stale and the
+// halt is not re-stamped. Zero or unparseable annotation values are fail-closed
+// (BillingHalt is stamped) to avoid burning credits on a bad annotation. Only a
+// fresh post-resume 400 from a Job created AFTER the resume may initiate a halt.
 //
 // Provider-firewall note: isBillingFailureReason performs pure string ops with
 // no SDK import. The Anthropic-specific classification at the HTTP boundary
@@ -36,6 +42,7 @@ package controller
 import (
 	"context"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -87,13 +94,33 @@ func checkBillingHalt(project *tideprojectv1alpha1.Project) bool {
 // can log it non-fatally (the halt is best-effort; the individual session has
 // already exited non-zero).
 //
+// jobStart is the completed Job's CreationTimestamp.Time (passed by each of the
+// five handleJobCompletion call sites). When the project carries
+// AnnotationBillingResumedAt and jobStart is non-zero and predates the resume
+// timestamp the evidence is stale (pre-resume straggler) and no halt is stamped.
+// Fail-closed fallbacks: zero jobStart or unparseable annotation → stamp.
+//
 // Nil project is a safe no-op (returns nil). Non-billing reasons are a no-op.
-func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha1.Project, reason string) error {
+func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha1.Project, reason string, jobStart time.Time) error {
 	if project == nil {
 		return nil
 	}
 	if !isBillingFailureReason(reason) {
 		return nil
+	}
+	// WR-03 time fence (Plan 13-05): if the project was resumed after this Job
+	// was created, the billing evidence is stale — skip the re-stamp. Fail-closed
+	// on zero jobStart or unparseable annotation (never fail open toward burning
+	// credits). See D-06 paragraph in file header for full lifecycle.
+	if !jobStart.IsZero() {
+		if resumeVal, ok := project.Annotations[tideprojectv1alpha1.AnnotationBillingResumedAt]; ok {
+			if resumedAt, err := time.Parse(time.RFC3339, resumeVal); err == nil {
+				if jobStart.Before(resumedAt) {
+					return nil // stale pre-resume evidence; no-op
+				}
+			}
+			// unparseable annotation → fall through (fail-closed: stamp halt)
+		}
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{

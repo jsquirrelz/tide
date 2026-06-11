@@ -447,7 +447,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 // Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
 // T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
 // the reporter Job's own completion re-enqueues this reconciler.
-func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, _ *batchv1.Job) (ctrl.Result, error) {
+func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	var project *tideprojectv1alpha1.Project
@@ -527,7 +527,11 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// reason, stamp BillingHalt=True on the owning Project. Non-fatal: the
 	// reconcile continues through the normal completion path regardless.
 	if envReadOK && out.ExitCode != 0 && project != nil {
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "milestone", ms.Name)
 		}
 	}

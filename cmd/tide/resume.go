@@ -40,6 +40,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -98,8 +99,27 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		if err := c.Status().Patch(ctx, &proj, patch2); err != nil {
 			return fmt.Errorf("patch status (clear BillingHalt): %w", err)
 		}
-		if hadBillingHalt && out != nil {
-			fmt.Fprintln(out, "tide: cleared BillingHalt (billing recovery)")
+		if hadBillingHalt {
+			// WR-03 (Plan 13-05): stamp billing-resumed-at so the reconciler backstop
+			// can distinguish pre-resume stragglers from fresh post-resume failures.
+			// Annotations are NOT status — separate metadata patch from the condition
+			// removal above (different subresource, different resourceVersion window).
+			if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+				return fmt.Errorf("re-get project for billing-resumed-at stamp: %w", err)
+			}
+			metaPatch := client.MergeFrom(proj.DeepCopy())
+			ann := proj.GetAnnotations()
+			if ann == nil {
+				ann = make(map[string]string)
+			}
+			ann[tidev1alpha1.AnnotationBillingResumedAt] = time.Now().UTC().Format(time.RFC3339)
+			proj.SetAnnotations(ann)
+			if err := c.Patch(ctx, &proj, metaPatch); err != nil {
+				return fmt.Errorf("patch metadata (billing-resumed-at stamp): %w", err)
+			}
+			if out != nil {
+				fmt.Fprintln(out, "tide: cleared BillingHalt (billing recovery); pre-resume in-flight sessions can no longer re-trip the halt")
+			}
 		}
 	}
 
