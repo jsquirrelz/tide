@@ -152,6 +152,12 @@ const (
 	// ReasonResumedByUser — `tide resume` cleared the reject annotation and
 	// reconciliation has re-entered the normal advance path (D-G4).
 	ReasonResumedByUser = "ResumedByUser"
+	// ReasonApprovedByUser — operator ran `tide approve`; the level's
+	// AwaitingApproval park is lifted (Status=ConditionFalse indicates pause
+	// cleared). Mirrors ReasonResumedByUser; no new Status.Phase enum — the
+	// level returns to Running and Succeeded fires only via ChildCount-gated
+	// succession after all children complete. Phase 12 D-04.
+	ReasonApprovedByUser = "ApprovedByUser"
 )
 
 // Phase 04.1 P1.4 condition + reason vocabulary — parent-resolution failure
