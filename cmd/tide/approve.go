@@ -20,6 +20,12 @@ limitations under the License.
 // tideproject.k8s/approve-wave-<N>=true on the named Plan when --wave is
 // passed. All writes use client.Patch + client.MergeFrom for one-shot
 // annotation semantics that mirror the reconciler-side reads in plan 04-04.
+//
+// D-07 guard (Plan 12-02): approveLevel calls findFailedLevel before the
+// findAwaiting* chain. If any level is Failed, the call returns an actionable
+// error naming the level and its failure reason, and directs the operator to
+// `tide resume --retry-failed`. Approval must never double as a spend-retry
+// (T-12-05: prevents re-firing planners into an empty credit balance).
 
 package main
 
@@ -33,6 +39,7 @@ import (
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -126,6 +133,10 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 // Status.Phase=AwaitingApproval. Order: Milestone → Phase → Plan → Task. The
 // first matching child receives the approve-<level>=true annotation.
 //
+// D-07 guard: if any level is Failed, returns an actionable error before
+// checking for AwaitingApproval levels. Approval must never double as a
+// spend-retry (T-12-05).
+//
 // Per the plan: discovers level from child CRDs (not from Project.Status
 // conditions directly, since the AwaitingApproval state lives on the child
 // itself per plan 04-05's patchMilestoneAwaitingApproval / etc.).
@@ -136,6 +147,19 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
 		}
 		return fmt.Errorf("get project: %w", err)
+	}
+
+	// D-07: check for Failed levels BEFORE the AwaitingApproval search.
+	// A Failed level means approval would be a spend-retry — refuse with an
+	// actionable error pointing at `tide resume --retry-failed`.
+	if obj, kind, err := findFailedLevel(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		detail := buildFailureDetail(obj)
+		return fmt.Errorf(
+			"tide: level %q (%s) has failed%s; approval never retries failed work — use 'tide resume %s --retry-failed' to recover",
+			obj.GetName(), kind, detail, projectName,
+		)
 	}
 
 	// Iterate child kinds in dependency-order. The first child matching
@@ -161,6 +185,116 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 		return patchApproveLevel(ctx, c, obj, level)
 	}
 	return fmt.Errorf("tide: no level awaiting approval on project %s", projectName)
+}
+
+// findFailedLevel scans all four level kinds (Milestone → Phase → Plan →
+// Task) for the first item with Status.Phase=="Failed" belonging to the
+// project. Returns the object and its kind string ("milestone", "phase",
+// "plan", "task"), or (nil, "", nil) when none is found.
+func findFailedLevel(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
+	var msList tidev1alpha1.MilestoneList
+	if err := c.List(ctx, &msList, client.InNamespace(ns)); err != nil {
+		return nil, "", fmt.Errorf("list milestones: %w", err)
+	}
+	for i := range msList.Items {
+		m := &msList.Items[i]
+		if m.Labels["tideproject.k8s/project"] != projectName {
+			continue
+		}
+		if m.Status.Phase == "Failed" {
+			return m, "milestone", nil
+		}
+	}
+
+	var phList tidev1alpha1.PhaseList
+	if err := c.List(ctx, &phList, client.InNamespace(ns)); err != nil {
+		return nil, "", fmt.Errorf("list phases: %w", err)
+	}
+	for i := range phList.Items {
+		p := &phList.Items[i]
+		if p.Labels["tideproject.k8s/project"] != projectName {
+			continue
+		}
+		if p.Status.Phase == "Failed" {
+			return p, "phase", nil
+		}
+	}
+
+	var plList tidev1alpha1.PlanList
+	if err := c.List(ctx, &plList, client.InNamespace(ns)); err != nil {
+		return nil, "", fmt.Errorf("list plans: %w", err)
+	}
+	for i := range plList.Items {
+		p := &plList.Items[i]
+		if p.Labels["tideproject.k8s/project"] != projectName {
+			continue
+		}
+		if p.Status.Phase == "Failed" {
+			return p, "plan", nil
+		}
+	}
+
+	var tkList tidev1alpha1.TaskList
+	if err := c.List(ctx, &tkList, client.InNamespace(ns)); err != nil {
+		return nil, "", fmt.Errorf("list tasks: %w", err)
+	}
+	for i := range tkList.Items {
+		t := &tkList.Items[i]
+		if t.Labels["tideproject.k8s/project"] != projectName {
+			continue
+		}
+		if t.Status.Phase == "Failed" {
+			return t, "task", nil
+		}
+	}
+
+	return nil, "", nil
+}
+
+// buildFailureDetail extracts a human-readable failure detail fragment from
+// the level's conditions. Looks for ConditionWaveOrLevelPaused first; falls
+// back to the first condition in the slice. Returns " (reason: <R>: <M>)"
+// when a condition with Reason and Message is found, or "" otherwise.
+func buildFailureDetail(obj client.Object) string {
+	var reason, message string
+	switch v := obj.(type) {
+	case *tidev1alpha1.Milestone:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+		if c == nil && len(v.Status.Conditions) > 0 {
+			c = &v.Status.Conditions[0]
+		}
+		if c != nil {
+			reason, message = c.Reason, c.Message
+		}
+	case *tidev1alpha1.Phase:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+		if c == nil && len(v.Status.Conditions) > 0 {
+			c = &v.Status.Conditions[0]
+		}
+		if c != nil {
+			reason, message = c.Reason, c.Message
+		}
+	case *tidev1alpha1.Plan:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+		if c == nil && len(v.Status.Conditions) > 0 {
+			c = &v.Status.Conditions[0]
+		}
+		if c != nil {
+			reason, message = c.Reason, c.Message
+		}
+	case *tidev1alpha1.Task:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+		if c == nil && len(v.Status.Conditions) > 0 {
+			c = &v.Status.Conditions[0]
+		}
+		if c != nil {
+			reason, message = c.Reason, c.Message
+		}
+	}
+	if reason == "" && message == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (reason: %s: %s)", reason, message)
 }
 
 // findAwaitingMilestone lists Milestones in the namespace, filtered to the
