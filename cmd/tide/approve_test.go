@@ -9,10 +9,14 @@ you may not use this file except in compliance with the License.
 // the canonical annotation key set defined in internal/gates/annotation.go on
 // either (a) the AwaitingApproval level discovered from Project Status
 // Conditions, or (b) the Plan when --wave plan/N is provided.
+// Plan 12-02 Task 2 adds D-07 guard tests: approve against a Failed level
+// must error with an actionable message naming the level and pointing to
+// tide resume --retry-failed.
 package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,6 +58,20 @@ func makePlan(name, projectName string) *tidev1alpha1.Plan {
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
 		Spec: tidev1alpha1.PlanSpec{PhaseRef: "some-phase"},
+	}
+}
+
+// makeFailedMilestone builds a Milestone fixture with Status.Phase="Failed"
+// and optionally one condition for the D-07 reason/message extraction test.
+func makeFailedMilestone(name, projectName string, conditions []metav1.Condition) *tidev1alpha1.Milestone {
+	return &tidev1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tidev1alpha1.MilestoneSpec{ProjectRef: projectName},
+		Status: tidev1alpha1.MilestoneStatus{Phase: "Failed", Conditions: conditions},
 	}
 }
 
@@ -142,5 +160,78 @@ func TestApproveUsesMergeFromPatch(t *testing.T) {
 	}
 	if v := got.Annotations["tideproject.k8s/approve-milestone"]; v != "true" {
 		t.Errorf("approve annotation missing on Milestone; annotations=%v", got.Annotations)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan 12-02 additions: D-07 guard — approve refuses Failed levels
+// ---------------------------------------------------------------------------
+
+// TestApproveRunFailedLevelError asserts that approveRun returns a non-nil
+// error when a Failed Milestone exists, and the error text contains
+// "retry-failed" and the level name "ms-alpha".
+func TestApproveRunFailedLevelError(t *testing.T) {
+	p := makeProject("my-project")
+	ms := makeFailedMilestone("ms-alpha", "my-project", nil)
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	err := approveRun(context.Background(), c, "default", "my-project", "", nil)
+	if err == nil {
+		t.Fatal("expected error when a Failed level exists; got nil")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "retry-failed") {
+		t.Errorf("error should contain 'retry-failed'; got: %q", errStr)
+	}
+	if !strings.Contains(errStr, "ms-alpha") {
+		t.Errorf("error should name the failed level 'ms-alpha'; got: %q", errStr)
+	}
+}
+
+// TestApproveFailedLevelErrorIncludesReason asserts that when the Failed
+// Milestone carries a condition with a Reason and Message, the error text
+// includes that information (D-07 — print failure reason).
+func TestApproveFailedLevelErrorIncludesReason(t *testing.T) {
+	p := makeProject("my-project")
+	ms := makeFailedMilestone("ms-alpha", "my-project", []metav1.Condition{
+		{
+			Type:               tidev1alpha1.ConditionWaveOrLevelPaused,
+			Status:             metav1.ConditionTrue,
+			Reason:             "PlannerJobFailed",
+			Message:            "planner job exceeded backoffLimit",
+			LastTransitionTime: metav1.Now(),
+		},
+	})
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	err := approveRun(context.Background(), c, "default", "my-project", "", nil)
+	if err == nil {
+		t.Fatal("expected error when a Failed level exists; got nil")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "planner job exceeded backoffLimit") {
+		t.Errorf("error should include failure message; got: %q", errStr)
+	}
+}
+
+// TestApproveFailedLevelNoAnnotationWritten asserts that when a Failed level
+// blocks approval, no approve annotation is written on the Milestone —
+// approval never doubles as a spend-retry (T-12-05).
+func TestApproveFailedLevelNoAnnotationWritten(t *testing.T) {
+	p := makeProject("my-project")
+	ms := makeFailedMilestone("ms-alpha", "my-project", nil)
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	_ = approveRun(context.Background(), c, "default", "my-project", "", nil)
+
+	var got tidev1alpha1.Milestone
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-alpha"}, &got); err != nil {
+		t.Fatalf("get milestone: %v", err)
+	}
+	if v := got.Annotations["tideproject.k8s/approve-milestone"]; v != "" {
+		t.Errorf("expected no approve annotation written when Failed level blocks; got %q", v)
 	}
 }
