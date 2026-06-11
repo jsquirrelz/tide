@@ -212,3 +212,21 @@ const (
 	// exit early without requeueing.
 	ReasonWaveIntegrationFailed = "WaveIntegrationFailed"
 )
+
+// Phase 13 condition + reason vocabulary — provider billing halt (HALT-01).
+// A provider credit-exhaustion 400 halts all new dispatch project-wide until
+// the operator refills credits and runs `tide resume`. BillingHalt is set on
+// the Project status by any reconciler that classifies the billing-failure
+// class from a failed Job envelope.
+const (
+	// ConditionBillingHalt — provider returned a credit-exhaustion 400;
+	// new dispatch is halted project-wide until the operator refills credits
+	// and runs `tide resume`. Set by reconciler billing classifier on Project;
+	// read by all five dispatch gates; cleared by tide resume. Phase 13 HALT-01.
+	ConditionBillingHalt = "BillingHalt"
+
+	// ReasonCreditBalanceTooLow — Anthropic API returned HTTP 400 with
+	// "credit balance" in the error body. Set on Project by the reconciler
+	// billing classifier.
+	ReasonCreditBalanceTooLow = "CreditBalanceTooLow"
+)

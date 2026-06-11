@@ -322,3 +322,199 @@ func TestProxyHandler_RejectsWrongMethodWith403(t *testing.T) {
 		t.Fatalf("expected 403 for GET on POST-only route, got %d", resp.StatusCode)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan 13-02 Task 2 — billing-400 classifier + fail-fast latch
+// ---------------------------------------------------------------------------
+
+// TestIsCreditExhaustion_Classifies400Body asserts that the classifier
+// correctly identifies Anthropic billing error bodies and rejects unrelated 400s.
+func TestIsCreditExhaustion_Classifies400Body(t *testing.T) {
+	billingBody := `{"type":"error","error":{"type":"invalid_request_error",` +
+		`"message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}`
+	if !isCreditExhaustion([]byte(billingBody)) {
+		t.Error("expected isCreditExhaustion=true for credit balance body")
+	}
+	// Unrelated 400 must not match.
+	if isCreditExhaustion([]byte(`{"type":"error","error":{"message":"invalid model"}}`)) {
+		t.Error("expected isCreditExhaustion=false for non-billing 400 body")
+	}
+	// Empty body must not match.
+	if isCreditExhaustion([]byte{}) {
+		t.Error("expected isCreditExhaustion=false for empty body")
+	}
+}
+
+// TestModifyResponse_BillingBodyPassesThroughUnchanged verifies that when the
+// upstream returns HTTP 400 with a billing body, the client receives the full
+// unmodified body (ModifyResponse must restore resp.Body after reading).
+func TestModifyResponse_BillingBodyPassesThroughUnchanged(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-billing"
+	billingBody := `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(billingBody))
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	token, err := Sign(key, taskUID, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 pass-through; got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != billingBody {
+		t.Errorf("body mismatch: got %q, want %q", string(body), billingBody)
+	}
+}
+
+// TestBillingLatch_ShortCircuitsAfterFirst400 verifies that after the first
+// credit-exhaustion 400, subsequent valid signed requests are short-circuited
+// at the proxy (no upstream contact).
+func TestBillingLatch_ShortCircuitsAfterFirst400(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-latch"
+	billingBody := `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}`
+
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(billingBody))
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	sendRequest := func() *http.Response {
+		token, err := Sign(key, taskUID, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		return resp
+	}
+
+	// First request: hits upstream, gets billing 400, latch trips.
+	resp1 := sendRequest()
+	resp1.Body.Close()
+	if resp1.StatusCode != http.StatusBadRequest {
+		t.Fatalf("first request: expected 400; got %d", resp1.StatusCode)
+	}
+
+	// Second request: must NOT hit upstream (latch short-circuits).
+	resp2 := sendRequest()
+	defer resp2.Body.Close()
+
+	if upstreamHits != 1 {
+		t.Errorf("expected exactly 1 upstream hit; got %d", upstreamHits)
+	}
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("second request: expected 400 (local short-circuit); got %d", resp2.StatusCode)
+	}
+	if resp2.Header.Get("X-Tide-Billing-Halt") != "true" {
+		t.Errorf("expected X-Tide-Billing-Halt: true header on short-circuited response; got %q",
+			resp2.Header.Get("X-Tide-Billing-Halt"))
+	}
+}
+
+// TestNonBilling400_DoesNotLatch verifies that a non-billing 400 upstream
+// response does not trip the latch — subsequent requests still reach upstream.
+func TestNonBilling400_DoesNotLatch(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-nolatch"
+	nonBillingBody := `{"type":"error","error":{"type":"invalid_request_error","message":"invalid model"}}`
+
+	upstreamHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(nonBillingBody))
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	sendRequest := func() *http.Response {
+		token, err := Sign(key, taskUID, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		return resp
+	}
+
+	r1 := sendRequest()
+	r1.Body.Close()
+	r2 := sendRequest()
+	r2.Body.Close()
+
+	if upstreamHits != 2 {
+		t.Errorf("expected 2 upstream hits (no latch on non-billing 400); got %d", upstreamHits)
+	}
+}
