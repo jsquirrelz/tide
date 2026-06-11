@@ -923,6 +923,7 @@ spec:
     - %s.go
   declaredOutputPaths:
     - %s.go
+  promptPath: "children/task-01.json"
   dev:
     testMode: success
 `,

@@ -174,7 +174,7 @@ type ProjectReconciler struct {
 
 	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
 	EnvReader      podjob.EnvelopeReader
-	SigningKey      []byte
+	SigningKey     []byte
 	CredproxyImage string
 	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
 	// retained for legacy test wiring, ignored at dispatch.

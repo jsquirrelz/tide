@@ -268,7 +268,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			Expect(err).NotTo(HaveOccurred())
 
 			// Park semantics: requeue with 30s interval (billing recovery is operator-paced).
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second),
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
 				"BillingHalt hold must park with 30s requeue, not fail or no-requeue")
 
 			// Status.Phase must NOT be changed to "Failed" — park-not-fail (D-05, T-13-15).

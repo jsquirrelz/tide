@@ -164,18 +164,28 @@ var _ = Describe("Plan 12-03 — GATE-04 descent hold envtest (run-1 finding-1 r
 			Expect(jobCountAfter).To(Equal(jobCountBefore),
 				"zero planner Jobs must exist while parent Milestone is AwaitingApproval (GATE-04 run-1 finding-1: 5 planners fired ~1s after park)")
 
-			// 5. Approve the Milestone: patch Status.Phase=Running.
+			// 5. Approve the Milestone via the annotation-based approval flow.
+			// Direct status patching to "Running" races with the reconciler which
+			// re-parks (PolicyApprove is the default for milestone) before the
+			// Eventually poll can observe "Running". Use the annotation gate instead:
+			// the reconciler consumes it, sets Running+ApprovedByUser condition, and
+			// the alreadyApproved sentinel prevents re-parking on the next reconcile.
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms)).To(Succeed())
-			approvePatch := client.MergeFrom(ms.DeepCopy())
-			ms.Status.Phase = "Running"
-			Expect(mgrClient.Status().Patch(ctx, ms, approvePatch)).To(Succeed())
+			annoPatch := client.MergeFrom(ms.DeepCopy())
+			anno := ms.GetAnnotations()
+			if anno == nil {
+				anno = make(map[string]string)
+			}
+			anno[gates.AnnotationApprovePrefix+"milestone"] = "true"
+			ms.SetAnnotations(anno)
+			Expect(mgrClient.Patch(ctx, ms, annoPatch)).To(Succeed())
 			Eventually(func() string {
 				var got tideprojectv1alpha1.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
 					return ""
 				}
 				return got.Status.Phase
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Running"))
+			}, 15*time.Second, 100*time.Millisecond).Should(Equal("Running"))
 
 			// 6. Drive all five PhaseReconcilers again — hold is now released.
 			for i, phName := range phaseNames {

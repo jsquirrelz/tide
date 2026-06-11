@@ -83,7 +83,7 @@ type TaskReconcilerDeps struct {
 	Dispatcher     dispatch.Dispatcher
 	Budget         *budget.Store
 	Defaults       budget.Limits
-	SigningKey      []byte
+	SigningKey     []byte
 	CredproxyImage string
 	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
 	// retained for legacy test wiring, ignored at dispatch.
