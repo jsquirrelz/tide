@@ -563,7 +563,7 @@ The phase makes no authentication, authorization, or cryptographic changes. Gate
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED — choices locked in plan tasks: Q1 → 12-03/T1 (`Status.Phase=""`, no new condition), Q2 → 12-04/T1 (in-flight Jobs drain), Q3 → 12-02/T1 (full-tree walk))
 
 1. **D-02: What condition state should child levels show during parent-approval hold?**
    - What we know: Current options are `Status.Phase=AwaitingApproval` (simple, but `approveLevel` would then find them) or `Status.Phase="" + ConditionWaveOrLevelPaused (Reason=ParentAwaitingApproval)` (correct but requires a new Reason constant).
