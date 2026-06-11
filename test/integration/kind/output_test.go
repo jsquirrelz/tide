@@ -80,6 +80,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: output-plan
+  promptPath: "children/task-01.json"
   filesTouched: ["declared.go"]
   declaredOutputPaths: ["declared.go"]
   dev:
