@@ -13,6 +13,7 @@ package envtest_integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,6 +31,7 @@ import (
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	"github.com/jsquirrelz/tide/internal/gates"
+	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -46,6 +48,161 @@ import (
 //     wave Task DAG; wave 0 Succeeded → Plan Condition WaveOrLevelPaused
 //     True → annotate approve-wave-1=true → Eventually wave 2 dispatches
 //     (the Tasks lose the wave-paused label) and the Condition flips False.
+var _ = Describe("Plan 12-03 — GATE-04 descent hold envtest (run-1 finding-1 regression)", Label("envtest", "gate04"), func() {
+	ctx := context.Background()
+
+	// TestNoChildJobsWhileParentAwaiting — GATE-04 regression: run-1 finding-1.
+	// Five Phase children are materialized (MilestoneRef set, project labels stamped)
+	// while the parent Milestone is parked at AwaitingApproval. Driving PhaseReconciler
+	// over all five must produce ZERO planner Jobs (the exact symptom that cost ~$3.20
+	// in run-1 before any review). After the Milestone is approved (Running), driving
+	// the reconcilers must produce planner Jobs for the children.
+	Describe("TestNoChildJobsWhileParentAwaiting", func() {
+		const projectName = "gate12-proj"
+		const msName = "gate12-ms"
+		phaseNames := []string{"gate12-ph-1", "gate12-ph-2", "gate12-ph-3", "gate12-ph-4", "gate12-ph-5"}
+
+		AfterEach(func() {
+			c := context.Background()
+			for _, phName := range phaseNames {
+				ph := &tideprojectv1alpha1.Phase{}
+				if err := k8sClient.Get(c, types.NamespacedName{Name: phName, Namespace: "default"}, ph); err == nil {
+					ph.Finalizers = nil
+					_ = k8sClient.Update(c, ph)
+					_ = k8sClient.Delete(c, ph)
+				}
+			}
+			cleanupGateFlowFixture(projectName, "", msName, "")
+		})
+
+		It("five Phase children produce zero planner Jobs while Milestone is AwaitingApproval; Jobs appear after approval", func() {
+			// 1. Create Project and Milestone.
+			proj := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/tide.git",
+					Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+					Git: &tideprojectv1alpha1.GitConfig{
+						RepoURL:        "https://github.com/example/tide.git",
+						CredsSecretRef: "test-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			waitITCacheSync(projectName, &tideprojectv1alpha1.Project{})
+
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
+
+			// 2. Park the Milestone at AwaitingApproval.
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms)).To(Succeed())
+			msPatch := client.MergeFrom(ms.DeepCopy())
+			ms.Status.Phase = "AwaitingApproval"
+			Expect(mgrClient.Status().Patch(ctx, ms, msPatch)).To(Succeed())
+			Eventually(func() string {
+				var got tideprojectv1alpha1.Milestone
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
+					return ""
+				}
+				return got.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("AwaitingApproval"))
+
+			// 3. Materialize five Phase children (Status.Phase="" — the reporter path).
+			phaseReconcilers := make([]*controller.PhaseReconciler, len(phaseNames))
+			for i, phName := range phaseNames {
+				ph := &tideprojectv1alpha1.Phase{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      phName,
+						Namespace: "default",
+						Labels:    map[string]string{"tideproject.k8s/project": projectName},
+					},
+					Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+				}
+				Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+				waitITCacheSync(phName, &tideprojectv1alpha1.Phase{})
+				phaseReconcilers[i] = newPhaseReconcilerForGateIT()
+			}
+
+			// 4. Drive all five PhaseReconcilers 3 times each while parent is parked.
+			// The GATE-04 D-02 hold must prevent ANY planner Job creation.
+			var jobsBefore batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsBefore, client.InNamespace("default"),
+				client.MatchingLabels{"batch.kubernetes.io/job-name": ""})
+			// Use namespace-scoped list without label filter for full count.
+			_ = k8sClient.List(ctx, &jobsBefore, client.InNamespace("default"))
+			jobCountBefore := len(jobsBefore.Items)
+
+			for i, phName := range phaseNames {
+				for range 3 {
+					_, _ = phaseReconcilers[i].Reconcile(ctx, ctrl.Request{
+						NamespacedName: types.NamespacedName{Name: phName, Namespace: "default"},
+					})
+				}
+			}
+
+			// Assert: all five Phase children stay at Status.Phase="" (held; Pitfall 5 guard).
+			for _, phName := range phaseNames {
+				func(name string) {
+					Eventually(func(g Gomega) {
+						var after tideprojectv1alpha1.Phase
+						g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &after)).To(Succeed())
+						g.Expect(after.Status.Phase).To(Equal(""),
+							"held child Phase must stay at Status.Phase='' (not AwaitingApproval) while parent is parked (Pitfall 5): %s", name)
+					}, 2*time.Second, 100*time.Millisecond).Should(Succeed())
+				}(phName)
+			}
+
+			// Assert: no new planner Jobs — zero tide-phase-* Jobs in namespace.
+			// This is the EXACT run-1 finding-1 symptom: 5 planners fired before review.
+			var jobsAfter batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
+			jobCountAfter := len(jobsAfter.Items)
+			Expect(jobCountAfter).To(Equal(jobCountBefore),
+				"zero planner Jobs must exist while parent Milestone is AwaitingApproval (GATE-04 run-1 finding-1: 5 planners fired ~1s after park)")
+
+			// 5. Approve the Milestone: patch Status.Phase=Running.
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms)).To(Succeed())
+			approvePatch := client.MergeFrom(ms.DeepCopy())
+			ms.Status.Phase = "Running"
+			Expect(mgrClient.Status().Patch(ctx, ms, approvePatch)).To(Succeed())
+			Eventually(func() string {
+				var got tideprojectv1alpha1.Milestone
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
+					return ""
+				}
+				return got.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Running"))
+
+			// 6. Drive all five PhaseReconcilers again — hold is now released.
+			for i, phName := range phaseNames {
+				for range 3 {
+					_, _ = phaseReconcilers[i].Reconcile(ctx, ctrl.Request{
+						NamespacedName: types.NamespacedName{Name: phName, Namespace: "default"},
+					})
+				}
+			}
+
+			// Assert: planner Jobs now exist for the Phase children (dispatch unblocked).
+			Eventually(func(g Gomega) {
+				var jobsNow batchv1.JobList
+				g.Expect(mgrClient.List(ctx, &jobsNow, client.InNamespace("default"))).To(Succeed())
+				plannerJobs := 0
+				for i := range jobsNow.Items {
+					if strings.HasPrefix(jobsNow.Items[i].Name, "tide-phase-") {
+						plannerJobs++
+					}
+				}
+				g.Expect(plannerJobs).To(BeNumerically(">=", 1),
+					"at least one planner Job must be created after Milestone approval (D-02 hold released)")
+			}, 10*time.Second, 200*time.Millisecond).Should(Succeed())
+		})
+	})
+})
+
 var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "phase4", "gates-integration"), func() {
 	ctx := context.Background()
 
@@ -371,6 +528,20 @@ func newMilestoneReconcilerForGateIT(envReader *mapEnvReader) *controller.Milest
 		Dispatcher:    &stubDispatcher{},
 		EnvReader:     envReader,
 		SubagentImage: testSubagentImage,
+	}
+}
+
+// newPhaseReconcilerForGateIT constructs a PhaseReconciler with the Dispatcher
+// seam wired for the Plan 12-03 GATE-04 descent-hold integration test.
+func newPhaseReconcilerForGateIT() *controller.PhaseReconciler {
+	return &controller.PhaseReconciler{
+		Client:         mgrClient,
+		Scheme:         k8sClient.Scheme(),
+		Dispatcher:     &stubDispatcher{},
+		PlannerPool:    pool.New(16, "planner"),
+		SubagentImage:  testSubagentImage,
+		CredproxyImage: testCredproxyImage,
+		SigningKey:     testSigningKey,
 	}
 }
 
