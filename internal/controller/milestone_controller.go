@@ -330,6 +330,22 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		}
 	}
 
+	// CR-01 (Plan 13-05): guard nil project before the first deref at :370 and :394.
+	// Mirrors the plan_controller.go cascade-7 guard shape: empty ProjectRef is a
+	// near-unreachable config error (CRD MinLength=1) — refuse without requeueing;
+	// transient Get failure / Project deleted between Step 2 and Step 4 — requeue so
+	// the cache can catch up. BuildJobSpec drops the provider Secret on nil Project
+	// (jobspec.go:259-273), causing credproxy CrashLoopBackOff on the first dispatch.
+	if project == nil {
+		if ms.Spec.ProjectRef == "" {
+			logf.FromContext(ctx).Info("refusing milestone-planner dispatch: spec.projectRef is empty")
+			return ctrl.Result{}, nil
+		}
+		logf.FromContext(ctx).V(1).Info("deferring milestone-planner dispatch: project not yet resolvable, requeueing",
+			"milestone", ms.Name, "projectRef", ms.Spec.ProjectRef)
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+
 	// Step 5: Build planner envelope.
 	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
 	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner). The marshaled
