@@ -117,8 +117,8 @@ const PROJECT_PAYLOAD: ProjectDetail = {
   ],
 };
 
-describe("PlanningDAGView — Test 1: hierarchy renders with ≥13 nodes and TB direction", () => {
-  it("renders 1 project + 2 milestones + 4 phases + 6 plans = 13 nodes via dagre TB", async () => {
+describe("PlanningDAGView — Test 1: hierarchy renders with ≥13 nodes and LR direction", () => {
+  it("renders 1 project + 2 milestones + 4 phases + 6 plans = 13 nodes via dagre LR", async () => {
     stubFetchOK(PROJECT_PAYLOAD);
     render(<PlanningDAGView projectName="my-project" onPlanClick={() => undefined} />);
     // Wait for the fetch + first layout pass to complete.
@@ -127,12 +127,12 @@ describe("PlanningDAGView — Test 1: hierarchy renders with ≥13 nodes and TB 
       const allTide = document.querySelectorAll('[data-testid^="tide-node-"]');
       expect(allTide.length).toBeGreaterThanOrEqual(13);
     });
-    // Direction marker: PlanningDAGView sets data-dagre-direction="TB"
+    // Direction marker: PlanningDAGView sets data-dagre-direction="LR"
     expect(
       document.querySelector('[data-testid="planning-dag-view"]')!.getAttribute(
         "data-dagre-direction",
       ),
-    ).toBe("TB");
+    ).toBe("LR");
   });
 });
 

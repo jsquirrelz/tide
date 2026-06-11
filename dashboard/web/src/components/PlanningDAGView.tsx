@@ -29,7 +29,7 @@ import type { StatusValue } from "./StatusBadge";
  *   Renders the Planning DAG for the currently-selected Project:
  *     Project → Milestone → Phase → Plan
  *
- *   Layout: dagre top-down (rankdir TB).
+ *   Layout: dagre left-right (rankdir LR).
  *   The view fetches initial data on mount and re-fetches when `projectName`
  *   changes. It also subscribes to the project-events SSE stream
  *   (`/api/v1/projects/{name}/events`) via useSSEStream and debounces a
@@ -292,13 +292,13 @@ function PlanningDAGViewInner({
     onConnectionStateChange?.(stream.state);
   }, [stream.state, onConnectionStateChange]);
 
-  // After nodes mount + measure, run dagre TB layout, then flip opacity 1.
+  // After nodes mount + measure, run dagre LR layout, then flip opacity 1.
   // The batch sentinel ensures the effect fires exactly once per data load.
   useEffect(() => {
     if (!ready) return;
     if (nodes.length === 0) return;
     if (lastPositionedBatchRef.current === layoutBatchRef.current) return;
-    const positioned = applyDagreLayout(nodes, edges, "TB");
+    const positioned = applyDagreLayout(nodes, edges, "LR");
     lastPositionedBatchRef.current = layoutBatchRef.current;
     setNodes(
       positioned.map((n) => ({
@@ -326,7 +326,7 @@ function PlanningDAGViewInner({
     <NodeClickContext.Provider value={onPlanClick}>
       <div
         data-testid="planning-dag-view"
-        data-dagre-direction="TB"
+        data-dagre-direction="LR"
         data-flicker-ready={flickerReady ? "true" : "false"}
         className="h-full w-full"
       >
