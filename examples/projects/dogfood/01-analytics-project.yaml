@@ -1,0 +1,181 @@
+# examples/projects/dogfood/01-analytics-project.yaml
+#
+# Run 1 of 3 in the TIDE-on-TIDE dogfood sequence.
+# Apply this FIRST. Do NOT apply 02-codex-runtime-project.yaml until this
+# Project reaches `status.phase: Complete` — the Project CRD has no ordering
+# mechanism; sequencing is operator discipline.
+#
+# Purpose: add run telemetry & cost observability to TIDE itself (token spend,
+# wall-clock, dispatch counts, failure rates at project/phase/wave granularity)
+# plus new React dashboard surfaces showcasing those metrics.
+#
+# After this run completes: the Codex dogfood run (02) becomes observable
+# through the very surfaces this run built — token spend and dispatch behavior
+# of the heterogeneous run watched live on the new dashboard.
+#
+# Prerequisites (see README.md for full recipe):
+#   - kind cluster + TIDE charts installed (see docs/INSTALL.md)
+#   - tide-secrets Secret created in namespace tide-dogfood-analytics
+#   - per-namespace-resources (tide-projects PVC + tide-subagent SA +
+#     tide-signing-key mirror) applied per README.md
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-dogfood-analytics
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-analytics
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: dogfood-analytics
+  namespace: tide-dogfood-analytics
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-analytics
+spec:
+  # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
+  # Phase 3 D-B6: TIDE clones, authors artifacts on a per-run branch, and pushes
+  # back to this remote (never to main per D-B6 contract).
+  targetRepo: https://github.com/jsquirrelz/tide.git
+
+  # Outcome prompt for TIDE's milestone-planner subagent.
+  # Written as an outcome + constraints + open questions, NOT a step-by-step
+  # task list (contrast with the tight-numbered-deliverable shape of the cost-tier
+  # samples, which used that shape as a budget-control mechanism for single-phase
+  # runs — this is a multi-phase outcome).
+  outcomePrompt: |
+    ## Outcome
+
+    Add run telemetry and cost observability to TIDE, surfaced through the
+    React dashboard. Concrete outcome: an operator running a dogfood Project
+    can open the dashboard and see, in near-real-time and historically:
+
+    - Token spend, wall-clock duration, dispatch counts, and failure rates
+      at project / phase / wave granularity.
+    - Cost-over-time charts spanning the full lifetime of a multi-day run
+      (history survives controller restarts).
+
+    ## Architecture — locked decisions (do NOT reinvent these)
+
+    **Prometheus is the DB.** Expose everything as Prometheus metrics using
+    `prometheus/client_golang` (already in the stack at pkg/metrics/ or
+    equivalent). The dashboard queries Prometheus for historical data.
+    This is the ONLY approved persistence mechanism for telemetry history —
+    no new DB, no SQLite, no in-cluster store, no .status caching of derived
+    aggregates (.status-only persistence constraint stays untouched;
+    CRD-.status carries live state, not history).
+
+    When the Helm chart's prometheus.enabled=false (the chart default for
+    portability), the dashboard must degrade gracefully to live-only
+    CRD-.status views — no error state, no blank panel, no broken layout.
+    Graceful degradation is a first-class deliverable, not an afterthought.
+
+    **Metric granularity and label-cardinality budget:**
+    - Project-level, phase-level, and wave-level labels are approved.
+    - Per-task labels are FORBIDDEN — cardinality explosion. Per-task
+      detail stays in CRD .status fields and OTel spans, not Prometheus
+      labels. Violating this budget triggers storage / scrape failures in
+      production clusters with many tasks.
+
+    **OTel spans remain orthogonal.** The existing OpenInference-convention
+    OTel tracing (pkg/otelai/) stays on its own track; do NOT route token
+    or cost counts through Prometheus by duplicating them from OTel spans.
+    Metric collection and trace emission are independent code paths.
+
+    **Instrument the existing reconcilers.** Token counts and cost figures
+    come from the provider's response metadata (already present in the
+    Anthropic SDK's Usage struct returned by subagent runs). Wire those into
+    counters at the reconciler level; do NOT add ad-hoc accounting to the
+    subagent image.
+
+    **Dashboard integration.** The React dashboard (served by the chi
+    manager.Runnable server) gains new views for the telemetry surfaces.
+    React + TypeScript + @xyflow/react + Tailwind (existing stack — match it).
+
+    ## Open questions for TIDE's planner to research
+
+    These questions are genuinely open and MUST be researched and decided
+    during the planning phase — do not assume an answer:
+
+    **Open question 1 — PromQL proxy vs direct datasource:**
+    Should the dashboard's Prometheus queries be proxied through the existing
+    chi server (single origin, one auth surface, no CORS) or should the
+    dashboard hit Prometheus as a second datasource directly (simpler
+    plumbing, manager out of the query path)? Evaluate CORS implications,
+    auth surface, and operational complexity before deciding.
+
+    **Open question 2 — Cardinality budget enforcement point:**
+    Project/phase/wave labels approved; per-task labels forbidden. Where is
+    this enforced — at metric registration review (code review gate only),
+    a lint/vet rule in CI, or a runtime guard in the metric registration
+    call? Choose the option that catches violations earliest.
+
+    **Open question 3 — Retention for multi-day cost-over-time charts:**
+    A dogfood run spans days. Default Prometheus retention (15 days local)
+    vs the retention window required for meaningful cost-over-time charts —
+    what does the chart need to document? Is there a configurable
+    retentionTime Helm value to expose?
+
+    ## Constraints
+
+    - No new DB, no SQLite, no external store beyond Prometheus.
+    - No .status caching of derived aggregates (PERSIST-02 invariant).
+    - No per-task Prometheus labels (cardinality budget).
+    - Prometheus-disabled path must render without errors.
+    - Follow all CLAUDE.md conventions: Apache 2.0 headers, logr/zap logging,
+      CEL validation for new CRD fields, controller-runtime patterns.
+    - Do NOT break existing tests. Confirm make test is green before
+      authoring any plan as delivered.
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # Created out-of-band before applying this CR — see README.md.
+  # NEVER inline credential material here.
+  providerSecretRef: tide-secrets
+
+  # Starting cap for dogfood runs — tune before applying.
+  # These are multi-phase real work runs; the cap is a safety net, not an
+  # operating budget. absoluteCapCents: 10000 = $100 USD lifetime cap.
+  budget:
+    absoluteCapCents: 10000
+    rollingWindowCapCents: 10000
+    # 24h rolling window. metav1.Duration parses Go duration strings.
+    # Default would be 24h when unset; explicit per Pitfall 7.
+    rollingWindowDuration: 24h
+
+  # claude-opus-4-7 for real multi-phase feature work.
+  # Cheaper alternatives: model: claude-sonnet-4-6 (good balance)
+  #                       model: claude-haiku-4-5 (minimal cost)
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
+    model: claude-opus-4-7
+
+  # Phase 3 D-B6: per-project git target + creds.
+  # TIDE pushes artifacts to tide/run-dogfood-analytics-<unix-ts>, never main.
+  # The same tide-secrets Secret carries GIT_PAT alongside ANTHROPIC_API_KEY.
+  git:
+    repoURL: https://github.com/jsquirrelz/tide.git
+    credsSecretRef: tide-secrets
+
+  # Human oversight at the top two levels; plan and task proceed automatically.
+  # Dogfood runs are real multi-phase work — milestone/phase: approve keeps a
+  # human in the loop before TIDE descends into each level.
+  # One edit (milestone: auto, phase: auto) to switch to fully-autonomous.
+  gates:
+    milestone: approve
+    phase: approve
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  # Phase 2 D-E1: strict file-touch admission.
+  planAdmission:
+    fileTouchMode: strict
+
+  # Phase 2 SUB-04: 3 attempts per task (v1 default — recovers transient 429s,
+  # surfaces genuinely-broken tasks quickly).
+  maxAttemptsPerTask: 3
