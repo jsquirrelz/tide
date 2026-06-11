@@ -17,13 +17,17 @@ limitations under the License.
 package credproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 )
 
 // RouteSpec is a (method, path-prefix) tuple for the per-Project credproxy
@@ -46,6 +50,11 @@ type RouteSpec struct {
 //
 // Token validation delegates to Verify (token.go); invalid tokens return
 // HTTP 401 with a structured body (T-02-05-01 / T-02-05-06).
+//
+// Phase 13 D-04: billingHalted is an atomic flag set by ModifyResponse on the
+// first credit-exhaustion 400. Once set, every subsequent valid signed request
+// is short-circuited locally (HTTP 400 + X-Tide-Billing-Halt: true) without
+// contacting the upstream. This prevents context ramps after a billing dry-out.
 type Proxy struct {
 	SigningKey        []byte // from Secret tide-signing-key (envFrom)
 	ExpectedTaskUID   string // from env TIDE_TASK_UID
@@ -59,6 +68,25 @@ type Proxy struct {
 	// hardcoded allowedRoutes baseline is ALWAYS checked first and cannot be
 	// removed — operator additions are additive, never restrictive.
 	ExtraAllowedRoutes []RouteSpec
+
+	// billingHalted is set to 1 by ModifyResponse on the first detected
+	// credit-exhaustion 400 (D-04). Subsequent requests short-circuit before
+	// reaching the upstream. Uses atomic.Bool for safe concurrent access.
+	billingHalted atomic.Bool
+}
+
+// isCreditExhaustion returns true if the upstream HTTP response body contains
+// Anthropic's credit-exhaustion error signal.
+//
+// Classification: case-insensitive substring "credit balance" — conservative
+// to survive Anthropic API message rewording (T-13-06 mitigate). Never
+// exact-match the error string; Anthropic has reworded it before.
+//
+// Provider-firewall: this is the Anthropic-specific classification at the HTTP
+// boundary. It lives in internal/credproxy (the legal home per the firewall
+// analyzer rule). Do NOT import api/v1alpha1 or controller-runtime here.
+func isCreditExhaustion(body []byte) bool {
+	return strings.Contains(strings.ToLower(string(body)), "credit balance")
 }
 
 // allowedRoutes is the defense-in-depth allowlist of (method, path-prefix)
@@ -135,6 +163,31 @@ func (p *Proxy) Handler() (http.Handler, error) {
 		// anthropic-version and other headers pass through untouched.
 	}
 
+	// Phase 13 D-04: ModifyResponse inspects upstream 400 responses for the
+	// Anthropic billing signal. On detection, it sets the billingHalted latch so
+	// subsequent requests short-circuit without contacting the upstream.
+	// The body is passed through byte-identical to the subagent (RESEARCH Pitfall 5:
+	// always restore resp.Body after io.ReadAll, even on error paths).
+	rp.ModifyResponse = func(resp *http.Response) error {
+		if resp.StatusCode != http.StatusBadRequest {
+			return nil
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		// Always restore the body before returning, even on read error.
+		if err != nil {
+			resp.Body = io.NopCloser(bytes.NewReader(nil))
+			return nil
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		if isCreditExhaustion(body) {
+			p.billingHalted.Store(true)
+			// stdlib log — credproxy must NOT import controller-runtime (providerfirewall boundary).
+			log.Printf("billing-halt: Anthropic credit-exhaustion 400 detected at credproxy (status=%d)", resp.StatusCode)
+		}
+		return nil
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Extract bearer token: try Authorization Bearer first, then x-api-key.
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -152,6 +205,20 @@ func (p *Proxy) Handler() (http.Handler, error) {
 		// (method, path) outside the allowlist (baseline + extensions) with 403.
 		if !p.isAllowedRoute(r.Method, r.URL.Path) {
 			http.Error(w, "forbidden: route not allowed", http.StatusForbidden)
+			return
+		}
+
+		// Phase 13 D-04: fail-fast latch. After the first credit-exhaustion 400,
+		// short-circuit every subsequent request locally without contacting the
+		// upstream. The body mirrors the Anthropic error shape so the subagent's
+		// stderr→EnvelopeOut.Reason channel still carries "credit balance".
+		if p.billingHalted.Load() {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Tide-Billing-Halt", "true")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error",`+
+				`"message":"Your credit balance is too low to access the Anthropic API. `+
+				`TIDE billing halt active — run tide resume after refilling credits."}}`)
 			return
 		}
 
