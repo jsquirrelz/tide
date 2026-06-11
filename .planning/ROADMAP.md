@@ -70,8 +70,8 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 13-01-PLAN.md — resolveImage precedence chain + all six controller dispatch sites wired; main.go flag-overrides-env default tier (DISPATCH-01)
-- [ ] 13-02-PLAN.md — BillingHalt condition vocabulary + shared helpers, credproxy fail-fast latch, tide resume clears the halt (HALT-01)
+- [x] 13-01-PLAN.md — resolveImage precedence chain + all six controller dispatch sites wired; main.go flag-overrides-env default tier (DISPATCH-01)
+- [x] 13-02-PLAN.md — BillingHalt condition vocabulary + shared helpers, credproxy fail-fast latch, tide resume clears the halt (HALT-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
-| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
+| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 2/4 | In Progress|  |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
