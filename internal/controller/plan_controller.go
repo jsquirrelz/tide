@@ -205,6 +205,44 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // to reconcileWaveMaterialization (Phase 2 path) which fires once the
 // admission webhook stamps ValidationState="Validated" on the Plan.
 func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, bool, error) {
+	// Phase 12 CR-02 / CR-01 fix: AwaitingApproval early-return placed at the VERY
+	// TOP — BEFORE the tasks-exist List — because a parked Plan with
+	// reporter-materialized Tasks would otherwise take the tasks-exist exit to
+	// dispatched=false, letting reconcileWaveMaterialization run while parked and
+	// dispatch executor Jobs without approval.
+	// Mirrors milestone_controller.go:216-243 Step 1a, adapted to the (ctrl.Result,
+	// bool, error) signature: dispatched=true suppresses reconcileWaveMaterialization.
+	if plan.Status.Phase == "AwaitingApproval" {
+		if gates.CheckApprove(plan, "plan") {
+			// Consume annotation (T-04-G2 one-shot).
+			newAnno := gates.ConsumeApprove(plan, "plan")
+			annoPatch := client.MergeFrom(plan.DeepCopy())
+			plan.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, plan, annoPatch); err != nil {
+				return ctrl.Result{}, true, err
+			}
+			// Return to Running + record ApprovedByUser condition (D-04).
+			statusPatch := client.MergeFrom(plan.DeepCopy())
+			plan.Status.Phase = "Running"
+			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+				Message:            "Plan approved; Tasks will dispatch",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+				return ctrl.Result{}, true, err
+			}
+			// Requeue immediately — the Running branch (below) calls
+			// handlePlannerJobCompletion which owns ChildCount-gated succession (D-03).
+			return ctrl.Result{Requeue: true}, true, nil
+		}
+		// No annotation — keep parked; dispatched=true so reconcileWaveMaterialization
+		// never runs while parked (GATE-04: no executor Jobs, no Wave CRs).
+		return ctrl.Result{}, true, nil
+	}
+
 	// If Tasks already exist for this Plan, skip planner dispatch — the
 	// Phase 2 Wave path runs.
 	var taskList tideprojectv1alpha1.TaskList
@@ -399,6 +437,14 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		projectUID = string(project.UID)
 	}
 
+	// Phase 12 / Phase 04.1: reject short-circuit FIRST — operator stop should always
+	// halt, regardless of envelope availability or read errors.
+	// Mirrors milestone_controller.go:442-449 ("reject short-circuit FIRST").
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchPlanRejected(ctx, plan, gates.RejectedReason(project))
+	}
+
 	// Read tiny status from the dispatch Job's termination message for budget
 	// rollup and failure classification. ChildCRDs are NOT used here —
 	// materialization has moved to the reporter Job (REQ-09-01).
@@ -480,6 +526,61 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		return ctrl.Result{}, err
 	}
 
+	// Phase 12 CR-01 fix: gate-policy hook moved BEFORE the ChildCount requeue so
+	// the gate fires even when ChildCount>0. Previously the ChildCount requeue
+	// returned first and patchPlanAwaitingApproval never ran for non-leaf Plans.
+	// Position comment: the reporter Job was already spawned above, so children
+	// keep materializing while parked — D-02 "materialize children, hold dispatch".
+	// ValidationState=Validated is already stamped so the wave path is armed the
+	// moment approval lands. Mirrors milestone_controller.go:510-553.
+	if project != nil {
+		policy := gates.EvaluatePolicy(project.Spec.Gates, "plan")
+		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
+			// Check if this level was already approved (permanent ApprovedByUser or
+			// ResumedByUser condition with Status=False means the park was lifted).
+			// Prevents re-parking after the Edit-1 AwaitingApproval branch approved
+			// the level — without this guard the consumed annotation re-parks on the
+			// next pass through this function.
+			alreadyApproved := false
+			if c := meta.FindStatusCondition(plan.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused); c != nil {
+				if c.Status == metav1.ConditionFalse &&
+					(c.Reason == tideprojectv1alpha1.ReasonApprovedByUser || c.Reason == tideprojectv1alpha1.ReasonResumedByUser) {
+					alreadyApproved = true
+				}
+			}
+			if !alreadyApproved {
+				if !gates.CheckApprove(plan, "plan") {
+					// No annotation and not yet approved — park.
+					return r.patchPlanAwaitingApproval(ctx, plan, policy)
+				}
+				// Annotation present at the hook (operator approved before the park fired):
+				// consume it and write Running+ApprovedByUser so the condition is recorded
+				// for future reconciles — otherwise the next reconcile would re-park because
+				// the annotation is gone but no approval record exists.
+				newAnno := gates.ConsumeApprove(plan, "plan")
+				annoPatch := client.MergeFrom(plan.DeepCopy())
+				plan.SetAnnotations(newAnno)
+				if err := r.Patch(ctx, plan, annoPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				statusPatch := client.MergeFrom(plan.DeepCopy())
+				plan.Status.Phase = "Running"
+				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+					Status:             metav1.ConditionFalse,
+					Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+					Message:            "Plan approved; Tasks will dispatch",
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				// Fall through to ChildCount-gated succession (D-03).
+			}
+			// alreadyApproved: fall through to ChildCount-gated succession.
+		}
+	}
+
 	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession replaces the
 	// prior reporterSpawned early-return. Gate:
 	//   expected == 0            → clear Running immediately (genuine leaf: no Tasks)
@@ -494,27 +595,6 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			logger.V(1).Info("requeue: reporter still materializing Task children",
 				"plan", plan.Name, "expected", expected, "observed", observed)
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-	}
-
-	// Plan 04-05: gate-policy hook (level=plan). Lands BEFORE clearing the
-	// Running phase so the gate stays the "exit gate" of the planner cycle.
-	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
-	if project != nil && gates.CheckRejected(project) {
-		return r.patchPlanRejected(ctx, plan, gates.RejectedReason(project))
-	}
-	if project != nil {
-		policy := gates.EvaluatePolicy(project.Spec.Gates, "plan")
-		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
-			if !gates.CheckApprove(plan, "plan") {
-				return r.patchPlanAwaitingApproval(ctx, plan, policy)
-			}
-			newAnno := gates.ConsumeApprove(plan, "plan")
-			patch := client.MergeFrom(plan.DeepCopy())
-			plan.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, plan, patch); err != nil {
-				return ctrl.Result{}, err
-			}
 		}
 	}
 
