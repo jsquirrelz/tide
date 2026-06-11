@@ -281,3 +281,61 @@ func TestResumeRetryFailedAllFourKinds(t *testing.T) {
 		t.Errorf("Task still Failed after retry-failed")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan 13-02 Task 3 — tide resume clears BillingHalt (D-06)
+// ---------------------------------------------------------------------------
+
+// makeBillingHaltedProject builds a Project fixture with BillingHalt=True.
+func makeBillingHaltedProject(name string) *tidev1alpha1.Project {
+	p := &tidev1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       tidev1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Status:     tidev1alpha1.ProjectStatus{Phase: "Running"},
+	}
+	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha1.ConditionBillingHalt,
+		Status:             metav1.ConditionTrue,
+		Reason:             tidev1alpha1.ReasonCreditBalanceTooLow,
+		LastTransitionTime: metav1.Now(),
+	})
+	return p
+}
+
+// TestResumeClearsBillingHalt asserts that resumeRun clears the BillingHalt
+// condition from a Project that has been halted for credit exhaustion.
+func TestResumeClearsBillingHalt(t *testing.T) {
+	p := makeBillingHaltedProject("halt-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "halt-project", false, nil); err != nil {
+		t.Fatalf("resumeRun: %v", err)
+	}
+
+	var got tidev1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "halt-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	for _, cond := range got.Status.Conditions {
+		if cond.Type == tidev1alpha1.ConditionBillingHalt && cond.Status == metav1.ConditionTrue {
+			t.Errorf("BillingHalt=True condition should be cleared after resume; still present: %+v", cond)
+		}
+	}
+}
+
+// TestResumeWithoutBillingHalt_StillSucceeds asserts that resumeRun on a
+// Project with no BillingHalt condition still succeeds (no-op for billing).
+func TestResumeWithoutBillingHalt_StillSucceeds(t *testing.T) {
+	p := makeProject("plain-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "plain-project", false, nil); err != nil {
+		t.Fatalf("resumeRun on project without BillingHalt should succeed; got %v", err)
+	}
+}

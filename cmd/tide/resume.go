@@ -81,6 +81,28 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		return fmt.Errorf("patch project: %w", err)
 	}
 
+	// Phase 13 D-06: clear BillingHalt unconditionally (operator chose recovery
+	// by invoking resume; no auto-probe of provider balance). Re-fetch so the
+	// status patch uses a fresh resourceVersion after the annotation patch above.
+	// Skip the status patch when no BillingHalt condition exists — avoids a
+	// spurious no-op patch on clients that don't register Project as a status
+	// subresource (e.g. legacy fake-client tests).
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for BillingHalt clear: %w", err)
+	}
+	haltCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha1.ConditionBillingHalt)
+	if haltCond != nil {
+		hadBillingHalt := haltCond.Status == metav1.ConditionTrue
+		patch2 := client.MergeFrom(proj.DeepCopy())
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha1.ConditionBillingHalt)
+		if err := c.Status().Patch(ctx, &proj, patch2); err != nil {
+			return fmt.Errorf("patch status (clear BillingHalt): %w", err)
+		}
+		if hadBillingHalt && out != nil {
+			fmt.Fprintln(out, "tide: cleared BillingHalt (billing recovery)")
+		}
+	}
+
 	if !retryFailed {
 		return nil
 	}
