@@ -11,7 +11,8 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 - [ ] **GATE-01**: Approving a gated level with incomplete children does not advance it to Succeeded — approval records gate passage; the level reaches Succeeded only when its children complete (finding 7, the run-killer: `ConsumeApprove` advanced a Milestone with 5 running Phases straight to Succeeded → Project `Complete`)
 - [ ] **GATE-02**: gates.md step 5 documents approve-then-wait-for-children semantics (the current doc encodes the bug — "advances the level to Succeeded")
-- [ ] **GATE-03**: Approval after a failed planner attempt triggers a retry dispatch instead of wedging the level (finding 5 — `backoffLimit: 0` planner failure during AwaitingApproval leaves no attempt-2 path)
+- [ ] **GATE-03**: A level whose planner Job failed is recoverable via `tide resume --retry-failed`, never wedged; `tide approve` against it gives an actionable error pointing at resume (finding 5 reworded per Phase 12 discussion D-07 — approval never doubles as a spend-retry)
+- [ ] **GATE-04**: A level parked at AwaitingApproval blocks child dispatch — children materialize (visible in dashboard/kubectl) but their reconcilers hold all Job dispatch until the parent is approved (finding 1, gate-before-descent: run 1 fired 5 × ~$0.64 phase planners one second after the milestone parked; folded into Phase 12 per discussion D-01/D-02)
 
 ### Reject/Resume Recovery (RESUME)
 
@@ -79,6 +80,7 @@ Which phases cover which requirements.
 | GATE-01 | Phase 12 | Pending |
 | GATE-02 | Phase 12 | Pending |
 | GATE-03 | Phase 12 | Pending |
+| GATE-04 | Phase 12 | Pending |
 | RESUME-01 | Phase 12 | Pending |
 | DISPATCH-01 | Phase 13 | Pending |
 | DISPATCH-02 | Phase 13 | Pending |
@@ -101,8 +103,8 @@ Which phases cover which requirements.
 | TELEM-06 | Phase 16 | Pending |
 
 **Coverage:**
-- v1.0.1 requirements: 23 total
-- Mapped to phases: 23
+- v1.0.1 requirements: 24 total
+- Mapped to phases: 24
 - Unmapped: 0 ✓
 
 ---

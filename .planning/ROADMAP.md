@@ -21,14 +21,16 @@
 ## Phase Details
 
 ### Phase 12: Gate Semantics + Reject/Resume
-**Goal**: Gate passage and reject/resume recovery are correct — approving a level does not advance it past its children, planner retries fire after approval, and `tide resume` recovers rejected children
+**Goal**: Gate passage and reject/resume recovery are correct — the approve gate sits at descent (review the authored artifact before children spend), approval never jumps a level past its children, reject parks instead of fail-marking, and `tide resume` is the one sanctioned recovery verb
 **Depends on**: Phase 11 (v1.0.0)
-**Requirements**: GATE-01, GATE-02, GATE-03, RESUME-01
+**Requirements**: GATE-01, GATE-02, GATE-03, GATE-04, RESUME-01
+**Context**: 12-CONTEXT.md (decisions D-01..D-07 locked 2026-06-11; gate-at-descent folds run-1 finding 1 in as GATE-04)
 **Success Criteria** (what must be TRUE):
-  1. Approving a gated Milestone with 5 running Phases does not set the Milestone to Succeeded — it remains Running until all Phase children complete (regression test reproduces the run-1 finding-7 symptom using the kind cluster `tide` CRs)
-  2. gates.md step 5 reads "approve records gate passage; the level reaches Succeeded only when its children complete" — the old "advances the level to Succeeded" text is gone
-  3. Approving a level whose planner Job previously failed with `backoffLimit: 0` triggers a fresh planner Job dispatch — the level does not wedge at AwaitingApproval
-  4. `tide resume` after `tide reject` resets fail-marked child Plans to Pending, fires reconciler re-dispatch, and records a `ResumedByUser` condition — matching the manual kubectl status-reset recipe
+  1. Approving a gated Milestone with 5 incomplete Phase children does not set the Milestone to Succeeded — it returns to Running with an `ApprovedByUser` condition and succeeds only when all children complete (regression test reproduces the run-1 finding-7 symptom)
+  2. While a level is parked at AwaitingApproval, its children are materialized and visible but ZERO child planner/executor Jobs exist — dispatch holds until approval (regression test reproduces the run-1 finding-1 symptom: 5 phase planners fired ~1s after the park)
+  3. gates.md documents approve-at-descent semantics — the old step-5 "advances the level to Succeeded" text and the `Approved` phase-value sketch are gone
+  4. `tide reject` parks children without writing `Status.Phase=Failed`; `tide resume` lifts the park; `tide resume --retry-failed` recovers a genuinely Failed level (status reset → re-dispatch → `ResumedByUser` condition), matching the run-1 kubectl recipe
+  5. `tide approve` against a level whose planner Job failed prints an actionable error pointing at `tide resume --retry-failed` — approval never doubles as a spend-retry
 **Plans**: TBD
 
 ### Phase 13: Dispatch Image Resolution + Provider Halt
