@@ -12,7 +12,7 @@
 
 **Milestone Goal:** Fix the dogfood run-1 findings (gate semantics run-killer, reject/resume recovery, image dispatch chain, billing halt, budget UX, paper cuts) and complete the merged telemetry foundation. Every fix carries a regression test reproducing the run-1 symptom.
 
-- [ ] **Phase 12: Gate Semantics + Reject/Resume** - Fix ConsumeApprove advancement bug + retry path + resume recovery (run-killers)
+- [x] **Phase 12: Gate Semantics + Reject/Resume** - Fix ConsumeApprove advancement bug + retry path + resume recovery (run-killers) (completed 2026-06-11)
 - [ ] **Phase 13: Dispatch Image Resolution + Provider Halt** - Implement image-resolution chain at all dispatch sites + billing-400 project-wide halt
 - [ ] **Phase 14: Budget Enforcement + Pricing** - Current model IDs in pricing table + BudgetBlocked condition + in-flight overshoot bound
 - [ ] **Phase 15: Paper Cuts** - Reporter CR labels, boundary push no-op, phase status flapping, artifact-get stub, dashboard chip + wave view, file-touch overlap
@@ -48,7 +48,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 12-04-PLAN.md — Reject parks instead of fail-marking at all four reconcilers; retry-failed re-dispatch regression (RESUME-01, GATE-03)
+- [x] 12-04-PLAN.md — Reject parks instead of fail-marking at all four reconcilers; retry-failed re-dispatch regression (RESUME-01, GATE-03)
 
 ### Phase 13: Dispatch Image Resolution + Provider Halt
 
@@ -118,7 +118,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 3/4 | In Progress|  |
+| 12. Gate Semantics + Reject/Resume | v1.0.1 | 4/4 | Complete   | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
