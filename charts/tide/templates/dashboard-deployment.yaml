@@ -54,11 +54,13 @@ spec:
           value: {{ quote .Values.otel.tracesSamplerArg }}
         - name: OTEL_SERVICE_NAME
           value: "tide-dashboard"
-        # PromQL proxy target (Phase 04 plan 02). Read by internal/config as the
-        # PROM_ENDPOINT override; drives the dashboard's /api/v1/query{,_range}
-        # proxy handlers. Emitted ONLY when prometheus.endpoint is non-empty; the
-        # empty default renders no env, so the proxy self-degrades to the
-        # {"status":"unavailable"} sentinel without error.
+        {{- /* PromQL proxy target (Phase 04 plan 02). Read by internal/config as
+        the PROM_ENDPOINT override; drives the dashboard's /api/v1/query{,_range}
+        proxy handlers. Emitted ONLY when prometheus.endpoint is non-empty; the
+        empty default renders no env, so the proxy self-degrades to the
+        {"status":"unavailable"} sentinel without error. Template comment so the
+        default render carries no PROM_ENDPOINT text at all (the EC-7 gate greps
+        rendered output). */}}
         {{- if .Values.prometheus.endpoint }}
         - name: PROM_ENDPOINT
           value: {{ quote .Values.prometheus.endpoint }}

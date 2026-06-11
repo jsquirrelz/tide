@@ -73,8 +73,10 @@ RENDER_A="$(helm template "${CHART_DIR}" 2>&1)" \
   || die "[A] helm template charts/tide (no overrides) exited non-zero:
 ${RENDER_A}"
 
-if echo "${RENDER_A}" | grep -q "PROM_ENDPOINT"; then
-  die "[A] PROM_ENDPOINT leaked into the default render — graceful-degradation posture violated.
+# Match only an env-entry shape (- name: PROM_ENDPOINT), not any occurrence of
+# the token — rendered comments mentioning PROM_ENDPOINT must not trip the gate.
+if echo "${RENDER_A}" | grep -qE '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROM_ENDPOINT[[:space:]]*$'; then
+  die "[A] PROM_ENDPOINT env entry leaked into the default render — graceful-degradation posture violated.
 When prometheus.endpoint is empty, the dashboard Deployment must NOT inject PROM_ENDPOINT."
 fi
 
@@ -95,8 +97,8 @@ RENDER_B="$(helm template "${CHART_DIR}" --set prometheus.endpoint=http://prom:9
   || die "[B] helm template --set prometheus.endpoint=http://prom:9090 exited non-zero:
 ${RENDER_B}"
 
-if ! echo "${RENDER_B}" | grep -q "PROM_ENDPOINT"; then
-  die "[B] PROM_ENDPOINT env key not found in rendered output when prometheus.endpoint is set.
+if ! echo "${RENDER_B}" | grep -qE '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROM_ENDPOINT[[:space:]]*$'; then
+  die "[B] PROM_ENDPOINT env entry not found in rendered output when prometheus.endpoint is set.
 The dashboard Deployment template must inject a PROM_ENDPOINT env entry when prometheus.endpoint is non-empty."
 fi
 
