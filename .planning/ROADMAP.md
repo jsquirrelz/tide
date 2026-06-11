@@ -85,7 +85,7 @@ Plans:
 
 **Wave 4 — gap closure** *(blocked on Wave 3)*
 
-- [ ] 13-07-PLAN.md — Diagnose-then-fix reporter materialization failure + final full make test-int gate (DISPATCH-02)
+- [x] 13-07-PLAN.md — Diagnose-then-fix reporter materialization failure + final full make test-int gate (DISPATCH-02)
 
 ### Phase 14: Budget Enforcement + Pricing
 
@@ -143,7 +143,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
-| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 6/7 | In Progress|  |
+| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |

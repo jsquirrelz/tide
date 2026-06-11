@@ -20,12 +20,12 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 ### Dispatch Image Resolution (DISPATCH)
 
-- [ ] **DISPATCH-01**: Subagent image resolves via the documented chain (`Levels.<level>.Image` → `Spec.Subagent.Image` → flag/Helm default) at all four reconciler dispatch sites (v1-stub-image-bug: chain implemented for Model only in ResolveProvider; no code path consults `project.Spec.Subagent.Image`)
-- [ ] **DISPATCH-02**: A released-chart install with a Project pinning a real image dispatches that image — no silent stub override; the chart's `--subagent-image=stub` default posture is explicitly decided and documented
+- [x] **DISPATCH-01**: Subagent image resolves via the documented chain (`Levels.<level>.Image` → `Spec.Subagent.Image` → flag/Helm default) at all four reconciler dispatch sites (v1-stub-image-bug: chain implemented for Model only in ResolveProvider; no code path consults `project.Spec.Subagent.Image`)
+- [x] **DISPATCH-02**: A released-chart install with a Project pinning a real image dispatches that image — no silent stub override; the chart's `--subagent-image=stub` default posture is explicitly decided and documented
 
 ### Provider Failure Halt (HALT)
 
-- [ ] **HALT-01**: A provider billing 400 ("credit balance is too low") halts further dispatch project-wide and surfaces a condition on the Project, instead of crashing the fan-out one session at a time (finding 9a tail: ~$80 of run 1's $140.64 burned by dying sessions across two credit dry-outs)
+- [x] **HALT-01**: A provider billing 400 ("credit balance is too low") halts further dispatch project-wide and surfaces a condition on the Project, instead of crashing the fan-out one session at a time (finding 9a tail: ~$80 of run 1's $140.64 burned by dying sessions across two credit dry-outs)
 
 ### Budget & Pricing (BUDGET)
 
@@ -82,9 +82,9 @@ Which phases cover which requirements.
 | GATE-03 | Phase 12 | Complete |
 | GATE-04 | Phase 12 | Complete |
 | RESUME-01 | Phase 12 | Complete |
-| DISPATCH-01 | Phase 13 | Pending |
-| DISPATCH-02 | Phase 13 | Pending |
-| HALT-01 | Phase 13 | Pending |
+| DISPATCH-01 | Phase 13 | Complete |
+| DISPATCH-02 | Phase 13 | Complete |
+| HALT-01 | Phase 13 | Complete |
 | BUDGET-01 | Phase 14 | Pending |
 | BUDGET-02 | Phase 14 | Pending |
 | BUDGET-03 | Phase 14 | Pending |
