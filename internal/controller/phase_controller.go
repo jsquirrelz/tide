@@ -188,6 +188,44 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		return ctrl.Result{}, nil
 	}
 
+	// Step 1a: AwaitingApproval early-return (D-01 parity with milestone_controller.go).
+	// Stops the finding-2 oscillation where a Phase parked at AwaitingApproval would
+	// fall through to the idempotency guard and re-enter the planner dispatch body on
+	// every reconcile (RESEARCH.md Pitfall 2). Two sub-cases:
+	//   (a) no approve annotation → keep paused, return early (no requeue)
+	//   (b) approve annotation present → D-04 two-step: consume annotation +
+	//       patch Status.Phase=Running + ApprovedByUser condition, then Requeue.
+	//       Succeeded fires ONLY via ChildCount-gated succession in handleJobCompletion.
+	// Phase 12 D-01/D-04: approval never jumps a level to Succeeded past its children.
+	if ph.Status.Phase == "AwaitingApproval" {
+		if gates.CheckApprove(ph, "phase") {
+			// Consume annotation (T-04-G2 one-shot).
+			newAnno := gates.ConsumeApprove(ph, "phase")
+			annoPatch := client.MergeFrom(ph.DeepCopy())
+			ph.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, ph, annoPatch); err != nil {
+				return ctrl.Result{}, err
+			}
+			// Return to Running + record ApprovedByUser condition (D-04).
+			statusPatch := client.MergeFrom(ph.DeepCopy())
+			ph.Status.Phase = "Running"
+			meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+				Message:            "Phase approved; children will dispatch",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, ph, statusPatch); err != nil {
+				return ctrl.Result{}, err
+			}
+			// Requeue immediately — the Running branch calls handleJobCompletion
+			// which owns the ChildCount-gated succession (D-03 invariant).
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+
 	jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
 
 	if ph.Status.Phase == "Running" {
@@ -336,19 +374,16 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// gate + boundary-push logic regardless — those are envelope-independent.
 	// Phase 04.1: previously a nil EnvReader short-circuited to patchSucceeded,
 	// which skipped the boundary push trigger.
+	// Phase 12 Pitfall 1 (parity with milestone_controller.go): track envReaderPresent
+	// to distinguish nil-reader (unit-test fallback) from read error (transient).
 	var out pkgdispatch.EnvelopeOut
 	envReadOK := false
+	envReaderPresent := r.EnvReader != nil
 	if r.EnvReader != nil {
 		var readErr error
 		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ph.UID))
 		if readErr != nil {
-			// Non-fatal: the planner envelope on the PVC may be unreadable on the
-			// Job-absent (TTL/GC) fall-through path — its per-run artifact can be
-			// wiped by the clone/init re-creation loop. The envelope is used only
-			// for budget rollup and ChildCount; the authoritative succession signal
-			// is the children's existence + Succeeded state. Mirror the Project
-			// level: log and continue with envReadOK=false so the children-based
-			// boundary gate (not a re-read of the planner envelope) decides outcome.
+			// Non-fatal: log and defer to hasChildPlans fallback.
 			logger.Error(readErr, "phase planner envelope tiny-status read failed (non-fatal); deferring to children-based succession", "phase", ph.Name)
 		} else {
 			envReadOK = true
@@ -375,21 +410,48 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	}
 
 	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).
+	// Phase 12 D-04: if the phase already has an ApprovedByUser (or ResumedByUser)
+	// condition, skip the park — don't re-park an already-approved level.
 	if project != nil && gates.CheckRejected(project) {
 		return r.patchPhaseFailed(ctx, ph, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
 	}
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "phase")
 		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
-			if !gates.CheckApprove(ph, "phase") {
-				return r.patchPhaseAwaitingApproval(ctx, ph, policy)
+			alreadyApproved := false
+			if c := meta.FindStatusCondition(ph.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused); c != nil {
+				if c.Status == metav1.ConditionFalse &&
+					(c.Reason == tideprojectv1alpha1.ReasonApprovedByUser || c.Reason == tideprojectv1alpha1.ReasonResumedByUser) {
+					alreadyApproved = true
+				}
 			}
-			newAnno := gates.ConsumeApprove(ph, "phase")
-			patch := client.MergeFrom(ph.DeepCopy())
-			ph.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, ph, patch); err != nil {
-				return ctrl.Result{}, err
+			if !alreadyApproved {
+				if !gates.CheckApprove(ph, "phase") {
+					return r.patchPhaseAwaitingApproval(ctx, ph, policy)
+				}
+				// Annotation present at the hook (approved before park): consume +
+				// write Running+ApprovedByUser so the condition is recorded.
+				newAnno := gates.ConsumeApprove(ph, "phase")
+				annoPatch := client.MergeFrom(ph.DeepCopy())
+				ph.SetAnnotations(newAnno)
+				if err := r.Patch(ctx, ph, annoPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				statusPatch := client.MergeFrom(ph.DeepCopy())
+				ph.Status.Phase = "Running"
+				meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+					Status:             metav1.ConditionFalse,
+					Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+					Message:            "Phase approved; children will dispatch",
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, ph, statusPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				// Fall through to ChildCount-gated succession (D-03).
 			}
+			// alreadyApproved: fall through.
 		}
 	}
 
@@ -435,8 +497,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// Fallback: EnvReader is nil (non-Option-C / unit-test path). Use the prior
-	// hasChild-based behavior (mirrors milestone_controller.go fallback).
+	// Fallback: EnvReader is nil (non-Option-C / unit-test path) OR had a read
+	// error (envelope transiently absent). Use the prior hasChild-based behavior
+	// with one extra guard: when the reader is PRESENT but returned an error, do
+	// not fire the "no children → succeed" leaf path — the envelope may have had
+	// ChildCount>0 but the read failed transiently. Only BoundaryDetected (all
+	// children Succeeded) is safe to act on when the ChildCount is unknown.
+	// Phase 12 Pitfall 1 fix (parity with milestone_controller.go).
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ph, "Plan")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -448,8 +515,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	} else if r.hasChildPlans(ctx, ph) {
 		logger.V(1).Info("boundary push deferred: child Plans pending (fallback)", "phase", ph.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	} else if envReaderPresent {
+		// Reader exists but had a read error AND no children observed yet — the envelope
+		// may have ChildCount>0 (children materializing). Requeue; don't auto-succeed.
+		logger.V(1).Info("boundary push deferred: env reader present but unreadable, waiting (fallback)", "phase", ph.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: phase has no child Plans (fallback)", "phase", ph.Name)
+		logger.V(1).Info("boundary push skipped: phase has no child Plans (nil-EnvReader fallback)", "phase", ph.Name)
 	}
 
 	return r.patchPhaseSucceeded(ctx, ph)

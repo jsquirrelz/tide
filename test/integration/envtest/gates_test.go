@@ -81,6 +81,9 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 	}
 
 	// TestGateApproveFlow — Milestone-level approve gate handshake.
+	// Phase 12 D-04 update: approve transitions to Running+ApprovedByUser first;
+	// Succeeded fires only after children complete (or immediately for this leaf fixture
+	// which has ChildCount=0). The It() description updated to reflect approve-then-wait-for-children.
 	Describe("TestGateApproveFlow", func() {
 		const projectName = "gate-it-proj-1"
 		const msName = "gate-it-ms-1"
@@ -89,7 +92,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			cleanupGateFlowFixture(projectName, "", msName, "")
 		})
 
-		It("approve-milestone annotation handshake transitions Milestone Succeeded", func() {
+		It("approve-milestone annotation: transitions Running+ApprovedByUser then Succeeded (leaf — ChildCount=0)", func() {
 			// 1. Apply Project with Gates.Milestone=approve.
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
@@ -146,15 +149,30 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			current.Annotations[gates.AnnotationApprovePrefix+"milestone"] = "true"
 			Expect(k8sClient.Patch(ctx, &current, patch)).To(Succeed())
 
-			// 6. Drive reconcile — consume annotation + patch Succeeded.
-			driveMSReconcile(r, msName, 3)
+			// 6. Drive reconcile — Phase 12 D-04 two-step:
+			//    consume annotation → Running+ApprovedByUser → (requeue) → handleJobCompletion
+			//    → leaf (ChildCount=0) → Succeeded.
+			// The intermediate Running+ApprovedByUser state may be transient for this leaf
+			// fixture; assert the annotation was consumed and level Succeeded eventually.
+			driveMSReconcile(r, msName, 5)
 
+			// 6a. Intermediate: approve annotation must be consumed (D-04) and milestone
+			// must NOT still be AwaitingApproval. The ApprovedByUser condition may or may not
+			// be visible here depending on how far the burst progressed.
+			Eventually(func(g Gomega) {
+				var ms2 tideprojectv1alpha1.Milestone
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
+				g.Expect(ms2.Status.Phase).NotTo(Equal("AwaitingApproval"),
+					"D-04: approval must lift the AwaitingApproval park")
+				_, has := ms2.Annotations[gates.AnnotationApprovePrefix+"milestone"]
+				g.Expect(has).To(BeFalse(), "approve-milestone annotation should be consumed")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// 6b. Terminal: Succeeded via ChildCount-gated succession (leaf: ChildCount=0).
 			Eventually(func(g Gomega) {
 				var ms2 tideprojectv1alpha1.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				g.Expect(ms2.Status.Phase).To(Equal("Succeeded"))
-				_, has := ms2.Annotations[gates.AnnotationApprovePrefix+"milestone"]
-				g.Expect(has).To(BeFalse(), "approve-milestone annotation should be consumed")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
