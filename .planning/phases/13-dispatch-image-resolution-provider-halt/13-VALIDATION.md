@@ -1,10 +1,11 @@
 ---
 phase: 13
 slug: dispatch-image-resolution-provider-halt
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: ready
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-11
+updated: 2026-06-11
 ---
 
 # Phase 13 — Validation Strategy
@@ -38,7 +39,15 @@ created: 2026-06-11
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| (populated by planner) | | | DISPATCH-01..02, HALT-01 | — | image resolution honors Project pin; billing halt cannot be bypassed | unit + envtest + helm render | `make test` | ⬜ | ⬜ pending |
+| 13-01/T1 | 13-01 | 1 | DISPATCH-01 | image-injection via Project spec | resolveImage walks Levels.Image → Spec.Subagent.Image → helm default | unit (RED-first) | `go test ./internal/controller/ -run 'TestResolveImage' -count=1 -timeout 120s` | ✅ in-task | ⬜ pending |
+| 13-01/T2 | 13-01 | 1 | DISPATCH-01 | — | all six dispatch sites consume resolveImage; main.go shim keeps Layer B green | suite + build | `go test ./internal/controller/... ./internal/dispatch/... -count=1 -timeout 600s && go build ./...` | ✅ existing suites | ⬜ pending |
+| 13-02/T1 | 13-02 | 1 | HALT-01 | halt-bypass | BillingHalt condition vocab + helpers (set/check/classify) | unit (RED-first) | `go test ./internal/controller/ -run 'TestIsBillingFailureReason\|TestCheckBillingHalt\|TestSetBillingHalt' -count=1 -timeout 120s` | ✅ in-task | ⬜ pending |
+| 13-02/T2 | 13-02 | 1 | HALT-01 | credproxy tampering | fail-fast latch: zero upstream calls after first 400; no controller-runtime import | unit (RED-first) | `go test ./internal/credproxy/... -count=1 -timeout 120s` | ✅ in-task | ⬜ pending |
+| 13-02/T3 | 13-02 | 1 | HALT-01 | — | tide resume clears BillingHalt unconditionally; no auto-probe | unit (RED-first) | `go test ./cmd/tide/... -count=1 -timeout 120s` | ✅ in-task | ⬜ pending |
+| 13-03/T1 | 13-03 | 2 | DISPATCH-02 | — | chart drops --subagent-image; CLAUDE_SUBAGENT_IMAGE from subagent.defaults.image | helm render gate | `go test ./test/integration/kind/ -run 'TestHelmDeploymentTemplate' -count=1 -timeout 120s && helm template tide charts/tide \| grep -c 'subagent-image=' \| grep -qx 0` | ✅ in-task | ⬜ pending |
+| 13-03/T2 | 13-03 | 2 | DISPATCH-02 | — | kind + acceptance opt into stub explicitly; full suite green after chart change | make test-int | `make test-int` (MAKE_EXIT + FAIL-line grep discipline) | ✅ existing harness | ⬜ pending |
+| 13-04/T1 | 13-04 | 2 | HALT-01 | halt-bypass | third dispatch-entry hold at all five levels; park-not-fail, 30s requeue | suite (RED-first) | `go test ./internal/controller/... -count=1 -timeout 600s` | ✅ in-task | ⬜ pending |
+| 13-04/T2 | 13-04 | 2 | HALT-01 | — | envelope backstop at five sites; run-1 regression: halt → zero sibling Jobs → resume → dispatch | envtest Layer A | `go test ./internal/controller/... -count=1 -timeout 600s && make test-int-fast` (exit discipline) | ✅ in-task | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -46,8 +55,8 @@ created: 2026-06-11
 
 ## Wave 0 Requirements
 
-- [ ] RED-first regression stubs inside fix tasks (tdd) — resolveImage chain unit specs; billing-classify unit specs; envtest BillingHalt dispatch-hold spec; helm render assert for the dropped flag
-- [ ] Existing envtest/kind harness covers infrastructure — no new framework install
+- [x] RED-first regression stubs inside fix tasks (tdd) — resolveImage chain unit specs; billing-classify unit specs; envtest BillingHalt dispatch-hold spec; helm render assert for the dropped flag
+- [x] Existing envtest/kind harness covers infrastructure — no new framework install
 
 ---
 
@@ -61,11 +70,11 @@ created: 2026-06-11
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 300s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 300s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-06-11 (orchestrator, post-checker fixes)

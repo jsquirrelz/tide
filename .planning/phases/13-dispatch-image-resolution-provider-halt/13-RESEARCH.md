@@ -690,17 +690,17 @@ The provider firewall constraint is the primary security consideration.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED — choices locked in plan tasks)
 
 1. **Does `tide resume` need a dedicated `--clear-billing-halt` flag for discoverability, or is `tide resume` alone sufficient?**
    - What we know: D-06 says "`tide resume` clears BillingHalt". The current `resumeRun` function only clears the reject annotation.
    - What's unclear: Should `tide resume` always clear BillingHalt (side-effect), or only clear it when `--clear-billing-halt` is passed?
-   - Recommendation: Always clear BillingHalt unconditionally in `resumeRun` (like it clears the reject annotation) — the operator already chose recovery by invoking resume. No new flag needed.
+   - RESOLVED (13-02 Task 3): Always clear BillingHalt unconditionally in `resumeRun` (like it clears the reject annotation) — the operator already chose recovery by invoking resume. No new flag needed.
 
 2. **Which reconcilers should write the BillingHalt condition to the Project?**
    - What we know: Task, Plan, Phase, Milestone, and Project reconcilers all process Job envelopes. Any of them could classify billing-halt.
    - What's unclear: If a Task reconciler classifies a billing halt and patches the Project, does that reconciler have write access to the Project status in a different namespace?
-   - Recommendation: The Project CR is always in the same namespace as the task (or accessible via resolved project name). All five reconcilers already read the Project — they can write it too (the controller's RBAC grants `projects/status` update cluster-wide).
+   - RESOLVED (13-04 Task 2): All five reconcilers write via setBillingHaltIfNeeded. The Project CR is always in the same namespace as the task (or accessible via resolved project name). All five reconcilers already read the Project — they can write it too (the controller's RBAC grants `projects/status` update cluster-wide).
 
 ---
 

@@ -68,8 +68,13 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 13-01-PLAN.md — resolveImage precedence chain + all six controller dispatch sites wired; main.go flag-overrides-env default tier (DISPATCH-01)
 - [ ] 13-02-PLAN.md — BillingHalt condition vocabulary + shared helpers, credproxy fail-fast latch, tide resume clears the halt (HALT-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
 - [ ] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
 
