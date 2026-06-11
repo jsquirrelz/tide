@@ -15,8 +15,9 @@ limitations under the License.
 */
 
 // telemetry_proxy_integration_test.go drives requests through a chi router
-// with GET /api/v1/query and GET /api/v1/query_range registered, proving
-// milestone exit-criteria #4 and #5 end-to-end via httptest.Server.
+// with GET /api/v1/query and GET /api/v1/query_range registered against the
+// production PrometheusHandler, proving milestone exit-criteria #4 and #5
+// end-to-end via httptest.Server.
 //
 // EC #4 — configured+reachable: the proxy forwards the upstream Prometheus
 // JSON envelope verbatim; HTTP 200, body.status == "success".
@@ -28,18 +29,20 @@ limitations under the License.
 // sentinel is distinct from the 200 "unavailable" sentinel so the dashboard
 // UI can differentiate not-configured from configured-but-broken.
 //
-// All three sub-tests issue real HTTP requests through a chi route tree;
-// no handler function is called in isolation.
+// All three sub-tests issue real HTTP requests through a chi route tree
+// wired to PrometheusHandler — the same handler RegisterRoutes installs;
+// no handler function is called in isolation and no test-local
+// reimplementation stands in for the production code path.
 package api
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-logr/logr"
 )
 
 // telemetryProxyStatus is the minimal JSON shape decoded from all three proxy
@@ -51,73 +54,21 @@ type telemetryProxyStatus struct {
 }
 
 // buildTelemetryProxyRouter creates a chi.Router with GET /api/v1/query and
-// GET /api/v1/query_range wired to a proxy handler configured with the given
-// upstream endpoint.  An empty endpoint activates the graceful-degradation
-// (unavailable) path without touching any upstream at all.
+// GET /api/v1/query_range wired to the production PrometheusHandler
+// configured with the given upstream endpoint.  An empty endpoint activates
+// the graceful-degradation (unavailable) path without touching any upstream
+// at all.
 func buildTelemetryProxyRouter(endpoint string) http.Handler {
-	handler := makeTelemetryProxyHandler(endpoint)
+	handler := &PrometheusHandler{
+		Endpoint: endpoint,
+		Log:      logr.Discard(),
+	}
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Get("/query", handler)
-		r.Get("/query_range", handler)
+		r.Get("/query", handler.Query)
+		r.Get("/query_range", handler.QueryRange)
 	})
 	return r
-}
-
-// makeTelemetryProxyHandler returns an http.HandlerFunc that implements the
-// Prometheus proxy degradation contract described in the milestone context:
-//
-//   - empty endpoint   -> HTTP 200  {"status":"unavailable"}
-//   - upstream non-2xx -> HTTP 502  {"status":"error","message":"..."}
-//   - upstream 2xx     -> forward response headers and body verbatim
-func makeTelemetryProxyHandler(endpoint string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// UNCONFIGURED path — no upstream URL configured.
-		if endpoint == "" {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "unavailable"})
-			return
-		}
-
-		// Forward the full request URI (path + query string) to the upstream.
-		target := endpoint + r.URL.RequestURI()
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"status":  "error",
-				"message": err.Error(),
-			})
-			return
-		}
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"status":  "error",
-				"message": err.Error(),
-			})
-			return
-		}
-		defer resp.Body.Close() //nolint:errcheck
-
-		// Non-2xx upstream -> 502 with "error" sentinel.
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			msg, _ := io.ReadAll(resp.Body)
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"status":  "error",
-				"message": string(msg),
-			})
-			return
-		}
-
-		// 2xx upstream -> forward headers and body verbatim.
-		for k, vs := range resp.Header {
-			for _, v := range vs {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-		_, _ = io.Copy(w, resp.Body)
-	}
 }
 
 // TestPrometheusProxyDegradation exercises the three operating modes of the
@@ -230,4 +181,38 @@ func TestPrometheusProxyDegradation(t *testing.T) {
 				"unavailable")
 		}
 	})
+}
+
+// TestPrometheusProxyDeadUpstream exercises the connection-refused path:
+// the endpoint is configured but no server listens there.  The production
+// handler must return HTTP 502 with status=="error" — never a hang and never
+// the "unavailable" sentinel reserved for the unconfigured state.
+func TestPrometheusProxyDeadUpstream(t *testing.T) {
+	// Reserve a port by starting and immediately closing a listener, so the
+	// URL points at a port with nothing listening.
+	dead := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	router := buildTelemetryProxyRouter(deadURL)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/query?query=up")
+	if err != nil {
+		t.Fatalf("GET /api/v1/query: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("DEAD UPSTREAM: want HTTP 502, got %d", resp.StatusCode)
+	}
+
+	var body telemetryProxyStatus
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("DEAD UPSTREAM: decode response body: %v", err)
+	}
+	if body.Status != "error" {
+		t.Errorf("DEAD UPSTREAM: body.status=%q, want %q", body.Status, "error")
+	}
 }
