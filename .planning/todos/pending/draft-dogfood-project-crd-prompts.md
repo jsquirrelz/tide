@@ -4,9 +4,9 @@ date: 2026-06-10
 priority: high
 ---
 
-# Draft the two Project CRD outcome prompts for the dogfood runs
+# Draft the three Project CRD outcome prompts for the dogfood runs
 
-Before TIDE can drive either internal project, each needs a `Project` CR: outcome
+Before TIDE can drive these internal projects, each needs a `Project` CR: outcome
 prompt + target repo (TIDE itself) + creds.
 
 - [ ] Analytics project prompt — Prometheus-backed run telemetry & cost metrics
@@ -17,6 +17,10 @@ prompt + target repo (TIDE itself) + creds.
       `internal/subagent/codex/`, per-level (planner-pool vs executor-pool) runtime
       selection, `OPENAI_API_KEY` Secret path, chart values, identical wave failure
       semantics. Include the Codex CLI flag findings from the exploration note.
-- [ ] Decide run order mechanics: analytics first (see note
+- [ ] Project editor prompt — dashboard authoring surface for `Project` CRs:
+      create + edit-drafts, reference-only Secret picker, chi-server mutation endpoints
+      + RBAC, draft/pending state honored by the reconciler, perimeter-trust auth
+      (documented). See the note for decisions and the draft-state research question.
+- [ ] Decide run order mechanics: analytics first, editor third (see note
       `tide-on-tide-dogfood-targets.md`), confirm cluster sizing for a full dogfood run
       (constrained-VM recipe in CLAUDE.md).

@@ -46,8 +46,31 @@ not just proving the `Subagent` interface.
   already-isolated pod — mirrors the Claude runner posture).
 - Sources: developers.openai.com/codex/{noninteractive,cli/reference,auth,cli/features}
 
+## Project 3: Dashboard Project editor
+
+**Scope:** an authoring surface in the React dashboard for `Project` CRs — create a new
+Project (outcome prompt, target repo, Secret ref, gate config) and save → the backend
+creates the CRD. Also supports editing **draft** Projects (saved but not yet running);
+editing in-flight Projects is out of scope.
+
+**Decisions:**
+- **Reference-only credentials.** The form offers a picker over existing Secret names in
+  the namespace; Secrets are created out-of-band via kubectl. Secret material never
+  transits the dashboard API or browser.
+- **Create + edit drafts.** Implies a controller-side feature: a draft/pending state the
+  reconciler honors (saved-but-not-running lives on the CR per artifacts-as-truth, not in
+  dashboard state). API shape (spec field vs annotation vs phase gating) is an open
+  research question.
+- **Trust the perimeter for v1.** No app-level auth on the new mutation endpoints;
+  document that the dashboard must sit behind port-forward/ingress auth. Hardening path
+  captured as a seed (`dashboard-mutation-auth-hardening.md`).
+- **First write path in the dashboard.** Today's surface is read + SSE; this adds
+  create/update endpoints on the chi server and RBAC additions (create/update on
+  Projects) to the manager's ServiceAccount.
+
 ## Ordering
 
 **Analytics first.** The Codex dogfood run then becomes observable through the surfaces
 the first run built — token spend and dispatch behavior of the heterogeneous run watched
-live on the new dashboard.
+live on the new dashboard. The editor slots naturally third: it can be the surface used
+to author subsequent Project CRs, so run 3's output creates run 4's input.
