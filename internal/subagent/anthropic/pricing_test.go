@@ -118,4 +118,67 @@ func TestEstimatedCostCents(t *testing.T) {
 			t.Errorf("zero tokens should cost 0 cents, got %d", got)
 		}
 	})
+
+	t.Run("fable5_input_output", func(t *testing.T) {
+		// claude-fable-5: input=1000 cents/MTok, output=5000 cents/MTok
+		// 1M input * 1000 / 1M = 1000 cents; 1M output * 5000 / 1M = 5000 cents → 6000 total
+		u := pkgdispatch.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+		got := estimatedCostCents("claude-fable-5", u)
+		if got != 6000 {
+			t.Errorf("fable-5 input+output=1M each: want 6000 cents, got %d", got)
+		}
+	})
+
+	t.Run("opus47_corrected", func(t *testing.T) {
+		// claude-opus-4-7 must be corrected from $75/M output to $25/M output (D-01 fix).
+		// Regression: old value was 7500 cents/MTok output; new value must be 2500.
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := estimatedCostCents("claude-opus-4-7", u)
+		if got != 2500 {
+			t.Errorf("opus-4-7 output=1M: want 2500 cents (D-01 corrected), got %d (regression: old value was 7500)", got)
+		}
+	})
+
+	t.Run("opus48_present", func(t *testing.T) {
+		// claude-opus-4-8 must be in the table (new model ID, D-01).
+		// 1M output at $25/M = 2500 cents; no stderr warning expected.
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := estimatedCostCents("claude-opus-4-8", u)
+		if got != 2500 {
+			t.Errorf("opus-4-8 output=1M: want 2500 cents, got %d", got)
+		}
+	})
+
+	t.Run("opus46_present", func(t *testing.T) {
+		// claude-opus-4-6 must be in the table (new model ID, D-01).
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := estimatedCostCents("claude-opus-4-6", u)
+		if got != 2500 {
+			t.Errorf("opus-4-6 output=1M: want 2500 cents, got %d", got)
+		}
+	})
+
+	t.Run("conservative_tier_is_fable5", func(t *testing.T) {
+		// Unknown model must fall back to fable-5 rates (most expensive after D-01 table fix).
+		// fable-5 output = 5000 cents/MTok; old conservative was opus-4-7 at 7500 (wrong).
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := estimatedCostCents("unknown-model-xyz", u)
+		if got != 5000 {
+			t.Errorf("unknown model conservative tier: want 5000 cents (fable-5 output rate), got %d", got)
+		}
+	})
+
+	t.Run("fable5_cache_rates", func(t *testing.T) {
+		// fable-5 cacheRead = 100 cents/MTok (0.10× input); cacheWrite = 1250 cents/MTok (1.25× input).
+		uRead := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
+		gotRead := estimatedCostCents("claude-fable-5", uRead)
+		if gotRead != 100 {
+			t.Errorf("fable-5 cacheRead=1M: want 100 cents, got %d", gotRead)
+		}
+		uWrite := pkgdispatch.Usage{CacheCreationTokens: 1_000_000}
+		gotWrite := estimatedCostCents("claude-fable-5", uWrite)
+		if gotWrite != 1250 {
+			t.Errorf("fable-5 cacheWrite=1M: want 1250 cents, got %d", gotWrite)
+		}
+	})
 }
