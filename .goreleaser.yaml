@@ -18,11 +18,15 @@
 
 version: 2
 
-# Pre-build hooks: run `go mod tidy` to confirm the module graph is clean,
-# then build + run tide-lint to fail-fast if any custom analyzer flags a
-# diagnostic. The release should NEVER ship from a tree that fails tide-lint.
+# Pre-build hooks: materialize the gitignored //go:embed all:fixture dir for
+# cmd/tide-demo-init (goreleaser runs from a fresh checkout, where the embed
+# pattern otherwise fails with "no matching files found"), run `go mod tidy`
+# to confirm the module graph is clean, then build + run tide-lint to
+# fail-fast if any custom analyzer flags a diagnostic. The release should
+# NEVER ship from a tree that fails tide-lint.
 before:
   hooks:
+    - make demo-fixture
     - go mod tidy
     - go build -o bin/tide-lint ./cmd/tide-lint
     - make tide-lint
