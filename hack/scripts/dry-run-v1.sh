@@ -39,11 +39,15 @@ REPORT_PATH="${DRY_RUN_DIR}/dry-run-report.json"
 TRANSCRIPT_PATH="${DRY_RUN_DIR}/transcript.log"
 TIMEOUT_SECONDS="${DRY_RUN_TIMEOUT_SECONDS:-1800}"
 DRY_RUN_IMAGE="${DRY_RUN_IMAGE:-ubuntu:24.04}"
-# DRY_RUN_REPO_URL lets local developers point at a worktree-local checkout
-# (file:// or http://localhost-served clone) instead of github.com — CI runs
-# leave this unset so the canonical https://github.com/jsquirrelz/tide path is
-# exercised.
-DRY_RUN_REPO_URL="${DRY_RUN_REPO_URL:-https://github.com/jsquirrelz/tide}"
+# DRY_RUN_REPO_URL is the clone source as seen from INSIDE the DinD container.
+# Default: /host-repo — the host checkout (REPO_ROOT) mounted read-only into
+# the container. This keeps the Quickstart's `git clone` step real while
+# working for a private repo (an unauthenticated https://github.com clone
+# fails with "could not read Username") AND pins the dry-run to the exact
+# tag/commit CI checked out instead of the remote default branch. Override
+# with a real remote URL (e.g. once the repo is public) to exercise the
+# network path.
+DRY_RUN_REPO_URL="${DRY_RUN_REPO_URL:-/host-repo}"
 
 # cert-manager version override (mirrors acceptance-v1.sh; default pinned to
 # Phase 02.2 bump decision — K8s 1.33-compatible).
@@ -67,6 +71,7 @@ START_TIME=$(date +%s)
 docker run --rm \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "${DRY_RUN_DIR}":/workspace \
+  -v "${REPO_ROOT}":/host-repo:ro \
   --network host \
   "${DRY_RUN_IMAGE}" bash -c "
     set -euo pipefail
@@ -89,7 +94,20 @@ docker run --rm \
     kind create cluster --name tide-dry-run
 
     # Clone the repo into the shared workspace volume so Pass 2 can find it.
-    git clone ${DRY_RUN_REPO_URL} /workspace/tide
+    # The default source is /host-repo (the runner checkout, mounted ro above)
+    # — the container runs as root while the mount is owned by the host uid,
+    # so mark it safe before git will read it. When cloning from /host-repo,
+    # pin the clone to the host checkout's exact HEAD: on rc-tag CI runs the
+    # host repo is in detached-HEAD state at the tag, and a plain clone would
+    # otherwise land on the default branch (or nothing at all).
+    if [ \"${DRY_RUN_REPO_URL}\" = \"/host-repo\" ]; then
+      git config --global --add safe.directory /host-repo
+      SRC_HEAD=\$(git -C /host-repo rev-parse HEAD)
+      git clone /host-repo /workspace/tide
+      git -C /workspace/tide checkout --detach \"\${SRC_HEAD}\"
+    else
+      git clone ${DRY_RUN_REPO_URL} /workspace/tide
+    fi
   " 2>&1 | tee "${TRANSCRIPT_PATH}"
 
 # ── Outer: load images into tide-dry-run cluster (IMG-LOAD-01) ───────────────

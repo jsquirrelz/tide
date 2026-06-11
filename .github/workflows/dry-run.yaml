@@ -47,6 +47,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Full history: hack/scripts/dry-run-v1.sh clones the DinD container's
+          # /workspace/tide from this checkout (mounted at /host-repo) — git
+          # refuses to clone from a shallow repository.
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
