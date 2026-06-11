@@ -141,6 +141,19 @@ func TestHelmControllerArgsForcesManagerRollout(t *testing.T) {
 	}
 }
 
+// TestHelmControllerArgsStubOptIn verifies the harness explicitly opts into the
+// stub subagent via subagent.defaults.image (Phase 13 D-01/D-02). The chart no
+// longer injects --subagent-image implicitly; test installs must declare the
+// stub so CLAUDE_SUBAGENT_IMAGE points at the kind-loaded stub image rather than
+// the real claude subagent (which is unavailable in the kind cluster).
+func TestHelmControllerArgsStubOptIn(t *testing.T) {
+	args := helmControllerArgs("/tmp/tide-chart", "nonce-123")
+	want := "subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:test"
+	if !containsString(args, want) {
+		t.Fatalf("helmControllerArgs must opt into the stub via subagent.defaults.image; args=%v", args)
+	}
+}
+
 func TestHelmDeploymentTemplateRendersManagerPodAnnotations(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
 	if err != nil {

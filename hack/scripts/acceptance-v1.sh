@@ -96,13 +96,26 @@ done
 # ── Helm install (both charts) ──────────────────────────────────────────────
 echo "==> helm-installing tide-crds + tide..."
 helm install tide-crds "${REPO_ROOT}/charts/tide-crds" -n tide-system --create-namespace
+
+# Phase 13 D-01/D-02: the --subagent-image startup flag has been dropped from the
+# chart (it was silently forcing the stub in every production install). The stub is
+# now an explicit opt-in via subagent.defaults.image.
+# small ($0) mode uses the stub (no API key, no real dispatch); the real-sample mode
+# does nothing here — the chart default (real claude subagent) is correct out of the box.
+HELM_EXTRA_SUBAGENT_ARGS=""
+if [ "${ACCEPTANCE_SAMPLE}" = "small" ]; then
+  HELM_EXTRA_SUBAGENT_ARGS="--set subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:${IMAGE_TAG}"
+fi
+
 # Override the chart's default RWX PVC accessModes → RWO for single-node kind:
 # kind's default StorageClass (rancher.io/local-path) only supports ReadWriteOnce,
 # so the chart's ReadWriteMany tide-projects PVC stays Pending and the controller
 # never reaches Available. RWO is correct on a single node (same-node pods share it).
 # Mirrors the proven Layer B pattern at test/integration/kind/suite_test.go:480.
+# shellcheck disable=SC2086
 helm install tide "${REPO_ROOT}/charts/tide" -n tide-system \
-  --set 'workspaces.pvc.accessModes={ReadWriteOnce}'
+  --set 'workspaces.pvc.accessModes={ReadWriteOnce}' \
+  ${HELM_EXTRA_SUBAGENT_ARGS}
 kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
 # ── Apply project + watch (mode-specific, D-05 / CHANGE 4) ─────────────────
