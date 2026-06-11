@@ -19,3 +19,10 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Fix:** Test-only. indegree_test.go: BeforeEach creates a default Project + bound PVC, AfterEach cleans them, makeTaskWithWaveLabel stamps tideproject.k8s/project on every Task. budget_test.go: added kickProjectReconcile helper that bumps a benign tide-test/kick annotation; bypass assertion now checks annotation consumption (production one-shot signal). init_test.go: kickProjectReconcile after Project create and after Job status patch; Job status patch matches K8s 1.33+ contract; completion-test resolves Job by tide-init-{UID} deterministic name to avoid stale-job races. admission_test.go: PLAN-03 grep replaced with go/ast walk over identifier names so doc comments don't trip the scan.
 - **Files changed:** test/integration/envtest/admission_test.go, test/integration/envtest/budget_test.go, test/integration/envtest/indegree_test.go, test/integration/envtest/init_test.go
 ---
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

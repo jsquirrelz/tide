@@ -1,6 +1,6 @@
 ---
 slug: push-lease-pvc-pending
-status: root_cause_found
+status: resolved
 trigger: |
   User-supplied (post-cascade-7-runtime-gate): "Phase 03 cascade 11: push_lease ×4 failures at line 228 — 'tide-push-<project-uid> not found'". The 4 specs were SKIP-gated until quick task 260521-ccz removed the gate; this run is the first time they exercised end-to-end on main.
   
@@ -363,3 +363,10 @@ The REMAINING hypothesis that survives all elimination:
 ## Resolution
 
 (populated when fix lands)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

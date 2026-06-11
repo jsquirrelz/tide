@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: bump. Closes Phase 02.1's BLOCKED runtime gate captured in 02.1-04-VERIFICATION.md.
-status: executing
-stopped_at: "Phase 7 COMPLETE + verified APPROVED. Full make test-int GREEN (Layer A 29/29 + Layer B 14/14, MAKE_EXIT=0); $0 acceptance = Project Complete (ACC_EXIT=0). Closed this session: gate-flow test race (f8812ef), cascade-11 materialize guard (3468de9), cascade-12 chart image tags (3edceb7), cascade-13 credproxy gate (55d898a), podAnnotations chart restore (922e01a). cascade-7 closed; v1.0 ship-ready. Annotated LOCAL tag v1.0.0 created — NOT pushed (awaiting user confirmation)."
+milestone: v1.0.0
+milestone_name: Self-Hosting MVP (SHIPPED 2026-06-11)
+status: milestone_complete
+stopped_at: "v1.0.0 SHIPPED 2026-06-11 — release run fully green (binaries + 7 images + 2 charts). Milestone archived; next milestone not yet scoped."
 last_updated: "2026-06-09T16:06:48.597Z"
 last_activity: 2026-06-09 -- Phase 11 execution started
 progress:
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 11 (executor-author-commit-push-lifecycle) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 11
+Phase: — (v1.0.0 milestone complete; no active phase)
+Plan: —
+Status: Between milestones — run /gsd:new-milestone
 Last activity: 2026-06-11 -- Completed quick task 260610-vcp: K8s/Helm best-practices audit (docs/audit/)
 
 Progress: [██████████] 100%
@@ -174,3 +174,25 @@ None yet.
 Last session: 2026-05-31T23:10:00Z
 Stopped at: Phase 7 COMPLETE + verified APPROVED. Full make test-int GREEN (Layer A 29/29 + Layer B 14/14, MAKE_EXIT=0); $0 acceptance = Project Complete (ACC_EXIT=0). Closed this session: gate-flow test race (f8812ef), cascade-11 materialize guard (3468de9), cascade-12 chart image tags (3edceb7), cascade-13 credproxy gate (55d898a), podAnnotations chart restore (922e01a). cascade-7 closed; v1.0 ship-ready. Annotated LOCAL tag v1.0.0 created — NOT pushed (awaiting user confirmation).
 Resume file: .planning/phases/07-project-to-milestone-authoring-and-self-bootstrap/07-VERIFICATION.md
+
+## Deferred Items
+
+Items acknowledged and deferred at v1.0.0 milestone close on 2026-06-11. All
+are administrative (the underlying work shipped; artifact status fields were
+never flipped):
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260521-ccz-push-lease-cascade-9-recipe | done, status unflipped |
+| quick_task | 260521-eoz-phase-03-cascade-10-filter-pillar-4-list | done, status unflipped |
+| quick_task | 260521-f8x-phase-03-cascade-7-gate-plan-planner-dis | done, status unflipped |
+| quick_task | 260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper | done, status unflipped |
+| quick_task | 260521-hk4-phase-03-cascade-12-patchjobtofailed-mus | done, status unflipped |
+| quick_task | 260521-jz0-phase-03-cascade-13-idempotency-guard-in | done, status unflipped |
+| quick_task | 260526-w11-phase-5-closeout-polish-roadmap-16-16-17 | done, status unflipped |
+| quick_task | 260530-h2h-boot-04-acceptance-v1-cert-manager-prere | done, status unflipped |
+| quick_task | 260530-hrc-open-phase-6-v1-0-image-publish-pipeline | done, status unflipped |
+| quick_task | 260531-oek-fix-cascade-12-chart-template-dispatch-i | done, status unflipped |
+| quick_task | 260610-vcp-audit-codebase-against-k8s-helm-best-pra | done (docs/audit/ landed 2bffb70/55bd90e) |
+| uat | 02-HUMAN-UAT.md | status=pass, 0 open scenarios (counting artifact) |
+| plans | 4 of 137 plans lack SUMMARY.md (final ship sprint) | accepted |

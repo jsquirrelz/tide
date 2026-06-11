@@ -96,3 +96,10 @@ The 2 distroless static-binary git-op images (`tide-demo-init`, `tide-push`) nee
 - hypothesis: minikube-specific / my-local-build artifact → ELIMINATED. Images built from committed Dockerfiles; distroless has no git by design; reproducible on any cluster.
 - hypothesis: stale image (pre-lint-commit) → ELIMINATED as cause. Images rebuilt fresh from HEAD this session still lack git (it's the base image, not the binary).
 - hypothesis: fix didn't take / still exec:git after rebuild → ELIMINATED. Root-caused to minikube NOT overwriting a pre-existing `:v1.0.0` tag on `image load`; forced rmi+reload fixed it (digests then matched local, git present in minikube-stored images).
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

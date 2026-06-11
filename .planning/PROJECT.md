@@ -8,6 +8,26 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current State (v1.0.0 — SHIPPED 2026-06-11)
+
+v1.0.0 is published: goreleaser binaries (5 platforms), 7 component images and
+both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated
+release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live
+medium DoD proven on minikube (Project=Complete, real authored commits pushed
+to a per-run branch). All 82 v1 requirements delivered — archive at
+[milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
+
+## Next Milestone Goals (not yet scoped)
+
+- **Full TIDE-on-TIDE**: a TIDE install drives this repo's own next milestone
+  end-to-end (v1.0.0 proved the mechanism against a fixture repo).
+- Hardening backlog from the v1.0.0-baseline audit (docs/audit/): metrics
+  endpoint authn/authz, digest-pinned base images, observedGeneration on CRD
+  statuses, SLSA provenance + cosign, krew-index submission.
+
+Run `/gsd:new-milestone` to scope. Everything below this line reflects v1
+planning state, preserved for reference.
+
 ## Requirements
 
 ### Validated

@@ -58,3 +58,10 @@ Implementation notes for the fix:
   - `internal/dispatch/podjob/jobspec.go` — gated credproxy container + cert-shared volume + subagent cert mount/env on `credproxyEnabled`.
   - `internal/dispatch/podjob/jobspec_test.go` — added `buildNoSecretTestOptions`, `validatePodSpecVolumeMountRefs`, and present/absent + PodSpec-validity tests.
   - `test/integration/envtest/planner_dispatch_test.go` — added `ProviderSecretRef` to the Project fixture so the full-dispatch-contract spec still exercises the credproxy-present path.
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

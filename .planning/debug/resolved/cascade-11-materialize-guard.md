@@ -57,3 +57,10 @@ verification:
   - The single non-Ginkgo failure `TestHelmDeploymentTemplateRendersManagerPodAnnotations` (projects_pvc_test.go:149) is a pre-existing chart-template unit-test failure unrelated to this fix — confirmed it FAILS identically on the unmodified tree (git stash run). No chart/test files were touched.
 
 files_changed: internal/controller/dispatch_helpers.go, internal/controller/milestone_controller.go, internal/controller/phase_controller.go, internal/controller/plan_controller.go, internal/controller/project_controller.go
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

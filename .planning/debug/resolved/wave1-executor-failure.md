@@ -79,3 +79,10 @@ unchanged — the floor only applies when caps is unset/zero.
 ## Current Focus
 - hypothesis: CONFIRMED — executor wall-clock floor (300s) too tight; Job DeadlineExceeded killed the dependent task's subagent before out.json was written.
 - next_action: (resolved) — floor raised 300→480; manager rebuilt + redeployed; live re-verify in progress/complete.
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

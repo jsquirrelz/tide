@@ -1,6 +1,6 @@
 ---
 slug: nightly-int-flake-timeout
-status: resolved  # all 8 failures closed; nightly run 26860681203 GREEN end-to-end (verified at summary level)
+status: resolved
 trigger: "Nightly-integration workflow (run 26849997916, commit 0645e1a) is RED on two distinct CI-harness failures in `make test-int`. Neither reproduces locally (local: Layer A 29/29 + Layer B 14/14 green). Fix so nightly runs green; this gates the v1.0.0 release (tag held local-only at 8a8e843). FAILURE 1 — Layer A envtest flake (1 of 29): init_test.go:101 ART-01 'creates a tide-init-{UID} Job on the first reconcile' failed under CI contention; 28/29 passed. The per-push path (make test-int-fast) guards this contention-flaky class with -ginkgo.flake-attempts=3, but nightly's full make test-int runs the envtest layer WITHOUT flake-attempts (mixed go-test package — flag breaks non-Ginkgo pkgs). FAILURE 2 — Layer B kind BeforeSuite (suite_test.go:446): helm upgrade --install ... --wait --timeout 5m -> context deadline exceeded at 5m1s. Images ARE built + kind-loaded by Makefile test-int-kind-prep and installed pullPolicy=IfNotPresent (NOT ImagePull). Controller Deployment didn't reach Ready within 5m on the cold 2-core ubuntu-latest runner. OBSERVATION GAP: cannot tell 5m-too-tight vs real pod failure — post-failure `kind export logs` artifact was EMPTY because the suite's AfterSuite (suite_test.go:186) deletes the tide-test cluster BEFORE the workflow's failure-collection step (nightly-integration.yml:94-101) runs."
 created: 2026-06-02
 updated: 2026-06-03  # F8 fix applied
@@ -343,3 +343,10 @@ files_changed:
   - .github/workflows/nightly-integration.yml (Failure 6: harden `Install kind v0.31.0` curl with --fail/--retry/--connect-timeout + non-empty download check; workflow-only CI-reliability fix)
   - test/e2e/live_suite_entry_test.go (Failure 7: NEW //go:build live_e2e file holding the relocated TestLiveE2E RunSpecs entry point)
   - test/e2e/suite_test.go (Failure 7: removed TestLiveE2E + unused `testing` import; stays UNTAGGED no-tag package anchor with no Test func; doc comment updated)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

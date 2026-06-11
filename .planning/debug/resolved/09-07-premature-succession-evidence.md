@@ -152,3 +152,10 @@ task-execution/git/clone/LLM-output layer — recommend a dedicated Phase 10 (ta
 reliability: clone idempotency + workspace-perms + push + child-CRD parse robustness), then
 re-run the DoD. v1.0.0 retag stays blocked. NOTE: wiping the PVC introduced issue #2; a clean
 run needs proper per-run workspace init, not a manual PVC wipe.
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

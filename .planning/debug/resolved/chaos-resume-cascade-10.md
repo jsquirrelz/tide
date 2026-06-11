@@ -1,6 +1,6 @@
 ---
 slug: chaos-resume-cascade-10
-status: root-cause-locked
+status: resolved
 trigger: |
   User-supplied: "Phase 03 cascade 10: chaos_resume duplicate Job dispatch post-restart (chaos_resume_test.go:230)"
   Observed: Pillar 4 assertion fails in iter-5 — `len(jobs.Items where succeeded=1)` returned 6, expected 3.
@@ -302,3 +302,10 @@ Optional secondary improvement (defensive — also filter the snapshot): apply t
 4. Commit on `main` with message describing the framing correction.
 
 **Scope:** Quick-task scope. Touches `test/integration/kind/chaos_resume_test.go` only. No production-side change.
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

@@ -52,3 +52,10 @@ verification:
 - Full Layer A: `make test-int-fast` → `Ran 29 of 29 Specs in 26.4s ... 29 Passed | 0 Failed | 0 Pending | 0 Skipped` (two consecutive stable runs at 26.4s / 26.8s; one earlier run hit a transient 20s-timeout flake on the unrelated budget spec under a 46s machine-load spike — the budget spec passes in isolation and in both steady-state runs).
 - Race detector: `go test ./test/integration/envtest/... -race --ginkgo.focus="gate-flow envtest"` → `3 Passed | 0 Failed`, 0 DATA RACE — confirms the shared-reader RWMutex is correct.
 - Baseline control: fix stashed → the gate-flow spec is RED (28/29), confirming the fix is what closes the race.
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

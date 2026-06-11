@@ -1,6 +1,6 @@
 ---
 slug: real-claude-authoring-path
-status: root-cause-locked-routed-to-phase
+status: resolved
 trigger: "The medium ($5 real-Claude) sample never completes a real end-to-end authoring run: defects #1–#10 were fixed iteratively, but #11 (4 KB termination-message cap) and #12 (the Manager's PVC and the dispatched pod's PVC are different namespace-local volumes) revealed that the Manager-reads-PVC envelope-return premise is architecturally wrong cross-namespace. Root cause locked; fix routed to a dedicated phase, not the debug loop."
 created: 2026-06-08
 updated: 2026-06-09
@@ -1335,3 +1335,10 @@ cascade stalled below the milestone.
 `api/v1alpha1/shared_types.go`,
 `internal/controller/parentref_surface_test.go` (new).
 **Committed atomically; NOT pushed.**
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

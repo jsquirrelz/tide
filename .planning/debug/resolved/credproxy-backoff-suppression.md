@@ -1,6 +1,6 @@
 ---
 slug: credproxy-backoff-suppression
-status: root_cause_found
+status: resolved
 trigger: |
   Cascade-8 surfaced after Plan 02.2-09's cascade-7 helper fix closed the "no project found" gate for caps/output/failure namespaces. The credproxy_test.go HARN-03 spec still fails: the task controller runs EXACTLY ONE reconcile attempt for credproxy-task at t=0 (hitting a ResourceVersion conflict because PlanReconciler.stampTaskLabels is concurrently updating the same Task), then controller-runtime exponential-backoff suppresses re-reconciliation for ~127s. The 120s `Eventually` pod-wait expires before backoff releases. Three timeout bumps (60s→120s→[proposed 240s]) are tactically accommodating this race rather than fixing it. Decide between Option α (tactical: bump pod-wait 120s→240s in Plan 02.2-10) vs Option β (durable: production-side debounce/coalesce in plan_controller.go or task_controller.go) BEFORE committing to Plan 02.2-10's scope.
 created: 2026-05-14
@@ -171,3 +171,10 @@ Investigation trail (chronological):
 ## TDD Checkpoint
 
 (not applicable — TDD mode is off)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

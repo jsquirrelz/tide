@@ -1,6 +1,6 @@
 ---
 slug: planner-envelope-roundtrip
-status: investigating
+status: resolved
 trigger: "Phase 7 cascade-8 — bare Project never authors its Milestone; bare_project_test.go Layer B cascade fails at first assertion (no Milestone owned by bare-project). The planner-level envelope round-trip never materializes child CRDs."
 created: 2026-05-31
 updated: 2026-05-31
@@ -90,3 +90,10 @@ All Phase 7 CODE is committed (07-01..07-05 + cascade-8/9/10 fixes). Only env-ga
   5. `jobspec_test.go`: updated assertion from "task-uid ABSENT" to "task-uid = parentUID".
 - verification: PASSED. `bare Project self-bootstraps full cascade to Project=Complete (REQ-1..5 + REQ-7a/b)` — 1 Passed | 0 Failed in 64.888s spec body. Full tree materialized: Project→Milestone→Phase→Plan→Task→Wave, all Succeeded, Project=Complete. Commits: 728b60a, 3ea86e5.
 - files_changed: internal/dispatch/podjob/jobspec.go, internal/dispatch/podjob/jobspec_test.go, internal/controller/project_controller.go, internal/controller/plan_controller.go, test/integration/kind/testdata/bare-project.yaml, cmd/manager/main.go (whitespace)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

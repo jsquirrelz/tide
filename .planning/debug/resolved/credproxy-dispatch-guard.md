@@ -1,6 +1,6 @@
 ---
 slug: credproxy-dispatch-guard
-status: root_cause_found
+status: resolved
 trigger: |
   Cascade-5 surfaced after Plan 02.2-06's Makefile timeout fix (300s→600s) closed cascade-4. Two `credproxy_test.go` HARN-03 specs FAIL with "A Pod should be created for the credproxy-task Job: Timed out after 60.000s". The inner Ginkgo `-timeout=5m` cap then fires (panic), leaving the remaining 5 Layer B specs unrun. Decide between Option A (testMode dispatch shortcut in task controller) vs Option B (full hierarchy in fixture) vs Option C (mock Wave Ready) before authoring Plan 02.2-07.
 created: 2026-05-14
@@ -153,3 +153,10 @@ This re-framing keeps the production path untouched when `Dev.TestMode == ""` an
 ## TDD Checkpoint
 
 (not applicable — TDD mode is off; will skip unless `workflow.tdd_mode: true` is set later)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.

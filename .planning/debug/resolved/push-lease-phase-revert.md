@@ -1,6 +1,6 @@
 ---
 slug: push-lease-phase-revert
-status: investigating
+status: resolved
 trigger: |
   User-supplied (post-cascade-12-runtime-gate): "Phase 03 cascade 13: push-lease Tests 3+4 fail with Phase=Initialized expected PushLeaseFailed". Surfaced when cascade-12 closed the patchJobToFailed K8s validation issue.
   
@@ -161,3 +161,10 @@ specialist_hint: ""
 ## Resolution
 
 (populated when fix lands)
+
+---
+**Closed at v1.0.0 milestone completion (2026-06-11).** The defect class this
+session tracked was fixed and validated before ship: full `make test-int`
+green (Layer A 36/36 + Layer B), nightly-integration green, live medium DoD
+on minikube (Project=Complete, BoundaryPushed=True), and the v1.0.0-rc dry-run
+gate green end-to-end.
