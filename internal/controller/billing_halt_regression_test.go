@@ -25,8 +25,9 @@ limitations under the License.
 //   - no per-level condition written (avoids status flapping per dogfood run 1)
 //
 // Run-1 regression (CONTEXT specifics verbatim):
-//   billing-classified failure → BillingHalt=True on Project → sibling holds →
-//   condition cleared (tide resume semantics) → dispatch resumes.
+//
+//	billing-classified failure → BillingHalt=True on Project → sibling holds →
+//	condition cleared (tide resume semantics) → dispatch resumes.
 package controller
 
 import (
@@ -236,7 +237,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
