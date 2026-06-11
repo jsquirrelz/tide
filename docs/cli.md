@@ -15,34 +15,32 @@ Phase 5 work.
 
 Three install paths. Pick whichever matches your toolchain.
 
-### 1.1 Krew (recommended for kubectl users)
+### 1.1 Krew (pending index submission)
 
 [Krew](https://krew.sigs.k8s.io/) is the standard kubectl plugin distribution
-channel. Once installed, `kubectl tide ...` works anywhere `kubectl ...` does.
-
-```bash
-kubectl krew install tide
-kubectl tide --help
-```
-
-Krew downloads the appropriate platform tarball from the GitHub Release,
-verifies its `sha256` against the manifest in `krew-plugins/tide.yaml`, and
-places the binary at `~/.krew/bin/kubectl-tide`. (`kubectl` discovers any
-binary named `kubectl-<verb>` on `$PATH` as a plugin.)
+channel. TIDE is **not yet in the krew index** — `kubectl krew install tide`
+will not resolve until the submission is accepted. The manifest template lives
+at `krew-plugins/tide.yaml`; once accepted, Krew will download the platform
+tarball from the GitHub Release, verify its `sha256` against the manifest, and
+place the binary at `~/.krew/bin/kubectl-tide`. Until then, use §1.2 or §1.3.
+(`kubectl` discovers any binary named `kubectl-<verb>` on `$PATH` as a plugin,
+so §1.2 + a rename gives you `kubectl tide ...` today.)
 
 ### 1.2 Standalone binary from GitHub Releases
 
 If you do not use kubectl plugins, download the archive directly:
 
 ```bash
-# Pick the right archive for your OS/arch.
-VERSION=v0.1.0
+# Pick the right archive for your OS/arch. Release assets use the bare
+# version (no v prefix) in the filename; the tag path keeps it.
+TAG=v1.0.0
+VER=${TAG#v}
 OS=linux            # linux | darwin | windows
 ARCH=amd64          # amd64 | arm64 (windows: amd64 only)
 EXT=tar.gz          # tar.gz for linux/darwin; zip for windows
 
-curl -LO "https://github.com/jsquirrelz/tide/releases/download/${VERSION}/tide_${VERSION}_${OS}_${ARCH}.${EXT}"
-tar -xzf "tide_${VERSION}_${OS}_${ARCH}.tar.gz"     # or `unzip` on windows
+curl -LO "https://github.com/jsquirrelz/tide/releases/download/${TAG}/tide_${VER}_${OS}_${ARCH}.${EXT}"
+tar -xzf "tide_${VER}_${OS}_${ARCH}.tar.gz"     # or `unzip` on windows
 sudo mv tide /usr/local/bin/
 
 tide --help

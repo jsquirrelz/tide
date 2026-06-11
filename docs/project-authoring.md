@@ -605,7 +605,9 @@ Once your Project is authored and applied:
 
 - **Drive your project:** [`docs/cli.md`](cli.md) — operator-facing CLI verbs
   (`tide apply`, `tide watch`, `tide approve`, `tide reject`, `tide resume`,
-  `tide cancel`). Krew-installable via `kubectl krew install tide`.
+  `tide cancel`). Install from the GitHub Release tarball or
+  `go install github.com/jsquirrelz/tide/cmd/tide@latest` (krew-index
+  submission pending — see docs/cli.md §1).
 - **Configure gates:** [`docs/gates.md`](gates.md) — per-level gate policy
   (auto / approve / pause), annotation handshake, `tide approve` mechanics.
 - **Inspect via dashboard:** [`docs/dashboard.md`](dashboard.md) — port-forward

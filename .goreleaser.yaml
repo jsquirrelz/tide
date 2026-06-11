@@ -78,15 +78,12 @@ snapshot:
   # required). Resolves to e.g. `0.0.0-SNAPSHOT-deadbeef`.
   version_template: '{{ incpatch .Version }}-SNAPSHOT-{{.ShortCommit}}'
 
+# Auto-changelog disabled: with the rc-first tag flow the previous-tag diff is
+# always a handful of CI commits — noise, not a changelog. Release notes are
+# the curated header/footer here, plus hand-edited highlights post-publish
+# (`gh release edit`).
 changelog:
-  sort: asc
-  use: github
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
-      - Merge pull request
+  disable: true
 
 release:
   github:
@@ -105,11 +102,12 @@ release:
 
     ### Install
 
-    - Krew: `kubectl krew install tide`
     - Manual: download the appropriate archive for your platform and place
       the `tide` binary on your `$PATH`. To use as a kubectl plugin, rename
-      it to `kubectl-tide` (Krew does this automatically).
+      it to `kubectl-tide`.
     - Source: `go install github.com/jsquirrelz/tide/cmd/tide@{{ .Tag }}`
+    - Krew: krew-index submission pending — `kubectl krew install tide` does
+      not resolve yet. See `docs/cli.md` §1.
 
     See `docs/cli.md` for verb reference.
   footer: |
