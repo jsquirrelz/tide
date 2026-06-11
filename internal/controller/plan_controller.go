@@ -254,6 +254,17 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
 	}
 
+	// D-05 dispatch-entry reject hold — resolve Project early to check for a reject
+	// annotation before acquiring the pool or creating a Job. A rejected Project
+	// halts NEW dispatch; in-flight Jobs drain (no Job deletion — resolved discretion call).
+	{
+		earlyProject := r.resolveProjectForPlan(ctx, plan)
+		if earlyProject != nil && gates.CheckRejected(earlyProject) {
+			res, err := r.patchPlanRejected(ctx, plan, gates.RejectedReason(earlyProject))
+			return res, true, err
+		}
+	}
+
 	// Acquire plannerPool (POOL-01) before Job creation (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
@@ -488,8 +499,9 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 
 	// Plan 04-05: gate-policy hook (level=plan). Lands BEFORE clearing the
 	// Running phase so the gate stays the "exit gate" of the planner cycle.
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
 	if project != nil && gates.CheckRejected(project) {
-		return r.patchPlanFailed(ctx, plan, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		return r.patchPlanRejected(ctx, plan, gates.RejectedReason(project))
 	}
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "plan")
@@ -572,8 +584,28 @@ func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideproje
 	return ctrl.Result{}, nil
 }
 
+// patchPlanRejected parks the Plan with a RejectedByUser condition WITHOUT
+// writing Status.Phase=Failed (D-05). In-flight Jobs drain; state is preserved
+// so clearing the reject annotation (tide resume) lets the level re-enter the
+// normal dispatch path on the next reconcile.
+// Returns RequeueAfter 5s so the park polls for the annotation clear.
+func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason string) (ctrl.Result, error) {
+	patch := client.MergeFrom(plan.DeepCopy())
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonRejectedByUser,
+		Message:            fmt.Sprintf("Rejected: %s", reason),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
 // patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
-// Used by the Plan 04-05 gate-policy hook (reject short-circuit).
+// Used by the Plan 04-05 gate-policy hook (genuine planner-Job failure classification).
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "Failed"

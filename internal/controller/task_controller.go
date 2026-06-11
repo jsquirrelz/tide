@@ -310,8 +310,9 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// mitigation). Fires BEFORE budget/indegree/dispatch so a rejected Project
 	// halts even Pending tasks. Reject value carries the operator-supplied
 	// reason which surfaces on the Condition Message (D-G4).
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
 	if gates.CheckRejected(project) {
-		result, err := r.patchTaskFailed(ctx, task, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		result, err := r.patchTaskRejected(ctx, task, gates.RejectedReason(project))
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 
@@ -661,9 +662,30 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	return ctrl.Result{}, nil
 }
 
+// patchTaskRejected parks the Task with a RejectedByUser condition WITHOUT
+// writing Status.Phase=Failed (D-05). In-flight Jobs drain; state is preserved
+// so clearing the reject annotation (tide resume) lets the task re-enter the
+// normal dispatch path on the next reconcile.
+// Returns RequeueAfter 5s so the park polls for the annotation clear.
+//
+//nolint:unparam // ctrl.Result kept so callers can return r.patchTaskRejected(...) in the reconcile chain
+func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojectv1alpha1.Task, reason string) (ctrl.Result, error) {
+	patch := client.MergeFrom(task.DeepCopy())
+	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonRejectedByUser,
+		Message:            fmt.Sprintf("Rejected: %s", reason),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, task, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+}
+
 // patchTaskFailed patches Task.Status.Phase=Failed with the supplied reason
-// + message. Used by the Plan 04-05 gate-policy hook for the reject
-// short-circuit (operator wrote tideproject.k8s/reject on the parent Project).
+// + message. Used by genuine failure classification (executor Job failure, etc.).
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchTaskFailed(...)` in the reconcile chain
 func (r *TaskReconciler) patchTaskFailed(ctx context.Context, task *tideprojectv1alpha1.Task, reason, message string) (ctrl.Result, error) {
