@@ -285,9 +285,26 @@ The small sample uses the **$0 stub-subagent** — it exercises TIDE's full disp
 
 ```bash
 kubectl apply -f examples/projects/small/project.yaml
+
+# Mirror the cluster-unique signing key into the sample namespace (the chart
+# generates it in tide-system; dispatch Job pods read it from their own namespace):
+SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata: { name: tide-signing-key, namespace: tide-sample-small }
+type: Opaque
+data: { TIDE_SIGNING_KEY: ${SIGNING_KEY} }
+EOF
+
 kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small-project \
     -n tide-sample-small --timeout=10m
 ```
+
+The sample's multi-doc YAML carries the rest of the per-namespace bootstrap
+(`tide-projects` PVC, `tide-subagent`/`tide-reporter` ServiceAccounts + RBAC,
+and a throwaway PVC-warmup pod for WaitForFirstConsumer storage classes) —
+only the signing-key copy above is dynamic.
 
 Expected output:
 

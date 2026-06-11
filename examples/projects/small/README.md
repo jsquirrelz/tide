@@ -60,20 +60,29 @@ See [docs/INSTALL.md](../../../docs/INSTALL.md) for the full install recipe.
 
 ## Apply
 
-The sample is a single multi-doc YAML file (Namespace + Project). Apply
-either of:
+The sample is a single multi-doc YAML file: Namespace + the Phase 8/9
+per-namespace dependencies (`tide-projects` PVC, `tide-subagent` and
+`tide-reporter` ServiceAccounts + reporter RBAC, a throwaway PVC-warmup pod
+for WaitForFirstConsumer storage classes) + the Project itself.
 
 ```bash
-# Apply the multi-doc file (preferred; one command):
 kubectl apply -f examples/projects/small/project.yaml
-
-# Or apply namespace.yaml + project.yaml separately:
-kubectl apply -f examples/projects/small/
 ```
 
-Both forms are equivalent — `namespace.yaml` and `project.yaml` declare the
-same Namespace shape (the multi-doc form in `project.yaml` is a convenience
-for the one-command path).
+One dynamic step follows — mirror the cluster-unique signing key the chart
+generated in `tide-system` (dispatch Job pods `envFrom` it in their own
+namespace, and a static YAML cannot carry a generated secret):
+
+```bash
+SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata: { name: tide-signing-key, namespace: tide-sample-small }
+type: Opaque
+data: { TIDE_SIGNING_KEY: ${SIGNING_KEY} }
+EOF
+```
 
 ## Watch
 

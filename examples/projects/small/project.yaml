@@ -6,9 +6,26 @@
 # MEDIUM-7 placeholder design), so this sample exercises K8s plumbing (CRD
 # admission, controller dispatch, Pod lifecycle) without any network or LLM cost.
 #
-# Multi-doc YAML: Namespace + Project. Applying this file via
-# `kubectl apply -f examples/projects/small/project.yaml` is equivalent to
-# applying namespace.yaml + this file separately.
+# Multi-doc YAML: Namespace + per-namespace deps + Project. Applying this file
+# via `kubectl apply -f examples/projects/small/project.yaml` is the complete
+# static bootstrap — ONE dynamic step remains (the chart generates a
+# cluster-unique signing key, so it cannot live in this file). After apply:
+#
+#   SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system \
+#     -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+#   kubectl apply -f - <<EOF
+#   apiVersion: v1
+#   kind: Secret
+#   metadata: { name: tide-signing-key, namespace: tide-sample-small }
+#   type: Opaque
+#   data: { TIDE_SIGNING_KEY: ${SIGNING_KEY} }
+#   EOF
+#
+# Phase 8/9 per-namespace deps (mirrors examples/projects/medium/
+# per-namespace-resources.yaml, trimmed to what the no-git $0 path needs):
+# the chart provisions tide-projects PVC + SAs only in tide-system, but the
+# controller's reconciler and Jobs expect them in the Project's namespace.
+# Without them the Project requeues forever on "shared PVC not found".
 ---
 apiVersion: v1
 kind: Namespace
@@ -18,6 +35,115 @@ metadata:
     app.kubernetes.io/name: tide
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: small
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+spec:
+  # ReadWriteOnce on purpose: this sample targets kind/minikube smoke runs
+  # (rancher.io/local-path has no RWX) and dispatch is wave-serialized, so a
+  # single-writer mount is safe. Production Projects use RWX — see
+  # examples/projects/medium/per-namespace-resources.yaml and docs/rwx-drivers.md.
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+  # Identity for the stub planner/executor pods (D-G3). No tide-push SA here:
+  # this Project declares no spec.git block, so clone/push Jobs never dispatch.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+  # Identity for the in-namespace reader Job (cmd/tide-reporter, plan 09-04)
+  # that materializes child CRs from the planner's out.json.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+rules:
+  # Least-privilege mirror of the chart's tide-reporter Role in tide-system
+  # (list backs the materializer idempotency guard; get projects resolves the
+  # parent UID). No watch/update/delete/patch, no secrets, no core resources.
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: tide-sample-small
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tide-pvc-warmup
+  namespace: tide-sample-small
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: small
+spec:
+  # WaitForFirstConsumer breaker: local-path provisioners won't bind the PVC
+  # until a Pod is scheduled against it, while the ProjectReconciler's
+  # PVC-Bound gate blocks dispatch until it binds — a deadlock with no
+  # consumer. This throwaway pod schedules, triggers binding, and exits;
+  # the PVC stays Bound. Mirrors acceptance-v1.sh / kind suite prewarm.
+  restartPolicy: Never
+  containers:
+    - name: warmup
+      image: busybox:1.36
+      command: ["true"]
+      volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+  volumes:
+    - name: workspace
+      persistentVolumeClaim:
+        claimName: tide-projects
 ---
 apiVersion: tideproject.k8s/v1alpha1
 kind: Project

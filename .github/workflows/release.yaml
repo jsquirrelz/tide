@@ -275,6 +275,9 @@ jobs:
           - component: tide-claude-subagent
             dockerfile: images/claude-subagent/Dockerfile
             context: .
+          - component: tide-reporter
+            dockerfile: images/tide-reporter/Dockerfile
+            context: .
     steps:
       - name: Clone the code
         uses: actions/checkout@v4

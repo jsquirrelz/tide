@@ -14,6 +14,20 @@ helm install tide oci://ghcr.io/jsquirrelz/tide-charts/tide --version 1.0.0 -n t
 
 # Apply the $0 stub sample (raw URL — the OCI install path doesn't clone the repo):
 kubectl apply -f https://raw.githubusercontent.com/jsquirrelz/tide/v1.0.0/examples/projects/small/project.yaml
+
+# Mirror the cluster-unique signing key into the sample namespace (the chart
+# generates it in tide-system; dispatch Job pods read it from their own namespace):
+SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata: { name: tide-signing-key, namespace: tide-sample-small }
+type: Opaque
+data: { TIDE_SIGNING_KEY: ${SIGNING_KEY} }
+EOF
+
+# Watch it run to Complete (~2 min):
+kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small-project -n tide-sample-small --timeout=10m
 ```
 
 ```text
@@ -22,7 +36,8 @@ customresourcedefinition.apiextensions.k8s.io/projects.tideproject.k8s created
 NAME: tide-crds   STATUS: deployed
 NAME: tide        STATUS: deployed
 project.tideproject.k8s/small-project created
-condition met
+secret/tide-signing-key created
+project.tideproject.k8s/small-project condition met
 ```
 
 > **First time?** Skip to [docs/INSTALL.md](docs/INSTALL.md) for the 4-command install with full prerequisites and troubleshooting.

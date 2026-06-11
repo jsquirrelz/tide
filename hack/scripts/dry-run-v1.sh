@@ -176,6 +176,19 @@ docker run --rm \
     kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
     kubectl apply -f examples/projects/small/project.yaml
+
+    # README Quickstart step: mirror the cluster-unique signing key into the
+    # sample namespace (dispatch Job pods envFrom it; the chart generates it
+    # only in tide-system, and a static sample YAML cannot carry it).
+    SIGNING_KEY=\$(kubectl get secret tide-signing-key -n tide-system -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+    kubectl apply -f - <<SECRET
+apiVersion: v1
+kind: Secret
+metadata: { name: tide-signing-key, namespace: tide-sample-small }
+type: Opaque
+data: { TIDE_SIGNING_KEY: \${SIGNING_KEY} }
+SECRET
+
     kubectl wait --for=jsonpath='{.status.phase}'=Complete project/small-project -n tide-sample-small --timeout=10m
   " 2>&1 | tee -a "${TRANSCRIPT_PATH}"
 
