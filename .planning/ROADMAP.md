@@ -52,7 +52,7 @@ Plans:
 
 **Wave 4** *(gap closure — 12-VERIFICATION.md CR-01/CR-02)*
 
-- [ ] 12-05-PLAN.md — Plan-level gate fix: park before ChildCount wait, AwaitingApproval early-return, wave path held while parked; ChildCount>0 regression specs (GATE-01, GATE-04 at Plan level)
+- [x] 12-05-PLAN.md — Plan-level gate fix: park before ChildCount wait, AwaitingApproval early-return, wave path held while parked; ChildCount>0 regression specs (GATE-01, GATE-04 at Plan level)
 
 ### Phase 13: Dispatch Image Resolution + Provider Halt
 
@@ -122,7 +122,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 4/4 | Complete   | 2026-06-11 |
+| 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0.1
 milestone_name: Orchestrator Trustworthiness + Telemetry Completion
-status: executing
-stopped_at: Phase 12 context gathered
-last_updated: "2026-06-11T14:46:36.192Z"
+status: ready_to_plan
+stopped_at: Phase 12 complete (5/5) — ready to discuss Phase 13
+last_updated: 2026-06-11T17:00:24.723Z
 last_activity: 2026-06-11 -- Phase 12 execution started
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 5
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 12 — Gate Semantics + Reject/Resume
+**Current focus:** Phase 13 — dispatch image resolution + provider halt
 
 ## Current Position
 
-Phase: 12 (Gate Semantics + Reject/Resume) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 12
-Last activity: 2026-06-11 -- Phase 12 execution started
+Phase: 13
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-11
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0 (this milestone)
+- Total plans completed: 5 (this milestone)
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -45,6 +45,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | — | — | — | — |
+| 12 | 5 | - | - |
 
 *Updated after each plan completion*
 

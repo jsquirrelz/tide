@@ -9,14 +9,14 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 ### Gate Semantics (GATE)
 
-- [ ] **GATE-01**: Approving a gated level with incomplete children does not advance it to Succeeded — approval records gate passage; the level reaches Succeeded only when its children complete (finding 7, the run-killer: `ConsumeApprove` advanced a Milestone with 5 running Phases straight to Succeeded → Project `Complete`)
-- [ ] **GATE-02**: gates.md step 5 documents approve-then-wait-for-children semantics (the current doc encodes the bug — "advances the level to Succeeded")
-- [ ] **GATE-03**: A level whose planner Job failed is recoverable via `tide resume --retry-failed`, never wedged; `tide approve` against it gives an actionable error pointing at resume (finding 5 reworded per Phase 12 discussion D-07 — approval never doubles as a spend-retry)
-- [ ] **GATE-04**: A level parked at AwaitingApproval blocks child dispatch — children materialize (visible in dashboard/kubectl) but their reconcilers hold all Job dispatch until the parent is approved (finding 1, gate-before-descent: run 1 fired 5 × ~$0.64 phase planners one second after the milestone parked; folded into Phase 12 per discussion D-01/D-02)
+- [x] **GATE-01**: Approving a gated level with incomplete children does not advance it to Succeeded — approval records gate passage; the level reaches Succeeded only when its children complete (finding 7, the run-killer: `ConsumeApprove` advanced a Milestone with 5 running Phases straight to Succeeded → Project `Complete`)
+- [x] **GATE-02**: gates.md step 5 documents approve-then-wait-for-children semantics (the current doc encodes the bug — "advances the level to Succeeded")
+- [x] **GATE-03**: A level whose planner Job failed is recoverable via `tide resume --retry-failed`, never wedged; `tide approve` against it gives an actionable error pointing at resume (finding 5 reworded per Phase 12 discussion D-07 — approval never doubles as a spend-retry)
+- [x] **GATE-04**: A level parked at AwaitingApproval blocks child dispatch — children materialize (visible in dashboard/kubectl) but their reconcilers hold all Job dispatch until the parent is approved (finding 1, gate-before-descent: run 1 fired 5 × ~$0.64 phase planners one second after the milestone parked; folded into Phase 12 per discussion D-01/D-02)
 
 ### Reject/Resume Recovery (RESUME)
 
-- [ ] **RESUME-01**: `tide resume` after `tide reject` recovers fail-marked children — status reset, reconciler re-dispatch, `ResumedByUser` condition — matching the manual kubectl recipe (finding 9a: reject patches children `Failed` via patchPlanFailed; reconcilers early-exit on Failed; resume only clears the annotation)
+- [x] **RESUME-01**: `tide resume` after `tide reject` recovers fail-marked children — status reset, reconciler re-dispatch, `ResumedByUser` condition — matching the manual kubectl recipe (finding 9a: reject patches children `Failed` via patchPlanFailed; reconcilers early-exit on Failed; resume only clears the annotation)
 
 ### Dispatch Image Resolution (DISPATCH)
 
@@ -77,11 +77,11 @@ Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GATE-01 | Phase 12 | Pending |
-| GATE-02 | Phase 12 | Pending |
-| GATE-03 | Phase 12 | Pending |
-| GATE-04 | Phase 12 | Pending |
-| RESUME-01 | Phase 12 | Pending |
+| GATE-01 | Phase 12 | Complete |
+| GATE-02 | Phase 12 | Complete |
+| GATE-03 | Phase 12 | Complete |
+| GATE-04 | Phase 12 | Complete |
+| RESUME-01 | Phase 12 | Complete |
 | DISPATCH-01 | Phase 13 | Pending |
 | DISPATCH-02 | Phase 13 | Pending |
 | HALT-01 | Phase 13 | Pending |
