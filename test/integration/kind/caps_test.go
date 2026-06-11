@@ -79,6 +79,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: cap-plan
+  promptPath: "children/task-01.json"
   filesTouched: ["hang.go"]
   declaredOutputPaths: ["hang.go"]
   caps:

@@ -76,6 +76,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: fail-plan
+  promptPath: "children/task-01.json"
   filesTouched: ["alpha-fail.go"]
   declaredOutputPaths: ["alpha-fail.go"]
   dev:
@@ -91,6 +92,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: fail-plan
+  promptPath: "children/task-02.json"
   filesTouched: ["beta-fail.go"]
   declaredOutputPaths: ["beta-fail.go"]
   dev:
@@ -106,6 +108,7 @@ metadata:
     tideproject.k8s/wave-index: "1"
 spec:
   planRef: fail-plan
+  promptPath: "children/task-03.json"
   dependsOn: ["beta-fail"]
   filesTouched: ["gamma-fail.go"]
   declaredOutputPaths: ["gamma-fail.go"]

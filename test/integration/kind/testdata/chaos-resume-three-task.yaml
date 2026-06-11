@@ -103,6 +103,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: chaos-resume-plan
+  promptPath: "children/task-01.json"
   filesTouched:
     - alpha.go
   declaredOutputPaths:
@@ -123,6 +124,7 @@ metadata:
     tideproject.k8s/wave-index: "0"
 spec:
   planRef: chaos-resume-plan
+  promptPath: "children/task-02.json"
   filesTouched:
     - beta.go
   declaredOutputPaths:
@@ -148,6 +150,7 @@ metadata:
     tideproject.k8s/wave-index: "1"
 spec:
   planRef: chaos-resume-plan
+  promptPath: "children/task-03.json"
   dependsOn:
     - alpha-chaos
   filesTouched:
