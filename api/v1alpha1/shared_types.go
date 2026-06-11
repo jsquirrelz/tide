@@ -237,3 +237,35 @@ const (
 	// a Job created AFTER this time may initiate a halt. Plan 13-05 WR-03.
 	AnnotationBillingResumedAt = "tideproject.k8s/billing-resumed-at"
 )
+
+// Phase 14 condition + reason vocabulary — operator budget cap blocked (BUDGET-02).
+// A Project budget cap exhaustion blocks all new dispatch project-wide until the
+// operator raises the cap (Spec.Budget.AbsoluteCapCents) or applies the bypass
+// annotation. BudgetBlocked is set on the Project status by the TaskReconciler
+// dispatch gate when IsCapExceeded returns true after RollUpUsage increments
+// CostSpentCents.
+//
+// DISTINCT from BillingHalt (provider billing auth failure): BillingHalt is set
+// when the provider returns a credit-exhaustion 400; BudgetBlocked is set when the
+// operator's own configured cap is exceeded. Both may be True simultaneously —
+// the dispatch gate checks each independently. BudgetBlocked is cleared by the
+// dispatch gate itself when IsCapExceeded returns false (i.e. the operator raises
+// the cap). BillingHalt is cleared by `tide resume`.
+const (
+	// ConditionBudgetBlocked — operator's budget cap has been reached; new dispatch
+	// is halted project-wide until the cap is raised (Spec.Budget.AbsoluteCapCents)
+	// or the bypass annotation is applied. Set and cleared by the TaskReconciler
+	// dispatch gate via setBudgetBlockedIfNeeded. Phase 14 BUDGET-02.
+	ConditionBudgetBlocked = "BudgetBlocked"
+
+	// ReasonBudgetCapReached — the project's absolute cost cap (or rolling cap) was
+	// exceeded; set by the TaskReconciler dispatch gate via setBudgetBlockedIfNeeded.
+	ReasonBudgetCapReached = "BudgetCapReached"
+
+	// ReasonBudgetCapCleared — the project's cost cap is no longer exceeded (e.g.
+	// the operator raised Spec.Budget.AbsoluteCapCents); the BudgetBlocked condition
+	// is flipped to False so dispatch can resume. Without this reason, a raised cap
+	// could never recover dispatch because the gate would park on the stale True
+	// condition. Phase 14 BUDGET-02.
+	ReasonBudgetCapCleared = "BudgetCapCleared"
+)
