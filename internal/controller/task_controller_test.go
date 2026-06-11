@@ -65,9 +65,12 @@ func newTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 			Budget:         testBudgetStore,
 			Defaults:       testBudgetDefaults,
 			SigningKey:     testSigningKey,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			EnvReader:      envReader,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		},
 	}
 }
@@ -416,9 +419,12 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 					Budget:         exhaustedStore,
 					Defaults:       exhaustedLimits,
 					SigningKey:     testSigningKey,
-					SubagentImage:  testSubagentImage,
+					SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 					CredproxyImage: testCredproxyImage,
 					EnvReader:      newMapEnvReader(),
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
 			}
 
@@ -502,9 +508,12 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 					Budget:         stormStore,
 					Defaults:       stormLimits,
 					SigningKey:     testSigningKey,
-					SubagentImage:  testSubagentImage,
+					SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 					CredproxyImage: testCredproxyImage,
 					EnvReader:      newMapEnvReader(),
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
 			}
 

@@ -259,13 +259,24 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 		pvcName = "tide-projects"
 	}
 
+	// Inline image precedence walk — mirrors controller.resolveImage for the
+	// task level. PodJobBackend is fixture-only but must stay consistent with
+	// the chain: Levels.Task.Image → Spec.Subagent.Image → b.SubagentImage.
+	resolvedImage := b.SubagentImage
+	if project.Spec.Subagent.Image != "" {
+		resolvedImage = project.Spec.Subagent.Image
+	}
+	if project.Spec.Subagent.Levels.Task != nil && project.Spec.Subagent.Levels.Task.Image != "" {
+		resolvedImage = project.Spec.Subagent.Levels.Task.Image
+	}
+
 	opts := BuildOptions{
 		Task:           task,
 		Project:        project,
 		Attempt:        attempt,
 		SignedToken:    string(b.SigningKey), // simplified for Run; TaskReconciler uses HMAC in Plan 09
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  b.SubagentImage,
+		SubagentImage:  resolvedImage,
 		CredproxyImage: b.CredproxyImage,
 		SecretUID:      string(project.UID),
 		PVCName:        pvcName,

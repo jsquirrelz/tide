@@ -145,9 +145,12 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoPhaseName, Namespace: "default"}, 5)).To(Succeed())
@@ -243,9 +246,12 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      newMapEnvReader(),
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())

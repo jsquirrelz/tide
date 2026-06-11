@@ -78,7 +78,8 @@ type MilestoneReconciler struct {
 	// planner Job completes (Phase 2 D-A2 path).
 	EnvReader podjob.EnvelopeReader
 
-	// SubagentImage is the image ref for the planner subagent container.
+	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
+	// retained for legacy test wiring, ignored at dispatch.
 	SubagentImage string
 
 	// CredproxyImage is the image ref for the tide-credproxy sidecar.
@@ -377,15 +378,12 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		Project:        project,
 		SignedToken:    token,
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  r.SubagentImage,
+		SubagentImage:  resolveImage(project, "milestone", r.HelmProviderDefaults),
 		CredproxyImage: r.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",
 		ProjectUID:     string(project.UID),
 		Caps:           plannerCaps,
-	}
-	if opts.SubagentImage == "" {
-		opts.SubagentImage = r.HelmProviderDefaults.Image
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {

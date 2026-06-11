@@ -116,9 +116,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -157,9 +160,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -242,9 +248,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			// Drive to job completion with ChildCount=5 (5 Phase children expected).
@@ -396,9 +405,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
 			// No Job is created; the reconciler parks the Milestone with RejectedByUser.
@@ -486,9 +498,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      newMapEnvReader(),
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			var jobsBefore batchv1.JobList
@@ -527,9 +542,12 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			driveToJobCompletion(msName, r, envReader)
 

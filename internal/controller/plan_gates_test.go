@@ -138,9 +138,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			driveToJobCompletion(planName, r, envReader, 0)
 
@@ -177,9 +180,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			driveToJobCompletion(planName, r, envReader, 0)
 
@@ -252,9 +258,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 3)).To(Succeed())
@@ -350,9 +359,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			// Step 1: drive planner completion with ChildCount=2.
@@ -508,9 +520,12 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			// Drive to completion with childCount=0 (leaf plan) — should park at AwaitingApproval.

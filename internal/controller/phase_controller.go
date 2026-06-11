@@ -70,7 +70,8 @@ type PhaseReconciler struct {
 	// EnvReader reads EnvelopeOut from PVC after planner Job completes.
 	EnvReader podjob.EnvelopeReader
 
-	// SubagentImage is the planner subagent container image.
+	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
+	// retained for legacy test wiring, ignored at dispatch.
 	SubagentImage string
 
 	// CredproxyImage is the image ref for the tide-credproxy sidecar.
@@ -338,11 +339,6 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		projectUID = string(project.UID)
 	}
 
-	subagentImage := r.SubagentImage
-	if subagentImage == "" {
-		subagentImage = r.HelmProviderDefaults.Image
-	}
-
 	opts := podjob.BuildOptions{
 		Kind:           podjob.JobKindPlanner,
 		ParentObj:      ph,
@@ -351,7 +347,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		Project:        project,
 		SignedToken:    token,
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  subagentImage,
+		SubagentImage:  resolveImage(project, "phase", r.HelmProviderDefaults),
 		CredproxyImage: r.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",

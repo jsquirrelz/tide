@@ -132,9 +132,12 @@ func newPlanReconciler() *PlanReconciler {
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SubagentImage:  testSubagentImage,
+		SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 		CredproxyImage: testCredproxyImage,
 		SigningKey:     testSigningKey,
+		HelmProviderDefaults: ProviderDefaults{
+			Image: testSubagentImage,
+		},
 	}
 }
 

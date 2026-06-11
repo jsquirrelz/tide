@@ -139,12 +139,15 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			SharedPVCName:  pvcName,
 			TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			ReporterImage:  testReporterImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: projectName, Namespace: "default"}, 5)).To(Succeed())
@@ -175,10 +178,13 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			ReporterImage:  testReporterImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -229,10 +235,13 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			ReporterImage:  testReporterImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
@@ -285,12 +294,15 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			ReporterImage:  testReporterImage,
 			// TidePushImage intentionally empty: the boundary push is skipped so the
 			// spec stays focused on succession, not the push Job (boundary_push.go:79-90).
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -372,11 +384,14 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			ReporterImage:  testReporterImage,
 			// TidePushImage intentionally empty (see milestone spec above).
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())

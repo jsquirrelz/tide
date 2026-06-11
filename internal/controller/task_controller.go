@@ -83,11 +83,13 @@ type TaskReconcilerDeps struct {
 	Dispatcher     dispatch.Dispatcher
 	Budget         *budget.Store
 	Defaults       budget.Limits
-	SigningKey     []byte
-	SubagentImage  string
+	SigningKey      []byte
 	CredproxyImage string
-	EnvReader      podjob.EnvelopeReader
-	Recorder       record.EventRecorder
+	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
+	// retained for legacy test wiring, ignored at dispatch.
+	SubagentImage string
+	EnvReader     podjob.EnvelopeReader
+	Recorder      record.EventRecorder
 	// HelmProviderDefaults carry Helm-chart provider/model defaults, mirroring
 	// the Milestone/Phase/Plan reconcilers. buildEnvelopeIn uses them to resolve
 	// the executor task's ProviderSpec (Vendor "anthropic" + the task-level model).
@@ -625,7 +627,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		Attempt:        spec.attempt,
 		SignedToken:    spec.token,
 		EnvelopeInJSON: spec.envInJSON,
-		SubagentImage:  r.Deps.SubagentImage,
+		SubagentImage:  resolveImage(project, "task", r.Deps.HelmProviderDefaults),
 		CredproxyImage: r.Deps.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",
@@ -1040,7 +1042,7 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 		Attempt:        attempt,
 		SignedToken:    token,
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  r.Deps.SubagentImage,
+		SubagentImage:  resolveImage(project, "task", r.Deps.HelmProviderDefaults),
 		CredproxyImage: r.Deps.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",

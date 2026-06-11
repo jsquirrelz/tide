@@ -235,10 +235,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
@@ -303,10 +306,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
@@ -377,10 +383,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				EnvReader:      envReader,
 				PlannerPool:    newPlannerPoolForTest(),
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
@@ -425,10 +434,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
@@ -484,10 +496,13 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage,
+				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			}
 			// D-05 dispatch-entry hold fires before Job creation — the reconciler parks the
 			// Milestone with RejectedByUser condition and no planner Job is created.

@@ -88,10 +88,13 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 		Client:         fc,
 		Scheme:         scheme,
 		Dispatcher:     &stubDispatcher{},
-		SubagentImage:  testSubagentImage,
+		SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 		CredproxyImage: testCredproxyImage,
 		SigningKey:     testSigningKey,
 		TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+		HelmProviderDefaults: ProviderDefaults{
+			Image: testSubagentImage,
+		},
 	}
 	return r, fc
 }
