@@ -93,6 +93,12 @@ docker run --rm \
     # Create the kind cluster (uses host Docker daemon via /var/run/docker.sock).
     kind create cluster --name tide-dry-run
 
+    # Hand the kubeconfig to Pass 2 via the shared volume: Pass 2 is a FRESH
+    # container, so the ~/.kube/config written here dies with this one —
+    # without it Pass 2's kubectl dials the localhost:8080 default and every
+    # apply fails 'connection refused'.
+    kind get kubeconfig --name tide-dry-run > /workspace/kubeconfig
+
     # Clone the repo into the shared workspace volume so Pass 2 can find it.
     # The default source is /host-repo (the runner checkout, mounted ro above)
     # — the container runs as root while the mount is owned by the host uid,
@@ -132,6 +138,9 @@ docker run --rm \
   -e TIDE_CERT_MANAGER_VERSION="${TIDE_CERT_MANAGER_VERSION}" \
   "${DRY_RUN_IMAGE}" bash -c "
     set -euo pipefail
+
+    # Cluster credentials from Pass 1 (fresh container — see Pass 1 comment).
+    export KUBECONFIG=/workspace/kubeconfig
 
     # Re-install tools (new container; binaries from Pass 1 are gone).
     apt-get update -qq && apt-get install -qq -y curl ca-certificates
