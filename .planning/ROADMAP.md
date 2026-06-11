@@ -98,7 +98,14 @@ Plans:
   2. When the project budget cap is reached, a `BudgetBlocked` condition appears on the Project CR — visible via `kubectl get project -o yaml` and reflected on the dashboard project node
   3. In-flight overshoot past the budget cap is bounded to at most one wave's worth of already-dispatched sessions — no new Jobs are created after cap breach is detected
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+- [ ] 14-01-PLAN.md — Pricing table correction (D-01) + provider-firewalled override merge & env transport (D-02 provider side)
+- [ ] 14-02-PLAN.md — Foundations: BudgetBlocked condition vocabulary + helpers (D-04) + ReservationStore with restart rederivation (D-05)
+- [ ] 14-03-PLAN.md — TaskReconciler dispatch-gate rewrite, reserve/settle wiring, run-1 regression envtest
+- [ ] 14-04-PLAN.md — Pricing-drift automation: hack script + weekly deduped-issue workflow + release checklist (D-03)
+- [ ] 14-05-PLAN.md — Five-site BudgetBlocked rollout + manager flags/validation/rederive runnable + additive Helm surface
 
 ### Phase 15: Paper Cuts
 
