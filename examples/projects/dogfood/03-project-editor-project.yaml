@@ -1,0 +1,179 @@
+# examples/projects/dogfood/03-project-editor-project.yaml
+#
+# Run 3 of 3 in the TIDE-on-TIDE dogfood sequence.
+# Apply ONLY after 02-codex-runtime-project reaches `status.phase: Complete`.
+# The Project CRD has no ordering mechanism; sequencing is operator discipline.
+#
+# Purpose: add an authoring surface in the React dashboard for Project CRs —
+# create a new Project (outcome prompt, target repo, Secret ref, gate config)
+# and save → backend creates the CRD. Also supports editing DRAFT Projects
+# (saved-but-not-running). Editing in-flight Projects is OUT of scope.
+#
+# After this run completes: subsequent Project CRs can be authored and applied
+# through the dashboard surface this run built — run 4's input is created by
+# run 3's output.
+#
+# Prerequisites (see README.md for full recipe):
+#   - 02-codex-runtime-project must have reached status.phase: Complete
+#   - kind cluster + TIDE charts installed (see docs/INSTALL.md)
+#   - tide-secrets Secret created in namespace tide-dogfood-editor
+#   - per-namespace-resources applied per README.md
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-dogfood-editor
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-editor
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: dogfood-project-editor
+  namespace: tide-dogfood-editor
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-editor
+spec:
+  # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
+  targetRepo: https://github.com/jsquirrelz/tide.git
+
+  outcomePrompt: |
+    ## Outcome
+
+    Add a Project authoring surface to the React dashboard: a form that lets
+    an operator create a new Project CR (outcome prompt, target repo, Secret
+    reference, gate config) and save it — the backend creates the CRD via the
+    K8s API. The surface also supports editing DRAFT Projects (saved-but-not-
+    running). Editing in-flight Projects is explicitly OUT of scope for this run.
+
+    ## Architecture — locked decisions (do NOT reinvent these)
+
+    **This is the first write path in the dashboard.**
+    Today's dashboard surface is read-only + SSE. This run adds create/update
+    mutation endpoints to the existing chi manager.Runnable server and the
+    corresponding RBAC additions (create/update on Projects) to the manager's
+    ServiceAccount. Do NOT create a separate service for these endpoints —
+    extend the existing chi server.
+
+    **Reference-only credentials.**
+    The form offers a picker over existing Secret names in the project namespace.
+    Secrets are created out-of-band via kubectl (or the tide-secrets recipe in
+    README.md). Secret material NEVER transits the dashboard API or the browser —
+    only Secret names are transmitted. This is a hard security invariant.
+
+    **Trust the perimeter for v1.**
+    No app-level authentication on the new mutation endpoints. The deliverable
+    explicitly INCLUDES documenting that the dashboard must sit behind
+    port-forward or ingress-level auth in any non-local deployment. Hardening
+    path (token auth, RBAC for dashboard service accounts, audit logging) is
+    captured as a deferred seed: docs/dashboard-mutation-auth-hardening.md.
+    Do NOT silently omit this documentation — it is a required deliverable.
+
+    **Draft/pending state lives on the CR.**
+    A saved-but-not-running Project must be persisted as a CRD field, not in
+    dashboard state (artifacts-as-source-of-truth invariant). The reconciler
+    must honor the draft state and not begin dispatch until the Project
+    transitions to running. The exact API shape is an open design question
+    (see Open questions below).
+
+    **React + TypeScript + Tailwind (existing stack).**
+    The editor form is a React component matching the existing dashboard
+    conventions. No new frontend frameworks, no new state management libraries
+    beyond what the dashboard already uses.
+
+    ## Open questions for TIDE's planner to research
+
+    These questions are genuinely open and MUST be researched and decided
+    during the planning phase — do not assume an answer:
+
+    **Open question 1 — Draft state API shape:**
+    How should "saved-but-not-running" be represented on the Project CR?
+    Options to evaluate:
+    - spec.paused boolean (Flux/CAPI precedent: spec.paused / spec.suspend
+      — weaker contract than a typed field but familiar to K8s operators).
+    - Annotation (e.g. tideproject.k8s/draft: "true") — weaker contract,
+      easier to strip programmatically.
+    - Phase-based gating: a new spec field (e.g. spec.mode: draft | running)
+      that the reconciler checks before dispatching.
+    Evaluate K8s community precedent, reconciler implementation complexity,
+    and CEL validation expressibility before deciding.
+
+    **Open question 2 — Edit semantics at the CRD level:**
+    When the dashboard saves an edit to a draft Project, what update strategy
+    should the backend use?
+    - Server-side apply with a dashboard-owned field manager: handles concurrent
+      kubectl-edit gracefully; requires the backend to track field ownership.
+    - Full spec replace: simpler implementation; conflicts if someone kubectl-edits
+      the same draft simultaneously.
+    Evaluate conflict behavior and operational complexity. Note: kubectl-edit
+    conflicts on a running Project must be impossible (editing in-flight is out
+    of scope); this question applies only to draft Projects.
+
+    **Open question 3 — Draft-to-running transition semantics:**
+    Should the draft → running transition be one-way for v1? That is, can a
+    running Project be re-paused, and if so what happens to in-flight waves
+    (relates to spec failure-handling profiles and the wave-boundary contract)?
+    Propose a v1 answer and flag the wave-pausing complexity if the answer is
+    "yes, re-pause is allowed."
+
+    **Open question 4 — CEL immutability enforcement:**
+    After a Project leaves draft state, certain spec fields (targetRepo,
+    providerSecretRef) should arguably be immutable. Can/should
+    x-kubernetes-validations with oldSelf transition rules enforce this?
+    Evaluate CEL transition rule capabilities (requires K8s >= 1.29, already
+    a TIDE requirement) and implementation cost before deciding.
+
+    ## Constraints
+
+    - Secret material never transits the dashboard API or browser (hard invariant).
+    - Mutation endpoints on the existing chi server — no new service.
+    - RBAC additions scoped to create/update on Projects only (no wildcard verbs,
+      no other resource types).
+    - docs/dashboard-mutation-auth-hardening.md must be authored as a deliverable.
+    - Follow all CLAUDE.md conventions: Apache 2.0 headers, logr/zap logging,
+      controller-runtime patterns, React/TypeScript/Tailwind conventions.
+    - Do NOT break existing tests. Confirm make test is green before
+      authoring any plan as delivered.
+    - Editing in-flight Projects is OUT of scope — enforce this at the API
+      level (reject update if Project.status.phase is Running or later).
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # Created out-of-band before applying this CR — see README.md.
+  providerSecretRef: tide-secrets
+
+  # Starting cap for dogfood runs — tune before applying.
+  # Editor run is expected to be smaller in scope than analytics/codex,
+  # hence the slightly reduced cap ($75 vs $100).
+  budget:
+    absoluteCapCents: 7500
+    rollingWindowCapCents: 7500
+    rollingWindowDuration: 24h
+
+  # claude-opus-4-7 for real multi-phase feature work.
+  # Cheaper alternatives: model: claude-sonnet-4-6, claude-haiku-4-5
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
+    model: claude-opus-4-7
+
+  # Phase 3 D-B6: per-project git target + creds.
+  git:
+    repoURL: https://github.com/jsquirrelz/tide.git
+    credsSecretRef: tide-secrets
+
+  # Human oversight at milestone and phase level; plan and task auto.
+  # Fully-autonomous: change milestone and phase to auto.
+  gates:
+    milestone: approve
+    phase: approve
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  planAdmission:
+    fileTouchMode: strict
+
+  maxAttemptsPerTask: 3

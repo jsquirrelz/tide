@@ -1,0 +1,175 @@
+# examples/projects/dogfood/02-codex-runtime-project.yaml
+#
+# Run 2 of 3 in the TIDE-on-TIDE dogfood sequence.
+# Apply ONLY after 01-analytics-project reaches `status.phase: Complete`.
+# Do NOT apply 03-project-editor-project.yaml until this Project reaches
+# `status.phase: Complete` — the Project CRD has no ordering mechanism;
+# sequencing is operator discipline.
+#
+# Purpose: add a second Subagent implementation (Codex / OpenAI) to TIDE and
+# demonstrate real heterogeneous dispatch — actually running mixed-provider
+# waves, not just proving the interface compiles.
+#
+# After this run completes: the run's token spend, dispatch behavior, and
+# failure characteristics are visible on the analytics dashboard built by run 1.
+# Run 3 (Project editor) can then be authored and applied through the dashboard
+# surface run 3 itself will build.
+#
+# Prerequisites (see README.md for full recipe):
+#   - 01-analytics-project must have reached status.phase: Complete
+#   - kind cluster + TIDE charts installed (see docs/INSTALL.md)
+#   - tide-secrets Secret created in namespace tide-dogfood-codex
+#     (ANTHROPIC_API_KEY + GIT_PAT — same as analytics namespace)
+#   - openai-secrets Secret created in namespace tide-dogfood-codex
+#     (OPENAI_API_KEY or CODEX_API_KEY — see README.md)
+#   - per-namespace-resources applied per README.md
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+---
+apiVersion: tideproject.k8s/v1alpha1
+kind: Project
+metadata:
+  name: dogfood-codex-runtime
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+spec:
+  # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
+  targetRepo: https://github.com/jsquirrelz/tide.git
+
+  outcomePrompt: |
+    ## Outcome
+
+    Add a second Subagent implementation for the Codex runtime (OpenAI) and
+    demonstrate real heterogeneous dispatch — mixed-provider waves that actually
+    run, not just interface scaffolding. Concrete outcome: a TIDE operator can
+    configure a Project where the planner pool runs Claude and the executor pool
+    runs Codex, and TIDE dispatches a multi-phase run to completion with correct
+    wave-boundary failure semantics across both providers.
+
+    ## Architecture — locked decisions (do NOT reinvent these)
+
+    **Implementation location: internal/subagent/codex/**
+    Mirror the existing internal/subagent/anthropic/ layering exactly:
+    - internal/subagent/codex/client.go — Client struct + constructor
+    - internal/subagent/codex/run.go — Subagent.Run(ctx, EnvelopeIn) (EnvelopeOut, error)
+    - internal/subagent/codex/Dockerfile — multi-stage build mirroring anthropic/Dockerfile
+    - internal/subagent/codex/doc.go — package doc referencing D-C1 layering pattern
+
+    All OpenAI/Codex-specific code stays behind the pkg/dispatch.Subagent
+    interface. No provider hard-coding in the controller. No Codex imports
+    in internal/controller/ or cmd/manager/.
+
+    **Per-level runtime selection (not per-task, not per-project).**
+    Planner pool and executor pool each pin a runtime. This is the correct
+    granularity: it matches the spec's separate-pools argument, achieves real
+    heterogeneity within a single run, and avoids the API/scheduler complexity
+    of per-task selection. Rejected alternatives (do not reopen):
+    - Per-task selection: large API surface, non-trivial scheduler changes.
+    - Per-project selection: no mixing within a run (defeats heterogeneity goal).
+
+    The SubagentConfig field already has Levels.{Milestone,Phase,Plan,Task}
+    per-level LevelConfig overrides (api/v1alpha1/project_types.go). Wire the
+    Codex image at the levels the operator wants to run Codex.
+
+    **Credential path.**
+    OPENAI_API_KEY or CODEX_API_KEY via a K8s Secret — the established
+    Secret-ref pattern from providerSecretRef. Never mount host config, never
+    headless OAuth (broken: claude-code#29983, #7100 — same restriction applies
+    to Codex). Chart values for the new Secret name are part of the deliverable.
+
+    **Mixed-provider waves: identical wave-boundary failure semantics.**
+    The spec's failure handling (spec section "Failure handling at wave
+    boundaries") applies unchanged regardless of which provider runs a task:
+    - Failed task: siblings in the same wave continue (they were declared
+      independent).
+    - Dependents in later waves: never dispatch.
+    - Non-dependents in later waves: dispatch in strict profile.
+    This contract must not change when tasks run on different providers.
+
+    **Codex CLI facts — carry verbatim, do NOT re-research:**
+    - codex exec is first-class headless: one-shot, no TTY, final message
+      to stdout.
+    - Flags for clean containers: --ephemeral, --skip-git-repo-check,
+      --ignore-user-config.
+    - --json emits a JSONL event stream.
+    - --output-schema <file> constrains the final response to a JSON schema
+      — use this for child-CRD emission (child-CRD format is JSON, mandated).
+    - Sandbox defaults read-only; the runner needs --sandbox workspace-write
+      (fine inside an already-isolated pod — mirrors the Claude runner posture).
+    - API-key env auth (OPENAI_API_KEY) is the documented container path —
+      no headless-OAuth problem.
+    - MCP client support (STDIO + streamable HTTP) via config.toml or
+      codex mcp add — available if needed for child-CRD emission.
+    - Sources: developers.openai.com/codex/{noninteractive,cli/reference,
+      auth,cli/features} (verified 2026-06).
+
+    **Container image.**
+    internal/subagent/codex/Dockerfile must build clean. The final image
+    bundles the Codex CLI binary. Image reference convention mirrors
+    ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0 (replace "claude" with
+    "codex" in the image name; exact tag/registry are authoring decisions).
+
+    ## Constraints
+
+    - All Codex/OpenAI-specific code stays in internal/subagent/codex/ and
+      behind the pkg/dispatch.Subagent interface — no provider leakage into
+      the controller or cmd/manager.
+    - Wave-boundary failure semantics unchanged for mixed-provider waves.
+    - Secret material never inlined in manifests or chart values — reference
+      by Secret name only.
+    - Follow all CLAUDE.md conventions: Apache 2.0 headers, logr/zap logging,
+      controller-runtime patterns.
+    - Do NOT break existing tests. Confirm make test is green before
+      authoring any plan as delivered.
+    - Do NOT add a real OpenAI API call in tests without an explicit test-env
+      guard (OPENAI_API_KEY env set) — tests must pass offline.
+
+  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
+  # For the planner pool (Claude side of the heterogeneous run).
+  # The Codex executor pool's OPENAI_API_KEY lives in a separate Secret —
+  # see README.md for the openai-secrets creation step.
+  providerSecretRef: tide-secrets
+
+  # Starting cap for dogfood runs — tune before applying.
+  # These are multi-phase real work runs; the cap is a safety net.
+  budget:
+    absoluteCapCents: 10000
+    rollingWindowCapCents: 10000
+    rollingWindowDuration: 24h
+
+  # Default image + model for the planner pool (Claude).
+  # Codex executor pool is wired via subagent.levels.task.image override
+  # once the codex subagent image is built by this run.
+  # Cheaper alternatives: model: claude-sonnet-4-6, claude-haiku-4-5
+  subagent:
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
+    model: claude-opus-4-7
+
+  # Phase 3 D-B6: per-project git target + creds.
+  git:
+    repoURL: https://github.com/jsquirrelz/tide.git
+    credsSecretRef: tide-secrets
+
+  # Human oversight at milestone and phase level; plan and task auto.
+  # Fully-autonomous: change milestone and phase to auto.
+  gates:
+    milestone: approve
+    phase: approve
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+
+  planAdmission:
+    fileTouchMode: strict
+
+  maxAttemptsPerTask: 3
