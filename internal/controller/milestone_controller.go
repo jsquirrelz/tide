@@ -302,6 +302,15 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		if earlyProject != nil && gates.CheckRejected(earlyProject) {
 			return r.patchMilestoneRejected(ctx, ms, gates.RejectedReason(earlyProject))
 		}
+		// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+		// parent-approval); park, never fail; cleared by tide resume.
+		// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+		// No per-Milestone condition written (operator signal is the Project condition).
+		if checkBillingHalt(earlyProject) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+				"milestone", ms.Name, "project", ms.Spec.ProjectRef)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).
@@ -495,6 +504,15 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	if isFirstCompletion && envReadOK && project != nil {
 		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 			logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
+		}
+	}
+
+	// Phase 13 D-04 layer 2: backstop — if the planner Job failed with a billing
+	// reason, stamp BillingHalt=True on the owning Project. Non-fatal: the
+	// reconcile continues through the normal completion path regardless.
+	if envReadOK && out.ExitCode != 0 && project != nil {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "milestone", ms.Name)
 		}
 	}
 

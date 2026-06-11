@@ -302,6 +302,15 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 			res, err := r.patchPlanRejected(ctx, plan, gates.RejectedReason(earlyProject))
 			return res, true, err
 		}
+		// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+		// parent-approval); park, never fail; cleared by tide resume.
+		// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+		// No per-Plan condition written (operator signal is the Project condition).
+		if checkBillingHalt(earlyProject) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+				"plan", plan.Name)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
+		}
 	}
 
 	// Acquire plannerPool (POOL-01) before Job creation (D-A4).
@@ -510,6 +519,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	if isFirstCompletion && project != nil {
 		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 			logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
+		}
+	}
+
+	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
+	if out.ExitCode != 0 && project != nil {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "plan", plan.Name)
 		}
 	}
 

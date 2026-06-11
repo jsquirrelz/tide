@@ -201,6 +201,193 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 	})
 })
 
+// Phase 13 HALT-01 / D-05: BillingHalt dispatch-entry hold at the Task level.
+//
+// The hold is the third dispatch-entry guard after CheckRejected + checkParentApproval.
+// Park semantics (D-05): log at V(1), requeue 30s, Status.Phase unchanged, no per-Task
+// condition written (avoids status flapping — the operator-visible signal is the single
+// Project BillingHalt condition).
+var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 HALT-01)", Label("envtest", "phase13", "billing-halt"), func() {
+	ctx := context.Background()
+
+	Describe("Test 13a — BillingHalt=True on Project parks Task, no Job created", func() {
+		const projectName, planRef, taskName = "billing-halt-proj-1", "billing-halt-plan-1", "billing-halt-task-1"
+
+		BeforeEach(func() {
+			// Create project
+			p := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/tide.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+
+			// Stamp BillingHalt=True condition on the Project.
+			var proj tideprojectv1alpha1.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
+			statusPatch := client.MergeFrom(proj.DeepCopy())
+			meta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionBillingHalt,
+				Status:             metav1.ConditionTrue,
+				Reason:             tideprojectv1alpha1.ReasonCreditBalanceTooLow,
+				Message:            "Test: billing halt stamped",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Patch(ctx, &proj, statusPatch)).To(Succeed())
+			Eventually(func() bool {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return false
+				}
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+				return c != nil && c.Status == metav1.ConditionTrue
+			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BillingHalt condition should be visible in cache")
+
+			makeTask(taskName, planRef, nil, projectName)
+		})
+		AfterEach(func() {
+			cleanupTask(taskName)
+			cleanupProject(projectName)
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := jobs.Items[i]
+				if j.Labels["tideproject.k8s/project"] == projectName {
+					_ = k8sClient.Delete(ctx, &j)
+				}
+			}
+		})
+
+		It("Task stays parked (Status.Phase unchanged, no Job), 30s requeue on BillingHalt", func() {
+			r := newTaskReconciler(newMapEnvReader())
+			name := types.NamespacedName{Name: taskName, Namespace: "default"}
+
+			result, err := reconcileN(r, name, 5)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Park semantics: requeue with 30s interval (billing recovery is operator-paced).
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second),
+				"BillingHalt hold must park with 30s requeue, not fail or no-requeue")
+
+			// Status.Phase must NOT be changed to "Failed" — park-not-fail (D-05, T-13-15).
+			var t tideprojectv1alpha1.Task
+			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
+			Expect(t.Status.Phase).NotTo(Equal("Failed"),
+				"D-05/T-13-15: BillingHalt must park the Task (not fail) — wave-boundary failure semantics preserved")
+
+			// No per-Task BillingHalt condition written (avoids status flapping per dogfood finding).
+			billingCond := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+			Expect(billingCond).To(BeNil(),
+				"HALT-01 park: no per-Task BillingHalt condition should be written (operator signal is on Project only)")
+
+			// No Job should be created for this task while halted (T-13-12: bypass mitigation).
+			taskUID := t.UID
+			var jobs batchv1.JobList
+			Expect(k8sClient.List(ctx, &jobs, client.InNamespace("default"))).To(Succeed())
+			for _, j := range jobs.Items {
+				Expect(j.Labels["tideproject.k8s/task-uid"]).NotTo(Equal(string(taskUID)),
+					"BillingHalt hold must prevent Job dispatch entirely")
+			}
+		})
+	})
+
+	Describe("Test 13b — BillingHalt cleared: dispatch resumes (no Job while halted, Job after clear)", func() {
+		const projectName, planRef, taskName = "billing-halt-proj-2", "billing-halt-plan-2", "billing-halt-task-2"
+
+		BeforeEach(func() {
+			p := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/tide.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+
+			// Stamp BillingHalt=True on the Project.
+			var proj tideprojectv1alpha1.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
+			statusPatch := client.MergeFrom(proj.DeepCopy())
+			meta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionBillingHalt,
+				Status:             metav1.ConditionTrue,
+				Reason:             tideprojectv1alpha1.ReasonCreditBalanceTooLow,
+				Message:            "Test: billing halt stamped",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Patch(ctx, &proj, statusPatch)).To(Succeed())
+			Eventually(func() bool {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return false
+				}
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+				return c != nil && c.Status == metav1.ConditionTrue
+			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue())
+
+			makeTask(taskName, planRef, nil, projectName)
+		})
+		AfterEach(func() {
+			cleanupTask(taskName)
+			cleanupProject(projectName)
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := jobs.Items[i]
+				if j.Labels["tideproject.k8s/project"] == projectName {
+					_ = k8sClient.Delete(ctx, &j)
+				}
+			}
+		})
+
+		It("Task parked while BillingHalt present, dispatches Job after condition cleared", func() {
+			r := newTaskReconciler(newMapEnvReader())
+			name := types.NamespacedName{Name: taskName, Namespace: "default"}
+
+			// While halted: reconcile must park with 30s requeue.
+			result, err := reconcileN(r, name, 3)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			// Clear the BillingHalt condition (mirrors what `tide resume` does via
+			// meta.RemoveStatusCondition + status update — D-06).
+			var current tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
+			clearPatch := client.MergeFrom(current.DeepCopy())
+			meta.RemoveStatusCondition(&current.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+			Expect(k8sClient.Status().Patch(ctx, &current, clearPatch)).To(Succeed())
+			Eventually(func() bool {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return false
+				}
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+				return c == nil
+			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BillingHalt condition should be removed from cache")
+
+			// After clear, re-reconcile should let dispatch proceed (no longer halted).
+			_, err = reconcileN(r, name, 3)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Task must not be Failed after halt cleared.
+			var t tideprojectv1alpha1.Task
+			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
+			Expect(t.Status.Phase).NotTo(Equal("Failed"),
+				"D-05: Task must not be Failed after BillingHalt cleared")
+
+			// Task should have progressed to Running (dispatch resumed).
+			Eventually(func(g Gomega) {
+				var t tideprojectv1alpha1.Task
+				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
+				g.Expect(t.Status.Phase).To(Equal("Running"),
+					"Dispatch must resume after BillingHalt condition cleared")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+})
+
 // getTaskUID is a small helper for the assertion in Test 7a; returns "" on miss.
 func getTaskUID(name string) types.UID {
 	var t tideprojectv1alpha1.Task
