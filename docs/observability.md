@@ -31,9 +31,14 @@ The Phase 4 metric set includes:
 - `tide_budget_overruns_total{project}`
 - `tide_dispatch_duration_seconds{level}`
 
-### Token, cost, and duration metrics
+### Token, cost, and duration metrics (planned — not yet implemented)
 
-Phase 5 adds six metrics incremented in the `TaskReconciler` terminal-success
+> **Status:** these six metrics are the locked design from milestone-01
+> phase-01 (metrics-instrumentation) and are **not yet emitted by the
+> controller**. The dashboard's PromQL proxy and Telemetry panels degrade
+> gracefully until they land.
+
+Six metrics will be incremented in the `TaskReconciler` terminal-success
 branch from the provider Anthropic `Usage` struct. **All six use the
 `{project, phase, wave}` label set.** The `wave` label value is the owning
 Wave CRD name resolved by walking the Task owner-reference chain (the same
@@ -142,9 +147,11 @@ This design provides:
 
 `prometheus.endpoint` is injected as the `PROM_ENDPOINT` environment
 variable into the dashboard process **only when non-empty**. When the value
-is empty the proxy routes return `503 Service Unavailable` rather than
-panicking, so clusters without a Prometheus instance remain functional for
-all non-metrics features.
+is empty the proxy routes return HTTP `200` with the
+`{"status":"unavailable"}` sentinel (deliberately not a 5xx, so the UI can
+distinguish not-configured from broken — see the graceful-degradation table
+in [docs/dashboard.md](dashboard.md)), and clusters without a Prometheus
+instance remain functional for all non-metrics features.
 
 ## Tracing
 
