@@ -103,8 +103,8 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — Pricing table correction (D-01) + provider-firewalled override merge & env transport (D-02 provider side)
-- [ ] 14-02-PLAN.md — Foundations: BudgetBlocked condition vocabulary + helpers (D-04) + ReservationStore with restart rederivation (D-05)
+- [x] 14-01-PLAN.md — Pricing table correction (D-01) + provider-firewalled override merge & env transport (D-02 provider side)
+- [x] 14-02-PLAN.md — Foundations: BudgetBlocked condition vocabulary + helpers (D-04) + ReservationStore with restart rederivation (D-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -159,6 +159,6 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
-| 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
+| 14. Budget Enforcement + Pricing | v1.0.1 | 2/5 | In Progress|  |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
