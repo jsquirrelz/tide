@@ -85,8 +85,59 @@ the dashboard Deployment is therefore an honest readiness signal.
 | `dashboard.replicas`                | `1`                                      | Replica count (stateless — safe >1)  |
 | `dashboard.resources`               | `50m/64Mi req`, `200m/256Mi limit`       | Resource budget                      |
 | `dashboard.service.{type,port,targetPort}` | `ClusterIP`, `80`, `8080`         | Service shape                        |
+| `prometheus.endpoint`               | `""`                                     | Server-side Prometheus endpoint for the PromQL proxy; injected as `PROM_ENDPOINT` into the dashboard container only when non-empty |
 
 See `charts/tide/values.yaml` for the full inline-documented value block.
+
+## Telemetry
+
+The dashboard exposes a **Telemetry** tab that surfaces token spend, wall-clock
+duration, dispatch counts, and failure rates at project, phase, and wave
+granularity. A **cost-over-time chart** (24 h / 7 d / 30 d selector) spans
+multi-day runs so operators can track spend trends across a full analytics
+pipeline.
+
+Data has two sources:
+
+- **Historical data** — queried from Prometheus via the PromQL proxy described
+  below. Available whenever `prometheus.endpoint` is configured.
+- **Live state** — read from CRD `.status` budget fields. Always available
+  regardless of Prometheus configuration.
+
+### PromQL proxy
+
+The dashboard never opens a second network target in the browser. Instead,
+Prometheus queries are proxied through the existing chi server:
+
+| Method | Path                   | Prometheus operation |
+| ------ | ---------------------- | -------------------- |
+| `GET`  | `/api/v1/query`        | Instant query        |
+| `GET`  | `/api/v1/query_range`  | Range query          |
+
+This single-origin design means the browser only ever talks to the dashboard
+service itself, so no CORS headers are required and the Prometheus endpoint
+stays entirely server-side (important when Prometheus is `ClusterIP`-only and
+unreachable outside the cluster).
+
+The dashboard reads the endpoint from the `PROM_ENDPOINT` environment variable,
+which the Helm chart injects from `prometheus.endpoint` **only when the value
+is non-empty**. A cluster without Prometheus configured never has the variable
+set.
+
+### Graceful degradation
+
+The proxy follows a three-state contract so the UI can distinguish between
+"not configured" and "configured but broken" without surfacing an error state
+to the operator:
+
+| Condition                              | Proxy response                                              | UI behaviour                                               |
+| -------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `PROM_ENDPOINT` is empty (not set)     | HTTP `200` with `{"status":"unavailable"}` sentinel        | Renders a non-error `TelemetryUnavailableNotice`; no spinner, no blank panel |
+| Endpoint configured, Prometheus non-2xx | HTTP `502` with `{"status":"error"}` sentinel             | Renders an error notice distinguishing unreachable from unconfigured |
+| Endpoint configured, Prometheus healthy | HTTP `200` with query result payload                       | Full Telemetry tab renders                                 |
+
+The live CRD `.status` budget views (token spend totals, phase progress) always
+render regardless of which proxy state is active.
 
 ## What's coming
 

@@ -69,6 +69,15 @@ type Dependencies struct {
 	// Tests pass an empty/fs.FS stub to verify the route table without
 	// requiring the real embed.
 	SPAFS fs.FS
+
+	// PrometheusEndpoint is the server-side Prometheus base URL the PromQL
+	// proxy forwards to (Q1: proxy, not a second browser datasource). It
+	// enters the process via the PROM_ENDPOINT env (set by main.go / the
+	// phase-04 Helm chart). Empty is a VALID, non-error state: the proxy
+	// handler self-degrades to an {status:unavailable} sentinel and the
+	// routes are still registered, so the dashboard renders live-only CRD
+	// views without Prometheus. Graceful degradation is first-class.
+	PrometheusEndpoint string
 }
 
 // RegisterRoutes builds the dashboard's chi.Mux. DASH-05 invariant: EVERY
@@ -76,7 +85,7 @@ type Dependencies struct {
 // the resulting route tree at test time and fails the build on any
 // non-GET method.
 //
-// Route table (Wave 5 inventory):
+// Route table (Wave 5 + phase-02 PromQL proxy inventory):
 //
 //	GET /healthz                              — process liveness
 //	GET /readyz                               — process readiness
@@ -86,11 +95,16 @@ type Dependencies struct {
 //	GET /api/v1/plans/{name}                  — single plan + task cards (plan 04-17)
 //	GET /api/v1/tasks/{name}                  — rich task detail (plan 04-17)
 //	GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
+//	GET /api/v1/query                         — PromQL instant query proxy (Q1, plan-02)
+//	GET /api/v1/query_range                   — PromQL range query proxy (Q1, plan-02)
 //	GET /*                                    — SPA fallback (embed.FS)
 //
 // EventsHandler is registered only when deps.Hub is non-nil; LogsHandler
 // only when deps.Clientset is non-nil. Tests pass nil for both to walk
 // just the synchronous route shape.
+// PromQL proxy routes (/query, /query_range) are ALWAYS registered —
+// the handler self-degrades to {status:unavailable} when PrometheusEndpoint
+// is empty (graceful degradation is first-class).
 func RegisterRoutes(deps Dependencies) chi.Router {
 	r := chi.NewRouter()
 
@@ -138,6 +152,14 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	if deps.Clientset != nil {
 		lh = dashboardapi.NewLogsHandler(deps.Client, deps.Clientset, deps.Log)
 	}
+	// PromQL proxy handler (Q1: proxy, not a second browser datasource).
+	// Registered unconditionally — the handler self-degrades to an
+	// {status:unavailable} sentinel on an empty endpoint so the dashboard
+	// renders live-only CRD views without Prometheus (graceful degradation).
+	promHandler := &dashboardapi.PrometheusHandler{
+		Endpoint: deps.PrometheusEndpoint,
+		Log:      deps.Log,
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
@@ -149,6 +171,10 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		if lh != nil {
 			r.Get("/tasks/{name}/log", lh.ServeHTTP)
 		}
+		// PromQL proxy routes — always registered per DASH-05 (GET-only).
+		// Handler self-degrades to {status:unavailable} when endpoint is empty.
+		r.Get("/query", promHandler.Query)
+		r.Get("/query_range", promHandler.QueryRange)
 	})
 
 	// SPA fallback (D-X2 single-image deploy). Serves the embedded

@@ -268,3 +268,33 @@ func TestRouteTableContainsExpectedGETs(t *testing.T) {
 		}
 	}
 }
+
+// TestPrometheusProxyRoutesRegistered asserts that both PromQL proxy routes
+// are present in the route table even when PrometheusEndpoint is "" (the
+// zero value used by newTestRouter). This proves graceful-degradation
+// REGISTRATION: the routes exist regardless of endpoint configuration
+// (the handler self-degrades to an {status:unavailable} sentinel on an
+// empty endpoint). DASH-05 invariant: both routes are GET-only.
+func TestPrometheusProxyRoutesRegistered(t *testing.T) {
+	// newTestRouter leaves PrometheusEndpoint at its zero value "" so this
+	// exercises the graceful-degradation path (no endpoint configured).
+	r := newTestRouter(t)
+
+	want := map[string]bool{
+		"GET /api/v1/query":       true,
+		"GET /api/v1/query_range": true,
+	}
+	got := make(map[string]bool)
+	err := chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		got[method+" "+route] = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chi.Walk: %v", err)
+	}
+	for route := range want {
+		if !got[route] {
+			t.Errorf("PromQL proxy route %q not registered (expected always-registered per graceful-degradation contract)", route)
+		}
+	}
+}
