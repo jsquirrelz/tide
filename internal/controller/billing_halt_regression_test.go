@@ -38,6 +38,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -344,6 +345,74 @@ func cleanupHaltTestJobs(projName string) {
 	}
 }
 
+// markTaskJobFailed simulates a terminal Job failure for a Running task. It:
+// 1. Waits until the Job created for taskUID (label tideproject.k8s/task-uid=<taskUID>) appears
+// 2. Patches its status to JobFailed so isJobTerminal returns true
+// This allows checkRunningState → handleJobCompletion to fire on next reconcile.
+func markTaskJobFailed(taskUID types.UID) {
+	var jobName string
+	var jobNS string
+
+	// Wait until the Job appears in the API (it may not be indexed yet immediately
+	// after pumpTaskToRunning returns, due to informer lag).
+	Eventually(func() bool {
+		var jobs batchv1.JobList
+		if err := k8sClient.List(context.Background(), &jobs, client.InNamespace("default")); err != nil {
+			return false
+		}
+		for _, j := range jobs.Items {
+			if j.Labels["tideproject.k8s/task-uid"] == string(taskUID) {
+				jobName = j.Name
+				jobNS = j.Namespace
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+		fmt.Sprintf("job for task-uid %s must exist", taskUID))
+
+	// Re-fetch the Job so we have a fresh ResourceVersion for the patch.
+	var j batchv1.Job
+	Expect(k8sClient.Get(context.Background(),
+		types.NamespacedName{Name: jobName, Namespace: jobNS}, &j)).To(Succeed())
+
+	jp := client.MergeFrom(j.DeepCopy())
+	now := metav1.Now()
+	// Kubernetes 1.33 requires startTime + FailureTarget=True before Failed=True.
+	j.Status.StartTime = &now
+	j.Status.Conditions = []batchv1.JobCondition{
+		{
+			Type:               batchv1.JobFailureTarget,
+			Status:             corev1.ConditionTrue,
+			Reason:             "PodFailed",
+			LastTransitionTime: now,
+		},
+		{
+			Type:               batchv1.JobFailed,
+			Status:             corev1.ConditionTrue,
+			Reason:             "BackoffLimitExceeded",
+			LastTransitionTime: now,
+		},
+	}
+	Expect(k8sClient.Status().Patch(context.Background(), &j, jp)).To(Succeed())
+
+	// Wait for cache to reflect the patch.
+	Eventually(func() bool {
+		var updated batchv1.Job
+		if err := mgrClient.Get(context.Background(),
+			types.NamespacedName{Name: jobName, Namespace: jobNS}, &updated); err != nil {
+			return false
+		}
+		for _, c := range updated.Status.Conditions {
+			if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+		fmt.Sprintf("job for task-uid %s must reflect Failed condition in cache", taskUID))
+}
+
 // Phase 13 HALT-01: run-1 regression Leg 1 — billing failure stamps BillingHalt.
 var _ = Describe("BillingHalt run-1 regression Leg 1: backstop stamps condition", Label("envtest", "phase13", "billing-halt", "regression"), func() {
 	ctx := context.Background()
@@ -375,6 +444,12 @@ var _ = Describe("BillingHalt run-1 regression Leg 1: backstop stamps condition"
 	It("billing-classified failure stamps BillingHalt=True on Project", func() {
 		var t tideprojectv1alpha1.Task
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: taskA, Namespace: "default"}, &t)).To(Succeed())
+
+		// Simulate Job terminal state so checkRunningState → handleJobCompletion fires.
+		markTaskJobFailed(t.UID)
+
+		// Inject billing-classified envelope AFTER marking the Job terminal so the
+		// reconcile path reads out.Reason from the fake EnvReader.
 		envReader.SetOut(string(t.UID), pkgdispatch.EnvelopeOut{
 			ExitCode:    1,
 			Reason:      billingReason,
@@ -434,6 +509,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 2: sibling holds while halted
 	It("sibling Task B creates no Job while BillingHalt is present", func() {
 		var t tideprojectv1alpha1.Task
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: taskA, Namespace: "default"}, &t)).To(Succeed())
+		markTaskJobFailed(t.UID)
 		envReader.SetOut(string(t.UID), pkgdispatch.EnvelopeOut{
 			ExitCode: 1, Reason: billingReason, Result: "failed",
 			CompletedAt: metav1.Now().Time,
@@ -505,6 +581,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 3: dispatch resumes after cle
 	It("dispatch resumes after BillingHalt cleared (tide resume semantics)", func() {
 		var ta tideprojectv1alpha1.Task
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: taskA, Namespace: "default"}, &ta)).To(Succeed())
+		markTaskJobFailed(ta.UID)
 		envReader.SetOut(string(ta.UID), pkgdispatch.EnvelopeOut{
 			ExitCode: 1, Reason: billingReason, Result: "failed",
 			CompletedAt: metav1.Now().Time,
@@ -589,6 +666,10 @@ var _ = Describe("BillingHalt backstop: non-billing failure does not set conditi
 	It("forced-failure Reason does NOT set BillingHalt on Project (classifier specificity)", func() {
 		var t tideprojectv1alpha1.Task
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: taskName, Namespace: "default"}, &t)).To(Succeed())
+
+		// Mark the Job terminal so checkRunningState → handleJobCompletion fires.
+		markTaskJobFailed(t.UID)
+
 		envReader.SetOut(string(t.UID), pkgdispatch.EnvelopeOut{
 			ExitCode:    1,
 			Reason:      "forced-failure",

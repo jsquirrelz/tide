@@ -522,6 +522,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		}
 	}
 
+	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
+	if out.ExitCode != 0 && project != nil {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "plan", plan.Name)
+		}
+	}
+
 	// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
 	// proceeds past the gate. Stamp always when we have a valid tiny status (i.e.
 	// EnvReader succeeded) — the reporter Job is in flight, Tasks will appear shortly.

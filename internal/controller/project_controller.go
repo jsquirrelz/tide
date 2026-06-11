@@ -1116,6 +1116,14 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		}
 	}
 
+	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
+	// NOT the push-Job path — push failures have their own classification.
+	if envReadOK && out.ExitCode != 0 {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "project", project.Name)
+		}
+	}
+
 	// Plan 09-08 Defect B fix: uniform ChildCount-gated succession. Gate:
 	//   expected == 0            → return (checkProjectComplete handles leaf case
 	//                              on next reconcile via BoundaryDetected)

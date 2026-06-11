@@ -438,6 +438,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		}
 	}
 
+	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
+	if envReadOK && out.ExitCode != 0 && project != nil {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "phase", ph.Name)
+		}
+	}
+
 	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).
 	// Phase 12 D-04: if the phase already has an ApprovedByUser (or ResumedByUser)
 	// condition, skip the park — don't re-park an already-approved level.

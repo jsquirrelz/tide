@@ -507,6 +507,15 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		}
 	}
 
+	// Phase 13 D-04 layer 2: backstop — if the planner Job failed with a billing
+	// reason, stamp BillingHalt=True on the owning Project. Non-fatal: the
+	// reconcile continues through the normal completion path regardless.
+	if envReadOK && out.ExitCode != 0 && project != nil {
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "milestone", ms.Name)
+		}
+	}
+
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
 	// top of handleJobCompletion per Phase 04.1 — reject should not be
 	// gated on envelope-read success.

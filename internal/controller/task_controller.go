@@ -824,6 +824,13 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			Message:            fmt.Sprintf("Task failed: exitCode=%d result=%s", out.ExitCode, out.Result),
 			LastTransitionTime: metav1.Now(),
 		})
+		// Phase 13 D-04 layer 2: backstop — classify the envelope's failure Reason
+		// against the billing signature; if matched, stamp BillingHalt=True on the
+		// owning Project. Non-fatal: the task's own terminal patch proceeds regardless
+		// (pattern: budget.RollUpUsage error handling below).
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "task", task.Name)
+		}
 	} else {
 		task.Status.Phase = "Succeeded"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
