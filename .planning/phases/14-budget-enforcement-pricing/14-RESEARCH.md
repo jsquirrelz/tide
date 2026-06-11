@@ -528,14 +528,14 @@ if !r.ReservationStore.HasHeadroom(project, estimatedCents) {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Pricing override injection mechanism: `--config` YAML vs. dedicated flag**
+1. **RESOLVED (plan 14-01/14-05): dedicated `--pricing-overrides-json` flag.** The manager never imports the anthropic package; overrides flow Helm value → manager flag (validated at startup, fail-fast) → `BuildOptions.PricingOverridesJSON` → `TIDE_PRICING_OVERRIDES_JSON` Job env → subagent-side merge. **Pricing override injection mechanism: `--config` YAML vs. dedicated flag**
    - What we know: `cmd/manager/main.go` parses `--config /etc/tide/config.yaml` but the current usage was not fully inspected in this session.
    - What's unclear: Does the config YAML have a well-defined schema already, or is `pricing.overrides` a new top-level key? A dedicated `--pricing-overrides-json` flag might be simpler.
    - Recommendation: Planner reads `cmd/manager/main.go` and the config.yaml schema before deciding. Either approach is valid; consistency with existing patterns matters.
 
-2. **Five dispatch sites vs. TaskReconciler only for BudgetBlocked**
+2. **RESOLVED (plan 14-05): mirror BillingHalt at all five dispatch sites.** **Five dispatch sites vs. TaskReconciler only for BudgetBlocked**
    - What we know: Phase 13 added BillingHalt checks at all FIVE dispatch sites (milestone, phase, plan, project, task reconcilers). The CONTEXT says BudgetBlocked mirrors BillingHalt shape.
    - What's unclear: Should BudgetBlocked also be checked at all five sites, or only the task reconciler (where `RollUpUsage` runs)?
    - Recommendation: Mirror BillingHalt exactly — add `checkBudgetBlocked` at all five sites. Planner-level dispatch also burns budget via planner Jobs; blocking at all five sites prevents any new spending once the cap is hit.

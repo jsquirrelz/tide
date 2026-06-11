@@ -101,10 +101,18 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 14-01-PLAN.md — Pricing table correction (D-01) + provider-firewalled override merge & env transport (D-02 provider side)
 - [ ] 14-02-PLAN.md — Foundations: BudgetBlocked condition vocabulary + helpers (D-04) + ReservationStore with restart rederivation (D-05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 14-03-PLAN.md — TaskReconciler dispatch-gate rewrite, reserve/settle wiring, run-1 regression envtest
 - [ ] 14-04-PLAN.md — Pricing-drift automation: hack script + weekly deduped-issue workflow + release checklist (D-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 14-05-PLAN.md — Five-site BudgetBlocked rollout + manager flags/validation/rederive runnable + additive Helm surface
 
 ### Phase 15: Paper Cuts
