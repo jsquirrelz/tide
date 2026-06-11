@@ -72,17 +72,39 @@ Deferred — tracked but not in this roadmap.
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
+Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmapper) | | |
+| GATE-01 | Phase 12 | Pending |
+| GATE-02 | Phase 12 | Pending |
+| GATE-03 | Phase 12 | Pending |
+| RESUME-01 | Phase 12 | Pending |
+| DISPATCH-01 | Phase 13 | Pending |
+| DISPATCH-02 | Phase 13 | Pending |
+| HALT-01 | Phase 13 | Pending |
+| BUDGET-01 | Phase 14 | Pending |
+| BUDGET-02 | Phase 14 | Pending |
+| BUDGET-03 | Phase 14 | Pending |
+| CUTS-01 | Phase 15 | Pending |
+| CUTS-02 | Phase 15 | Pending |
+| CUTS-03 | Phase 15 | Pending |
+| CUTS-04 | Phase 15 | Pending |
+| CUTS-05 | Phase 15 | Pending |
+| CUTS-06 | Phase 15 | Pending |
+| CUTS-07 | Phase 15 | Pending |
+| TELEM-01 | Phase 16 | Pending |
+| TELEM-02 | Phase 16 | Pending |
+| TELEM-03 | Phase 16 | Pending |
+| TELEM-04 | Phase 16 | Pending |
+| TELEM-05 | Phase 16 | Pending |
+| TELEM-06 | Phase 16 | Pending |
 
 **Coverage:**
-- v1.0.1 requirements: 21 total
-- Mapped to phases: 0
-- Unmapped: 21 ⚠️ (pre-roadmap)
+- v1.0.1 requirements: 23 total
+- Mapped to phases: 23
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-11*
-*Last updated: 2026-06-11 after initial definition*
+*Last updated: 2026-06-11 — traceability populated by roadmapper*
