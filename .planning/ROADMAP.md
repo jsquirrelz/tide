@@ -44,7 +44,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12-03-PLAN.md — Descent dispatch hold: children materialize but zero Jobs while parent parked at AwaitingApproval (GATE-04)
+- [x] 12-03-PLAN.md — Descent dispatch hold: children materialize but zero Jobs while parent parked at AwaitingApproval (GATE-04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -118,7 +118,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 2/4 | In Progress|  |
+| 12. Gate Semantics + Reject/Resume | v1.0.1 | 3/4 | In Progress|  |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
