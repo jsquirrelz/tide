@@ -13,7 +13,7 @@
 **Milestone Goal:** Fix the dogfood run-1 findings (gate semantics run-killer, reject/resume recovery, image dispatch chain, billing halt, budget UX, paper cuts) and complete the merged telemetry foundation. Every fix carries a regression test reproducing the run-1 symptom.
 
 - [x] **Phase 12: Gate Semantics + Reject/Resume** - Fix ConsumeApprove advancement bug + retry path + resume recovery (run-killers) (completed 2026-06-11)
-- [ ] **Phase 13: Dispatch Image Resolution + Provider Halt** - Implement image-resolution chain at all dispatch sites + billing-400 project-wide halt
+- [x] **Phase 13: Dispatch Image Resolution + Provider Halt** - Implement image-resolution chain at all dispatch sites + billing-400 project-wide halt (completed 2026-06-11)
 - [ ] **Phase 14: Budget Enforcement + Pricing** - Current model IDs in pricing table + BudgetBlocked condition + in-flight overshoot bound
 - [ ] **Phase 15: Paper Cuts** - Reporter CR labels, boundary push no-op, phase status flapping, artifact-get stub, dashboard chip + wave view, file-touch overlap
 - [ ] **Phase 16: Telemetry Completion** - PROM_ENDPOINT wiring, TelemetryView tab, six locked metrics, PromQL name alignment, Makefile gate, proxy client timeout
@@ -75,8 +75,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
-- [ ] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
+- [x] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
+- [x] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
 
 ### Phase 14: Budget Enforcement + Pricing
 
@@ -134,7 +134,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
-| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 2/4 | In Progress|  |
+| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 4/4 | Complete   | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
