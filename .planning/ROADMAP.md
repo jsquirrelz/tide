@@ -39,8 +39,8 @@
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Approve-at-descent routing: approval returns level to Running + ApprovedByUser; succession stays children-gated (GATE-01); gates.md rewrite (GATE-02)
-- [ ] 12-02-PLAN.md — CLI verbs: tide resume --retry-failed status reset (RESUME-01) + tide approve refuses Failed levels with actionable error (GATE-03)
+- [x] 12-01-PLAN.md — Approve-at-descent routing: approval returns level to Running + ApprovedByUser; succession stays children-gated (GATE-01); gates.md rewrite (GATE-02)
+- [x] 12-02-PLAN.md — CLI verbs: tide resume --retry-failed status reset (RESUME-01) + tide approve refuses Failed levels with actionable error (GATE-03)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -118,7 +118,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 0/4 | Not started | - |
+| 12. Gate Semantics + Reject/Resume | v1.0.1 | 2/4 | In Progress|  |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
