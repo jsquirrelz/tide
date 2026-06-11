@@ -124,7 +124,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		}
 	}
 
-	// --- Milestone ---
+	// --- Milestone hold spec ---
 	Describe("Milestone level: BillingHalt=True → no planner Job, Status.Phase unchanged", func() {
 		const projName = "bh-ms-proj-1"
 		const msName = "bh-ms-1"
@@ -147,14 +147,18 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
 			_ = k8sClient.Delete(ctx, &ms)
 			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
 		})
 
 		It("no planner Job created; Status.Phase unchanged while BillingHalt=True", func() {
 			r := newBHMilestoneReconciler()
 			name := types.NamespacedName{Name: msName, Namespace: "default"}
+			var result reconcile.Result
 			for range 3 {
-				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			}
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+				"T-13-G5: checkBillingHalt must return 30s park requeue (proves HALT-01 gate fired)")
 
 			var ms tideprojectv1alpha1.Milestone
 			Expect(mgrClient.Get(ctx, name, &ms)).To(Succeed())
@@ -165,7 +169,55 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		})
 	})
 
-	// --- Phase ---
+	// --- Milestone halt-cleared control spec (unique names to avoid finalizer collision) ---
+	Describe("Milestone level halt-cleared control: planner Job IS created once BillingHalt removed", func() {
+		const projName = "bh-ms-proj-2"
+		const msName = "bh-ms-2"
+
+		BeforeEach(func() {
+			makeProjectForHalt(ctx, projName)
+			stampBillingHalt(ctx, projName)
+
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		})
+		AfterEach(func() {
+			var ms tideprojectv1alpha1.Milestone
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
+			_ = k8sClient.Delete(ctx, &ms)
+			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
+		})
+
+		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
+			r := newBHMilestoneReconciler()
+			name := types.NamespacedName{Name: msName, Namespace: "default"}
+			// Pre-condition: pump past finalizer+ownerRef setup (3 reconciles) until
+			// the reconciler enters reconcilePlannerDispatch and returns 30s.
+			var result reconcile.Result
+			for range 3 {
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			}
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			// Clear BillingHalt (mirrors tide resume D-06).
+			clearBillingHalt(ctx, projName)
+
+			// Re-reconcile: dispatch body must now create a planner Job.
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred(), "reconcile after BillingHalt cleared must not error")
+
+			var ms tideprojectv1alpha1.Milestone
+			Expect(mgrClient.Get(ctx, name, &ms)).To(Succeed())
+			assertPlannerJobForParent("milestone", ms.UID)
+		})
+	})
+
+	// --- Phase hold spec ---
 	Describe("Phase level: BillingHalt=True → no planner Job, Status.Phase unchanged", func() {
 		const projName = "bh-ph-proj-1"
 		const phName = "bh-ph-1"
@@ -205,14 +257,18 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
 			_ = k8sClient.Delete(ctx, &ms)
 			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
 		})
 
 		It("no planner Job created; Status.Phase unchanged while BillingHalt=True", func() {
 			r := newBHPhaseReconciler()
 			name := types.NamespacedName{Name: phName, Namespace: "default"}
+			var result reconcile.Result
 			for range 3 {
-				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			}
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+				"T-13-G5: checkBillingHalt must return 30s park requeue (proves HALT-01 gate fired)")
 
 			var ph tideprojectv1alpha1.Phase
 			Expect(mgrClient.Get(ctx, name, &ph)).To(Succeed())
@@ -223,7 +279,62 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		})
 	})
 
-	// --- Plan ---
+	// --- Phase halt-cleared control spec (unique names) ---
+	Describe("Phase level halt-cleared control: planner Job IS created once BillingHalt removed", func() {
+		const projName = "bh-ph-proj-2"
+		const phName = "bh-ph-2"
+		const msName = "bh-ph-ms-2"
+
+		BeforeEach(func() {
+			makeProjectForHalt(ctx, projName)
+			stampBillingHalt(ctx, projName)
+
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+			ph := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default",
+					Labels: map[string]string{"tideproject.k8s/project": projName}},
+				Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+			waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+		})
+		AfterEach(func() {
+			var ph tideprojectv1alpha1.Phase
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &ph)
+			_ = k8sClient.Delete(ctx, &ph)
+			var ms tideprojectv1alpha1.Milestone
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
+			_ = k8sClient.Delete(ctx, &ms)
+			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
+		})
+
+		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
+			r := newBHPhaseReconciler()
+			name := types.NamespacedName{Name: phName, Namespace: "default"}
+			var result reconcile.Result
+			for range 3 {
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			}
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			clearBillingHalt(ctx, projName)
+
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+
+			var ph tideprojectv1alpha1.Phase
+			Expect(mgrClient.Get(ctx, name, &ph)).To(Succeed())
+			assertPlannerJobForParent("phase", ph.UID)
+		})
+	})
+
+	// --- Plan hold spec ---
 	Describe("Plan level: BillingHalt=True → no planner Job, Status.Phase unchanged", func() {
 		const projName = "bh-plan-proj-1"
 		const planName = "bh-plan-1"
@@ -270,14 +381,18 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
 			_ = k8sClient.Delete(ctx, &ms)
 			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
 		})
 
 		It("no planner Job created; Status.Phase unchanged while BillingHalt=True", func() {
 			r := newBHPlanReconciler()
 			name := types.NamespacedName{Name: planName, Namespace: "default"}
+			var result reconcile.Result
 			for range 3 {
-				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			}
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+				"T-13-G5: checkBillingHalt must return 30s park requeue (proves HALT-01 gate fired)")
 
 			var plan tideprojectv1alpha1.Plan
 			Expect(mgrClient.Get(ctx, name, &plan)).To(Succeed())
@@ -288,7 +403,77 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		})
 	})
 
-	// --- Project ---
+	// --- Plan halt-cleared control spec (unique names) ---
+	Describe("Plan level halt-cleared control: planner Job IS created once BillingHalt removed", func() {
+		const projName = "bh-plan-proj-2"
+		const planName = "bh-plan-2"
+		const msName = "bh-plan-ms-2"
+		const phName = "bh-plan-ph-2"
+
+		BeforeEach(func() {
+			makeProjectForHalt(ctx, projName)
+			stampBillingHalt(ctx, projName)
+
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+			ph := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default",
+					Labels: map[string]string{"tideproject.k8s/project": projName}},
+				Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+			waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+
+			plan := &tideprojectv1alpha1.Plan{
+				ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default",
+					Labels: map[string]string{"tideproject.k8s/project": projName}},
+				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+			}
+			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+		})
+		AfterEach(func() {
+			var plan tideprojectv1alpha1.Plan
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan)
+			_ = k8sClient.Delete(ctx, &plan)
+			var ph tideprojectv1alpha1.Phase
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &ph)
+			_ = k8sClient.Delete(ctx, &ph)
+			var ms tideprojectv1alpha1.Milestone
+			_ = k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)
+			_ = k8sClient.Delete(ctx, &ms)
+			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
+		})
+
+		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
+			r := newBHPlanReconciler()
+			name := types.NamespacedName{Name: planName, Namespace: "default"}
+			var result reconcile.Result
+			for range 3 {
+				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			}
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			clearBillingHalt(ctx, projName)
+
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+
+			var plan tideprojectv1alpha1.Plan
+			Expect(mgrClient.Get(ctx, name, &plan)).To(Succeed())
+			assertPlannerJobForParent("plan", plan.UID)
+		})
+	})
+
+	// --- Project hold spec ---
+	// Calls reconcileProjectPlannerDispatch directly (same package) to bypass
+	// the init-Job/PVC lifecycle in reconcileProjectPhase2 and prove the
+	// BillingHalt check at the correct dispatch-entry point.
 	Describe("Project level: BillingHalt=True → no planner Job created", func() {
 		const projName = "bh-project-1"
 
@@ -298,21 +483,62 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		})
 		AfterEach(func() {
 			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
 		})
 
 		It("no planner Job created while BillingHalt=True on Project itself", func() {
 			r := newBHProjectReconciler()
-			name := types.NamespacedName{Name: projName, Namespace: "default"}
-			for range 3 {
-				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-			}
-
 			var proj tideprojectv1alpha1.Project
-			Expect(mgrClient.Get(ctx, name, &proj)).To(Succeed())
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &proj)).To(Succeed())
+
+			result, err := r.reconcileProjectPlannerDispatch(ctx, &proj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+				"T-13-G5: checkBillingHalt must return 30s park requeue (proves HALT-01 gate fired)")
+
 			Expect(proj.Status.Phase).NotTo(Equal("Failed"),
 				"T-13-15: BillingHalt must not fail the Project")
 
 			assertNoJobForParent(proj.UID)
+		})
+	})
+
+	// --- Project halt-cleared control spec (unique name) ---
+	// Calls reconcileProjectPlannerDispatch directly (same package) to prove
+	// the dispatch body runs (Job created) once BillingHalt is cleared.
+	Describe("Project level halt-cleared control: planner Job IS created once BillingHalt removed", func() {
+		const projName = "bh-project-2"
+
+		BeforeEach(func() {
+			makeProjectForHalt(ctx, projName)
+			stampBillingHalt(ctx, projName)
+		})
+		AfterEach(func() {
+			cleanupProject(projName)
+			cleanupHaltTestJobs(projName)
+		})
+
+		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
+			r := newBHProjectReconciler()
+			var proj tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &proj)).To(Succeed())
+
+			// Pre-condition: BillingHalt blocks dispatch.
+			result, err := r.reconcileProjectPlannerDispatch(ctx, &proj)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+
+			// Clear BillingHalt (mirrors tide resume D-06).
+			clearBillingHalt(ctx, projName)
+
+			// Re-fetch so the reconciler sees the cleared condition.
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &proj)).To(Succeed())
+
+			// Re-dispatch: dispatch body must now create a planner Job.
+			_, err = r.reconcileProjectPlannerDispatch(ctx, &proj)
+			Expect(err).NotTo(HaveOccurred(), "reconcileProjectPlannerDispatch after BillingHalt cleared must not error")
+
+			assertPlannerJobForParent("project", proj.UID)
 		})
 	})
 })
@@ -696,13 +922,16 @@ var _ = Describe("BillingHalt backstop: non-billing failure does not set conditi
 })
 
 // newBHMilestoneReconciler builds a MilestoneReconciler for BillingHalt hold specs.
-// Uses testSigningKey so the dispatch guard (len(SigningKey) > 0) passes and
-// the reconciler enters the dispatch path before hitting the BillingHalt gate.
+// Wires both dispatch-entry gates: Dispatcher != nil (outer gate, required to
+// enter reconcilePlannerDispatch) and SigningKey (credproxy token gate). Without
+// Dispatcher set the reconciler exits before checkBillingHalt is ever reachable,
+// making the hold specs vacuous (HALT-01 regression honesty — Phase 13 WR-01).
 func newBHMilestoneReconciler() *MilestoneReconciler {
 	return &MilestoneReconciler{
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
-		SigningKey:     testSigningKey,
+		Dispatcher:     &stubDispatcher{},
+		SigningKey:      testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -712,11 +941,13 @@ func newBHMilestoneReconciler() *MilestoneReconciler {
 }
 
 // newBHPhaseReconciler builds a PhaseReconciler for BillingHalt hold specs.
+// See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHPhaseReconciler() *PhaseReconciler {
 	return &PhaseReconciler{
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
-		SigningKey:     testSigningKey,
+		Dispatcher:     &stubDispatcher{},
+		SigningKey:      testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -726,11 +957,13 @@ func newBHPhaseReconciler() *PhaseReconciler {
 }
 
 // newBHPlanReconciler builds a PlanReconciler for BillingHalt hold specs.
+// See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHPlanReconciler() *PlanReconciler {
 	return &PlanReconciler{
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
-		SigningKey:     testSigningKey,
+		Dispatcher:     &stubDispatcher{},
+		SigningKey:      testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -740,17 +973,42 @@ func newBHPlanReconciler() *PlanReconciler {
 }
 
 // newBHProjectReconciler builds a ProjectReconciler for BillingHalt hold specs.
+// See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHProjectReconciler() *ProjectReconciler {
 	return &ProjectReconciler{
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
-		SigningKey:     testSigningKey,
+		Dispatcher:     &stubDispatcher{},
+		SigningKey:      testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
 		},
 		EnvReader: newMapEnvReader(),
 	}
+}
+
+// assertPlannerJobForParent asserts that at least one planner Job with
+// the level-specific parent UID label (tideproject.k8s/<level>-uid) exists
+// in the default namespace. Used by halt-cleared control specs to prove the
+// dispatch body was entered (non-vacuousness proof for HALT-01).
+func assertPlannerJobForParent(level string, parentUID types.UID) {
+	ctx := context.Background()
+	label := fmt.Sprintf("tideproject.k8s/%s-uid", level)
+	Eventually(func(g Gomega) {
+		var jobs batchv1.JobList
+		g.Expect(k8sClient.List(ctx, &jobs, client.InNamespace("default"))).To(Succeed())
+		found := false
+		for _, j := range jobs.Items {
+			if j.Labels[label] == string(parentUID) {
+				found = true
+				break
+			}
+		}
+		g.Expect(found).To(BeTrue(),
+			fmt.Sprintf("halt-cleared control: planner Job with %s=%s must exist after BillingHalt cleared",
+				label, parentUID))
+	}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 }
 
 // ---- unused import guard ----
