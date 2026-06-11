@@ -213,7 +213,7 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		})
 	})
 
-	Describe("Test 6c — reject annotation on Project: Plan ends Failed/RejectedByUser", func() {
+	Describe("Test 6c — reject annotation on Project: parks Plan with RejectedByUser condition (D-05)", func() {
 		const projectName, msName, phaseName, planName = "gate-proj-pl3", "gate-ms-pl3", "gate-phase-pl3", "gate-plan-3"
 
 		BeforeEach(func() {
@@ -236,12 +236,13 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName, planName) })
 
-		It("plan ends Failed with Reason=RejectedByUser and Message containing reason", func() {
+		It("Plan is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed), then recovers after annotation clear", func() {
 			plan := &tideprojectv1alpha1.Plan{
 				ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"},
 				Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
@@ -254,16 +255,44 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 			}
-			driveToJobCompletion(planName, r, envReader)
+			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 3)).To(Succeed())
 
+			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {
 				var after tideprojectv1alpha1.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
-				g.Expect(after.Status.Phase).To(Equal("Failed"))
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
-				g.Expect(c).NotTo(BeNil())
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: reject must park the Plan, not fail-mark it")
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("plan halt"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// D-05 recovery: clear the reject annotation (simulating tide resume).
+			var current tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
+			newAnno := gates.ConsumeReject(&current)
+			annoPatch := client.MergeFrom(current.DeepCopy())
+			current.SetAnnotations(newAnno)
+			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return "err"
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+
+			// After annotation clear, re-driving must let the Plan proceed.
+			driveToJobCompletion(planName, r, envReader)
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Plan
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: Plan must not be Failed after reject annotation cleared")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})

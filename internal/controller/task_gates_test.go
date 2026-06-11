@@ -92,7 +92,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		})
 	})
 
-	Describe("Test 7b — reject annotation on Project halts Task to Failed", func() {
+	Describe("Test 7b — reject annotation on Project parks Task with RejectedByUser condition (D-05)", func() {
 		const projectName, planRef, taskName = "gate-proj-tk2", "gate-plan-tk2", "gate-task-2"
 
 		BeforeEach(func() {
@@ -120,21 +120,49 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			cleanupProject(projectName)
 		})
 
-		It("Task ends Failed with Reason=RejectedByUser", func() {
+		It("Task is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed), then recovers after annotation clear", func() {
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
 			_, err := reconcileN(r, name, 5)
 			Expect(err).NotTo(HaveOccurred())
 
+			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {
 				var t tideprojectv1alpha1.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
-				g.Expect(t.Status.Phase).To(Equal("Failed"))
-				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
-				g.Expect(c).NotTo(BeNil())
+				g.Expect(t.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: reject must park the Task, not fail-mark it")
+				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("task halt"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// D-05 recovery: clear the reject annotation (simulating tide resume).
+			var current tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
+			newAnno := gates.ConsumeReject(&current)
+			annoPatch := client.MergeFrom(current.DeepCopy())
+			current.SetAnnotations(newAnno)
+			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return "err"
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+
+			// After annotation clear, re-driving must let the Task proceed (no longer halted).
+			_, err = reconcileN(r, name, 3)
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func(g Gomega) {
+				var t tideprojectv1alpha1.Task
+				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
+				g.Expect(t.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: Task must not be Failed after reject annotation cleared")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
