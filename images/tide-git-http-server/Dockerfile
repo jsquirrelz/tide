@@ -15,7 +15,7 @@
 # required for supporting git plumbing binaries.
 #
 # Single-stage build — no Go binary to compile; just package installation.
-FROM alpine:3.21
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 RUN apk add --no-cache git git-daemon nginx fcgiwrap spawn-fcgi \
     && adduser -D -u 1000 nonroot \

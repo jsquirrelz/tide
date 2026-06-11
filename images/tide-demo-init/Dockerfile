@@ -5,7 +5,7 @@
 #
 # Stage 1: compile a static Linux binary with the medium-sample fixture
 # content embedded via //go:embed all:fixture (see cmd/tide-demo-init/main.go).
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:a6a091eac01ceac4b97496fe2957a49b6cdd83365337d5f46f6f73710424e805 AS builder
 
 WORKDIR /workspace
 
@@ -56,7 +56,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # correctly — far less fragile than hand-assembling a static git into
 # distroless. We recreate the non-root UID 1000 contract that distroless
 # provided out of the box (D-G3 subagent harness UID).
-FROM alpine:3.21
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 RUN apk add --no-cache git \
     && adduser -D -u 1000 nonroot

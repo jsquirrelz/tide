@@ -5,7 +5,7 @@
 #                -f images/tide-push/Dockerfile .
 #
 # Stage 1: compile a static Linux binary.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:a6a091eac01ceac4b97496fe2957a49b6cdd83365337d5f46f6f73710424e805 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 # CGO_ENABLED=0 binary runs fine on musl). We recreate the uid 65532 (nonroot)
 # the prior distroless:nonroot base ran as, to keep the pod securityContext +
 # PVC fsGroup expectations intact (D-G3).
-FROM alpine:3.21
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
 
 RUN apk add --no-cache git \
     # The per-run repo/worktree on the shared PVC may be owned by a different

@@ -5,7 +5,7 @@
 #                -f images/stub-subagent/Dockerfile .
 #
 # Stage 1: compile a static Linux binary.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:a6a091eac01ceac4b97496fe2957a49b6cdd83365337d5f46f6f73710424e805 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -31,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 # neither is needed.  distroless/static:nonroot is used instead of scratch
 # because it ships a /etc/passwd and lets the container runtime enforce
 # USER 1000 cleanly across all OCI runtimes.
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:963fa6c544fe5ce420f1f54fb88b6fb01479f054c8056d0f74cc2c6000df5240
 
 COPY --from=builder /out/stub-subagent /usr/local/bin/stub-subagent
 

@@ -14,7 +14,7 @@
 #
 # The SPA must be pre-built into cmd/dashboard/embed/dist/ before `docker build`
 # (run `make dashboard-frontend` if cmd/dashboard/embed/dist is stale).
-FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26@sha256:11fd8f7f63db3b6fb198797042ba4c40a4a34dc83325d3328ca3bc4bb7726786 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -28,7 +28,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o dashboard ./cmd/dashboard
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:963fa6c544fe5ce420f1f54fb88b6fb01479f054c8056d0f74cc2c6000df5240
 WORKDIR /
 COPY --from=builder /workspace/dashboard .
 USER 65532:65532

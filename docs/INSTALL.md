@@ -403,7 +403,28 @@ Verify a specific image is published and public:
 docker manifest inspect ghcr.io/jsquirrelz/tide-controller:1.0.0
 ```
 
-Exits `0` if the image is published and publicly accessible; non-zero if absent or private. Run for each of the 6 images before announcing a release.
+Exits `0` if the image is published and publicly accessible; non-zero if absent or private. Run for each of the 7 images before announcing a release.
+
+## Uninstall
+
+Two releases, two very different blast radii — order matters:
+
+```bash
+# 1. Remove the controller + dashboard. SAFE: your Project/Milestone/Phase/
+#    Plan/Task/Wave CRs (and their status history) remain in etcd untouched.
+helm uninstall tide -n tide-system
+
+# 2. Remove the CRDs. ⚠️ DESTRUCTIVE: deleting a CustomResourceDefinition
+#    makes Kubernetes garbage-collect EVERY custom resource of that Kind,
+#    cluster-wide — all Projects in all namespaces, plus the entire child
+#    hierarchy, irreversibly. Back up first if any run history matters:
+kubectl get projects,milestones,phases,plans,tasks,waves -A -o yaml > tide-backup.yaml
+helm uninstall tide-crds -n tide-system
+```
+
+Per-namespace resources you created while bootstrapping Project namespaces
+(`tide-projects` PVC, ServiceAccounts, the `tide-signing-key` copy) are not
+chart-managed — delete the namespaces or the resources directly.
 
 ## Next steps
 

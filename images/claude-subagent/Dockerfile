@@ -5,7 +5,7 @@
 #                -f images/claude-subagent/Dockerfile .
 #
 # Stage 1: compile a static Linux Go binary.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:a6a091eac01ceac4b97496fe2957a49b6cdd83365337d5f46f6f73710424e805 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
       ./cmd/claude-subagent
 
 # Stage 2: Claude Code CLI runtime image.
-# node:22-slim is required because the claude CLI is a Node binary. The CLI
+# node:22-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732 is required because the claude CLI is a Node binary. The CLI
 # version is pinned (Pitfall 3 — RESEARCH.md: never npm install without an
 # explicit @<version>); pin tracks the planner's choice on the STACK floor of
 # v2.1.139. The signed-token credential is injected at K8s Pod-spec time by
@@ -41,9 +41,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
 # git CLI's `git worktree add` (pkg/git/worktree.go — go-git/v5 does not expose
 # linked worktrees). Clone still uses go-git's pure-Go HTTP transport, but the
 # per-Task worktree the executor authors into needs the real git binary, so
-# node:22-slim (Debian) gets git installed. Prior to Phase 10 no executor ever
+# node:22-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732 (Debian) gets git installed. Prior to Phase 10 no executor ever
 # ran end-to-end, so this gap stayed latent.
-FROM node:22-slim
+FROM node:22-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
