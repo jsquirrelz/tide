@@ -45,7 +45,7 @@ func withFakeSubagent(t *testing.T, fixturePath, workspaceRoot string) {
 	t.Helper()
 	orig := newSubagent
 	t.Cleanup(func() { newSubagent = orig })
-	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+	newSubagent = func(claudeBinary, wsRoot string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
 		a := anthropic.NewWithExec(
 			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
 			func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -147,7 +147,7 @@ func TestClaudeSubagentMain_EnvelopeLoadFailure(t *testing.T) {
 	// envelope load fails.
 	orig := newSubagent
 	t.Cleanup(func() { newSubagent = orig })
-	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+	newSubagent = func(claudeBinary, wsRoot string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
 		t.Fatalf("newSubagent must not be invoked on envelope load failure")
 		return nil
 	}
@@ -229,7 +229,7 @@ func TestClaudeSubagentMain_InvokesEnsureWorktreeBeforeRun(t *testing.T) {
 	}
 	origSA := newSubagent
 	t.Cleanup(func() { newSubagent = origSA })
-	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+	newSubagent = func(claudeBinary, wsRoot string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
 		return anthropic.NewWithExec(
 			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
 			func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -290,7 +290,7 @@ func TestClaudeSubagentMain_PassesEnvBranchToWorktree(t *testing.T) {
 	}
 	origSA := newSubagent
 	t.Cleanup(func() { newSubagent = origSA })
-	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+	newSubagent = func(claudeBinary, wsRoot string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
 		return anthropic.NewWithExec(
 			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
 			func(ctx context.Context, name string, args ...string) *exec.Cmd {

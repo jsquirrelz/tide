@@ -37,12 +37,33 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
+// parsePricingOverridesFromEnv reads TIDE_PRICING_OVERRIDES_JSON and parses it.
+// An empty or missing env var returns a nil map (no overrides). An invalid JSON
+// value logs a loud stderr warning and returns nil (bad override must not fail
+// the session — Plan 14-05 validates at manager startup; this is defense in depth).
+func parsePricingOverridesFromEnv(stderr io.Writer) map[string]pkgdispatch.PriceOverride {
+	raw := os.Getenv("TIDE_PRICING_OVERRIDES_JSON")
+	if raw == "" {
+		return nil
+	}
+	overrides, err := pkgdispatch.ParsePricingOverrides(raw)
+	if err != nil {
+		fmt.Fprintf(stderr, "pricing: invalid TIDE_PRICING_OVERRIDES_JSON, ignoring overrides: %v\n", err)
+		return nil
+	}
+	return overrides
+}
+
 type anthropicRunner interface {
 	Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdispatch.EnvelopeOut, error)
 }
 
-var newSubagent = func(claudeBinary, workspaceRoot string) anthropicRunner {
-	return anthropic.New(anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: workspaceRoot})
+var newSubagent = func(claudeBinary, workspaceRoot string, pricingOverrides map[string]pkgdispatch.PriceOverride) anthropicRunner {
+	return anthropic.New(anthropic.Options{
+		ClaudeBinary:     claudeBinary,
+		WorkspaceRoot:    workspaceRoot,
+		PricingOverrides: pricingOverrides,
+	})
 }
 var ensureWorktreeFunc = harness.EnsureWorktree
 var commitWorktreeFunc = func(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
@@ -89,7 +110,10 @@ func run(ctx context.Context, envelopePath, workspaceRoot string, stdout, stderr
 	if err := ensureWorktreeFunc(env, workspaceRoot, env.Branch); err != nil {
 		return failOut(stderr, outPath, env.TaskUID, err, 1, "worktree-setup-failed")
 	}
-	out, runErr := newSubagent("claude", workspaceRoot).Run(ctx, env)
+	// D-02: read pricing overrides from TIDE_PRICING_OVERRIDES_JSON env.
+	// Invalid JSON logs a loud warning and falls back to compiled table (defense in depth).
+	pricingOverrides := parsePricingOverridesFromEnv(stderr)
+	out, runErr := newSubagent("claude", workspaceRoot, pricingOverrides).Run(ctx, env)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "claude-subagent: %v\n", runErr)
 		out = failEnvelope(env.TaskUID, runErr, 1, "subagent-error")

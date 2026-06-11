@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,6 +90,14 @@ type Options struct {
 	// <WorkspaceRoot>/envelopes/<TaskUID>/events.jsonl per Phase 3 D-B4.
 	// Defaults to "/workspace".
 	WorkspaceRoot string
+
+	// PricingOverrides is the D-02 per-instance price override map. On New(),
+	// these entries are merged over a clone of the compiled priceTable —
+	// the package-level priceTable is never mutated (T-14-02). Zero fields
+	// in an override entry derive from the existing compiled entry (if present)
+	// or from the override's non-zero fields. Cache fields are auto-derived
+	// from input when left as 0 (read=input/10, write=input*125/100).
+	PricingOverrides map[string]pkgdispatch.PriceOverride
 }
 
 // Anthropic implements pkg/dispatch.Subagent against the Claude Code CLI.
@@ -96,6 +105,12 @@ type Options struct {
 // Run() makes no mutable struct state changes.
 type Anthropic struct {
 	opts Options
+
+	// prices is the per-instance effective price table, built by New() as
+	// maps.Clone(priceTable) merged with opts.PricingOverrides. It is read-only
+	// after construction, so concurrent Run() calls are safe. The package-level
+	// priceTable is never mutated (T-14-02 / Pitfall 2).
+	prices map[string]modelPrice
 
 	// execFunc is the indirection seam that lets tests replace
 	// exec.CommandContext with a fixture-serving fake. Production calls
@@ -106,6 +121,10 @@ type Anthropic struct {
 
 // New returns an *Anthropic configured with opts. Defaults: ClaudeBinary
 // resolves "claude" via PATH; WorkspaceRoot is "/workspace".
+//
+// D-02: opts.PricingOverrides are merged over a clone of the compiled priceTable
+// to build a per-instance effective table. The package-level priceTable is never
+// mutated (T-14-02 / Pitfall 2).
 func New(opts Options) *Anthropic {
 	if opts.ClaudeBinary == "" {
 		opts.ClaudeBinary = "claude"
@@ -113,8 +132,39 @@ func New(opts Options) *Anthropic {
 	if opts.WorkspaceRoot == "" {
 		opts.WorkspaceRoot = "/workspace"
 	}
+
+	// Build the per-instance effective price table (D-02 / T-14-02).
+	// Clone first so we never write to the package-level var.
+	effective := maps.Clone(priceTable)
+	for modelID, override := range opts.PricingOverrides {
+		// Start from the existing compiled entry if available; otherwise zero.
+		base := effective[modelID]
+		if override.InputCentsPerMTok > 0 {
+			base.inputCentsPerMTok = override.InputCentsPerMTok
+		}
+		if override.OutputCentsPerMTok > 0 {
+			base.outputCentsPerMTok = override.OutputCentsPerMTok
+		}
+		// Cache fields: use explicit override value when > 0; otherwise derive
+		// from the (possibly just-updated) input rate.
+		if override.CacheReadCentsPerMTok > 0 {
+			base.cacheReadCentsPerMTok = override.CacheReadCentsPerMTok
+		} else if override.InputCentsPerMTok > 0 {
+			// Derive: cacheRead = 0.10 × input (same as Anthropic prompt-caching schedule).
+			base.cacheReadCentsPerMTok = override.InputCentsPerMTok / 10
+		}
+		if override.CacheWriteCentsPerMTok > 0 {
+			base.cacheWriteCentsPerMTok = override.CacheWriteCentsPerMTok
+		} else if override.InputCentsPerMTok > 0 {
+			// Derive: cacheWrite = 1.25 × input.
+			base.cacheWriteCentsPerMTok = override.InputCentsPerMTok * 125 / 100
+		}
+		effective[modelID] = base
+	}
+
 	return &Anthropic{
 		opts:     opts,
+		prices:   effective,
 		execFunc: exec.CommandContext,
 	}
 }
@@ -128,6 +178,10 @@ func New(opts Options) *Anthropic {
 // cmd/claude-subagent shim's tests can replicate the fake-`bash -c cat`
 // fixture pattern from internal/subagent/anthropic/subagent_test.go without
 // the shim having to live inside the anthropic package itself.
+//
+// D-02: opts.PricingOverrides are applied through [New] — the effective table
+// is built before execFunc is overridden, so the pricing behavior is identical
+// to the production path.
 func NewWithExec(opts Options, execFunc func(ctx context.Context, name string, args ...string) *exec.Cmd) *Anthropic {
 	a := New(opts)
 	if execFunc != nil {
@@ -283,10 +337,12 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: parse stream: %w", parseErr)
 	}
 
-	// Compute cost from the per-model price table before assembling EnvelopeOut.
-	// EstimatedCostCents flows into budget.RollUpUsage → Project.Status.budget.
+	// Compute cost from the per-instance effective price table before assembling
+	// EnvelopeOut. EstimatedCostCents flows into budget.RollUpUsage → Project.Status.budget.
 	// This call stays in internal/subagent/anthropic/ (provider firewall, D-C1).
-	usage.EstimatedCostCents = estimatedCostCents(in.Provider.Model, usage)
+	// D-02: a.estimatedCostCents reads a.prices (the per-instance merged clone),
+	// never the package-level priceTable — T-14-02 race safety.
+	usage.EstimatedCostCents = a.estimatedCostCents(in.Provider.Model, usage)
 
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,

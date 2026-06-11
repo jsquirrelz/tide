@@ -54,7 +54,7 @@ func withFakeSubagentSuccess(t *testing.T, tmp string) {
 	fixturePath := writeFixture(t, tmp, fixtureStreamJSON)
 	orig := newSubagent
 	t.Cleanup(func() { newSubagent = orig })
-	newSubagent = func(claudeBinary, wsRoot string) anthropicRunner {
+	newSubagent = func(claudeBinary, wsRoot string, _ map[string]pkgdispatch.PriceOverride) anthropicRunner {
 		return anthropic.NewWithExec(
 			anthropic.Options{ClaudeBinary: claudeBinary, WorkspaceRoot: wsRoot},
 			func(ctx context.Context, name string, args ...string) *exec.Cmd {

@@ -119,14 +119,18 @@ var conservativeTier = priceTable["claude-fable-5"]
 // estimatedCostCents returns the estimated cost in US cents (rounded up to the
 // nearest whole cent) for the given model and token usage.
 //
-// On a table miss the function:
+// It reads a.prices — the per-instance effective table built by New() as
+// maps.Clone(priceTable) merged with Options.PricingOverrides. The package-level
+// priceTable is never read here (T-14-02 / Pitfall 2).
+//
+// On a table miss the method:
 //  1. Logs a loud warning to stderr so the operator sees it in Pod logs.
 //  2. Falls back to the most-expensive known tier (conservativeTier) to
 //     ensure budget tracking never silently under-reports spend (T-09-01).
 //
 // A zero-token usage for a known model returns 0 (no spend).
-func estimatedCostCents(model string, u pkgdispatch.Usage) int64 {
-	price, ok := priceTable[model]
+func (a *Anthropic) estimatedCostCents(model string, u pkgdispatch.Usage) int64 {
+	price, ok := a.prices[model]
 	if !ok {
 		// Loud, operator-visible warning: unknown model → conservative default.
 		// Never return 0 silently (Pitfall 4 / T-09-01).
