@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0.1
 milestone_name: Orchestrator Trustworthiness + Telemetry Completion
 status: planning
-last_updated: "2026-06-11T00:00:00.000Z"
-last_activity: 2026-06-11
+stopped_at: Phase 12 context gathered
+last_updated: "2026-06-11T14:11:41.068Z"
+last_activity: 2026-06-11 — v1.0.1 roadmap created (Phases 12–16)
 progress:
   total_phases: 5
   completed_phases: 0
@@ -75,6 +76,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-11
-Stopped at: v1.0.1 roadmap written (Phases 12–16, 23 requirements mapped)
-Resume file: None
+Last session: 2026-06-11T14:11:41.055Z
+Stopped at: Phase 12 context gathered
+Resume file: .planning/phases/12-gate-semantics-reject-resume/12-CONTEXT.md
