@@ -57,7 +57,7 @@ spec:
         # pass through verbatim. Bare refs get ":<appVersion>" appended automatically.
         # Digest pinning passes through unchanged — recommended for production.
         - name: CLAUDE_SUBAGENT_IMAGE
-          {{- $img := .Values.subagent.defaults.image }}
+          {{- $img := required "subagent.defaults.image must be a non-empty image ref (e.g. ghcr.io/jsquirrelz/tide-stub-subagent:latest)" .Values.subagent.defaults.image }}
           {{- if or (regexMatch ":[^/]+$" $img) (contains "@" $img) }}
           value: {{ $img | quote }}
           {{- else }}

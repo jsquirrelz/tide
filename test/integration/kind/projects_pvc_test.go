@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -191,6 +193,26 @@ func TestHelmDeploymentTemplateSubagentImageEnvFromDefaults(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte(".Values.subagent.defaults.image")) {
 		t.Fatal("deployment template must source CLAUDE_SUBAGENT_IMAGE from .Values.subagent.defaults.image (Phase 13 D-01)")
+	}
+}
+
+// TestHelmDeploymentTemplateEmptyImageFailsRender verifies the required guard
+// added for WR-04: rendering the deployment template with an empty
+// subagent.defaults.image must fail with the named error message rather than
+// silently producing the garbage value ":<appVersion>" (InvalidImageName at
+// runtime — Phase 13 WR-04).
+func TestHelmDeploymentTemplateEmptyImageFailsRender(t *testing.T) {
+	chartDir := filepath.Join("..", "..", "..", "charts", "tide")
+	cmd := exec.Command("helm", "template", "tide", chartDir,
+		"--set", "subagent.defaults.image=",
+	)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("helm template with empty subagent.defaults.image must fail (required guard); it succeeded instead")
+	}
+	const wantFragment = "subagent.defaults.image must be a non-empty image ref"
+	if !strings.Contains(string(out), wantFragment) {
+		t.Fatalf("helm template error output must contain %q; got:\n%s", wantFragment, out)
 	}
 }
 
