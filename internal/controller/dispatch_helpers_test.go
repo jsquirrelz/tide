@@ -167,6 +167,95 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 	}
 }
 
+// ---------- resolveImage tests (pure function — no envtest) ----------
+
+// TestResolveImage_LevelWins: level Image override beats project default and Helm default.
+func TestResolveImage_LevelWins(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			Subagent: tideprojectv1alpha1.SubagentConfig{
+				Image: "ghcr.io/project-default",
+				Levels: tideprojectv1alpha1.LevelOverrides{
+					Plan: &tideprojectv1alpha1.LevelConfig{Image: "ghcr.io/level-override"},
+				},
+			},
+		},
+	}
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(project, "plan", defaults); got != "ghcr.io/level-override" {
+		t.Errorf("resolveImage = %q, want %q (level override wins)", got, "ghcr.io/level-override")
+	}
+}
+
+// TestResolveImage_ProjectDefaultWinsOverHelm: project Image wins when no level override.
+func TestResolveImage_ProjectDefaultWinsOverHelm(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			Subagent: tideprojectv1alpha1.SubagentConfig{
+				Image: "ghcr.io/project-image",
+			},
+		},
+	}
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(project, "task", defaults); got != "ghcr.io/project-image" {
+		t.Errorf("resolveImage = %q, want %q (project default wins over helm)", got, "ghcr.io/project-image")
+	}
+}
+
+// TestResolveImage_HelmDefaultFallback: Helm default applies when project has no image set.
+func TestResolveImage_HelmDefaultFallback(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{}
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(project, "milestone", defaults); got != "ghcr.io/helm-default" {
+		t.Errorf("resolveImage = %q, want %q (helm default fallback)", got, "ghcr.io/helm-default")
+	}
+}
+
+// TestResolveImage_NilProject_ReturnsHelmDefault: nil project returns helm default, no panic.
+func TestResolveImage_NilProject_ReturnsHelmDefault(t *testing.T) {
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(nil, "plan", defaults); got != "ghcr.io/helm-default" {
+		t.Errorf("resolveImage(nil) = %q, want %q", got, "ghcr.io/helm-default")
+	}
+}
+
+// TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough: level config set with Model only
+// (Image "") falls through to project Spec.Subagent.Image.
+func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			Subagent: tideprojectv1alpha1.SubagentConfig{
+				Image: "ghcr.io/project-image",
+				Levels: tideprojectv1alpha1.LevelOverrides{
+					Plan: &tideprojectv1alpha1.LevelConfig{Model: "claude-sonnet-4-6"}, // Image is ""
+				},
+			},
+		},
+	}
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(project, "plan", defaults); got != "ghcr.io/project-image" {
+		t.Errorf("resolveImage = %q, want %q (empty level Image falls through)", got, "ghcr.io/project-image")
+	}
+}
+
+// TestResolveImage_ProjectLevel_NoLevelTier: level "project" has no level-config case;
+// Spec.Subagent.Image is returned directly.
+func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
+	project := &tideprojectv1alpha1.Project{
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			Subagent: tideprojectv1alpha1.SubagentConfig{
+				Image: "ghcr.io/project-image",
+			},
+		},
+	}
+	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
+	if got := resolveImage(project, "project", defaults); got != "ghcr.io/project-image" {
+		t.Errorf("resolveImage(project level) = %q, want %q", got, "ghcr.io/project-image")
+	}
+}
+
+// ---------- BuildPlannerEnvelope tests ----------
+
 // Test 4b: BuildPlannerEnvelope threads the supplied prompt into
 // EnvelopeIn.Prompt and keeps it distinct from the signed token (defect #4 —
 // the field was previously never assigned and the real Claude planner saw an
