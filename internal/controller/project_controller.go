@@ -173,10 +173,12 @@ type ProjectReconciler struct {
 	TidePushImage string
 
 	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
-	EnvReader            podjob.EnvelopeReader
-	SigningKey           []byte
+	EnvReader      podjob.EnvelopeReader
+	SigningKey      []byte
+	CredproxyImage string
+	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
+	// retained for legacy test wiring, ignored at dispatch.
 	SubagentImage        string
-	CredproxyImage       string
 	HelmProviderDefaults ProviderDefaults
 
 	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
@@ -978,12 +980,6 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		}
 	}
 
-	// Step 8: Resolve SubagentImage.
-	subagentImg := r.SubagentImage
-	if subagentImg == "" {
-		subagentImg = r.HelmProviderDefaults.Image
-	}
-
 	// Step 9: Build + Create planner Job via shared BuildJobSpec.
 	opts := podjob.BuildOptions{
 		Kind:           podjob.JobKindPlanner,
@@ -993,7 +989,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		Project:        project,
 		SignedToken:    token,
 		EnvelopeInJSON: envInJSON,
-		SubagentImage:  subagentImg,
+		SubagentImage:  resolveImage(project, "project", r.HelmProviderDefaults),
 		CredproxyImage: r.CredproxyImage,
 		SecretUID:      secretUID,
 		PVCName:        "tide-projects",

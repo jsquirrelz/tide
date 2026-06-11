@@ -165,9 +165,12 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      newMapEnvReader(),
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		// Reconcile a few times — first for finalizer ensure, then for owner ref, then for dispatch.
@@ -252,9 +255,12 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -344,9 +350,12 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
+			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 5)).To(Succeed())

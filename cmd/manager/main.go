@@ -149,7 +149,11 @@ func main() {
 			"(controller-runtime CertDir; controllerManager.manager.args in values.yaml)")
 	// Phase 2 flags — bound from Helm values.yaml via the controller Deployment args.
 	flag.StringVar(&subagentImage, "subagent-image", "",
-		"Image ref for the subagent container (images.stubSubagent in values.yaml)")
+		"Helm default-tier image for the subagent container. CRD fields (Spec.Subagent.Image, "+
+			"Spec.Subagent.Levels.<level>.Image) take precedence over this flag (Phase 13 DISPATCH-01). "+
+			"When set, overrides CLAUDE_SUBAGENT_IMAGE env so the unchanged chart (still passing "+
+			"--subagent-image until 13-03) dispatches the stub in kind. "+
+			"(images.stubSubagent in values.yaml)")
 	flag.StringVar(&credproxyImage, "credproxy-image", "",
 		"Image ref for the tide-credproxy sidecar (images.credProxy in values.yaml)")
 	flag.StringVar(&defaultFileTouchMode, "default-file-touch-mode", "warn",
@@ -194,6 +198,16 @@ func main() {
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	// Phase 13 DISPATCH-01 compatibility shim: if --subagent-image was passed (non-empty),
+	// it overrides helmProviderDefaults.Image so the unchanged chart (still passing
+	// --subagent-image={{ .Values.images.stubSubagent.* }} until plan 13-03 drops the arg)
+	// continues to dispatch the stub in kind and Layer B. The flag is now the default tier
+	// only — CRD fields (Spec.Subagent.Image, Spec.Subagent.Levels.<level>.Image) always
+	// beat it via resolveImage in each reconciler.
+	if subagentImage != "" {
+		helmProviderDefaults.Image = subagentImage
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
@@ -332,7 +346,7 @@ func main() {
 	dispatcher := &podjob.PodJobBackend{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		SubagentImage:  subagentImage,
+		SubagentImage:  helmProviderDefaults.Image, // Phase 13: use post-shim default tier (CRD fields resolved inline in Run)
 		CredproxyImage: credproxyImage,
 		SigningKey:     signingKey,
 		EnvReader:      envReader,
