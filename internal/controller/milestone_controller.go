@@ -302,6 +302,15 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		if earlyProject != nil && gates.CheckRejected(earlyProject) {
 			return r.patchMilestoneRejected(ctx, ms, gates.RejectedReason(earlyProject))
 		}
+		// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+		// parent-approval); park, never fail; cleared by tide resume.
+		// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+		// No per-Milestone condition written (operator signal is the Project condition).
+		if checkBillingHalt(earlyProject) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+				"milestone", ms.Name, "project", ms.Spec.ProjectRef)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).

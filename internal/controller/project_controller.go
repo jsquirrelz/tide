@@ -940,6 +940,18 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		return ctrl.Result{}, nil
 	}
 
+	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+	// parent-approval); park, never fail; cleared by tide resume.
+	// At the project level, the reconciled object IS the project — gate directly.
+	// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+	// No per-Project condition written (operator signal is the Project BillingHalt
+	// condition itself; writing it here would be redundant and cause flapping).
+	if checkBillingHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+			"project", project.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
 	// Step 3: Acquire PlannerPool (POOL-01) before creating the Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {

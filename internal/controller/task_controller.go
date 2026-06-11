@@ -333,6 +333,17 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
 	}
 
+	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+	// parent-approval); park, never fail; cleared by tide resume.
+	// Position: BEFORE pool/slot acquisition and BEFORE Job creation (Pitfall 2).
+	// No per-Task condition written (avoids status flapping — operator signal is the
+	// single Project BillingHalt condition).
+	if checkBillingHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+			"task", task.Name, "project", project.Name)
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+	}
+
 	// Step 4: Budget gate.
 	if project.Status.Phase == "BudgetExceeded" && !budget.IsBypassed(project, time.Now()) {
 		patch := client.MergeFrom(task.DeepCopy())

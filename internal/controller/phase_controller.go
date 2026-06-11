@@ -291,6 +291,15 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		if earlyProject != nil && gates.CheckRejected(earlyProject) {
 			return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(earlyProject))
 		}
+		// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+		// parent-approval); park, never fail; cleared by tide resume.
+		// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+		// No per-Phase condition written (operator signal is the Project condition).
+		if checkBillingHalt(earlyProject) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+				"phase", ph.Name)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	// Acquire plannerPool before creating Job (D-A4).
