@@ -80,6 +80,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/admission-task-a.json",
 					DependsOn:           []string{"admission-task-b"},
 					FilesTouched:        []string{"a.go"},
 					DeclaredOutputPaths: []string{"a.go"},
@@ -92,6 +93,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/admission-task-b.json",
 					DependsOn:           []string{"admission-task-a"},
 					FilesTouched:        []string{"b.go"},
 					DeclaredOutputPaths: []string{"b.go"},
@@ -159,6 +161,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/acyclic-task-a.json",
 					FilesTouched:        []string{"a.go"},
 					DeclaredOutputPaths: []string{"a.go"},
 				},
@@ -170,6 +173,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/acyclic-task-b.json",
 					DependsOn:           []string{"acyclic-task-a"},
 					FilesTouched:        []string{"b.go"},
 					DeclaredOutputPaths: []string{"b.go"},
@@ -211,6 +215,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/strict-task-a.json",
 					FilesTouched:        []string{"shared.go"},
 					DeclaredOutputPaths: []string{"shared.go"},
 				},
@@ -222,6 +227,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/strict-task-b.json",
 					FilesTouched:        []string{"shared.go"},
 					DeclaredOutputPaths: []string{"shared.go"},
 				},
@@ -286,6 +292,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/warn-task-a.json",
 					FilesTouched:        []string{"warn-shared.go"},
 					DeclaredOutputPaths: []string{"warn-shared.go"},
 				},
@@ -297,6 +304,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 				},
 				Spec: tideprojectv1alpha1.TaskSpec{
 					PlanRef:             planName,
+					PromptPath:          "envelopes/test/children/warn-task-b.json",
 					FilesTouched:        []string{"warn-shared.go"},
 					DeclaredOutputPaths: []string{"warn-shared.go"},
 				},

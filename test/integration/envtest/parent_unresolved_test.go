@@ -95,6 +95,7 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 			},
 			Spec: tideprojectv1alpha1.TaskSpec{
 				PlanRef:             "pu-plan",
+				PromptPath:          "envelopes/test/children/" + taskName + ".json",
 				FilesTouched:        []string{"pu.go"},
 				DeclaredOutputPaths: []string{"pu.go"},
 			},

@@ -379,6 +379,7 @@ func makeGateITTask(name, planRef, projectName string, dependsOn []string) *tide
 		},
 		Spec: tideprojectv1alpha1.TaskSpec{
 			PlanRef:             planRef,
+			PromptPath:          "envelopes/test/children/" + name + ".json",
 			FilesTouched:        []string{"src/" + name + ".go"},
 			DeclaredOutputPaths: []string{"artifacts/" + name + ".txt"},
 			DependsOn:           dependsOn,

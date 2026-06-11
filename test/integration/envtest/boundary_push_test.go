@@ -265,7 +265,10 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				return g.Status.Phase
 			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
 
-			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
+			// ChildCount must match the authored child Plan above: the 09-08
+			// Defect B succession gate treats ChildCount==0 as a genuine leaf
+			// and succeeds WITHOUT a boundary push.
+			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0, ChildCount: 1})
 			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-phase-%s-1", got.UID), "default")).To(Succeed())
 
 			drive(r.Reconcile, phaseName, 3)

@@ -344,6 +344,7 @@ func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn,
 		},
 		Spec: tideprojectv1alpha1.TaskSpec{
 			PlanRef:             planRef,
+			PromptPath:          "envelopes/test/children/" + name + ".json",
 			DependsOn:           dependsOn,
 			FilesTouched:        files,
 			DeclaredOutputPaths: files,
