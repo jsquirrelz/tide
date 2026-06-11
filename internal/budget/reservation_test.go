@@ -81,38 +81,38 @@ func makeProjectWithBudget(cap, spent int64) *tidev1alpha1.Project {
 
 func TestReservationStore_HasHeadroom(t *testing.T) {
 	cases := []struct {
-		name          string
-		cap           int64
-		spent         int64
-		reserved      int64
-		estimate      int64
-		wantHeadroom  bool
-		nilProject    bool
-		nilStore      bool
+		name         string
+		cap          int64
+		spent        int64
+		reserved     int64
+		estimate     int64
+		wantHeadroom bool
+		nilProject   bool
+		nilStore     bool
 	}{
 		{
-			name:         "under cap",
-			cap:          1000, spent: 400, reserved: 100, estimate: 200,
+			name: "under cap",
+			cap:  1000, spent: 400, reserved: 100, estimate: 200,
 			wantHeadroom: true, // 400+100+200=700 < 1000
 		},
 		{
-			name:         "at cap (== not allowed by D-05 strict less-than)",
-			cap:          1000, spent: 400, reserved: 300, estimate: 300,
+			name: "at cap (== not allowed by D-05 strict less-than)",
+			cap:  1000, spent: 400, reserved: 300, estimate: 300,
 			wantHeadroom: false, // 400+300+300=1000 == 1000, not < 1000
 		},
 		{
-			name:         "over cap",
-			cap:          1000, spent: 900, reserved: 50, estimate: 100,
+			name: "over cap",
+			cap:  1000, spent: 900, reserved: 50, estimate: 100,
 			wantHeadroom: false, // 900+50+100=1050 > 1000
 		},
 		{
-			name:         "zero cap = unlimited",
-			cap:          0, spent: 999999, reserved: 0, estimate: 1,
+			name: "zero cap = unlimited",
+			cap:  0, spent: 999999, reserved: 0, estimate: 1,
 			wantHeadroom: true,
 		},
 		{
-			name:         "negative cap = unlimited",
-			cap:          -1, spent: 999999, reserved: 0, estimate: 1,
+			name: "negative cap = unlimited",
+			cap:  -1, spent: 999999, reserved: 0, estimate: 1,
 			wantHeadroom: true,
 		},
 		{
@@ -121,9 +121,9 @@ func TestReservationStore_HasHeadroom(t *testing.T) {
 			wantHeadroom: true,
 		},
 		{
-			name:         "nil store",
-			nilStore:     true,
-			cap:          100, spent: 200, // would be over cap if store were active
+			name:     "nil store",
+			nilStore: true,
+			cap:      100, spent: 200, // would be over cap if store were active
 			wantHeadroom: true,
 		},
 	}
