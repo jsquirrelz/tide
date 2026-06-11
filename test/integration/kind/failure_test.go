@@ -190,10 +190,20 @@ metadata:
 // RoleBinding in the given namespace. The tide-reporter reader Job runs in the
 // project namespace; without this SA the Job Pod cannot start.
 //
-// Mirrors ensureSubagentSA but with RBAC: create+get on the five TIDE CRD Kinds
+// Mirrors the chart's reporter-rbac.yaml Role exactly:
+//   - create+get+list on the five child CRD Kinds (list backs the idempotency
+//     check in reporter.ChildrenAlreadyMaterialized)
+//   - get on projects (resolveParent fetches the parent Project by name to
+//     obtain its live UID for ownerRef — Project-level reporter only)
+//
 // (T-09-07 least-privilege mitigation). The chart's reporter-rbac.yaml only
 // installs these into .Release.Namespace and .Values.projectNamespaces; per-test
 // namespaces need the manual equivalent.
+//
+// Phase-09 origin defect (commit e451b90): the original helper omitted `list`
+// on child kinds and omitted the `projects/get` rule, causing the reporter Job
+// to exit 2 (RBAC denial on resolveParent) and no Milestone to be created —
+// the root cause of the reporter_pod_test.go:196 materialization failure.
 func ensureReporterSARBAC(ns string) {
 	rbacYAML := fmt.Sprintf(`apiVersion: v1
 kind: ServiceAccount
@@ -210,7 +220,10 @@ metadata:
 rules:
   - apiGroups: ["tideproject.k8s"]
     resources: ["milestones", "phases", "plans", "tasks", "waves"]
-    verbs: ["create", "get"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
