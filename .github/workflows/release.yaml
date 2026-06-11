@@ -217,6 +217,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pin the release tag to the pushed ref. goreleaser otherwise infers
+          # it via `git describe` — and when the release tag and an rc tag
+          # share a commit it can pick the rc, publishing a pre-release named
+          # vX.Y.Z-rc.N with rc-stamped binaries (observed on the first
+          # v1.0.0/v1.0.0-rc.7 shared-commit push).
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
   # Gate 4 — build and push all 6 component images to ghcr.io (IMG-01).
   #
