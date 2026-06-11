@@ -18,6 +18,7 @@ package envtest_integration
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -84,14 +85,30 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			// by bumping a benign annotation (AnnotationChangedPredicate fires).
 			kickProjectReconcile(ctx, projectName, budgetNamespace, "cap-exceeded")
 
-			// After reconcile, the Project should be BudgetExceeded.
+			// After reconcile, the Project should be BudgetExceeded. A SINGLE
+			// kick races the manager cache under CI contention: if its
+			// reconcile reads the Project before the status patch above is
+			// visible, no further event ever arrives and this wait starves
+			// (the rc.7-era Tests flake — failed all 3 flake-attempts on a
+			// congested runner). Re-kick on every poll until the reconciler
+			// observes the exceeded budget; update conflicts are best-effort
+			// and simply retry on the next poll.
+			kickN := 0
 			Eventually(func() string {
 				p := &tideprojectv1alpha1.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return ""
 				}
+				if p.Status.Phase != tideprojectv1alpha1.PhaseBudgetExceeded {
+					kickN++
+					if p.Annotations == nil {
+						p.Annotations = map[string]string{}
+					}
+					p.Annotations["tide-test/kick"] = fmt.Sprintf("cap-exceeded-%d", kickN)
+					_ = k8sClient.Update(ctx, p)
+				}
 				return p.Status.Phase
-			}, "60s", "500ms").Should(Equal(tideprojectv1alpha1.PhaseBudgetExceeded),
+			}, "60s", "1s").Should(Equal(tideprojectv1alpha1.PhaseBudgetExceeded),
 				"Project.Status.Phase should be BudgetExceeded when cost exceeds cap")
 		})
 	})
@@ -150,14 +167,26 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			// reconcile pass", which is observable as annotation consumption
 			// (ConsumeBypass deletes the bypass-budget key). Asserting the
 			// terminal phase is racy and contradicts the one-shot contract.
+			// Same one-shot-event race as the cap spec: the annotation Update
+			// above is the only reconcile trigger, and if that reconcile reads
+			// a cached Project that does not yet show Phase=BudgetExceeded the
+			// bypass-consume path never runs and no further event arrives.
+			// Re-kick (benign tide-test/kick bump) on every poll until the
+			// bypass annotation is observed consumed.
+			kickN := 0
 			Eventually(func() bool {
 				p := &tideprojectv1alpha1.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return false
 				}
 				_, stillThere := p.Annotations["tideproject.k8s/bypass-budget"]
+				if stillThere {
+					kickN++
+					p.Annotations["tide-test/kick"] = fmt.Sprintf("bypass-%d", kickN)
+					_ = k8sClient.Update(ctx, p)
+				}
 				return !stillThere
-			}, "60s", "500ms").Should(BeTrue(),
+			}, "60s", "1s").Should(BeTrue(),
 				"one-shot bypass annotation should be consumed after the bypass takes effect")
 		})
 	})
