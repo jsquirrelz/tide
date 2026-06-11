@@ -21,6 +21,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -197,6 +198,191 @@ func TestSetBillingHaltIfNeeded_NilProject_NoOp(t *testing.T) {
 	// Must not panic
 	if err := setBillingHaltIfNeeded(context.Background(), c, nil, "claude exit 1: credit balance"); err != nil {
 		t.Fatalf("expected nil error for nil project; got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan 13-05 Task 2 — WR-03 time-fence: jobStart guard in setBillingHaltIfNeeded
+// Tests for the new setBillingHaltIfNeeded(ctx, c, project, reason, jobStart) signature.
+// ---------------------------------------------------------------------------
+
+// TestSetBillingHalt_PreResumeStraggler_NoStamp asserts that a billing reason
+// from a Job created BEFORE the resume timestamp is silently dropped — the WR-03
+// straggler symptom reproduced as a regression test.
+func TestSetBillingHalt_PreResumeStraggler_NoStamp(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pre-resume-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+			},
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	jobStart := resumedAt.Add(-5 * time.Minute) // job created before resume
+	reason := "claude exit 1: API Error: 400 Your credit balance is too low to access the Anthropic API."
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, jobStart); err != nil {
+		t.Fatalf("setBillingHaltIfNeeded: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pre-resume-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	if cond != nil && cond.Status == metav1.ConditionTrue {
+		t.Errorf("WR-03 regression: pre-resume straggler must NOT stamp BillingHalt; got condition %+v", cond)
+	}
+}
+
+// TestSetBillingHalt_PostResumeFreshFailure_Stamps asserts that a billing reason
+// from a Job created AFTER the resume timestamp DOES stamp BillingHalt (fresh
+// post-resume dry-out still halts).
+func TestSetBillingHalt_PostResumeFreshFailure_Stamps(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "post-resume-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+			},
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	jobStart := resumedAt.Add(5 * time.Minute) // job created after resume
+	reason := "claude exit 1: API Error: 400 Your credit balance is too low to access the Anthropic API."
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, jobStart); err != nil {
+		t.Fatalf("setBillingHaltIfNeeded: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "post-resume-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("fresh post-resume billing failure must stamp BillingHalt; got condition %v", cond)
+	}
+}
+
+// TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart asserts that when
+// AnnotationBillingResumedAt is absent (never resumed), BillingHalt is stamped
+// regardless of jobStart (initial halt path unchanged).
+func TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-annotation-project",
+			Namespace: "default",
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	jobStart := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	reason := "billing-halt:credit-balance-too-low"
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, jobStart); err != nil {
+		t.Fatalf("setBillingHaltIfNeeded: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "no-annotation-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("no annotation present: must stamp BillingHalt regardless of jobStart; got condition %v", cond)
+	}
+}
+
+// TestSetBillingHalt_ZeroJobStart_FailClosed asserts that a zero jobStart is
+// treated as fail-closed: BillingHalt is stamped even when annotation is present
+// (never fail open toward burning credits).
+func TestSetBillingHalt_ZeroJobStart_FailClosed(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "zero-jobstart-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+			},
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	var zeroTime time.Time // zero value
+	reason := "billing-halt:credit-balance-too-low"
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, zeroTime); err != nil {
+		t.Fatalf("setBillingHaltIfNeeded: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "zero-jobstart-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("zero jobStart must fail-closed (stamp BillingHalt); got condition %v", cond)
+	}
+}
+
+// TestSetBillingHalt_UnparseableAnnotation_FailClosed asserts that an unparseable
+// AnnotationBillingResumedAt value is treated as fail-closed: BillingHalt is
+// stamped (never fail open toward burning credits).
+func TestSetBillingHalt_UnparseableAnnotation_FailClosed(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bad-annotation-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha1.AnnotationBillingResumedAt: "not-a-timestamp",
+			},
+		},
+		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	jobStart := time.Date(2010, 1, 1, 0, 0, 0, 0, time.UTC) // very old job
+	reason := "billing-halt:credit-balance-too-low"
+	if err := setBillingHaltIfNeeded(context.Background(), c, project, reason, jobStart); err != nil {
+		t.Fatalf("setBillingHaltIfNeeded: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "bad-annotation-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("unparseable annotation must fail-closed (stamp BillingHalt); got condition %v", cond)
 	}
 }
 

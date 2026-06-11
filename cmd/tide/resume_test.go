@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -323,6 +324,70 @@ func TestResumeClearsBillingHalt(t *testing.T) {
 		if cond.Type == tidev1alpha1.ConditionBillingHalt && cond.Status == metav1.ConditionTrue {
 			t.Errorf("BillingHalt=True condition should be cleared after resume; still present: %+v", cond)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan 13-05 Task 2 — resume stamps AnnotationBillingResumedAt (WR-03)
+// ---------------------------------------------------------------------------
+
+// TestResumeStampsBillingResumedAt asserts that resumeRun on a Project that has
+// BillingHalt=True clears the condition AND stamps AnnotationBillingResumedAt
+// with an RFC3339 value parseable to approximately now.
+func TestResumeStampsBillingResumedAt(t *testing.T) {
+	p := makeBillingHaltedProject("halt-annotate-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	before := time.Now().UTC().Add(-2 * time.Second)
+	var buf bytes.Buffer
+	if err := resumeRun(context.Background(), c, "default", "halt-annotate-project", false, &buf); err != nil {
+		t.Fatalf("resumeRun: %v", err)
+	}
+	after := time.Now().UTC().Add(2 * time.Second)
+
+	var got tidev1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "halt-annotate-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	v, ok := got.Annotations[tidev1alpha1.AnnotationBillingResumedAt]
+	if !ok {
+		t.Fatalf("expected %q annotation stamped after resume; annotations=%v", tidev1alpha1.AnnotationBillingResumedAt, got.Annotations)
+	}
+	ts, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		t.Fatalf("AnnotationBillingResumedAt value %q is not RFC3339: %v", v, err)
+	}
+	if ts.Before(before) || ts.After(after) {
+		t.Errorf("AnnotationBillingResumedAt %v is outside expected window [%v, %v]", ts, before, after)
+	}
+	// Output must mention the pre-resume in-flight session time-fence.
+	if out := buf.String(); out == "" {
+		t.Errorf("expected feedback output; got empty string")
+	}
+}
+
+// TestResumeWithoutBillingHalt_DoesNotStampAnnotation asserts that resumeRun on
+// a Project WITHOUT the BillingHalt condition does NOT add AnnotationBillingResumedAt.
+func TestResumeWithoutBillingHalt_DoesNotStampAnnotation(t *testing.T) {
+	p := makeProject("no-halt-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "no-halt-project", false, nil); err != nil {
+		t.Fatalf("resumeRun: %v", err)
+	}
+
+	var got tidev1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "no-halt-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if _, ok := got.Annotations[tidev1alpha1.AnnotationBillingResumedAt]; ok {
+		t.Errorf("expected NO AnnotationBillingResumedAt on project without BillingHalt; annotations=%v", got.Annotations)
 	}
 }
 
