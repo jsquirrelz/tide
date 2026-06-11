@@ -34,7 +34,7 @@
   4. `tide reject` parks children without writing `Status.Phase=Failed`; `tide resume` lifts the park; `tide resume --retry-failed` recovers a genuinely Failed level (status reset → re-dispatch → `ResumedByUser` condition), matching the run-1 kubectl recipe
   5. `tide approve` against a level whose planner Job failed prints an actionable error pointing at `tide resume --retry-failed` — approval never doubles as a spend-retry
 
-**Plans**: 4 plans
+**Plans**: 5 plans (1 gap closure)
 
 Plans:
 **Wave 1**
@@ -49,6 +49,10 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 12-04-PLAN.md — Reject parks instead of fail-marking at all four reconcilers; retry-failed re-dispatch regression (RESUME-01, GATE-03)
+
+**Wave 4** *(gap closure — 12-VERIFICATION.md CR-01/CR-02)*
+
+- [ ] 12-05-PLAN.md — Plan-level gate fix: park before ChildCount wait, AwaitingApproval early-return, wave path held while parked; ChildCount>0 regression specs (GATE-01, GATE-04 at Plan level)
 
 ### Phase 13: Dispatch Image Resolution + Provider Halt
 
