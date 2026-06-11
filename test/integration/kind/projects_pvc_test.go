@@ -151,6 +151,36 @@ func TestHelmDeploymentTemplateRendersManagerPodAnnotations(t *testing.T) {
 	}
 }
 
+// TestHelmDeploymentTemplateDropsSubagentImageFlag verifies the chart no longer
+// injects --subagent-image as a hard-coded flag. Phase 13 D-01: the flag was
+// silently forcing the stub image in every v1.0.0 install; it has been removed
+// so production installs dispatch the real subagent via CLAUDE_SUBAGENT_IMAGE.
+func TestHelmDeploymentTemplateDropsSubagentImageFlag(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+	if bytes.Contains(data, []byte("--subagent-image=")) {
+		t.Fatal("deployment template must NOT contain --subagent-image= (Phase 13 D-01: flag dropped; subagent image flows via subagent.defaults.image → CLAUDE_SUBAGENT_IMAGE env)")
+	}
+}
+
+// TestHelmDeploymentTemplateSubagentImageEnvFromDefaults verifies the chart
+// sources CLAUDE_SUBAGENT_IMAGE from .Values.subagent.defaults.image (D-01)
+// rather than the old images.claudeSubagent path that was wired pre-Phase 13.
+func TestHelmDeploymentTemplateSubagentImageEnvFromDefaults(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+	if !bytes.Contains(data, []byte("CLAUDE_SUBAGENT_IMAGE")) {
+		t.Fatal("deployment template must contain CLAUDE_SUBAGENT_IMAGE env var")
+	}
+	if !bytes.Contains(data, []byte(".Values.subagent.defaults.image")) {
+		t.Fatal("deployment template must source CLAUDE_SUBAGENT_IMAGE from .Values.subagent.defaults.image (Phase 13 D-01)")
+	}
+}
+
 func readKindYAMLDocs(t *testing.T, path string) []kindYAMLDoc {
 	t.Helper()
 
