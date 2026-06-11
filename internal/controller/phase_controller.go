@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -363,31 +362,9 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
-	isFirstCompletion := false
-	if r.ReporterImage != "" && project != nil {
-		reporterJobName := fmt.Sprintf("tide-reporter-%s", ph.UID)
-		pvcName := defaultSharedPVCName
-		var existingReporterJob batchv1.Job
-		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: ph.Namespace}, &existingReporterJob); gErr != nil {
-			if !apierrors.IsNotFound(gErr) {
-				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
-			}
-			isFirstCompletion = true
-			reporterJob := BuildReporterJob(ph, project, pvcName, string(ph.UID), "Phase",
-				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
-			if cErr := r.Create(ctx, reporterJob); cErr != nil {
-				if !apierrors.IsAlreadyExists(cErr) {
-					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
-				}
-			} else {
-				logger.Info("spawned reporter Job", "job", reporterJobName, "phase", ph.Name)
-			}
-		} else {
-			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
-		}
-	} else if r.ReporterImage == "" {
-		isFirstCompletion = true
-		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "phase", ph.Name)
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.ReporterImage)
+	if spawnErr != nil {
+		return ctrl.Result{}, spawnErr
 	}
 
 	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.

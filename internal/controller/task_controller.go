@@ -1040,7 +1040,7 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 
 // buildEnvelopeIn constructs and marshals the EnvelopeIn for this Task dispatch.
 // Translates api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
-func (r *TaskReconciler) buildEnvelopeIn(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {
 		caps = pkgdispatch.Caps{

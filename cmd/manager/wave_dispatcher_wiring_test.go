@@ -43,6 +43,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -137,12 +138,7 @@ func compositeLitTypeName(lit *ast.CompositeLit) (string, bool) {
 }
 
 func contains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // mainGoPath resolves main.go next to this test file, independent of the test

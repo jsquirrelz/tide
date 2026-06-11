@@ -21,10 +21,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
+
+// envelopesDirName is the shared per-Project PVC directory that holds the
+// per-task envelope subdirs (/workspace/envelopes/<task-uid>/...).
+const envelopesDirName = "envelopes"
 
 // mkdirSharedAll creates dir and all parents, then makes the shared "envelopes"
 // directory subtree group-writable with the setgid bit so a pod running as a
@@ -43,19 +48,12 @@ func mkdirSharedAll(dir string) error {
 		return err
 	}
 	clean := filepath.Clean(dir)
-	hasEnvelopes := false
-	for _, seg := range strings.Split(clean, string(os.PathSeparator)) {
-		if seg == "envelopes" {
-			hasEnvelopes = true
-			break
-		}
-	}
-	if !hasEnvelopes {
+	if !slices.Contains(strings.Split(clean, string(os.PathSeparator)), envelopesDirName) {
 		return nil
 	}
 	for p := clean; ; p = filepath.Dir(p) {
 		_ = os.Chmod(p, 0o775|os.ModeSetgid) // best-effort across uid boundaries
-		if filepath.Base(p) == "envelopes" {
+		if filepath.Base(p) == envelopesDirName {
 			break
 		}
 	}

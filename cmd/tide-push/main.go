@@ -81,16 +81,19 @@ import (
 // push-mode. The struct is passed by value into run() so tests can drive
 // it without setting os.Args.
 type pushConfig struct {
-	Mode                  string   // "clone" | "push"
-	RepoURL               string   // clone-mode: remote URL
-	Branch                string   // push-mode: per-run branch (D-B6)
-	LastPushedSHA         string   // push-mode: lease anchor (empty on first push)
-	CommitMessage         string   // push-mode: W11 boundary commit message
-	ArtifactPaths         []string // push-mode: workspace-relative paths to stage
-	LeaksConfig           string   // push-mode: optional gitleaks override TOML path
-	Workspace             string   // root, default "/workspace"
-	ProjectUID            string   // push-mode: keys the envelope output path
-	RunBranch             string   // clone-mode: per-run branch for EnsureRunBranch + run worktree (D-B6/B5); if non-empty, EnsureRunBranch + provision run worktree after clone
+	Mode          string   // "clone" | "push"
+	RepoURL       string   // clone-mode: remote URL
+	Branch        string   // push-mode: per-run branch (D-B6)
+	LastPushedSHA string   // push-mode: lease anchor (empty on first push)
+	CommitMessage string   // push-mode: W11 boundary commit message
+	ArtifactPaths []string // push-mode: workspace-relative paths to stage
+	LeaksConfig   string   // push-mode: optional gitleaks override TOML path
+	Workspace     string   // root, default "/workspace"
+	ProjectUID    string   // push-mode: keys the envelope output path
+	// RunBranch is the clone-mode per-run branch for EnsureRunBranch + run
+	// worktree (D-B6/B5); if non-empty, EnsureRunBranch + provision run
+	// worktree after clone.
+	RunBranch             string
 	IntegrateTaskBranches []string // push-mode: task branch names to merge before staging artifacts (D-04)
 }
 
@@ -144,8 +147,10 @@ func main() {
 	leaksConfig := fs.String("leaks-config", "", "push-mode: optional gitleaks override TOML path")
 	workspace := fs.String("workspace", "/workspace", "workspace root")
 	projectUID := fs.String("project-uid", "", "push-mode: keys envelope output path")
-	runBranch := fs.String("run-branch", "", "clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
-	integrateTaskBranches := fs.String("integrate-task-branches", "", "push-mode: CSV of task branch names to merge before staging (D-04)")
+	runBranch := fs.String("run-branch", "",
+		"clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
+	integrateTaskBranches := fs.String("integrate-task-branches", "",
+		"push-mode: CSV of task branch names to merge before staging (D-04)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -276,7 +281,8 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// EnsureRunBranch + worktree-add, so those writes are group-shared too. git's
 	// umask alone (0755 objects) would otherwise block the cross-uid merge with
 	// "insufficient permission for adding an object to repository database".
-	if out, err := exec.Command("git", "-C", destDir, "config", "core.sharedRepository", "group").CombinedOutput(); err != nil {
+	shareCmd := exec.Command("git", "-C", destDir, "config", "core.sharedRepository", "group")
+	if out, err := shareCmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "tide-push: set core.sharedRepository: %v: %s\n", err, string(out))
 		return exitGenericFail
 	}
@@ -366,7 +372,9 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		// empty commit: clean working tree"). The remote push happens only at the
 		// final plan boundary, which carries planner artifacts. Exit success.
 		if len(cfg.ArtifactPaths) == 0 {
-			fmt.Fprintf(stderr, "tide-push: integration-only run — merged %d task branch(es) into %s locally; no artifacts to commit/push\n", len(cfg.IntegrateTaskBranches), cfg.Branch)
+			fmt.Fprintf(stderr,
+				"tide-push: integration-only run — merged %d task branch(es) into %s locally; no artifacts to commit/push\n",
+				len(cfg.IntegrateTaskBranches), cfg.Branch)
 			return exitSuccess
 		}
 	}
@@ -498,7 +506,8 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	scanBase := oldHash
 
 	if clean {
-		fmt.Fprintf(stderr, "tide-push: clean working tree — nothing to commit; pushing already-integrated run branch %s\n", cfg.Branch)
+		fmt.Fprintf(stderr,
+			"tide-push: clean working tree — nothing to commit; pushing already-integrated run branch %s\n", cfg.Branch)
 		if cfg.LastPushedSHA != "" {
 			if anchor := plumbing.NewHash(cfg.LastPushedSHA); !anchor.IsZero() {
 				if _, cerr := repo.CommitObject(anchor); cerr == nil {

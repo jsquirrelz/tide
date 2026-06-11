@@ -61,7 +61,7 @@ func Validate(workspaceRoot string, runStart time.Time, declared []string) ([]st
 		}
 		if d.IsDir() {
 			rel, relErr := filepath.Rel(workspaceRoot, p)
-			if relErr == nil && rel == "envelopes" {
+			if relErr == nil && rel == envelopesDirName {
 				return filepath.SkipDir
 			}
 			return nil

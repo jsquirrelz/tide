@@ -51,7 +51,8 @@ var commitWorktreeFunc = func(worktreeDir, taskUID string) (plumbing.Hash, bool,
 
 func main() {
 	fs := flag.NewFlagSet("claude-subagent", flag.ExitOnError)
-	envelopePath := fs.String("envelope-path", "", "path to EnvelopeIn JSON (default: $TIDE_ENVELOPE_PATH or /workspace/envelopes/$TIDE_TASK_UID/in.json)")
+	envelopePath := fs.String("envelope-path", "",
+		"path to EnvelopeIn JSON (default: $TIDE_ENVELOPE_PATH or /workspace/envelopes/$TIDE_TASK_UID/in.json)")
 	workspaceRoot := fs.String("workspace-root", "/workspace", "PVC mount root")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		os.Exit(2)

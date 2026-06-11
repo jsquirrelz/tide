@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -420,10 +419,4 @@ func jobNames(jobs []batchv1.Job) []string {
 		names[i] = j.Name
 	}
 	return names
-}
-
-// waveIntegJobCompletionTime returns a valid metav1.Time 1s in the past.
-func waveIntegJobCompletionTime() *metav1.Time {
-	t := metav1.NewTime(time.Now().Add(-time.Second))
-	return &t
 }

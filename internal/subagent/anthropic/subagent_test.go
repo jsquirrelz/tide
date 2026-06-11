@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -331,12 +332,7 @@ func TestRun_PromptViaStdinAndPermissionFlags(t *testing.T) {
 
 // containsArg reports whether want appears as a standalone element of args.
 func containsArg(args []string, want string) bool {
-	for _, a := range args {
-		if a == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, want)
 }
 
 // assertFlagPair asserts that flag is immediately followed by value in args.

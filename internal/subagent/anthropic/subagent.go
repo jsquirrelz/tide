@@ -461,7 +461,7 @@ func readChildCRDs(childrenDir, relPrefix string) ([]pkgdispatch.ChildCRDSpec, e
 		// (e.g. "With these tasks we will...") is NOT valid JSON, so the second
 		// Decode returns a syntax error and we ignore it — trailing prose is
 		// the observed production failure class and must be tolerated.
-		var extra interface{}
+		var extra any
 		if extraErr := dec.Decode(&extra); extraErr == nil {
 			parseErrs = append(parseErrs, fmt.Errorf("child file %q contains extra content after JSON object", name))
 			continue

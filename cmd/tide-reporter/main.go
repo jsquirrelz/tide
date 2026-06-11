@@ -77,8 +77,10 @@ const (
 
 func main() {
 	fs := flag.NewFlagSet("tide-reporter", flag.ExitOnError)
-	workspace := fs.String("workspace", "/workspace", "workspace root — out.json at <workspace>/envelopes/<task-uid>/out.json")
-	projectUID := fs.String("project-uid", "", "UID of the parent Project (informational; PVC mount already resolves the subPath)")
+	workspace := fs.String("workspace", "/workspace",
+		"workspace root — out.json at <workspace>/envelopes/<task-uid>/out.json")
+	projectUID := fs.String("project-uid", "",
+		"UID of the parent Project (informational; PVC mount already resolves the subPath)")
 	taskUID := fs.String("task-uid", "", "UID of the dispatch Task — keys the out.json path")
 	parentName := fs.String("parent-name", "", "metadata.name of the parent CR (Project/Milestone/Phase/Plan)")
 	parentNamespace := fs.String("parent-namespace", "", "namespace of the parent CR")
@@ -114,7 +116,9 @@ func run(ctx context.Context, cfg reporterConfig, stdout io.Writer, stderr io.Wr
 // runWithClient is the implementation seam that accepts an optional pre-built
 // client.Client. Tests pass a fake.Client; production passes nil to trigger
 // in-cluster config resolution.
-func runWithClient(ctx context.Context, cfg reporterConfig, _ io.Writer, stderr io.Writer, clientOverride client.Client) int {
+func runWithClient(
+	ctx context.Context, cfg reporterConfig, _ io.Writer, stderr io.Writer, clientOverride client.Client,
+) int {
 	// 1. Validate required flags.
 	if cfg.TaskUID == "" {
 		fmt.Fprintf(stderr, "tide-reporter: --task-uid is required\n")

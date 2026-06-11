@@ -655,6 +655,105 @@ func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tidepr
 	return &p
 }
 
+// reconcileWaveBoundary runs the per-wave integration gate (D-02 / SC-3 /
+// Plan 11-03) for the single wave boundary k → k+1. Returns handled=true when
+// the boundary decided the reconcile outcome (terminal failure, requeue, or
+// error) and the caller must return (res, err) immediately; handled=false
+// means this boundary needs nothing right now — fall through to the next.
+func (r *PlanReconciler) reconcileWaveBoundary(
+	ctx context.Context,
+	plan *tideprojectv1alpha1.Plan,
+	project *tideprojectv1alpha1.Project,
+	taskByName map[string]*tideprojectv1alpha1.Task,
+	layers [][]dag.NodeID,
+	k int,
+) (ctrl.Result, bool, error) {
+	waveNum := k + 1 // 1-indexed wave number
+
+	// If already integrated through this wave, skip to next boundary.
+	if plan.Status.IntegratedThroughWave >= waveNum {
+		return ctrl.Result{}, false, nil
+	}
+
+	// Integration only applies when a real git target + push image exist.
+	// Stub/test/no-remote projects have no run branch to integrate into —
+	// there is nothing to push, so this boundary must NOT block wave k+1
+	// dispatch (otherwise the no-op triggerWaveIntegrationJob would requeue
+	// forever and IntegratedThroughWave would never advance). Fall through to
+	// the normal label-stamp + Task-dispatch path below.
+	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" || r.TidePushImage == "" {
+		return ctrl.Result{}, false, nil
+	}
+
+	// PauseBetweenWaves (Plan 04-05) is the OUTER operator gate at this
+	// boundary: do not integrate a wave that is still awaiting operator
+	// approval. maybePauseForWaveApprove (downstream) sets the
+	// WaveOrLevelPaused condition and blocks Task dispatch via the
+	// wave-paused label. Once the operator approves, the wave-approved-<N>
+	// label is stamped and integration proceeds on a later reconcile —
+	// integrate-then-dispatch ordering is preserved past the gate.
+	if project.Spec.Gates.PauseBetweenWaves &&
+		plan.Labels[fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, waveNum)] != "true" {
+		return ctrl.Result{}, false, nil
+	}
+
+	integJobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveNum)
+
+	// RESPONSIBILITY A: Check if integration Job exists.
+	var integJob batchv1.Job
+	getErr := r.Get(ctx, types.NamespacedName{Name: integJobName, Namespace: plan.Namespace}, &integJob)
+	if getErr == nil {
+		// Job exists — check terminal status.
+		// IMPORTANT: check Failed BEFORE Succeeded==0 to avoid livelock.
+		if integJob.Status.Failed > 0 {
+			// Permanently failed (BackoffLimit exhausted) → terminal Plan failure.
+			res, err := r.patchPlanFailed(ctx, plan,
+				tideprojectv1alpha1.ReasonWaveIntegrationFailed,
+				fmt.Sprintf("wave %d integration job %s failed (BackoffLimit exhausted)", waveNum, integJobName))
+			return res, true, err
+		}
+		if integJob.Status.Succeeded > 0 {
+			// Integration complete — stamp IntegratedThroughWave and continue loop.
+			patch := client.MergeFrom(plan.DeepCopy())
+			plan.Status.IntegratedThroughWave = waveNum
+			if err := r.Status().Patch(ctx, plan, patch); err != nil {
+				return ctrl.Result{}, true, fmt.Errorf("patch IntegratedThroughWave=%d: %w", waveNum, err)
+			}
+			return ctrl.Result{}, false, nil
+		}
+		// Job is still running (Succeeded==0, Failed==0): block wave k+1 dispatch.
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+	if !apierrors.IsNotFound(getErr) {
+		return ctrl.Result{}, true, fmt.Errorf("get wave integration job %s: %w", integJobName, getErr)
+	}
+
+	// RESPONSIBILITY B: No Job found — dispatch if all wave-k tasks Succeeded.
+	for _, name := range layers[k] {
+		t := taskByName[name]
+		if t == nil || t.Status.Phase != "Succeeded" {
+			// Wave k not yet complete — nothing to integrate yet.
+			return ctrl.Result{}, false, nil
+		}
+	}
+
+	// Collect wave-k task branch names.
+	var branches []string
+	for _, name := range layers[k] {
+		if t := taskByName[name]; t != nil {
+			branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
+		}
+	}
+
+	// Dispatch the integration Job.
+	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage); err != nil {
+		return ctrl.Result{}, true, err
+	}
+	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).
+	// Do NOT stamp IntegratedThroughWave here — the Job has not yet completed.
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+}
+
 // reconcileWaveMaterialization implements the Wave materialization body inside the
 // Dispatcher seam (step 5 of the six-step pattern).
 //
@@ -745,95 +844,10 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 
 	// Iterate each wave boundary k → k+1. Skip the last wave (no k+1 to gate on).
 	for k := 0; k < len(layers)-1; k++ {
-		waveNum := k + 1 // 1-indexed wave number
-
-		// If already integrated through this wave, skip to next boundary.
-		if plan.Status.IntegratedThroughWave >= waveNum {
-			continue
+		res, handled, err := r.reconcileWaveBoundary(ctx, plan, project, taskByName, layers, k)
+		if handled || err != nil {
+			return res, err
 		}
-
-		// Integration only applies when a real git target + push image exist.
-		// Stub/test/no-remote projects have no run branch to integrate into —
-		// there is nothing to push, so this boundary must NOT block wave k+1
-		// dispatch (otherwise the no-op triggerWaveIntegrationJob would requeue
-		// forever and IntegratedThroughWave would never advance). Fall through to
-		// the normal label-stamp + Task-dispatch path below.
-		if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" || r.TidePushImage == "" {
-			continue
-		}
-
-		// PauseBetweenWaves (Plan 04-05) is the OUTER operator gate at this
-		// boundary: do not integrate a wave that is still awaiting operator
-		// approval. maybePauseForWaveApprove (downstream) sets the
-		// WaveOrLevelPaused condition and blocks Task dispatch via the
-		// wave-paused label. Once the operator approves, the wave-approved-<N>
-		// label is stamped and integration proceeds on a later reconcile —
-		// integrate-then-dispatch ordering is preserved past the gate.
-		if project.Spec.Gates.PauseBetweenWaves &&
-			plan.Labels[fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, waveNum)] != "true" {
-			continue
-		}
-
-		integJobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveNum)
-
-		// RESPONSIBILITY A: Check if integration Job exists.
-		var integJob batchv1.Job
-		getErr := r.Get(ctx, types.NamespacedName{Name: integJobName, Namespace: plan.Namespace}, &integJob)
-		if getErr == nil {
-			// Job exists — check terminal status.
-			// IMPORTANT: check Failed BEFORE Succeeded==0 to avoid livelock.
-			if integJob.Status.Failed > 0 {
-				// Permanently failed (BackoffLimit exhausted) → terminal Plan failure.
-				return r.patchPlanFailed(ctx, plan,
-					tideprojectv1alpha1.ReasonWaveIntegrationFailed,
-					fmt.Sprintf("wave %d integration job %s failed (BackoffLimit exhausted)", waveNum, integJobName))
-			}
-			if integJob.Status.Succeeded > 0 {
-				// Integration complete — stamp IntegratedThroughWave and continue loop.
-				patch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.IntegratedThroughWave = waveNum
-				if err := r.Status().Patch(ctx, plan, patch); err != nil {
-					return ctrl.Result{}, fmt.Errorf("patch IntegratedThroughWave=%d: %w", waveNum, err)
-				}
-				continue
-			}
-			// Job is still running (Succeeded==0, Failed==0): block wave k+1 dispatch.
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		if !apierrors.IsNotFound(getErr) {
-			return ctrl.Result{}, fmt.Errorf("get wave integration job %s: %w", integJobName, getErr)
-		}
-
-		// RESPONSIBILITY B: No Job found — dispatch if all wave-k tasks Succeeded.
-		allWaveKSucceeded := true
-		for _, name := range layers[k] {
-			t := taskByName[name]
-			if t == nil || t.Status.Phase != "Succeeded" {
-				allWaveKSucceeded = false
-				break
-			}
-		}
-		if !allWaveKSucceeded {
-			// Wave k not yet complete — nothing to integrate yet.
-			continue
-		}
-
-		// Collect wave-k task branch names.
-		var branches []string
-		for _, name := range layers[k] {
-			t := taskByName[name]
-			if t != nil {
-				branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
-			}
-		}
-
-		// Dispatch the integration Job.
-		if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage); err != nil {
-			return ctrl.Result{}, err
-		}
-		// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).
-		// Do NOT stamp IntegratedThroughWave here — the Job has not yet completed.
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Step 5: Resolve the project name for Task label stamping.

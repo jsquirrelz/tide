@@ -29,7 +29,6 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -104,7 +103,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			Expect(refs).NotTo(BeEmpty(), "Phase must have ownerRef")
 			var foundRef bool
 			for _, r := range refs {
-				if r.Kind == "Milestone" && r.UID == types.UID(milestone.UID) {
+				if r.Kind == "Milestone" && r.UID == milestone.UID {
 					Expect(r.Controller).NotTo(BeNil(), "controller bool must be set")
 					Expect(*r.Controller).To(BeTrue(), "ownerRef.Controller must be true")
 					foundRef = true

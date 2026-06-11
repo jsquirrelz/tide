@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -447,33 +446,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// isFirstCompletion tracks whether this is the initial observation of the planner
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
-	isFirstCompletion := false
-	if r.ReporterImage != "" && project != nil {
-		reporterJobName := fmt.Sprintf("tide-reporter-%s", ms.UID)
-		pvcName := defaultSharedPVCName
-		var existingReporterJob batchv1.Job
-		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: ms.Namespace}, &existingReporterJob); gErr != nil {
-			if !apierrors.IsNotFound(gErr) {
-				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
-			}
-			// Not found — spawn it (first completion observation).
-			isFirstCompletion = true
-			reporterJob := BuildReporterJob(ms, project, pvcName, string(ms.UID), "Milestone",
-				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
-			if cErr := r.Create(ctx, reporterJob); cErr != nil {
-				if !apierrors.IsAlreadyExists(cErr) {
-					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
-				}
-			} else {
-				logger.Info("spawned reporter Job", "job", reporterJobName, "milestone", ms.Name)
-			}
-		} else {
-			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
-		}
-	} else if r.ReporterImage == "" {
-		// No reporter configured (stub/test path) — treat as first completion.
-		isFirstCompletion = true
-		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "milestone", ms.Name)
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.ReporterImage)
+	if spawnErr != nil {
+		return ctrl.Result{}, spawnErr
 	}
 
 	// Plan 09-08 Defect C: roll up planner-level Usage to Project.Status.Budget

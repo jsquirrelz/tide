@@ -42,14 +42,68 @@ import (
 	"fmt"
 	"maps"
 
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
+
+// spawnReporterIfNeeded idempotently spawns the tide-reporter reader Job for a
+// planner-level Job completion (Option C / T-09-13: AlreadyExists on Create is
+// success; a pre-existing reporter Job means this completion was already
+// observed). Returns isFirstCompletion=true when this is the initial
+// observation of the planner Job's terminal state: either the reporter Job was
+// newly spawned, or no ReporterImage is configured at all (stub/test path).
+// When ReporterImage is set but the parent Project is unresolved, no spawn
+// happens and isFirstCompletion stays false (mirrors the prior inline blocks
+// in milestone_controller.go / phase_controller.go).
+func spawnReporterIfNeeded(
+	ctx context.Context,
+	c client.Client,
+	scheme *runtime.Scheme,
+	parent metav1.Object,
+	project *tideprojectv1alpha1.Project,
+	parentKind string,
+	reporterImage string,
+) (bool, error) {
+	logger := logf.FromContext(ctx)
+	if reporterImage == "" {
+		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured",
+			"parentKind", parentKind, "parent", parent.GetName())
+		return true, nil
+	}
+	if project == nil {
+		return false, nil
+	}
+	reporterJobName := fmt.Sprintf("tide-reporter-%s", parent.GetUID())
+	var existing batchv1.Job
+	if gErr := c.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: parent.GetNamespace()}, &existing); gErr != nil {
+		if !apierrors.IsNotFound(gErr) {
+			return false, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+		}
+		// Not found — spawn it (first completion observation).
+		reporterJob := BuildReporterJob(parent, project, defaultSharedPVCName, string(parent.GetUID()), parentKind,
+			ReporterOptions{ReporterImage: reporterImage}, scheme)
+		if cErr := c.Create(ctx, reporterJob); cErr != nil {
+			if !apierrors.IsAlreadyExists(cErr) {
+				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+			}
+		} else {
+			logger.Info("spawned reporter Job", "job", reporterJobName,
+				"parentKind", parentKind, "parent", parent.GetName())
+		}
+		return true, nil
+	}
+	logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
+	return false, nil
+}
 
 // ProviderDefaults carries the Helm-chart-supplied defaults used as the
 // last fallback in ResolveProvider's precedence chain (D-C2).
@@ -67,11 +121,6 @@ type ProviderDefaults struct {
 	// that level".
 	Models map[string]string
 }
-
-// childKindAllowlist is a package-local alias for the allowlist that now lives in
-// internal/reporter. Call sites within internal/controller reference it via this
-// delegator so callers need not be updated in this plan.
-var childKindAllowlist = reporter.ChildKindAllowlist
 
 // ResolveProvider walks Project.Spec.Subagent precedence chain for the
 // given level (D-C2). Returns a ProviderSpec with Vendor pinned to
@@ -193,13 +242,6 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 		return pkgdispatch.EnvelopeIn{}, nil, fmt.Errorf("marshal planner envelope: %w", err)
 	}
 	return envIn, data, nil
-}
-
-// childrenAlreadyMaterialized delegates to reporter.ChildrenAlreadyMaterialized.
-// The guard logic lives in internal/reporter so cmd/tide-reporter can import it;
-// the controller callers remain unchanged (plan 09-04).
-func childrenAlreadyMaterialized(ctx context.Context, c client.Client, parent metav1.Object) (bool, error) {
-	return reporter.ChildrenAlreadyMaterialized(ctx, c, parent)
 }
 
 // MaterializeChildCRDs delegates to reporter.MaterializeChildCRDs.
