@@ -34,5 +34,9 @@
   "agent_skills": {},
   "mode": "yolo",
   "granularity": "standard",
-  "resolve_model_ids": "omit"
+  "resolve_model_ids": "omit",
+  "model_overrides": {
+    "gsd-planner": "fable",
+    "gsd-verifier": "opus"
+  }
 }
