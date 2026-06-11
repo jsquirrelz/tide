@@ -241,6 +241,19 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		return ctrl.Result{}, true, nil
 	}
 
+	// D-02 descent hold: if the parent Phase is parked at AwaitingApproval,
+	// hold Job dispatch here. The Plan stays at Status.Phase="" so tide approve's
+	// findAwaitingPlan cannot target a held child instead of the parked parent
+	// (12-RESEARCH.md Pitfall 5). NotFound parent is transient informer lag —
+	// checkParentApproval returns (false, nil) and dispatch continues.
+	if held, hErr := checkParentApproval(ctx, r.Client, plan.Namespace, plan.Spec.PhaseRef, "Phase"); hErr != nil {
+		return ctrl.Result{}, true, hErr
+	} else if held {
+		logf.FromContext(ctx).V(1).Info("dispatch held: parent Phase awaiting approval",
+			"plan", plan.Name, "phase", plan.Spec.PhaseRef)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
 	// Acquire plannerPool (POOL-01) before Job creation (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {

@@ -250,3 +250,47 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.Scheme, parent metav1.Object, children []pkgdispatch.ChildCRDSpec) error {
 	return reporter.MaterializeChildCRDs(ctx, c, scheme, parent, children)
 }
+
+// checkParentApproval implements the D-02 descent hold — children materialize
+// but dispatch waits for parental approval (tidal lock pending).
+//
+// Returns (true, nil) when the direct parent is parked at AwaitingApproval,
+// signalling that the child reconciler must hold Job dispatch with a 5s requeue.
+// Returns (false, nil) when parentName is empty (root level — no parent to check)
+// or when the parent is not found (client.IgnoreNotFound — NotFound is transient
+// informer lag; callers continue dispatch and the next reconcile re-checks).
+// Non-NotFound Get errors propagate to the standard requeue-on-error path.
+//
+// The parentKind switch covers "Milestone", "Phase", and "Plan" — the three
+// parent kinds that can park at AwaitingApproval. Unknown kinds return (false, nil)
+// (permissive default: unknown parent kind should not block dispatch).
+//
+// Design note: held children stay at Status.Phase="" — this helper writes NO
+// status so tide approve's findAwaiting* cannot target a held child instead of
+// the parked parent (Pitfall 5 from 12-RESEARCH.md).
+func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, parentKind string) (bool, error) {
+	if parentName == "" {
+		return false, nil
+	}
+	switch parentKind {
+	case "Milestone":
+		var ms tideprojectv1alpha1.Milestone
+		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ms); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		return ms.Status.Phase == "AwaitingApproval", nil
+	case "Phase":
+		var ph tideprojectv1alpha1.Phase
+		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ph); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		return ph.Status.Phase == "AwaitingApproval", nil
+	case "Plan":
+		var plan tideprojectv1alpha1.Plan
+		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &plan); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+		return plan.Status.Phase == "AwaitingApproval", nil
+	}
+	return false, nil
+}

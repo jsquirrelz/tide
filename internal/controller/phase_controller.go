@@ -184,6 +184,7 @@ func (r *PhaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 // Dispatches tide-phase-<phase-uid>-<attempt>; on completion materializes
 // Plan child CRDs from EnvelopeOut.ChildCRDs.
 func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tideprojectv1alpha1.Phase) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
 	if ph.Status.Phase == "Succeeded" || ph.Status.Phase == "Failed" {
 		return ctrl.Result{}, nil
 	}
@@ -266,6 +267,19 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 				return ctrl.Result{}, nil
 			}
 		}
+	}
+
+	// D-02 descent hold: if the parent Milestone is parked at AwaitingApproval,
+	// hold Job dispatch here. The Phase stays at Status.Phase="" so tide approve's
+	// findAwaitingPhase cannot target a held child instead of the parked parent
+	// (12-RESEARCH.md Pitfall 5). NotFound parent is transient informer lag —
+	// checkParentApproval returns (false, nil) and dispatch continues.
+	if held, hErr := checkParentApproval(ctx, r.Client, ph.Namespace, ph.Spec.MilestoneRef, "Milestone"); hErr != nil {
+		return ctrl.Result{}, hErr
+	} else if held {
+		logger.V(1).Info("dispatch held: parent Milestone awaiting approval",
+			"phase", ph.Name, "milestone", ph.Spec.MilestoneRef)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Acquire plannerPool before creating Job (D-A4).
