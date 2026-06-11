@@ -356,7 +356,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 		})
 	})
 
-	Describe("Test 3 — reject annotation on Project: short-circuits to Failed/RejectedByUser", func() {
+	Describe("Test 3 — reject annotation on Project: parks Milestone with RejectedByUser condition (D-05)", func() {
 		const projectName = "gate-proj-ms3"
 		const msName = "gate-ms-3"
 
@@ -381,7 +381,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 		})
 		AfterEach(func() { cleanup(projectName, msName) })
 
-		It("Milestone reaches Status.Phase=Failed with Reason=RejectedByUser and the reject reason in Message", func() {
+		It("Milestone is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed), then recovers after annotation clear", func() {
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
 				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
@@ -397,19 +397,107 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(msName, r, envReader)
 
+			// D-05: reject parks — Status.Phase must NOT be "Failed".
+			// ConditionWaveOrLevelPaused must be True with Reason=RejectedByUser.
 			Eventually(func(g Gomega) {
 				var after tideprojectv1alpha1.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
-				g.Expect(after.Status.Phase).To(Equal("Failed"))
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
-				g.Expect(c).NotTo(BeNil())
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: reject must park the Milestone, not fail-mark it")
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("operator halt"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// D-05 recovery: clear the reject annotation (simulating tide resume).
+			var current tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
+			newAnno := gates.ConsumeReject(&current)
+			annoPatch := client.MergeFrom(current.DeepCopy())
+			current.SetAnnotations(newAnno)
+			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return "err"
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+
+			// After annotation clear, re-driving must let the Milestone proceed
+			// (park condition no longer blocks — it re-enters the normal dispatch path).
+			driveToJobCompletion(msName, r, envReader)
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Milestone
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
+				// After resume, Status.Phase must NOT be "Failed" and must have progressed
+				// past the park (Succeeded for this leaf fixture).
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: Milestone must not be Failed after reject annotation cleared")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// D-05 dispatch-hold: a Pending Milestone under a rejected Project must not create a planner Job.
+	Describe("Test 3b — reject annotation on Project: halts new dispatch for Pending Milestone", func() {
+		const projectName = "gate-proj-ms3b"
+		const msName = "gate-ms-3b"
+
+		BeforeEach(func() {
+			makeProject(projectName, tideprojectv1alpha1.Gates{Milestone: gates.PolicyAuto})
+			var proj tideprojectv1alpha1.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
+			patch := client.MergeFrom(proj.DeepCopy())
+			if proj.Annotations == nil {
+				proj.Annotations = map[string]string{}
+			}
+			proj.Annotations[gates.AnnotationReject] = "halt dispatch"
+			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return ""
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("halt dispatch"))
+		})
+		AfterEach(func() { cleanup(projectName, msName) })
+
+		It("Pending Milestone creates no planner Job while Project carries reject annotation", func() {
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+			r := &MilestoneReconciler{
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      newMapEnvReader(),
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+			}
+
+			var jobsBefore batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsBefore, client.InNamespace("default"))
+			jobCountBefore := len(jobsBefore.Items)
+
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
+
+			var jobsAfter batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
+			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+				"no planner Job must be created while Project carries reject annotation")
 		})
 	})
 

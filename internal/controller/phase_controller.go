@@ -282,6 +282,16 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	// D-05 dispatch-entry reject hold — check reject annotation before acquiring the
+	// pool or creating a Job. A rejected Project halts NEW dispatch; in-flight Jobs
+	// drain (no Job deletion — resolved discretion call).
+	{
+		earlyProject := r.resolveProject(ctx, ph)
+		if earlyProject != nil && gates.CheckRejected(earlyProject) {
+			return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(earlyProject))
+		}
+	}
+
 	// Acquire plannerPool before creating Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
@@ -426,8 +436,9 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).
 	// Phase 12 D-04: if the phase already has an ApprovedByUser (or ResumedByUser)
 	// condition, skip the park — don't re-park an already-approved level.
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
 	if project != nil && gates.CheckRejected(project) {
-		return r.patchPhaseFailed(ctx, ph, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(project))
 	}
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "phase")
@@ -586,6 +597,26 @@ func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideproje
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// patchPhaseRejected parks the Phase with a RejectedByUser condition WITHOUT
+// writing Status.Phase=Failed (D-05). In-flight Jobs drain; state is preserved
+// so clearing the reject annotation (tide resume) lets the level re-enter the
+// normal dispatch path on the next reconcile.
+// Returns RequeueAfter 5s so the park polls for the annotation clear.
+func (r *PhaseReconciler) patchPhaseRejected(ctx context.Context, ph *tideprojectv1alpha1.Phase, reason string) (ctrl.Result, error) {
+	patch := client.MergeFrom(ph.DeepCopy())
+	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonRejectedByUser,
+		Message:            fmt.Sprintf("Rejected: %s", reason),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ph, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // patchPhaseAwaitingApproval parks the Phase at Status.Phase=AwaitingApproval

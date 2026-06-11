@@ -286,6 +286,23 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		}
 	}
 
+	// Step 2c: D-05 dispatch-entry reject hold — resolve Project early to check
+	// for a reject annotation before acquiring the pool or creating a Job.
+	// A rejected Project must halt NEW dispatch (not only post-completion advancement).
+	// In-flight Jobs drain; no Job deletion (resolved discretion call).
+	{
+		var earlyProject *tideprojectv1alpha1.Project
+		if ms.Spec.ProjectRef != "" {
+			var p tideprojectv1alpha1.Project
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
+				earlyProject = &p
+			}
+		}
+		if earlyProject != nil && gates.CheckRejected(earlyProject) {
+			return r.patchMilestoneRejected(ctx, ms, gates.RejectedReason(earlyProject))
+		}
+	}
+
 	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
@@ -426,8 +443,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// regardless of envelope availability or read errors). Was previously checked
 	// after envelope read, which made TestRejectHalts race with the EnvelopeRead
 	// failure path when the shared envReader has no SetOut for this UID.
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
 	if project != nil && gates.CheckRejected(project) {
-		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha1.ReasonRejectedByUser, gates.RejectedReason(project))
+		return r.patchMilestoneRejected(ctx, ms, gates.RejectedReason(project))
 	}
 
 	// Read tiny status from the dispatch Job's termination message for budget
@@ -655,6 +673,26 @@ func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *t
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// patchMilestoneRejected parks the Milestone with a RejectedByUser condition
+// WITHOUT writing Status.Phase=Failed (D-05). In-flight Jobs drain; state is
+// preserved so clearing the reject annotation (tide resume) lets the level
+// re-enter the normal dispatch path on the next reconcile.
+// Returns RequeueAfter 5s so the park polls for the annotation clear.
+func (r *MilestoneReconciler) patchMilestoneRejected(ctx context.Context, ms *tideprojectv1alpha1.Milestone, reason string) (ctrl.Result, error) {
+	patch := client.MergeFrom(ms.DeepCopy())
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             tideprojectv1alpha1.ReasonRejectedByUser,
+		Message:            fmt.Sprintf("Rejected: %s", reason),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // patchMilestoneAwaitingApproval parks the Milestone at Status.Phase=AwaitingApproval

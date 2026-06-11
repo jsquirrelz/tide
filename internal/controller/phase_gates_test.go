@@ -276,7 +276,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		})
 	})
 
-	Describe("Test 5c — reject annotation on Project: short-circuits Phase to Failed", func() {
+	Describe("Test 5c — reject annotation on Project: parks Phase with RejectedByUser condition (D-05)", func() {
 		const projectName, msName, phaseName = "gate-proj-ph3", "gate-ms-ph3", "gate-phase-3"
 
 		BeforeEach(func() {
@@ -299,7 +299,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
-		It("phase ends in Failed with Reason=RejectedByUser", func() {
+		It("Phase is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed), then recovers after annotation clear", func() {
 			phase := &tideprojectv1alpha1.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
 				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
@@ -315,19 +315,102 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
+				SigningKey:      testSigningKey,
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
+			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {
 				var after tideprojectv1alpha1.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
-				g.Expect(after.Status.Phase).To(Equal("Failed"))
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
-				g.Expect(c).NotTo(BeNil())
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: reject must park the Phase, not fail-mark it")
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("phase halt"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// D-05 recovery: clear the reject annotation (simulating tide resume).
+			var current tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
+			newAnno := gates.ConsumeReject(&current)
+			annoPatch := client.MergeFrom(current.DeepCopy())
+			current.SetAnnotations(newAnno)
+			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return "err"
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+
+			// After annotation clear, re-driving must let the Phase proceed.
+			driveToJobCompletion(phaseName, r, envReader)
+			Eventually(func(g Gomega) {
+				var after tideprojectv1alpha1.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
+				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: Phase must not be Failed after reject annotation cleared")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// D-05 dispatch-hold: a Pending Phase under a rejected Project must not create a planner Job.
+	Describe("Test 5c-hold — reject annotation on Project: halts new dispatch for Pending Phase", func() {
+		const projectName, msName, phaseName = "gate-proj-ph3h", "gate-ms-ph3h", "gate-phase-3h"
+
+		BeforeEach(func() {
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha1.Gates{Phase: gates.PolicyAuto})
+			var proj tideprojectv1alpha1.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
+			patch := client.MergeFrom(proj.DeepCopy())
+			if proj.Annotations == nil {
+				proj.Annotations = map[string]string{}
+			}
+			proj.Annotations[gates.AnnotationReject] = "halt dispatch"
+			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
+			Eventually(func() string {
+				var p tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
+					return ""
+				}
+				return p.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("halt dispatch"))
+		})
+		AfterEach(func() { cleanup(projectName, msName, phaseName) })
+
+		It("Pending Phase creates no planner Job while Project carries reject annotation", func() {
+			phase := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
+
+			r := &PhaseReconciler{
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      newMapEnvReader(),
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+			}
+
+			var jobsBefore batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsBefore, client.InNamespace("default"))
+			jobCountBefore := len(jobsBefore.Items)
+
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
+
+			var jobsAfter batchv1.JobList
+			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
+			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+				"no planner Job must be created while Project carries reject annotation")
 		})
 	})
 
