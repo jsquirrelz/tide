@@ -65,7 +65,7 @@ Plans:
   2. A Project pinning a real image via `spec.subagent.image` in a released-chart install dispatches that image — no silent stub override; the chart's `--subagent-image` default posture is documented in values.yaml with an explicit comment
   3. A provider response with HTTP 400 "credit balance is too low" sets a `BillingHalt` condition on the Project and stops further Job dispatches — subsequent reconcile loops skip dispatch while the condition is present
 
-**Plans**: 4 plans
+**Plans**: 7 plans
 
 Plans:
 **Wave 1**
@@ -77,6 +77,15 @@ Plans:
 
 - [x] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
 - [x] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
+
+**Wave 3 — gap closure** *(from 13-VERIFICATION.md)*
+
+- [ ] 13-05-PLAN.md — CR-01 milestone nil-project guard + WR-03 resume time-fence (billing-resumed-at annotation, jobStart guard, distinct latch body) (DISPATCH-01, HALT-01)
+- [ ] 13-06-PLAN.md — WR-01 de-vacuate planner-level hold specs + promptPath fixture debt + WR-04 chart required guard (HALT-01, DISPATCH-02)
+
+**Wave 4 — gap closure** *(blocked on Wave 3)*
+
+- [ ] 13-07-PLAN.md — Diagnose-then-fix reporter materialization failure + final full make test-int gate (DISPATCH-02)
 
 ### Phase 14: Budget Enforcement + Pricing
 
