@@ -69,35 +69,13 @@ project.tideproject.k8s/small-project condition met
 
   A five-level decomposition that turns "build this system" into a structured graph of work an autonomous agent (or pool of agents) can traverse.
 
-  Level: 1
-  Unit: Milestone
-  Purpose: An outcome-bearing capability set. The largest unit a human stakeholder cares about.
-  Artifact produced: MILESTONE.md — outcome statement, exit criteria, upstream/downstream milestones
-  Dependency model: DAG across milestones (not linear)
-  ────────────────────────────────────────
-  Level: 2
-  Unit: Phase
-  Purpose: A coherent slice within a milestone that delivers something incrementally testable.
-  Artifact produced: Phase brief — one paragraph of intent + dependency declarations
-  Dependency model: DAG within (and across) milestones, expressed at the interface level
-  ────────────────────────────────────────
-  Level: 3
-  Unit: Plan
-  Purpose: The file/line-level specification of one slice of a phase's work. A phase can have multiple plans; plans within a phase may execute in parallel or serially depending on their task dependencies.
-  Artifact produced: PLAN.md — file paths, type signatures, test cases, acceptance checklist
-  Dependency model: Consumes its phase's brief + upstream phases' interface contracts. Sibling plans within the same phase declare any interface dependencies they have on each other.
-  ────────────────────────────────────────
-  Level: 4
-  Unit: Task
-  Purpose: The atomic unit of code mutation. Small enough to finish in one pass; large enough to be meaningful.
-  Artifact produced: A diff, a test, a file.
-  Dependency model: DAG within the plan; declares the files it touches
-  ────────────────────────────────────────
-  Level: 5
-  Unit: Wave
-  Purpose: A horizontal grouping of tasks with no mutual dependencies. Tasks within a wave execute in parallel; waves execute sequentially.
-  Artifact produced: An execution schedule
-  Dependency model: Derived from the task DAG by topological layering
+| Level | Unit | Purpose | Artifact produced | Dependency model |
+|-------|------|---------|-------------------|------------------|
+| 1 | **Milestone** | An outcome-bearing capability set. The largest unit a human stakeholder cares about. | `MILESTONE.md` — outcome statement, exit criteria, upstream/downstream milestones | DAG across milestones (not linear) |
+| 2 | **Phase** | A coherent slice within a milestone that delivers something incrementally testable. | Phase brief — one paragraph of intent + dependency declarations | DAG within (and across) milestones, expressed at the interface level |
+| 3 | **Plan** | The file/line-level specification of one slice of a phase's work. A phase can have multiple plans; plans within a phase may execute in parallel or serially depending on their task dependencies. | `PLAN.md` — file paths, type signatures, test cases, acceptance checklist | Consumes its phase's brief + upstream phases' interface contracts. Sibling plans within the same phase declare any interface dependencies they have on each other. |
+| 4 | **Task** | The atomic unit of code mutation. Small enough to finish in one pass; large enough to be meaningful. | A diff, a test, a file. | DAG within the plan; declares the files it touches |
+| 5 | **Wave** | A horizontal grouping of tasks with no mutual dependencies. Tasks within a wave execute in parallel; waves execute sequentially. | An execution schedule | Derived from the task DAG by topological layering |
 
   Two distinct DAGs run through this:
 
