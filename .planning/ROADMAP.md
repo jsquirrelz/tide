@@ -65,7 +65,13 @@ Plans:
   2. A Project pinning a real image via `spec.subagent.image` in a released-chart install dispatches that image — no silent stub override; the chart's `--subagent-image` default posture is documented in values.yaml with an explicit comment
   3. A provider response with HTTP 400 "credit balance is too low" sets a `BillingHalt` condition on the Project and stops further Job dispatches — subsequent reconcile loops skip dispatch while the condition is present
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — resolveImage precedence chain + all six controller dispatch sites wired; main.go flag-overrides-env default tier (DISPATCH-01)
+- [ ] 13-02-PLAN.md — BillingHalt condition vocabulary + shared helpers, credproxy fail-fast latch, tide resume clears the halt (HALT-01)
+- [ ] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
+- [ ] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
 
 ### Phase 14: Budget Enforcement + Pricing
 
