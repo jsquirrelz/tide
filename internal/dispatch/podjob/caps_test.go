@@ -36,21 +36,21 @@ func TestDefaultCaps(t *testing.T) {
 		wantInputTokens  int64
 		wantOutputTokens int64
 	}{
-		// Executor branch — 480s floor
+		// Executor branch — 1200s floor
 		{
-			name:          "executor: nil caps → 480s floor",
+			name:          "executor: nil caps → 1200s floor",
 			in:            nil,
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
-			name:          "executor: zero WallClockSeconds → 480s floor",
+			name:          "executor: zero WallClockSeconds → 1200s floor",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: 0},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
-			name:          "executor: negative WallClockSeconds → 480s floor",
+			name:          "executor: negative WallClockSeconds → 1200s floor",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: -1},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
@@ -62,35 +62,35 @@ func TestDefaultCaps(t *testing.T) {
 			wantWallClock: 60,
 		},
 		{
-			name:          "executor: 600s WallClockSeconds → 600s",
+			name:          "executor: 600s WallClockSeconds → 600s (under floor but operator-set is honored)",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: 600},
 			kind:          JobKindExecutor,
 			wantWallClock: 600,
 		},
 		{
-			name:           "executor: zero WallClockSeconds + non-zero Iterations → 480s floor, Iterations preserved",
+			name:           "executor: zero WallClockSeconds + non-zero Iterations → 1200s floor, Iterations preserved",
 			in:             &tidev1alpha1.Caps{WallClockSeconds: 0, Iterations: 50},
 			kind:           JobKindExecutor,
 			wantWallClock:  executorCapsFloorSeconds,
 			wantIterations: 50,
 		},
 		{
-			name:             "executor: zero WallClockSeconds + non-zero Token caps → 480s floor, tokens preserved",
+			name:             "executor: zero WallClockSeconds + non-zero Token caps → 1200s floor, tokens preserved",
 			in:               &tidev1alpha1.Caps{WallClockSeconds: 0, InputTokens: 100000, OutputTokens: 50000},
 			kind:             JobKindExecutor,
 			wantWallClock:    executorCapsFloorSeconds,
 			wantInputTokens:  100000,
 			wantOutputTokens: 50000,
 		},
-		// Planner branch — 600s floor
+		// Planner branch — 1800s floor
 		{
-			name:          "planner: nil caps → 600s floor",
+			name:          "planner: nil caps → 1800s floor",
 			in:            nil,
 			kind:          JobKindPlanner,
 			wantWallClock: plannerCapsFloorSeconds,
 		},
 		{
-			name:          "planner: zero WallClockSeconds → 600s floor",
+			name:          "planner: zero WallClockSeconds → 1800s floor",
 			in:            &tidev1alpha1.Caps{WallClockSeconds: 0},
 			kind:          JobKindPlanner,
 			wantWallClock: plannerCapsFloorSeconds,
@@ -144,7 +144,7 @@ func TestDefaultCaps(t *testing.T) {
 // equally to both consumers downstream of DefaultCaps), with Kind-appropriate
 // floors honored.
 func TestDefaultCaps_NilCapsDeadlineMatch(t *testing.T) {
-	// Executor branch — 480s floor + 60s grace = 540s
+	// Executor branch — 1200s floor + 60s grace = 1260s
 	capsForToken := DefaultCaps(nil, JobKindExecutor)
 	capsForJob := DefaultCaps(nil, JobKindExecutor)
 	tokenValidity := capsForToken.WallClockSeconds + DefaultWallClockGraceSeconds
@@ -158,7 +158,7 @@ func TestDefaultCaps_NilCapsDeadlineMatch(t *testing.T) {
 			executorCapsFloorSeconds+DefaultWallClockGraceSeconds, tokenValidity)
 	}
 
-	// Planner branch — 600s floor + 60s grace = 660s
+	// Planner branch — 1800s floor + 60s grace = 1860s
 	plannerCapsForToken := DefaultCaps(nil, JobKindPlanner)
 	plannerCapsForJob := DefaultCaps(nil, JobKindPlanner)
 	plannerTokenValidity := plannerCapsForToken.WallClockSeconds + DefaultWallClockGraceSeconds

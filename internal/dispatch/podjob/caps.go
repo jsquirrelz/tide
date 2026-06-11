@@ -33,8 +33,8 @@ import (
 type JobKind string
 
 const (
-	JobKindExecutor JobKind = "executor" // Phase 2 task dispatch — 480s floor
-	JobKindPlanner  JobKind = "planner"  // Phase 3 planner dispatch — 600s floor
+	JobKindExecutor JobKind = "executor" // Phase 2 task dispatch — 1200s floor
+	JobKindPlanner  JobKind = "planner"  // Phase 3 planner dispatch — 1800s floor
 )
 
 // executorCapsFloorSeconds is the minimum wall-clock budget applied to
@@ -50,17 +50,34 @@ const (
 // with reason DeadlineExceeded, never writing out.json — surfacing downstream
 // as EnvelopeReadFailed / exitCode=-1. The quick wave-0 task (~163s) fit under
 // 360s, which is why the failure was intermittent and wave-dependent. 480s
-// (+60s grace = 540s deadline) gives a real executor task ~50% headroom over
-// the old cap while staying below the 600s planner floor (the drift guard in
+// (+60s grace = 540s deadline) gave a real executor task ~50% headroom over
+// the old cap while staying below plannerCapsFloorSeconds (the drift guard in
 // caps_test.go requires planner > executor). Token-mint validity tracks this
 // same floor via DefaultCaps in task_controller.go, so the two stay aligned.
-const executorCapsFloorSeconds int32 = 480
+//
+// Raised 480→1200 after dogfood run 1 (2026-06-11, verified live): real
+// Sonnet executor tasks ran their tool loops past the 480s floor and were
+// killed by the Job's activeDeadlineSeconds (=floor+grace=540s) — exitCode -1,
+// partial envelope flush, EnvelopeReadFailed → Task CR marked Failed. 10+
+// tasks were lost this way in one run (alongside 8 plans on the planner
+// floor). Token-mint validity tracks the same floor via DefaultCaps
+// (task_controller.go mint), so no other change is needed.
+const executorCapsFloorSeconds int32 = 1200
 
 // plannerCapsFloorSeconds is the minimum wall-clock budget applied to planner
 // Jobs (milestone/phase/plan dispatch) when caps is nil or
 // caps.WallClockSeconds <= 0. Sized to cover executor floor + Anthropic API
 // call latency on planner pods (RESEARCH.md §P1.3).
-const plannerCapsFloorSeconds int32 = 600
+//
+// Raised 600→1800 after dogfood run 1 (2026-06-11, verified live): heavyweight
+// Opus plan-planner sessions ran ~11+ min, well past the 600s floor, and were
+// killed by the Job's activeDeadlineSeconds (=floor+grace=660s) — exitCode -1,
+// partial envelope flush, EnvelopeReadFailed → Plan CR marked Failed. 8 plans
+// were lost this way in one run (alongside 10+ tasks on the executor floor).
+// Token-mint validity tracks the same floor via DefaultCaps (phase/plan
+// controllers' credproxy.Sign use plannerCaps.WallClockSeconds + grace), so
+// no other change is needed.
+const plannerCapsFloorSeconds int32 = 1800
 
 // DefaultCaps returns a *Caps with the Kind-appropriate wall-clock floor
 // applied. If caps is non-nil and WallClockSeconds > 0, returns caps unchanged
