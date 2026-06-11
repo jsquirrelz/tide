@@ -206,20 +206,38 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// Step 1a: AwaitingApproval is paused — the reconciler MUST NOT re-dispatch
 	// the planner. Two sub-cases:
 	//   (a) no approve annotation → keep paused, return early
-	//   (b) approve annotation present → re-enter handleJobCompletion (which
-	//       handles the annotation-consume + patchSucceeded branch).
-	// Phase 04.1: closes a long-running flake where the reconciler fell through
-	// to dispatchPlanner on AwaitingApproval and re-patched Phase=Running on
-	// every reconcile (manifested as TestGateApproveFlow intermittent failures).
+	//   (b) approve annotation present → D-04 two-step: consume annotation +
+	//       patch Status.Phase=Running + ApprovedByUser condition, then Requeue.
+	//       Succeeded fires ONLY via the ChildCount-gated succession inside
+	//       handleJobCompletion on the next Running-branch reconcile (D-03 /
+	//       GATE-01). The old path called patchMilestoneSucceeded directly here,
+	//       bypassing the ChildCount guard — that was the run-1 finding-7 bug.
+	// Phase 12 D-04: approve never jumps a level to Succeeded past its children.
 	if ms.Status.Phase == "AwaitingApproval" {
 		if gates.CheckApprove(ms, "milestone") {
-			jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
-			var job batchv1.Job
-			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: jobName}, &job); err == nil {
-				return r.handleJobCompletion(ctx, ms, &job)
+			// Consume annotation (T-04-G2 one-shot).
+			newAnno := gates.ConsumeApprove(ms, "milestone")
+			annoPatch := client.MergeFrom(ms.DeepCopy())
+			ms.SetAnnotations(newAnno)
+			if err := r.Patch(ctx, ms, annoPatch); err != nil {
+				return ctrl.Result{}, err
 			}
-			// Job missing — annotation-only finalization (no envelope read needed).
-			return r.patchMilestoneSucceeded(ctx, ms)
+			// Return to Running + record ApprovedByUser condition (D-04).
+			statusPatch := client.MergeFrom(ms.DeepCopy())
+			ms.Status.Phase = "Running"
+			meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+				Message:            "Milestone approved; children will dispatch",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
+				return ctrl.Result{}, err
+			}
+			// Requeue immediately — the Running branch (below) calls handleJobCompletion
+			// which owns the ChildCount-gated succession (D-03 invariant).
+			return ctrl.Result{Requeue: true}, nil
 		}
 		return ctrl.Result{}, nil
 	}
@@ -414,27 +432,30 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 
 	// Read tiny status from the dispatch Job's termination message for budget
 	// rollup and failure classification. ChildCRDs are NOT used here — materialization
-	// has moved to the reporter Job (REQ-09-01). Tolerate nil EnvReader — continue
-	// through gate logic regardless (Phase 04.1 pattern).
+	// has moved to the reporter Job (REQ-09-01).
+	// Phase 12 Pitfall 1: when EnvReader exists but returns a read error, do NOT
+	// fall into the nil-EnvReader fallback path unconditionally — that path's final
+	// patchMilestoneSucceeded at :542 fires for "!hasChildPhases" (leaf) which could
+	// incorrectly succeed a milestone that has a ChildCount>0 envelope still being
+	// materialized. Instead, treat a read error the same as envReadOK=false but use
+	// a sentinel to distinguish "reader error" from "no reader" so the fallback can
+	// still fire BoundaryDetected succession when children ARE all done.
 	var out pkgdispatch.EnvelopeOut
 	envReadOK := false
+	envReaderPresent := r.EnvReader != nil
 	if r.EnvReader != nil {
 		var readErr error
 		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
 		if readErr != nil {
-			// Non-fatal: the planner envelope on the PVC may be unreadable on the
-			// Job-absent (TTL/GC) fall-through path — its per-run artifact can be
-			// wiped by the clone/init re-creation loop. The envelope is used only
-			// for budget rollup and ChildCount; the authoritative succession signal
-			// is the children's existence + Succeeded state. Mirror the Project
-			// level: log and continue with envReadOK=false so the children-based
-			// boundary gate (not a re-read of the planner envelope) decides outcome.
+			// Non-fatal: log and defer to the hasChildPhases fallback below.
+			// The fallback uses BoundaryDetected (all-children-Succeeded) as the succession
+			// signal, which is safe regardless of the envelope — it does not depend on ChildCount.
 			logger.Error(readErr, "milestone planner envelope tiny-status read failed (non-fatal); deferring to children-based succession", "milestone", ms.Name)
 		} else {
 			envReadOK = true
 		}
 	} else {
-		logger.V(1).Info("no env reader; skipping tiny-status read", "milestone", ms.Name)
+		logger.V(1).Info("no env reader; skipping tiny-status read (nil-EnvReader unit-test path)", "milestone", ms.Name)
 	}
 
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
@@ -464,19 +485,52 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
 	// top of handleJobCompletion per Phase 04.1 — reject should not be
 	// gated on envelope-read success.
+	// Phase 12 D-04: if the milestone already has an ApprovedByUser (or
+	// ResumedByUser) condition — i.e., the operator approved before this
+	// reconcile entered handleJobCompletion — skip the park entirely so we
+	// do not re-park an already-approved level.
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "milestone")
 		if policy == gates.PolicyApprove || policy == gates.PolicyPause {
-			if !gates.CheckApprove(ms, "milestone") {
-				return r.patchMilestoneAwaitingApproval(ctx, ms, policy)
+			// Check if this level was already approved (permanent ApprovedByUser or
+			// ResumedByUser condition with Status=False means the park was lifted).
+			alreadyApproved := false
+			if c := meta.FindStatusCondition(ms.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused); c != nil {
+				if c.Status == metav1.ConditionFalse &&
+					(c.Reason == tideprojectv1alpha1.ReasonApprovedByUser || c.Reason == tideprojectv1alpha1.ReasonResumedByUser) {
+					alreadyApproved = true
+				}
 			}
-			// Approve annotation present: consume it (one-shot) before patching Succeeded.
-			newAnno := gates.ConsumeApprove(ms, "milestone")
-			patch := client.MergeFrom(ms.DeepCopy())
-			ms.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, ms, patch); err != nil {
-				return ctrl.Result{}, err
+			if !alreadyApproved {
+				if !gates.CheckApprove(ms, "milestone") {
+					// No annotation and not yet approved — park.
+					return r.patchMilestoneAwaitingApproval(ctx, ms, policy)
+				}
+				// Annotation present at the hook (operator approved before the park fired):
+				// consume it and write Running+ApprovedByUser so the condition is recorded
+				// for future reconciles — otherwise the next reconcile would re-park because
+				// the annotation is gone but no approval record exists.
+				newAnno := gates.ConsumeApprove(ms, "milestone")
+				annoPatch := client.MergeFrom(ms.DeepCopy())
+				ms.SetAnnotations(newAnno)
+				if err := r.Patch(ctx, ms, annoPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				statusPatch := client.MergeFrom(ms.DeepCopy())
+				ms.Status.Phase = "Running"
+				meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+					Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+					Status:             metav1.ConditionFalse,
+					Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+					Message:            "Milestone approved; children will dispatch",
+					LastTransitionTime: metav1.Now(),
+				})
+				if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
+					return ctrl.Result{}, err
+				}
+				// Fall through to ChildCount-gated succession (D-03).
 			}
+			// alreadyApproved: fall through to ChildCount-gated succession.
 		}
 	}
 
@@ -522,8 +576,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// Fallback: EnvReader is nil (non-Option-C / unit-test path). Use the prior
-	// hasChild-based behavior.
+	// Fallback: EnvReader is nil (non-Option-C / unit-test path) OR had a read
+	// error (envelope transiently absent). Use the prior hasChild-based behavior
+	// with one extra guard: when the reader is PRESENT but returned an error, do
+	// not fire the "no children → succeed" leaf path — the envelope may have had
+	// ChildCount>0 but the read failed transiently. Only BoundaryDetected (all
+	// children Succeeded) is safe to act on when the ChildCount is unknown.
+	// Phase 12 Pitfall 1 fix: envReaderPresent && !envReadOK → guard the leaf path.
 	detected, derr := gates.BoundaryDetected(ctx, r.Client, ms, "Phase")
 	if derr != nil {
 		return ctrl.Result{}, derr
@@ -535,8 +594,13 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	} else if r.hasChildPhases(ctx, ms) {
 		logger.V(1).Info("boundary push deferred: child Phases pending (fallback)", "milestone", ms.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	} else if envReaderPresent {
+		// Reader exists but had a read error AND no children observed yet — the envelope
+		// may have ChildCount>0 (children materializing). Requeue; don't auto-succeed.
+		logger.V(1).Info("boundary push deferred: env reader present but unreadable, waiting (fallback)", "milestone", ms.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	} else {
-		logger.V(1).Info("boundary push skipped: milestone has no child Phases (fallback)", "milestone", ms.Name)
+		logger.V(1).Info("boundary push skipped: milestone has no child Phases (nil-EnvReader fallback)", "milestone", ms.Name)
 	}
 
 	return r.patchMilestoneSucceeded(ctx, ms)
