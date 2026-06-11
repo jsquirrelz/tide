@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: — (v1.0.0 milestone complete; no active phase)
 Plan: —
 Status: Between milestones — run /gsd:new-milestone
-Last activity: 2026-06-11 -- Completed quick task 260610-x3d: dogfood Project CR manifests (examples/projects/dogfood/)
+Last activity: 2026-06-11 -- Completed quick task 260611-cz8: dogfood run 1 salvage branch reviewed, fixed (4 commits), merged to main (49e93cb)
 
 Progress: [██████████] 100%
 
@@ -169,6 +169,7 @@ None yet.
 | 260531-oek | Phase 7 cascade-12: chart-template dispatch image tags default to .Chart.AppVersion not "latest" (subagent/credproxy/push/claude) — fixes $0 acceptance ImagePullBackOff stall | 2026-05-31 | 3edceb7 | [260531-oek-fix-cascade-12-chart-template-dispatch-i](./quick/260531-oek-fix-cascade-12-chart-template-dispatch-i/) |
 | 260610-vcp | K8s/Helm best-practices audit — 76 classified findings (PASS/DRIFT/DEVIATION) in docs/audit/ as post-1.0 hardening backlog | 2026-06-11 | 2bffb70 | [260610-vcp-audit-codebase-against-k8s-helm-best-pra](./quick/260610-vcp-audit-codebase-against-k8s-helm-best-pra/) |
 | 260610-x3d | Draft the three TIDE-on-TIDE dogfood Project CR manifests (analytics, Codex runtime, dashboard Project editor) in examples/projects/dogfood/ + strict-decode guard test | 2026-06-11 | 15de022, 730b960 | [260610-x3d-draft-the-three-tide-on-tide-dogfood-pro](./quick/260610-x3d-draft-the-three-tide-on-tide-dogfood-pro/) |
+| 260611-cz8 | Salvage branch merge prep — 4 review fixes on run-1 telemetry branch (0-byte files, tautological proxy test, observability.md 503 contradiction, EC-7 gate false positive), merged to main | 2026-06-11 | 883ff1d, 5a3fe67, 39053b7, 923357c, 49e93cb | [260611-cz8-salvage-branch-merge-prep-4-review-fixes](./quick/260611-cz8-salvage-branch-merge-prep-4-review-fixes/) |
 
 ## Session Continuity
 
