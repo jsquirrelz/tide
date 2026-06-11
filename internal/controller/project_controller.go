@@ -1049,7 +1049,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 // as success, so a re-enqueue from the reporter Job's own completion does no harm.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
-func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, _ *batchv1.Job) (ctrl.Result, error) {
+func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// Read tiny status from the dispatch Job's termination message for budget
@@ -1119,7 +1119,11 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
 	// NOT the push-Job path — push failures have their own classification.
 	if envReadOK && out.ExitCode != 0 {
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "project", project.Name)
 		}
 	}

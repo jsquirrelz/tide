@@ -35,6 +35,59 @@ import (
 // This is the structural negation of the v1.0 stub-image bug (run-1
 // signature: planner pod completing in seconds with "planner stub success").
 
+// --- Spec 0: CR-01 nil-project guard in milestone reconcilePlannerDispatch ---
+
+// TestMilestoneReconcilePlannerDispatch_NilProject_NoPanic is a white-box envtest spec
+// that calls reconcilePlannerDispatch directly with a Milestone whose spec.projectRef
+// names a Project that does not exist. Before the CR-01 fix this panics at :370
+// (project.Spec.ProviderSecretRef deref). After the fix: no panic, returns RequeueAfter≈1s
+// and no planner Job labelled with the Milestone's UID exists.
+//
+// Plan 13-05 Task 1 (RED phase — will panic/fail until the guard is inserted).
+var _ = Describe("CR-01: milestone nil-project guard (DISPATCH-01)", Label("envtest", "cr01-nil-project"), func() {
+	ctx := context.Background()
+
+	It("does not panic when spec.projectRef names a missing Project; returns RequeueAfter", func() {
+		const msMissingProj = "cr01-ms-missing-proj"
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msMissingProj, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: "does-not-exist-project"},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msMissingProj, "default", &tideprojectv1alpha1.Milestone{})
+
+		r := &MilestoneReconciler{
+			Client:      mgrClient,
+			Scheme:      k8sClient.Scheme(),
+			PlannerPool: newPlannerPoolForTest(),
+			SigningKey:   testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: "tide-stub-subagent:test",
+			},
+			CredproxyImage: testCredproxyImage,
+		}
+
+		// Direct white-box call — the full Reconcile stops earlier at parent resolution
+		// so the nil-project window in reconcilePlannerDispatch is unreachable from Reconcile.
+		result, err := r.reconcilePlannerDispatch(ctx, ms)
+		Expect(err).NotTo(HaveOccurred())
+		// Guard must requeue, not return zero (which would silently drop the reconcile).
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0),
+			"reconcilePlannerDispatch with missing project must requeue (got RequeueAfter=%v)", result.RequeueAfter)
+
+		// No planner Job should have been created — the guard fires before Job creation.
+		var jobs batchv1.JobList
+		Expect(mgrClient.List(ctx, &jobs, client.InNamespace("default"))).To(Succeed())
+		for _, j := range jobs.Items {
+			Expect(j.Name).NotTo(ContainSubstring(string(ms.UID)),
+				"no planner Job labelled with milestone UID must exist after nil-project guard fires")
+		}
+
+		// Cleanup
+		_ = k8sClient.Delete(ctx, ms)
+	})
+})
+
 var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "dispatch-image"), func() {
 	const milestoneRef = "dispatch-image-ms"
 	const phaseRef = "dispatch-image-ph"

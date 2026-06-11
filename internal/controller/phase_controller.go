@@ -389,7 +389,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	return ctrl.Result{}, nil
 }
 
-func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideprojectv1alpha1.Phase, _ *batchv1.Job) (ctrl.Result, error) {
+func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideprojectv1alpha1.Phase, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := r.resolveProject(ctx, ph)
 	projectUID := ""
@@ -440,7 +440,11 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 
 	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
 	if envReadOK && out.ExitCode != 0 && project != nil {
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "phase", ph.Name)
 		}
 	}

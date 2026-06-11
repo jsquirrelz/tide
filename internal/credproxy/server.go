@@ -210,15 +210,25 @@ func (p *Proxy) Handler() (http.Handler, error) {
 
 		// Phase 13 D-04: fail-fast latch. After the first credit-exhaustion 400,
 		// short-circuit every subsequent request locally without contacting the
-		// upstream. The body mirrors the Anthropic error shape so the subagent's
-		// stderr→EnvelopeOut.Reason channel still carries "credit balance".
+		// upstream.
+		//
+		// WR-03 (Plan 13-05): the body is DELIBERATELY non-matching for
+		// isBillingFailureReason (no "credit balance" substring). The reconciler
+		// backstop's billing evidence is the REAL first 400 (which set this latch
+		// and whose message leads the subagent's stderr — EnvelopeOut.Reason is
+		// built from the head of stderr, so the real message survives). Post-resume
+		// staleness is fenced by AnnotationBillingResumedAt (billing_halt.go). A
+		// subagent container that restarts inside an already-latched pod sees this
+		// synthetic body as its first stderr error; without the body rewording its
+		// Reason would also carry the classifier substring, enabling WR-03 re-stamp
+		// even for a container that never touched the real Anthropic API.
 		if p.billingHalted.Load() {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-Tide-Billing-Halt", "true")
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error",`+
-				`"message":"Your credit balance is too low to access the Anthropic API. `+
-				`TIDE billing halt active — run tide resume after refilling credits."}}`)
+				`"message":"TIDE billing halt is active (cached at credproxy); upstream not contacted. `+
+				`Run tide resume after refilling credits."}}`)
 			return
 		}
 

@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -462,6 +463,75 @@ func TestBillingLatch_ShortCircuitsAfterFirst400(t *testing.T) {
 	if resp2.Header.Get("X-Tide-Billing-Halt") != "true" {
 		t.Errorf("expected X-Tide-Billing-Halt: true header on short-circuited response; got %q",
 			resp2.Header.Get("X-Tide-Billing-Halt"))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan 13-05 Task 3 — WR-03 defense-in-depth: synthetic latch body
+// ---------------------------------------------------------------------------
+
+// TestBillingLatch_SyntheticBodyDoesNotContainCreditBalance asserts that the
+// fail-fast latch response body does NOT contain the "credit balance" substring
+// (case-insensitive). The synthetic body must not feed the isBillingFailureReason
+// classifier in the controller backstop — only the REAL first 400 body (whose
+// text leads stderr and is captured in EnvelopeOut.Reason) is the billing evidence
+// channel. Plan 13-05 Task 3 WR-03 defense-in-depth.
+func TestBillingLatch_SyntheticBodyDoesNotContainCreditBalance(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-latch-body"
+	billingBody := `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low"}}`
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(billingBody))
+	}))
+	defer upstream.Close()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, hErr := p.Handler()
+	if hErr != nil {
+		t.Fatalf("Handler: %v", hErr)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	sendRequest := func() *http.Response {
+		token, err := Sign(key, taskUID, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		return resp
+	}
+
+	// First request: hits upstream, latch trips on the real billing 400.
+	resp1 := sendRequest()
+	resp1.Body.Close()
+
+	// Second request: served from the local latch short-circuit (synthetic body).
+	resp2 := sendRequest()
+	defer resp2.Body.Close()
+
+	if resp2.Header.Get("X-Tide-Billing-Halt") != "true" {
+		t.Fatalf("expected X-Tide-Billing-Halt: true on latch response; got %q", resp2.Header.Get("X-Tide-Billing-Halt"))
+	}
+	syntheticBody, _ := io.ReadAll(resp2.Body)
+	// The synthetic body must NOT contain "credit balance" (case-insensitive) —
+	// this is the manufactured-evidence channel that WR-03 closes.
+	if strings.Contains(strings.ToLower(string(syntheticBody)), "credit balance") {
+		t.Errorf("WR-03: synthetic latch body must NOT contain 'credit balance' substring; got body: %s", string(syntheticBody))
 	}
 }
 

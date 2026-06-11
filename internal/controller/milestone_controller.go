@@ -330,6 +330,22 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		}
 	}
 
+	// CR-01 (Plan 13-05): guard nil project before the first deref at :370 and :394.
+	// Mirrors the plan_controller.go cascade-7 guard shape: empty ProjectRef is a
+	// near-unreachable config error (CRD MinLength=1) — refuse without requeueing;
+	// transient Get failure / Project deleted between Step 2 and Step 4 — requeue so
+	// the cache can catch up. BuildJobSpec drops the provider Secret on nil Project
+	// (jobspec.go:259-273), causing credproxy CrashLoopBackOff on the first dispatch.
+	if project == nil {
+		if ms.Spec.ProjectRef == "" {
+			logf.FromContext(ctx).Info("refusing milestone-planner dispatch: spec.projectRef is empty")
+			return ctrl.Result{}, nil
+		}
+		logf.FromContext(ctx).V(1).Info("deferring milestone-planner dispatch: project not yet resolvable, requeueing",
+			"milestone", ms.Name, "projectRef", ms.Spec.ProjectRef)
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+
 	// Step 5: Build planner envelope.
 	// Phase 04.1 P1.2 fix: planner Jobs now share the full Phase 2 dispatch
 	// contract via podjob.BuildJobSpec(Kind=JobKindPlanner). The marshaled
@@ -431,7 +447,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 // Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
 // T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
 // the reporter Job's own completion re-enqueues this reconciler.
-func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, _ *batchv1.Job) (ctrl.Result, error) {
+func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	var project *tideprojectv1alpha1.Project
@@ -511,7 +527,11 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// reason, stamp BillingHalt=True on the owning Project. Non-fatal: the
 	// reconcile continues through the normal completion path regardless.
 	if envReadOK && out.ExitCode != 0 && project != nil {
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "milestone", ms.Name)
 		}
 	}

@@ -434,7 +434,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 //
 // Note: This does NOT create Waves — the existing reconcileWaveMaterialization
 // handles that once the admission webhook stamps ValidationState=Validated.
-func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha1.Plan, _ *batchv1.Job) (ctrl.Result, error) {
+func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha1.Plan, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := r.resolveProjectForPlan(ctx, plan)
 	projectUID := ""
@@ -524,7 +524,11 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 
 	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
 	if out.ExitCode != 0 && project != nil {
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "plan", plan.Name)
 		}
 	}

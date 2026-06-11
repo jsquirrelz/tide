@@ -229,4 +229,11 @@ const (
 	// "credit balance" in the error body. Set on Project by the reconciler
 	// billing classifier.
 	ReasonCreditBalanceTooLow = "CreditBalanceTooLow"
+
+	// AnnotationBillingResumedAt — RFC3339 timestamp stamped by `tide resume`
+	// when clearing the BillingHalt condition. Consumed by the reconciler
+	// backstop (setBillingHaltIfNeeded) to ignore billing evidence from Jobs
+	// created before the resume timestamp — only a fresh post-resume 400 from
+	// a Job created AFTER this time may initiate a halt. Plan 13-05 WR-03.
+	AnnotationBillingResumedAt = "tideproject.k8s/billing-resumed-at"
 )

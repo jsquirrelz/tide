@@ -450,7 +450,7 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 		if err != nil {
 			return taskGateResult{}, err
 		}
-		result, err := r.handleJobCompletion(ctx, task, project)
+		result, err := r.handleJobCompletion(ctx, task, project, &job)
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 	return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
@@ -748,7 +748,7 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 // budget, and patches Task.Status to the terminal state.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
-func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
@@ -828,7 +828,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// against the billing signature; if matched, stamp BillingHalt=True on the
 		// owning Project. Non-fatal: the task's own terminal patch proceeds regardless
 		// (pattern: budget.RollUpUsage error handling below).
-		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason); hErr != nil {
+		var jobStart time.Time
+		if completedJob != nil {
+			jobStart = completedJob.CreationTimestamp.Time
+		}
+		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
 	} else {
