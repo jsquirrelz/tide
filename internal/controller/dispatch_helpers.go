@@ -251,6 +251,39 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 	return reporter.MaterializeChildCRDs(ctx, c, scheme, parent, children)
 }
 
+// resolveImage walks Project.Spec.Subagent precedence chain for the given
+// level, returning the resolved subagent container image reference.
+//
+//	Levels.<level>.Image → Spec.Subagent.Image → helmDefaults.Image → ""
+//
+// An empty return means no image was configured; callers must surface this
+// as a config error rather than dispatching a Job with an empty image field.
+// Level "project" has no entry in the switch (the CRD has no Levels.Project);
+// resolution falls straight to Spec.Subagent.Image, then helmDefaults.Image.
+func resolveImage(project *tideprojectv1alpha1.Project, level string, helmDefaults ProviderDefaults) string {
+	var levelCfg *tideprojectv1alpha1.LevelConfig
+	if project != nil {
+		switch level {
+		case "milestone":
+			levelCfg = project.Spec.Subagent.Levels.Milestone
+		case "phase":
+			levelCfg = project.Spec.Subagent.Levels.Phase
+		case "plan":
+			levelCfg = project.Spec.Subagent.Levels.Plan
+		case "task":
+			levelCfg = project.Spec.Subagent.Levels.Task
+		}
+	}
+	switch {
+	case levelCfg != nil && levelCfg.Image != "":
+		return levelCfg.Image
+	case project != nil && project.Spec.Subagent.Image != "":
+		return project.Spec.Subagent.Image
+	default:
+		return helmDefaults.Image
+	}
+}
+
 // checkParentApproval implements the D-02 descent hold — children materialize
 // but dispatch waits for parental approval (tidal lock pending).
 //
