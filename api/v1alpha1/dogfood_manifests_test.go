@@ -31,7 +31,7 @@ import (
 // returning non-empty documents only.
 func splitYAMLDocs(content []byte) [][]byte {
 	var docs [][]byte
-	for _, raw := range bytes.Split(content, []byte("\n---")) {
+	for raw := range bytes.SplitSeq(content, []byte("\n---")) {
 		trimmed := bytes.TrimSpace(raw)
 		// Strip leading "---" from the first document if present.
 		trimmed = bytes.TrimPrefix(trimmed, []byte("---"))
@@ -52,7 +52,7 @@ func isProjectDoc(doc []byte) bool {
 // top-level key (i.e., at the start of a line with no leading spaces).
 func hasTopLevelKey(doc []byte, key string) bool {
 	needle := []byte(key + ":")
-	for _, line := range bytes.Split(doc, []byte("\n")) {
+	for line := range bytes.SplitSeq(doc, []byte("\n")) {
 		stripped := bytes.TrimLeft(line, " \t")
 		if bytes.HasPrefix(stripped, needle) {
 			return true
