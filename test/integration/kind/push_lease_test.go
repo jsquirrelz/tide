@@ -238,17 +238,96 @@ func pushJobArgs(job *batchv1.Job) []string {
 	return job.Spec.Template.Spec.Containers[0].Args
 }
 
-// patchJobToFailed forces the named Job into a Failed terminal state by
-// patching its Status with a JobFailed=True condition. Used to mock push
-// Job lease rejection without actually running tide-push against a real
-// remote.
+// patchJobToFailed forces the named Job into a Failed terminal state and
+// creates a fake Pod with a termination message encoding reason="lease-rejected".
+//
+// The ProjectReconciler's reconcileBoundaryPush classifies failure reason by
+// calling readPushEnvelope, which reads the Pod's container[0]
+// State.Terminated.Message as a pushResultEnvelope JSON document — NOT the
+// Job condition reason field. Both layers are needed:
+//
+//  1. Job status patch (JobFailed=True) so isJobFailed() returns true and the
+//     controller enters the failure classification arm.
+//  2. Fake Pod with label job-name=<jobName> and a Terminated container status
+//     whose Message is {"reason":"lease-rejected",...} so readPushEnvelope
+//     returns (env, true) with reason="lease-rejected", routing to
+//     PhasePushLeaseFailed rather than the generic auto-retry arm.
+//
+// The Pod is created via kubectl apply and immediately patched to Succeeded
+// phase + Terminated container status; it never actually runs.
 func patchJobToFailed(ns, jobName string) {
-	patch := map[string]any{
+	// Step 1: create a stub pod with label job-name=<jobName> so
+	// readPushEnvelope (which filters on client.MatchingLabels{"job-name":
+	// pushJobName}) can locate it. Pod phase = Succeeded prevents
+	// kube-scheduler from retrying it.
+	terminationMsg := fmt.Sprintf(`{"apiVersion":"v1","kind":"PushResult","projectUID":"","branch":"","headSHA":"","exitCode":11,"reason":"lease-rejected"}`)
+	podName := jobName + "-lease-mock"
+	podYAML := fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    job-name: %s
+spec:
+  restartPolicy: Never
+  containers:
+    - name: tide-push
+      image: busybox:1.36
+      command: ["true"]
+`, podName, ns, jobName)
+	Expect(applyYAML(podYAML)).To(Succeed())
+
+	// Step 2: patch the Pod to Succeeded + Terminated container status with
+	// the lease-rejected termination message. kubectl patch on /status
+	// subresource is available on kind v0.31 + k8s 1.33.
+	podStatusPatch := map[string]any{
+		"status": map[string]any{
+			"phase": "Succeeded",
+			"containerStatuses": []map[string]any{
+				{
+					"name":         "tide-push",
+					"ready":        false,
+					"restartCount": 0,
+					"image":        "busybox:1.36",
+					"imageID":      "",
+					"state": map[string]any{
+						"terminated": map[string]any{
+							"exitCode":    11,
+							"reason":      "Completed",
+							"message":     terminationMsg,
+							"startedAt":   time.Now().UTC().Format(time.RFC3339),
+							"finishedAt":  time.Now().UTC().Format(time.RFC3339),
+							"containerID": "containerd://mock",
+						},
+					},
+				},
+			},
+		},
+	}
+	podBody, err := json.Marshal(podStatusPatch)
+	Expect(err).NotTo(HaveOccurred())
+	podCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+		"patch", "pod", podName, "-n", ns,
+		"--subresource=status", "--type=merge",
+		"--patch", string(podBody))
+	podOut, podErr := podCmd.CombinedOutput()
+	if podErr != nil {
+		// Fall back to non-subresource patch on older kube-apiserver.
+		podCmd = exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+			"patch", "pod", podName, "-n", ns,
+			"--type=merge", "--patch", string(podBody))
+		podOut, podErr = podCmd.CombinedOutput()
+		Expect(podErr).NotTo(HaveOccurred(),
+			"fallback patch Pod status failed: %s", podOut)
+	}
+
+	// Step 3: patch the Job itself to Failed so isJobFailed() returns true.
+	// K8s 1.31+ requires FailureTarget=True before Failed=True.
+	jobPatch := map[string]any{
 		"status": map[string]any{
 			"failed": 1,
 			"conditions": []map[string]any{
-				// K8s 1.31+ requires FailureTarget=True before Failed=True can be set on Job status.
-				// See .planning/debug/push-lease-pvc-pending.md cascade-12 footnote.
 				{
 					"type":               string(batchv1.JobFailureTarget),
 					"status":             string(corev1.ConditionTrue),
@@ -268,7 +347,7 @@ func patchJobToFailed(ns, jobName string) {
 			},
 		},
 	}
-	body, err := json.Marshal(patch)
+	body, err := json.Marshal(jobPatch)
 	Expect(err).NotTo(HaveOccurred())
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 		"patch", "job", jobName, "-n", ns,
@@ -276,9 +355,6 @@ func patchJobToFailed(ns, jobName string) {
 		"--patch", string(body))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Some kube-apiserver versions fail on `kubectl patch job --subresource=status`
-		// for batch/v1; fall back to a non-subresource patch (kind v0.31 + k8s 1.33
-		// supports the subresource path, but be defensive).
 		if !strings.Contains(string(out), "the server could not find the requested resource") {
 			Fail(fmt.Sprintf("patch Job status failed: %v\n%s", err, out))
 		}
