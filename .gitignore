@@ -55,3 +55,7 @@ cmd/tide-demo-init/fixture/
 
 # Phase 6 ACC-01 — acceptance run evidence archives (maintainer-local, never committed)
 .acceptance-runs/
+
+# GSD ephemeral session state
+.planning/RESUME.md
+.planning/HANDOFF.json
