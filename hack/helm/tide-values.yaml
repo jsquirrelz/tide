@@ -275,6 +275,38 @@ dashboard:
 # Enable explicitly via `--set prometheus.serviceMonitor.enabled=true` once
 # the prometheus-operator CRDs (monitoring.coreos.com/v1) are installed.
 prometheus:
+  # PromQL-proxy endpoint (Phase 4 telemetry surface -- milestone-01 Q1 lock-in).
+  #
+  # Q1 DECISION: PROXY, not a second browser-side datasource. This is a
+  # SERVER-SIDE value. When non-empty it is injected as the PROM_ENDPOINT env
+  # var into the dashboard container (templates/dashboard-deployment.yaml, landed
+  # by plan-02), and the dashboard chi server proxies PromQL via
+  # GET /api/v1/query and GET /api/v1/query_range. The browser therefore never
+  # learns a second network target: single origin, no CORS, one auth surface,
+  # and the Prometheus URL stays confined to the dashboard process (matters when
+  # Prometheus is ClusterIP-only and unreachable from outside the cluster).
+  #
+  # Empty (default) => graceful degradation: the proxy returns HTTP 200 with the
+  # body {"status":"unavailable"} and the React Telemetry tab falls back to
+  # live-only CRD-.status views (no error state, no blank panel, no broken
+  # layout). Set e.g.
+  #   --set prometheus.endpoint=http://prometheus-operated.monitoring:9090
+  # to wire historical cost-over-time charts.
+  endpoint: ""
+  # Prometheus local-TSDB retention window for telemetry history (Phase 4 -- Q3).
+  #
+  # This chart ships a ServiceMonitor only (serviceMonitor block below) and does
+  # NOT bundle a Prometheus server, so this value configures no in-chart
+  # component. It is the single documented knob for the retention operators must
+  # apply as --storage.tsdb.retention.time=<value> on their operator-managed
+  # Prometheus.
+  #
+  # RETENTION MATH: one multi-day dogfood run plus a one-week post-run analysis
+  # window fits comfortably inside the 15d default. For organizations tracking
+  # cost-over-time trends ACROSS multiple runs (weeks of continuous dogfooding),
+  # set "30d" or longer so the cost-over-time charts span the full cross-run
+  # history.
+  retentionTime: "15d"
   serviceMonitor:
     enabled: false
     interval: 30s
