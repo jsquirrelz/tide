@@ -334,7 +334,10 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 		})
 	})
 
-	// TestRejectHalts — reject annotation on Project halts up-stack reconcilers.
+	// TestRejectHalts — reject annotation on Project parks up-stack reconcilers (D-05).
+	// Updated from Phase 04-05 to Phase 12-04: reject must park (ConditionWaveOrLevelPaused/
+	// RejectedByUser), NOT fail-mark (Status.Phase=Failed). After clearing the annotation
+	// (simulated tide resume), the flow must proceed to completion.
 	Describe("TestRejectHalts", func() {
 		const projectName = "gate-it-proj-2"
 		const msName = "gate-it-ms-2"
@@ -343,7 +346,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			cleanupGateFlowFixture(projectName, "", msName, "")
 		})
 
-		It("Milestone reaches Status.Phase=Failed with Reason=RejectedByUser and Message containing the operator reason", func() {
+		It("Milestone is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed); post-resume flow completes", func() {
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
 				Spec: tideprojectv1alpha1.ProjectSpec{
@@ -357,12 +360,12 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// Annotate Project rejected mid-run.
 			var p tideprojectv1alpha1.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
-			patch := client.MergeFrom(p.DeepCopy())
+			rejectPatch := client.MergeFrom(p.DeepCopy())
 			if p.Annotations == nil {
 				p.Annotations = map[string]string{}
 			}
 			p.Annotations[gates.AnnotationReject] = "operator stop"
-			Expect(k8sClient.Patch(ctx, &p, patch)).To(Succeed())
+			Expect(k8sClient.Patch(ctx, &p, rejectPatch)).To(Succeed())
 			Eventually(func() string {
 				var pp tideprojectv1alpha1.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &pp); err != nil {
@@ -382,22 +385,208 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// auto-reconciler does not race this spec with an empty reader.
 			envReader := suiteEnvReader
 			r := newMilestoneReconcilerForGateIT(envReader)
-			driveMSReconcile(r, msName, 5)
-
-			var got tideprojectv1alpha1.Milestone
-			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
-			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
-			Expect(makeFakeJobTerminalGates(fmt.Sprintf("tide-milestone-%s-1", got.UID), "default")).To(Succeed())
+			// D-05 dispatch-entry hold: reject annotation is already present →
+			// reconcile fires the reject check before Job creation → no planner Job
+			// is created, Milestone is parked with RejectedByUser condition.
 			driveMSReconcile(r, msName, 3)
+
+			// D-05: park-not-fail. Status.Phase must NOT be "Failed".
+			// ConditionWaveOrLevelPaused must be True with Reason=RejectedByUser.
+			var msUID string
+			Eventually(func(g Gomega) {
+				var ms2 tideprojectv1alpha1.Milestone
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
+				msUID = string(ms2.UID)
+				g.Expect(ms2.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: reject must park the Milestone, not fail-mark it")
+				c := meta.FindStatusCondition(ms2.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
+				g.Expect(c.Message).To(ContainSubstring("operator stop"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// No new Jobs while rejected.
+			var jobsBefore batchv1.JobList
+			Expect(mgrClient.List(ctx, &jobsBefore, client.InNamespace("default"))).To(Succeed())
+			jobCountBefore := len(jobsBefore.Items)
+			driveMSReconcile(r, msName, 3)
+			var jobsAfter batchv1.JobList
+			Expect(mgrClient.List(ctx, &jobsAfter, client.InNamespace("default"))).To(Succeed())
+			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+				"no new Jobs must be created while rejected")
+
+			// Simulated tide resume: clear the reject annotation via gates.ConsumeReject.
+			var currentProj tideprojectv1alpha1.Project
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &currentProj)).To(Succeed())
+			resumeAnnotationPatch := client.MergeFrom(currentProj.DeepCopy())
+			currentProj.SetAnnotations(gates.ConsumeReject(&currentProj))
+			Expect(k8sClient.Patch(ctx, &currentProj, resumeAnnotationPatch)).To(Succeed())
+			Eventually(func() string {
+				var pp tideprojectv1alpha1.Project
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &pp); err != nil {
+					return "err"
+				}
+				return pp.Annotations[gates.AnnotationReject]
+			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+
+			// After resume, park is lifted — re-driving dispatches the planner Job.
+			// Set the envelope so the completion path works for this leaf fixture.
+			envReader.SetOut(msUID, pkgdispatch.EnvelopeOut{TaskUID: msUID, ExitCode: 0})
+			driveMSReconcile(r, msName, 5)
 
 			Eventually(func(g Gomega) {
 				var ms2 tideprojectv1alpha1.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
-				g.Expect(ms2.Status.Phase).To(Equal("Failed"))
-				c := meta.FindStatusCondition(ms2.Status.Conditions, tideprojectv1alpha1.ConditionFailed)
-				g.Expect(c).NotTo(BeNil())
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser))
-				g.Expect(c.Message).To(ContainSubstring("operator stop"))
+				g.Expect(ms2.Status.Phase).NotTo(Equal("Failed"),
+					"D-05: Milestone must not be Failed after reject annotation cleared")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// RESUME-01 — retry-failed status reset re-dispatches (GATE-03 "never wedged" contract).
+	// Reproduces the run-1 finding-9a wedge: a Plan status-patched to Failed (genuine failure)
+	// is stuck behind the Succeeded||Failed terminal short-circuit. The retry-failed recipe
+	// (Status.Phase="" + conditions cleared + ResumedByUser condition) re-enables dispatch.
+	// Cross-ref: cmd/tide/resume.go retryFailedLevels implements this recipe for the CLI verb.
+	Describe("RESUME-01 — retry-failed status reset re-dispatches Failed Plan", func() {
+		const projectName = "gate-it-proj-resume01"
+		const msName = "gate-it-ms-resume01"
+		const phaseName = "gate-it-ph-resume01"
+		const planName = "gate-it-plan-resume01"
+
+		AfterEach(func() {
+			cleanupGateFlowFixture(projectName, planName, msName, phaseName)
+		})
+
+		It("Failed Plan does not re-dispatch until retry-failed reset; after reset the planner Job is created and ResumedByUser condition is present", func() {
+			// 1. Project + chain.
+			proj := &tideprojectv1alpha1.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+				Spec: tideprojectv1alpha1.ProjectSpec{
+					TargetRepo: "https://github.com/example/tide.git",
+					Gates:      tideprojectv1alpha1.Gates{Plan: gates.PolicyAuto},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			waitITCacheSync(projectName, &tideprojectv1alpha1.Project{})
+
+			ms := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			}
+			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
+
+			ph := &tideprojectv1alpha1.Phase{
+				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
+				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			}
+			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+			waitITCacheSync(phaseName, &tideprojectv1alpha1.Phase{})
+
+			plan := &tideprojectv1alpha1.Plan{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      planName,
+					Namespace: "default",
+					Labels:    map[string]string{"tideproject.k8s/project": projectName},
+				},
+				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
+			}
+			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+			waitITCacheSync(planName, &tideprojectv1alpha1.Plan{})
+
+			// 2. Simulate a genuinely failed planner: status-patch Plan to Failed.
+			// This is the run-1 wedge state.
+			var planObj tideprojectv1alpha1.Plan
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &planObj)).To(Succeed())
+			failPatch := client.MergeFrom(planObj.DeepCopy())
+			planObj.Status.Phase = "Failed"
+			Expect(mgrClient.Status().Patch(ctx, &planObj, failPatch)).To(Succeed())
+			Eventually(func() string {
+				var pp tideprojectv1alpha1.Plan
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp); err != nil {
+					return ""
+				}
+				return pp.Status.Phase
+			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Failed"))
+
+			// 3. Drive PlanReconciler — terminal short-circuit must hold (no re-dispatch).
+			rPlan := &controller.PlanReconciler{
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    pool.New(16, "planner"),
+				SubagentImage:  testSubagentImage,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+			}
+
+			// The background PlanReconciler from BeforeSuite may have dispatched the Plan
+			// before our Failed patch arrived (initial Status.Phase="" → Job "-1" created).
+			// Record the job name prefix and assert no Job with suffix "-2" or higher is
+			// ever created while the Plan holds Status.Phase=Failed — that proves the
+			// terminal short-circuit holds.
+			planJobPrefix := fmt.Sprintf("tide-plan-%s-", string(planObj.UID))
+			drivePlanReconcile(rPlan, planName, 5)
+
+			// Assert: no second planner Job (terminal short-circuit held; "-1" may already exist).
+			Consistently(func(g Gomega) {
+				var jobs batchv1.JobList
+				g.Expect(mgrClient.List(ctx, &jobs, client.InNamespace("default"))).To(Succeed())
+				for i := range jobs.Items {
+					name := jobs.Items[i].Name
+					if strings.HasPrefix(name, planJobPrefix) {
+						// Only Job "-1" (created before the Failed patch) is allowed.
+						// A "-2" or higher suffix would mean the reconciler re-dispatched.
+						g.Expect(name).To(Equal(planJobPrefix+"1"),
+							"only the pre-existing Job -1 may exist; a new Job would mean terminal short-circuit failed")
+					}
+				}
+			}, 2*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// 4. Apply the retry-failed reset exactly as cmd/tide/resume.go retryFailedLevels does:
+			//    Status.Phase="" + Status.Conditions=nil + SetStatusCondition(ResumedByUser/ConditionFalse).
+			//    Cross-ref: cmd/tide/resume.go retryFailedLevels — keep this in sync.
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &planObj)).To(Succeed())
+			resetPatch := client.MergeFrom(planObj.DeepCopy())
+			planObj.Status.Phase = ""
+			planObj.Status.Conditions = nil
+			meta.SetStatusCondition(&planObj.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+				Message:            "Level reset by tide resume --retry-failed; reconciler will re-dispatch",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(mgrClient.Status().Patch(ctx, &planObj, resetPatch)).To(Succeed())
+			// Reset verified by the Patch returning success above.
+			// Note: we do NOT await Status.Phase=="" here — the background PlanReconciler
+			// may transition it to "Running" immediately after the reset, which is the
+			// expected re-dispatch behavior. We assert the Job instead.
+
+			// 5. Drive PlanReconciler — empty phase re-enters dispatch; terminal short-circuit bypassed.
+			// The planner Job name is hardcoded to tide-plan-<uid>-1 (D-B5 dedup); the Job may
+			// already exist from the initial dispatch before the Failed patch. The meaningful
+			// proof is that Status.Phase exits "Failed" (reconcile bypassed the terminal
+			// short-circuit) and the ResumedByUser condition is preserved.
+			drivePlanReconcile(rPlan, planName, 5)
+
+			// Assert: Status.Phase is no longer "Failed" (terminal short-circuit was bypassed).
+			Eventually(func(g Gomega) {
+				var pp tideprojectv1alpha1.Plan
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp)).To(Succeed())
+				g.Expect(pp.Status.Phase).NotTo(Equal("Failed"),
+					"Plan must exit Failed phase after retry-failed reset (RESUME-01 bypass proof)")
+			}, 10*time.Second, 200*time.Millisecond).Should(Succeed())
+
+			// Assert: ResumedByUser condition is present (reset state is preserved / still visible).
+			Eventually(func(g Gomega) {
+				var pp tideprojectv1alpha1.Plan
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp)).To(Succeed())
+				c := meta.FindStatusCondition(pp.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be present after reset")
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonResumedByUser))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})

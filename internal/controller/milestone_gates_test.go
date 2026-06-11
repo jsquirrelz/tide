@@ -387,6 +387,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
@@ -397,9 +398,11 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
-			driveToJobCompletion(msName, r, envReader)
+			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
+			// No Job is created; the reconciler parks the Milestone with RejectedByUser.
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			// ConditionWaveOrLevelPaused must be True with Reason=RejectedByUser.
@@ -431,7 +434,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
 
 			// After annotation clear, re-driving must let the Milestone proceed
-			// (park condition no longer blocks — it re-enters the normal dispatch path).
+			// (dispatch-entry hold no longer fires — Job is created and completed).
 			driveToJobCompletion(msName, r, envReader)
 			Eventually(func(g Gomega) {
 				var after tideprojectv1alpha1.Milestone

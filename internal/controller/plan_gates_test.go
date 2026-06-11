@@ -242,6 +242,7 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
@@ -254,7 +255,8 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 			}
-			driveToJobCompletion(planName, r, envReader)
+			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 3)).To(Succeed())
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {

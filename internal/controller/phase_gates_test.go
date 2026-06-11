@@ -305,6 +305,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
@@ -315,9 +316,10 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				EnvReader:      envReader,
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
-				SigningKey:      testSigningKey,
+				SigningKey:     testSigningKey,
 			}
-			driveToJobCompletion(phaseName, r, envReader)
+			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {

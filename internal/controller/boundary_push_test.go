@@ -489,16 +489,11 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
+			// D-05 dispatch-entry hold fires before Job creation — the reconciler parks the
+			// Milestone with RejectedByUser condition and no planner Job is created.
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
-			var got tideprojectv1alpha1.Milestone
-			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
-			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
-			Expect(makeFakeJobTerminal(ctx, mgrClient, fmt.Sprintf("tide-milestone-%s-1", got.UID), "default", true)).To(Succeed())
-
-			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
-
-			// Push Job must NOT exist.
+			// Push Job must NOT exist (Milestone is parked by dispatch-entry hold; boundary push never fires).
 			pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 			Consistently(func() error {
 				var j batchv1.Job
