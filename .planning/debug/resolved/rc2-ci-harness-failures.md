@@ -1,8 +1,8 @@
 ---
-status: fixing
+status: resolved
 trigger: "GH Action failures on tag v1.0.0-rc.2 (fabd0c0): Tests 27312281364, dry-run 27312281348, Lint 27312281333 all failed; release (helmify-verify) succeeded. Goal: fix on main, re-tag v1.0.0-rc.3, confirm Tests+dry-run+Lint green."
 created: 2026-06-10
-updated: 2026-06-10
+updated: 2026-06-11
 ---
 
 ## Symptoms
@@ -54,3 +54,10 @@ files_changed: test/integration/envtest/{admission,gates,indegree,parent_unresol
   4. **SHIP BLOCKER: ghcr.io/jsquirrelz/tide-reporter absent from release.yaml matrix AND load-images-if-needed.sh (both stuck at pre-Phase-9 6-image inventory) → never published/loaded → ErrImagePull on every reporter Job of any real install.**
 - After bootstrap + reporter image load: $0 flow Complete in ~100s live (all 4 reporter Jobs green). Fixes committed [aefd203]: release matrix + loader 7 images, sample multi-doc carries namespace bootstrap + warmup pod, signing-key copy in README Quickstart/INSTALL/sample README/dry-run script.
 - Validation: clean `make dry-run-v1` local run from committed HEAD (log /tmp/local-dry-run2.log) → then rc.6.
+
+## RESOLVED — v1.0.0 SHIPPED 2026-06-11
+
+- rc.6 (3dd9665): ALL workflows green (dry-run full DinD flow 7m19s in CI).
+- v1.0.0 retag #1 (3dd9665): pre-flight ✓ + 7 images ✓, goreleaser FAILED on gitignored //go:embed fixture (cmd/tide-demo-init) — `make demo-fixture` added as first goreleaser before-hook [02d3481], verified from pristine clone.
+- v1.0.0 FINAL (02d3481): release run 27319506554 ALL GREEN — pre-flight, helmify-verify, goreleaser (5 platform tarballs + checksums on the GitHub Release), all 7 images, chart publish to oci://ghcr.io/jsquirrelz/tide-charts. main Tests/Lint/ci green at same commit.
+- Remaining (user UI): set 9 GHCR packages public (7 images + 2 charts).
