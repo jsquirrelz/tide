@@ -57,16 +57,24 @@ func ParsePricingOverrides(s string) (map[string]PriceOverride, error) {
 
 	for modelID, p := range raw {
 		if p.InputCentsPerMTok <= 0 {
-			return nil, fmt.Errorf("pricing overrides: model %q has invalid inputCentsPerMTok %d (must be > 0)", modelID, p.InputCentsPerMTok)
+			return nil, fmt.Errorf(
+				"pricing overrides: model %q has invalid inputCentsPerMTok %d (must be > 0)",
+				modelID, p.InputCentsPerMTok)
 		}
 		if p.OutputCentsPerMTok <= 0 {
-			return nil, fmt.Errorf("pricing overrides: model %q has invalid outputCentsPerMTok %d (must be > 0)", modelID, p.OutputCentsPerMTok)
+			return nil, fmt.Errorf(
+				"pricing overrides: model %q has invalid outputCentsPerMTok %d (must be > 0)",
+				modelID, p.OutputCentsPerMTok)
 		}
 		if p.CacheReadCentsPerMTok < 0 {
-			return nil, fmt.Errorf("pricing overrides: model %q has negative cacheReadCentsPerMTok %d (must be >= 0)", modelID, p.CacheReadCentsPerMTok)
+			return nil, fmt.Errorf(
+				"pricing overrides: model %q has negative cacheReadCentsPerMTok %d (must be >= 0)",
+				modelID, p.CacheReadCentsPerMTok)
 		}
 		if p.CacheWriteCentsPerMTok < 0 {
-			return nil, fmt.Errorf("pricing overrides: model %q has negative cacheWriteCentsPerMTok %d (must be >= 0)", modelID, p.CacheWriteCentsPerMTok)
+			return nil, fmt.Errorf(
+				"pricing overrides: model %q has negative cacheWriteCentsPerMTok %d (must be >= 0)",
+				modelID, p.CacheWriteCentsPerMTok)
 		}
 	}
 

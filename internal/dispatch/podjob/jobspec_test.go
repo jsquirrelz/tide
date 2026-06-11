@@ -877,8 +877,8 @@ func TestBuildJobSpec_PricingOverridesJSON_PresentWhenSet(t *testing.T) {
 // on the subagent container (D-02 transport — clean PodSpec when not configured).
 func TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty(t *testing.T) {
 	cases := map[string]BuildOptions{
-		"executor": buildTestOptions(),         // PricingOverridesJSON is zero value = ""
-		"planner":  buildPlannerTestOptions(),  // same
+		"executor": buildTestOptions(),        // PricingOverridesJSON is zero value = ""
+		"planner":  buildPlannerTestOptions(), // same
 	}
 
 	for name, opts := range cases {
