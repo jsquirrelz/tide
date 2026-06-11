@@ -256,6 +256,17 @@ func pushJobArgs(job *batchv1.Job) []string {
 // The Pod is created via kubectl apply and immediately patched to Succeeded
 // phase + Terminated container status; it never actually runs.
 func patchJobToFailed(ns, jobName string) {
+	// Step 0: delete any existing pods for this Job so readPushEnvelope does
+	// not find a real pod with a network-timeout termination message (which
+	// would route to the auto-retry arm instead of PhasePushLeaseFailed).
+	// --ignore-not-found is safe here — if no pods exist yet, that is fine.
+	delCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+		"delete", "pod", "-n", ns,
+		"-l", "job-name="+jobName, "--ignore-not-found=true")
+	delOut, delErr := delCmd.CombinedOutput()
+	Expect(delErr).NotTo(HaveOccurred(),
+		"delete real Job pods failed: %s", delOut)
+
 	// Step 1: create a stub pod with label job-name=<jobName> so
 	// readPushEnvelope (which filters on client.MatchingLabels{"job-name":
 	// pushJobName}) can locate it. Pod phase = Succeeded prevents
