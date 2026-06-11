@@ -25,8 +25,9 @@ limitations under the License.
 //   - no per-level condition written (avoids status flapping per dogfood run 1)
 //
 // Run-1 regression (CONTEXT specifics verbatim):
-//   billing-classified failure → BillingHalt=True on Project → sibling holds →
-//   condition cleared (tide resume semantics) → dispatch resumes.
+//
+//	billing-classified failure → BillingHalt=True on Project → sibling holds →
+//	condition cleared (tide resume semantics) → dispatch resumes.
 package controller
 
 import (
@@ -180,7 +181,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
@@ -196,13 +197,15 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
 			r := newBHMilestoneReconciler()
 			name := types.NamespacedName{Name: msName, Namespace: "default"}
-			// Pre-condition: pump past finalizer+ownerRef setup (3 reconciles) until
-			// the reconciler enters reconcilePlannerDispatch and returns 30s.
-			var result reconcile.Result
-			for range 3 {
-				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-			}
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			// Pre-condition: pump the reconciler until it enters reconcilePlannerDispatch
+			// and returns 30s (BillingHalt active). The exact number of setup reconciles
+			// (finalizer + ownerRef) is non-deterministic; Eventually is the correct gate.
+			Eventually(func(g Gomega) {
+				result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"pre-condition: reconciler must return 30s while BillingHalt active")
 
 			// Clear BillingHalt (mirrors tide resume D-06).
 			clearBillingHalt(ctx, projName)
@@ -291,7 +294,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
@@ -318,15 +321,18 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
 			r := newBHPhaseReconciler()
 			name := types.NamespacedName{Name: phName, Namespace: "default"}
-			var result reconcile.Result
-			for range 3 {
-				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-			}
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			// Pre-condition: pump until billing halt returns 30s.
+			Eventually(func(g Gomega) {
+				result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"pre-condition: reconciler must return 30s while BillingHalt active")
 
 			clearBillingHalt(ctx, projName)
 
-			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred(), "reconcile after BillingHalt cleared must not error")
 
 			var ph tideprojectv1alpha1.Phase
 			Expect(mgrClient.Get(ctx, name, &ph)).To(Succeed())
@@ -347,7 +353,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
@@ -416,7 +422,7 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 
 			ms := &tideprojectv1alpha1.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 			waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
@@ -454,15 +460,18 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		It("planner Job IS created once BillingHalt removed (non-vacuousness proof)", func() {
 			r := newBHPlanReconciler()
 			name := types.NamespacedName{Name: planName, Namespace: "default"}
-			var result reconcile.Result
-			for range 3 {
-				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-			}
-			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			// Pre-condition: pump until billing halt returns 30s.
+			Eventually(func(g Gomega) {
+				result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"pre-condition: reconciler must return 30s while BillingHalt active")
 
 			clearBillingHalt(ctx, projName)
 
-			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred(), "reconcile after BillingHalt cleared must not error")
 
 			var plan tideprojectv1alpha1.Plan
 			Expect(mgrClient.Get(ctx, name, &plan)).To(Succeed())
@@ -931,7 +940,7 @@ func newBHMilestoneReconciler() *MilestoneReconciler {
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -947,7 +956,7 @@ func newBHPhaseReconciler() *PhaseReconciler {
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -963,7 +972,7 @@ func newBHPlanReconciler() *PlanReconciler {
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
@@ -979,7 +988,7 @@ func newBHProjectReconciler() *ProjectReconciler {
 		Client:         mgrClient,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
