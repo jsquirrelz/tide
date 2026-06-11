@@ -41,3 +41,16 @@ fix: |
   (3) dry-run-v1.sh mounts REPO_ROOT ro at /host-repo, DRY_RUN_REPO_URL defaults to /host-repo, safe.directory + pinned detach checkout; dry-run.yaml checkout fetch-depth: 0.
 verification: make lint = "0 issues" (observed). make test + make test-int-fast pending (run2).
 files_changed: test/integration/envtest/{admission,gates,indegree,parent_unresolved,boundary_push,reporter_materialize}_test.go, internal/controller/{dispatch_helpers,milestone_controller,phase_controller,plan_controller,task_controller,plan_wave_integration_test}.go, internal/harness/{envelope_io,outputs}.go, internal/subagent/anthropic/{subagent.go,subagent_test.go}, cmd/{claude-subagent,tide-push,tide-reporter}/main.go, cmd/manager/wave_dispatcher_wiring_test.go, .golangci.yml, hack/scripts/dry-run-v1.sh, .github/workflows/dry-run.yaml
+
+## Session continuation — rc.3→rc.5 + dry-run deep diagnosis (2026-06-10/11)
+
+- rc.3 (0326451): Tests/ci/release GREEN. Residuals: Lint cold-cache goconst "Validated" (→ ignore vocab) + dry-run safe.directory needs '*' (upload-pack resolves /host-repo/.git). Fixed [6adb962] = rc.4.
+- rc.4: Lint+Tests GREEN everywhere. ci main = budget FAIL-04 60s-timeout contention flake (green 4× same commit; rerun PASSED). dry-run reached Pass 2 first time → kubectl dialed localhost:8080: Pass 2 fresh container had NO kubeconfig → Pass 1 writes /workspace/kubeconfig, Pass 2 exports KUBECONFIG [7cd18c4] = rc.5.
+- rc.5: all GREEN except dry-run: first attempt = proxy.golang.org stream INTERNAL_ERROR during in-CI image build (transient); rerun got through cert-manager/helm/controller-Available and STALLED 10 min on small-project.
+- Local kind repro (minikube stopped for VM headroom): manager log = "shared PVC not found" forever. Four stacked causes:
+  1. small sample predates Phase 8/9 per-namespace model (no tide-projects PVC/SAs/RBAC in its YAML);
+  2. WFFC binding deadlock (PVC Pending until consumer; reconciler gates dispatch on Bound) — warmup pod breaks it;
+  3. tide-signing-key Secret required in project ns (Job pods envFrom, mandatory) — dynamic copy step;
+  4. **SHIP BLOCKER: ghcr.io/jsquirrelz/tide-reporter absent from release.yaml matrix AND load-images-if-needed.sh (both stuck at pre-Phase-9 6-image inventory) → never published/loaded → ErrImagePull on every reporter Job of any real install.**
+- After bootstrap + reporter image load: $0 flow Complete in ~100s live (all 4 reporter Jobs green). Fixes committed [aefd203]: release matrix + loader 7 images, sample multi-doc carries namespace bootstrap + warmup pod, signing-key copy in README Quickstart/INSTALL/sample README/dry-run script.
+- Validation: clean `make dry-run-v1` local run from committed HEAD (log /tmp/local-dry-run2.log) → then rc.6.
