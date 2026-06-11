@@ -175,7 +175,22 @@ docker run --rm \
     helm install tide ./charts/tide -n tide-system --set 'workspaces.pvc.accessModes={ReadWriteOnce}'
     kubectl wait --for=condition=Available deploy/tide-controller-manager -n tide-system --timeout=5m
 
-    kubectl apply -f examples/projects/small/project.yaml
+    # Deployment Available != webhook serving: the manager's admission webhook
+    # binds after cert mount + manager bootstrap, so an immediate apply can hit
+    # 'failed calling webhook ... connect: connection refused'. Bounded retry
+    # rides out the startup window (~seconds); a persistent webhook failure
+    # still fails the run after 60s.
+    for i in \$(seq 1 12); do
+      if kubectl apply -f examples/projects/small/project.yaml; then
+        break
+      fi
+      if [ \"\$i\" -eq 12 ]; then
+        echo 'ERROR: sample apply failed after 12 attempts (webhook never came up)'
+        exit 1
+      fi
+      echo \"webhook not ready (attempt \$i/12); retrying in 5s...\"
+      sleep 5
+    done
 
     # README Quickstart step: mirror the cluster-unique signing key into the
     # sample namespace (dispatch Job pods envFrom it; the chart generates it
