@@ -7,11 +7,10 @@
 # trigger clone/push Jobs (D-04: git guard is
 # project.Spec.Git != nil && project.Spec.Git.RepoURL != "").
 #
-# The subagent image is resolved from the helm chart's --subagent-image
-# Deployment arg (set to the kind-loaded stub image via
-# `helm upgrade --install --set images.stubSubagent.tag=test`). Per-Project
-# spec.subagent.image is intentionally omitted; the controller's
-# Helm-chart default is the stub in the Layer B test environment.
+# The subagent image is resolved from CLAUDE_SUBAGENT_IMAGE env, which the
+# harness sets via `--set subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:test`
+# (Phase 13 D-01/D-02: explicit stub opt-in). Per-Project spec.subagent.image
+# is intentionally omitted; the harness Helm override routes to the stub.
 #
 # W13 note: ownerReferences are OMITTED from this YAML. ProjectReconciler
 # sets them on child CRs via internal/owner.EnsureOwnerRef on first reconcile

@@ -372,10 +372,12 @@ func installCertManager() {
 // tide ./charts/tide --create-namespace -n tide-system ...`. The chart
 // provides four pieces the kustomize overlay omits and the controller's
 // Phase 2 wiring requires: tide-signing-key Secret, tide-projects PVC,
-// tide-subagent ServiceAccount, and the --subagent-image / --credproxy-image
-// / --default-file-touch-mode Deployment args. Without them the manager
+// tide-subagent ServiceAccount, and the --credproxy-image /
+// --default-file-touch-mode Deployment args. Without them the manager
 // Pod CrashLoopBackOffs on startup with
 // `TIDE_SIGNING_KEY env var is required (HARN-03)` before any spec runs.
+// Phase 13 D-01/D-02: the --subagent-image flag has been dropped from the
+// chart; the stub is now an explicit opt-in via subagent.defaults.image.
 //
 // The WR-09 contract (D-03) is preserved: when helm is missing or the
 // install fails, soft-skip with a GinkgoWriter warning by default;
@@ -431,6 +433,10 @@ func applyController() {
 	// builds + tags it as `controller:test`. images.stubSubagent + credProxy
 	// keep their chart-default repositories — only .tag and .pullPolicy
 	// need override.
+	// Phase 13 D-01/D-02: subagent.defaults.image is set explicitly to the
+	// kind-loaded stub image so the harness uses the stub. Without this set,
+	// the chart default (real claude subagent) would be used — correct for
+	// production but unavailable in the kind test cluster.
 	// Use upgrade --install so KEEP_KIND_CLUSTER=true reruns update the live
 	// release instead of continuing with a stale controller image. helm install
 	// --replace only works for deleted releases; it fails for a currently
@@ -476,6 +482,11 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		"--set", "controllerManager.manager.image.pullPolicy=IfNotPresent",
 		"--set", "images.stubSubagent.tag=test",
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
+		// Phase 13 D-01/D-02: explicit stub opt-in. The --subagent-image flag
+		// has been dropped from the chart; test installs must declare the stub
+		// via subagent.defaults.image so CLAUDE_SUBAGENT_IMAGE points at the
+		// kind-loaded stub image (ghcr.io/jsquirrelz/tide-stub-subagent:test).
+		"--set", "subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:test",
 		"--set", "images.credProxy.tag=test",
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
 		"--set", "images.tideReporter.tag=test",

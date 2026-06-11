@@ -121,10 +121,13 @@ rateLimits:
     tokensPerMinute: 100000  # informational v1 — not yet enforced at the bucket level
     burst: 10
 
-# Phase 2 image refs for subagent + credproxy sidecar containers (D-A2).
-# Passed to the controller via --subagent-image and --credproxy-image flags in the
-# Deployment args. The controller injects these into TaskReconciler.SubagentImage +
-# TaskReconciler.CredproxyImage, which BuildJobSpec consumes (Plan 08 / Plan 09).
+# Phase 2 image refs for credproxy sidecar + build/load tooling (D-A2).
+# images.stubSubagent.* keys are retained for image build/load tooling
+# (make test-int-kind-prep loads the stub image by tag), but are NO LONGER
+# injected as a --subagent-image flag into the Deployment args (Phase 13 D-01;
+# that flag was silently forcing the stub in every v1.0.0 install and has been
+# dropped). Subagent image default now flows via subagent.defaults.image →
+# CLAUDE_SUBAGENT_IMAGE env var on the manager Deployment.
 #
 # Phase 3 plan 03-09 additions: claudeSubagent (D-C2 real-Claude image, swaps
 # in alongside stubSubagent; both images stay buildable so chaos-resume and
@@ -179,10 +182,23 @@ images:
 # dispatch time (in MilestoneReconciler / PhaseReconciler / PlanReconciler before
 # calling Dispatcher.Run):
 #
-#   project.Spec.subagent.levels.<level>.{image,model}  ← per-level override
-#   project.Spec.subagent.{image,model}                 ← per-Project default
-#   subagent.defaults.{image,model}                     ← Helm chart default (this block)
-#   subagent.levels.<level>.model                       ← Helm per-level default (this block)
+#   Levels.<level>.Image (project.Spec.subagent.levels.<level>.image) ← per-level override
+#   → Spec.Subagent.Image (project.Spec.subagent.image)               ← per-Project default
+#   → subagent.defaults.image (this value → CLAUDE_SUBAGENT_IMAGE env) ← Helm chart default
+#
+#   project.Spec.subagent.levels.<level>.model  ← per-level model override
+#   project.Spec.subagent.model                 ← per-Project model default
+#   subagent.defaults.model                     ← Helm chart default (this block)
+#   subagent.levels.<level>.model               ← Helm per-level default (this block)
+#
+# Phase 13 D-01 image posture: production default is the real Claude-backed subagent
+# (ghcr.io/jsquirrelz/tide-claude-subagent). The stub is explicit opt-in for tests/CI
+# only — it is never injected implicitly. To use the stub:
+#   --set subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:<tag>
+# Bare refs (no ":<tag>" or "@sha256:" suffix) have ":<appVersion>" appended by the
+# chart template. Tag- or digest-qualified values pass through verbatim.
+# Digest pinning is recommended for production reproducibility:
+#   --set subagent.defaults.image=ghcr.io/jsquirrelz/tide-claude-subagent@sha256:<digest>
 #
 # Per-level model defaults (D-C4) match the phase-brief lock-in:
 #   milestone → claude-opus-4-7    (heavy planning, lowest fan-out)

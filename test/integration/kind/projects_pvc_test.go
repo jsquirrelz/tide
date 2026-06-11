@@ -141,6 +141,19 @@ func TestHelmControllerArgsForcesManagerRollout(t *testing.T) {
 	}
 }
 
+// TestHelmControllerArgsStubOptIn verifies the harness explicitly opts into the
+// stub subagent via subagent.defaults.image (Phase 13 D-01/D-02). The chart no
+// longer injects --subagent-image implicitly; test installs must declare the
+// stub so CLAUDE_SUBAGENT_IMAGE points at the kind-loaded stub image rather than
+// the real claude subagent (which is unavailable in the kind cluster).
+func TestHelmControllerArgsStubOptIn(t *testing.T) {
+	args := helmControllerArgs("/tmp/tide-chart", "nonce-123")
+	want := "subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:test"
+	if !containsString(args, want) {
+		t.Fatalf("helmControllerArgs must opt into the stub via subagent.defaults.image; args=%v", args)
+	}
+}
+
 func TestHelmDeploymentTemplateRendersManagerPodAnnotations(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
 	if err != nil {
@@ -148,6 +161,36 @@ func TestHelmDeploymentTemplateRendersManagerPodAnnotations(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte(".Values.controllerManager.manager.podAnnotations")) {
 		t.Fatal("deployment template must render controllerManager.manager.podAnnotations")
+	}
+}
+
+// TestHelmDeploymentTemplateDropsSubagentImageFlag verifies the chart no longer
+// injects --subagent-image as a hard-coded flag. Phase 13 D-01: the flag was
+// silently forcing the stub image in every v1.0.0 install; it has been removed
+// so production installs dispatch the real subagent via CLAUDE_SUBAGENT_IMAGE.
+func TestHelmDeploymentTemplateDropsSubagentImageFlag(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+	if bytes.Contains(data, []byte("--subagent-image=")) {
+		t.Fatal("deployment template must NOT contain --subagent-image= (Phase 13 D-01: flag dropped; subagent image flows via subagent.defaults.image → CLAUDE_SUBAGENT_IMAGE env)")
+	}
+}
+
+// TestHelmDeploymentTemplateSubagentImageEnvFromDefaults verifies the chart
+// sources CLAUDE_SUBAGENT_IMAGE from .Values.subagent.defaults.image (D-01)
+// rather than the old images.claudeSubagent path that was wired pre-Phase 13.
+func TestHelmDeploymentTemplateSubagentImageEnvFromDefaults(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "charts", "tide", "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment template: %v", err)
+	}
+	if !bytes.Contains(data, []byte("CLAUDE_SUBAGENT_IMAGE")) {
+		t.Fatal("deployment template must contain CLAUDE_SUBAGENT_IMAGE env var")
+	}
+	if !bytes.Contains(data, []byte(".Values.subagent.defaults.image")) {
+		t.Fatal("deployment template must source CLAUDE_SUBAGENT_IMAGE from .Values.subagent.defaults.image (Phase 13 D-01)")
 	}
 }
 

@@ -27,7 +27,6 @@ spec:
       containers:
       - args:
           {{- toYaml .Values.controllerManager.manager.args | nindent 10 }}
-          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default .Chart.AppVersion }}
           - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default .Chart.AppVersion }}
           - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
           - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
@@ -42,8 +41,28 @@ spec:
           value: {{ quote .Values.kubernetesClusterDomain }}
         - name: TIDE_PUSH_IMAGE
           value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default .Chart.AppVersion }}"
+        # Phase 13 D-01: subagent image default channel.
+        # Resolution chain (highest priority wins):
+        #   Levels.<level>.Image (Project CRD per-level override)
+        #   → Spec.Subagent.Image (Project CRD per-project default)
+        #   → CLAUDE_SUBAGENT_IMAGE (this env — Helm chart default)
+        #
+        # The startup flag injecting the stub image has been removed (Phase 13
+        # D-01 deliberate fixed-contract exception). This env is now the sole
+        # default tier.
+        #
+        # Stub opt-in for tests/CI:
+        #   --set subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:<tag>
+        # Tag- or digest-qualified values (containing ":" after last "/" or "@sha256:")
+        # pass through verbatim. Bare refs get ":<appVersion>" appended automatically.
+        # Digest pinning passes through unchanged — recommended for production.
         - name: CLAUDE_SUBAGENT_IMAGE
-          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default .Chart.AppVersion }}"
+          {{- $img := .Values.subagent.defaults.image }}
+          {{- if or (regexMatch ":[^/]+$" $img) (contains "@" $img) }}
+          value: {{ $img | quote }}
+          {{- else }}
+          value: {{ printf "%s:%s" $img .Chart.AppVersion | quote }}
+          {{- end }}
         - name: TIDE_DEFAULT_MODEL_MILESTONE
           value: "{{ .Values.subagent.levels.milestone.model | default "claude-opus-4-7" }}"
         - name: TIDE_DEFAULT_MODEL_PHASE
