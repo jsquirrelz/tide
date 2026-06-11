@@ -31,7 +31,13 @@
   3. gates.md documents approve-at-descent semantics — the old step-5 "advances the level to Succeeded" text and the `Approved` phase-value sketch are gone
   4. `tide reject` parks children without writing `Status.Phase=Failed`; `tide resume` lifts the park; `tide resume --retry-failed` recovers a genuinely Failed level (status reset → re-dispatch → `ResumedByUser` condition), matching the run-1 kubectl recipe
   5. `tide approve` against a level whose planner Job failed prints an actionable error pointing at `tide resume --retry-failed` — approval never doubles as a spend-retry
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — Approve-at-descent routing: approval returns level to Running + ApprovedByUser; succession stays children-gated (GATE-01); gates.md rewrite (GATE-02)
+- [ ] 12-02-PLAN.md — CLI verbs: tide resume --retry-failed status reset (RESUME-01) + tide approve refuses Failed levels with actionable error (GATE-03)
+- [ ] 12-03-PLAN.md — Descent dispatch hold: children materialize but zero Jobs while parent parked at AwaitingApproval (GATE-04)
+- [ ] 12-04-PLAN.md — Reject parks instead of fail-marking at all four reconcilers; retry-failed re-dispatch regression (RESUME-01, GATE-03)
 
 ### Phase 13: Dispatch Image Resolution + Provider Halt
 **Goal**: Subagent image resolves correctly at all four dispatch sites via the documented chain, and a provider billing-400 response halts the entire project instead of burning sessions one at a time
@@ -89,7 +95,7 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 0/TBD | Not started | - |
+| 12. Gate Semantics + Reject/Resume | v1.0.1 | 0/4 | Not started | - |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 0/TBD | Not started | - |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 0/TBD | Not started | - |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
