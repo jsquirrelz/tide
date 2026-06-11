@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.0
-milestone_name: Self-Hosting MVP (SHIPPED 2026-06-11)
-status: milestone_complete
-stopped_at: "v1.0.0 SHIPPED 2026-06-11 — release run fully green (binaries + 7 images + 2 charts). Milestone archived; next milestone not yet scoped."
-last_updated: "2026-06-09T16:06:48.597Z"
-last_activity: 2026-06-09 -- Phase 11 execution started
+milestone: v1.0.1
+milestone_name: Orchestrator Trustworthiness + Telemetry Completion
+status: planning
+last_updated: "2026-06-11T13:35:33.108Z"
+last_activity: 2026-06-11
 progress:
-  total_phases: 6
-  completed_phases: 2
-  total_plans: 37
-  completed_plans: 30
-  percent: 81
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,12 +24,10 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: — (v1.0.0 milestone complete; no active phase)
+Phase: Not started (defining requirements)
 Plan: —
-Status: Between milestones — run /gsd:new-milestone
-Last activity: 2026-06-11 -- Completed quick task 260611-cz8: dogfood run 1 salvage branch reviewed, fixed (4 commits), merged to main (49e93cb)
-
-Progress: [██████████] 100%
+Status: Defining requirements
+Last activity: 2026-06-11 — Milestone v1.0.1 started
 
 ## Performance Metrics
 

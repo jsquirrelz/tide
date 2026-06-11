@@ -17,16 +17,22 @@ medium DoD proven on minikube (Project=Complete, real authored commits pushed
 to a per-run branch). All 82 v1 requirements delivered — archive at
 [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 
-## Next Milestone Goals (not yet scoped)
+## Current Milestone: v1.0.1 Orchestrator Trustworthiness + Telemetry Completion
 
-- **Full TIDE-on-TIDE**: a TIDE install drives this repo's own next milestone
-  end-to-end (v1.0.0 proved the mechanism against a fixture repo).
-- Hardening backlog from the v1.0.0-baseline audit (docs/audit/): metrics
-  endpoint authn/authz, digest-pinned base images, observedGeneration on CRD
-  statuses, SLSA provenance + cosign, krew-index submission.
+**Goal:** Fix the dogfood run-1 findings so the orchestrator is trustworthy enough to gate run 2 on, and make the merged telemetry foundation functional — every fix carries a regression test reproducing the run-1 symptom.
 
-Run `/gsd:new-milestone` to scope. Everything below this line reflects v1
-planning state, preserved for reference.
+**Target features (ordered by what blocks dogfood run 2):**
+- Approve-consume gate semantics — ConsumeApprove must not advance a level to Succeeded while children are incomplete (run-1 finding 7, the run-killer); gates.md step 5 docs change with the fix
+- Reject/resume recovery — `tide reject` fail-marks children; `tide resume` must recover them (finding 9a; the kubectl status-reset recipe is the behavioral spec)
+- Subagent image resolution — implement Image in the ResolveProvider chain at the four dispatch sites; kill the dead `spec.subagent.image` config and reconsider the chart's stub default
+- Billing-400 project-wide halt — provider credit exhaustion stops the fan-out instead of burning sessions one at a time
+- Pricing + budget UX — current model IDs in the pricing table; surface BudgetBlocked on the Project; bound in-flight overshoot
+- Paper cuts — reporter CR labels, boundary-push no-op on clean tree, phase status flapping, artifact-get stub, dashboard status-chip mapping + cross-plan wave view, file-touch overlap
+- Telemetry completion — PROM_ENDPOINT config wiring, TelemetryView AppShell mount + Vitest coverage, the six locked metrics in internal/metrics, PromQL query-name alignment, Makefile gate-script wiring, proxy client timeout
+
+**Key context:** kind cluster `tide` with run-1 CRs is the repro environment for the gate-semantics fixes (do not delete without asking). Caps floors (finding 11) already landed on main (47a9aa9). Dogfood run 2 (02-codex-runtime) is gated on this milestone, not part of it. Deferred to a later milestone: full TIDE-on-TIDE headline, docs/audit/ 27-item hardening backlog.
+
+Everything below this line reflects v1 planning state, preserved for reference.
 
 ## Requirements
 
@@ -128,7 +134,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-13 after Phase 2 (Dispatch & Plan Validation — Innermost Reconcilers + Harness) completed.*
+*Last updated: 2026-06-11 — milestone v1.0.1 (orchestrator trustworthiness + telemetry completion) scoped.*
 
 ## Current State
 
