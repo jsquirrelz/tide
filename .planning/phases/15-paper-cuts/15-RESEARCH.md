@@ -621,22 +621,25 @@ command: []string{"sh", "-c",
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **artifact-get wait timeout default**
    - What we know: D-11 says "wait rather than erroring"; D-12 says "plain error after wait window exhausted"
    - What's unclear: what the default timeout value should be (30s? 5m? configurable?)
    - Recommendation: Claude's Discretion per CONTEXT.md. 5 minutes with a `--timeout` flag defaulting to 5m is reasonable for a human-supervised operator tool. The planner should pick this.
+   - RESOLVED: `--timeout` flag defaulting to 5m (plan 15-03 Task 1).
 
 2. **Inspector pod: watch vs poll for readiness**
    - What we know: D-11 requires race-free completeness; the shell-loop pattern (`until [ -f path ]; do sleep 1; done; cat`) is race-free
    - What's unclear: whether a watch (using `CoreV1().Pods(ns).Watch()`) is more efficient than poll
    - Recommendation: Use the shell-loop approach in the inspector pod command — it is simpler, avoids a second goroutine for the watch, and is proven in the existing `tail.go` architecture.
+   - RESOLVED: in-pod shell loop with 2s file-stability window (plan 15-03 Task 1).
 
 3. **SSE running-waves: new event type vs new endpoint**
    - What we know: D-15 explicitly says "existing SSE channel"
    - What's unclear: whether the informer_bridge already delivers enough context for the new event type, or whether the bridge needs augmentation
    - Recommendation: Inspect `informer_bridge.go` closely during planning. If the bridge emits per-Task events, the EventsHandler can aggregate on receive. If not, a TTL-based re-query on Task events is the right pattern.
+   - RESOLVED: `waves.snapshot` named event on the existing SSE channel — informer-bridge publishes snapshot-on-subscribe and on Task events; no new route (plan 15-06, D-15).
 
 ---
 

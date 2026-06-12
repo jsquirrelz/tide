@@ -138,13 +138,19 @@ Plans:
 **Plans**: 7 plans (waves: 1 → 15-01..15-06 parallel; 2 → 15-07)
 
 Plans:
+**Wave 1**
+
 - [ ] 15-01-PLAN.md — CUTS-01: universal project-label stamping (StampProjectLabel + reporter create site) + reconciler backfill + approve-discovery regression
 - [ ] 15-02-PLAN.md — CUTS-07: PlanReconciler file-touch dispatch gate (park-not-fail) + webhook real mode resolution + planner prompt patch
 - [ ] 15-03-PLAN.md — CUTS-04: real artifact-get inspector Pod (readiness wait, raw stdout, 5m timeout) + fake-seam tests
 - [ ] 15-04-PLAN.md — CUTS-02/03: verify already-fixed cuts + regression pinning (clean-tree push, AwaitingApproval convergence)
 - [ ] 15-05-PLAN.md — CUTS-05: Complete status vocabulary row + coerce-guard consolidation + finding-9b Vitest regressions
 - [ ] 15-06-PLAN.md — CUTS-06 backend: waves.snapshot SSE aggregate (label-selector derivation, snapshot-on-subscribe)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 15-07-PLAN.md — CUTS-06 frontend: RunningWavesView + App.tsx pane swap + All waves return + Vitest contract
+
 **UI hint**: yes
 
 ### Phase 16: Telemetry Completion
