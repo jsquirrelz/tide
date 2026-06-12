@@ -166,7 +166,7 @@ Plans:
   4. All four TelemetryView PromQL panels query the locked metric names — `tide_tasks_dispatched_total` and `tide_tokens_used_total{model}` are replaced with the correct names
   5. `make helm-rbac-assert` and the other telemetry gate scripts in `hack/helm` execute and pass on a running cluster — the Makefile targets are wired and documented
 
-**Plans**: 5 plans
+**Plans**: 8 plans (5 + 3 gap closure)
 **UI hint**: yes
 
 Plans:
@@ -180,6 +180,12 @@ Plans:
 **Wave 2** *(blocked on 16-04)*
 
 - [x] 16-05-PLAN.md — TELEM-02 (mount): header DAGs|Telemetry view switcher, TelemetryView body branch, App-level Vitest
+
+**Wave 3** *(gap closure — 16-VERIFICATION.md CR-01 + 16-REVIEW.md CR-02/WR-03/WR-04)*
+
+- [ ] 16-06-PLAN.md — CR-01: all-projects per-project series keys in TelemetryView fetchPanel + multi-result Vitest regression
+- [ ] 16-07-PLAN.md — CR-02 + WR-04: emit tasks_completed/tasks_failed at emitTaskMetrics seams, waves_dispatched at materializeWaves Create; negative-duration guard
+- [ ] 16-08-PLAN.md — WR-03: delete dead prometheusEndpoint config field/tests; align MILESTONE.md + chart comment to env-only mechanism
 
 ## Progress
 
