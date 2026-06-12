@@ -17,6 +17,8 @@ export type HeaderProps = {
   connectionStatus: ReactNode;
   /** Slot for ProjectPicker — populated by plan 04-15 once ProjectPicker exists. */
   projectPicker?: ReactNode;
+  /** Slot for the DAGs | Telemetry view switcher (UI-SPEC §C2, plan 16-05). */
+  viewSwitcher?: ReactNode;
 };
 
 function resolveTheme(theme: Theme): "dark" | "light" {
@@ -50,7 +52,7 @@ function applyTheme(theme: Theme) {
  * Height: 48px fixed (`--spacing-12`). Border-bottom: 1px subtle. Background:
  * --color-surface-raised.
  */
-export default function Header({ connectionStatus, projectPicker }: HeaderProps) {
+export default function Header({ connectionStatus, projectPicker, viewSwitcher }: HeaderProps) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window === "undefined") return "system";
     const raw = window.localStorage.getItem(THEME_KEY);
@@ -85,6 +87,7 @@ export default function Header({ connectionStatus, projectPicker }: HeaderProps)
           TIDE
         </span>
         {projectPicker}
+        {viewSwitcher}
       </div>
       <div className="flex items-center gap-3">
         {connectionStatus}
