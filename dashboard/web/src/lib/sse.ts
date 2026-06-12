@@ -83,7 +83,11 @@ export const SSE_PROJECT_EVENT_TYPES: string[] = (
   (["create", "update", "delete"] as const).map(
     (action) => `${kind}.${action}`,
   ),
-);
+// UI-SPEC C3 (15-07-PLAN.md): waves.snapshot is a named event outside the
+// <kind>.<action> generator matrix — plural "waves" keeps it distinct from
+// the Wave-CRD wave.create/update/delete events. Named events NOT in this list
+// never reach onMessage — registering here is build-blocking if missed.
+).concat(["waves.snapshot"]);
 
 export type SSEStreamOptions = {
   /**

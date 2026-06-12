@@ -16,7 +16,9 @@ import type { ReactNode } from "react";
 export type EmptyStateVariant =
   | "no-projects"
   | "awaiting-first-milestone"
-  | "plan-accepted-no-tasks";
+  | "plan-accepted-no-tasks"
+  // UI-SPEC C3 (15-07-PLAN.md): rendered by RunningWavesView when waves: [].
+  | "no-running-waves";
 
 export type EmptyStateProps = {
   variant: EmptyStateVariant;
@@ -137,6 +139,34 @@ export default function EmptyState({ variant }: EmptyStateProps) {
             }}
           >
             Computing wave structure…
+          </p>
+        </CenteredCard>
+      );
+
+    // UI-SPEC C3 (15-07-PLAN.md) §Copywriting Contract: no-running-waves variant.
+    // Rendered by RunningWavesView when waves.snapshot delivers waves: [].
+    case "no-running-waves":
+      return (
+        <CenteredCard>
+          <h2
+            style={{
+              fontSize: "18px",
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            No running waves
+          </h2>
+          <p
+            style={{
+              marginTop: "16px",
+              fontSize: "14px",
+              color: "var(--color-text-muted)",
+              maxWidth: "440px",
+            }}
+          >
+            Wave cards appear here while task Jobs run — select a plan to view
+            its execution DAG.
           </p>
         </CenteredCard>
       );
