@@ -554,6 +554,17 @@ helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list
 	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
 	@python3 hack/helm/assert-dashboard-rbac.py /tmp/tide-helm-render.yaml
 
+.PHONY: helm-telemetry-assert
+helm-telemetry-assert: ## Assert PROM_ENDPOINT env injection and telemetry render gates (Phase 16 TELEM-05 D-13).
+	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
+	@python3 hack/helm/assert-prometheus-env.py /tmp/tide-helm-render.yaml --expect-absent
+	@helm template charts/tide --set dashboard.enabled=true --set prometheus.endpoint=http://prom:9090 > /tmp/tide-helm-render-prom.yaml
+	@python3 hack/helm/assert-prometheus-env.py /tmp/tide-helm-render-prom.yaml --expect-endpoint http://prom:9090
+	@bash hack/helm/assert-telemetry-render.sh
+
+.PHONY: helm-assert
+helm-assert: helm-rbac-assert helm-telemetry-assert ## Run all Helm render gate assertions (Phase 16 TELEM-05 D-13).
+
 ##@ Legal compliance gates (Phase 5 DIST-03 — Plan 05-01)
 
 .PHONY: verify-license

@@ -17,7 +17,7 @@ container would be caught before merging.
 Invocation:
   python3 hack/helm/assert-prometheus-env.py <rendered-chart.yaml> \\
       (--expect-endpoint <value> | --expect-absent)
-Driven by the `make helm-rbac-assert` Makefile target (Phase 04 gate).
+Driven by the `make helm-telemetry-assert` Makefile target (Phase 16 TELEM-05 D-13).
 """
 
 import sys
