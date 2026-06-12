@@ -52,6 +52,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/harness"
+	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -857,6 +858,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
 			}
+			// Emit six locked metrics at the same once-only terminal commit point as
+			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
+			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		if skipped {
@@ -882,6 +889,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// pattern as the terminal roll-up below).
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
+			}
+			// Emit six locked metrics at the same once-only terminal commit point as
+			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
+			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
 		}
@@ -933,6 +946,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// Log but do not fail the reconcile — the task is already in terminal state.
 		logger.Error(err, "failed to roll up budget usage", "task", task.Name)
 	}
+	// Emit six locked metrics at the same once-only terminal commit point as
+	// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
+	// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
+	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+		logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
+	}
 
 	// Phase 14 BUDGET-02: stamp BudgetBlocked immediately after RollUpUsage — this
 	// is the first moment where CostSpentCents may cross the cap (RESEARCH §Root Cause,
@@ -965,6 +984,64 @@ func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1
 		return parent, nil
 	}
 	return nil, ErrParentUnresolved
+}
+
+// resolveWave returns the name of the Wave CRD that directly owns this Task.
+// Tasks in the normal execution path are created by the wave controller with
+// Wave as their controller OwnerRef (wave_controller.go SetControllerReference).
+// Returns "unknown" on miss — D-09 sentinel; never emits an empty label value
+// (Metric Label Sentinel, RESEARCH Pitfall 4). No API call needed — OwnerReferences
+// are part of the in-memory Task object.
+func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha1.Task) string {
+	for _, ref := range task.GetOwnerReferences() {
+		if ref.Kind == "Wave" {
+			return ref.Name
+		}
+	}
+	return "unknown"
+}
+
+// emitTaskMetrics emits the six locked Phase 16 TELEM-03 metrics at the exact
+// terminal commit point shared with budget.RollUpUsage (D-12). Resolves the
+// four label values: project from the owning Project CRD name; phase from the
+// Plan's PhaseRef (via r.Get — the tideproject.k8s/phase label does not exist
+// on Tasks); plan from task.Spec.PlanRef; wave from resolveWave. Any resolution
+// miss falls back to "unknown" (sentinel, D-09). Failures are non-fatal — the
+// task is already in terminal state.
+func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, usage pkgdispatch.Usage, completedAt time.Time) error {
+	wave := r.resolveWave(task)
+	projectName := project.Name
+
+	// Resolve plan — fall back to "unknown" on empty PlanRef.
+	plan := task.Spec.PlanRef
+	if plan == "" {
+		plan = "unknown"
+	}
+
+	// Resolve phase via PlanRef → plan.Spec.PhaseRef (PLANNER CORRECTION: there
+	// is no tideproject.k8s/phase label on Tasks; the label does not exist in
+	// the codebase). Fall back to "unknown" on any miss.
+	phase := "unknown"
+	if task.Spec.PlanRef != "" {
+		var planObj tideprojectv1alpha1.Plan
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &planObj); err == nil {
+			if planObj.Spec.PhaseRef != "" {
+				phase = planObj.Spec.PhaseRef
+			}
+		}
+	}
+
+	tidemetrics.TokensInputTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.InputTokens))
+	tidemetrics.TokensOutputTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.OutputTokens))
+	tidemetrics.TokensCacheReadTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheReadTokens))
+	tidemetrics.TokensCacheCreationTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheCreationTokens))
+	tidemetrics.CostCentsTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.EstimatedCostCents))
+
+	if task.Status.StartedAt != nil && !completedAt.IsZero() {
+		duration := completedAt.Sub(task.Status.StartedAt.Time)
+		tidemetrics.TaskDurationSeconds.WithLabelValues(projectName, phase, plan, wave).Observe(duration.Seconds())
+	}
+	return nil
 }
 
 // walkOwnerChainToProject walks the owner-ref chain looking for a Project,

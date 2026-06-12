@@ -32,6 +32,11 @@ import (
 // quantize LLM responses into a single bucket, defeating the histogram.
 var dispatchLatencyBuckets = []float64{0.1, 0.5, 1, 5, 10, 30, 60, 300, 1800}
 
+// taskDurationBuckets covers the minutes-to-hours range for agentic tasks
+// (Phase 16 D-11). Prometheus default buckets top out at 10s — useless for
+// agentic tasks that routinely run for tens of minutes to hours.
+var taskDurationBuckets = []float64{30, 60, 120, 300, 600, 1200, 1800, 3600, 7200}
+
 // WavesDispatchedTotal counts the number of Waves the orchestrator dispatched
 // to the executor pool, surfaced by Project / Phase / Plan (D-O2).
 //
@@ -84,6 +89,30 @@ var PushJobsTotal *prometheus.CounterVec
 // BudgetStatus.CostSpentCents; this counter surfaces overruns as discrete
 // events for Prometheus alerting. Label arity {project} = 1.
 var BudgetOverrunsTotal *prometheus.CounterVec
+
+// Six locked metrics for token, cost, and duration telemetry (Phase 16 TELEM-03).
+// Label set: {project, phase, plan, wave} — D-10. The wave and plan labels are
+// permitted by the metriccardinality analyzer; the task label is forbidden
+// (Pitfall 17 / metriccardinality analyzer in tools/analyzers/metriccardinality/).
+
+// TokensInputTotal counts input tokens consumed by Tasks.
+var TokensInputTotal *prometheus.CounterVec
+
+// TokensOutputTotal counts output tokens produced by Tasks.
+var TokensOutputTotal *prometheus.CounterVec
+
+// TokensCacheReadTotal counts cache-read tokens consumed by Tasks.
+var TokensCacheReadTotal *prometheus.CounterVec
+
+// TokensCacheCreationTotal counts cache-creation tokens consumed by Tasks.
+var TokensCacheCreationTotal *prometheus.CounterVec
+
+// CostCentsTotal counts the estimated cost in US cents consumed by Tasks.
+var CostCentsTotal *prometheus.CounterVec
+
+// TaskDurationSeconds observes the wall-clock duration of Tasks from dispatch
+// to terminal state. Uses taskDurationBuckets (D-11).
+var TaskDurationSeconds *prometheus.HistogramVec
 
 // ProviderRateLimitHitsTotal is re-exported from internal/budget for callers
 // that want a single metrics package import. The underlying
@@ -151,6 +180,52 @@ func init() {
 		[]string{"project"},
 	)
 
+	// Phase 16 TELEM-03: six locked metrics for token, cost, and duration telemetry.
+	// Label set {project, phase, plan, wave} on all six (D-10).
+	TokensInputTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_tokens_input_total",
+			Help: "Input tokens consumed by Tasks, surfaced by Project, Phase, Plan, and Wave (Phase 16 TELEM-03).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+	TokensOutputTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_tokens_output_total",
+			Help: "Output tokens produced by Tasks (Phase 16 TELEM-03).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+	TokensCacheReadTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_tokens_cache_read_total",
+			Help: "Cache-read tokens consumed by Tasks (Phase 16 TELEM-03).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+	TokensCacheCreationTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_tokens_cache_creation_total",
+			Help: "Cache-creation tokens consumed by Tasks (Phase 16 TELEM-03).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+	CostCentsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_cost_cents_total",
+			Help: "Estimated cost in US cents consumed by Tasks (Phase 16 TELEM-03).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+	TaskDurationSeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "tide_task_duration_seconds",
+			Help:    "Wall-clock duration of Tasks from dispatch to terminal state. Buckets sized for agentic tasks (Phase 16 D-11).",
+			Buckets: taskDurationBuckets,
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
+
 	metrics.Registry.MustRegister(
 		WavesDispatchedTotal,
 		TasksCompletedTotal,
@@ -159,6 +234,13 @@ func init() {
 		SecretLeakBlockedTotal,
 		PushJobsTotal,
 		BudgetOverrunsTotal,
+		// Phase 16 TELEM-03:
+		TokensInputTotal,
+		TokensOutputTotal,
+		TokensCacheReadTotal,
+		TokensCacheCreationTotal,
+		CostCentsTotal,
+		TaskDurationSeconds,
 	)
 
 	// Re-export Phase 2's ProviderRateLimitHitsTotal. The variable is a

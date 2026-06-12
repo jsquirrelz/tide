@@ -61,6 +61,13 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 	tidemetrics.SecretLeakBlockedTotal.WithLabelValues("__seed__", "ph", "pl").Add(0)
 	tidemetrics.PushJobsTotal.WithLabelValues("__seed__", "success").Add(0)
 	tidemetrics.BudgetOverrunsTotal.WithLabelValues("__seed__").Add(0)
+	// Phase 16 TELEM-03: seed six new metric families ({project, phase, plan, wave} = 4 args).
+	tidemetrics.TokensInputTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
+	tidemetrics.TokensOutputTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
+	tidemetrics.TokensCacheReadTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
+	tidemetrics.TokensCacheCreationTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
+	tidemetrics.CostCentsTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
+	tidemetrics.TaskDurationSeconds.WithLabelValues("__seed__", "ph", "pl", "w").Observe(0)
 
 	families, err := crmetrics.Registry.Gather()
 	if err != nil {
@@ -78,6 +85,13 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 		"tide_secret_leak_blocked_total",
 		"tide_push_jobs_total",
 		"tide_budget_overruns_total",
+		// Phase 16 TELEM-03 locked metrics:
+		"tide_tokens_input_total",
+		"tide_tokens_output_total",
+		"tide_tokens_cache_read_total",
+		"tide_tokens_cache_creation_total",
+		"tide_cost_cents_total",
+		"tide_task_duration_seconds",
 	}
 	for _, name := range want {
 		if !seen[name] {
@@ -162,6 +176,71 @@ func TestRegistry_BudgetOverrunsArity(t *testing.T) {
 	tidemetrics.BudgetOverrunsTotal.WithLabelValues("p").Inc()
 	if got := testutil.ToFloat64(tidemetrics.BudgetOverrunsTotal.WithLabelValues("p")); got < 1 {
 		t.Errorf("BudgetOverrunsTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_TokensInputLabelArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_TokensInputLabelArity(t *testing.T) {
+	tidemetrics.TokensInputTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.TokensInputTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("TokensInputTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_TokensOutputLabelArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_TokensOutputLabelArity(t *testing.T) {
+	tidemetrics.TokensOutputTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.TokensOutputTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("TokensOutputTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_TokensCacheReadLabelArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_TokensCacheReadLabelArity(t *testing.T) {
+	tidemetrics.TokensCacheReadTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.TokensCacheReadTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("TokensCacheReadTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_TokensCacheCreationLabelArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_TokensCacheCreationLabelArity(t *testing.T) {
+	tidemetrics.TokensCacheCreationTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.TokensCacheCreationTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("TokensCacheCreationTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_CostCentsLabelArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_CostCentsLabelArity(t *testing.T) {
+	tidemetrics.CostCentsTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.CostCentsTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("CostCentsTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_TaskDurationSecondsArity asserts arity {project, phase, plan, wave} = 4.
+func TestRegistry_TaskDurationSecondsArity(t *testing.T) {
+	tidemetrics.TaskDurationSeconds.WithLabelValues("p", "ph", "pl", "w").Observe(90)
+	count := testutil.CollectAndCount(tidemetrics.TaskDurationSeconds)
+	if count < 1 {
+		t.Errorf("TaskDurationSeconds series count = %d, want >= 1", count)
+	}
+}
+
+// TestRegistry_TaskDurationBuckets asserts the exact locked bucket slice
+// [30, 60, 120, 300, 600, 1200, 1800, 3600, 7200] (D-11) by reading the source file.
+// Buckets are not exposed via the runtime API; grep of the source is the audit.
+func TestRegistry_TaskDurationBuckets(t *testing.T) {
+	root := findRepoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "internal", "metrics", "registry.go"))
+	if err != nil {
+		t.Fatalf("read registry.go: %v", err)
+	}
+	src := string(data)
+	want := "[]float64{30, 60, 120, 300, 600, 1200, 1800, 3600, 7200}"
+	if !strings.Contains(src, want) {
+		t.Errorf("registry.go missing locked D-11 histogram bucket slice %q", want)
 	}
 }
 
