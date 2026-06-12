@@ -190,3 +190,6 @@ jobs:
             exit 1
           fi
           echo "OK: charts/ tree matches fresh helmify+augment output"
+
+      - name: Helm render gate assertions (TELEM-05 D-14)
+        run: make helm-assert
