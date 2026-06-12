@@ -32,9 +32,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 )
+
+// proxyTimeout bounds individual upstream Prometheus requests. Prevents a
+// hanging upstream from pinning a dashboard goroutine indefinitely (TELEM-06).
+const proxyTimeout = 30 * time.Second
+
+// proxyClient is the package-level HTTP client for upstream Prometheus calls.
+// Using a dedicated client with an explicit Timeout lets us set a hard bound
+// that survives browser disconnects — context propagation via the request
+// handles the disconnect case; proxyTimeout is the last-resort bound (TELEM-06).
+var proxyClient = &http.Client{Timeout: proxyTimeout}
 
 // PrometheusHandler proxies PromQL queries to the configured Prometheus
 // endpoint. Endpoint is the base URL (e.g. "http://prometheus:9090"); an
@@ -81,10 +93,20 @@ func (h *PrometheusHandler) proxy(w http.ResponseWriter, r *http.Request, path s
 		})
 		return
 	}
-	upstream.Path = path
+	upstream.Path = strings.TrimRight(upstream.Path, "/") + path
 	upstream.RawQuery = r.URL.RawQuery
 
-	resp, err := http.DefaultClient.Get(upstream.String()) //nolint:noctx
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream.String(), nil)
+	if err != nil {
+		h.Log.Error(err, "failed to build upstream request", "url", upstream.String())
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("failed to build request: %v", err),
+		})
+		return
+	}
+	resp, err := proxyClient.Do(req)
 	if err != nil {
 		h.Log.Error(err, "prometheus upstream unreachable", "url", upstream.String())
 		w.WriteHeader(http.StatusBadGateway)
