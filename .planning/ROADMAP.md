@@ -183,9 +183,9 @@ Plans:
 
 **Wave 3** *(gap closure — 16-VERIFICATION.md CR-01 + 16-REVIEW.md CR-02/WR-03/WR-04)*
 
-- [ ] 16-06-PLAN.md — CR-01: all-projects per-project series keys in TelemetryView fetchPanel + multi-result Vitest regression
-- [ ] 16-07-PLAN.md — CR-02 + WR-04: emit tasks_completed/tasks_failed at emitTaskMetrics seams, waves_dispatched at materializeWaves Create; negative-duration guard
-- [ ] 16-08-PLAN.md — WR-03: delete dead prometheusEndpoint config field/tests; align MILESTONE.md + chart comment to env-only mechanism
+- [x] 16-06-PLAN.md — CR-01: all-projects per-project series keys in TelemetryView fetchPanel + multi-result Vitest regression
+- [x] 16-07-PLAN.md — CR-02 + WR-04: emit tasks_completed/tasks_failed at emitTaskMetrics seams, waves_dispatched at materializeWaves Create; negative-duration guard
+- [x] 16-08-PLAN.md — WR-03: delete dead prometheusEndpoint config field/tests; align MILESTONE.md + chart comment to env-only mechanism
 
 ## Progress
 
@@ -199,4 +199,4 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 16. Telemetry Completion | v1.0.1 | 5/5 | Complete   | 2026-06-12 |
+| 16. Telemetry Completion | v1.0.1 | 8/8 | Complete   | 2026-06-12 |
