@@ -55,11 +55,16 @@ jobs:
           # Export the exit code and output for subsequent steps.
           echo "exit_code=${DRIFT_EXIT}" >> "$GITHUB_OUTPUT"
           DRIFT_BODY=$(cat /tmp/drift-output.txt)
-          # Pass multi-line output via GITHUB_OUTPUT using heredoc delimiter.
+          # Pass multi-line output via GITHUB_OUTPUT using a RANDOM heredoc
+          # delimiter (GitHub hardening guidance): the body is fetched external
+          # page content — a fixed marker embedded in the page would terminate
+          # the heredoc early and let the remaining lines be parsed as new
+          # key=value outputs (last write wins, e.g. overriding exit_code).
+          EOF_MARKER="DRIFT_EOF_$(head -c16 /dev/urandom | base64 | tr -d '=+/')"
           {
-            echo 'drift_body<<DRIFT_EOF'
+            echo "drift_body<<${EOF_MARKER}"
             cat /tmp/drift-output.txt
-            echo 'DRIFT_EOF'
+            echo "${EOF_MARKER}"
           } >> "$GITHUB_OUTPUT"
           # Surface the exit code as outcome for the condition check below.
           # continue-on-error keeps the step green; we inspect exit_code manually.
