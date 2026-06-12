@@ -38,17 +38,21 @@ created: 2026-06-12
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 16-01-T1 | 16-01 | 1 | TELEM-06 | T-16-02 | Bounded 30s client + r.Context() propagation; base path preserved; no http.DefaultClient | go integration | `go test ./cmd/dashboard/api/... -count=1` | ✅ extend telemetry_proxy_integration_test.go | ⬜ pending |
-| 16-01-T2 | 16-01 | 1 | TELEM-01 | T-16-01 | Endpoint is operator-set env/YAML only, never request-time user input | go unit | `go test ./internal/config/... ./cmd/dashboard/... -count=1` | ✅ extend config_test.go + router_test.go | ⬜ pending |
-| 16-02-T1 | 16-02 | 1 | TELEM-03 | T-16-06 | Locked {project, phase, plan, wave} arity on all six; no `task` label (analyzer-gated) | go unit | `go test ./internal/metrics/... -count=1` | ✅ extend registry_test.go | ⬜ pending |
-| 16-02-T2 | 16-02 | 1 | TELEM-03 | T-16-05 | Label values are CR names + "unknown" sentinel only — never envelope free-text | go unit (fake client) | `go test ./internal/controller/... -run 'TestResolveWave\|TestEmitTaskMetrics' -count=1` | ⬜ task_controller_metrics_test.go created in-task | ⬜ pending |
-| 16-03-T1 | 16-03 | 1 | TELEM-05 | T-16-08 | Render gates pass; chart untouched (fixed contract) | shell | `make helm-telemetry-assert && make helm-assert` | ⬜ targets created in-task | ⬜ pending |
-| 16-03-T2 | 16-03 | 1 | TELEM-05 | T-16-09 | helm-lint job stays cluster-credential-free | yaml/grep | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yaml'))"` + grep step placement | ✅ ci.yaml exists | ⬜ pending |
-| 16-04-T1 | 16-04 | 1 | TELEM-04 | T-16-10 | Only registry.go metric names queried; values parseFloat'd, JSX-escaped | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ⬜ pending |
-| 16-04-T2 | 16-04 | 1 | TELEM-02, TELEM-04 | T-16-12 | Transient state only — zero localStorage; read-only GETs | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ⬜ pending |
-| 16-04-T3 | 16-04 | 1 | TELEM-02 | T-16-11 | Both locked degradation shapes pinned (200 sentinel + 502) | Vitest | `cd dashboard/web && npm test` | ⬜ __tests__/TelemetryView.test.tsx created in-task | ⬜ pending |
-| 16-05-T1 | 16-05 | 2 | TELEM-02 | T-16-13 | Switcher mutates React state only; no new network surface | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ⬜ pending |
-| 16-05-T2 | 16-05 | 2 | TELEM-02 | T-16-14 | Single body tree mounted (conditional render, polling stops on unmount) | Vitest | `cd dashboard/web && npm test` | ⬜ __tests__/view-switcher.test.tsx created in-task | ⬜ pending |
+| 16-01-T1 | 16-01 | 1 | TELEM-06 | T-16-02 | Bounded 30s client + r.Context() propagation; base path preserved; no http.DefaultClient | go integration | `go test ./cmd/dashboard/api/... -count=1` | ✅ extend telemetry_proxy_integration_test.go | ✅ green |
+| 16-01-T2 | 16-01 | 1 | TELEM-01 | T-16-01 | Endpoint is operator-set env/YAML only, never request-time user input | go unit | `go test ./internal/config/... ./cmd/dashboard/... -count=1` | ✅ extend config_test.go + router_test.go | ✅ green |
+| 16-02-T1 | 16-02 | 1 | TELEM-03 | T-16-06 | Locked {project, phase, plan, wave} arity on all six; no `task` label (analyzer-gated) | go unit | `go test ./internal/metrics/... -count=1` | ✅ extend registry_test.go | ✅ green |
+| 16-02-T2 | 16-02 | 1 | TELEM-03 | T-16-05 | Label values are CR names + "unknown" sentinel only — never envelope free-text | go unit (fake client) | `go test ./internal/controller/... -run 'TestResolveWave\|TestEmitTaskMetrics' -count=1` | ✅ task_controller_metrics_test.go | ✅ green |
+| 16-03-T1 | 16-03 | 1 | TELEM-05 | T-16-08 | Render gates pass; chart untouched (fixed contract) | shell | `make helm-telemetry-assert && make helm-assert` | ✅ Makefile:helm-telemetry-assert/helm-assert | ✅ green |
+| 16-03-T2 | 16-03 | 1 | TELEM-05 | T-16-09 | helm-lint job stays cluster-credential-free | yaml/grep | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yaml'))"` + grep step placement | ✅ ci.yaml exists | ✅ green |
+| 16-04-T1 | 16-04 | 1 | TELEM-04 | T-16-10 | Only registry.go metric names queried; values parseFloat'd, JSX-escaped | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ✅ green |
+| 16-04-T2 | 16-04 | 1 | TELEM-02, TELEM-04 | T-16-12 | Transient state only — zero localStorage; read-only GETs | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ✅ green |
+| 16-04-T3 | 16-04 | 1 | TELEM-02 | T-16-11 | Both locked degradation shapes pinned (200 sentinel + 502) | Vitest | `cd dashboard/web && npm test` | ✅ __tests__/TelemetryView.test.tsx | ✅ green |
+| 16-05-T1 | 16-05 | 2 | TELEM-02 | T-16-13 | Switcher mutates React state only; no new network surface | tsc + Vitest | `cd dashboard/web && npx tsc --noEmit && npm test` | ✅ suite exists | ✅ green |
+| 16-05-T2 | 16-05 | 2 | TELEM-02 | T-16-14 | Single body tree mounted (conditional render, polling stops on unmount) | Vitest | `cd dashboard/web && npm test` | ✅ __tests__/view-switcher.test.tsx | ✅ green |
+| 16-06-T1 | 16-06 | 3 | TELEM-02, TELEM-04 | T-16-20 | Per-project series keys in all-projects scope; JSX-only rendering | Vitest (tdd RED→GREEN) | `cd dashboard/web && npx vitest run src/components/__tests__/TelemetryView.test.tsx && npx tsc --noEmit` | ✅ extended TelemetryView.test.tsx | ✅ green |
+| 16-07-T1 | 16-07 | 3 | TELEM-03, TELEM-04 | T-16-21, T-16-22 | Bounded 3-value reason enum; negative durations skipped+logged | go unit (fake client) | `go test ./internal/controller/... -run 'TestEmitTaskMetrics\|TestMetricFailureReason' -count=1` | ✅ task_controller_metrics_test.go | ✅ green |
+| 16-07-T2 | 16-07 | 3 | TELEM-04 | T-16-23 | WavesDispatchedTotal exactly-once at Create-success; no replay double-count | go unit (fake client) | `go test ./internal/controller/... -run 'TestMaterializeWaves' -count=1` | ✅ plan_controller_metrics_test.go | ✅ green |
+| 16-08-T1 | 16-08 | 3 | TELEM-01 | T-16-24, T-16-25 | Dead config surface removed; chart render byte-identical | go unit + shell | `go test ./internal/config/... -count=1 && make helm-assert` | ✅ config_test.go + render gates | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -68,6 +72,18 @@ created: 2026-06-12
 
 ---
 
+## Validation Audit 2026-06-12
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+All 15 task rows (11 original + 4 gap-closure) verified green this audit: `go test ./internal/metrics/... ./internal/config/... ./cmd/dashboard/api/...` ok; `go test ./internal/controller/... -run 'TestEmitTaskMetrics|TestResolveWave|TestMetricFailureReason|TestMaterializeWaves'` ok; full `make test` exit 0; dashboard Vitest 199/199; `make helm-telemetry-assert` + `make helm-assert` all permutations PASS. Every TELEM requirement maps to at least one green automated test.
+
+---
+
 ## Validation Sign-Off
 
 - [x] All tasks have `<automated>` verify or Wave 0 dependencies
@@ -77,4 +93,4 @@ created: 2026-06-12
 - [x] Feedback latency < 180s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** filled by gsd-planner 2026-06-12
+**Approval:** verified 2026-06-12 (validate-phase audit — Nyquist-compliant, 0 gaps)
