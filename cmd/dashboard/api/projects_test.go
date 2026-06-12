@@ -451,6 +451,218 @@ func TestGetProjectWithoutNamespaceParamFindsAcrossNamespaces(t *testing.T) {
 	}
 }
 
+// TestBlockingConditionsTrueBudgetBlocked — behavior #1: a Project with a
+// True BudgetBlocked condition exposes it under blockingConditions in both
+// GET /api/v1/projects (list) and GET /api/v1/projects/{name} (detail).
+// The entry carries type/reason/message verbatim and a non-empty age string.
+func TestBlockingConditionsTrueBudgetBlocked(t *testing.T) {
+	msg := "Cost spent 10100 cents (+ 220 reserved) exceeds cap 10000 cents; dispatch halted project-wide"
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "BudgetBlocked",
+			Status:             metav1.ConditionTrue,
+			Reason:             "BudgetCapReached",
+			Message:            msg,
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	// List endpoint
+	respList, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects: %v", err)
+	}
+	defer respList.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(respList.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 project, got %d", len(list))
+	}
+	bc := assertBlockingConditions(t, list[0], 1)
+	assertConditionEntry(t, bc[0], "BudgetBlocked", "BudgetCapReached", msg)
+
+	// Detail endpoint
+	respGet, err := http.Get(srv.URL + "/api/v1/projects/alpha?namespace=default")
+	if err != nil {
+		t.Fatalf("GET /api/v1/projects/alpha: %v", err)
+	}
+	defer respGet.Body.Close()
+	var detail map[string]any
+	if err := json.NewDecoder(respGet.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	bc2 := assertBlockingConditions(t, detail, 1)
+	assertConditionEntry(t, bc2[0], "BudgetBlocked", "BudgetCapReached", msg)
+}
+
+// TestBlockingConditionsFalseStatusExcluded — behavior #2: a Status=False
+// BudgetBlocked condition is EXCLUDED (recovered caps disappear from payload).
+func TestBlockingConditionsFalseStatusExcluded(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "BudgetBlocked",
+			Status:             metav1.ConditionFalse,
+			Reason:             "BudgetOK",
+			Message:            "budget recovered",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assertBlockingConditions(t, list[0], 0)
+}
+
+// TestBlockingConditionsNonWhitelistedTypeExcluded — behavior #3: a
+// Status=True condition of a non-whitelisted type (e.g. "Ready") is EXCLUDED.
+func TestBlockingConditionsNonWhitelistedTypeExcluded(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "Ready",
+			Status:             metav1.ConditionTrue,
+			Reason:             "AsExpected",
+			Message:            "all good",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assertBlockingConditions(t, list[0], 0)
+}
+
+// TestBlockingConditionsEmptyIsNotNull — behavior #4: a Project with no
+// matching conditions serializes the literal JSON fragment
+// "blockingConditions":[] (assert on raw body — never null).
+func TestBlockingConditionsEmptyIsNotNull(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	// No conditions at all.
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"blockingConditions":[]`) {
+		t.Errorf("expected literal \"blockingConditions\":[] in body; got:\n%s", string(body))
+	}
+}
+
+// TestBlockingConditionsBothWhitelistedTypes — behavior #5: simultaneous True
+// BudgetBlocked AND True BillingHalt yields exactly 2 entries.
+func TestBlockingConditionsBothWhitelistedTypes(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	p.Status.Conditions = []metav1.Condition{
+		{
+			Type:               "BudgetBlocked",
+			Status:             metav1.ConditionTrue,
+			Reason:             "BudgetCapReached",
+			Message:            "cap exceeded",
+			LastTransitionTime: metav1.Now(),
+		},
+		{
+			Type:               "BillingHalt",
+			Status:             metav1.ConditionTrue,
+			Reason:             "CreditExhausted",
+			Message:            "provider credits exhausted",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	_, router := newHandler(t, p)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	assertBlockingConditions(t, list[0], 2)
+}
+
+// assertBlockingConditions verifies the blockingConditions field is present,
+// is an array (never null), and has the expected length. Returns the entries.
+func assertBlockingConditions(t *testing.T, proj map[string]any, wantLen int) []map[string]any {
+	t.Helper()
+	raw, ok := proj["blockingConditions"]
+	if !ok {
+		t.Fatalf("missing blockingConditions field; have %v", proj)
+	}
+	if raw == nil {
+		t.Fatal("blockingConditions is null, want []")
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		t.Fatalf("blockingConditions is not an array: %T %v", raw, raw)
+	}
+	if len(arr) != wantLen {
+		t.Errorf("blockingConditions len=%d, want %d; entries: %v", len(arr), wantLen, arr)
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, e := range arr {
+		m, ok := e.(map[string]any)
+		if !ok {
+			t.Errorf("blockingConditions entry is not a map: %T", e)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// assertConditionEntry checks type/reason/message are verbatim and age is non-empty.
+func assertConditionEntry(t *testing.T, entry map[string]any, wantType, wantReason, wantMessage string) {
+	t.Helper()
+	if entry["type"] != wantType {
+		t.Errorf("condition type=%v, want %q", entry["type"], wantType)
+	}
+	if entry["reason"] != wantReason {
+		t.Errorf("condition reason=%v, want %q", entry["reason"], wantReason)
+	}
+	if entry["message"] != wantMessage {
+		t.Errorf("condition message=%v, want %q", entry["message"], wantMessage)
+	}
+	if age, _ := entry["age"].(string); age == "" {
+		t.Errorf("condition age is empty, want non-empty relative time string")
+	}
+}
+
 // TestListProjectsActiveMilestoneCountCrossNamespace is the WR-10 regression
 // test: projects in different namespaces that happen to share a name must
 // NOT cross-contaminate each other's activeMilestoneCount via the hoisted
