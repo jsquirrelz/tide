@@ -1,7 +1,8 @@
 ---
 phase: 15
 slug: paper-cuts
-status: draft
+status: approved
+reviewed_at: 2026-06-12
 shadcn_initialized: false
 preset: none
 created: 2026-06-12
