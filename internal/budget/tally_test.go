@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -103,6 +105,68 @@ func TestRollUpUsage_AccumulatesAcrossCalls(t *testing.T) {
 	}
 	if final.Status.Budget.CostSpentCents != wantCents {
 		t.Errorf("CostSpentCents: got %d; want %d", final.Status.Budget.CostSpentCents, wantCents)
+	}
+}
+
+// TestRollUpUsage_RetriesOnConflict verifies that a concurrent roll-up landing
+// between RollUpUsage's read and patch does not get clobbered: the optimistic
+// lock surfaces a Conflict, the retry re-fetches the newer tally, and BOTH
+// completions' costs survive (WR-09 — last-write-wins silently dropped spend).
+func TestRollUpUsage_RetriesOnConflict(t *testing.T) {
+	p := makeProject("test-project-conflict")
+
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+	if err := tidev1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tidev1alpha1: %v", err)
+	}
+
+	var injected sync.Once
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(p).
+		WithStatusSubresource(&tidev1alpha1.Project{}).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				// Before the first patch lands, slip in a concurrent completion
+				// that bumps resourceVersion — forcing a Conflict and a retry.
+				injected.Do(func() {
+					other := &tidev1alpha1.Project{}
+					if err := cl.Get(ctx, client.ObjectKeyFromObject(p), other); err != nil {
+						t.Errorf("interceptor Get: %v", err)
+						return
+					}
+					base := client.MergeFrom(other.DeepCopy())
+					other.Status.Budget.TokensSpent += 70
+					other.Status.Budget.CostSpentCents += 7
+					if err := cl.Status().Patch(ctx, other, base); err != nil {
+						t.Errorf("interceptor concurrent patch: %v", err)
+					}
+				})
+				return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+			},
+		}).
+		Build()
+
+	usage := pkgdispatch.Usage{InputTokens: 100, OutputTokens: 50, EstimatedCostCents: 25}
+	if err := RollUpUsage(context.Background(), c, p, usage); err != nil {
+		t.Fatalf("RollUpUsage: %v", err)
+	}
+
+	final := &tidev1alpha1.Project{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), final); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// Both the injected concurrent roll-up (70 tokens / 7 cents) and this
+	// call's usage (150 tokens / 25 cents) must survive.
+	if got, want := final.Status.Budget.TokensSpent, int64(70+150); got != want {
+		t.Errorf("TokensSpent: got %d; want %d (concurrent completion's tokens were clobbered)", got, want)
+	}
+	if got, want := final.Status.Budget.CostSpentCents, int64(7+25); got != want {
+		t.Errorf("CostSpentCents: got %d; want %d (concurrent completion's cost was clobbered)", got, want)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -36,27 +37,52 @@ import (
 // EnvelopeOut — one Status write per Task completion (D-D2). Churn is
 // proportional to throughput, not to reconcile frequency.
 //
+// Concurrency: with MaxConcurrentReconciles > 1 two completions can roll up
+// near-simultaneously. The increment re-fetches the Project and patches with
+// an optimistic lock, retrying on conflict, so concurrent roll-ups serialize
+// instead of last-write-wins clobbering the tally — an under-counted
+// CostSpentCents directly defeats IsCapExceeded and HasHeadroom.
+//
 // WindowStart is set to time.Now() on the first call (zero value). Once set
 // it is preserved. The rolling-window reset path is implemented in
 // MaybeResetWindow (Phase 04.1 P4.1) and called by ProjectReconciler at
 // the start of each budget-gate evaluation.
 //
-// Returns nil on success. Wraps client.Status().Patch errors with context.
+// On success the caller's project.Status.Budget is updated to the rolled-up
+// state — TaskReconciler feeds the same struct to setBudgetBlockedIfNeeded
+// immediately after roll-up.
+//
+// Returns nil on success. Wraps Get/Status().Patch errors with context.
 func RollUpUsage(ctx context.Context, c client.Client, project *tidev1alpha1.Project, usage pkgdispatch.Usage) error {
-	// Capture the baseline for the MergeFrom patch.
-	patch := client.MergeFrom(project.DeepCopy())
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		// Re-fetch so the increment applies to the latest tally, not a stale
+		// read captured before a concurrent completion's patch landed.
+		latest := &tidev1alpha1.Project{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+			return err
+		}
+		// The patch carries latest's resourceVersion: a concurrent roll-up
+		// that landed in between returns a Conflict and this closure re-runs
+		// against the newer tally.
+		patch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
 
-	// Accumulate token and cost tallies.
-	project.Status.Budget.TokensSpent += usage.InputTokens + usage.OutputTokens
-	project.Status.Budget.CostSpentCents += usage.EstimatedCostCents
+		// Accumulate token and cost tallies.
+		latest.Status.Budget.TokensSpent += usage.InputTokens + usage.OutputTokens
+		latest.Status.Budget.CostSpentCents += usage.EstimatedCostCents
 
-	// Set WindowStart on first call; preserve once set.
-	if project.Status.Budget.WindowStart == nil {
-		now := metav1.Now()
-		project.Status.Budget.WindowStart = &now
-	}
+		// Set WindowStart on first call; preserve once set.
+		if latest.Status.Budget.WindowStart == nil {
+			now := metav1.Now()
+			latest.Status.Budget.WindowStart = &now
+		}
 
-	if err := c.Status().Patch(ctx, project, patch); err != nil {
+		if err := c.Status().Patch(ctx, latest, patch); err != nil {
+			return err
+		}
+		project.Status.Budget = latest.Status.Budget
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("budget: tally roll-up: %w", err)
 	}
 	return nil
