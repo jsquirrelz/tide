@@ -94,6 +94,23 @@ type TaskReconcilerDeps struct {
 	// the Milestone/Phase/Plan reconcilers. buildEnvelopeIn uses them to resolve
 	// the executor task's ProviderSpec (Vendor "anthropic" + the task-level model).
 	HelmProviderDefaults ProviderDefaults
+
+	// Reservations is the in-process D-05 pre-charge store (nil-safe; wired in
+	// main.go in Plan 14-05). All ReservationStore methods are nil-receiver-safe
+	// so existing tests that do not set this field continue to pass without panic.
+	Reservations *budget.ReservationStore
+
+	// ReserveEstimateCents is the flat per-dispatch reservation estimate (D-05
+	// Option B; sourced from Helm budget.reservePerDispatchCents via the
+	// --budget-reserve-per-dispatch-cents flag, wired in Plan 14-05). Zero means
+	// no pre-charge — safe default for pre-Phase-14 code paths.
+	ReserveEstimateCents int64
+
+	// PricingOverridesJSON is the validated D-02 override JSON forwarded
+	// opaquely to executor Jobs as TIDE_PRICING_OVERRIDES_JSON. The manager
+	// does not interpret prices — it passes the validated string through.
+	// Wired in Plan 14-05.
+	PricingOverridesJSON string
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -143,6 +160,9 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return finalizer.HandleDeletion(ctx, r.Client, &task, taskFinalizer,
 			func(_ context.Context) error {
 				logger.Info("task cleanup", "name", task.Name)
+				// D-05: release the reservation so a deleted Task does not leak
+				// its reserved headroom until manager restart.
+				r.Deps.Reservations.Release(string(task.UID))
 				return nil
 			}, finalizerCleanupTimeout)
 	}
@@ -344,20 +364,51 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
 	}
 
-	// Step 4: Budget gate.
-	if project.Status.Phase == "BudgetExceeded" && !budget.IsBypassed(project, time.Now()) {
+	// Phase 14 BUDGET-02 / D-04: fourth dispatch-entry hold — BudgetBlocked condition.
+	// Cap detection happens here (not in ProjectReconciler) because Status patches from
+	// RollUpUsage do NOT increment metadata.generation and thus do NOT re-enqueue the
+	// ProjectReconciler (watch-predicate gap root cause, 14-RESEARCH.md §Root Cause).
+	// The bidirectional setBudgetBlockedIfNeeded also handles cap-raise recovery: when
+	// IsCapExceeded becomes false it clears the condition so dispatch can resume.
+	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {
+		logf.FromContext(ctx).Error(err, "setBudgetBlockedIfNeeded failed (non-fatal)")
+	}
+	// OR the legacy BudgetExceeded phase check so the Phase machinery (D-04) is preserved
+	// — the condition check is the new primary path; the phase check is the fallback that
+	// ensures tasks parked by the pre-Phase-14 phase gate continue to be held.
+	if (checkBudgetBlocked(project) || project.Status.Phase == "BudgetExceeded") &&
+		!budget.IsBypassed(project, time.Now()) {
 		patch := client.MergeFrom(task.DeepCopy())
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               "BudgetBlocked",
+			Type:               tideprojectv1alpha1.ConditionBudgetBlocked,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha1.ConditionBudgetExceeded,
+			Reason:             tideprojectv1alpha1.ReasonBudgetCapReached,
 			Message:            "Project budget cap exceeded; task dispatch halted",
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
 			return taskGateResult{}, err
 		}
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
+			"task", task.Name, "project", project.Name,
+			"spent", project.Status.Budget.CostSpentCents,
+			"cap", project.Spec.Budget.AbsoluteCapCents)
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+	}
+
+	// Phase 14 BUDGET-03 / D-05: reservation headroom check. Prevents wave-wide
+	// overshoot (run-1 root class) by gating dispatch when committed spend + reserved
+	// + this estimate would exceed the cap. Transient park — no per-Task condition
+	// stamp (not a cap breach, just insufficient headroom at this moment).
+	if !budget.IsBypassed(project, time.Now()) &&
+		!r.Deps.Reservations.HasHeadroom(project, r.Deps.ReserveEstimateCents) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: insufficient reservation headroom",
+			"task", task.Name,
+			"spent", project.Status.Budget.CostSpentCents,
+			"reserved", r.Deps.Reservations.TotalReserved(),
+			"estimate", r.Deps.ReserveEstimateCents,
+			"cap", project.Spec.Budget.AbsoluteCapCents)
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
 	}
 
 	// Step 5: Indegree + wave-pause + gate-policy — delegate to checkReadinessGates.
@@ -630,19 +681,21 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		}
 	}
 	opts := podjob.BuildOptions{
-		Kind:           podjob.JobKindExecutor,
-		Task:           task,
-		ParentObj:      task,
-		Level:          "task",
-		Project:        project,
-		Attempt:        spec.attempt,
-		SignedToken:    spec.token,
-		EnvelopeInJSON: spec.envInJSON,
-		SubagentImage:  resolveImage(project, "task", r.Deps.HelmProviderDefaults),
-		CredproxyImage: r.Deps.CredproxyImage,
-		SecretUID:      secretUID,
-		PVCName:        "tide-projects",
-		ProjectUID:     string(project.UID),
+		Kind:                 podjob.JobKindExecutor,
+		Task:                 task,
+		ParentObj:            task,
+		Level:                "task",
+		Project:              project,
+		Attempt:              spec.attempt,
+		SignedToken:          spec.token,
+		EnvelopeInJSON:       spec.envInJSON,
+		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
+		CredproxyImage:       r.Deps.CredproxyImage,
+		SecretUID:            secretUID,
+		PVCName:              "tide-projects",
+		ProjectUID:           string(project.UID),
+		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, task, r.Scheme); err != nil {
@@ -654,6 +707,12 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		}
 		// AlreadyExists: idempotent success — watch-lag race (Pitfall F / SUB-03).
 		logger.Info("job already exists; treating as successful dispatch", "job", job.Name)
+	}
+	// D-05: pre-charge the reservation immediately after successful Job creation
+	// (including AlreadyExists-as-success). Reserve only when a non-zero estimate
+	// is configured; same-key re-Reserve on retry dispatch is an intentional overwrite.
+	if r.Deps.ReserveEstimateCents > 0 {
+		r.Deps.Reservations.Reserve(string(task.UID), r.Deps.ReserveEstimateCents)
 	}
 
 	// Step 12: Patch Status.Phase=Running + Condition Running=True, Reason=Dispatched.
@@ -750,6 +809,12 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
 func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
+
+	// D-05: settle the reservation immediately — the Job is terminal regardless of
+	// outcome. A single early call here avoids missing any of the several early-return
+	// Failed branches below. Settle is a no-op when Reservations is nil or the UID is
+	// not in the store (idempotent — safe on reconcile replay).
+	r.Deps.Reservations.Settle(string(task.UID))
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
@@ -857,6 +922,14 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	if err := budget.RollUpUsage(ctx, r.Client, project, out.Usage); err != nil {
 		// Log but do not fail the reconcile — the task is already in terminal state.
 		logger.Error(err, "failed to roll up budget usage", "task", task.Name)
+	}
+
+	// Phase 14 BUDGET-02: stamp BudgetBlocked immediately after RollUpUsage — this
+	// is the first moment where CostSpentCents may cross the cap (RESEARCH §Root Cause,
+	// Architecture diagram). Bidirectional: also clears the condition when a cap raise
+	// brings IsCapExceeded back to false. Non-fatal: the task is already terminal.
+	if err := setBudgetBlockedIfNeeded(ctx, r.Client, project, r.Deps.Reservations.TotalReserved()); err != nil {
+		logger.Error(err, "setBudgetBlockedIfNeeded failed (non-fatal)", "task", task.Name)
 	}
 
 	return ctrl.Result{}, nil
@@ -1056,19 +1129,21 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 		}
 	}
 	opts := podjob.BuildOptions{
-		Kind:           podjob.JobKindExecutor,
-		Task:           task,
-		ParentObj:      task,
-		Level:          "task",
-		Project:        project,
-		Attempt:        attempt,
-		SignedToken:    token,
-		EnvelopeInJSON: envInJSON,
-		SubagentImage:  resolveImage(project, "task", r.Deps.HelmProviderDefaults),
-		CredproxyImage: r.Deps.CredproxyImage,
-		SecretUID:      secretUID,
-		PVCName:        "tide-projects",
-		ProjectUID:     string(project.UID),
+		Kind:                 podjob.JobKindExecutor,
+		Task:                 task,
+		ParentObj:            task,
+		Level:                "task",
+		Project:              project,
+		Attempt:              attempt,
+		SignedToken:          token,
+		EnvelopeInJSON:       envInJSON,
+		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
+		CredproxyImage:       r.Deps.CredproxyImage,
+		SecretUID:            secretUID,
+		PVCName:              "tide-projects",
+		ProjectUID:           string(project.UID),
+		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, task, r.Scheme); err != nil {
@@ -1079,6 +1154,11 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 			return nil, fmt.Errorf("create job: %w", err)
 		}
 		// AlreadyExists: idempotent success — watch-lag race (Pitfall F / SUB-03).
+	}
+	// D-05: pre-charge the reservation after successful Job creation (including
+	// AlreadyExists-as-success). Reserve only when a non-zero estimate is configured.
+	if r.Deps.ReserveEstimateCents > 0 {
+		r.Deps.Reservations.Reserve(string(task.UID), r.Deps.ReserveEstimateCents)
 	}
 	return job, nil
 }
