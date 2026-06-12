@@ -198,6 +198,11 @@ type PodJobBackend struct {
 	EnvReader      EnvelopeReader
 	// PVCName is the name of the chart-provisioned shared PVC (default "tide-projects").
 	PVCName string
+
+	// PricingOverridesJSON is the validated D-02 override JSON forwarded
+	// opaquely to executor Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
+	// Empty string means no overrides (manager default "").
+	PricingOverridesJSON string
 }
 
 // Run satisfies internal/dispatch.Dispatcher.
@@ -271,16 +276,17 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 	}
 
 	opts := BuildOptions{
-		Task:           task,
-		Project:        project,
-		Attempt:        attempt,
-		SignedToken:    string(b.SigningKey), // simplified for Run; TaskReconciler uses HMAC in Plan 09
-		EnvelopeInJSON: envInJSON,
-		SubagentImage:  resolvedImage,
-		CredproxyImage: b.CredproxyImage,
-		SecretUID:      string(project.UID),
-		PVCName:        pvcName,
-		ProjectUID:     string(project.UID),
+		Task:                 task,
+		Project:              project,
+		Attempt:              attempt,
+		SignedToken:          string(b.SigningKey), // simplified for Run; TaskReconciler uses HMAC in Plan 09
+		EnvelopeInJSON:       envInJSON,
+		SubagentImage:        resolvedImage,
+		CredproxyImage:       b.CredproxyImage,
+		SecretUID:            string(project.UID),
+		PVCName:              pvcName,
+		ProjectUID:           string(project.UID),
+		PricingOverridesJSON: b.PricingOverridesJSON,
 	}
 
 	// 5. Build the Job spec.

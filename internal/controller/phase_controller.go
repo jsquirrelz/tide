@@ -94,6 +94,10 @@ type PhaseReconciler struct {
 	// HelmProviderDefaults carry Helm-chart provider/model defaults.
 	HelmProviderDefaults ProviderDefaults
 
+	// PricingOverridesJSON is the validated D-02 override JSON forwarded
+	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
+	PricingOverridesJSON string
+
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
@@ -300,6 +304,14 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 				"phase", ph.Name)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
+		// BillingHalt (provider billing); both may be true simultaneously.
+		// No per-Phase condition written (operator signal is the single Project BudgetBlocked condition).
+		if checkBudgetBlocked(earlyProject) && !budget.IsBypassed(earlyProject, time.Now()) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
+				"phase", ph.Name)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	// Acquire plannerPool before creating Job (D-A4).
@@ -349,19 +361,20 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	}
 
 	opts := podjob.BuildOptions{
-		Kind:           podjob.JobKindPlanner,
-		ParentObj:      ph,
-		Level:          "phase",
-		Attempt:        attempt,
-		Project:        project,
-		SignedToken:    token,
-		EnvelopeInJSON: envInJSON,
-		SubagentImage:  resolveImage(project, "phase", r.HelmProviderDefaults),
-		CredproxyImage: r.CredproxyImage,
-		SecretUID:      secretUID,
-		PVCName:        "tide-projects",
-		ProjectUID:     projectUID,
-		Caps:           plannerCaps,
+		Kind:                 podjob.JobKindPlanner,
+		ParentObj:            ph,
+		Level:                "phase",
+		Attempt:              attempt,
+		Project:              project,
+		SignedToken:          token,
+		EnvelopeInJSON:       envInJSON,
+		SubagentImage:        resolveImage(project, "phase", r.HelmProviderDefaults),
+		CredproxyImage:       r.CredproxyImage,
+		SecretUID:            secretUID,
+		PVCName:              "tide-projects",
+		ProjectUID:           projectUID,
+		Caps:                 plannerCaps,
+		PricingOverridesJSON: r.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ph, r.Scheme); err != nil {
