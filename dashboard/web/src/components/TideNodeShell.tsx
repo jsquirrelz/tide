@@ -110,12 +110,15 @@ export type TideNodeShellProps = {
   handleAxis?: "vertical" | "horizontal";
   /**
    * 14-UI-SPEC §C2: optional list of True blocking conditions on the Project CR
-   * (e.g. BudgetBlocked, BillingHalt). Each True entry renders one
-   * <ConditionBadge> in the summary row, immediately after <StatusBadge>.
-   * When non-empty, a purple border-l-4 is applied — the blocked sibling of the
-   * existing destructive border-left, so blocked state reads at DAG-zoom scale
-   * where badges are illegible. Failed family (FAILED_STATUSES) takes
-   * precedence: destructive red wins if both apply.
+   * (e.g. BudgetBlocked, BillingHalt). Each whitelisted (CONDITION_TABLE) entry
+   * renders one <ConditionBadge> in the summary row, immediately after
+   * <StatusBadge>. When at least one whitelisted entry is present, a purple
+   * border-l-4 is applied — the blocked sibling of the existing destructive
+   * border-left, so blocked state reads at DAG-zoom scale where badges are
+   * illegible. Unknown condition types drive nothing — no border, no badge, no
+   * aria suffix (defensive against vocabulary drift, same as ConditionBadge).
+   * Failed family (FAILED_STATUSES) takes precedence: destructive red wins if
+   * both apply.
    * Defaults to [] so zero-condition render is byte-identical to today.
    */
   blockingConditions?: ProjectBlockingCondition[];
@@ -153,8 +156,14 @@ export default function TideNodeShell({
   );
 
   const isFailed = FAILED_STATUSES.has(status);
-  // 14-UI-SPEC §C2: isBlocked drives the purple border-l-4 and data-blocked attribute.
-  const isBlocked = blockingConditions.length > 0;
+  // 14-UI-SPEC §C2: every blocked-state surface (border, badge row, aria-label)
+  // derives from the whitelist-filtered list so unknown condition types render
+  // nothing anywhere — the same vocabulary-drift defense ConditionBadge enforces.
+  const knownConditions = blockingConditions.filter(
+    (c) => CONDITION_TABLE[c.type],
+  );
+  // isBlocked drives the purple border-l-4 and data-blocked attribute.
+  const isBlocked = knownConditions.length > 0;
 
   // Read-only graph: handles exist only so edges have attachment anchors.
   // They must be in the DOM but invisible (no dots, no connect affordance).
@@ -203,11 +212,10 @@ export default function TideNodeShell({
         // 14-UI-SPEC §C2: extend with ", blocked: <Label1>[, <Label2>]" when blocked.
         const base = `${KIND_LABEL[kind]} ${name}, status ${status}`;
         if (!isBlocked) return base;
-        const labels = blockingConditions
-          .map((c) => CONDITION_TABLE[c.type]?.label)
-          .filter(Boolean)
+        const labels = knownConditions
+          .map((c) => CONDITION_TABLE[c.type].label)
           .join(", ");
-        return labels ? `${base}, blocked: ${labels}` : base;
+        return `${base}, blocked: ${labels}`;
       })()}
       className={containerClass}
       style={{
@@ -259,7 +267,7 @@ export default function TideNodeShell({
         <span className="shrink-0">
           <StatusBadge status={status} />
         </span>
-        {blockingConditions.map((c) => (
+        {knownConditions.map((c) => (
           <span key={c.type} className="shrink-0">
             <ConditionBadge condition={c} />
           </span>

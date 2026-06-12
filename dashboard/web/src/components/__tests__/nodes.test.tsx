@@ -413,4 +413,56 @@ describe("Custom Nodes — Test 6: blocking-conditions slot (14-UI-SPEC §C2)", 
     const label = root.getAttribute("aria-label") ?? "";
     expect(label).toMatch(/blocked: Budget blocked, Billing halted/);
   });
+
+  // Test 6: unknown-type-only payload (the vocabulary-drift scenario the
+  // whitelist defends against) drives NO blocked surface — no purple border,
+  // no data-blocked, no badge, no aria-label suffix.
+  it("blockingConditions with only an unknown type → data-blocked=false, no border-l-4, no badge, base aria-label", () => {
+    const { container } = renderShell({
+      blockingConditions: [
+        {
+          type: "QuotaExceeded",
+          reason: "FutureVocabulary",
+          message: "condition type the client does not know",
+          age: "1m 0s",
+        },
+      ],
+    });
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+
+    expect(root.getAttribute("data-blocked")).toBe("false");
+    expect(root.className).not.toMatch(/border-l-4/);
+    expect(
+      container.querySelector('[data-testid^="condition-badge-"]'),
+    ).toBeNull();
+    expect(root.getAttribute("aria-label")).not.toMatch(/blocked/);
+  });
+
+  // Test 7: unknown types mixed with known ones are filtered out everywhere —
+  // the known condition still drives border/badge/aria, the unknown one is inert.
+  it("blockingConditions=[unknown, BudgetBlocked] → blocked surfaces driven by BudgetBlocked only", () => {
+    const { container } = renderShell({
+      blockingConditions: [
+        {
+          type: "QuotaExceeded",
+          reason: "FutureVocabulary",
+          message: "condition type the client does not know",
+          age: "1m 0s",
+        },
+        BUDGET_BLOCKED_CONDITION,
+      ],
+    });
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+
+    expect(root.getAttribute("data-blocked")).toBe("true");
+    expect(root.className).toMatch(/border-l-\[var\(--color-status-blocked\)\]/);
+    expect(
+      container.querySelector('[data-testid="condition-badge-BudgetBlocked"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="condition-badge-QuotaExceeded"]'),
+    ).toBeNull();
+    const label = root.getAttribute("aria-label") ?? "";
+    expect(label).toMatch(/blocked: Budget blocked$/);
+  });
 });
