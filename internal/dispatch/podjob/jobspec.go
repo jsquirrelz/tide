@@ -20,6 +20,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -141,6 +142,17 @@ type BuildOptions struct {
 	// Non-empty → env var stamped on the container. Empty → env var absent.
 	// Populated at the controller call site in Plan 14-05 (not in this plan).
 	PricingOverridesJSON string
+
+	// EstimatedCostCents is the D-05 pre-charge estimate in cents. Stamped as
+	// label tideproject.k8s/estimated-cost on executor Jobs so that
+	// budget.RederiveReservations can restore the in-process ReservationStore
+	// after a manager restart (same restart-rederivation pattern as
+	// tideproject.k8s/provider-secret-uid for rate-limiter buckets). Omitted
+	// when 0 (pre-Phase-14-compatible; RederiveReservations treats absence as
+	// 0 reserved — Pitfall 5). Only stamped on JobKindExecutor (executor
+	// sessions are the run-1 overshoot source; planner Jobs are gated via
+	// the BudgetBlocked condition).
+	EstimatedCostCents int64
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -217,6 +229,12 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		jobName = JobName(opts.Task.UID, opts.Attempt)
 		labels["tideproject.k8s/task-uid"] = string(opts.Task.UID)
 		labels["tideproject.k8s/role"] = "executor"
+		// D-05: stamp estimated-cost label for restart rederivation via
+		// budget.RederiveReservations. Omit when 0 (pre-Phase-14-compatible;
+		// absence treated as 0 reserved — Pitfall 5).
+		if opts.EstimatedCostCents > 0 {
+			labels["tideproject.k8s/estimated-cost"] = strconv.FormatInt(opts.EstimatedCostCents, 10)
+		}
 	}
 
 	// 3. Compute the PVC subPath for per-Project isolation (Blocker #2/#3).

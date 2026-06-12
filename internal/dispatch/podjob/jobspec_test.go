@@ -872,6 +872,37 @@ func TestBuildJobSpec_PricingOverridesJSON_PresentWhenSet(t *testing.T) {
 	}
 }
 
+// ---- Phase 14 D-05: EstimatedCostCents label tests ----
+
+// TestBuildJobSpec_EstimatedCostCents_PresentOnExecutorWhenSet verifies that
+// BuildOptions.EstimatedCostCents > 0 stamps tideproject.k8s/estimated-cost on the
+// executor Job's labels. This label enables budget.RederiveReservations to restore
+// the in-process ReservationStore after a manager restart (D-05 restart rederivation).
+func TestBuildJobSpec_EstimatedCostCents_PresentOnExecutorWhenSet(t *testing.T) {
+	opts := buildTestOptions()
+	opts.EstimatedCostCents = 250
+	job := BuildJobSpec(opts)
+	got, ok := job.Labels["tideproject.k8s/estimated-cost"]
+	if !ok {
+		t.Fatal("executor Job labels missing tideproject.k8s/estimated-cost when EstimatedCostCents=250")
+	}
+	if got != "250" {
+		t.Errorf("tideproject.k8s/estimated-cost = %q; want \"250\"", got)
+	}
+}
+
+// TestBuildJobSpec_EstimatedCostCents_AbsentWhenZero verifies that
+// BuildOptions.EstimatedCostCents == 0 does NOT stamp the label (pre-Phase-14
+// compatibility — RederiveReservations treats label absence as 0 reserved).
+func TestBuildJobSpec_EstimatedCostCents_AbsentWhenZero(t *testing.T) {
+	opts := buildTestOptions()
+	opts.EstimatedCostCents = 0 // default
+	job := BuildJobSpec(opts)
+	if _, ok := job.Labels["tideproject.k8s/estimated-cost"]; ok {
+		t.Error("executor Job labels must NOT carry tideproject.k8s/estimated-cost when EstimatedCostCents=0")
+	}
+}
+
 // TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty verifies that an empty
 // BuildOptions.PricingOverridesJSON does NOT stamp TIDE_PRICING_OVERRIDES_JSON
 // on the subagent container (D-02 transport — clean PodSpec when not configured).
