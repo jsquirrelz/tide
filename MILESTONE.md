@@ -64,7 +64,7 @@ Two new GET endpoints in `cmd/dashboard/api/prometheus.go`:
 - `GET /api/v1/query` — instant query proxy (passes through `query`, `time` params).
 - `GET /api/v1/query_range` — range query proxy (passes through `query`, `start`, `end`, `step` params).
 
-`Dependencies` in `router.go` gains `PrometheusEndpoint string`. `RegisterRoutes` wires both handlers (always registered; they self-degrade when `PrometheusEndpoint` is empty). `internal/config/config.go` gains `PrometheusEndpoint string` (YAML key `prometheusEndpoint`), overridable via `PROM_ENDPOINT` env — same pattern as existing config fields. The dashboard Deployment in the Helm chart injects this env from `prometheus.endpoint` when non-empty.
+`Dependencies` in `router.go` gains `PrometheusEndpoint string`. `RegisterRoutes` wires both handlers (always registered; they self-degrade when `PrometheusEndpoint` is empty). The dashboard binary (`cmd/dashboard/main.go`) reads the `PROM_ENDPOINT` env directly via `os.Getenv("PROM_ENDPOINT")` and passes it to `Dependencies.PrometheusEndpoint`. The dashboard Deployment in the Helm chart injects this env from `prometheus.endpoint` when non-empty.
 
 ### Dashboard UI
 
@@ -123,7 +123,7 @@ Reconciler-side telemetry and cardinality enforcement, pure Go. Adds the six tok
 
 ### phase-02-promql-proxy — *(no dependencies)*
 
-Dashboard backend only. Adds `GET /api/v1/query` and `GET /api/v1/query_range` chi proxy handlers in `cmd/dashboard/api/prometheus.go`, the `PrometheusEndpoint` config field (`prometheusEndpoint` YAML key, `PROM_ENDPOINT` env override), and the degradation contract: HTTP 200 `{"status":"unavailable"}` when unconfigured, HTTP 502 `{"status":"error",...}` when configured-but-unreachable. Deliverable boundary: handler unit tests (`httptest` test-double Prometheus) prove all three response shapes. Proxies arbitrary PromQL — does not depend on phase 01's metrics existing.
+Dashboard backend only. Adds `GET /api/v1/query` and `GET /api/v1/query_range` chi proxy handlers in `cmd/dashboard/api/prometheus.go`, the `PrometheusEndpoint` field in `Dependencies` (populated via the `PROM_ENDPOINT` env read directly by the dashboard binary), and the degradation contract: HTTP 200 `{"status":"unavailable"}` when unconfigured, HTTP 502 `{"status":"error",...}` when configured-but-unreachable. Deliverable boundary: handler unit tests (`httptest` test-double Prometheus) prove all three response shapes. Proxies arbitrary PromQL — does not depend on phase 01's metrics existing.
 
 ### phase-03-telemetry-ui — *(depends on: phase-02-promql-proxy)*
 
