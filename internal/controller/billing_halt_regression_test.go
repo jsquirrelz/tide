@@ -393,11 +393,11 @@ var _ = Describe("BillingHalt planner dispatch-entry holds (Phase 13 HALT-01)", 
 		It("no planner Job created; Status.Phase unchanged while BillingHalt=True", func() {
 			r := newBHPlanReconciler()
 			name := types.NamespacedName{Name: planName, Namespace: "default"}
-			var result reconcile.Result
-			for range 3 {
-				result, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
-			}
-			Expect(result.RequeueAfter).To(Equal(30*time.Second),
+			Eventually(func(g Gomega) {
+				result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result.RequeueAfter).To(Equal(30 * time.Second))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
 				"T-13-G5: checkBillingHalt must return 30s park requeue (proves HALT-01 gate fired)")
 
 			var plan tideprojectv1alpha1.Plan
