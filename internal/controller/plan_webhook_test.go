@@ -399,6 +399,96 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 	})
 
 	// -------------------------------------------------------------------------
+	// D-08: Real project mode resolution (webhook resolveProjectForWebhook)
+	// -------------------------------------------------------------------------
+
+	It("TestPlanWebhook_D08_ProjectFileTouchModeStrict — Project.Spec.FileTouchMode=strict drives admission (no plan annotation)", func() {
+		// Build a full owner-ref chain: Project → Milestone → Phase → Plan.
+		// The Plan has NO file-touch-mode annotation; mode must come from Project.Spec.
+		projectName := "d08-project"
+		msName := "d08-ms"
+		phaseName := "d08-phase"
+		planName := "d08-plan-strict"
+
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: namespace},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/d08-test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/d08-test.git",
+					CredsSecretRef: "test-creds",
+				},
+				// strict mode set on Project — should propagate to webhook mode resolution.
+				PlanAdmission: tideprojectv1alpha1.PlanAdmissionConfig{
+					FileTouchMode: "strict",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: namespace},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+
+		phase := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: namespace},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		Expect(k8sClient.Create(ctx, phase)).To(Succeed())
+
+		// Plan with NO file-touch-mode annotation — mode must come from Project.Spec.
+		plan := &tideprojectv1alpha1.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: namespace,
+			},
+			Spec: tideprojectv1alpha1.PlanSpec{
+				PhaseRef: phaseName,
+			},
+		}
+		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+
+		// Create two sibling Tasks that overlap on the same file with no dependsOn.
+		taskAlpha := mkTask("alpha-d08", planName, nil, []string{"pkg/d08/shared.go"})
+		taskBeta := mkTask("beta-d08", planName, nil, []string{"pkg/d08/shared.go"})
+		Expect(k8sClient.Create(ctx, taskAlpha)).To(Succeed())
+		Expect(k8sClient.Create(ctx, taskBeta)).To(Succeed())
+
+		// WR-05: wait for Tasks to surface in the .spec.planRef indexer.
+		Eventually(func() int {
+			var taskList tideprojectv1alpha1.TaskList
+			_ = mgrClient.List(ctx, &taskList,
+				client.InNamespace(namespace),
+				client.MatchingFields{".spec.planRef": planName},
+			)
+			return len(taskList.Items)
+		}, "15s", "200ms").Should(BeNumerically(">=", 2),
+			"waiting for both D-08 Tasks to surface in the indexer")
+
+		// The Plan update should be REJECTED because the Project sets strict mode
+		// (and the webhook now resolves the real Project via D-08 logic, not nil).
+		// This distinguishes D-08 from the old nil-project path which would have
+		// fallen through to cluster default "warn" and admitted with warnings.
+		Eventually(func() error {
+			fresh := &tideprojectv1alpha1.Plan{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
+				return err
+			}
+			if fresh.Annotations == nil {
+				fresh.Annotations = map[string]string{}
+			}
+			fresh.Annotations["test-trigger"] = "d08-strict-validate"
+			return k8sClient.Update(ctx, fresh)
+		}, "15s", "500ms").Should(Satisfy(func(err error) bool {
+			return err != nil && isWebhookRejection(err)
+		}),
+			"D-08: Project.Spec.FileTouchMode=strict (no annotation) must cause rejection once Tasks are indexed")
+	})
+
+	// -------------------------------------------------------------------------
 	// K8s Event audit (PLAN-03 / T-02-11-05)
 	// -------------------------------------------------------------------------
 

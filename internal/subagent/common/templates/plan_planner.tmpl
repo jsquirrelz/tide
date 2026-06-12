@@ -64,6 +64,13 @@ Each file MUST be a single JSON object with this exact shape:
   single-task plan). Waves are NOT inputs — they are derived by layered Kahn
   over the dependsOn edges you emit here. Do not declare waves.
 
+FILE-TOUCH RULE: sibling tasks in the same wave must not declare the same path
+in filesTouched. When two tasks need the same file, either declare a dependsOn
+edge between them (serializing them into different waves) or split file ownership
+so each task touches disjoint paths. Violating this rule causes the orchestrator
+to park the Plan with ValidationState=FileTouchMismatch, blocking all dispatch
+until the overlap is resolved.
+
 Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
 

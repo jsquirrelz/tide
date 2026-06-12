@@ -491,6 +491,9 @@ func main() {
 		ReporterImage: reporterImage,
 		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
 		PricingOverridesJSON: pricingOverridesJSON,
+		// Phase 15 D-05: same cluster-level default as the webhook so the reconciler
+		// gate uses the same baseline mode when no Project.Spec overrides it.
+		DefaultFileTouchMode: defaultFileTouchMode,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)

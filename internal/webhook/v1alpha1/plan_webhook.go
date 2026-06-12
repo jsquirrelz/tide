@@ -166,16 +166,16 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 
 	// PLAN-02: file-touch ↔ dependsOn reconciliation (D-E2).
 	// Resolve mode per D-E3 precedence (annotation > resolved-cache > project.Spec > helm default).
-	// Phase 2 trade-off per RESEARCH.md Open Question #1: the webhook does NOT walk
-	// owner refs to find the Project (would add 3 Gets per validate). Instead,
-	// PlanReconciler can stamp the resolved mode in the annotation
-	// tideproject.k8s/file-touch-mode-resolved. Without that annotation (first
-	// admission before PlanReconciler reconciles), mode falls back to clusterDefault.
-	mode := ResolveFileTouchMode(plan, nil, v.DefaultFileTouchMode)
-	mismatches := computeFileTouchMismatches(taskList.Items)
+	// D-08: walk the owner-ref chain to resolve the real Project so Project.Spec.FileTouchMode
+	// drives mode at admission time. On any chain-Get failure, project is nil and we fall back
+	// to the annotation-cached or cluster-default mode (nil-fallback preserved — admission never
+	// hard-fails on a missing chain; the reconciler gate backstops at dispatch time).
+	project := resolveProjectForWebhook(ctx, v.Client, plan)
+	mode := ResolveFileTouchMode(plan, project, v.DefaultFileTouchMode)
+	mismatches := ComputeFileTouchMismatches(taskList.Items)
 
 	if len(mismatches) > 0 {
-		summary := summariseMismatches(mismatches)
+		summary := SummariseMismatches(mismatches)
 		if mode == "strict" {
 			// Strict mode: reject admission and emit Warning event.
 			if v.Recorder != nil {
@@ -193,21 +193,53 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 		for _, m := range mismatches {
 			warnings = append(warnings,
 				fmt.Sprintf("file-touch mismatch on tasks %s/%s sharing path %q without declared dependsOn",
-					m.taskA, m.taskB, m.sharedPath))
+					m.TaskA, m.TaskB, m.SharedPath))
 		}
 	}
 
 	return warnings, nil
 }
 
-// fileTouchMismatch records a pair of Tasks that share an EXACT file path
+// resolveProjectForWebhook walks the Plan → Phase → Milestone → Project owner-ref chain
+// using the webhook's client. Returns nil on any Get failure so admission never hard-fails
+// on a missing chain (nil-fallback preserved — the reconciler gate backstops at dispatch
+// time, addressing D-08).
+func resolveProjectForWebhook(ctx context.Context, c client.Client, plan *tideprojectv1alpha1.Plan) *tideprojectv1alpha1.Project {
+	if plan.Spec.PhaseRef == "" {
+		return nil
+	}
+	var ph tideprojectv1alpha1.Phase
+	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &ph); err != nil {
+		return nil
+	}
+	if ph.Spec.MilestoneRef == "" {
+		return nil
+	}
+	var ms tideprojectv1alpha1.Milestone
+	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
+		return nil
+	}
+	if ms.Spec.ProjectRef == "" {
+		return nil
+	}
+	var p tideprojectv1alpha1.Project
+	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
+		return nil
+	}
+	return &p
+}
+
+// FileTouchMismatchPair records a pair of Tasks that share an EXACT file path
 // without a declared dependsOn edge between them. (Pitfall G: same-directory
 // siblings — e.g. foo.go + foo_test.go — do NOT generate derived edges because
 // they share only a directory prefix, not an exact path.)
-type fileTouchMismatch struct {
-	taskA      string
-	taskB      string
-	sharedPath string // the EXACT path shared between taskA.filesTouched and taskB.filesTouched
+//
+// Exported so PlanReconciler can call ComputeFileTouchMismatches and use the
+// result without importing private types from this package.
+type FileTouchMismatchPair struct {
+	TaskA      string
+	TaskB      string
+	SharedPath string // the EXACT path shared between TaskA.filesTouched and TaskB.filesTouched
 }
 
 // tasksToDAG translates a slice of Task CRDs into the (nodes, edges) form
@@ -229,9 +261,13 @@ func tasksToDAG(tasks []tideprojectv1alpha1.Task) ([]dag.NodeID, []dag.Edge) {
 	return nodes, edges
 }
 
-// computeFileTouchMismatches returns pairs of Tasks (a, b) where their
+// ComputeFileTouchMismatches returns pairs of Tasks (a, b) where their
 // filesTouched sets overlap on EXACT path equality AND no declared dependsOn
 // edge exists in either direction.
+//
+// Exported so the PlanReconciler dispatch gate (D-05) can call it after Tasks
+// materialize — the webhook remains the early-admission layer; the reconciler
+// is the authoritative seat that sees reporter-flow Tasks.
 //
 // Algorithm (EXACT-equality only — Pitfall G defense):
 //  1. Build a name → declared-dependsOn set for O(1) edge lookup.
@@ -239,12 +275,12 @@ func tasksToDAG(tasks []tideprojectv1alpha1.Task) ([]dag.NodeID, []dag.Edge) {
 //     - Compute exact intersection of a.FilesTouched ∩ b.FilesTouched.
 //     - If empty → skip (no overlap).
 //     - If b.Name in a.DependsOn OR a.Name in b.DependsOn → declared edge; skip.
-//     - Else → append one fileTouchMismatch per shared path.
+//     - Else → append one FileTouchMismatchPair per shared path.
 //  3. Return the list.
 //
 // Complexity: O(N² × P) where N = task count, P = average filesTouched length.
 // Acceptable for v1 Plans bounded to ≤20 Tasks per RESEARCH.md.
-func computeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []fileTouchMismatch {
+func ComputeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []FileTouchMismatchPair {
 	// Build name → dependsOn set for fast lookup.
 	dependsOnSet := make(map[string]map[string]struct{}, len(tasks))
 	for i := range tasks {
@@ -256,7 +292,7 @@ func computeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []fileTouchMis
 		dependsOnSet[t.Name] = deps
 	}
 
-	var mismatches []fileTouchMismatch
+	var mismatches []FileTouchMismatchPair
 
 	for i := range tasks {
 		for j := i + 1; j < len(tasks); j++ {
@@ -297,10 +333,10 @@ func computeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []fileTouchMis
 
 			// Undeclared overlap: record one entry per shared path.
 			for _, p := range shared {
-				mismatches = append(mismatches, fileTouchMismatch{
-					taskA:      a.Name,
-					taskB:      b.Name,
-					sharedPath: p,
+				mismatches = append(mismatches, FileTouchMismatchPair{
+					TaskA:      a.Name,
+					TaskB:      b.Name,
+					SharedPath: p,
 				})
 			}
 		}
@@ -309,12 +345,15 @@ func computeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []fileTouchMis
 	return mismatches
 }
 
-// summariseMismatches returns a compact human-readable string of all mismatches
+// SummariseMismatches returns a compact human-readable string of all mismatches
 // for use in error messages and K8s Events.
-func summariseMismatches(mismatches []fileTouchMismatch) string {
+//
+// Exported so PlanReconciler can build the condition Message that names both
+// tasks and the shared path (T-15-07 mitigaton).
+func SummariseMismatches(mismatches []FileTouchMismatchPair) string {
 	parts := make([]string, 0, len(mismatches))
 	for _, m := range mismatches {
-		parts = append(parts, fmt.Sprintf("(%s,%s)@%q", m.taskA, m.taskB, m.sharedPath))
+		parts = append(parts, fmt.Sprintf("(%s,%s)@%q", m.TaskA, m.TaskB, m.SharedPath))
 	}
 	return strings.Join(parts, "; ")
 }
