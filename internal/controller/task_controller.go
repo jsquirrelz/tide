@@ -378,17 +378,10 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// ensures tasks parked by the pre-Phase-14 phase gate continue to be held.
 	if (checkBudgetBlocked(project) || project.Status.Phase == "BudgetExceeded") &&
 		!budget.IsBypassed(project, time.Now()) {
-		patch := client.MergeFrom(task.DeepCopy())
-		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionBudgetBlocked,
-			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha1.ReasonBudgetCapReached,
-			Message:            "Project budget cap exceeded; task dispatch halted",
-			LastTransitionTime: metav1.Now(),
-		})
-		if err := r.Status().Patch(ctx, task, patch); err != nil {
-			return taskGateResult{}, err
-		}
+		// No per-Task condition stamp: the operator signal is the single Project
+		// BudgetBlocked condition, same as the other four dispatch gates. A
+		// per-Task stamp here was never cleared once dispatch resumed, so it
+		// outlived the park as stale misinformation on terminal Tasks.
 		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
 			"task", task.Name, "project", project.Name,
 			"spent", project.Status.Budget.CostSpentCents,
