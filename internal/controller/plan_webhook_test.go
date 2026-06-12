@@ -435,7 +435,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		phase := &tideprojectv1alpha1.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: namespace},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName, Prompt: "d08 test phase"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
 		}
 		Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 

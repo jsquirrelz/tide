@@ -48,6 +48,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
+	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
 	"github.com/jsquirrelz/tide/pkg/dag"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -102,6 +103,12 @@ type PlanReconciler struct {
 	// PricingOverridesJSON is the validated D-02 override JSON forwarded
 	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
 	PricingOverridesJSON string
+
+	// DefaultFileTouchMode is the cluster-level file-touch validation default from
+	// the Helm chart (typically "warn"). Matches the PlanCustomValidator field so
+	// the reconciler gate (D-05) and the admission webhook use the same baseline
+	// when no Project.Spec.PlanAdmission.FileTouchMode is set.
+	DefaultFileTouchMode string
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
@@ -713,6 +720,50 @@ func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojec
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
+// patchPlanFileTouchMismatch parks the Plan for a strict file-touch overlap (D-05,
+// D-06). Sets ValidationState=FileTouchMismatch AND a WaveOrLevelPaused condition
+// whose Message names both tasks and the shared paths via SummariseMismatches.
+// Returns ctrl.Result{} without requeueing — the next Task create/update event
+// re-enters reconcile (matching how the reporter flow materializes Tasks async;
+// the false-negative window self-heals on the next Task event, per RESEARCH Pitfall 3).
+// No Status.Phase mutation (park-not-fail doctrine, D-05).
+func (r *PlanReconciler) patchPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha1.Plan, mismatches []webhookv1alpha1.FileTouchMismatchPair) (ctrl.Result, error) {
+	summary := webhookv1alpha1.SummariseMismatches(mismatches)
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.ValidationState = "FileTouchMismatch"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionTrue,
+		Reason:             "FileTouchMismatch",
+		Message:            fmt.Sprintf("strict file-touch overlap detected — fix by adding a dependsOn edge or splitting file ownership: %s", summary),
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// liftPlanFileTouchMismatch clears a prior FileTouchMismatch park (D-06).
+// Resets ValidationState to "Validated" and flips the WaveOrLevelPaused
+// condition to Status=False so the reconcile proceeds to wave derivation.
+func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
+	patch := client.MergeFrom(plan.DeepCopy())
+	plan.Status.ValidationState = "Validated"
+	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Status:             metav1.ConditionFalse,
+		Reason:             "FileTouchValidationPassed",
+		Message:            "file-touch overlap resolved; proceeding to wave derivation",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	// Re-enter reconcile immediately so wave derivation runs this cycle.
+	return ctrl.Result{Requeue: true}, nil
+}
+
 // patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
 // Used by the Plan 04-05 gate-policy hook (genuine planner-Job failure classification).
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
@@ -915,7 +966,10 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 // is re-derived from the current Task set, never cached in .status.
 func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
 	// Step 1: No-op until Plan is Validated by the admission webhook (Plan 11).
-	if plan.Status.ValidationState != "Validated" {
+	// FileTouchMismatch is the dormant parked state set by this reconciler; treat
+	// it as "Validated" so we re-enter the gate on every Task change and can lift
+	// the park once the overlap is resolved (D-06).
+	if plan.Status.ValidationState != "Validated" && plan.Status.ValidationState != "FileTouchMismatch" {
 		return ctrl.Result{}, nil
 	}
 
@@ -926,6 +980,30 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		client.MatchingFields{taskPlanRefIndexKey: plan.Name},
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list tasks for plan %s: %w", plan.Name, err)
+	}
+
+	// Step 2b: D-05 / D-06 file-touch dispatch gate.
+	// After Tasks materialize (reporter flow or direct apply) and before wave
+	// derivation: check for strict-mode file-touch overlaps. If found, park the
+	// Plan with ValidationState=FileTouchMismatch and return without dispatching
+	// any Jobs. If no overlaps (or mode is not strict), lift a prior park.
+	// This gate is the authoritative seat — the webhook's Pitfall B means it never
+	// sees reporter-flow Tasks; this gate always runs after Tasks exist.
+	if len(taskList.Items) > 0 {
+		project := r.resolveProjectForPlan(ctx, plan)
+		mode := webhookv1alpha1.ResolveFileTouchMode(plan, project, r.DefaultFileTouchMode)
+		mismatches := webhookv1alpha1.ComputeFileTouchMismatches(taskList.Items)
+
+		if len(mismatches) > 0 && mode == "strict" {
+			// Park: ValidationState=FileTouchMismatch, no wave derivation, no dispatch.
+			return r.patchPlanFileTouchMismatch(ctx, plan, mismatches)
+		}
+
+		// D-06 un-park path: if we were parked for FileTouchMismatch but now either
+		// the mode is non-strict or the overlaps are resolved, lift the park.
+		if plan.Status.ValidationState == "FileTouchMismatch" {
+			return r.liftPlanFileTouchMismatch(ctx, plan)
+		}
 	}
 
 	// Build nodes + edges for ComputeWaves.
