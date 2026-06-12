@@ -361,6 +361,112 @@ func TestInformerBridgePublishesOnStatusOnlyProjectUpdate(t *testing.T) {
 	}
 }
 
+// TestInformerBridgeTaskUpdatePublishesBothTaskAndWavesSnapshot confirms that
+// a Task OnUpdate fires BOTH a task.update event AND a waves.snapshot event
+// on the project hub. The waves.snapshot reflects the fixture's wave grouping.
+// This is the key invariant for the 15-06 CUTS-06 running-waves view.
+func TestInformerBridgeTaskUpdatePublishesBothTaskAndWavesSnapshot(t *testing.T) {
+	// Seed the owner chain needed by resolveProjectKey for a Task:
+	// Task.Spec.PlanRef → Plan.Spec.PhaseRef → Phase.Spec.MilestoneRef → Milestone.Spec.ProjectRef
+	ms := &tidev1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "ms1", Namespace: "default"},
+		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "proj1"},
+	}
+	ph := &tidev1alpha1.Phase{
+		ObjectMeta: metav1.ObjectMeta{Name: "ph1", Namespace: "default"},
+		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "ms1"},
+	}
+	pl := &tidev1alpha1.Plan{
+		ObjectMeta: metav1.ObjectMeta{Name: "plan-x", Namespace: "default"},
+		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "ph1"},
+	}
+	// The Task itself — with wave labels so computeRunningWaves finds it.
+	tk := &tidev1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "task-run-1",
+			Namespace: "default",
+			Labels: map[string]string{
+				labelProject:   "proj1",
+				labelWaveIndex: "0",
+			},
+		},
+		Spec: tidev1alpha1.TaskSpec{
+			PlanRef:             "plan-x",
+			FilesTouched:        []string{"a.go"},
+			DeclaredOutputPaths: []string{"/workspace/a"},
+		},
+		Status: tidev1alpha1.TaskStatus{Phase: "Running"},
+	}
+
+	scheme := testInformerScheme(t)
+	c := ctrlfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ms, ph, pl, tk).
+		Build()
+	fc := newFakeCache(scheme)
+	h := hub.NewHub(testr.New(t))
+
+	if err := BridgeInformerToHub(context.Background(), fc, c, h, testr.New(t)); err != nil {
+		t.Fatalf("BridgeInformerToHub: %v", err)
+	}
+
+	sub := h.Subscribe("proj1", 0)
+	defer h.Unsubscribe(sub)
+
+	handler := fc.handlerForKind("Task")
+	if handler == nil {
+		t.Fatal("no Task handler registered")
+	}
+	// Fire a synthetic OnUpdate — same object as old/new is fine for this test.
+	handler.OnUpdate(tk, tk)
+
+	// Collect events; we expect task.update + waves.snapshot (order may vary
+	// since map iteration is non-deterministic, but both must arrive).
+	got := map[string]json.RawMessage{}
+	deadline := time.NewTimer(300 * time.Millisecond)
+	defer deadline.Stop()
+	for len(got) < 2 {
+		select {
+		case ev := <-sub.Events():
+			got[ev.Type] = ev.JSON
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for events; received: %v", mapKeys(got))
+		}
+	}
+
+	if _, ok := got["task.update"]; !ok {
+		t.Error("expected task.update event; not received")
+	}
+	snapJSON, ok := got["waves.snapshot"]
+	if !ok {
+		t.Error("expected waves.snapshot event; not received")
+	}
+
+	// Verify the snapshot payload contains the expected wave.
+	var snap WavesSnapshot
+	if err := json.Unmarshal(snapJSON, &snap); err != nil {
+		t.Fatalf("unmarshal waves.snapshot: %v", err)
+	}
+	if len(snap.Waves) != 1 {
+		t.Fatalf("len(snap.Waves) = %d, want 1; snap=%+v", len(snap.Waves), snap)
+	}
+	if snap.Waves[0].PlanName != "plan-x" {
+		t.Errorf("wave.PlanName = %q, want plan-x", snap.Waves[0].PlanName)
+	}
+	if snap.Waves[0].WaveIndex != 0 {
+		t.Errorf("wave.WaveIndex = %d, want 0", snap.Waves[0].WaveIndex)
+	}
+}
+
+// mapKeys returns the keys of a string-keyed map for test diagnostics.
+func mapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // testInformerScheme returns a runtime.Scheme populated with all v1alpha1
 // types + corev1 (needed by logs_sse_test.go for Pod registration). Same
 // shape as the controller's scheme but bare so this test stays fast.

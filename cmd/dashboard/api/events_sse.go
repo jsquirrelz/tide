@@ -47,6 +47,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -82,6 +83,14 @@ type EventsHandler struct {
 	// construct the handler without a Client).
 	Client client.Client
 
+	// cacheReader is the controller-runtime informer-cache-backed reader
+	// used to derive and write an initial waves.snapshot SSE frame on
+	// subscribe (UI-SPEC C3 data path: "snapshot on subscribe so the pane
+	// populates without waiting for a Task transition"). Optional — if nil,
+	// the initial snapshot is skipped (existing tests/constructors with no
+	// reader keep working with no behaviour change and no panic).
+	cacheReader client.Reader
+
 	// heartbeatInterval is private + injected via options so tests can
 	// shrink it to 50ms without exposing the field on the public surface.
 	heartbeatInterval time.Duration
@@ -105,6 +114,17 @@ func WithHeartbeatInterval(d time.Duration) EventsHandlerOption {
 func WithClient(c client.Client) EventsHandlerOption {
 	return func(h *EventsHandler) {
 		h.Client = c
+	}
+}
+
+// WithCacheReader injects the informer-cache-backed reader used to derive
+// and write an initial waves.snapshot SSE frame on subscribe (UI-SPEC C3:
+// "snapshot on subscribe so the pane populates without waiting for a Task
+// transition"). Optional — nil-safe; existing constructors without a reader
+// keep working with no behaviour change and no panic.
+func WithCacheReader(r client.Reader) EventsHandlerOption {
+	return func(h *EventsHandler) {
+		h.cacheReader = r
 	}
 }
 
@@ -188,6 +208,37 @@ func (h *EventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sub := h.Hub.Subscribe(projectName, lastEventID)
 	defer h.Hub.Unsubscribe(sub)
+
+	// UI-SPEC C3 data path: emit an initial waves.snapshot frame so the
+	// aggregate pane populates without waiting for a Task change. Written
+	// directly to the response (not via hub.Publish) so it arrives before
+	// any buffered replay events. Skipped when cacheReader is nil so
+	// existing constructors and tests without a reader are unaffected.
+	if h.cacheReader != nil {
+		namespace := r.URL.Query().Get("namespace")
+		snap, snapErr := computeRunningWaves(r.Context(), h.cacheReader, namespace, projectName)
+		if snapErr != nil {
+			h.Log.V(1).Info("waves.snapshot: initial derivation failed; skipping frame",
+				"project", projectName, "err", snapErr)
+		} else {
+			snapBuf, snapMarshalErr := json.Marshal(snap)
+			if snapMarshalErr != nil {
+				h.Log.V(1).Info("waves.snapshot: initial marshal failed; skipping frame",
+					"project", projectName, "err", snapMarshalErr)
+			} else {
+				// Write without an id field — this is a synthetic out-of-band
+				// frame, not a replay-eligible hub event, so it carries no
+				// sequence ID. The EventSource spec allows frames without id.
+				if _, writeErr := fmt.Fprintf(w, "event: waves.snapshot\ndata: %s\n\n",
+					snapBuf); writeErr != nil {
+					// Write error = client gone. Return; deferred Unsubscribe
+					// handles cleanup.
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	}
 
 	ticker := time.NewTicker(h.heartbeatInterval)
 	defer ticker.Stop()

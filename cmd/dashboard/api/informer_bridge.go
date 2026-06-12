@@ -142,6 +142,31 @@ func newKindHandler(ctx context.Context, cli client.Reader, h *hub.Hub, log logr
 			Type: typePrefix + "." + verb,
 			JSON: json.RawMessage(buf),
 		})
+
+		// For Task events, derive and publish the waves.snapshot aggregate so
+		// all connected dashboards receive a fresh running-waves view immediately.
+		// Reads are cache-backed (client.Reader over the informer cache), making
+		// per-event derivation O(tasks-in-namespace) with no apiserver round-trip.
+		// No debounce in v1 — accepted T-15-17 disposition (see threat model);
+		// debounce is deferred to v1.x if profiling demands it.
+		if typePrefix == "task" {
+			snap, snapErr := computeRunningWaves(ctx, cli, co.GetNamespace(), projectKey)
+			if snapErr != nil {
+				log.V(1).Info("waves.snapshot: derivation failed; skipping publish",
+					"project", projectKey, "err", snapErr)
+			} else {
+				snapBuf, snapMarshalErr := json.Marshal(snap)
+				if snapMarshalErr != nil {
+					log.V(1).Info("waves.snapshot: marshal failed; skipping publish",
+						"project", projectKey, "err", snapMarshalErr)
+				} else {
+					h.Publish(projectKey, hub.Event{
+						Type: "waves.snapshot",
+						JSON: json.RawMessage(snapBuf),
+					})
+				}
+			}
+		}
 	}
 
 	return toolscache.ResourceEventHandlerFuncs{
