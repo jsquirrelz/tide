@@ -32,9 +32,20 @@ authoritative install and production guidance lives in
    `pricing-drift`-labeled issue when drift is detected between releases.
    Resolve any open `pricing-drift` issue before tagging.
 
-4. **Chart contract intact.** `grep -c 'stub' charts/tide/values.yaml` returns
-   0 for production image fields. The binary catches up to the chart — never
-   change chart defaults to match a broken binary.
+4. **Chart contract intact.** The rendered default must not point any image
+   field at the stub subagent:
+
+   ```sh
+   helm template charts/tide | grep -cE '(image:|value:).*tide-stub-subagent'
+   ```
+
+   Must print `0` (grep exits 1 on zero matches — read the count, not the
+   exit code). Don't grep `values.yaml` for `stub`: it legitimately mentions
+   the stub in comments and in the `images.stubSubagent` build-tooling keys,
+   and the rendered template also carries a stub opt-in *comment* — only an
+   `image:`/`value:` field referencing the stub is a contract break. The
+   binary catches up to the chart — never change chart defaults to match a
+   broken binary.
 
 5. **go.mod tidy.** `go mod tidy && git diff --exit-code go.mod go.sum` exits 0.
 
