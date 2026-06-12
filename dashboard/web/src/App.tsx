@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import AppShell from "./components/AppShell";
 import Header from "./components/Header";
@@ -13,6 +13,7 @@ import PodLogStreamer from "./components/PodLogStreamer";
 import ProjectPicker from "./components/ProjectPicker";
 import EmptyState from "./components/EmptyState";
 import RunningWavesView from "./components/RunningWavesView";
+import TelemetryView from "./components/TelemetryView";
 import LoadingState from "./components/LoadingState";
 import ErrorState from "./components/ErrorState";
 import { useProjects } from "./lib/projects";
@@ -86,6 +87,89 @@ function PaneHeader({ label, action }: { label: string; action?: React.ReactNode
   );
 }
 
+type ActiveView = "dags" | "telemetry";
+
+/**
+ * Segmented view switcher rendered in the Header left cluster (UI-SPEC §C2, plan 16-05).
+ *
+ * Segments: DAGs (primary surface) → Telemetry. Container uses role="tablist" /
+ * role="tab" semantics; ArrowLeft/ArrowRight move selection with roving focus
+ * (accessibility — UI-SPEC C2). Transient state only — no localStorage.
+ */
+function ViewSwitcher({
+  activeView,
+  onChange,
+}: {
+  activeView: ActiveView;
+  onChange: (v: ActiveView) => void;
+}) {
+  const dagsRef = useRef<HTMLButtonElement>(null);
+  const telemetryRef = useRef<HTMLButtonElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowRight") {
+      e.preventDefault();
+      onChange("telemetry");
+      telemetryRef.current?.focus();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      onChange("dags");
+      dagsRef.current?.focus();
+    }
+  };
+
+  const segmentStyle = (active: boolean): React.CSSProperties => ({
+    background: active ? "var(--color-surface-overlay)" : "transparent",
+    color: active ? "var(--color-text-primary)" : "var(--color-text-muted)",
+    fontFamily: "var(--font-sans)",
+    fontSize: "var(--text-label)",
+    fontWeight: 600,
+    border: "none",
+    padding: "var(--spacing-1) var(--spacing-2)",
+    cursor: "pointer",
+    outline: "none",
+  });
+
+  return (
+    <div
+      role="tablist"
+      aria-label="Dashboard view"
+      data-testid="view-switcher"
+      style={{
+        display: "inline-flex",
+        borderRadius: "var(--radius-sm, 4px)",
+        border: "1px solid var(--color-border-subtle)",
+        background: "transparent",
+      }}
+    >
+      <button
+        ref={dagsRef}
+        type="button"
+        role="tab"
+        aria-selected={activeView === "dags"}
+        data-testid="view-tab-dags"
+        style={segmentStyle(activeView === "dags")}
+        onClick={() => onChange("dags")}
+        onKeyDown={handleKeyDown}
+      >
+        DAGs
+      </button>
+      <button
+        ref={telemetryRef}
+        type="button"
+        role="tab"
+        aria-selected={activeView === "telemetry"}
+        data-testid="view-tab-telemetry"
+        style={segmentStyle(activeView === "telemetry")}
+        onClick={() => onChange("telemetry")}
+        onKeyDown={handleKeyDown}
+      >
+        Telemetry
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   // Plan 04-17: selectedProject starts null; useProjects defaults it to
   // projects[0].name once the list lands (single-project clusters never
@@ -94,6 +178,9 @@ export default function App() {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [streamingTask, setStreamingTask] = useState<string | null>(null);
+  // Plan 16-05 (D-01): transient view switcher — DAGs | Telemetry. Default
+  // is DAGs; never persisted to localStorage (UI-SPEC §C2).
+  const [activeView, setActiveView] = useState<ActiveView>("dags");
   // Real project-events SSE connection state, driven up from PlanningDAGView.
   // Starts "connecting" so the header pill shows activity before the first
   // project resolves.
@@ -201,6 +288,13 @@ export default function App() {
     body = <LoadingState variant="initial" />;
   } else if (projects.length === 0) {
     body = <EmptyState variant="no-projects" />;
+  } else if (activeView === "telemetry") {
+    // Plan 16-05 (D-01): full-width TelemetryView — no two-pane grid, no
+    // split-ratio involvement. Receives the same projects array and
+    // selectedProject the DAGs view already holds (16-04 props contract).
+    body = (
+      <TelemetryView projects={projects} selectedProject={selectedProject} />
+    );
   } else {
     body = (
       <div className="grid h-full grid-cols-2 gap-2 p-4">
@@ -288,6 +382,7 @@ export default function App() {
             projectPicker={
               <ProjectPicker projects={projects.map((p) => ({ name: p.name, namespace: p.namespace, phase: p.phase }))} value={selectedProject} onChange={setSelectedProject} />
             }
+            viewSwitcher={<ViewSwitcher activeView={activeView} onChange={setActiveView} />}
           />
         }
       >
