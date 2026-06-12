@@ -165,6 +165,26 @@ func (r *PhaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// 4b. D-03 (CUTS-01): backfill tideproject.k8s/project on the Phase
+	// itself when the label is absent. Heals pre-Phase-15 CRs created by the
+	// reporter before D-01 was in place. Guard: only patch when label is
+	// missing so the second reconcile is a no-op (T-15-03 / idempotent).
+	// Runs BEFORE reconcilePlannerDispatch so parked AwaitingApproval CRs
+	// also self-heal on their first post-upgrade reconcile.
+	if phase.Labels[owner.LabelProject] == "" {
+		projectName := r.resolveProjectNameForPhase(ctx, &phase)
+		if projectName != "" {
+			patch := client.MergeFrom(phase.DeepCopy())
+			if phase.Labels == nil {
+				phase.Labels = map[string]string{}
+			}
+			phase.Labels[owner.LabelProject] = projectName
+			if err := r.Patch(ctx, &phase, patch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("backfill project label on phase %s: %w", phase.Name, err)
+			}
+		}
+	}
+
 	// 5. Phase 3: planner dispatch body (REQ-SUB-01, D-A2).
 	if r.Dispatcher != nil {
 		return r.reconcilePlannerDispatch(ctx, &phase)
@@ -183,6 +203,27 @@ func (r *PhaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// resolveProjectNameForPhase returns the Project name for a Phase via the
+// Phase→Milestone→Project chain (max 2 Gets). Returns "" if the chain cannot
+// be resolved (orphan) — caller should skip the backfill silently.
+func (r *PhaseReconciler) resolveProjectNameForPhase(ctx context.Context, ph *tideprojectv1alpha1.Phase) string {
+	if ph.Spec.MilestoneRef == "" {
+		return ""
+	}
+	var ms tideprojectv1alpha1.Milestone
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
+		return ""
+	}
+	if ms.Spec.ProjectRef == "" {
+		return ""
+	}
+	var p tideprojectv1alpha1.Project
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
+		return ""
+	}
+	return p.Name
 }
 
 // reconcilePlannerDispatch mirrors MilestoneReconciler one level down.

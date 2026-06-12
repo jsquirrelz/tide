@@ -43,11 +43,17 @@ const phaseSucceeded = "Succeeded"
 // Filtering: the function lists all children of childKind in parent's
 // namespace, then filters by controller-style OwnerRef (metav1.IsControlledBy
 // — matches the controllerutil.SetControllerReference convention used by
-// MaterializeChildCRDs in internal/controller/dispatch_helpers.go). Label-
-// based pre-filtering is intentionally NOT used: not every reconciler stamps
-// the canonical tideproject.k8s/project label on every child (only
-// Plan→Task stamps it explicitly per internal/controller/plan_controller.go),
-// so owner refs are the universal seam.
+// MaterializeChildCRDs in internal/reporter/materialize.go). Label-based
+// pre-filtering is intentionally NOT used here: BoundaryDetected must work for
+// any child regardless of whether its project label is present.
+//
+// Label stamping note (Phase 15, CUTS-01/D-01): as of Phase 15 every child CR
+// create site stamps tideproject.k8s/project via owner.StampProjectLabel, so
+// new CRs carry the label from birth. The OwnerRef-based filter below is
+// retained as a defensive fallback for pre-Phase-15 CRs that have not yet
+// been backfilled by the reconciler (D-03). Once a CR is reconciled and the
+// backfill applied (milestone_controller.go / phase_controller.go step 4b),
+// it will carry the label for all future label-filtered lookups.
 //
 // Childless contract: returns (false, nil) when the filtered child set is
 // empty. "All children Succeeded" is vacuously true on an empty set, but a
