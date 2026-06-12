@@ -803,11 +803,15 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	// D-05: settle the reservation immediately — the Job is terminal regardless of
-	// outcome. A single early call here avoids missing any of the several early-return
-	// Failed branches below. Settle is a no-op when Reservations is nil or the UID is
-	// not in the store (idempotent — safe on reconcile replay).
-	r.Deps.Reservations.Settle(string(task.UID))
+	// D-05: settle the reservation when this handler returns — i.e. AFTER
+	// budget.RollUpUsage has landed the actual cost in CostSpentCents. Settling
+	// before roll-up opened a window (spanning several API round-trips) where
+	// TotalReserved had already dropped while CostSpentCents had not yet risen,
+	// letting concurrent HasHeadroom checks dispatch past the cap. The defer
+	// still covers every early-return Failed branch below. Settle is a no-op
+	// when Reservations is nil or the UID is not in the store (idempotent —
+	// safe on reconcile replay).
+	defer r.Deps.Reservations.Settle(string(task.UID))
 
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
