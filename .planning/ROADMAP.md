@@ -135,7 +135,16 @@ Plans:
   6. The dashboard offers an aggregate view of all currently-running waves across all Plans — the view reads from label-selector queries per the spec's derived-waves model
   7. Two sibling Tasks in the same wave that both declare the same file under `fileTouchMode: strict` are rejected at Plan admission time — the duplicate is surfaced before any Job dispatches
 
-**Plans**: TBD
+**Plans**: 7 plans (waves: 1 → 15-01..15-06 parallel; 2 → 15-07)
+
+Plans:
+- [ ] 15-01-PLAN.md — CUTS-01: universal project-label stamping (StampProjectLabel + reporter create site) + reconciler backfill + approve-discovery regression
+- [ ] 15-02-PLAN.md — CUTS-07: PlanReconciler file-touch dispatch gate (park-not-fail) + webhook real mode resolution + planner prompt patch
+- [ ] 15-03-PLAN.md — CUTS-04: real artifact-get inspector Pod (readiness wait, raw stdout, 5m timeout) + fake-seam tests
+- [ ] 15-04-PLAN.md — CUTS-02/03: verify already-fixed cuts + regression pinning (clean-tree push, AwaitingApproval convergence)
+- [ ] 15-05-PLAN.md — CUTS-05: Complete status vocabulary row + coerce-guard consolidation + finding-9b Vitest regressions
+- [ ] 15-06-PLAN.md — CUTS-06 backend: waves.snapshot SSE aggregate (label-selector derivation, snapshot-on-subscribe)
+- [ ] 15-07-PLAN.md — CUTS-06 frontend: RunningWavesView + App.tsx pane swap + All waves return + Vitest contract
 **UI hint**: yes
 
 ### Phase 16: Telemetry Completion
