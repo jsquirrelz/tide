@@ -166,8 +166,20 @@ Plans:
   4. All four TelemetryView PromQL panels query the locked metric names — `tide_tasks_dispatched_total` and `tide_tokens_used_total{model}` are replaced with the correct names
   5. `make helm-rbac-assert` and the other telemetry gate scripts in `hack/helm` execute and pass on a running cluster — the Makefile targets are wired and documented
 
-**Plans**: TBD
+**Plans**: 5 plans
 **UI hint**: yes
+
+Plans:
+**Wave 1**
+
+- [ ] 16-01-PLAN.md — TELEM-01/06: PROM_ENDPOINT config + env wiring, PromQL proxy hardening (bounded client, ctx propagation, base-path preservation)
+- [ ] 16-02-PLAN.md — TELEM-03: six locked metrics registered + emitted at the three RollUpUsage terminal seams with {project, phase, plan, wave}
+- [ ] 16-03-PLAN.md — TELEM-05: helm-telemetry-assert + helm-assert Makefile targets, ci.yaml helm-lint step, docstring corrections
+- [ ] 16-04-PLAN.md — TELEM-04 + TELEM-02 (view): recharts charts, D-06 query fixes, scope/range toolbar, polling, budget grid, degradation Vitest
+
+**Wave 2** *(blocked on 16-04)*
+
+- [ ] 16-05-PLAN.md — TELEM-02 (mount): header DAGs|Telemetry view switcher, TelemetryView body branch, App-level Vitest
 
 ## Progress
 
