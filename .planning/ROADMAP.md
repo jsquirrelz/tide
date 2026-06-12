@@ -140,12 +140,12 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 15-01-PLAN.md — CUTS-01: universal project-label stamping (StampProjectLabel + reporter create site) + reconciler backfill + approve-discovery regression
-- [ ] 15-02-PLAN.md — CUTS-07: PlanReconciler file-touch dispatch gate (park-not-fail) + webhook real mode resolution + planner prompt patch
-- [ ] 15-03-PLAN.md — CUTS-04: real artifact-get inspector Pod (readiness wait, raw stdout, 5m timeout) + fake-seam tests
-- [ ] 15-04-PLAN.md — CUTS-02/03: verify already-fixed cuts + regression pinning (clean-tree push, AwaitingApproval convergence)
-- [ ] 15-05-PLAN.md — CUTS-05: Complete status vocabulary row + coerce-guard consolidation + finding-9b Vitest regressions
-- [ ] 15-06-PLAN.md — CUTS-06 backend: waves.snapshot SSE aggregate (label-selector derivation, snapshot-on-subscribe)
+- [x] 15-01-PLAN.md — CUTS-01: universal project-label stamping (StampProjectLabel + reporter create site) + reconciler backfill + approve-discovery regression
+- [x] 15-02-PLAN.md — CUTS-07: PlanReconciler file-touch dispatch gate (park-not-fail) + webhook real mode resolution + planner prompt patch
+- [x] 15-03-PLAN.md — CUTS-04: real artifact-get inspector Pod (readiness wait, raw stdout, 5m timeout) + fake-seam tests
+- [x] 15-04-PLAN.md — CUTS-02/03: verify already-fixed cuts + regression pinning (clean-tree push, AwaitingApproval convergence)
+- [x] 15-05-PLAN.md — CUTS-05: Complete status vocabulary row + coerce-guard consolidation + finding-9b Vitest regressions
+- [x] 15-06-PLAN.md — CUTS-06 backend: waves.snapshot SSE aggregate (label-selector derivation, snapshot-on-subscribe)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -180,5 +180,5 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
+| 15. Paper Cuts | v1.0.1 | 6/7 | In Progress|  |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
