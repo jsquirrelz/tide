@@ -4,6 +4,10 @@ import type { LucideIcon } from "lucide-react";
 
 import { clsx } from "../lib/clsx";
 import StatusBadge, { type StatusValue } from "./StatusBadge";
+import ConditionBadge, {
+  CONDITION_TABLE,
+  type ProjectBlockingCondition,
+} from "./ConditionBadge";
 import { useNodeClick } from "./NodeClickContext";
 
 /**
@@ -104,6 +108,17 @@ export type TideNodeShellProps = {
    * Execution DAG's dagre LR layout. Defaults to "vertical".
    */
   handleAxis?: "vertical" | "horizontal";
+  /**
+   * 14-UI-SPEC §C2: optional list of True blocking conditions on the Project CR
+   * (e.g. BudgetBlocked, BillingHalt). Each True entry renders one
+   * <ConditionBadge> in the summary row, immediately after <StatusBadge>.
+   * When non-empty, a purple border-l-4 is applied — the blocked sibling of the
+   * existing destructive border-left, so blocked state reads at DAG-zoom scale
+   * where badges are illegible. Failed family (FAILED_STATUSES) takes
+   * precedence: destructive red wins if both apply.
+   * Defaults to [] so zero-condition render is byte-identical to today.
+   */
+  blockingConditions?: ProjectBlockingCondition[];
 };
 
 export default function TideNodeShell({
@@ -119,6 +134,7 @@ export default function TideNodeShell({
   minHeight,
   clickable = true,
   handleAxis = "vertical",
+  blockingConditions = [],
 }: TideNodeShellProps) {
   const onNodeClick = useNodeClick();
 
@@ -137,6 +153,8 @@ export default function TideNodeShell({
   );
 
   const isFailed = FAILED_STATUSES.has(status);
+  // 14-UI-SPEC §C2: isBlocked drives the purple border-l-4 and data-blocked attribute.
+  const isBlocked = blockingConditions.length > 0;
 
   // Read-only graph: handles exist only so edges have attachment anchors.
   // They must be in the DOM but invisible (no dots, no connect affordance).
@@ -156,6 +174,9 @@ export default function TideNodeShell({
     selected && "ring-2 ring-[var(--color-accent)] ring-offset-0",
     // 4px destructive border-left for failed family
     isFailed && "border-l-4 border-l-[var(--color-destructive)]",
+    // 4px blocked border-left for policy-halted conditions (14-UI-SPEC §C2).
+    // Destructive red takes precedence: only applied when not already failed.
+    !isFailed && isBlocked && "border-l-4 border-l-[var(--color-status-blocked)]",
   );
 
   // CR-04 fix: when clickable=false, omit role="button"/tabIndex/onClick/
@@ -168,6 +189,7 @@ export default function TideNodeShell({
       data-kind={kind}
       data-selected={selected ? "true" : "false"}
       data-failed={isFailed ? "true" : "false"}
+      data-blocked={isBlocked ? "true" : "false"}
       data-clickable={clickable ? "true" : "false"}
       {...(clickable
         ? {
@@ -177,7 +199,16 @@ export default function TideNodeShell({
             onKeyDown: onKey,
           }
         : {})}
-      aria-label={`${KIND_LABEL[kind]} ${name}, status ${status}`}
+      aria-label={(() => {
+        // 14-UI-SPEC §C2: extend with ", blocked: <Label1>[, <Label2>]" when blocked.
+        const base = `${KIND_LABEL[kind]} ${name}, status ${status}`;
+        if (!isBlocked) return base;
+        const labels = blockingConditions
+          .map((c) => CONDITION_TABLE[c.type]?.label)
+          .filter(Boolean)
+          .join(", ");
+        return labels ? `${base}, blocked: ${labels}` : base;
+      })()}
       className={containerClass}
       style={{
         width: `${width}px`,
@@ -215,7 +246,9 @@ export default function TideNodeShell({
         aria-hidden="true"
         className="h-px bg-[var(--color-border-subtle)]"
       />
-      {/* Summary row — StatusBadge leads, then the summary text. */}
+      {/* Summary row — StatusBadge leads, then any ConditionBadges (14-UI-SPEC §C2),
+          then the summary text. The row's existing gap-2 provides badge separation;
+          summary text absorbs the squeeze via min-w-0 truncate. */}
       <div
         className="flex items-center gap-2 px-3 py-2 text-[var(--color-text-muted)]"
         style={{
@@ -226,6 +259,11 @@ export default function TideNodeShell({
         <span className="shrink-0">
           <StatusBadge status={status} />
         </span>
+        {blockingConditions.map((c) => (
+          <span key={c.type} className="shrink-0">
+            <ConditionBadge condition={c} />
+          </span>
+        ))}
         <span className="min-w-0 truncate">{summary}</span>
       </div>
       <Handle
