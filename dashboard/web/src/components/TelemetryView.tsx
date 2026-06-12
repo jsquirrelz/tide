@@ -843,18 +843,74 @@ export default function TelemetryView({
     >
       {/* Toolbar: scope toggle (left) + range selector (right) — UI-SPEC C3 */}
       <div className="flex items-center justify-between">
-        <SegmentedControl<ScopeKind>
-          options={scopeOptions}
-          value={scope}
-          onChange={setScope}
-          testId="telemetry-scope-toggle"
-        />
-        <SegmentedControl<RangeKey>
-          options={rangeOptions}
-          value={range}
-          onChange={setRange}
-          testId="telemetry-range-selector"
-        />
+        {/* Scope toggle — C1 segmented control, aria-pressed (D-02/D-04) */}
+        <div
+          data-testid="telemetry-scope-toggle"
+          style={{
+            display: "inline-flex",
+            borderRadius: "4px",
+            border: "1px solid var(--color-border-subtle)",
+          }}
+        >
+          {scopeOptions.map((opt) => {
+            const isActive = opt.value === scope;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => setScope(opt.value)}
+                style={{
+                  padding: "4px 8px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  fontFamily: opt.mono ? "var(--font-mono)" : "var(--font-sans)",
+                  cursor: "pointer",
+                  border: "none",
+                  borderRadius: "3px",
+                  background: isActive ? "var(--color-surface-overlay)" : "transparent",
+                  color: isActive ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        {/* Range selector — C1 segmented control, aria-pressed (D-07) */}
+        <div
+          data-testid="telemetry-range-selector"
+          style={{
+            display: "inline-flex",
+            borderRadius: "4px",
+            border: "1px solid var(--color-border-subtle)",
+          }}
+        >
+          {rangeOptions.map((opt) => {
+            const isActive = opt.value === range;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={isActive}
+                onClick={() => setRange(opt.value)}
+                style={{
+                  padding: "4px 8px",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-sans)",
+                  cursor: "pointer",
+                  border: "none",
+                  borderRadius: "3px",
+                  background: isActive ? "var(--color-surface-overlay)" : "transparent",
+                  color: isActive ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Budget surface — always rendered, no Prometheus dependency (D-03) */}
