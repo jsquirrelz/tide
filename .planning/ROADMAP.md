@@ -117,8 +117,8 @@ Plans:
 
 **Wave 4 — gap closure** *(BUDGET-02 dashboard half, per 14-VERIFICATION.md + approved 14-UI-SPEC.md)*
 
-- [ ] 14-06-PLAN.md — Backend: whitelisted blockingConditions on projectSummary + informer-bridge status-only-update regression test
-- [ ] 14-07-PLAN.md — Frontend: ConditionBadge primitive + TideNodeShell blocked border + ProjectNode/PlanningDAGView/api.ts wiring
+- [x] 14-06-PLAN.md — Backend: whitelisted blockingConditions on projectSummary + informer-bridge status-only-update regression test
+- [x] 14-07-PLAN.md — Frontend: ConditionBadge primitive + TideNodeShell blocked border + ProjectNode/PlanningDAGView/api.ts wiring
 
 ### Phase 15: Paper Cuts
 
@@ -164,6 +164,6 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
-| 14. Budget Enforcement + Pricing | v1.0.1 | 5/5 | Complete   | 2026-06-12 |
+| 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete   | 2026-06-12 |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
