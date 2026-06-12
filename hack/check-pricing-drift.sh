@@ -207,8 +207,12 @@ done <<< "${COMPILED_MODELS}"
 # ---------------------------------------------------------------------------
 # Step 4: Check for models on the live page that are missing from the table.
 # ---------------------------------------------------------------------------
-# Extract model IDs the live page mentions (claude-* strings).
-LIVE_MODELS=$(grep -oE 'claude-[a-z0-9-]+' "${PRICING_TMP}" | sort -u || true)
+# Extract model IDs from PRICED TABLE ROWS only (pipe-table rows carrying a $
+# amount), skipping rows marked deprecated/retired. Scanning the whole page
+# flags every claude-* token in prose, URLs, code samples, and legacy-model
+# sections — permanent false-drift noise that keeps the deduped issue open
+# forever and trains operators to ignore it.
+LIVE_MODELS=$(grep -E '^\|' "${PRICING_TMP}" | grep '\$' | grep -viE 'deprecated|retired' | grep -oE 'claude-[a-z0-9-]+' | sort -u || true)
 
 while IFS= read -r LIVE_MODEL; do
     # Only check models that look like real versioned model IDs (must contain a digit).
