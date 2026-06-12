@@ -46,6 +46,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
+	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
@@ -1292,8 +1293,27 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 // materializeWaves creates or gets one Wave per layer. Each Wave has a
 // deterministic name tide-wave-{plan.UID}-{N} and is owned by the Plan.
 // AlreadyExists is treated as success (idempotent on PERSIST-03 re-invocations).
+//
+// CR-02: increments tide_waves_dispatched_total{project,phase,plan} ONLY on the
+// r.Create success path — not on AlreadyExists (watch-lag race) and not on the
+// Get-existing branch (reconcile replay). This mirrors D-12's exactly-once shape:
+// the reconcile whose Create succeeded already counted it; replays Get the Wave.
 func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideprojectv1alpha1.Plan, _ []tideprojectv1alpha1.Task, layers [][]dag.NodeID) error {
 	logger := logf.FromContext(ctx)
+
+	// Resolve metric label values once before the layer loop.
+	// resolveProjectName is non-fatal — on error use "unknown" (Metric Label Sentinel,
+	// Pitfall 4 — never emit an empty label value). Wave materialization proceeds
+	// regardless of label resolution success.
+	projectName, err := r.resolveProjectName(ctx, plan)
+	if err != nil {
+		projectName = "unknown"
+	}
+	phaseName := plan.Spec.PhaseRef
+	if phaseName == "" {
+		phaseName = "unknown"
+	}
+
 	for i := range layers {
 		waveName := fmt.Sprintf("tide-wave-%s-%d", plan.UID, i)
 		wave := &tideprojectv1alpha1.Wave{
@@ -1322,11 +1342,18 @@ func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideproject
 					return fmt.Errorf("create wave %s: %w", waveName, err)
 				}
 				// AlreadyExists: idempotent success — watch-lag race (CR-01).
+				// The reconcile that successfully created this Wave already counted it;
+				// do NOT increment WavesDispatchedTotal here.
+			} else {
+				// Create succeeded — this is the once-only dispatch commit point.
+				// Increment adjacent to logger.Info per CR-02 plan (D-23).
+				tidemetrics.WavesDispatchedTotal.WithLabelValues(projectName, phaseName, plan.Name).Inc()
 			}
 			logger.Info("created wave", "wave", waveName, "index", i)
 		} else {
 			// Wave exists — ensure owner ref is set (may be missing on first reconcile
 			// after a restart where the Wave was created but the Plan was not owner-set).
+			// Do NOT increment WavesDispatchedTotal — this is a reconcile replay.
 			if err := owner.EnsureOwnerRef(&existing, plan, r.Scheme); err == nil {
 				// Patch if owner ref changed.
 				_ = r.Update(ctx, &existing)
