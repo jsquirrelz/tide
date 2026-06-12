@@ -109,7 +109,14 @@ const RANGE_CONFIG: Record<
 // ─── Panel definitions ───────────────────────────────────────────────────────
 
 type SeriesDef = {
-  key?: string; // fixed legend label; omitted → use metric.project from response
+  /**
+   * Fixed legend label used in project scope and for non-grouped queries
+   * (e.g. Token Breakdown cluster sums that carry no `metric.project` label).
+   * In all-projects scope on `by (project)` queries the merge step derives
+   * per-project keys from `matrix.metric["project"]`, suffixing with this
+   * label when the panel has multiple SeriesDefs to prevent key collisions.
+   */
+  key?: string;
   buildQuery: (scope: ScopeKind, project: string, window: string) => string;
 };
 
@@ -321,12 +328,24 @@ async function fetchPanel(
   }
 
   // All data — merge series.
+  // Key derivation is scope-aware:
+  //   all-projects + metric.project present → key by project label (suffixed
+  //     with sd.key when the panel has multiple SeriesDefs to avoid collisions).
+  //   project scope or no project label → use the fixed sd.key (fallback "value").
   const allSeries: ResolvedSeries[] = [];
   results.forEach((r, i) => {
     if (r.kind !== "data") return;
     const sd = seriesDefs[i];
     r.result.forEach((matrix) => {
-      const key = sd.key ?? matrix.metric["project"] ?? Object.values(matrix.metric).join(",") ?? "value";
+      const projectLabel = matrix.metric["project"];
+      let key: string;
+      if (scope === "all" && projectLabel) {
+        key = seriesDefs.length > 1
+          ? `${sd.key} (${projectLabel})`
+          : projectLabel;
+      } else {
+        key = sd.key ?? projectLabel ?? "value";
+      }
       allSeries.push({ key, matrix });
     });
   });

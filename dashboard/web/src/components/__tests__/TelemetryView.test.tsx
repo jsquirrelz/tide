@@ -476,3 +476,94 @@ describe("TelemetryView — polling (D-07)", () => {
     expect(notices.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ─── 8. All-projects per-project series (CR-01) ───────────────────────────────
+//
+// Guard: in all-projects scope the merge step MUST derive one series key per
+// project matrix rather than collapsing all matrices onto a fixed sd.key.
+// These tests are the regression pin for CR-01 (16-VERIFICATION.md gap).
+
+/** A multi-project success payload with TWO matrices in data.result. */
+const TWO_PROJECT_PAYLOAD = {
+  status: "success",
+  data: {
+    resultType: "matrix",
+    result: [
+      {
+        metric: { project: "p1" },
+        values: [
+          [1700000000, "1"],
+          [1700000300, "2"],
+        ],
+      },
+      {
+        metric: { project: "p2" },
+        values: [
+          [1700000000, "3"],
+          [1700000300, "4"],
+        ],
+      },
+    ],
+  },
+};
+
+describe("TelemetryView — all-projects per-project series (CR-01)", () => {
+  // Test 1: single-SeriesDef panels (Cost Over Time, Failure Rate) must render
+  // one legend entry per project — keys are bare project names, not the fixed sd.key.
+  it("all-projects scope with two matrices: both project names appear as legend entries", async () => {
+    stubFetchOK(TWO_PROJECT_PAYLOAD);
+    render(
+      // Empty projects array — all-projects mode (selectedProject=null, D-04).
+      // Empty array prevents budget-card text from colliding with project label names
+      // (16-04 deviation #5: budget-card-grid data-testid collision on named projects).
+      <TelemetryView projects={[]} selectedProject={null} />,
+    );
+    await flushInitialFetch();
+
+    // Each single-SeriesDef panel should key by bare project name.
+    // getAllByText will throw if nothing matches — the test fails if keys collapsed.
+    const p1Entries = screen.getAllByText("p1");
+    const p2Entries = screen.getAllByText("p2");
+    expect(p1Entries.length).toBeGreaterThanOrEqual(1);
+    expect(p2Entries.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Test 2: multi-SeriesDef panels (Dispatch Counts, 2 series) must disambiguate
+  // so "waves dispatched" for p1 and p2 get distinct keys.
+  it("all-projects scope with two matrices: multi-series panel uses disambiguated legend keys", async () => {
+    stubFetchOK(TWO_PROJECT_PAYLOAD);
+    render(
+      <TelemetryView projects={[]} selectedProject={null} />,
+    );
+    await flushInitialFetch();
+
+    // Dispatch Counts has 2 SeriesDefs — both emit per-project keys.
+    // The disambiguation pattern is "<seriesDef.key> (<project>)".
+    const wd_p1 = screen.getAllByText("waves dispatched (p1)");
+    const wd_p2 = screen.getAllByText("waves dispatched (p2)");
+    expect(wd_p1.length).toBeGreaterThanOrEqual(1);
+    expect(wd_p2.length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Test 3 (no-regression): project scope must continue using fixed SeriesDef keys.
+  it("project scope: series keys remain the fixed SeriesDef keys (no project suffix)", async () => {
+    // Single-matrix payload; metric.project is present but should NOT become the key.
+    stubFetchOK(SUCCESS_PAYLOAD);
+    render(
+      <TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />,
+    );
+    await flushInitialFetch();
+
+    // Chart should render (SVG present — same as D-05 test 1).
+    const panels = screen.getAllByTestId(/^panel-/);
+    const hasSvg = panels.some((p) => p.querySelector("svg") !== null);
+    expect(hasSvg).toBe(true);
+
+    // The scope-aware key derivation must NOT produce "p1 (cost)" or "p1 (failure rate)"
+    // style strings in project scope — those suffixed forms appear only in all-projects scope.
+    // queryAllByText returns [] rather than throwing, so safe to assert empty.
+    expect(screen.queryAllByText("p1 (cost)")).toHaveLength(0);
+    expect(screen.queryAllByText("p1 (failure rate)")).toHaveLength(0);
+    expect(screen.queryAllByText("p1 (waves dispatched)")).toHaveLength(0);
+  });
+});
