@@ -26,10 +26,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
@@ -45,16 +47,31 @@ type ProjectsHandler struct {
 	Log    logr.Logger
 }
 
+// projectCondition is the JSON shape of a single entry in the
+// blockingConditions array. Mirrors taskCondition in tasks.go (same package)
+// with the addition of Message — the controller-stamped string surfaced
+// verbatim as the badge's native tooltip (UI-SPEC C1). The whitelist (see
+// summarize) limits entries to BudgetBlocked and BillingHalt; at most 2
+// entries per project keep the response size bounded per the "stripped down"
+// doctrine in the projectSummary comment below.
+type projectCondition struct {
+	Type    string `json:"type"`
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+	Age     string `json:"age"`
+}
+
 // projectSummary is the JSON shape returned by the List handler — one
 // entry per Project. Stripped down from the full CRD to bound response
 // size and avoid surfacing transient fields (managedFields, etc.) the
 // dashboard never needs.
 type projectSummary struct {
-	Name                 string        `json:"name"`
-	Namespace            string        `json:"namespace"`
-	Phase                string        `json:"phase"`
-	ActiveMilestoneCount int           `json:"activeMilestoneCount"`
-	Budget               budgetSummary `json:"budget"`
+	Name                 string             `json:"name"`
+	Namespace            string             `json:"namespace"`
+	Phase                string             `json:"phase"`
+	ActiveMilestoneCount int                `json:"activeMilestoneCount"`
+	Budget               budgetSummary      `json:"budget"`
+	BlockingConditions   []projectCondition `json:"blockingConditions"`
 }
 
 // budgetSummary captures the three Budget fields the dashboard's status
@@ -317,6 +334,14 @@ func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1al
 // withinBudget is the derived predicate the UI's budget pill renders:
 // false iff a positive AbsoluteCapCents is configured AND CostSpentCents
 // has met or exceeded it. Zero cap = no enforcement = always within.
+//
+// BlockingConditions is populated by iterating p.Status.Conditions and
+// keeping only entries where Type is ConditionBudgetBlocked or
+// ConditionBillingHalt AND Status == ConditionTrue. Pre-allocated with
+// make([]projectCondition, 0, 2) so zero matches serialize as [] not null
+// (D-UI-SPEC empty-array contract). Age uses the same formatAge helper from
+// tasks.go (same package). Whitelist limits exposure to exactly 2 types
+// per T-14-06-01/02/03.
 func summarize(p *tidev1alpha1.Project, activeMilestoneCount int) projectSummary {
 	cap := p.Spec.Budget.AbsoluteCapCents
 	spent := p.Status.Budget.CostSpentCents
@@ -324,6 +349,26 @@ func summarize(p *tidev1alpha1.Project, activeMilestoneCount int) projectSummary
 	if cap > 0 {
 		within = spent < cap
 	}
+
+	// Whitelist: only BudgetBlocked and BillingHalt, Status==True only.
+	// Pre-allocate to 2 to bound payload and ensure []-not-null serialization.
+	now := time.Now()
+	blocking := make([]projectCondition, 0, 2)
+	for _, c := range p.Status.Conditions {
+		if c.Status != metav1.ConditionTrue {
+			continue
+		}
+		if c.Type != tidev1alpha1.ConditionBudgetBlocked && c.Type != tidev1alpha1.ConditionBillingHalt {
+			continue
+		}
+		blocking = append(blocking, projectCondition{
+			Type:    c.Type,
+			Reason:  c.Reason,
+			Message: c.Message,
+			Age:     formatAge(now.Sub(c.LastTransitionTime.Time)),
+		})
+	}
+
 	return projectSummary{
 		Name:                 p.Name,
 		Namespace:            p.Namespace,
@@ -334,6 +379,7 @@ func summarize(p *tidev1alpha1.Project, activeMilestoneCount int) projectSummary
 			CurrentSpend: spent,
 			WithinBudget: within,
 		},
+		BlockingConditions: blocking,
 	}
 }
 
