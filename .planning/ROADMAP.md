@@ -108,8 +108,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 14-03-PLAN.md — TaskReconciler dispatch-gate rewrite, reserve/settle wiring, run-1 regression envtest
-- [ ] 14-04-PLAN.md — Pricing-drift automation: hack script + weekly deduped-issue workflow + release checklist (D-03)
+- [x] 14-03-PLAN.md — TaskReconciler dispatch-gate rewrite, reserve/settle wiring, run-1 regression envtest
+- [x] 14-04-PLAN.md — Pricing-drift automation: hack script + weekly deduped-issue workflow + release checklist (D-03)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -159,6 +159,6 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
-| 14. Budget Enforcement + Pricing | v1.0.1 | 2/5 | In Progress|  |
+| 14. Budget Enforcement + Pricing | v1.0.1 | 4/5 | In Progress|  |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
