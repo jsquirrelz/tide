@@ -29,9 +29,9 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 ### Budget & Pricing (BUDGET)
 
-- [ ] **BUDGET-01**: Pricing table resolves current model IDs (claude-opus-4-8, claude-fable-5, …) without falling to the conservative default (finding 4 reduced scope: the fallback was near-accurate in aggregate but logs `pricing: unknown model` per session)
-- [ ] **BUDGET-02**: Budget-cap enforcement surfaces `BudgetBlocked` on the Project status, visible to kubectl and the dashboard (finding 12: cap works at task dispatch but is silent on the Project)
-- [ ] **BUDGET-03**: In-flight overshoot past the budget cap is bounded (run 1 overshot ~$40 past the $100 cap from already-dispatched sessions)
+- [x] **BUDGET-01**: Pricing table resolves current model IDs (claude-opus-4-8, claude-fable-5, …) without falling to the conservative default (finding 4 reduced scope: the fallback was near-accurate in aggregate but logs `pricing: unknown model` per session)
+- [x] **BUDGET-02**: Budget-cap enforcement surfaces `BudgetBlocked` on the Project status, visible to kubectl and the dashboard (finding 12: cap works at task dispatch but is silent on the Project)
+- [x] **BUDGET-03**: In-flight overshoot past the budget cap is bounded (run 1 overshot ~$40 past the $100 cap from already-dispatched sessions)
 
 ### Paper Cuts (CUTS)
 
@@ -85,9 +85,9 @@ Which phases cover which requirements.
 | DISPATCH-01 | Phase 13 | Complete |
 | DISPATCH-02 | Phase 13 | Complete |
 | HALT-01 | Phase 13 | Complete |
-| BUDGET-01 | Phase 14 | Pending |
-| BUDGET-02 | Phase 14 | Pending |
-| BUDGET-03 | Phase 14 | Pending |
+| BUDGET-01 | Phase 14 | Complete |
+| BUDGET-02 | Phase 14 | Complete |
+| BUDGET-03 | Phase 14 | Complete |
 | CUTS-01 | Phase 15 | Pending |
 | CUTS-02 | Phase 15 | Pending |
 | CUTS-03 | Phase 15 | Pending |

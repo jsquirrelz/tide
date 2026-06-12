@@ -164,6 +164,6 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 |-------|-----------|----------------|--------|-----------|
 | 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
-| 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete   | 2026-06-12 |
+| 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
 | 15. Paper Cuts | v1.0.1 | 0/TBD | Not started | - |
 | 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
