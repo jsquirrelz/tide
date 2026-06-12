@@ -59,4 +59,21 @@ describe("ProjectPicker (UI-SPEC §Component Inventory #9)", () => {
     expect(screen.getByTestId("status-badge-AwaitingApproval")).toBeInTheDocument();
     expect(screen.getByTestId("status-badge-Succeeded")).toBeInTheDocument();
   });
+
+  // 15-05: finding-9b second coerce site — ProjectPicker row with phase "Complete"
+  // must render status-badge-Complete (not status-badge-Pending). (UI-SPEC C2 / RESEARCH A2)
+  it("renders status-badge-Complete for a project row with phase Complete (finding-9b, second coerce site)", () => {
+    const projects: ProjectEntry[] = [
+      { name: "done-project", namespace: "ns", phase: "Complete" },
+    ];
+    render(
+      <ProjectPicker projects={projects} value={null} onChange={() => undefined} />,
+    );
+    const trigger = screen.getByRole("button", { name: /open project picker/i });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    expect(screen.getByTestId("status-badge-Complete")).toBeInTheDocument();
+    expect(screen.queryByTestId("status-badge-Pending")).not.toBeInTheDocument();
+  });
 });
