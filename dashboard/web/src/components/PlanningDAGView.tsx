@@ -105,6 +105,12 @@ function buildPlanningGraph(detail: ProjectDetail): {
     milestonesCount: detail.milestones.length,
     phasesCount: detail.phases.length,
     plansCount: detail.plans.length,
+    // 14-UI-SPEC §C4: map blocking conditions from ProjectDetail.
+    // The `?? []` default ensures legacy payloads (field absent) degrade
+    // gracefully to today's render — no badge, no border-l.
+    // No new SSE wiring: PLANNING_KINDS already includes "Project" and the
+    // debounced refetch already delivers live condition updates (UI-SPEC C4).
+    blockingConditions: detail.blockingConditions ?? [],
   };
   nodes.push({
     id: projectId,

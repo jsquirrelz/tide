@@ -19,6 +19,7 @@ import ExecutionDAGView, {
   type ExecutionPlanData,
 } from "../ExecutionDAGView";
 import type { ProjectDetail } from "../../lib/api";
+import type { ProjectBlockingCondition } from "../ConditionBadge";
 
 // PlanningDAGView now subscribes to the project-events SSE stream. jsdom has
 // no EventSource, so stub it. The fake routes named events
@@ -303,5 +304,58 @@ describe("ExecutionDAGView — Test 3: Pitfall 26 flicker mitigation", () => {
     // before flicker-ready transitions to true they would have opacity:0.
     // We assert on the data-flicker-ready transition rather than reading
     // individual node opacity (which @xyflow nests inside its own wrapper).
+  });
+});
+
+// 14-UI-SPEC §C3/C4: blockingConditions wiring from ProjectDetail → ProjectNode → TideNodeShell.
+const BUDGET_BLOCKED_ENTRY: ProjectBlockingCondition = {
+  type: "BudgetBlocked",
+  reason: "BudgetCapReached",
+  message: "cap reached",
+  age: "4m 12s",
+};
+
+describe("PlanningDAGView — Test 6: blockingConditions wiring (14-UI-SPEC §C3/C4)", () => {
+  // Test 1: ProjectDetail with blockingConditions drives condition-badge + data-blocked on the project node.
+  it("blocked ProjectDetail payload shows condition-badge-BudgetBlocked and data-blocked=true on the project node", async () => {
+    const blockedPayload: ProjectDetail = {
+      ...PROJECT_PAYLOAD,
+      blockingConditions: [BUDGET_BLOCKED_ENTRY],
+    };
+    render(
+      <PlanningDAGView
+        projectName="my-project"
+        onPlanClick={() => undefined}
+        initialData={blockedPayload}
+      />,
+    );
+    await waitFor(() => {
+      const node = document.querySelector('[data-testid="tide-node-project"]');
+      expect(node).not.toBeNull();
+      expect(node?.getAttribute("data-blocked")).toBe("true");
+      expect(
+        document.querySelector('[data-testid="condition-badge-BudgetBlocked"]'),
+      ).not.toBeNull();
+    });
+  });
+
+  // Test 2: legacy ProjectDetail without blockingConditions field renders data-blocked=false, no badge.
+  it("ProjectDetail without blockingConditions degrades to data-blocked=false (no badge)", async () => {
+    // PROJECT_PAYLOAD has no blockingConditions field — simulates legacy payload.
+    render(
+      <PlanningDAGView
+        projectName="my-project"
+        onPlanClick={() => undefined}
+        initialData={PROJECT_PAYLOAD}
+      />,
+    );
+    await waitFor(() => {
+      const node = document.querySelector('[data-testid="tide-node-project"]');
+      expect(node).not.toBeNull();
+      expect(node?.getAttribute("data-blocked")).toBe("false");
+      expect(
+        document.querySelector('[data-testid^="condition-badge-"]'),
+      ).toBeNull();
+    });
   });
 });

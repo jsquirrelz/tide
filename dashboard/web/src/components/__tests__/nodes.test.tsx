@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
+import { Layers } from "lucide-react";
 import { ToastProvider } from "../ToastContainer";
 
 import ProjectNode from "../ProjectNode";
@@ -8,7 +9,9 @@ import MilestoneNode from "../MilestoneNode";
 import PhaseNode from "../PhaseNode";
 import PlanNode from "../PlanNode";
 import TaskNode from "../TaskNode";
+import TideNodeShell from "../TideNodeShell";
 import { NodeClickContext } from "../NodeClickContext";
+import type { ProjectBlockingCondition } from "../ConditionBadge";
 
 afterEach(() => cleanup());
 
@@ -286,5 +289,128 @@ describe("Custom Nodes — Test 5: Accessibility (role=button, tabIndex=0, Enter
     expect(label).toMatch(/task/i);
     expect(label).toMatch(/t1/);
     expect(label).toMatch(/Running/);
+  });
+});
+
+// 14-UI-SPEC §C2: TideNodeShell blocking-conditions slot.
+// Tests exercise TideNodeShell directly (via the "project" kind) so they don't
+// depend on Task 3's ProjectNode passthrough. The existing ProjectNode/TaskNode
+// tests above remain the regression suite for the node hierarchy.
+const BUDGET_BLOCKED_CONDITION: ProjectBlockingCondition = {
+  type: "BudgetBlocked",
+  reason: "BudgetCapReached",
+  message: "Cost spent 10100 cents exceeds cap 10000 cents; dispatch halted project-wide",
+  age: "4m 12s",
+};
+
+const BILLING_HALT_CONDITION: ProjectBlockingCondition = {
+  type: "BillingHalt",
+  reason: "InsufficientCredits",
+  message: "Provider credit balance too low; dispatch halted project-wide",
+  age: "2m 0s",
+};
+
+function renderShell(props: Partial<React.ComponentProps<typeof TideNodeShell>> & {
+  name?: string;
+  status?: React.ComponentProps<typeof TideNodeShell>["status"];
+}) {
+  return renderWithCtx(
+    <TideNodeShell
+      kind="project"
+      name={props.name ?? "alpha"}
+      headerLabel={props.headerLabel ?? `project/${props.name ?? "alpha"}`}
+      status={props.status ?? "Running"}
+      icon={Layers}
+      iconName="Layers"
+      summary="1 milestone"
+      width={360}
+      minHeight={92}
+      clickable={false}
+      blockingConditions={props.blockingConditions}
+    />,
+  );
+}
+
+describe("Custom Nodes — Test 6: blocking-conditions slot (14-UI-SPEC §C2)", () => {
+  // Test 1: blocked node gets ConditionBadge in summary row, data-blocked=true, purple border.
+  it("blockingConditions=[BudgetBlocked] renders condition-badge-BudgetBlocked, data-blocked=true, purple border", () => {
+    const { container } = renderShell({
+      blockingConditions: [BUDGET_BLOCKED_CONDITION],
+    });
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+
+    // data-blocked attribute
+    expect(root.getAttribute("data-blocked")).toBe("true");
+
+    // Purple border classes (14-UI-SPEC §C2 — readable at DAG zoom)
+    expect(root.className).toMatch(/border-l-4/);
+    expect(root.className).toMatch(/border-l-\[var\(--color-status-blocked\)\]/);
+
+    // ConditionBadge inside the node
+    const badge = container.querySelector('[data-testid="condition-badge-BudgetBlocked"]');
+    expect(badge).not.toBeNull();
+  });
+
+  // Test 2: destructive precedence — Failed + blocked → red border wins, data-blocked still true.
+  it("status=Failed + blockingConditions=[BudgetBlocked] → red border-l, no purple border-l, data-blocked=true", () => {
+    const { container } = renderShell({
+      status: "Failed",
+      blockingConditions: [BUDGET_BLOCKED_CONDITION],
+    });
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+
+    // Still data-blocked=true (the condition exists)
+    expect(root.getAttribute("data-blocked")).toBe("true");
+
+    // Destructive border wins
+    expect(root.className).toMatch(/border-l-\[var\(--color-destructive\)\]/);
+
+    // Purple border must NOT be present (destructive takes precedence per 14-UI-SPEC §C2)
+    expect(root.className).not.toMatch(/border-l-\[var\(--color-status-blocked\)\]/);
+  });
+
+  // Test 3: zero conditions → data-blocked=false, no border-l-4, no condition badge,
+  //         and all pre-existing specs pass unmodified.
+  it("blockingConditions omitted → data-blocked=false, no border-l-4, no condition badge", () => {
+    const { container } = renderShell({});
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+
+    expect(root.getAttribute("data-blocked")).toBe("false");
+    expect(root.className).not.toMatch(/border-l-4/);
+    expect(
+      container.querySelector('[data-testid^="condition-badge-"]'),
+    ).toBeNull();
+  });
+
+  // Test 4: aria-label extends to include blocked labels when blocked.
+  it("aria-label extends to '... blocked: Budget blocked' when BudgetBlocked condition present", () => {
+    const { container } = renderShell({
+      blockingConditions: [BUDGET_BLOCKED_CONDITION],
+    });
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+    const label = root.getAttribute("aria-label") ?? "";
+    expect(label).toMatch(/blocked: Budget blocked/);
+    // Must still contain the base kind + name + status
+    expect(label).toMatch(/project/);
+    expect(label).toMatch(/alpha/);
+    expect(label).toMatch(/Running/);
+  });
+
+  // Test 5: two conditions render two badges in order.
+  it("blockingConditions=[BudgetBlocked, BillingHalt] renders both badges", () => {
+    const { container } = renderShell({
+      blockingConditions: [BUDGET_BLOCKED_CONDITION, BILLING_HALT_CONDITION],
+    });
+    expect(
+      container.querySelector('[data-testid="condition-badge-BudgetBlocked"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-testid="condition-badge-BillingHalt"]'),
+    ).not.toBeNull();
+
+    // aria-label lists both, comma-separated
+    const root = container.querySelector('[data-testid="tide-node-project"]')!;
+    const label = root.getAttribute("aria-label") ?? "";
+    expect(label).toMatch(/blocked: Budget blocked, Billing halted/);
   });
 });

@@ -10,6 +10,7 @@
  * envelope. The TypeScript types here mirror the Go struct fields verbatim
  * so any backend rename surfaces as a compile-time error in this file.
  */
+import type { ProjectBlockingCondition } from "../components/ConditionBadge";
 
 export type BudgetSummary = {
   capCents: number;
@@ -17,13 +18,24 @@ export type BudgetSummary = {
   withinBudget: boolean;
 };
 
-/** Mirrors cmd/dashboard/api/projects.go::projectSummary. */
+/**
+ * Mirrors cmd/dashboard/api/projects.go::projectSummary.
+ *
+ * Plan 14-07: `blockingConditions` mirrors the new `blockingConditions` field
+ * added to projectSummary in plan 14-06. The backend always serializes `[]`
+ * (never null) per the UI-SPEC empty-array contract; the field is typed
+ * optional here so the frontend degrades gracefully when receiving a legacy
+ * payload that omits it (the `?? []` default in buildPlanningGraph handles it).
+ */
 export type ProjectSummary = {
   name: string;
   namespace: string;
   phase: string;
   activeMilestoneCount: number;
   budget: BudgetSummary;
+  /** True blocking conditions on the Project CR (BudgetBlocked, BillingHalt).
+   *  Backend always sends [] not null; optional here for legacy-payload safety. */
+  blockingConditions?: ProjectBlockingCondition[];
 };
 
 /** Mirrors cmd/dashboard/api/projects.go::childRef. */

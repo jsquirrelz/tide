@@ -3,6 +3,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 
 import TideNodeShell from "./TideNodeShell";
 import type { StatusValue } from "./StatusBadge";
+import type { ProjectBlockingCondition } from "./ConditionBadge";
 import { pluralize } from "../lib/pluralize";
 
 /**
@@ -18,6 +19,9 @@ export type ProjectNodeData = {
   milestonesCount: number;
   phasesCount: number;
   plansCount: number;
+  /** 14-UI-SPEC §C3: True blocking conditions forwarded to TideNodeShell.
+   *  buildPlanningGraph always supplies this (via `?? []`), so required here. */
+  blockingConditions: ProjectBlockingCondition[];
 } & Record<string, unknown>;
 
 type ProjectNodeType = Node<ProjectNodeData, "project">;
@@ -40,6 +44,8 @@ export default function ProjectNode({ data, selected }: NodeProps<ProjectNodeTyp
        * clicking would call setSelectedPlan(projectName) which has no
        * matching Plan and pollutes the right pane. */
       clickable={false}
+      /* 14-UI-SPEC §C3: pass blocking conditions through to TideNodeShell. */
+      blockingConditions={data.blockingConditions}
     />
   );
 }
