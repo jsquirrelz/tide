@@ -98,7 +98,7 @@ Plans:
   2. When the project budget cap is reached, a `BudgetBlocked` condition appears on the Project CR — visible via `kubectl get project -o yaml` and reflected on the dashboard project node
   3. In-flight overshoot past the budget cap is bounded to at most one wave's worth of already-dispatched sessions — no new Jobs are created after cap breach is detected
 
-**Plans**: 5 plans
+**Plans**: 7 plans (2 gap closure)
 
 Plans:
 **Wave 1**
@@ -114,6 +114,11 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 14-05-PLAN.md — Five-site BudgetBlocked rollout + manager flags/validation/rederive runnable + additive Helm surface
+
+**Wave 4 — gap closure** *(BUDGET-02 dashboard half, per 14-VERIFICATION.md + approved 14-UI-SPEC.md)*
+
+- [ ] 14-06-PLAN.md — Backend: whitelisted blockingConditions on projectSummary + informer-bridge status-only-update regression test
+- [ ] 14-07-PLAN.md — Frontend: ConditionBadge primitive + TideNodeShell blocked border + ProjectNode/PlanningDAGView/api.ts wiring
 
 ### Phase 15: Paper Cuts
 
