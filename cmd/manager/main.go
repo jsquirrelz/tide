@@ -45,6 +45,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/controller"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 
 	// Phase 4 D-O2: blank-import the central metric registry so its init()
 	// registers all 7 Phase 4 counters/histograms on
@@ -137,6 +138,9 @@ func main() {
 	var defaultFileTouchMode string
 	var rateLimitDefaultRPM int
 	var rateLimitDefaultBurst int
+	// Phase 14 flags (Plan 14-05 wiring — D-02/D-05 operator tuning).
+	var pricingOverridesJSON string
+	var budgetReservePerDispatchCents int64
 
 	flag.StringVar(&configPath, "config", "/etc/tide/config.yaml", "Path to runtime config YAML")
 	flag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election (CTRL-03)")
@@ -162,6 +166,13 @@ func main() {
 		"Default requests-per-minute rate limit (rateLimits.defaults.requestsPerMinute in values.yaml)")
 	flag.IntVar(&rateLimitDefaultBurst, "rate-limit-default-burst", 10,
 		"Default burst size for rate-limit buckets (rateLimits.defaults.burst in values.yaml)")
+	// Phase 14 flags — operator billing tuning. Flag-over-config chosen for
+	// consistency with --rate-limit-default-rpm (RESEARCH Open Question 1 resolved:
+	// flag mirrors the established Helm→flag pattern for per-operator tunables).
+	flag.StringVar(&pricingOverridesJSON, "pricing-overrides-json", "",
+		"JSON map of model-ID to price overrides in cents/MTok (Helm pricing.overrides, D-02); validated at startup")
+	flag.Int64Var(&budgetReservePerDispatchCents, "budget-reserve-per-dispatch-cents", 100,
+		"Flat per-dispatch reservation estimate in cents (Helm budget.reservePerDispatchCents, D-05); 0 disables pre-charge")
 
 	// Phase 3 plan 03-09 — Helm env-var wiring. Set by the controller Deployment
 	// env block from charts/tide/values.yaml. Helpers in cmd/manager/env.go.
@@ -198,6 +209,20 @@ func main() {
 	opts := zap.Options{Development: false}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	// Phase 14 startup validation (T-14-01 / ASVS V5): validate flags before
+	// constructing any component. Fail-fast: running with silently-broken billing
+	// config is worse than failing to start (operator sees the error immediately).
+	if pricingOverridesJSON != "" {
+		if _, err := pkgdispatch.ParsePricingOverrides(pricingOverridesJSON); err != nil {
+			fmt.Fprintf(os.Stderr, "invalid --pricing-overrides-json: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if budgetReservePerDispatchCents < 0 {
+		fmt.Fprintf(os.Stderr, "--budget-reserve-per-dispatch-cents must be >= 0 (got %d)\n", budgetReservePerDispatchCents)
+		os.Exit(1)
+	}
 
 	// Phase 13 DISPATCH-01 compatibility shim: if --subagent-image was passed (non-empty),
 	// it overrides helmProviderDefaults.Image so the unchanged chart (still passing
@@ -327,6 +352,10 @@ func main() {
 	setupLog.Info("HMAC self-test passed", "key-bytes", len(signingKey))
 	//    b. Budget store — in-process per-Secret-UID rate-limiter cache (D-D1).
 	budgetStore := budget.NewStore()
+	//    b.2 Phase 14 D-05: in-process reservation store for pre-dispatch cost
+	//    estimation. Rederived at startup from in-flight Job labels by the runnable
+	//    registered below (same pattern as budget.PreCharge for the rate-limiter).
+	reservationStore := budget.NewReservationStore()
 	//    c. Rate-limit defaults from Helm values (rateLimits.defaults.* in values.yaml).
 	defaults := budget.Limits{
 		RequestsPerMinute: rateLimitDefaultRPM,
@@ -344,13 +373,14 @@ func main() {
 	//       Without this, plan_controller.go:121 and task_controller.go:167 short-circuit
 	//       and no Job is ever created in production.
 	dispatcher := &podjob.PodJobBackend{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		SubagentImage:  helmProviderDefaults.Image, // Phase 13: use post-shim default tier (CRD fields resolved inline in Run)
-		CredproxyImage: credproxyImage,
-		SigningKey:     signingKey,
-		EnvReader:      envReader,
-		PVCName:        "tide-projects",
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		SubagentImage:        helmProviderDefaults.Image, // Phase 13: use post-shim default tier (CRD fields resolved inline in Run)
+		CredproxyImage:       credproxyImage,
+		SigningKey:            signingKey,
+		EnvReader:            envReader,
+		PVCName:              "tide-projects",
+		PricingOverridesJSON: pricingOverridesJSON,
 	}
 
 	// 7. Register all six reconcilers (CTRL-01).
@@ -378,6 +408,8 @@ func main() {
 		HelmProviderDefaults: helmProviderDefaults,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
+		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
+		PricingOverridesJSON: pricingOverridesJSON,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
@@ -406,6 +438,8 @@ func main() {
 		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
+		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
+		PricingOverridesJSON: pricingOverridesJSON,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -430,6 +464,8 @@ func main() {
 		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
+		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
+		PricingOverridesJSON: pricingOverridesJSON,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -453,6 +489,8 @@ func main() {
 		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
+		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
+		PricingOverridesJSON: pricingOverridesJSON,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)
@@ -492,6 +530,11 @@ func main() {
 			CredproxyImage:       credproxyImage,
 			EnvReader:            envReader,
 			HelmProviderDefaults: helmProviderDefaults,
+			// Phase 14 D-05: reservation store + per-dispatch estimate for pre-charge.
+			Reservations:         reservationStore,
+			ReserveEstimateCents: budgetReservePerDispatchCents,
+			// Phase 14 D-02: pricing overrides forwarded opaquely to executor Jobs.
+			PricingOverridesJSON: pricingOverridesJSON,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
@@ -532,6 +575,25 @@ func main() {
 		return nil
 	})); err != nil {
 		setupLog.Error(err, "unable to register budget pre-charge runnable")
+		os.Exit(1)
+	}
+
+	// 9.b Register Phase 14 RederiveReservations as a Manager Runnable (Pitfall 3).
+	//     Runs after cache sync (same NeedLeaderElection/cache-warm pattern as PreCharge
+	//     above). Restores in-flight reservation estimates from the tideproject.k8s/estimated-cost
+	//     labels on active Jobs so the ReservationStore is populated before the first reconcile.
+	//     Pre-Phase-14 Jobs lacking the label are treated as 0 reserved (conservative; Pitfall 5).
+	//     Best-effort: errors are logged but non-fatal (a clean restart re-arms on next reconcile).
+	if err := mgr.Add(ctrlmgr.RunnableFunc(func(ctx context.Context) error {
+		if err := budget.RederiveReservations(ctx, mgr.GetClient(), reservationStore); err != nil {
+			setupLog.Error(err, "reservation rederivation failed (non-fatal, Pitfall 3)")
+			return nil
+		}
+		setupLog.Info("reservation store rederived from in-flight jobs",
+			"totalReservedCents", reservationStore.TotalReserved())
+		return nil
+	})); err != nil {
+		setupLog.Error(err, "unable to register reservation rederive runnable")
 		os.Exit(1)
 	}
 
