@@ -597,22 +597,22 @@ helm-assert: helm-rbac-assert helm-telemetry-assert ## Run all Helm render gate 
 | A5 | `strings.TrimRight(upstream.Path, "/") + path` is the correct join for Prometheus URLs with base paths | Pattern 4 | Low — Prometheus always uses absolute paths starting with `/api/v1/`; the join is unambiguous |
 | A6 | `internal/config/config.go` also needs the `PrometheusEndpoint` field even though `main.go` reads env directly | Pattern 1 | Low — MILESTONE.md explicitly names this file; both changes are needed but serve different binaries |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does `Project.Status.Budget` come back in the projects list API response?**
    - What we know: `TelemetryViewProps` requires `budget: BudgetSummary`; Phase 14 added `BudgetSummary` to the Project CR status.
    - What's unclear: Does `ProjectsHandler.List` include `.Status.Budget` in its JSON response?
-   - Recommendation: Check `cmd/dashboard/api/projects.go` — if the list endpoint omits budget, TelemetryView needs a separate per-project fetch or App.tsx must use the already-fetched project detail.
+   - **RESOLVED (planning, 2026-06-12):** Phase 14's projects list endpoint already returns `BudgetSummary` per project (verified in `cmd/dashboard/api/projects.go` during planning); TelemetryView receives the projects array as a prop from App.tsx — no new backend fetch. Incorporated into plan 16-04.
 
 2. **Are integration Jobs (boundary-push) also Task-owned, and do they need wave resolution?**
    - What we know: D-08 says emit on ALL terminal branches; boundary-push Jobs are separate from Task Jobs.
    - What's unclear: Does boundary push go through `task_controller.go` terminal branch? (Likely not — it's handled by `plan_controller.go`.)
-   - Recommendation: The six metrics are Task-scoped by design (Usage comes from `out.Usage` in the task reconciler). Boundary-push is not in scope.
+   - **RESOLVED (planning, 2026-06-12):** Boundary-push goes through `plan_controller.go`, not `task_controller.go`. The six metrics are Task-scoped by design (`out.Usage` in the task reconciler); boundary-push is out of scope for TELEM-03.
 
 3. **How does D-02's `{project="<selected>"}` label filter interact with the `wave` label being on the six new metrics?**
    - What we know: The four locked PromQL panel queries filter by project label. The `plan` label is also on the new metrics (D-10).
    - What's unclear: Whether the 24h range panels should also filter `by (plan)` or aggregate across all plans for the selected project.
-   - Recommendation: Default to `by (project)` aggregation for the TelemetryView panels — this matches the cardinality budget table's "Project roll-up" level and keeps panel queries simple.
+   - **RESOLVED (planning, 2026-06-12):** Panels aggregate at project level (`by (project)`), matching the cardinality budget table's Project roll-up level and keeping panel queries simple. Encoded in plan 16-04's query builders.
 
 ## Environment Availability
 
