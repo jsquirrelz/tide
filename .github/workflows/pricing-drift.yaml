@@ -48,9 +48,10 @@ jobs:
         continue-on-error: true
         run: |
           # Capture the script output to a file for use in the issue body.
-          # Exit code is captured via continue-on-error + outcome check.
-          ./hack/check-pricing-drift.sh > /tmp/drift-output.txt 2>&1 || true
-          DRIFT_EXIT=$?
+          # `|| DRIFT_EXIT=$?` (not `|| true; DRIFT_EXIT=$?` — that captures
+          # true's exit and is always 0) so non-zero exits survive bash -e.
+          DRIFT_EXIT=0
+          ./hack/check-pricing-drift.sh > /tmp/drift-output.txt 2>&1 || DRIFT_EXIT=$?
           # Export the exit code and output for subsequent steps.
           echo "exit_code=${DRIFT_EXIT}" >> "$GITHUB_OUTPUT"
           DRIFT_BODY=$(cat /tmp/drift-output.txt)
