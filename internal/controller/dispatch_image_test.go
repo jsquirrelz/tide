@@ -60,7 +60,7 @@ var _ = Describe("CR-01: milestone nil-project guard (DISPATCH-01)", Label("envt
 			Client:      mgrClient,
 			Scheme:      k8sClient.Scheme(),
 			PlannerPool: newPlannerPoolForTest(),
-			SigningKey:   testSigningKey,
+			SigningKey:  testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
 				Image: "tide-stub-subagent:test",
 			},
