@@ -134,10 +134,10 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12 — Phase 14 (budget-enforcement-pricing) complete; BUDGET-01..03 validated.*
+*Last updated: 2026-06-12 — Phase 15 (paper-cuts) complete; CUTS-01..07 validated.*
 
 ## Current State
 
-Phase 14 (budget-enforcement-pricing) complete — 7/7 plans, 3/3 success criteria, VERIFICATION passed (re-verified 2026-06-12 after gap closure). The pricing table covers all v1.0.1 model IDs; `BudgetBlocked` surfaces on the Project CR and on the dashboard project node (`blockingConditions` API field → `ConditionBadge` purple pill + blocked border, with `BillingHalt` riding the same mechanism); in-flight overshoot is bounded by the ReservationStore dispatch gate. Validated in Phase 14: BUDGET-01, BUDGET-02, BUDGET-03.
+Phase 15 (paper-cuts) complete — 7/7 plans, 7/7 success criteria, VERIFICATION passed. All seven run-1 paper cuts closed: universal `tideproject.k8s/project` label stamping (`owner.StampProjectLabel`) + reconciler backfill so `tide approve` discovers gated levels first call; clean-tree boundary push pinned (finding 8); AwaitingApproval oscillation convergence pinned (finding 2); `tide artifact-get` runs a real inspector pod streaming artifact bytes to stdout with readiness wait; dashboard `Complete` chip + `KNOWN_STATUS_VALUES` consolidation; cross-plan running-waves view (server-side `waves.snapshot` SSE aggregate + `RunningWavesView` right-pane default); file-touch overlap enforcement seated in the PlanReconciler dispatch gate (park-not-fail, `ValidationState=FileTouchMismatch`) + planner prompt rule. Validated in Phase 15: CUTS-01..CUTS-07. Code review noted one PRE-EXISTING Critical (plan_controller envelope-read transient → terminal Failed, from phase 03-08) for follow-up — not Phase-15-introduced.
 
-**Next:** Phase 15 — paper-cuts (CUTS-01 … CUTS-07).
+**Next:** Phase 16 — telemetry-completion (TELEM-01 … TELEM-06).
