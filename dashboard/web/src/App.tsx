@@ -12,6 +12,7 @@ import TaskDetailDrawer from "./components/TaskDetailDrawer";
 import PodLogStreamer from "./components/PodLogStreamer";
 import ProjectPicker from "./components/ProjectPicker";
 import EmptyState from "./components/EmptyState";
+import RunningWavesView from "./components/RunningWavesView";
 import LoadingState from "./components/LoadingState";
 import ErrorState from "./components/ErrorState";
 import { useProjects } from "./lib/projects";
@@ -64,18 +65,23 @@ import type { SSEState } from "./lib/sse";
 /**
  * A 28px header strip labelling each DAG pane (UI-SPEC — pane labels). Mono
  * 12px semibold muted text over a subtle bottom border.
+ *
+ * UI-SPEC C4 (15-07-PLAN.md): optional `action` slot for right-aligned
+ * affordances (e.g. the EXECUTION pane's "All waves" return button). The
+ * PLANNING pane call is untouched and passes no action.
  */
-function PaneHeader({ label }: { label: string }) {
+function PaneHeader({ label, action }: { label: string; action?: React.ReactNode }) {
   return (
     <div
-      className="flex h-7 shrink-0 items-center border-b border-[var(--color-border-subtle)] px-3 text-[var(--color-text-muted)]"
+      className="flex h-7 shrink-0 items-center justify-between border-b border-[var(--color-border-subtle)] px-3 text-[var(--color-text-muted)]"
       style={{
         fontFamily: "var(--font-mono)",
         fontSize: "12px",
         fontWeight: 600,
       }}
     >
-      {label}
+      <span>{label}</span>
+      {action}
     </div>
   );
 }
@@ -212,8 +218,49 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-col overflow-hidden rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
-          <PaneHeader label="EXECUTION" />
+          {/* UI-SPEC C4 (15-07-PLAN.md): EXECUTION PaneHeader gains an "All waves"
+              return button when a plan is selected — clears selectedPlan + URL hash
+              so the right pane returns to the RunningWavesView aggregate (D-13). */}
+          <PaneHeader
+            label="EXECUTION"
+            action={
+              selectedPlan ? (
+                <button
+                  data-testid="execution-pane-all-waves"
+                  aria-label="Show all running waves"
+                  onClick={() => {
+                    setSelectedPlan(null);
+                    // Mirror how onPlanClick writes the hash — clear it symmetrically.
+                    history.replaceState(null, "", window.location.pathname + window.location.search);
+                  }}
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-primary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-muted)";
+                  }}
+                >
+                  All waves
+                </button>
+              ) : undefined
+            }
+          />
           <div className="min-h-0 flex-1">
+            {/* UI-SPEC C4 / D-13 (15-07-PLAN.md): replace the "Select a plan" empty
+                state with RunningWavesView as the right-pane default. The
+                selectedPlan !== null branch (ExecutionDAGView) is unchanged. */}
             {selectedPlan ? (
               <ExecutionDAGView
                 planName={selectedPlan}
@@ -221,12 +268,10 @@ export default function App() {
                 onTaskClick={onTaskClick}
               />
             ) : (
-              <div
-                className="flex h-full items-center justify-center text-[var(--color-text-muted)]"
-                style={{ fontFamily: "var(--font-mono)", fontSize: "13px" }}
-              >
-                Select a plan to view its execution DAG
-              </div>
+              <RunningWavesView
+                projectName={selectedProject ?? ""}
+                onPlanClick={onPlanClick}
+              />
             )}
           </div>
         </div>
