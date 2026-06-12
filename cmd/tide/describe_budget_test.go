@@ -123,21 +123,6 @@ func TestArtifactGetRefParsingValid(t *testing.T) {
 	}
 }
 
-func TestArtifactGetDryRunPrintsPodSpec(t *testing.T) {
-	var buf bytes.Buffer
-	if err := artifactGetDryRun("default/my-project/envelopes/abc/out.json", &buf); err != nil {
-		t.Fatalf("artifactGetDryRun: %v", err)
-	}
-	got := buf.String()
-	for _, want := range []string{
-		"namespace: default",
-		"project: my-project",
-		"path: envelopes/abc/out.json",
-		"image: busybox",
-		"cat /workspace/artifacts/envelopes/abc/out.json",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("expected %q in dry-run output:\n%s", want, got)
-		}
-	}
-}
+// TestArtifactGetDryRunPrintsPodSpec was removed in plan 15-03: the dry-run
+// stub (artifactGetDryRun) is gone; the real inspector-pod path replaces it.
+// Finding-3 regression coverage lives in artifact_get_run_test.go.

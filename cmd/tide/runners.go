@@ -63,11 +63,3 @@ func runDescribeBudget(cmd *cobra.Command, args []string) error {
 	}
 	return describeBudgetRun(cmd.Context(), c, ns, project, outputFormat, cmd.OutOrStdout())
 }
-
-// runArtifactGet is the cobra RunE adapter for `tide artifact-get`. v1.0
-// implementation is dry-run-only — the real apiserver pod-exec proxy lands
-// alongside the kind harness work in plan 04-14. Dry-run is exercised by
-// tests and documents the pod spec that WOULD be created.
-func runArtifactGet(cmd *cobra.Command, args []string) error {
-	return artifactGetDryRun(args[0], cmd.OutOrStdout())
-}
