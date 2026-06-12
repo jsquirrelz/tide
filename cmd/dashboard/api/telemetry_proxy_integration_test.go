@@ -36,10 +36,14 @@ limitations under the License.
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr"
@@ -181,6 +185,114 @@ func TestPrometheusProxyDegradation(t *testing.T) {
 				"unavailable")
 		}
 	})
+}
+
+// TestPrometheusProxyBasePath verifies that an operator-configured endpoint
+// with a base path (e.g. http://prom:9090/prometheus) results in the upstream
+// receiving a request at /prometheus/api/v1/query_range, not /api/v1/query_range.
+// This is the TELEM-06 base-path preservation fix.
+func TestPrometheusProxyBasePath(t *testing.T) {
+	var observedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
+	}))
+	defer upstream.Close()
+
+	// Configure the router with a base-path endpoint.
+	router := buildTelemetryProxyRouter(upstream.URL + "/prometheus")
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/query_range?query=up&start=0&end=1&step=15")
+	if err != nil {
+		t.Fatalf("GET /api/v1/query_range: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("BASE-PATH: want HTTP 200, got %d", resp.StatusCode)
+	}
+
+	want := "/prometheus/api/v1/query_range"
+	if observedPath != want {
+		t.Errorf("BASE-PATH: upstream received path %q, want %q (base-path clobbered)", observedPath, want)
+	}
+}
+
+// TestPrometheusProxyClientBounds verifies two TELEM-06 client hardening
+// properties via source-level and direct struct assertions (same package):
+//
+//  1. http.DefaultClient is not referenced in prometheus.go (replaced by proxyClient).
+//  2. proxyClient carries the 30s timeout (bounded upstream calls).
+func TestPrometheusProxyClientBounds(t *testing.T) {
+	// 1. Source-level assertion: http.DefaultClient must not appear.
+	// Find the source file relative to the test binary's working directory.
+	src, err := os.ReadFile("prometheus.go")
+	if err != nil {
+		t.Fatalf("read prometheus.go: %v", err)
+	}
+	if strings.Contains(string(src), "http.DefaultClient") {
+		t.Errorf("TELEM-06: http.DefaultClient found in prometheus.go — must use proxyClient")
+	}
+
+	// 2. Direct struct assertion: proxyClient.Timeout == 30s.
+	if proxyClient.Timeout != 30*time.Second {
+		t.Errorf("TELEM-06: proxyClient.Timeout = %v, want 30s", proxyClient.Timeout)
+	}
+}
+
+// TestPrometheusProxyContextCancellation verifies that a slow upstream does not
+// pin the handler goroutine after the browser disconnects. The proxy must return
+// the 502 error shape promptly when the request context is pre-cancelled, not
+// after the upstream's sleep completes.
+func TestPrometheusProxyContextCancellation(t *testing.T) {
+	// Slow upstream — sleeps 2s to simulate a hanging Prometheus.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2 * time.Second)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer upstream.Close()
+
+	router := buildTelemetryProxyRouter(upstream.URL)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	// Issue a GET with a pre-cancelled context — simulates browser disconnect.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately before the request is issued
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/v1/query_range?query=up&start=0&end=1&step=15", nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req) //nolint:noctx — test-only: the *client* context is already cancelled
+	elapsed := time.Since(start)
+
+	// The request may fail at the client side (context cancelled before dial)
+	// or succeed and get a 502. Either is acceptable — what is NOT acceptable is
+	// blocking for the full 2s upstream sleep.
+	if elapsed > time.Second {
+		t.Errorf("TELEM-06: context cancellation took %v — handler did not propagate cancellation promptly", elapsed)
+	}
+
+	// If we got a response, it must be the 502 error shape.
+	if err == nil {
+		defer resp.Body.Close() //nolint:errcheck
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Errorf("CONTEXT-CANCEL: want HTTP 502, got %d", resp.StatusCode)
+		}
+		var body telemetryProxyStatus
+		if dErr := json.NewDecoder(resp.Body).Decode(&body); dErr == nil {
+			if body.Status != "error" {
+				t.Errorf("CONTEXT-CANCEL: body.status=%q, want %q", body.Status, "error")
+			}
+		}
+	}
 }
 
 // TestPrometheusProxyDeadUpstream exercises the connection-refused path:

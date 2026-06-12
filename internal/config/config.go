@@ -45,6 +45,10 @@ type Config struct {
 	PlannerConcurrency      int                     `yaml:"plannerConcurrency"`
 	ExecutorConcurrency     int                     `yaml:"executorConcurrency"`
 	MaxConcurrentReconciles MaxConcurrentReconciles `yaml:"maxConcurrentReconciles"`
+	// PrometheusEndpoint is the Prometheus base URL injected by Helm's
+	// prometheusEndpoint value. Empty is valid — the dashboard proxy self-degrades.
+	// YAML key: prometheusEndpoint. Env override: PROM_ENDPOINT.
+	PrometheusEndpoint string `yaml:"prometheusEndpoint"`
 }
 
 // MaxConcurrentReconciles is the per-Kind reconciler concurrency map. Each
@@ -72,10 +76,12 @@ type MaxConcurrentReconciles struct {
 // "field omitted" (nil → apply default) from "field explicitly zero or
 // negative" (validation error). yaml.v3 leaves *int fields nil when the key
 // is absent and sets them to the decoded value (including 0) when present.
+// PrometheusEndpoint uses *string so we can distinguish "omitted" from "empty".
 type rawConfig struct {
 	PlannerConcurrency      *int             `yaml:"plannerConcurrency"`
 	ExecutorConcurrency     *int             `yaml:"executorConcurrency"`
 	MaxConcurrentReconciles rawMaxConcurrent `yaml:"maxConcurrentReconciles"`
+	PrometheusEndpoint      *string          `yaml:"prometheusEndpoint"`
 }
 
 type rawMaxConcurrent struct {
@@ -106,6 +112,14 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	if err := applyAndValidate(&raw, cfg); err != nil {
 		return nil, err
+	}
+	// Apply PrometheusEndpoint from YAML if present (empty string is valid —
+	// the proxy self-degrades). Env override PROM_ENDPOINT wins when non-empty.
+	if raw.PrometheusEndpoint != nil {
+		cfg.PrometheusEndpoint = *raw.PrometheusEndpoint
+	}
+	if v := os.Getenv("PROM_ENDPOINT"); v != "" {
+		cfg.PrometheusEndpoint = v
 	}
 	return cfg, nil
 }
