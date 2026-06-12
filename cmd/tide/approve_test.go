@@ -216,6 +216,63 @@ func TestApproveFailedLevelErrorIncludesReason(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// CUTS-01 finding-6 regression: label-filtered discovery (D-02)
+// ---------------------------------------------------------------------------
+
+// TestApproveUnlabeledMilestoneNotDiscovered is the SYMPTOM case for CUTS-01
+// run-1 finding 6: a Milestone at AwaitingApproval WITHOUT the
+// tideproject.k8s/project label is NOT discovered by findAwaitingMilestone —
+// the caller gets "no level awaiting approval" despite a parked CR.
+//
+// D-02 locks `tide approve` discovery to label-filter-only; the test pins that
+// contract so a future "helpful" OwnerRef fallback does not silently change
+// the approved surface (T-15-01 mitigation).
+func TestApproveUnlabeledMilestoneNotDiscovered(t *testing.T) {
+	p := makeProject("proj-unlabeled")
+	ms := &tidev1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-unlabeled",
+			Namespace: "default",
+			// Labels intentionally absent — reproduces pre-Phase-15 reporter shape.
+		},
+		Spec:   tidev1alpha1.MilestoneSpec{ProjectRef: "proj-unlabeled"},
+		Status: tidev1alpha1.MilestoneStatus{Phase: "AwaitingApproval"},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	err := approveRun(context.Background(), c, "default", "proj-unlabeled", "", nil)
+	if err == nil {
+		t.Fatal("expected 'no level awaiting approval' error for unlabeled Milestone; got nil")
+	}
+	if strings.Contains(err.Error(), "ms-unlabeled") {
+		t.Errorf("unlabeled Milestone should NOT be discovered by label-filter; got error mentioning it: %q", err.Error())
+	}
+}
+
+// TestApproveLabeledMilestoneDiscoveredFirstCall is the FIX case for CUTS-01
+// run-1 finding 6: a Milestone at AwaitingApproval WITH the
+// tideproject.k8s/project label (as MaterializeChildCRDs now stamps via D-01)
+// IS discovered on the FIRST approveRun call — no "no level awaiting approval"
+// false negative.
+func TestApproveLabeledMilestoneDiscoveredFirstCall(t *testing.T) {
+	p := makeProject("proj-labeled")
+	ms := makeMilestoneAwaiting("ms-labeled", "proj-labeled")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
+
+	if err := approveRun(context.Background(), c, "default", "proj-labeled", "", nil); err != nil {
+		t.Fatalf("approveRun on labeled Milestone: %v — should discover it on first call (CUTS-01 fix)", err)
+	}
+
+	var got tidev1alpha1.Milestone
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-labeled"}, &got); err != nil {
+		t.Fatalf("get milestone: %v", err)
+	}
+	if v := got.Annotations["tideproject.k8s/approve-milestone"]; v != "true" {
+		t.Errorf("approve annotation not written; annotations=%v", got.Annotations)
+	}
+}
+
 // TestApproveFailedLevelNoAnnotationWritten asserts that when a Failed level
 // blocks approval, no approve annotation is written on the Milestone —
 // approval never doubles as a spend-retry (T-12-05).
