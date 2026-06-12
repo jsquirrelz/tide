@@ -16,7 +16,7 @@
 - [x] **Phase 13: Dispatch Image Resolution + Provider Halt** - Implement image-resolution chain at all dispatch sites + billing-400 project-wide halt (completed 2026-06-11)
 - [x] **Phase 14: Budget Enforcement + Pricing** - Current model IDs in pricing table + BudgetBlocked condition + in-flight overshoot bound (completed 2026-06-12)
 - [x] **Phase 15: Paper Cuts** - Reporter CR labels, boundary push no-op, phase status flapping, artifact-get stub, dashboard chip + wave view, file-touch overlap (completed 2026-06-12)
-- [ ] **Phase 16: Telemetry Completion** - PROM_ENDPOINT wiring, TelemetryView tab, six locked metrics, PromQL name alignment, Makefile gate, proxy client timeout
+- [x] **Phase 16: Telemetry Completion** - PROM_ENDPOINT wiring, TelemetryView tab, six locked metrics, PromQL name alignment, Makefile gate, proxy client timeout (completed 2026-06-12)
 
 ## Phase Details
 
@@ -179,7 +179,7 @@ Plans:
 
 **Wave 2** *(blocked on 16-04)*
 
-- [ ] 16-05-PLAN.md — TELEM-02 (mount): header DAGs|Telemetry view switcher, TelemetryView body branch, App-level Vitest
+- [x] 16-05-PLAN.md — TELEM-02 (mount): header DAGs|Telemetry view switcher, TelemetryView body branch, App-level Vitest
 
 ## Progress
 
@@ -193,4 +193,4 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 16. Telemetry Completion | v1.0.1 | 4/5 | In Progress|  |
+| 16. Telemetry Completion | v1.0.1 | 5/5 | Complete   | 2026-06-12 |
