@@ -280,6 +280,87 @@ func TestInformerBridgePublishesMilestoneCreateWithProjectKey(t *testing.T) {
 	}
 }
 
+// TestInformerBridgePublishesOnStatusOnlyProjectUpdate pins the contract that
+// status-only Project updates MUST publish through the informer bridge.
+// The BudgetBlocked dashboard badge (BUDGET-02) depends on it: the controller
+// issues a status-only MergeFrom patch when setBudgetBlockedIfNeeded fires;
+// that patch produces an informer UpdateFunc call which must reach
+// hub.Publish("alpha", "project.update") so PlanningDAGView can re-fetch
+// ProjectDetail and render the badge.
+//
+// Today newKindHandler's UpdateFunc publishes unconditionally (no old/new diff
+// filter). This test pins that contract so a future "skip no-op updates"
+// optimization cannot silently filter status-only condition changes and kill
+// the badge's liveness.
+func TestInformerBridgePublishesOnStatusOnlyProjectUpdate(t *testing.T) {
+	fc := newFakeCache(testInformerScheme(t))
+	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).Build()
+	h := hub.NewHub(testr.New(t))
+
+	if err := BridgeInformerToHub(context.Background(), fc, c, h, testr.New(t)); err != nil {
+		t.Fatalf("BridgeInformerToHub: %v", err)
+	}
+
+	// Subscribe BEFORE firing the synthetic event so we capture it.
+	sub := h.Subscribe("alpha", 0)
+	defer h.Unsubscribe(sub)
+
+	handler := fc.handlerForKind("Project")
+	if handler == nil {
+		t.Fatal("no Project handler registered")
+	}
+
+	// oldObj and newObj are identical Projects except:
+	//   - newObj.Status.Conditions gains a True BudgetBlocked metav1.Condition
+	//   - newObj.ResourceVersion is bumped ("1" → "2")
+	// This mirrors the shape of a controller status-only MergeFrom patch.
+	oldObj := &tidev1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "alpha",
+			Namespace:       "default",
+			ResourceVersion: "1",
+		},
+		Status: tidev1alpha1.ProjectStatus{Phase: "Running"},
+	}
+	newObj := &tidev1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            "alpha",
+			Namespace:       "default",
+			ResourceVersion: "2",
+		},
+		Status: tidev1alpha1.ProjectStatus{
+			Phase: "Running",
+			Conditions: []metav1.Condition{
+				{
+					Type:               tidev1alpha1.ConditionBudgetBlocked,
+					Status:             metav1.ConditionTrue,
+					Reason:             "BudgetCapReached",
+					Message:            "cap reached",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+
+	handler.OnUpdate(oldObj, newObj)
+
+	select {
+	case ev := <-sub.Events():
+		if ev.Type != "project.update" {
+			t.Errorf("event Type = %q, want %q", ev.Type, "project.update")
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.JSON, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		if payload["name"] != "alpha" {
+			t.Errorf("payload name = %v, want alpha", payload["name"])
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("hub.Publish was not called within 200ms of OnUpdate (status-only Project update)")
+	}
+}
+
 // testInformerScheme returns a runtime.Scheme populated with all v1alpha1
 // types + corev1 (needed by logs_sse_test.go for Pod registration). Same
 // shape as the controller's scheme but bare so this test stays fast.
