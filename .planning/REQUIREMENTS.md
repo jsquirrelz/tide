@@ -45,12 +45,12 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 ### Telemetry Completion (TELEM)
 
-- [ ] **TELEM-01**: The dashboard reads `PROM_ENDPOINT` into `Dependencies.PrometheusEndpoint` — the helm-injected env actually drives the PromQL proxy (dead config today: helm injects, nothing reads)
-- [ ] **TELEM-02**: TelemetryView is mounted as a Telemetry tab in AppShell with Vitest coverage of both degradation shapes (200 `unavailable` sentinel and 502 error)
-- [ ] **TELEM-03**: The six locked metrics (`tide_tokens_{input,output,cache_read,cache_creation}_total`, `tide_cost_cents_total`, `tide_task_duration_seconds`) are emitted from the TaskReconciler terminal branch with `{project, phase, wave}` labels per the merged MILESTONE.md table
-- [ ] **TELEM-04**: TelemetryView PromQL queries use the locked metric names (two of four panels query nonexistent names: `tide_tasks_dispatched_total`, `tide_tokens_used_total{model}`)
-- [ ] **TELEM-05**: The `hack/helm` telemetry gate scripts are wired into the Makefile (docstrings claim `make helm-rbac-assert` drives them; nothing does)
-- [ ] **TELEM-06**: PrometheusHandler uses a bounded HTTP client (timeout + request-context propagation) and preserves base paths in the configured endpoint URL
+- [x] **TELEM-01**: The dashboard reads `PROM_ENDPOINT` into `Dependencies.PrometheusEndpoint` — the helm-injected env actually drives the PromQL proxy (dead config today: helm injects, nothing reads)
+- [x] **TELEM-02**: TelemetryView is mounted as a Telemetry tab in AppShell with Vitest coverage of both degradation shapes (200 `unavailable` sentinel and 502 error)
+- [x] **TELEM-03**: The six locked metrics (`tide_tokens_{input,output,cache_read,cache_creation}_total`, `tide_cost_cents_total`, `tide_task_duration_seconds`) are emitted from the TaskReconciler terminal branch with `{project, phase, wave}` labels per the merged MILESTONE.md table
+- [x] **TELEM-04**: TelemetryView PromQL queries use the locked metric names (two of four panels query nonexistent names: `tide_tasks_dispatched_total`, `tide_tokens_used_total{model}`)
+- [x] **TELEM-05**: The `hack/helm` telemetry gate scripts are wired into the Makefile (docstrings claim `make helm-rbac-assert` drives them; nothing does)
+- [x] **TELEM-06**: PrometheusHandler uses a bounded HTTP client (timeout + request-context propagation) and preserves base paths in the configured endpoint URL
 
 ## Future Requirements
 
@@ -95,12 +95,12 @@ Which phases cover which requirements.
 | CUTS-05 | Phase 15 | Complete |
 | CUTS-06 | Phase 15 | Complete |
 | CUTS-07 | Phase 15 | Complete |
-| TELEM-01 | Phase 16 | Pending |
-| TELEM-02 | Phase 16 | Pending |
-| TELEM-03 | Phase 16 | Pending |
-| TELEM-04 | Phase 16 | Pending |
-| TELEM-05 | Phase 16 | Pending |
-| TELEM-06 | Phase 16 | Pending |
+| TELEM-01 | Phase 16 | Complete |
+| TELEM-02 | Phase 16 | Complete |
+| TELEM-03 | Phase 16 | Complete |
+| TELEM-04 | Phase 16 | Complete |
+| TELEM-05 | Phase 16 | Complete |
+| TELEM-06 | Phase 16 | Complete |
 
 **Coverage:**
 - v1.0.1 requirements: 24 total
