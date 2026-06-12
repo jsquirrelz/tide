@@ -829,6 +829,10 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		if patchErr := r.Status().Patch(ctx, task, patch); patchErr != nil {
 			return ctrl.Result{}, patchErr
 		}
+		// Deliberate exclusion: EnvelopeReadFailed performs no budget.RollUpUsage
+		// and no emitTaskMetrics — task counters keep strict parity with the D-12
+		// budget-rollup commit points (seams 1 and 2 only, per CR-02 scope). Widening
+		// to envelope-less failures is a deliberate non-goal of this gap closure.
 		return ctrl.Result{}, nil
 	}
 
@@ -861,7 +865,8 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// Emit six locked metrics at the same once-only terminal commit point as
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
-			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+			// OutputValidationError is a controller-side policy failure → "internal" reason.
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal"); emitErr != nil {
 				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
@@ -893,7 +898,8 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// Emit six locked metrics at the same once-only terminal commit point as
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
-			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+			// OutputPathsViolation is a controller-side policy failure → "internal" reason.
+			if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, "internal"); emitErr != nil {
 				logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
@@ -949,7 +955,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Emit six locked metrics at the same once-only terminal commit point as
 	// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 	// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
-	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt); emitErr != nil {
+	// Compute the bounded metric reason from the envelope result; "" = Succeeded.
+	var metricReason string
+	if task.Status.Phase == "Failed" {
+		metricReason = metricFailureReason(out.Result, out.ExitCode)
+	}
+	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricReason); emitErr != nil {
 		logger.Error(emitErr, "failed to emit task metrics (non-fatal)", "task", task.Name)
 	}
 
@@ -1001,6 +1012,35 @@ func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha1.Task) string {
 	return "unknown"
 }
 
+// metricFailureReason maps an envelope result string and exit code onto the
+// bounded six-value reason enum documented in internal/metrics/registry.go:
+//
+//	cap-hit               → "budget"  (Phase 2 D-D2 billing halt)
+//	output-paths-violation→ "internal" (policy violation surfaced controller-side)
+//	any other + exitCode≠0 → "exit-1"  (subagent CLI non-zero without specific class)
+//	default               → "internal" (defensive; only reachable if the :905
+//	                                    failure predicate changes — treat as TIDE bug)
+//
+// T-16-21 (cardinality bomb): envelope free-text NEVER becomes a label value —
+// this function is the only code path that produces reason label strings.
+// conditionReasonFromEnvelopeResult is deliberately NOT reused here because it
+// capitalises arbitrary envelope result strings and is unbounded (Pitfall 17).
+func metricFailureReason(envelopeResult string, exitCode int) string {
+	switch envelopeResult {
+	case "cap-hit":
+		return "budget"
+	case "output-paths-violation":
+		// Policy violation surfaced by the controller (not a CLI exit class).
+		return "internal"
+	default:
+		if exitCode != 0 {
+			return "exit-1"
+		}
+		// Defensive default — only reachable if the :905 failure predicate changes.
+		return "internal"
+	}
+}
+
 // emitTaskMetrics emits the six locked Phase 16 TELEM-03 metrics at the exact
 // terminal commit point shared with budget.RollUpUsage (D-12). Resolves the
 // four label values: project from the owning Project CRD name; phase from the
@@ -1008,7 +1048,14 @@ func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha1.Task) string {
 // on Tasks); plan from task.Spec.PlanRef; wave from resolveWave. Any resolution
 // miss falls back to "unknown" (sentinel, D-09). Failures are non-fatal — the
 // task is already in terminal state.
-func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, usage pkgdispatch.Usage, completedAt time.Time) error {
+//
+// failureReason is the bounded metric reason string (see metricFailureReason).
+// Empty string signals Succeeded — increments TasksCompletedTotal. Non-empty
+// increments TasksFailedTotal with the given reason. Note: TasksCompletedTotal
+// and TasksFailedTotal carry only {project, phase, plan} (no wave label) per
+// registry.go — arity differs from the six TELEM-03 metrics above.
+func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string) error {
+	logger := logf.FromContext(ctx)
 	wave := r.resolveWave(task)
 	projectName := project.Name
 
@@ -1037,9 +1084,29 @@ func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv
 	tidemetrics.TokensCacheCreationTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheCreationTokens))
 	tidemetrics.CostCentsTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.EstimatedCostCents))
 
+	// WR-04: guard against negative durations from stale envelopes or manager↔pod
+	// clock skew. Compute a signed duration; only observe when d >= 0. On negative,
+	// log at V(1) as a stale-envelope / clock-skew signal and skip the observation —
+	// observing a negative value would drag the histogram _sum permanently negative.
 	if task.Status.StartedAt != nil && !completedAt.IsZero() {
-		duration := completedAt.Sub(task.Status.StartedAt.Time)
-		tidemetrics.TaskDurationSeconds.WithLabelValues(projectName, phase, plan, wave).Observe(duration.Seconds())
+		d := completedAt.Sub(task.Status.StartedAt.Time)
+		if d >= 0 {
+			tidemetrics.TaskDurationSeconds.WithLabelValues(projectName, phase, plan, wave).Observe(d.Seconds())
+		} else {
+			logger.V(1).Info("skipping negative task duration (stale envelope or clock skew)",
+				"task", task.Name,
+				"startedAt", task.Status.StartedAt.Time,
+				"completedAt", completedAt,
+				"durationSeconds", d.Seconds())
+		}
+	}
+
+	// CR-02: emit task completion/failure counters with {project, phase, plan} (3-label,
+	// no wave). These counters power the Dispatch Counts and Failure Rate panels.
+	if failureReason == "" {
+		tidemetrics.TasksCompletedTotal.WithLabelValues(projectName, phase, plan).Inc()
+	} else {
+		tidemetrics.TasksFailedTotal.WithLabelValues(projectName, phase, plan, failureReason).Inc()
 	}
 	return nil
 }
