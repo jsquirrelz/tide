@@ -83,6 +83,7 @@ func TestReservationStore_HasHeadroom(t *testing.T) {
 	cases := []struct {
 		name         string
 		cap          int64
+		rollingCap   int64
 		spent        int64
 		reserved     int64
 		estimate     int64
@@ -116,6 +117,26 @@ func TestReservationStore_HasHeadroom(t *testing.T) {
 			wantHeadroom: true,
 		},
 		{
+			name: "rolling cap tighter than absolute cap blocks",
+			cap:  100000, rollingCap: 1000, spent: 400, reserved: 300, estimate: 300,
+			wantHeadroom: false, // 400+300+300=1000 >= rolling 1000, despite huge absolute headroom
+		},
+		{
+			name: "rolling cap only (no absolute cap) blocks",
+			cap:  0, rollingCap: 1000, spent: 900, reserved: 50, estimate: 100,
+			wantHeadroom: false, // 900+50+100=1050 > rolling 1000
+		},
+		{
+			name: "rolling cap looser than absolute cap — absolute still binds",
+			cap:  1000, rollingCap: 100000, spent: 900, reserved: 50, estimate: 100,
+			wantHeadroom: false, // 900+50+100=1050 > absolute 1000
+		},
+		{
+			name: "under both caps",
+			cap:  1000, rollingCap: 900, spent: 400, reserved: 100, estimate: 200,
+			wantHeadroom: true, // 400+100+200=700 < min(1000, 900)
+		},
+		{
 			name:         "nil project",
 			nilProject:   true,
 			wantHeadroom: true,
@@ -141,12 +162,13 @@ func TestReservationStore_HasHeadroom(t *testing.T) {
 			var project *tidev1alpha1.Project
 			if !tc.nilProject {
 				project = makeProjectWithBudget(tc.cap, tc.spent)
+				project.Spec.Budget.RollingWindowCapCents = tc.rollingCap
 			}
 
 			got := store.HasHeadroom(project, tc.estimate)
 			if got != tc.wantHeadroom {
-				t.Errorf("HasHeadroom(cap=%d, spent=%d, reserved=%d, estimate=%d) = %v; want %v",
-					tc.cap, tc.spent, tc.reserved, tc.estimate, got, tc.wantHeadroom)
+				t.Errorf("HasHeadroom(cap=%d, rollingCap=%d, spent=%d, reserved=%d, estimate=%d) = %v; want %v",
+					tc.cap, tc.rollingCap, tc.spent, tc.reserved, tc.estimate, got, tc.wantHeadroom)
 			}
 		})
 	}

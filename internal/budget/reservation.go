@@ -111,9 +111,18 @@ func (s *ReservationStore) TotalReserved() int64 {
 // Blocking condition (D-05): dispatch blocks when spent + reserved + estimate >= cap.
 // Equivalently, headroom exists only when committed+estimatedCents < cap (strict less-than).
 //
+// The effective cap is the tightest configured cap: IsCapExceeded enforces
+// BOTH AbsoluteCapCents and RollingWindowCapCents, so the reservation gate
+// must bound in-flight estimates against both as well — otherwise a wide wave
+// commits unbounded estimates against the rolling window and the rolling cap
+// only trips after roll-up (run-1 wave-wide overshoot class). CostSpentCents
+// is window-relative once a rolling cap is configured (MaybeResetWindow zeros
+// it), the same value IsCapExceeded compares against both caps.
+//
 // Returns true (permissive) when:
 //   - project is nil
-//   - Spec.Budget.AbsoluteCapCents <= 0 (zero or negative cap = unlimited)
+//   - no cap is configured (both AbsoluteCapCents and RollingWindowCapCents <= 0;
+//     zero or negative = unlimited)
 //   - s is nil (store not configured — pre-Phase-14 code paths)
 func (s *ReservationStore) HasHeadroom(project *tidev1alpha1.Project, estimatedCents int64) bool {
 	if s == nil {
@@ -122,12 +131,21 @@ func (s *ReservationStore) HasHeadroom(project *tidev1alpha1.Project, estimatedC
 	if project == nil {
 		return true
 	}
-	cap := project.Spec.Budget.AbsoluteCapCents
-	if cap <= 0 {
+	absCap := project.Spec.Budget.AbsoluteCapCents
+	rollCap := project.Spec.Budget.RollingWindowCapCents
+	var capCents int64
+	switch {
+	case absCap > 0 && rollCap > 0:
+		capCents = min(absCap, rollCap)
+	case absCap > 0:
+		capCents = absCap
+	case rollCap > 0:
+		capCents = rollCap
+	default:
 		return true
 	}
 	committed := project.Status.Budget.CostSpentCents + s.TotalReserved()
-	return committed+estimatedCents < cap
+	return committed+estimatedCents < capCents
 }
 
 // RederiveReservations scans active Jobs carrying the reservedCostLabel label
