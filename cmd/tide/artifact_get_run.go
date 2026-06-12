@@ -99,7 +99,7 @@ func parseArtifactRef(ref string) (namespace, project, path string, err error) {
 // injection or directory traversal (T-15-08). Rejected patterns:
 //   - ".." component (directory traversal)
 //   - absolute path (leading "/")
-//   - shell metacharacters: quotes, backticks, $, ;, &, |, whitespace
+//   - shell metacharacters: single/double quotes, backtick, $, ;, &, |, whitespace
 func validateArtifactPath(path string) error {
 	// Directory traversal guard.
 	for _, part := range strings.Split(path, "/") {
@@ -112,9 +112,11 @@ func validateArtifactPath(path string) error {
 		return fmt.Errorf("artifact path %q must not be absolute", path)
 	}
 	// Shell metacharacter guard — path is passed via env var but defense in depth.
-	const shellMeta = `'"` + "`" + `$;&| \t\n`
+	// Use explicit rune checks rather than a raw-string constant to avoid
+	// confusing \t/\n escape sequences in backtick literals.
 	for _, r := range path {
-		if strings.ContainsRune(shellMeta, r) {
+		switch r {
+		case '\'', '"', '`', '$', ';', '&', '|', ' ', '\t', '\n', '\r':
 			return fmt.Errorf("artifact path %q contains shell metacharacter %q", path, r)
 		}
 	}
