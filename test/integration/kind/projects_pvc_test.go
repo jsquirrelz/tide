@@ -216,6 +216,53 @@ func TestHelmDeploymentTemplateEmptyImageFailsRender(t *testing.T) {
 	}
 }
 
+// TestHelmDeploymentTemplateBudgetReserveDefaultArg verifies that helm template
+// with default values renders --budget-reserve-per-dispatch-cents=100 in the
+// manager args and does NOT render --pricing-overrides-json (D-02/D-05, Phase 14-05).
+func TestHelmDeploymentTemplateBudgetReserveDefaultArg(t *testing.T) {
+	chartDir := filepath.Join("..", "..", "..", "charts", "tide")
+	cmd := exec.Command("helm", "template", "tide", chartDir)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\n%s", err, out)
+	}
+	outStr := string(out)
+	const wantArg = "--budget-reserve-per-dispatch-cents=100"
+	if !strings.Contains(outStr, wantArg) {
+		t.Fatalf("default render must contain %q; got output (args section):\n%s",
+			wantArg, outStr)
+	}
+	const notWantArg = "--pricing-overrides-json"
+	if strings.Contains(outStr, notWantArg) {
+		t.Fatalf("default render must NOT contain %q (pricing.overrides is empty by default); got:\n%s",
+			notWantArg, outStr)
+	}
+}
+
+// TestHelmDeploymentTemplatePricingOverridesArg verifies that helm template with
+// pricing.overrides set renders --pricing-overrides-json containing the model key
+// (D-02, Phase 14-05).
+func TestHelmDeploymentTemplatePricingOverridesArg(t *testing.T) {
+	chartDir := filepath.Join("..", "..", "..", "charts", "tide")
+	cmd := exec.Command("helm", "template", "tide", chartDir,
+		"--set", "pricing.overrides.claude-test-model.inputCentsPerMTok=300",
+		"--set", "pricing.overrides.claude-test-model.outputCentsPerMTok=1500",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template with pricing.overrides failed: %v\n%s", err, out)
+	}
+	outStr := string(out)
+	const wantKey = "claude-test-model"
+	const wantFlag = "--pricing-overrides-json"
+	if !strings.Contains(outStr, wantFlag) {
+		t.Fatalf("render with pricing.overrides must contain %q; got:\n%s", wantFlag, outStr)
+	}
+	if !strings.Contains(outStr, wantKey) {
+		t.Fatalf("render with pricing.overrides must contain model key %q; got:\n%s", wantKey, outStr)
+	}
+}
+
 func readKindYAMLDocs(t *testing.T, path string) []kindYAMLDoc {
 	t.Helper()
 

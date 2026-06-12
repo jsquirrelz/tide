@@ -31,6 +31,10 @@ spec:
           - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
           - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
           - --rate-limit-default-burst={{ .Values.rateLimits.defaults.burst | default 10 }}
+          - --budget-reserve-per-dispatch-cents={{ .Values.budget.reservePerDispatchCents | default 100 }}
+          {{- if .Values.pricing.overrides }}
+          - --pricing-overrides-json={{ .Values.pricing.overrides | toJson }}
+          {{- end }}
           # phase2-args-injected
         command:
         - /manager

@@ -121,6 +121,22 @@ rateLimits:
     tokensPerMinute: 100000  # informational v1 — not yet enforced at the bucket level
     burst: 10
 
+# Pricing overrides (D-02): per-model price corrections merged OVER the compiled
+# priceTable at controller startup. Operators use this to correct price drift without
+# a TIDE release. Keys are exact model ID strings; values are cents per million tokens.
+# Passed to the controller via --pricing-overrides-json flag (JSON-encoded map).
+#
+# Example (all fields optional — omitted fields inherit compiled defaults):
+#   pricing:
+#     overrides:
+#       claude-some-future-model:
+#         inputCentsPerMTok: 300
+#         outputCentsPerMTok: 1500
+#         cacheReadCentsPerMTok: 30
+#         cacheWriteCentsPerMTok: 375
+pricing:
+  overrides: {}
+
 # Phase 2 image refs for credproxy sidecar + build/load tooling (D-A2).
 # images.stubSubagent.* keys are retained for image build/load tooling
 # (make test-int-kind-prep loads the stub image by tag), but are NO LONGER
@@ -243,6 +259,11 @@ signingKey:
 # Budget defaults (D-D2 / FAIL-04). Helm-driven hard caps applied to all Projects that
 # do not specify per-Project caps in Project.Spec.Budget.
 budget:
+  # D-05: flat per-dispatch reservation estimate in cents pre-charged against the budget
+  # cap at Job creation; bounds in-flight overshoot to estimate error instead of wave width;
+  # 0 disables pre-charge (cap still enforced at dispatch via the BudgetBlocked condition).
+  # Passed via --budget-reserve-per-dispatch-cents.
+  reservePerDispatchCents: 100
   defaults:
     absoluteCapCents: 10000      # $100.00 default absolute cap
     rollingWindowCapCents: 5000  # $50.00 / 15-min rolling window default

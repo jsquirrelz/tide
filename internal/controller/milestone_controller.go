@@ -105,6 +105,10 @@ type MilestoneReconciler struct {
 	// HelmProviderDefaults carry Helm-chart provider/model defaults.
 	HelmProviderDefaults ProviderDefaults
 
+	// PricingOverridesJSON is the validated D-02 override JSON forwarded
+	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
+	PricingOverridesJSON string
+
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
@@ -311,6 +315,14 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 				"milestone", ms.Name, "project", ms.Spec.ProjectRef)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
+		// BillingHalt (provider billing); both may be true simultaneously.
+		// No per-Milestone condition written (operator signal is the single Project BudgetBlocked condition).
+		if checkBudgetBlocked(earlyProject) && !budget.IsBypassed(earlyProject, time.Now()) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
+				"milestone", ms.Name, "project", ms.Spec.ProjectRef)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
 	}
 
 	// Step 3: Acquire plannerPool (POOL-01) before creating the Job (D-A4).
@@ -396,19 +408,20 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// envelope-writer init container, credproxy native sidecar, signed-token env,
 	// bounded ActiveDeadline via DefaultCaps, and 3 SecurityContexts.
 	opts := podjob.BuildOptions{
-		Kind:           podjob.JobKindPlanner,
-		ParentObj:      ms,
-		Level:          "milestone",
-		Attempt:        attempt,
-		Project:        project,
-		SignedToken:    token,
-		EnvelopeInJSON: envInJSON,
-		SubagentImage:  resolveImage(project, "milestone", r.HelmProviderDefaults),
-		CredproxyImage: r.CredproxyImage,
-		SecretUID:      secretUID,
-		PVCName:        "tide-projects",
-		ProjectUID:     string(project.UID),
-		Caps:           plannerCaps,
+		Kind:                 podjob.JobKindPlanner,
+		ParentObj:            ms,
+		Level:                "milestone",
+		Attempt:              attempt,
+		Project:              project,
+		SignedToken:          token,
+		EnvelopeInJSON:       envInJSON,
+		SubagentImage:        resolveImage(project, "milestone", r.HelmProviderDefaults),
+		CredproxyImage:       r.CredproxyImage,
+		SecretUID:            secretUID,
+		PVCName:              "tide-projects",
+		ProjectUID:           string(project.UID),
+		Caps:                 plannerCaps,
+		PricingOverridesJSON: r.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
