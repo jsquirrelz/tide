@@ -172,10 +172,10 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 16-01-PLAN.md — TELEM-01/06: PROM_ENDPOINT config + env wiring, PromQL proxy hardening (bounded client, ctx propagation, base-path preservation)
-- [ ] 16-02-PLAN.md — TELEM-03: six locked metrics registered + emitted at the three RollUpUsage terminal seams with {project, phase, plan, wave}
-- [ ] 16-03-PLAN.md — TELEM-05: helm-telemetry-assert + helm-assert Makefile targets, ci.yaml helm-lint step, docstring corrections
-- [ ] 16-04-PLAN.md — TELEM-04 + TELEM-02 (view): recharts charts, D-06 query fixes, scope/range toolbar, polling, budget grid, degradation Vitest
+- [x] 16-01-PLAN.md — TELEM-01/06: PROM_ENDPOINT config + env wiring, PromQL proxy hardening (bounded client, ctx propagation, base-path preservation)
+- [x] 16-02-PLAN.md — TELEM-03: six locked metrics registered + emitted at the three RollUpUsage terminal seams with {project, phase, plan, wave}
+- [x] 16-03-PLAN.md — TELEM-05: helm-telemetry-assert + helm-assert Makefile targets, ci.yaml helm-lint step, docstring corrections
+- [x] 16-04-PLAN.md — TELEM-04 + TELEM-02 (view): recharts charts, D-06 query fixes, scope/range toolbar, polling, budget grid, degradation Vitest
 
 **Wave 2** *(blocked on 16-04)*
 
@@ -193,4 +193,4 @@ Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
 | 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
 | 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 16. Telemetry Completion | v1.0.1 | 0/TBD | Not started | - |
+| 16. Telemetry Completion | v1.0.1 | 4/5 | In Progress|  |
