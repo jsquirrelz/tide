@@ -329,6 +329,75 @@ func TestMaterializeChildCRDsStampsParentRef(t *testing.T) {
 	}
 }
 
+// TestMaterializeChildCRDsStampsProjectLabel is the CUTS-01 run-1 finding-6
+// regression test: reporter-created Milestone/Phase CRs carried zero labels,
+// so `tide approve` label-filtered discovery reported "no level awaiting
+// approval" despite a parked CR.
+//
+// After D-01 (Phase 15), MaterializeChildCRDs MUST stamp
+// tideproject.k8s/project on every child CR it creates.
+func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
+	tests := []struct {
+		name         string
+		parentLabels map[string]string
+		wantLabel    string // empty = label must be absent (fail-open)
+	}{
+		{
+			name:         "parent labeled tideproject.k8s/project=demo — child inherits label (finding-6 fix)",
+			parentLabels: map[string]string{"tideproject.k8s/project": "demo"},
+			wantLabel:    "demo",
+		},
+		{
+			name:         "parent has no project label — child created without label (fail-open)",
+			parentLabels: nil,
+			wantLabel:    "",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := fakeClientForTest(t)
+			scheme := runtime.NewScheme()
+			if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+				t.Fatalf("AddToScheme: %v", err)
+			}
+
+			milestone := &tideprojectv1alpha1.Milestone{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:       types.UID("ms-uid-cuts01"),
+					Name:      "parent-milestone",
+					Namespace: "default",
+					Labels:    tc.parentLabels,
+				},
+			}
+
+			phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "parent-milestone"}
+			rawSpec, err := json.Marshal(phaseSpec)
+			if err != nil {
+				t.Fatalf("Marshal phase spec: %v", err)
+			}
+			children := []pkgdispatch.ChildCRDSpec{
+				{Kind: "Phase", Name: "child-phase-cuts01", Spec: runtime.RawExtension{Raw: rawSpec}},
+			}
+
+			if err := MaterializeChildCRDs(context.Background(), c, scheme, milestone, children); err != nil {
+				t.Fatalf("MaterializeChildCRDs: %v", err)
+			}
+
+			var got tideprojectv1alpha1.Phase
+			if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "child-phase-cuts01"}, &got); err != nil {
+				t.Fatalf("Get Phase: %v", err)
+			}
+
+			gotLabel := got.GetLabels()["tideproject.k8s/project"]
+			if gotLabel != tc.wantLabel {
+				t.Errorf("labels[tideproject.k8s/project] = %q; want %q (CUTS-01 finding-6 regression)", gotLabel, tc.wantLabel)
+			}
+		})
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

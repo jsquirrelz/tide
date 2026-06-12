@@ -251,6 +251,11 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 		// agree on the same authoritative parent.
 		stampParentRef(obj, parent.GetName())
 
+		// D-01 (CUTS-01): stamp the canonical project label from the parent at
+		// create-site. Fail-open when the parent has no project label (StampProjectLabel
+		// is a no-op on empty string — RESEARCH Pitfall 1).
+		owner.StampProjectLabel(obj, parent.GetLabels()[owner.LabelProject])
+
 		if err := owner.EnsureOwnerRef(obj, parent, scheme); err != nil {
 			return fmt.Errorf("MaterializeChildCRDs: ensure owner ref on %s/%s: %w", child.Kind, child.Name, err)
 		}
