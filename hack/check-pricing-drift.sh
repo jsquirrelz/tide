@@ -77,45 +77,80 @@ fi
 DRIFT_LINES=""
 PARSE_ERRORS=""
 
-# For each compiled model ID, attempt to find its entry on the live page.
-# The Anthropic pricing page uses Markdown table format with rows like:
-#   | claude-fable-5 | $10 / MTok | $50 / MTok | ... |
-# or section headers like:
-#   ## claude-fable-5
-# followed by a pricing table.
+# For each compiled model ID, attempt to find its pricing row on the live page.
+# The Anthropic pricing page lists models in a Markdown pipe table whose HEADER
+# names the price columns, e.g.:
+#   | Model | Base Input Tokens | 5m Cache Writes | 1h Cache Writes | Cache Hits & Refreshes | Output Tokens |
+#   | Claude Fable 5 | $10 / MTok | $12.50 / MTok | $20 / MTok | $1 / MTok | $50 / MTok |
 #
-# We look for a table row containing the model ID, then extract the first
-# two numeric dollar amounts (input and output prices per MTok).
+# Extraction is anchored on the header row: positional "first two $ amounts"
+# parsing silently mis-reads a cache-write column as the output price whenever
+# the column order is input / cache-write / ... / output. The model cell may
+# carry a display name ("Claude Opus 4.8") or a raw ID (claude-opus-4-8) — the
+# match pattern tolerates hyphen/space/dot separators in either form.
 while IFS= read -r MODEL; do
-    # Escape dots in model ID for use in grep pattern.
-    MODEL_PAT=$(printf '%s' "${MODEL}" | sed 's/\./\\./g')
+    # Hyphens in the compiled ID may appear as hyphen, space, or dot on the
+    # page ("claude-opus-4-8" vs "Claude Opus 4.8"); matching is case-insensitive.
+    MODEL_PAT=$(printf '%s' "${MODEL}" | sed 's/-/[ .-]/g')
 
-    # Search the fetched page for a line containing this model ID.
-    # The Anthropic pricing docs use pipe-delimited tables; extract the line.
-    PAGE_LINE=$(grep -i "${MODEL_PAT}" "${PRICING_TMP}" | head -1 || true)
+    # Header-anchored row extraction: remember the input/output/cache column
+    # indexes from the most recent table header row, then print those cells
+    # from the first priced row whose model cell (field 2) matches. Output is
+    # one TAB-separated line: input, output, cache-write (5m), cache-read.
+    ROW_CELLS=$(awk -v model="${MODEL_PAT}" '
+        BEGIN { FS = "|"; in_col = 0; out_col = 0; cw_col = 0; cr_col = 0 }
+        /^\|/ {
+            low = tolower($0)
+            if (low !~ /\$/) {
+                # No prices on the line — candidate header row. Require both an
+                # input and an output column label before trusting the indexes.
+                if (low ~ /input/ && low ~ /output/) {
+                    in_col = 0; out_col = 0; cw_col = 0; cr_col = 0
+                    for (i = 2; i <= NF; i++) {
+                        cell = tolower($i)
+                        if (cell ~ /input/ && in_col == 0) in_col = i
+                        else if (cell ~ /output/ && out_col == 0) out_col = i
+                        else if (cell ~ /cache/ && cell ~ /write/ && cell !~ /1[ -]?h/ && cw_col == 0) cw_col = i
+                        else if (cell ~ /cache/ && cell ~ /(hit|read)/ && cr_col == 0) cr_col = i
+                    }
+                }
+                next
+            }
+            if (in_col > 0 && out_col > 0 && tolower($2) ~ model) {
+                printf "%s\t%s\t%s\t%s\n", $(in_col), $(out_col), \
+                    (cw_col > 0 ? $(cw_col) : ""), (cr_col > 0 ? $(cr_col) : "")
+                exit
+            }
+        }
+    ' "${PRICING_TMP}")
 
-    if [ -z "${PAGE_LINE}" ]; then
-        # Model not found on the live page — informational only (D-03 spec:
-        # "table models absent from the page are reported as informational only").
+    if [ -z "${ROW_CELLS}" ]; then
+        if grep -qiE "${MODEL_PAT}" "${PRICING_TMP}"; then
+            # Mentioned on the page but no header-anchored pricing row parsed —
+            # the table layout may have changed; surface as a parse error.
+            PARSE_ERRORS="${PARSE_ERRORS}UNPARSEABLE: ${MODEL} — model mentioned on page but no header-anchored pricing row found; page format may have changed\n"
+        fi
+        # Otherwise: model absent from the live page — informational only (D-03
+        # spec: "table models absent from the page are reported as informational only").
         continue
     fi
 
-    # Extract dollar amounts from the page line.
-    # Match patterns like "$10" or "$10.00" or "$3" in the table row.
-    # We want the FIRST two numeric dollar values (input price, output price).
-    INPUT_DOLLARS=$(printf '%s' "${PAGE_LINE}" | grep -oE '\$[0-9]+(\.[0-9]+)?' | head -1 | tr -d '$' || true)
-    OUTPUT_DOLLARS=$(printf '%s' "${PAGE_LINE}" | grep -oE '\$[0-9]+(\.[0-9]+)?' | sed -n '2p' | tr -d '$' || true)
+    # Extract one dollar amount per column cell ("$10", "$12.50", "$0.30").
+    INPUT_DOLLARS=$(printf '%s' "${ROW_CELLS}" | cut -f1 | grep -oE '\$[0-9]+(\.[0-9]+)?' | head -1 | tr -d '$' || true)
+    OUTPUT_DOLLARS=$(printf '%s' "${ROW_CELLS}" | cut -f2 | grep -oE '\$[0-9]+(\.[0-9]+)?' | head -1 | tr -d '$' || true)
+    CACHE_WRITE_DOLLARS=$(printf '%s' "${ROW_CELLS}" | cut -f3 | grep -oE '\$[0-9]+(\.[0-9]+)?' | head -1 | tr -d '$' || true)
+    CACHE_READ_DOLLARS=$(printf '%s' "${ROW_CELLS}" | cut -f4 | grep -oE '\$[0-9]+(\.[0-9]+)?' | head -1 | tr -d '$' || true)
 
     if [ -z "${INPUT_DOLLARS}" ] || [ -z "${OUTPUT_DOLLARS}" ]; then
-        # Page line found but prices not parseable — report as parse error.
-        PARSE_ERRORS="${PARSE_ERRORS}UNPARSEABLE: ${MODEL} — page line found but price values not parseable; page format may have changed\n  Line: ${PAGE_LINE}\n"
+        # Row found but prices not parseable — report as parse error.
+        PARSE_ERRORS="${PARSE_ERRORS}UNPARSEABLE: ${MODEL} — pricing row found but price values not parseable; page format may have changed\n  Row: ${ROW_CELLS}\n"
         continue
     fi
 
-    # Convert dollar amounts to cents (multiply by 100).
-    # Use awk for the arithmetic to handle potential decimals (e.g. $0.80 → 80 cents).
-    INPUT_LIVE_CENTS=$(awk "BEGIN { printf \"%d\", ${INPUT_DOLLARS} * 100 }")
-    OUTPUT_LIVE_CENTS=$(awk "BEGIN { printf \"%d\", ${OUTPUT_DOLLARS} * 100 }")
+    # Convert dollar amounts to cents (multiply by 100). %.0f rounds to the
+    # nearest cent; %d would truncate binary-inexact products ($0.30 * 100 → 29).
+    INPUT_LIVE_CENTS=$(awk "BEGIN { printf \"%.0f\", ${INPUT_DOLLARS} * 100 }")
+    OUTPUT_LIVE_CENTS=$(awk "BEGIN { printf \"%.0f\", ${OUTPUT_DOLLARS} * 100 }")
 
     # Extract compiled values for this model from pricing.go.
     # The table entries look like:
@@ -125,13 +160,15 @@ while IFS= read -r MODEL; do
     # We extract the block for this model by finding lines between the model key
     # and the closing brace.
     MODEL_BLOCK=$(awk "
-        /\"${MODEL_PAT}\"[[:space:]]*:/ { found=1; next }
+        /\"${MODEL}\"[[:space:]]*:/ { found=1; next }
         found && /}/ { exit }
         found { print }
     " "${PRICING_GO}")
 
     INPUT_COMPILED=$(printf '%s' "${MODEL_BLOCK}" | grep 'inputCentsPerMTok' | grep -oE '[0-9]+' | head -1 || echo "")
     OUTPUT_COMPILED=$(printf '%s' "${MODEL_BLOCK}" | grep 'outputCentsPerMTok' | grep -oE '[0-9]+' | head -1 || echo "")
+    CACHE_WRITE_COMPILED=$(printf '%s' "${MODEL_BLOCK}" | grep 'cacheWriteCentsPerMTok' | grep -oE '[0-9]+' | head -1 || echo "")
+    CACHE_READ_COMPILED=$(printf '%s' "${MODEL_BLOCK}" | grep 'cacheReadCentsPerMTok' | grep -oE '[0-9]+' | head -1 || echo "")
 
     if [ -z "${INPUT_COMPILED}" ] || [ -z "${OUTPUT_COMPILED}" ]; then
         PARSE_ERRORS="${PARSE_ERRORS}UNPARSEABLE: ${MODEL} compiled values — pricing.go parse error; file format may have changed\n"
@@ -146,6 +183,24 @@ while IFS= read -r MODEL; do
     # Compare output price.
     if [ "${OUTPUT_COMPILED}" != "${OUTPUT_LIVE_CENTS}" ]; then
         DRIFT_LINES="${DRIFT_LINES}DRIFT: ${MODEL} output ${OUTPUT_COMPILED} cents/MTok compiled vs ${OUTPUT_LIVE_CENTS} cents/MTok live\n"
+    fi
+
+    # Compare cache prices when both the live column and the compiled value
+    # exist. The 5m cache write maps to cacheWriteCentsPerMTok (1.25x input);
+    # cache hits/reads map to cacheReadCentsPerMTok (0.10x input). An absent
+    # cache column is skipped rather than failed — input/output remain the
+    # load-bearing comparison.
+    if [ -n "${CACHE_WRITE_DOLLARS}" ] && [ -n "${CACHE_WRITE_COMPILED}" ]; then
+        CACHE_WRITE_LIVE_CENTS=$(awk "BEGIN { printf \"%.0f\", ${CACHE_WRITE_DOLLARS} * 100 }")
+        if [ "${CACHE_WRITE_COMPILED}" != "${CACHE_WRITE_LIVE_CENTS}" ]; then
+            DRIFT_LINES="${DRIFT_LINES}DRIFT: ${MODEL} cacheWrite ${CACHE_WRITE_COMPILED} cents/MTok compiled vs ${CACHE_WRITE_LIVE_CENTS} cents/MTok live\n"
+        fi
+    fi
+    if [ -n "${CACHE_READ_DOLLARS}" ] && [ -n "${CACHE_READ_COMPILED}" ]; then
+        CACHE_READ_LIVE_CENTS=$(awk "BEGIN { printf \"%.0f\", ${CACHE_READ_DOLLARS} * 100 }")
+        if [ "${CACHE_READ_COMPILED}" != "${CACHE_READ_LIVE_CENTS}" ]; then
+            DRIFT_LINES="${DRIFT_LINES}DRIFT: ${MODEL} cacheRead ${CACHE_READ_COMPILED} cents/MTok compiled vs ${CACHE_READ_LIVE_CENTS} cents/MTok live\n"
+        fi
     fi
 done <<< "${COMPILED_MODELS}"
 
