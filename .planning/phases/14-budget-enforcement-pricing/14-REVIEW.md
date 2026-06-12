@@ -1,174 +1,102 @@
 ---
 phase: 14-budget-enforcement-pricing
-reviewed: 2026-06-12T00:53:29Z
+reviewed: 2026-06-12T17:55:00Z
 depth: standard
-files_reviewed: 30
+files_reviewed: 11
 files_reviewed_list:
-  - .github/workflows/pricing-drift.yaml
-  - api/v1alpha1/shared_types.go
-  - charts/tide/templates/deployment.yaml
-  - charts/tide/values.yaml
-  - cmd/claude-subagent/commit_test.go
-  - cmd/claude-subagent/main_test.go
-  - cmd/claude-subagent/main.go
-  - cmd/manager/main.go
-  - docs/releasing.md
-  - hack/check-pricing-drift.sh
-  - internal/budget/reservation_test.go
-  - internal/budget/reservation.go
-  - internal/controller/budget_blocked_regression_test.go
-  - internal/controller/budget_blocked_test.go
-  - internal/controller/budget_blocked.go
-  - internal/controller/milestone_controller.go
-  - internal/controller/phase_controller.go
-  - internal/controller/plan_controller.go
-  - internal/controller/project_controller.go
-  - internal/controller/task_controller.go
-  - internal/dispatch/podjob/backend.go
-  - internal/dispatch/podjob/jobspec_test.go
-  - internal/dispatch/podjob/jobspec.go
-  - internal/subagent/anthropic/pricing_test.go
-  - internal/subagent/anthropic/pricing.go
-  - internal/subagent/anthropic/subagent.go
-  - pkg/dispatch/pricing_test.go
-  - pkg/dispatch/pricing.go
-  - test/integration/kind/projects_pvc_test.go
+  - cmd/dashboard/api/informer_bridge_test.go
+  - cmd/dashboard/api/projects_test.go
+  - cmd/dashboard/api/projects.go
+  - dashboard/web/src/components/__tests__/dag-views.test.tsx
+  - dashboard/web/src/components/__tests__/nodes.test.tsx
+  - dashboard/web/src/components/ConditionBadge.test.tsx
+  - dashboard/web/src/components/ConditionBadge.tsx
+  - dashboard/web/src/components/PlanningDAGView.tsx
+  - dashboard/web/src/components/ProjectNode.tsx
+  - dashboard/web/src/components/TideNodeShell.tsx
+  - dashboard/web/src/lib/api.ts
 findings:
-  critical: 1
-  warning: 10
+  critical: 0
+  warning: 1
   info: 4
-  total: 15
+  total: 5
 status: issues_found
 ---
 
-# Phase 14: Code Review Report
+# Phase 14: Code Review Report (gap-closure wave — plans 14-06/14-07)
 
-**Reviewed:** 2026-06-12T00:53:29Z
+**Reviewed:** 2026-06-12T17:55:00Z
 **Depth:** standard
-**Files Reviewed:** 30
+**Files Reviewed:** 11
 **Status:** issues_found
+
+> Re-review scoped to the gap-closure wave only (plans 14-06/14-07). The earlier
+> 14-REVIEW.md covering plans 14-01…14-05 (1 critical / 10 warnings / 4 info, all
+> fixed per 14-REVIEW-FIX.md) is preserved in git history.
 
 ## Summary
 
-Phase 14's core mechanics are sound: the corrected price table is internally consistent (cache rates follow the 1.25x/0.10x rule, conservative fallback re-points to the new most-expensive tier), the provider firewall holds (only `internal/subagent/anthropic/` interprets prices; `pkg/dispatch.ParsePricingOverrides` validates without pricing knowledge), the ReservationStore is goroutine-safe and never persisted to CRD status (PERSIST-02), all five dispatch sites carry the `checkBudgetBlocked` hold after `checkBillingHalt`, and the bidirectional `setBudgetBlockedIfNeeded` clear path is implemented and tested.
+Re-review scoped to the BudgetBlocked dashboard surface (diff base `6641de1`): backend `blockingConditions` exposure on `projectSummary` (14-06) and the `ConditionBadge` → `TideNodeShell` → `ProjectNode` → `PlanningDAGView` wiring (14-07). The three security focus areas from the scope note were each verified against the actual code, not assumed:
 
-However, the D-03 pricing-drift automation is dead on arrival: a shell quirk in the workflow guarantees the drift-issue step can never fire (CR-01). The drift shell script has three independent fragilities that make it either silently wrong or noisy (WR-01..WR-03, WR-04). On the controller side, the budget-accuracy goal is undermined by a settle-before-rollup ordering race (WR-06), failure branches that drop real spend (WR-07), a reservation gate that ignores the rolling-window cap (WR-08), and a non-atomic spend roll-up (WR-09). One operator-visible condition is set and never cleared (WR-05).
+- **XSS via condition message passthrough — clean.** The controller-stamped `Message` flows through `json.Encoder` with `SetEscapeHTML` left at its default (`projects.go:392-405`), then lands only in a React JSX `title` attribute (`ConditionBadge.tsx:107`). React escapes all JSX attribute values; no `dangerouslySetInnerHTML`, `innerHTML`, or `eval` anywhere in the reviewed files. `condition.type` reaches `data-testid`/`data-condition` only after the `CONDITION_TABLE` whitelist check returns a row.
+- **Condition-type whitelist enforcement — correct server-side.** `summarize` (`projects.go:357-370`) admits only `ConditionBudgetBlocked`/`ConditionBillingHalt` (constants verified at `api/v1alpha1/shared_types.go:226,259`) with `Status == ConditionTrue`. The 2-entry bound holds because `Project.Status.Conditions` carries `+listType=map +listMapKey=type` (`project_types.go:403-404`), so the apiserver rejects duplicate types. Client-side, however, the whitelist is applied inconsistently — see WR-01.
+- **Read-only route invariant — intact.** No route registrations changed in the diff (`cmd/dashboard/router.go` untouched); `TestZeroMutationRoutes` (router_test.go:62) still guards the chi tree. The 14-06 change is payload-shape-only.
 
-## Critical Issues
+The end-to-end badge-liveness chain was traced and holds: controller status-only patch → informer `OnUpdate` → unconditional `hub.Publish` (pinned by the new `TestInformerBridgePublishesOnStatusOnlyProjectUpdate`) → SSE payload includes `kind: "Project"` (`informer_bridge.go:282`) → `PLANNING_KINDS` includes `"Project"` (`PlanningDAGView.tsx:222`) → debounced `runFetch` re-renders the badge. Empty-array contract (`[]` never `null`) holds via the pre-allocated non-nil slice with no `omitempty` tag. Negative/clock-skewed condition ages clamp to `0s` via `humanizeDuration` (`tasks.go:294-296`).
 
-### CR-01: `|| true` swallows the drift script's exit code — the drift issue can never be opened
+Verification evidence: `go test ./cmd/dashboard/api/` → `ok 1.227s`; `npx vitest run` on the three reviewed test files → 37/37 passed.
 
-**File:** `.github/workflows/pricing-drift.yaml:52-53`
-**Issue:** The step captures the exit code *after* forcing success:
-
-```bash
-./hack/check-pricing-drift.sh > /tmp/drift-output.txt 2>&1 || true
-DRIFT_EXIT=$?
-```
-
-After `cmd || true`, `$?` is the exit status of `true` — always `0` (verified: `bash -c 'false || true; echo $?'` prints `0`). `DRIFT_EXIT` is therefore `0` on every run regardless of drift, `exit_code` output is always `'0'`, the `if: steps.drift.outputs.exit_code == '1'` condition on the issue step never matches, and `exit ${DRIFT_EXIT}` always exits 0 (making the `continue-on-error` + outcome commentary moot). The entire weekly D-03 automation silently reports nothing, forever — exactly the "stale pricing table" failure class this phase exists to close.
-**Fix:**
-```bash
-DRIFT_EXIT=0
-./hack/check-pricing-drift.sh > /tmp/drift-output.txt 2>&1 || DRIFT_EXIT=$?
-echo "exit_code=${DRIFT_EXIT}" >> "$GITHUB_OUTPUT"
-```
-(The `|| DRIFT_EXIT=$?` form also keeps the step alive under the default `bash -e` shell.) Add a workflow-level test or at minimum manually trigger `workflow_dispatch` with a known-drifted table to verify the issue opens.
+One warning (client-side whitelist inconsistency in `TideNodeShell`) and four informational items.
 
 ## Warnings
 
-### WR-01: `mktemp` template with non-trailing X's breaks on macOS (documented local-run platform)
+### WR-01: TideNodeShell blocked-state signals bypass the client-side condition-type whitelist
 
-**File:** `hack/check-pricing-drift.sh:28`
-**Issue:** `mktemp /tmp/anthropic-pricing-XXXXXX.md` only randomizes trailing X's on BSD/macOS `mktemp`. Verified on this host: it creates the *literal* file `/tmp/anthropic-pricing-XXXXXX.md` (predictable path, no randomization — temp-file squatting/symlink exposure on shared `/tmp`), and a subsequent run after any interrupted prior run fails with `mkstemp failed ... File exists`, which under `set -e` exits non-zero — misread as "drift detected" per the exit-code contract in `docs/releasing.md` step 3. GNU mktemp on CI happens to imply `--suffix`, so the bug only bites the documented local pre-tag flow.
-**Fix:** Drop the suffix: `PRICING_TMP="$(mktemp /tmp/anthropic-pricing-XXXXXX)"` or use `mktemp -t anthropic-pricing`. Also add a `trap 'rm -f "${PRICING_TMP}"' EXIT` so interrupted runs don't leave the file behind.
+**File:** `dashboard/web/src/components/TideNodeShell.tsx:157` (also 179, 262-266)
+**Issue:** The client-side whitelist defense (T-14-07-02) is enforced in `ConditionBadge` (unknown type → `null`) and in the aria-label builder (`CONDITION_TABLE[c.type]?.label` + `filter(Boolean)`), but NOT in `isBlocked`:
 
-### WR-02: Price extraction assumes the first two `$` amounts on the row are (input, output)
-
-**File:** `hack/check-pricing-drift.sh:101-102`
-**Issue:** `head -1` / `sed -n '2p'` over all `$N` matches assumes column order `input, output, ...`. Anthropic pricing tables have historically ordered columns as input / cache-write / cache-read / output (and `grep -i "${MODEL_PAT}" | head -1` may land on a prose mention rather than the table row). If the live page uses any other column order, "output" silently compares against the cache-write price, producing a *wrong* drift report — and a human following D-03 would "correct" the compiled table to a wrong value. The script also never compares the cache dimensions even though the compiled table carries them.
-**Fix:** Anchor extraction on column headers (parse the table header row to find the input/output column indexes) or at minimum extract the *last* dollar amount for output if the page layout is input-first/output-last; emit a parse error when more than two price columns are present and unrecognized. Extend comparison to cacheRead/cacheWrite.
-
-### WR-03: Missing-model scan greps every `claude-*` token on the page — permanent false-drift noise
-
-**File:** `hack/check-pricing-drift.sh:151-164`
-**Issue:** Step 4 extracts `grep -oE 'claude-[a-z0-9-]+'` across the entire fetched page and flags any digit-containing ID not in the compiled table. The pricing page lists legacy/deprecated model pricing (e.g. older claude-3-x families), code samples, and URLs — every one of those becomes two permanent `DRIFT: ... missing from compiled table` lines on every weekly run. Because the workflow updates a single deduped issue, the issue can never be resolved-and-stay-closed, training operators to ignore it (cry-wolf failure of D-03).
-**Fix:** Scope the missing-model scan to the current-models pricing table section (anchor on the section heading or table boundaries), or maintain an explicit ignore-list of known-legacy model IDs in the script.
-
-### WR-04: Static heredoc delimiter allows `GITHUB_OUTPUT` injection from external page content
-
-**File:** `.github/workflows/pricing-drift.yaml:58-62`
-**Issue:** The drift body is fetched external content, yet it is written to `GITHUB_OUTPUT` between fixed `DRIFT_EOF` markers. A page (or MITM'd response) containing a line that is exactly `DRIFT_EOF` terminates the heredoc early and the remaining lines are parsed as new `key=value` outputs — e.g. a later `exit_code=1` line overrides the earlier output (last write wins), forcing the issue step to run with attacker-shaped body. T-14-09 explicitly treats this content as data; the transport doesn't.
-**Fix:** Use a random delimiter per GitHub's hardening guidance:
-```bash
-EOF_MARKER="DRIFT_EOF_$(head -c16 /dev/urandom | base64 | tr -d '=+/')"
-{ echo "drift_body<<${EOF_MARKER}"; cat /tmp/drift-output.txt; echo "${EOF_MARKER}"; } >> "$GITHUB_OUTPUT"
+```tsx
+const isBlocked = blockingConditions.length > 0;
 ```
 
-### WR-05: Per-Task `BudgetBlocked` condition is set but never cleared
+A payload whose `blockingConditions` contains only unknown types — exactly the vocabulary-drift scenario the whitelist exists to defend against — produces a purple `border-l-4` and `data-blocked="true"` with **no badge rendered and no "blocked:" suffix in the aria-label**. Sighted users get an unexplained visual signal; screen-reader users get nothing at all. The three blocked-state surfaces (border, badge, aria-label) disagree about whether the node is blocked. Unreachable today only because the server whitelist holds; the component's own doc comment claims unknown types are "defensive against vocabulary drift," which the border path contradicts.
+**Fix:** Filter once against the whitelist and drive all three surfaces from the filtered list:
 
-**File:** `internal/controller/task_controller.go:381-397`
-**Issue:** When the budget gate parks a Task it stamps `ConditionBudgetBlocked=True` on the *Task* status. No code path ever flips this condition to False: after the operator raises the cap, the Project condition clears (bidirectional helper), the Task dispatches, runs, and reaches `Succeeded` — still permanently carrying `BudgetBlocked=True` in `kubectl get task -o yaml`. The other four dispatch sites deliberately write *no* per-level condition ("operator signal is the single Project condition") — this site is the inconsistent one, and the stale condition is operator-visible misinformation.
-**Fix:** Either drop the per-Task condition stamp for consistency with the other four gates, or clear it (`Status=False, Reason=BudgetCapCleared`) on the first reconcile that passes the budget gate (e.g. just before `checkReadinessGates` returns the pass-through result).
-
-### WR-06: Reservation settled before spend rolls up — headroom under-counts during the window
-
-**File:** `internal/controller/task_controller.go:817` (settle) vs `:922` (roll-up)
-**Issue:** `handleJobCompletion` calls `Reservations.Settle(taskUID)` as its first statement, but `budget.RollUpUsage` (which lands the actual cost into `CostSpentCents`) runs ~100 lines later, after the envelope read, output-path validation, and two status patches — each a real API round-trip. In that window `TotalReserved()` has dropped by the estimate while `CostSpentCents` hasn't risen, so a concurrent Task reconcile's `HasHeadroom` (and `setBudgetBlockedIfNeeded`) sees artificially low committed spend and can dispatch past the cap. This is a *wider* overshoot than the documented T-14-06 bound of "one estimate per concurrent reconcile," because the window spans multiple API calls and every in-flight completion contributes.
-**Fix:** Move `Settle` to immediately *after* the `RollUpUsage` call (and call it explicitly in each early-return failure branch, or via `defer` guarded to run after roll-up state is decided). The comment's rationale ("avoids missing the early-return Failed branches") is better served by a `defer r.Deps.Reservations.Settle(string(task.UID))` placed after roll-up ordering is fixed.
-
-### WR-07: Failure early-returns skip `RollUpUsage` — real spend silently dropped from the cap
-
-**File:** `internal/controller/task_controller.go:820-877`
-**Issue:** Three terminal-Failed branches return before the roll-up at line 922: `EnvelopeReadFailed`, `OutputValidationError`, and `OutputPathsViolation`. For the latter two the envelope *was* read successfully and `out.Usage` carries real token spend — a session that burned, say, $3 of opus tokens and then touched an undeclared path contributes $0 to `CostSpentCents`. Combined with WR-06 the cap systematically under-counts on failure-heavy runs, which is precisely the run-1 regression class this phase closes. (The `ExitCode != 0` path correctly falls through to roll-up; these three do not.)
-**Fix:** In the `OutputPathsViolation` and `OutputValidationError` branches, call `budget.RollUpUsage(ctx, r.Client, project, out.Usage)` (non-fatal, same pattern as line 922) before returning. `EnvelopeReadFailed` has no usage to roll up — acceptable.
-
-### WR-08: `HasHeadroom` ignores `RollingWindowCapCents` — reservation gate doesn't bound the rolling cap
-
-**File:** `internal/budget/reservation.go:118-131`
-**Issue:** `HasHeadroom` reads only `Spec.Budget.AbsoluteCapCents`, but `budget.IsCapExceeded` (cap.go:44-57) enforces *both* the absolute and rolling-window caps, and `charts/tide/values.yaml` ships `rollingWindowCapCents: 5000` as a default. A wide wave can therefore commit unbounded in-flight estimates against the rolling window: every task passes `HasHeadroom` (absolute headroom plentiful), dispatch proceeds, and the rolling cap only trips after roll-up — reproducing the run-1 wave-wide overshoot for the rolling dimension that D-05 was built to bound.
-**Fix:** Compute headroom against the effective cap: `cap := min(positive(AbsoluteCapCents), positive(RollingWindowCapCents))` (treating <=0 as unset), or check both independently and require headroom under each configured cap.
-
-### WR-09: `RollUpUsage` read-modify-write without optimistic lock — concurrent completions lose spend
-
-**File:** `internal/controller/task_controller.go:922` → `internal/budget/tally.go:45-63` (cross-file)
-**Issue:** `RollUpUsage` computes `CostSpentCents += usage.EstimatedCostCents` on a Project read from the informer cache and patches with plain `client.MergeFrom` (no `WithOptimisticLock`), writing an *absolute* value. With Task `MaxConcurrentReconciles: 16` (values.yaml), two tasks completing near-simultaneously both read base `N`, write `N+a` and `N+b`; last write wins and one task's cost vanishes from the tally permanently. The helper pre-dates Phase 14, but this phase ships budget *enforcement* on top of it — an under-counted `CostSpentCents` directly defeats both `IsCapExceeded` and `HasHeadroom`.
-**Fix:** Use `client.MergeFromWithOptions(project.DeepCopy(), client.MergeFromWithOptimisticLock{})` and retry on conflict (e.g. `retry.RetryOnConflict` re-fetching the Project), so concurrent increments serialize instead of clobbering.
-
-### WR-10: Release checklist step 4 is impossible to satisfy as written
-
-**File:** `docs/releasing.md:35-37`
-**Issue:** "`grep -c 'stub' charts/tide/values.yaml` returns 0 for production image fields" — the file *by design* contains the `images.stubSubagent:` key block plus multiple "stub" mentions in comments (values.yaml:144-160, 211-215), so the grep returns a large non-zero count on a perfectly correct chart. An operator following the checklist either fails the gate on every release or learns to skip checklist items — both bad outcomes for a pre-tag document.
-**Fix:** Replace with a check that matches the actual contract, e.g. `helm template charts/tide | grep -c 'tide-stub-subagent'` returns 0 (the rendered default must not reference the stub image), or `grep -c 'image: ghcr.io/jsquirrelz/tide-stub-subagent' charts/tide/values.yaml` scoped to the `subagent.defaults.image` value.
+```tsx
+const knownConditions = blockingConditions.filter((c) => CONDITION_TABLE[c.type]);
+const isBlocked = knownConditions.length > 0;
+// ... and map over knownConditions for the badge row;
+// the aria-label builder can then drop its ?./filter(Boolean) hedge.
+```
 
 ## Info
 
-### IN-01: Dead variable in workflow step
+### IN-01: Wire-type layer imports from the component layer
 
-**File:** `.github/workflows/pricing-drift.yaml:56`
-**Issue:** `DRIFT_BODY=$(cat /tmp/drift-output.txt)` is assigned and never used (the heredoc block below re-reads the file).
-**Fix:** Delete the line.
+**File:** `dashboard/web/src/lib/api.ts:13`
+**Issue:** `lib/api.ts` — documented as the verbatim mirror of the Go wire structs — imports `ProjectBlockingCondition` from `../components/ConditionBadge`, inverting the codebase's lib ← components dependency direction. It is `import type` (erased at compile time, no runtime cycle), but `PlanningDAGView` → `lib/api` → `components/ConditionBadge` is one accidental value-import away from a real cycle, and the wire shape now lives outside the file that claims to own wire shapes.
+**Fix:** Move the `ProjectBlockingCondition` type into `lib/api.ts` (next to `ProjectSummary`) and have `ConditionBadge.tsx` import it from there.
 
-### IN-02: Conservative-tier fallback ignores per-instance overrides
+### IN-02: SSE-refetch failure silently strands the badge (pre-existing gap, now load-bearing)
 
-**File:** `internal/subagent/anthropic/pricing.go:117,137-139`
-**Issue:** `estimatedCostCents` falls back to the package-level `conservativeTier` (compiled fable-5 rates) on a table miss. If an operator's overrides add a model *more expensive* than fable-5, or lower fable-5's own rates, the unknown-model fallback no longer reflects "most-expensive known tier" of the effective table.
-**Fix:** Derive the conservative tier per-instance in `New()` (max across the merged `effective` map), or document the compiled-table-only semantics at the `conservativeTier` declaration.
+**File:** `dashboard/web/src/components/PlanningDAGView.tsx:247-255, 278-281`
+**Issue:** Pre-existing (not introduced by this diff): `runFetch` has no error handling, and both call sites invoke it as `void runFetch()`. A `fetchProject` rejection becomes an unhandled promise rejection; the DAG — and now the BudgetBlocked badge, whose liveness depends on this refetch path — silently stays stale with no operator-visible surface. Flagged because the gap-closure wave made this path load-bearing for budget-state visibility.
+**Fix:** Catch in `runFetch` (or at the call sites) and surface via the existing toast emitter / connection pill, e.g. `void runFetch().catch((err) => toast(...))`.
 
-### IN-03: `RederiveReservations` skips Jobs with `Status.Active <= 0` that still hold headroom
+### IN-03: No frontend test covers the project.update → badge liveness path
 
-**File:** `internal/budget/reservation.go:151`
-**Issue:** A just-created Job whose pod hasn't started (`Active` not yet incremented) and a completed Job whose Task reconcile hasn't yet rolled up its cost both have `Active <= 0` at restart scan time and are skipped — a small post-restart undercount window beyond the documented pre-Phase-14-label case. Also note the startup comment in `cmd/manager/main.go:581-585` claims the store is "populated before the first reconcile," but `mgr.Add` runnables start concurrently with the controllers after leader election — there is no ordering barrier, so a brief empty-store dispatch window exists.
-**Fix:** Consider also rederiving Jobs without a terminal condition (use `isJobTerminal`-style condition check rather than `Active`), and soften/correct the main.go comment or gate first dispatch on a `store.Ready()` flag if the bound matters.
+**File:** `dashboard/web/src/components/__tests__/dag-views.test.tsx:318-361`
+**Issue:** The new blockingConditions tests use `initialData`, which short-circuits `fetchProject` entirely (`initialData ?? (await fetchProject(...))`) — so the SSE-driven badge update (a `project.update` event causing a refetch that delivers new conditions) is never exercised in the frontend suite. The existing SSE test only asserts a `plan.update` event triggers a refetch. The backend half is pinned (`TestInformerBridgePublishesOnStatusOnlyProjectUpdate`), but the frontend `kind: "Project"` routing through `PLANNING_KINDS` has no test.
+**Fix:** Add a case to the SSE live-update describe block emitting `project.update` with `{kind: "Project"}` and asserting `fetchFn` fires (mirroring the existing Plan-event case).
 
-### IN-04: Fractional-cent live prices truncate instead of rounding
+### IN-04: Test helper panics instead of failing cleanly on the condition it guards
 
-**File:** `hack/check-pricing-drift.sh:112-113`
-**Issue:** `awk "BEGIN { printf \"%d\", ${INPUT_DOLLARS} * 100 }"` truncates (e.g. a hypothetical $0.075/MTok → 7, not 8), which would report a stable off-by-one "drift" against a correctly-rounded compiled value.
-**Fix:** Use `printf "%.0f"` for round-half-up behavior.
+**File:** `cmd/dashboard/api/projects_test.go:487-488, 500-501`
+**Issue:** `assertBlockingConditions` reports a length mismatch via non-fatal `t.Errorf`, then returns; callers immediately index `bc[0]`. If the backend regresses to zero entries, the test fails via an index-out-of-range panic rather than the helper's diagnostic message — the assertion output that explains the regression gets buried under a panic trace.
+**Fix:** Use `t.Fatalf` for the length check in `assertBlockingConditions` (consistent with its other checks), making the helper safe to index after.
 
 ---
 
-_Reviewed: 2026-06-12T00:53:29Z_
+_Reviewed: 2026-06-12T17:55:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
