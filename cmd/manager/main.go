@@ -377,7 +377,7 @@ func main() {
 		Scheme:               mgr.GetScheme(),
 		SubagentImage:        helmProviderDefaults.Image, // Phase 13: use post-shim default tier (CRD fields resolved inline in Run)
 		CredproxyImage:       credproxyImage,
-		SigningKey:            signingKey,
+		SigningKey:           signingKey,
 		EnvReader:            envReader,
 		PVCName:              "tide-projects",
 		PricingOverridesJSON: pricingOverridesJSON,
