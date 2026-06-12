@@ -145,8 +145,11 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		// WR-01 fix: pass the read-only client so the handler can do a
 		// project-existence pre-check before promoting the response to
 		// SSE framing.
+		// 15-06: pass the same client as a cache-backed reader so the handler
+		// emits an initial waves.snapshot frame on subscribe (UI-SPEC C3).
 		eh = dashboardapi.NewEventsHandler(deps.Hub, deps.Log,
-			dashboardapi.WithClient(deps.Client))
+			dashboardapi.WithClient(deps.Client),
+			dashboardapi.WithCacheReader(deps.Client))
 	}
 	var lh *dashboardapi.LogsHandler
 	if deps.Clientset != nil {

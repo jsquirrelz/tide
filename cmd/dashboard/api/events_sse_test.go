@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-logr/logr/testr"
 	"go.uber.org/goleak"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
@@ -356,6 +357,101 @@ func TestSSEFanoutCleanup(t *testing.T) {
 	}
 	t.Errorf("subscriber count did not drop to 0 within 1s: got %d (connected=%d)",
 		hubInst.SubscriberCount("racey"), connectedCount.Load())
+}
+
+// TestEventsHandlerInitialWavesSnapshotWithReader confirms that when
+// WithCacheReader is wired, the first SSE frame received on subscribe is
+// an "event: waves.snapshot" frame (no Task transition required). This
+// verifies the UI-SPEC C3 data path: "snapshot on subscribe so the pane
+// populates without waiting for a Task transition".
+func TestEventsHandlerInitialWavesSnapshotWithReader(t *testing.T) {
+	scheme := testInformerScheme(t)
+	// Seed a Running task so the snapshot is non-empty.
+	tk := makeTask("snap-task-1", "proj-snap", "plan-snap", "0", "Running")
+	c := ctrlfake.NewClientBuilder().WithScheme(scheme).WithObjects(tk).Build()
+
+	hubInst := hub.NewHub(testr.New(t))
+	eh := NewEventsHandler(hubInst, testr.New(t),
+		WithHeartbeatInterval(5*time.Second), // slow heartbeat so it doesn't interfere
+		WithCacheReader(c),
+	)
+
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/projects/{name}/events", eh.ServeHTTP)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/v1/projects/proj-snap/events?namespace=default", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The very first SSE frame should be the waves.snapshot — before any
+	// hub events, before the heartbeat.
+	frame, err := readSSEFrame(resp.Body, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("readSSEFrame: %v", err)
+	}
+	if !strings.Contains(frame, "event: waves.snapshot") {
+		t.Errorf("first frame is not waves.snapshot:\n%s", frame)
+	}
+	if !strings.Contains(frame, `"waves"`) {
+		t.Errorf("waves.snapshot frame missing 'waves' key:\n%s", frame)
+	}
+}
+
+// TestEventsHandlerNoInitialWavesSnapshotWithNilReader confirms that when
+// no WithCacheReader is provided, no initial waves.snapshot frame is written
+// and the handler continues normally (no panic, no frame).
+func TestEventsHandlerNoInitialWavesSnapshotWithNilReader(t *testing.T) {
+	hubInst := hub.NewHub(testr.New(t))
+	// No WithCacheReader — cacheReader is nil.
+	eh := NewEventsHandler(hubInst, testr.New(t),
+		WithHeartbeatInterval(50*time.Millisecond),
+	)
+
+	r := chi.NewRouter()
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/projects/{name}/events", eh.ServeHTTP)
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/v1/projects/nil-reader-proj/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET events: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// With no reader and no hub events, the first "frame" we see should be
+	// the heartbeat comment (": heartbeat\n\n"), NOT a waves.snapshot.
+	frame, err := readSSEFrame(resp.Body, 250*time.Millisecond)
+	if err != nil {
+		// Timeout is also acceptable here — no frame at all is fine (means
+		// the handler is idle and cacheReader==nil is a no-op). If we got a
+		// timeout, just confirm there was no waves.snapshot output.
+		if strings.Contains(frame, "waves.snapshot") {
+			t.Errorf("unexpected waves.snapshot frame with nil reader:\n%s", frame)
+		}
+		return
+	}
+	// If we got a frame, it must NOT be waves.snapshot.
+	if strings.Contains(frame, "waves.snapshot") {
+		t.Errorf("unexpected waves.snapshot frame with nil reader:\n%s", frame)
+	}
 }
 
 // TestMain runs goleak verification across this package.
