@@ -114,6 +114,42 @@ func TestLoadPromptTemplate_RendersEnvelopeFields(t *testing.T) {
 	}
 }
 
+// TestPlanPlannerTemplate_FileTouchRule asserts that the plan-planner template
+// contains the D-07 sibling-file-overlap rule (CUTS-07 prompt patch). A stable
+// phrase from the rule is used as the substring target so that minor rewording
+// does not break the assertion — only removing the rule entirely would cause failure.
+func TestPlanPlannerTemplate_FileTouchRule(t *testing.T) {
+	tmpl, err := LoadPromptTemplate("planner", "plan")
+	if err != nil {
+		t.Fatalf("LoadPromptTemplate(planner, plan): %v", err)
+	}
+
+	in := pkgdispatch.EnvelopeIn{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeIn,
+		TaskUID:    "uid-ft-rule-check",
+		Role:       "planner",
+		Level:      "plan",
+		Prompt:     "fixture",
+		Provider: pkgdispatch.ProviderSpec{
+			Vendor: "anthropic",
+			Model:  "claude-sonnet-4-6",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, in); err != nil {
+		t.Fatalf("template.Execute: %v", err)
+	}
+
+	// The stable phrase from the FILE-TOUCH RULE section added in D-07.
+	const rulePhrase = "must not declare the same path"
+	if !strings.Contains(buf.String(), rulePhrase) {
+		t.Errorf("plan-planner template is missing the D-07 file-touch sibling rule; expected to find %q in rendered output:\n%s",
+			rulePhrase, buf.String())
+	}
+}
+
 // TestLoadPromptTemplate_Unknown asserts LoadPromptTemplate returns an error
 // for unknown (role, level) combinations. The file template.ParseFS attempts
 // to load does not exist in the embed.FS, so this should surface fs.ErrNotExist
