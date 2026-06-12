@@ -171,6 +171,24 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 	}
 
+	// 4b. D-03 (CUTS-01): backfill tideproject.k8s/project on the Milestone
+	// itself when the label is absent. Heals pre-Phase-15 CRs created by the
+	// reporter before D-01 was in place. Guard: only patch when label is
+	// missing so the second reconcile is a no-op (T-15-03 / idempotent).
+	if milestone.Labels[owner.LabelProject] == "" {
+		projectName := r.resolveProjectNameForMilestone(ctx, &milestone)
+		if projectName != "" {
+			patch := client.MergeFrom(milestone.DeepCopy())
+			if milestone.Labels == nil {
+				milestone.Labels = map[string]string{}
+			}
+			milestone.Labels[owner.LabelProject] = projectName
+			if err := r.Patch(ctx, &milestone, patch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("backfill project label on milestone %s: %w", milestone.Name, err)
+			}
+		}
+	}
+
 	// 5. Phase 3: planner dispatch body (REQ-SUB-01, D-A2).
 	if r.Dispatcher != nil {
 		return r.reconcilePlannerDispatch(ctx, &milestone)
@@ -189,6 +207,20 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// resolveProjectNameForMilestone returns the Project name for a Milestone via
+// Milestone.Spec.ProjectRef (1 Get). Returns "" if the chain cannot be
+// resolved (orphan) — caller should skip the backfill silently.
+func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context, ms *tideprojectv1alpha1.Milestone) string {
+	if ms.Spec.ProjectRef == "" {
+		return ""
+	}
+	var p tideprojectv1alpha1.Project
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
+		return ""
+	}
+	return p.Name
 }
 
 // reconcilePlannerDispatch is the Phase 3 planner dispatch body.

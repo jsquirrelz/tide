@@ -432,3 +432,70 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 	})
 
 })
+
+var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)", Label("envtest"), func() {
+	ctx := context.Background()
+
+	It("backfills tideproject.k8s/project on a Milestone that was created without the label, and is idempotent on second reconcile", func() {
+		const projName = "backfill-proj-ms"
+		const msName = "backfill-ms-01"
+
+		// Create parent Project (no special labels needed — the project name is enough).
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+
+		// Create Milestone WITHOUT the tideproject.k8s/project label (simulating a
+		// pre-Phase-15 / run-1 CR created by the reporter before D-01 was in place).
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      msName,
+				Namespace: "default",
+				// Labels intentionally absent — this is the pre-Phase-15 shape.
+			},
+			Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+		r := &MilestoneReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			// No Dispatcher — drives steps 1-5 without planner dispatch.
+		}
+
+		// First reconcile: finalizer, owner-ref, then backfill.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
+
+		// Assert the project label was backfilled.
+		var after tideprojectv1alpha1.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
+		Expect(after.Labels["tideproject.k8s/project"]).To(Equal(projName),
+			"backfill must stamp tideproject.k8s/project from the OwnerRef chain")
+
+		// Idempotency: record ResourceVersion, reconcile again, verify unchanged.
+		rvBefore := after.ResourceVersion
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 2)).To(Succeed())
+		var after2 tideprojectv1alpha1.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after2)).To(Succeed())
+		Expect(after2.ResourceVersion).To(Equal(rvBefore),
+			"second reconcile must not patch the object (idempotent backfill)")
+
+		// Cleanup.
+		after2.Finalizers = nil
+		_ = k8sClient.Update(ctx, &after2)
+		_ = k8sClient.Delete(ctx, &after2)
+		proj2 := &tideprojectv1alpha1.Project{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, proj2); err == nil {
+			proj2.Finalizers = nil
+			_ = k8sClient.Update(ctx, proj2)
+			_ = k8sClient.Delete(ctx, proj2)
+		}
+	})
+})
