@@ -25,7 +25,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PRICING_URL="https://platform.claude.com/docs/en/pricing.md"
-PRICING_TMP="$(mktemp /tmp/anthropic-pricing-XXXXXX.md)"
+PRICING_TMP="$(mktemp /tmp/anthropic-pricing-XXXXXX)"
+# BSD/macOS mktemp only randomizes TRAILING X's — a suffix after the X's makes
+# the path literal and predictable, and a second run after an interrupted one
+# fails with "File exists" (misread as drift under set -e). Clean up on any
+# exit, including interrupts, so a leftover file never breaks the next run.
+trap 'rm -f "${PRICING_TMP}"' EXIT
 
 # ---------------------------------------------------------------------------
 # Step 1: Fetch the live pricing page
