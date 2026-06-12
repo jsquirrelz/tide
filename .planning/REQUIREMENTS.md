@@ -35,13 +35,13 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 ### Paper Cuts (CUTS)
 
-- [ ] **CUTS-01**: Reporter-created Milestone/Phase CRs carry the `tideproject.k8s/project` label so `tide approve` discovers gated levels (finding 6: zero labels → "no level awaiting approval" despite a parked CR)
-- [ ] **CUTS-02**: Boundary push no-ops cleanly on a clean tree instead of erroring/retrying on `cannot create empty commit` (finding 8)
-- [ ] **CUTS-03**: Phase CRs stop oscillating AwaitingApproval↔Running (finding 2: cosmetic requeue loop, noisy for watchers)
-- [ ] **CUTS-04**: `tide artifact-get` runs the inspector pod for real instead of dry-run printing its spec (finding 3)
-- [ ] **CUTS-05**: Dashboard project-node status chip maps CR status `Complete` correctly (finding 9b: showed "Pending")
-- [ ] **CUTS-06**: Dashboard offers a cross-plan "all running waves right now" view (run-1 user feature 2; waves stay per-plan derivations per spec — this is an aggregate read surface)
-- [ ] **CUTS-07**: Sibling tasks in one wave cannot both declare the same file under strict fileTouchMode (root cause of run-1's two merge-conflict task branches despite `fileTouchMode: strict`)
+- [x] **CUTS-01**: Reporter-created Milestone/Phase CRs carry the `tideproject.k8s/project` label so `tide approve` discovers gated levels (finding 6: zero labels → "no level awaiting approval" despite a parked CR)
+- [x] **CUTS-02**: Boundary push no-ops cleanly on a clean tree instead of erroring/retrying on `cannot create empty commit` (finding 8)
+- [x] **CUTS-03**: Phase CRs stop oscillating AwaitingApproval↔Running (finding 2: cosmetic requeue loop, noisy for watchers)
+- [x] **CUTS-04**: `tide artifact-get` runs the inspector pod for real instead of dry-run printing its spec (finding 3)
+- [x] **CUTS-05**: Dashboard project-node status chip maps CR status `Complete` correctly (finding 9b: showed "Pending")
+- [x] **CUTS-06**: Dashboard offers a cross-plan "all running waves right now" view (run-1 user feature 2; waves stay per-plan derivations per spec — this is an aggregate read surface)
+- [x] **CUTS-07**: Sibling tasks in one wave cannot both declare the same file under strict fileTouchMode (root cause of run-1's two merge-conflict task branches despite `fileTouchMode: strict`)
 
 ### Telemetry Completion (TELEM)
 
@@ -88,13 +88,13 @@ Which phases cover which requirements.
 | BUDGET-01 | Phase 14 | Complete |
 | BUDGET-02 | Phase 14 | Complete |
 | BUDGET-03 | Phase 14 | Complete |
-| CUTS-01 | Phase 15 | Pending |
-| CUTS-02 | Phase 15 | Pending |
-| CUTS-03 | Phase 15 | Pending |
-| CUTS-04 | Phase 15 | Pending |
-| CUTS-05 | Phase 15 | Pending |
-| CUTS-06 | Phase 15 | Pending |
-| CUTS-07 | Phase 15 | Pending |
+| CUTS-01 | Phase 15 | Complete |
+| CUTS-02 | Phase 15 | Complete |
+| CUTS-03 | Phase 15 | Complete |
+| CUTS-04 | Phase 15 | Complete |
+| CUTS-05 | Phase 15 | Complete |
+| CUTS-06 | Phase 15 | Complete |
+| CUTS-07 | Phase 15 | Complete |
 | TELEM-01 | Phase 16 | Pending |
 | TELEM-02 | Phase 16 | Pending |
 | TELEM-03 | Phase 16 | Pending |
