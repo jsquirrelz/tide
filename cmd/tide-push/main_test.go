@@ -1057,6 +1057,11 @@ func TestRunPushBoundaryCleanTreePushesIntegratedBranch(t *testing.T) {
 	if bytes.Contains(stderr, []byte("cannot create empty commit")) {
 		t.Errorf("boundary push attempted an empty commit: %s", stderr)
 	}
+	// (d) SC2 gap check: a "nothing to commit" skip message must be emitted so the
+	// operator can distinguish a successful clean-tree push from a silent no-op.
+	if !bytes.Contains(stderr, []byte("clean working tree")) {
+		t.Errorf("boundary push on clean tree did not emit 'clean working tree' skip message; stderr=%s", stderr)
+	}
 
 	// The merged run branch must now exist on the remote and carry the task file.
 	bareRepo, err = gogit.PlainOpen(bareSrc)
