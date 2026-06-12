@@ -269,6 +269,56 @@ func TestRouteTableContainsExpectedGETs(t *testing.T) {
 	}
 }
 
+// TestPrometheusEndpointWiringThroughRegisterRoutes verifies TELEM-01: that
+// Dependencies.PrometheusEndpoint flows through RegisterRoutes into
+// PrometheusHandler.Endpoint. It starts a test-double upstream, builds a
+// router with that upstream as PrometheusEndpoint, and asserts the upstream
+// received a request when the client hits /api/v1/query.
+//
+// main() itself is not unit-testable (it calls os.Getenv directly). The
+// source assertion in the plan's acceptance criteria covers the os.Getenv line.
+func TestPrometheusEndpointWiringThroughRegisterRoutes(t *testing.T) {
+	upstreamHit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
+	}))
+	defer upstream.Close()
+
+	scheme := runtime.NewScheme()
+	if err := tidev1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add v1alpha1 scheme: %v", err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	spa := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><html><body>spa</body></html>")},
+	}
+
+	router := RegisterRoutes(Dependencies{
+		Client:             c,
+		Hub:                nil,
+		Log:                testr.New(t),
+		SPAFS:              spa,
+		PrometheusEndpoint: upstream.URL,
+	})
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/query?query=up")
+	if err != nil {
+		t.Fatalf("GET /api/v1/query: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("TELEM-01 wiring: want HTTP 200, got %d", resp.StatusCode)
+	}
+	if !upstreamHit {
+		t.Errorf("TELEM-01 wiring: upstream was not hit — PrometheusEndpoint did not flow through RegisterRoutes to PrometheusHandler")
+	}
+}
+
 // TestPrometheusProxyRoutesRegistered asserts that both PromQL proxy routes
 // are present in the route table even when PrometheusEndpoint is "" (the
 // zero value used by newTestRouter). This proves graceful-degradation

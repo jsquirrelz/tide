@@ -151,8 +151,9 @@ func main() {
 		Hub:       pubsubHub,
 		Clientset: clientset,
 		//nolint:logcheck // controller-runtime logr idiom; klogr LoggerWithName helper not adopted
-		Log:   setupLog.WithName("router"),
-		SPAFS: spaFS,
+		Log:                setupLog.WithName("router"),
+		SPAFS:              spaFS,
+		PrometheusEndpoint: os.Getenv("PROM_ENDPOINT"),
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the
