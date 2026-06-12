@@ -6,6 +6,7 @@ afterEach(cleanup);
 
 // Verbatim labels + screen-reader descriptions from UI-SPEC §Status Vocabulary.
 // Order matches the spec table; tests are table-driven against this map.
+// 15-05: extended to 11 entries with the Complete row (UI-SPEC C1).
 const EXPECTED: Record<
   StatusValue,
   {
@@ -54,6 +55,14 @@ const EXPECTED: Record<
     colorVar: "var(--color-status-success)",
     iconName: "CircleCheck",
   },
+  // 15-05: Project CRD terminal success (PhaseComplete). CircleCheckBig is
+  // distinct from CircleCheck per the color-blindness rule (both are green).
+  Complete: {
+    label: "Complete",
+    srDescription: "Complete — all milestones succeeded",
+    colorVar: "var(--color-status-success)",
+    iconName: "CircleCheckBig",
+  },
   Failed: {
     label: "Failed",
     srDescription: "Failed — see logs and Conditions for details",
@@ -84,7 +93,7 @@ const EXPECTED: Record<
 
 const ALL_STATUSES = Object.keys(EXPECTED) as StatusValue[];
 
-describe("StatusBadge (UI-SPEC §Status Vocabulary — 10 variants)", () => {
+describe("StatusBadge (UI-SPEC §Status Vocabulary — 11 variants)", () => {
   // Test 1 (table-driven): each status renders the correct icon, label, aria-label.
   it.each(ALL_STATUSES)(
     "renders %s with the locked icon + label + aria-label",

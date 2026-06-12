@@ -2,6 +2,7 @@ import {
   Ban,
   Circle,
   CircleCheck,
+  CircleCheckBig,
   CircleDot,
   CircleX,
   Hand,
@@ -16,7 +17,7 @@ import type { CSSProperties } from "react";
 import { clsx } from "../lib/clsx";
 
 /**
- * The 10 CRD `.status.phase` values rendered by `<StatusBadge>`. Sourced
+ * The 11 CRD `.status.phase` values rendered by `<StatusBadge>`. Sourced
  * verbatim from UI-SPEC §Status Vocabulary. Order matches the spec table.
  *
  * `Hourglass` is exported by lucide-react and intentionally imported here so
@@ -32,6 +33,7 @@ export type StatusValue =
   | "AwaitingApproval"
   | "Paused"
   | "Succeeded"
+  | "Complete"
   | "Failed"
   | "PushLeaseFailed"
   | "PushLeakBlocked"
@@ -97,6 +99,17 @@ const STATUS_TABLE: Record<StatusValue, StatusRow> = {
     colorVar: "var(--color-status-success)",
     srDescription: "Succeeded",
   },
+  // UI-SPEC C1 (15-UI-SPEC.md): Project CRD terminal success (PhaseComplete,
+  // project_types.go:392). Same success family as Succeeded; distinct glyph
+  // (CircleCheckBig vs CircleCheck) per the color-blindness rule — these two
+  // badges share green and can appear side by side in the Planning DAG.
+  Complete: {
+    icon: CircleCheckBig,
+    iconName: "CircleCheckBig",
+    label: "Complete",
+    colorVar: "var(--color-status-success)",
+    srDescription: "Complete — all milestones succeeded",
+  },
   Failed: {
     icon: CircleX,
     iconName: "CircleX",
@@ -131,6 +144,16 @@ const STATUS_TABLE: Record<StatusValue, StatusRow> = {
 
 // Re-export so consumers can iterate the table (e.g. a primitives gallery).
 export { STATUS_TABLE };
+
+/**
+ * Single source-of-truth list of all known status values, derived from
+ * STATUS_TABLE keys. Both coerce guards (PlanningDAGView, ProjectPicker)
+ * import this list instead of maintaining local literals — killing the
+ * silent-drift bug class (UI-SPEC C2, 15-05-PLAN.md).
+ */
+export const KNOWN_STATUS_VALUES = Object.keys(
+  STATUS_TABLE,
+) as readonly StatusValue[];
 
 // Re-export Hourglass so drawer chronograph affordances can share the icon set
 // without re-importing lucide-react directly. Listed in plan must_haves.

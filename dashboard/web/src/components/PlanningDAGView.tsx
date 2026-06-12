@@ -21,7 +21,7 @@ import { applyDagreLayout } from "../lib/layout";
 import { fetchProject, type ProjectDetail } from "../lib/api";
 import { useSSEStream, type SSEState } from "../lib/sse";
 import { projectEventsURL } from "../lib/tasks";
-import type { StatusValue } from "./StatusBadge";
+import { KNOWN_STATUS_VALUES, type StatusValue } from "./StatusBadge";
 
 /**
  * <PlanningDAGView> (UI-SPEC §3).
@@ -58,20 +58,11 @@ export type PlanningDAGViewProps = {
 // Map any backend phase string into the StatusBadge union; unknown phase
 // strings coerce to "Pending" (defensive against schema drift between the
 // K8s API server CRD and the dashboard build — same guard ProjectPicker uses).
-const KNOWN: readonly StatusValue[] = [
-  "Pending",
-  "Dispatching",
-  "Running",
-  "AwaitingApproval",
-  "Paused",
-  "Succeeded",
-  "Failed",
-  "PushLeaseFailed",
-  "PushLeakBlocked",
-  "Rejected",
-];
+// Uses the shared KNOWN_STATUS_VALUES derived from STATUS_TABLE keys (UI-SPEC
+// C2, 15-05-PLAN.md) — adding a new CRD status to StatusBadge automatically
+// propagates here without a separate KNOWN update.
 function coerce(phase: string): StatusValue {
-  return (KNOWN as readonly string[]).includes(phase)
+  return (KNOWN_STATUS_VALUES as readonly string[]).includes(phase)
     ? (phase as StatusValue)
     : "Pending";
 }

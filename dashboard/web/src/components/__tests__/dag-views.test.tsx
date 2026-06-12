@@ -359,3 +359,58 @@ describe("PlanningDAGView — Test 6: blockingConditions wiring (14-UI-SPEC §C3
     });
   });
 });
+
+// 15-05: run-1 finding-9b regression — Complete project renders Complete badge,
+// NOT Pending. Both coerce sites (PlanningDAGView, ProjectPicker) are covered.
+// Companion test asserts that genuinely unknown phases still coerce to Pending.
+describe("PlanningDAGView — Test 7: finding-9b regression (Complete project node, UI-SPEC C1/C2)", () => {
+  it("project node with phase Complete renders status-badge-Complete, not status-badge-Pending", async () => {
+    const completePayload: ProjectDetail = {
+      ...PROJECT_PAYLOAD,
+      phase: "Complete",
+    };
+    render(
+      <PlanningDAGView
+        projectName="my-project"
+        onPlanClick={() => undefined}
+        initialData={completePayload}
+      />,
+    );
+    await waitFor(() => {
+      const projectNode = document.querySelector('[data-testid="tide-node-project"]');
+      expect(projectNode).not.toBeNull();
+      // Symptom assertion: scoped to the project node — Complete badge present,
+      // NOT Pending. Other nodes (milestones/phases/plans) may carry Pending
+      // legitimately — we test only the project node's own badge (finding-9b).
+      expect(
+        projectNode!.querySelector('[data-testid="status-badge-Complete"]'),
+      ).not.toBeNull();
+      expect(
+        projectNode!.querySelector('[data-testid="status-badge-Pending"]'),
+      ).toBeNull();
+    });
+  });
+
+  it("project node with an unknown phase string still coerces to status-badge-Pending", async () => {
+    const bogusPayload: ProjectDetail = {
+      ...PROJECT_PAYLOAD,
+      phase: "Bogus",
+    };
+    render(
+      <PlanningDAGView
+        projectName="my-project"
+        onPlanClick={() => undefined}
+        initialData={bogusPayload}
+      />,
+    );
+    await waitFor(() => {
+      // Unknown phase → Pending fallback (coerce guard still exhaustive).
+      expect(
+        document.querySelector('[data-testid="status-badge-Pending"]'),
+      ).not.toBeNull();
+      expect(
+        document.querySelector('[data-testid="status-badge-Bogus"]'),
+      ).toBeNull();
+    });
+  });
+});

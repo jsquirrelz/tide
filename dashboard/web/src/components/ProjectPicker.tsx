@@ -7,7 +7,7 @@ import {
 } from "react";
 import { ChevronDown } from "lucide-react";
 import { clsx } from "../lib/clsx";
-import StatusBadge, { type StatusValue } from "./StatusBadge";
+import StatusBadge, { KNOWN_STATUS_VALUES, type StatusValue } from "./StatusBadge";
 
 /**
  * One entry in the project picker. The dashboard surfaces a project's
@@ -27,21 +27,11 @@ export type ProjectPickerProps = {
   onChange: (name: string) => void;
 };
 
-const KNOWN_STATUSES: readonly StatusValue[] = [
-  "Pending",
-  "Dispatching",
-  "Running",
-  "AwaitingApproval",
-  "Paused",
-  "Succeeded",
-  "Failed",
-  "PushLeaseFailed",
-  "PushLeakBlocked",
-  "Rejected",
-] as const;
-
+// Uses the shared KNOWN_STATUS_VALUES derived from STATUS_TABLE keys (UI-SPEC
+// C2, 15-05-PLAN.md) — adding a new CRD status to StatusBadge automatically
+// propagates here without a separate local-list update.
 function coerceStatus(phase: string): StatusValue {
-  return (KNOWN_STATUSES as readonly string[]).includes(phase)
+  return (KNOWN_STATUS_VALUES as readonly string[]).includes(phase)
     ? (phase as StatusValue)
     : "Pending";
 }
