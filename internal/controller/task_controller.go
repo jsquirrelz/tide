@@ -850,6 +850,13 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			if patchErr := r.Status().Patch(ctx, task, patch); patchErr != nil {
 				return ctrl.Result{}, patchErr
 			}
+			// The envelope was read successfully — the session burned real
+			// tokens before the validation error, so its usage still counts
+			// against the cap (non-fatal, same pattern as the terminal roll-up
+			// below). Skipping this silently dropped spend on failure-heavy runs.
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		if skipped {
@@ -869,6 +876,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			})
 			if patchErr := r.Status().Patch(ctx, task, patch); patchErr != nil {
 				return ctrl.Result{}, patchErr
+			}
+			// Real token spend precedes the violation — roll it up so the cap
+			// does not under-count on failure-heavy runs (non-fatal, same
+			// pattern as the terminal roll-up below).
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
 			}
 			return ctrl.Result{}, nil
 		}
