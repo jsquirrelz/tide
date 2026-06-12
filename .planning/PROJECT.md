@@ -134,10 +134,10 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 — milestone v1.0.1 (orchestrator trustworthiness + telemetry completion) scoped.*
+*Last updated: 2026-06-12 — Phase 14 (budget-enforcement-pricing) complete; BUDGET-01..03 validated.*
 
 ## Current State
 
-Phase 2 complete (13/13 plans, 21/21 REQ-IDs, 5/5 success criteria implemented). Dogfood-critical pair (TaskReconciler + WaveReconciler) dispatches via `internal/dispatch/podjob.PodJobBackend` against a stub-subagent image; harness enforces caps + redacts secrets + validates output paths; budget rate-limiter absorbs 429 storms; Plan admission webhook rejects cycles and surfaces file-touch mismatches. Helm chart pair gains signing-secret (auto-rotation-safe), `tide-subagent` zero-verb SA, shared RWX `tide-projects` PVC. Layer A envtest tier is 18/18 deterministic green; Layer B kind tier ships test files + CI gate but real run on developer laptops still has environment-setup gaps (cert-manager + image-load + manifest plumbing) — Phase 2.1 (URGENT, INSERTED) is the dedicated debug-and-fix slice. Code review found 5 Critical + 11 Warning; 14 fixed inline (1 deferred, 1 reverted-and-recorded). Phase 1 invariants preserved: K8s API group `tideproject.k8s`; no LLM-SDK imports under firewalled boundaries (providerfirewall analyzer now CI-gated alongside crosspool); CRD-`.status`-only persistence; toolchain pins untouched.
+Phase 14 (budget-enforcement-pricing) complete — 7/7 plans, 3/3 success criteria, VERIFICATION passed (re-verified 2026-06-12 after gap closure). The pricing table covers all v1.0.1 model IDs; `BudgetBlocked` surfaces on the Project CR and on the dashboard project node (`blockingConditions` API field → `ConditionBadge` purple pill + blocked border, with `BillingHalt` riding the same mechanism); in-flight overshoot is bounded by the ReservationStore dispatch gate. Validated in Phase 14: BUDGET-01, BUDGET-02, BUDGET-03.
 
-**Next:** Phase 2.1 — Debug + fix the Layer B kind integration test suite so `make test-int` runs end-to-end on a developer laptop (URGENT insertion; the dedicated gap-closure pass before Phase 3 picks up the up-stack reconcilers).
+**Next:** Phase 15 — paper-cuts (CUTS-01 … CUTS-07).
