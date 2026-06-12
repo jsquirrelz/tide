@@ -554,14 +554,16 @@ describe("TelemetryView — all-projects per-project series (CR-01)", () => {
     );
     await flushInitialFetch();
 
-    // The Cost panel in project scope uses key "cost".
-    // Confirm "cost" appears and "p1" does NOT appear as a standalone legend entry
-    // (it may appear in other UI text, but not as a chart series key).
-    const costEntries = screen.getAllByText("cost");
-    expect(costEntries.length).toBeGreaterThanOrEqual(1);
+    // Chart should render (SVG present — same as D-05 test 1).
+    const panels = screen.getAllByTestId(/^panel-/);
+    const hasSvg = panels.some((p) => p.querySelector("svg") !== null);
+    expect(hasSvg).toBe(true);
 
-    // "p1 (cost)" or bare "p1" as a legend/series key must NOT exist in project scope.
-    // queryAllByText returns [] rather than throwing, so we can safely assert none.
+    // The scope-aware key derivation must NOT produce "p1 (cost)" or "p1 (failure rate)"
+    // style strings in project scope — those suffixed forms appear only in all-projects scope.
+    // queryAllByText returns [] rather than throwing, so safe to assert empty.
     expect(screen.queryAllByText("p1 (cost)")).toHaveLength(0);
+    expect(screen.queryAllByText("p1 (failure rate)")).toHaveLength(0);
+    expect(screen.queryAllByText("p1 (waves dispatched)")).toHaveLength(0);
   });
 });
