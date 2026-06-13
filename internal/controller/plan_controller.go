@@ -495,7 +495,14 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// rollup and failure classification. ChildCRDs are NOT used here —
 	// materialization has moved to the reporter Job (REQ-09-01).
 	// Plan 09-08: capture out so we can gate on out.ChildCount below.
+	//
+	// Phase 17 DEBT-04 (CR-01): Pitfall-1 parity with milestone/phase controllers.
+	// A transient PVC/read error must not wedge the Plan to terminal Status.Phase=Failed.
+	// Track envReaderPresent to distinguish nil-reader (unit-test / non-Option-C path)
+	// from read-error (transient); envReadOK gates the envelope-dependent downstream.
 	var out pkgdispatch.EnvelopeOut
+	envReadOK := false
+	envReaderPresent := r.EnvReader != nil
 	if r.EnvReader == nil {
 		// Fallback: no EnvReader (non-Option-C / unit-test path). Clear Running phase
 		// immediately and let the Wave path take over, mirroring prior behavior.
@@ -509,19 +516,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	var readErr error
 	out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
 	if readErr != nil {
-		patch := client.MergeFrom(plan.DeepCopy())
-		plan.Status.Phase = "Failed"
-		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionFailed,
-			Status:             metav1.ConditionTrue,
-			Reason:             "EnvelopeReadFailed",
-			Message:            readErr.Error(),
-			LastTransitionTime: metav1.Now(),
-		})
-		if pErr := r.Status().Patch(ctx, plan, patch); pErr != nil {
-			return ctrl.Result{}, pErr
-		}
-		return ctrl.Result{}, nil
+		// Non-fatal: log and defer to children-based succession (Pitfall-1 parity with
+		// milestone_controller.go:535-539 and phase_controller.go:476-479). A transient
+		// read error must not permanently wedge the Plan — the envelope is a status
+		// optimization, not the success authority.
+		logger.Error(readErr, "plan planner envelope tiny-status read failed (non-fatal); deferring to children-based succession", "plan", plan.Name)
+	} else {
+		envReadOK = true
 	}
 
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
@@ -557,14 +558,16 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	}
 
 	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
-	if isFirstCompletion && project != nil {
+	// Guard on envReadOK: out.Usage is only valid when the envelope read succeeded.
+	if isFirstCompletion && envReadOK && project != nil {
 		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 			logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
 		}
 	}
 
 	// Phase 13 D-04 layer 2: backstop — classify planner-envelope failure Reason.
-	if out.ExitCode != 0 && project != nil {
+	// Guard on envReadOK: out.ExitCode/Reason are only valid when the envelope read succeeded.
+	if envReadOK && out.ExitCode != 0 && project != nil {
 		var jobStart time.Time
 		if completedJob != nil {
 			jobStart = completedJob.CreationTimestamp.Time
@@ -575,12 +578,16 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	}
 
 	// REQ-7a: stamp ValidationState=Validated so reconcileWaveMaterialization
-	// proceeds past the gate. Stamp always when we have a valid tiny status (i.e.
-	// EnvReader succeeded) — the reporter Job is in flight, Tasks will appear shortly.
-	valPatch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.ValidationState = "Validated"
-	if err := r.Status().Patch(ctx, plan, valPatch); err != nil {
-		return ctrl.Result{}, err
+	// proceeds past the gate. Only stamp when the envelope read succeeded (i.e. we
+	// have a valid tiny status) — the reporter Job is in flight, Tasks will appear shortly.
+	// On a read error, skip the stamp and fall through to the children-based fallback below
+	// (Pitfall-1 parity: the envelope is a status optimization, not the success authority).
+	if envReadOK {
+		valPatch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.ValidationState = "Validated"
+		if err := r.Status().Patch(ctx, plan, valPatch); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Phase 12 CR-01 fix: gate-policy hook moved BEFORE the ChildCount requeue so
@@ -645,14 +652,27 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	//   observed >= expected     → clear Running, let Wave path take over
 	// The plan controller does NOT call patchPlanSucceeded here — succession
 	// happens in reconcileWaveMaterialization once all Tasks complete.
-	expected := out.ChildCount
-	if expected > 0 {
-		observed := r.countChildTasks(ctx, plan)
-		if observed < expected {
-			logger.V(1).Info("requeue: reporter still materializing Task children",
-				"plan", plan.Name, "expected", expected, "observed", observed)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	//
+	// Phase 17 DEBT-04: when envReadOK=false (transient read error), out.ChildCount is
+	// unreliable. Use the children-based fallback instead (Pitfall-1 parity):
+	//   - reader present but errored AND no children yet → requeue (envelope may have ChildCount>0)
+	//   - reader present but errored AND children already exist → fall through (reporter is in flight)
+	// This mirrors phase_controller.go:617-621.
+	if envReadOK {
+		expected := out.ChildCount
+		if expected > 0 {
+			observed := r.countChildTasks(ctx, plan)
+			if observed < expected {
+				logger.V(1).Info("requeue: reporter still materializing Task children",
+					"plan", plan.Name, "expected", expected, "observed", observed)
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
 		}
+	} else if envReaderPresent && r.countChildTasks(ctx, plan) == 0 {
+		// Reader exists but had a read error AND no children observed yet — the envelope
+		// may have ChildCount>0 (children still materializing). Requeue; don't auto-succeed.
+		logger.V(1).Info("boundary push deferred: env reader present but unreadable, waiting (fallback)", "plan", plan.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Plan 04-06 W-2: boundary push trigger AFTER gate, BEFORE clearing

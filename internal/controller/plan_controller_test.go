@@ -589,6 +589,119 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 	})
 })
 
+// PlanReconciler — DEBT-04 (CR-01): envelope-read error is non-fatal (Pitfall-1 parity)
+//
+// When the EnvReader returns a transient error in handlePlannerJobCompletion, the Plan
+// must NOT be set to terminal Status.Phase="Failed". Instead the handler defers to the
+// children-based succession fallback, exactly as milestone_controller.go and
+// phase_controller.go do (Phase 12 Pitfall 1). This Describe block is the regression
+// guard for DEBT-04.
+var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (Pitfall-1 parity)", Label("envtest"), func() {
+	ctx := context.Background()
+
+	It("does not set Status.Phase=Failed when EnvReader.ReadOut returns a transient error", func() {
+		const projName = "debt04-proj-plan"
+		const msName = "debt04-ms-plan"
+		const phName = "debt04-phase-plan"
+		const planName = "debt04-plan-01"
+
+		// Create Project → Milestone → Phase → Plan chain so resolveProjectForPlan succeeds.
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+
+		pl := &tideprojectv1alpha1.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: "default",
+				Labels: map[string]string{
+					"tideproject.k8s/project": projName,
+				},
+			},
+			Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+		}
+		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
+		waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+
+		// Fetch the Plan so we have its UID.
+		var plan tideprojectv1alpha1.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan)).To(Succeed())
+
+		// Wire an EnvReader that returns an error for this Plan's UID (simulates a
+		// transient PVC/read failure — the condition that previously wedged the Plan).
+		envReader := newMapEnvReader()
+		envReader.SetErr(string(plan.UID), fmt.Errorf("simulated transient read error for DEBT-04"))
+
+		r := &PlanReconciler{
+			Client:    mgrClient,
+			Scheme:    k8sClient.Scheme(),
+			EnvReader: envReader,
+			// No Dispatcher or ReporterImage — we call handlePlannerJobCompletion directly.
+		}
+
+		// Drive handlePlannerJobCompletion directly with a nil completedJob
+		// (billing-halt path gates on out.ExitCode != 0, unreachable when read errors).
+		_, err := r.handlePlannerJobCompletion(ctx, &plan, nil)
+
+		// The load-bearing assertions:
+		//
+		// 1. The in-memory plan struct must NOT have Status.Phase="Failed" set
+		//    (the buggy code mutates the struct before patching). This catches the
+		//    regression even if the status subresource patch is delayed in cache.
+		Expect(plan.Status.Phase).NotTo(Equal("Failed"),
+			"DEBT-04: handlePlannerJobCompletion must not mutate plan.Status.Phase to Failed on a transient read error (in-memory check)")
+
+		// 2. A transient read error must not return a hard reconcile error.
+		Expect(err).NotTo(HaveOccurred(),
+			"a transient envelope read error must not return a hard reconcile error (non-fatal)")
+
+		// 3. Cross-check via the direct API-server client (k8sClient) to verify the
+		//    ConditionFailed with Reason=EnvelopeReadFailed was NOT patched to etcd.
+		//    Use Eventually so the watch stream propagates if the cache is stale.
+		Consistently(func(g Gomega) {
+			var fresh tideprojectv1alpha1.Plan
+			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.Phase).NotTo(Equal("Failed"),
+				"DEBT-04: a transient envelope-read error must NOT persist terminal Failed to etcd")
+		}, 1*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Cleanup.
+		DeferCleanup(func() {
+			for _, obj := range []client.Object{
+				&tideprojectv1alpha1.Plan{ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"}},
+				&tideprojectv1alpha1.Phase{ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"}},
+				&tideprojectv1alpha1.Milestone{ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"}},
+				&tideprojectv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"}},
+			} {
+				_ = k8sClient.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, obj)
+				obj.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, obj)
+				_ = k8sClient.Delete(ctx, obj)
+			}
+		})
+	})
+})
+
 var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label("envtest", "phase2"), func() {
 	ctx := context.Background()
 
