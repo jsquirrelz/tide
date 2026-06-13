@@ -10,7 +10,7 @@
   3. `tide approve` refuses approval only when the approval target is itself Failed, not when an unrelated sibling level is Failed — honoring the strict-failure profile (DEBT-03)
   4. A transient envelope-read error in the Plan completion handler is non-fatal — it defers to children-based succession instead of wedging the Plan to terminal `Failed`, matching milestone/phase (DEBT-04)
 
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -21,4 +21,4 @@ Plans:
 
 **Wave 2** *(blocked on 17-01 — shares plan_controller.go ownership)*
 
-- [ ] 17-04-PLAN.md — DEBT-04: make the Plan envelope-read error non-fatal (defer to children-based succession; mirror milestone/phase Pitfall-1) (+ non-terminal-Failed regression spec)
+- [x] 17-04-PLAN.md — DEBT-04: make the Plan envelope-read error non-fatal (defer to children-based succession; mirror milestone/phase Pitfall-1) (+ non-terminal-Failed regression spec)
