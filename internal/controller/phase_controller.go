@@ -451,6 +451,14 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		projectUID = string(project.UID)
 	}
 
+	// Phase 12 / Phase 04.1: reject short-circuit FIRST — operator stop should always
+	// halt, regardless of envelope availability or read errors.
+	// Mirrors plan_controller.go:470-471 ("reject short-circuit FIRST").
+	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
+	if project != nil && gates.CheckRejected(project) {
+		return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(project))
+	}
+
 	// Read tiny status from the dispatch Job's termination message for budget
 	// rollup and failure classification. ChildCRDs are NOT used here —
 	// materialization has moved to the reporter Job (REQ-09-01). Continue through
@@ -506,10 +514,6 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Plan 04-05: gate-policy hook (mirrors milestone_controller.go pattern).
 	// Phase 12 D-04: if the phase already has an ApprovedByUser (or ResumedByUser)
 	// condition, skip the park — don't re-park an already-approved level.
-	// D-05: park (not fail) — in-flight Jobs drain; state is preserved for resume.
-	if project != nil && gates.CheckRejected(project) {
-		return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(project))
-	}
 	if project != nil {
 		policy := gates.EvaluatePolicy(project.Spec.Gates, "phase")
 		if policy == gates.PolicyApprove || policy == gates.PolicyPause {

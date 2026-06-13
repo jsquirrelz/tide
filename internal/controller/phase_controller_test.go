@@ -19,12 +19,14 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	"github.com/jsquirrelz/tide/internal/gates"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -264,6 +266,164 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: expectedJobName, Namespace: "default"}, &job)).To(Succeed())
 			g.Expect(got.Status.Phase).To(Equal("Running"))
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+})
+
+// PhaseReconciler — DEBT-02 (WR-10): reject short-circuit fires before reporter spawn
+//
+// This Describe block contains the regression spec that asserts the fix for DEBT-02:
+// when a Project carries the reject annotation, PhaseReconciler.handleJobCompletion
+// must park the Phase Rejected WITHOUT spawning a new tide-reporter Job. Prior to
+// the fix, spawnReporterIfNeeded ran before gates.CheckRejected, so a rejected
+// Project's completing planner Job still launched a reporter Job (T-17-04).
+var _ = Describe("PhaseReconciler — DEBT-02 reject short-circuit before reporter spawn", Label("envtest"), func() {
+	ctx := context.Background()
+
+	It("parks Phase Rejected and creates zero tide-reporter Jobs when Project carries the reject annotation", func() {
+		const projName = "reject-proj-ph-d02"
+		const msName = "reject-ms-ph-d02"
+		const phName = "reject-phase-d02"
+
+		// Create Project with the reject annotation (simulates `tide reject`).
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      projName,
+				Namespace: "default",
+				Annotations: map[string]string{
+					gates.AnnotationReject: "operator halt test",
+				},
+			},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha1.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+
+		// Wait until the reject annotation is visible via the manager's cached client.
+		Eventually(func() string {
+			var p tideprojectv1alpha1.Project
+			if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
+				return ""
+			}
+			return p.Annotations[gates.AnnotationReject]
+		}, 5*time.Second, 50*time.Millisecond).Should(Equal("operator halt test"))
+
+		// Create Milestone and Phase hierarchy.
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+
+		envReader := newMapEnvReader()
+		r := &PhaseReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+		}
+
+		// Drive through to handleJobCompletion: first drive reconcile to dispatch the
+		// planner Job, fake it terminal, then reconcile again to trigger handleJobCompletion.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha1.Phase
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &got)
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
+
+		// The planner Job may or may not be created (the dispatch-entry hold may fire
+		// first on the Pending path since the reject annotation is already present).
+		// Either way: drive handleJobCompletion directly by patching the Job terminal if
+		// one was created, or call handleJobCompletion directly via reconcile if parked.
+		jobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
+		var plannerJob batchv1.Job
+		if err := mgrClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &plannerJob); err == nil {
+			// Planner Job exists — fake it complete to enter handleJobCompletion.
+			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
+			Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phName, Namespace: "default"}, 3)).To(Succeed())
+		}
+
+		// Load-bearing assertion (a): Phase must be parked Rejected (RejectedByUser condition).
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha1.Phase
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &after)).To(Succeed())
+			c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+			g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked Rejected")
+			g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser),
+				"Phase must be parked with RejectedByUser reason (D-05)")
+			g.Expect(c.Message).To(ContainSubstring("operator halt test"),
+				"reject reason must be propagated to the condition message")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Load-bearing assertion (b): NO tide-reporter-<phase-uid> Job must exist for
+		// this Phase. The reporter Job name is "tide-reporter-<phase-uid>" (see
+		// dispatch_helpers.go). Assert by exact name — NOT by listing all Jobs — to
+		// avoid false-positives from unrelated reporter Jobs from concurrent specs.
+		// Pitfall 3: assert NONE created, never assert deletion.
+		var got2 tideprojectv1alpha1.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &got2)).To(Succeed())
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", got2.UID)
+		var reporterJob batchv1.Job
+		getErr := mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &reporterJob)
+		Expect(getErr).To(HaveOccurred(),
+			"no tide-reporter Job must be created when Project is rejected (T-17-04)")
+		Expect(getErr.Error()).To(ContainSubstring("not found"),
+			"reporter Job absence must be a not-found error, not some other error")
+
+		// Cleanup.
+		DeferCleanup(func() {
+			for _, name := range []struct{ n string }{
+				{phName}, {msName}, {projName},
+			} {
+				phObj := &tideprojectv1alpha1.Phase{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name.n, Namespace: "default"}, phObj); err == nil {
+					phObj.Finalizers = nil
+					_ = k8sClient.Update(ctx, phObj)
+					_ = k8sClient.Delete(ctx, phObj)
+				}
+				msObj := &tideprojectv1alpha1.Milestone{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name.n, Namespace: "default"}, msObj); err == nil {
+					msObj.Finalizers = nil
+					_ = k8sClient.Update(ctx, msObj)
+					_ = k8sClient.Delete(ctx, msObj)
+				}
+				projObj := &tideprojectv1alpha1.Project{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name.n, Namespace: "default"}, projObj); err == nil {
+					projObj.Finalizers = nil
+					_ = k8sClient.Update(ctx, projObj)
+					_ = k8sClient.Delete(ctx, projObj)
+				}
+			}
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := jobs.Items[i]
+				_ = k8sClient.Delete(ctx, &j)
+			}
+		})
 	})
 })
 
