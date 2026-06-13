@@ -10,14 +10,14 @@
   3. `tide approve` refuses approval only when the approval target is itself Failed, not when an unrelated sibling level is Failed — honoring the strict-failure profile (DEBT-03)
   4. A transient envelope-read error in the Plan completion handler is non-fatal — it defers to children-based succession instead of wedging the Plan to terminal `Failed`, matching milestone/phase (DEBT-04)
 
-**Plans:** 4 plans (Wave 1: 17-01..17-03 parallel; Wave 2: 17-04)
+**Plans:** 3/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 17-01-PLAN.md — DEBT-01: PlanReconciler project-label backfill + Project→Milestone reporter-edge create-site stamp (+ backfill/idempotency/stamp regression specs)
-- [ ] 17-02-PLAN.md — DEBT-02: relocate the reject short-circuit ahead of the reporter spawn in milestone + phase completion handlers (+ no-reporter-Job-on-reject specs)
-- [ ] 17-03-PLAN.md — DEBT-03: narrow the D-07 approve guard to the approval target (Option A) + `--wave` semantics doc (+ approve table-test rows)
+- [x] 17-01-PLAN.md — DEBT-01: PlanReconciler project-label backfill + Project→Milestone reporter-edge create-site stamp (+ backfill/idempotency/stamp regression specs)
+- [x] 17-02-PLAN.md — DEBT-02: relocate the reject short-circuit ahead of the reporter spawn in milestone + phase completion handlers (+ no-reporter-Job-on-reject specs)
+- [x] 17-03-PLAN.md — DEBT-03: narrow the D-07 approve guard to the approval target (Option A) + `--wave` semantics doc (+ approve table-test rows)
 
 **Wave 2** *(blocked on 17-01 — shares plan_controller.go ownership)*
 
