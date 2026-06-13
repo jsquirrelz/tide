@@ -56,10 +56,10 @@ Every requirement below carries an implicit acceptance criterion: **a regression
 
 Carried from the v1.0.1 milestone audit's `tech_debt` list. Each item mirrors an already-shipped sibling pattern in this codebase and carries a regression test (the audit's IN-scope subset; the WR-01 + 13/15/16 misc robustness/UX notes are explicitly deferred to the docs/audit backlog).
 
-- [ ] **DEBT-01**: A pre-v1.0.1 Plan CR missing the `tideproject.k8s/project` label is self-healed in-reconciler so `tide approve`/`tide resume` label selectors discover it — `PlanReconciler.Reconcile` gains the backfill block milestone/phase already have; plus the Project→Milestone reporter-edge create-site stamp (15-WR-03) is closed
-- [ ] **DEBT-02**: A rejected Project's completing planner Job does not spawn a NEW reporter Job at the milestone or phase level — the `gates.CheckRejected` short-circuit is relocated ahead of `spawnReporterIfNeeded` in both completion handlers (mirrors the plan 12-05 reject-first fix), without deleting any in-flight Job (D-05 WR-10)
-- [ ] **DEBT-03**: `tide approve` refuses approval only when the approval TARGET is itself Failed, not when any unrelated sibling level is Failed — the D-07 guard is narrowed to the target (Option A), aligning with the strict-failure profile; `--wave` semantics documented (WR-06)
-- [ ] **DEBT-04**: A transient envelope-read error in the Plan completion handler is non-fatal — it defers to children-based succession instead of wedging the Plan to terminal `Status.Phase=Failed`, matching the milestone/phase Pitfall-1 pattern (CR-01)
+- [x] **DEBT-01**: A pre-v1.0.1 Plan CR missing the `tideproject.k8s/project` label is self-healed in-reconciler so `tide approve`/`tide resume` label selectors discover it — `PlanReconciler.Reconcile` gains the backfill block milestone/phase already have; plus the Project→Milestone reporter-edge create-site stamp (15-WR-03) is closed
+- [x] **DEBT-02**: A rejected Project's completing planner Job does not spawn a NEW reporter Job at the milestone or phase level — the `gates.CheckRejected` short-circuit is relocated ahead of `spawnReporterIfNeeded` in both completion handlers (mirrors the plan 12-05 reject-first fix), without deleting any in-flight Job (D-05 WR-10)
+- [x] **DEBT-03**: `tide approve` refuses approval only when the approval TARGET is itself Failed, not when any unrelated sibling level is Failed — the D-07 guard is narrowed to the target (Option A), aligning with the strict-failure profile; `--wave` semantics documented (WR-06)
+- [x] **DEBT-04**: A transient envelope-read error in the Plan completion handler is non-fatal — it defers to children-based succession instead of wedging the Plan to terminal `Status.Phase=Failed`, matching the milestone/phase Pitfall-1 pattern (CR-01)
 
 
 ## Future Requirements
@@ -111,17 +111,17 @@ Which phases cover which requirements.
 | TELEM-04 | Phase 16 | Complete |
 | TELEM-05 | Phase 16 | Complete |
 | TELEM-06 | Phase 16 | Complete |
-| DEBT-01 | Phase 17 | Planned |
-| DEBT-02 | Phase 17 | Planned |
-| DEBT-03 | Phase 17 | Planned |
-| DEBT-04 | Phase 17 | Planned |
+| DEBT-01 | Phase 17 | Complete |
+| DEBT-02 | Phase 17 | Complete |
+| DEBT-03 | Phase 17 | Complete |
+| DEBT-04 | Phase 17 | Complete |
 
 **Coverage:**
 - v1.0.1 requirements: 24 total (Phases 12–16) — all Complete
-- Phase 17 tech-debt requirements: 4 total (DEBT-01..04) — Planned
+- Phase 17 tech-debt requirements: 4 total (DEBT-01..04) — all Complete
 - Mapped to phases: 28
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-11*
-*Last updated: 2026-06-13 — Phase 17 tech-debt requirements (DEBT-01..04) minted + traceability populated by planner*
+*Last updated: 2026-06-13 — Phase 17 tech-debt requirements (DEBT-01..04) verified Complete (17-VERIFICATION passed, 4/4 must-haves)*
