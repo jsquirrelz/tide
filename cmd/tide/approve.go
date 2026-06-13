@@ -21,11 +21,18 @@ limitations under the License.
 // passed. All writes use client.Patch + client.MergeFrom for one-shot
 // annotation semantics that mirror the reconciler-side reads in plan 04-04.
 //
-// D-07 guard (Plan 12-02): approveLevel calls findFailedLevel before the
-// findAwaiting* chain. If any level is Failed, the call returns an actionable
-// error naming the level and its failure reason, and directs the operator to
-// `tide resume --retry-failed`. Approval must never double as a spend-retry
-// (T-12-05: prevents re-firing planners into an empty credit balance).
+// D-07 guard (Plan 12-02, narrowed in Plan 17-03 / DEBT-03 — Option A):
+// approveLevel discovers the AwaitingApproval target FIRST via the
+// findAwaiting* chain, then refuses only if THAT specific target is itself
+// Failed. An unrelated Failed sibling elsewhere on the same project does NOT
+// block approval of a healthy AwaitingApproval level, honoring the
+// strict-failure-profile contract (siblings are independent; only dependents
+// halt). When no AwaitingApproval level exists and a Failed level is present,
+// the "retry-failed" hint is surfaced as an actionable fallback.
+//
+// --wave path (Option A): a --wave approve targets a specific Plan/wave and
+// is NOT subject to the level-path guard; both paths are now coherent under
+// Option A.
 
 package main
 
@@ -69,6 +76,11 @@ var approveWaveRE = regexp.MustCompile(`^[^/]+/\d+$`)
 //nolint:unparam // out is a documented future seam (success-confirmation line); kept on the signature intentionally
 func approveRun(ctx context.Context, c client.Client, ns, projectName, waveFlag string, out io.Writer) error {
 	// Branch A: --wave plan/N — write approve-wave-N on the named Plan.
+	// Option A (DEBT-03): --wave targets a specific Plan/wave, not a
+	// project-wide gate; it is not subject to the level-path failed-level
+	// guard. This is intentional — the operator is approving a precise wave
+	// on a named Plan, which is a different authorization surface from
+	// approving the next AwaitingApproval level in the hierarchy.
 	if waveFlag != "" {
 		return approveWave(ctx, c, ns, projectName, waveFlag)
 	}
@@ -133,9 +145,17 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 // Status.Phase=AwaitingApproval. Order: Milestone → Phase → Plan → Task. The
 // first matching child receives the approve-<level>=true annotation.
 //
-// D-07 guard: if any level is Failed, returns an actionable error before
-// checking for AwaitingApproval levels. Approval must never double as a
-// spend-retry (T-12-05).
+// D-07 guard (Option A, DEBT-03): the guard is narrowed to the approval target.
+// The AwaitingApproval target is discovered FIRST; refusal fires only if THAT
+// specific target has Status.Phase=="Failed". Unrelated Failed siblings do NOT
+// block approval of a healthy AwaitingApproval level — honoring the
+// strict-failure-profile contract (T-17-08: siblings are independent).
+//
+// When no AwaitingApproval level exists at all, findFailedLevel is consulted
+// as a UX fallback: if a Failed level is present, the operator sees the
+// actionable "retry-failed" hint instead of a bare "no level awaiting" message.
+// This preserves D-07's "approval never doubles as a spend-retry" intent for
+// the case where the operator has no valid target to approve (T-17-07).
 //
 // Per the plan: discovers level from child CRDs (not from Project.Status
 // conditions directly, since the AwaitingApproval state lives on the child
@@ -149,9 +169,33 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 		return fmt.Errorf("get project: %w", err)
 	}
 
-	// D-07: check for Failed levels BEFORE the AwaitingApproval search.
-	// A Failed level means approval would be a spend-retry — refuse with an
-	// actionable error pointing at `tide resume --retry-failed`.
+	// Option A (DEBT-03): discover the AwaitingApproval target FIRST in
+	// dependency-order. Milestone → Phase → Plan → Task. The first matching
+	// child is the one the operator is gating on.
+	if obj, level, err := findAwaitingMilestone(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		return approveLevelTarget(ctx, c, obj, level, projectName)
+	}
+	if obj, level, err := findAwaitingPhase(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		return approveLevelTarget(ctx, c, obj, level, projectName)
+	}
+	if obj, level, err := findAwaitingPlan(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		return approveLevelTarget(ctx, c, obj, level, projectName)
+	}
+	if obj, level, err := findAwaitingTask(ctx, c, ns, projectName); err != nil {
+		return err
+	} else if obj != nil {
+		return approveLevelTarget(ctx, c, obj, level, projectName)
+	}
+
+	// No AwaitingApproval level found. Check for Failed levels as a UX hint:
+	// if a Failed level exists, guide the operator to `tide resume --retry-failed`
+	// rather than surfacing a confusing "no level awaiting approval" message.
 	if obj, kind, err := findFailedLevel(ctx, c, ns, projectName); err != nil {
 		return err
 	} else if obj != nil {
@@ -162,29 +206,40 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 		)
 	}
 
-	// Iterate child kinds in dependency-order. The first child matching
-	// AwaitingApproval is the one the operator is gating on.
-	if obj, level, err := findAwaitingMilestone(ctx, c, ns, projectName); err != nil {
-		return err
-	} else if obj != nil {
-		return patchApproveLevel(ctx, c, obj, level)
-	}
-	if obj, level, err := findAwaitingPhase(ctx, c, ns, projectName); err != nil {
-		return err
-	} else if obj != nil {
-		return patchApproveLevel(ctx, c, obj, level)
-	}
-	if obj, level, err := findAwaitingPlan(ctx, c, ns, projectName); err != nil {
-		return err
-	} else if obj != nil {
-		return patchApproveLevel(ctx, c, obj, level)
-	}
-	if obj, level, err := findAwaitingTask(ctx, c, ns, projectName); err != nil {
-		return err
-	} else if obj != nil {
-		return patchApproveLevel(ctx, c, obj, level)
-	}
 	return fmt.Errorf("tide: no level awaiting approval on project %s", projectName)
+}
+
+// approveLevelTarget applies the D-07 targeted check to the discovered
+// AwaitingApproval object and, if it passes, writes the approve annotation.
+//
+// D-07 (Option A, DEBT-03): approval is refused only if the TARGET itself
+// has Status.Phase=="Failed" — not because of any unrelated sibling failure.
+// Reuses buildFailureDetail for the actionable "retry-failed" error message
+// (T-17-07: prevents approval from doubling as a spend-retry for the target).
+func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object, level, projectName string) error {
+	// Belt-and-suspenders: refuse if the discovered AwaitingApproval target
+	// is itself in a Failed phase (e.g., the level transitioned to Failed
+	// after the list but before the approval check — or the controller sets
+	// both AwaitingApproval status and a Failed condition simultaneously).
+	var targetPhase string
+	switch v := obj.(type) {
+	case *tidev1alpha1.Milestone:
+		targetPhase = v.Status.Phase
+	case *tidev1alpha1.Phase:
+		targetPhase = v.Status.Phase
+	case *tidev1alpha1.Plan:
+		targetPhase = v.Status.Phase
+	case *tidev1alpha1.Task:
+		targetPhase = v.Status.Phase
+	}
+	if targetPhase == "Failed" {
+		detail := buildFailureDetail(obj)
+		return fmt.Errorf(
+			"tide: level %q (%s) has failed%s; approval never retries failed work — use 'tide resume %s --retry-failed' to recover",
+			obj.GetName(), level, detail, projectName,
+		)
+	}
+	return patchApproveLevel(ctx, c, obj, level)
 }
 
 // findFailedLevel scans all four level kinds (Milestone → Phase → Plan →
