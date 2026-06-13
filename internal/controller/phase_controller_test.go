@@ -13,7 +13,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -379,14 +378,20 @@ var _ = Describe("PhaseReconciler — DEBT-02 reject short-circuit before report
 				"reject reason must be propagated to the condition message")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
-		// Load-bearing assertion (b): NO tide-reporter-<uid> Job must exist in the namespace
-		// (assert NONE created, not that one was deleted — Pitfall 3 / T-17-04 / T-17-05).
-		var allJobs batchv1.JobList
-		Expect(mgrClient.List(ctx, &allJobs, client.InNamespace("default"))).To(Succeed())
-		for _, j := range allJobs.Items {
-			Expect(strings.HasPrefix(j.Name, "tide-reporter-")).To(BeFalse(),
-				"no tide-reporter Job must be created when Project is rejected (T-17-04)")
-		}
+		// Load-bearing assertion (b): NO tide-reporter-<phase-uid> Job must exist for
+		// this Phase. The reporter Job name is "tide-reporter-<phase-uid>" (see
+		// dispatch_helpers.go). Assert by exact name — NOT by listing all Jobs — to
+		// avoid false-positives from unrelated reporter Jobs from concurrent specs.
+		// Pitfall 3: assert NONE created, never assert deletion.
+		var got2 tideprojectv1alpha1.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &got2)).To(Succeed())
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", got2.UID)
+		var reporterJob batchv1.Job
+		getErr := mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &reporterJob)
+		Expect(getErr).To(HaveOccurred(),
+			"no tide-reporter Job must be created when Project is rejected (T-17-04)")
+		Expect(getErr.Error()).To(ContainSubstring("not found"),
+			"reporter Job absence must be a not-found error, not some other error")
 
 		// Cleanup.
 		DeferCleanup(func() {
