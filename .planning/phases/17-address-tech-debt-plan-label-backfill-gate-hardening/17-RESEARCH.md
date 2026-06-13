@@ -242,11 +242,11 @@ Requirement IDs for this phase are TBD (the planner will mint them — suggest `
 | A2 | WR-01 is intended/acceptable (DEFER) | Item 4 | If the informer-lag window is wider than assumed on a loaded cluster, a child could dispatch under a parked parent. Doc-comment frames it as bounded; low risk. |
 | A3 | No Layer-B (kind) coverage needed — all fixes are controller-internal | Validation Architecture | If a fix interacts with the real reporter Job lifecycle in-cluster, an envtest-only gate could miss it. WR-10's "no Job created" assertion is envtest-checkable, mitigating. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **WR-06 semantics fork (A vs B).** See Item 3 / Assumption A1. Recommend the planner route this through discuss-phase or default to A (narrowed guard) per fix-thoroughly preference.
-2. **Should WR-01 be included as a hardening freebie?** It's a one-liner if the planner wants belt-and-suspenders. Default DEFER; flag for a yes/no in planning.
-3. **Requirement IDs.** This phase has none yet (ROADMAP goal "[To be planned]"). The planner must mint IDs and update REQUIREMENTS.md traceability; suggested: BACKFILL-01 (Item 1), GATE-05 (WR-10), GATE-06 (WR-06), ROBUST-01 (CR-01), plus fold WR-03 into BACKFILL-01.
+1. **WR-06 semantics fork (A vs B).** RESOLVED: Option A (narrow guard) — only refuse approval when the approval target itself is Failed. See Item 3 / Assumption A1. Default lean confirmed downstream per fix-thoroughly preference.
+2. **Should WR-01 be included as a hardening freebie?** RESOLVED: DEFER — informer-lag-bounded, documented design choice; tracked in the docs/audit hardening backlog. Not in this phase's scope.
+3. **Requirement IDs.** RESOLVED: DEBT-01..04 minted (DEBT-01 = Item 1 backfill + WR-03 fold; DEBT-02 = WR-10 reject reorder; DEBT-03 = WR-06 guard narrow; DEBT-04 = CR-01 envelope-read non-fatal). REQUIREMENTS.md traceability updated.
 
 ## Environment Availability
 
@@ -295,3 +295,4 @@ No external state-of-the-art shift. This is internal consistency work. The relev
 
 **Research date:** 2026-06-12
 **Valid until:** 2026-07-12 (stable — internal codebase consistency work; only invalidated by edits to the cited controllers before planning)
+</content>

@@ -4,8 +4,8 @@ milestone: v1.0.1
 milestone_name: — Orchestrator Trustworthiness + Telemetry Completion
 status: executing
 stopped_at: Phase 16 context gathered
-last_updated: "2026-06-13T04:13:35.434Z"
-last_activity: 2026-06-13 -- Phase 17 planning complete
+last_updated: "2026-06-13T04:14:52.368Z"
+last_activity: 2026-06-13 -- Phase 17 execution started
 progress:
   total_phases: 1
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 17: tech debt — Plan label backfill + gate hardening
+**Current focus:** Phase 17 — address-tech-debt-plan-label-backfill-gate-hardening
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-13 -- Phase 17 planning complete
+Phase: 17 (address-tech-debt-plan-label-backfill-gate-hardening) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 17
+Last activity: 2026-06-13 -- Phase 17 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
