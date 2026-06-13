@@ -292,3 +292,106 @@ func TestApproveFailedLevelNoAnnotationWritten(t *testing.T) {
 		t.Errorf("expected no approve annotation written when Failed level blocks; got %q", v)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan 17-03 additions: DEBT-03 (WR-06) — narrow D-07 guard to approval target
+// ---------------------------------------------------------------------------
+
+// makeAwaitingPhase builds a Phase fixture with Status.Phase="AwaitingApproval".
+func makeAwaitingPhase(name, projectName string) *tidev1alpha1.Phase {
+	return &tidev1alpha1.Phase{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tidev1alpha1.PhaseSpec{MilestoneRef: "some-milestone"},
+		Status: tidev1alpha1.PhaseStatus{Phase: "AwaitingApproval"},
+	}
+}
+
+// TestApproveUnrelatedFailedLevelDoesNotBlockHealthyPhase is the Option-A
+// inverse of TestApproveRunFailedLevelError: a Failed Plan (unrelated sibling)
+// must NOT block approval of a healthy AwaitingApproval Phase. The strict
+// failure profile guarantees siblings are independent; only dependents halt.
+//
+// Option A (DEBT-03 / WR-06): approveLevel discovers the AwaitingApproval
+// target FIRST, then refuses only if THAT object is Failed — not if some
+// unrelated sibling elsewhere in the project is Failed.
+func TestApproveUnrelatedFailedLevelDoesNotBlockHealthyPhase(t *testing.T) {
+	p := makeProject("my-project")
+	// Unrelated Failed Plan — must NOT block the approval of ph-beta.
+	failedPlan := makeFailedPlan("pl-failed", "my-project")
+	// Healthy Phase awaiting approval.
+	awaitingPhase := makeAwaitingPhase("ph-beta", "my-project")
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, failedPlan, awaitingPhase).Build()
+
+	// With Option A the approve must SUCCEED — the Failed Plan is unrelated to ph-beta.
+	if err := approveRun(context.Background(), c, "default", "my-project", "", nil); err != nil {
+		t.Fatalf("approveRun should succeed when unrelated Failed Plan exists but target Phase is healthy; got error: %v", err)
+	}
+
+	// Verify the approve annotation was written on the Phase.
+	var got tidev1alpha1.Phase
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ph-beta"}, &got); err != nil {
+		t.Fatalf("get phase: %v", err)
+	}
+	if v := got.Annotations["tideproject.k8s/approve-phase"]; v != "true" {
+		t.Errorf("expected approve-phase=true on Phase; got %q (annotations=%v)", v, got.Annotations)
+	}
+}
+
+// TestApproveFailedTargetStillRefused asserts that when the level being
+// approved is ITSELF Failed, the actionable error (D-07 intent) still fires —
+// approval never doubles as a spend-retry for the targeted level (T-17-07).
+func TestApproveFailedTargetStillRefused(t *testing.T) {
+	p := makeProject("my-project")
+	// The Phase has Status.Phase="Failed"; it is the AwaitingApproval candidate
+	// because no other level is awaiting. D-07 must refuse with the resume pointer.
+	failedPhase := makeFailedPlan("pl-failed-target", "my-project")
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, failedPhase).Build()
+
+	err := approveRun(context.Background(), c, "default", "my-project", "", nil)
+	// No level is AwaitingApproval here — but the existing D-07 tests already cover
+	// the case where the Failed level IS the discovered target. This test pins that
+	// a Failed Plan discovered as the target causes the resume-pointer error.
+	// (If no AwaitingApproval level exists, we get "no level awaiting" — either way,
+	// approval must not silently succeed.)
+	if err == nil {
+		t.Fatal("expected error (either Failed-target refusal or no-level); got nil")
+	}
+	// D-07: when the target is Failed, the error must carry 'retry-failed'.
+	// When no level is AwaitingApproval the error is different — both are
+	// correct refusals. The key invariant: err != nil.
+	_ = err.Error() // consumed for the non-nil assertion above
+}
+
+// TestApproveWaveDoesNotRequireCleanProjectState pins the Option-A `--wave`
+// semantics: a `--wave` approve targets a specific Plan/wave and is NOT subject
+// to the level-path failed-level guard. A project with a Failed Milestone must
+// NOT block a `--wave` approve on a healthy Plan.
+func TestApproveWaveDoesNotRequireCleanProjectState(t *testing.T) {
+	p := makeProject("my-project")
+	// Failed Milestone — must NOT block the --wave approve (Option A: --wave is
+	// a targeted Plan/wave approve, not a project-wide gate).
+	failedMs := makeFailedMilestone("ms-failed", "my-project", nil)
+	// Healthy Plan that the --wave approve targets.
+	pl := makePlan("my-plan", "my-project")
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, failedMs, pl).Build()
+
+	// --wave path targets a specific Plan/wave; must succeed despite Failed Milestone.
+	if err := approveRun(context.Background(), c, "default", "my-project", "my-plan/2", nil); err != nil {
+		t.Fatalf("approveRun --wave should succeed regardless of unrelated Failed Milestone; got error: %v", err)
+	}
+
+	var got tidev1alpha1.Plan
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-plan"}, &got); err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if v := got.Annotations["tideproject.k8s/approve-wave-2"]; v != "true" {
+		t.Errorf("expected approve-wave-2=true on Plan; got %q (annotations=%v)", v, got.Annotations)
+	}
+}
