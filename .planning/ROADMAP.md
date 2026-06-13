@@ -1,202 +1,24 @@
-# Roadmap: TIDE — Topologically-Indexed Dependency Execution
+### Phase 17: Address tech debt: Plan label backfill + gate hardening
 
-## Milestones
-
-- ✅ **v1.0.0 — Self-Hosting MVP** (SHIPPED 2026-06-11) — Phases 1–11, 137 plans, 965 commits. Six CRDs + layered-Kahn waves + pluggable subagent dispatch + gates/observability/dashboard/CLI + Helm distribution; release published (binaries, 7 images, 2 OCI charts). Full archive: [milestones/v1.0.0-ROADMAP.md](milestones/v1.0.0-ROADMAP.md) · [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md)
-
-- 🚧 **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (Phases 12–16) — Fix dogfood run-1 findings; make the orchestrator trustworthy enough to gate run 2 on; complete the merged telemetry foundation.
-
-## Phases
-
-### v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion
-
-**Milestone Goal:** Fix the dogfood run-1 findings (gate semantics run-killer, reject/resume recovery, image dispatch chain, billing halt, budget UX, paper cuts) and complete the merged telemetry foundation. Every fix carries a regression test reproducing the run-1 symptom.
-
-- [x] **Phase 12: Gate Semantics + Reject/Resume** - Fix ConsumeApprove advancement bug + retry path + resume recovery (run-killers) (completed 2026-06-11)
-- [x] **Phase 13: Dispatch Image Resolution + Provider Halt** - Implement image-resolution chain at all dispatch sites + billing-400 project-wide halt (completed 2026-06-11)
-- [x] **Phase 14: Budget Enforcement + Pricing** - Current model IDs in pricing table + BudgetBlocked condition + in-flight overshoot bound (completed 2026-06-12)
-- [x] **Phase 15: Paper Cuts** - Reporter CR labels, boundary push no-op, phase status flapping, artifact-get stub, dashboard chip + wave view, file-touch overlap (completed 2026-06-12)
-- [x] **Phase 16: Telemetry Completion** - PROM_ENDPOINT wiring, TelemetryView tab, six locked metrics, PromQL name alignment, Makefile gate, proxy client timeout (completed 2026-06-12)
-
-## Phase Details
-
-### Phase 12: Gate Semantics + Reject/Resume
-
-**Goal**: Gate passage and reject/resume recovery are correct — the approve gate sits at descent (review the authored artifact before children spend), approval never jumps a level past its children, reject parks instead of fail-marking, and `tide resume` is the one sanctioned recovery verb
-**Depends on**: Phase 11 (v1.0.0)
-**Requirements**: GATE-01, GATE-02, GATE-03, GATE-04, RESUME-01
-**Context**: 12-CONTEXT.md (decisions D-01..D-07 locked 2026-06-11; gate-at-descent folds run-1 finding 1 in as GATE-04)
+**Goal:** PlanReconciler self-heals the `tideproject.k8s/project` label like milestone/phase already do, and the reject/approve/envelope-read gate paths are brought into consistency with their shipped sibling patterns — every fix mirrors an in-tree template and carries a regression test
+**Requirements**: DEBT-01, DEBT-02, DEBT-03, DEBT-04
+**Depends on:** Phase 16
 **Success Criteria** (what must be TRUE):
 
-  1. Approving a gated Milestone with 5 incomplete Phase children does not set the Milestone to Succeeded — it returns to Running with an `ApprovedByUser` condition and succeeds only when all children complete (regression test reproduces the run-1 finding-7 symptom)
-  2. While a level is parked at AwaitingApproval, its children are materialized and visible but ZERO child planner/executor Jobs exist — dispatch holds until approval (regression test reproduces the run-1 finding-1 symptom: 5 phase planners fired ~1s after the park)
-  3. gates.md documents approve-at-descent semantics — the old step-5 "advances the level to Succeeded" text and the `Approved` phase-value sketch are gone
-  4. `tide reject` parks children without writing `Status.Phase=Failed`; `tide resume` lifts the park; `tide resume --retry-failed` recovers a genuinely Failed level (status reset → re-dispatch → `ResumedByUser` condition), matching the run-1 kubectl recipe
-  5. `tide approve` against a level whose planner Job failed prints an actionable error pointing at `tide resume --retry-failed` — approval never doubles as a spend-retry
+  1. A pre-v1.0.1 Plan CR with no `tideproject.k8s/project` label gets it stamped on its next reconcile (idempotently), becoming visible to `tide approve`/`tide resume` label selectors; the Project→Milestone reporter edge also stamps the label at create-site (DEBT-01)
+  2. A rejected Project's completing planner Job parks the Milestone/Phase Rejected WITHOUT spawning a NEW reporter Job — and never deletes an in-flight Job (DEBT-02)
+  3. `tide approve` refuses approval only when the approval target is itself Failed, not when an unrelated sibling level is Failed — honoring the strict-failure profile (DEBT-03)
+  4. A transient envelope-read error in the Plan completion handler is non-fatal — it defers to children-based succession instead of wedging the Plan to terminal `Failed`, matching milestone/phase (DEBT-04)
 
-**Plans**: 5 plans (1 gap closure)
+**Plans:** 4 plans (Wave 1: 17-01..17-03 parallel; Wave 2: 17-04)
 
 Plans:
 **Wave 1**
 
-- [x] 12-01-PLAN.md — Approve-at-descent routing: approval returns level to Running + ApprovedByUser; succession stays children-gated (GATE-01); gates.md rewrite (GATE-02)
-- [x] 12-02-PLAN.md — CLI verbs: tide resume --retry-failed status reset (RESUME-01) + tide approve refuses Failed levels with actionable error (GATE-03)
+- [ ] 17-01-PLAN.md — DEBT-01: PlanReconciler project-label backfill + Project→Milestone reporter-edge create-site stamp (+ backfill/idempotency/stamp regression specs)
+- [ ] 17-02-PLAN.md — DEBT-02: relocate the reject short-circuit ahead of the reporter spawn in milestone + phase completion handlers (+ no-reporter-Job-on-reject specs)
+- [ ] 17-03-PLAN.md — DEBT-03: narrow the D-07 approve guard to the approval target (Option A) + `--wave` semantics doc (+ approve table-test rows)
 
-**Wave 2** *(blocked on Wave 1 completion)*
+**Wave 2** *(blocked on 17-01 — shares plan_controller.go ownership)*
 
-- [x] 12-03-PLAN.md — Descent dispatch hold: children materialize but zero Jobs while parent parked at AwaitingApproval (GATE-04)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 12-04-PLAN.md — Reject parks instead of fail-marking at all four reconcilers; retry-failed re-dispatch regression (RESUME-01, GATE-03)
-
-**Wave 4** *(gap closure — 12-VERIFICATION.md CR-01/CR-02)*
-
-- [x] 12-05-PLAN.md — Plan-level gate fix: park before ChildCount wait, AwaitingApproval early-return, wave path held while parked; ChildCount>0 regression specs (GATE-01, GATE-04 at Plan level)
-
-### Phase 13: Dispatch Image Resolution + Provider Halt
-
-**Goal**: Subagent image resolves correctly at all four dispatch sites via the documented chain, and a provider billing-400 response halts the entire project instead of burning sessions one at a time
-**Depends on**: Phase 12
-**Requirements**: DISPATCH-01, DISPATCH-02, HALT-01
-**Success Criteria** (what must be TRUE):
-
-  1. A Project with `spec.levels.plan.image` set dispatches that image in the planner Job — `kubectl get job -o yaml` shows the correct image at each of the four reconciler dispatch sites
-  2. A Project pinning a real image via `spec.subagent.image` in a released-chart install dispatches that image — no silent stub override; the chart's `--subagent-image` default posture is documented in values.yaml with an explicit comment
-  3. A provider response with HTTP 400 "credit balance is too low" sets a `BillingHalt` condition on the Project and stops further Job dispatches — subsequent reconcile loops skip dispatch while the condition is present
-
-**Plans**: 7 plans
-
-Plans:
-**Wave 1**
-
-- [x] 13-01-PLAN.md — resolveImage precedence chain + all six controller dispatch sites wired; main.go flag-overrides-env default tier (DISPATCH-01)
-- [x] 13-02-PLAN.md — BillingHalt condition vocabulary + shared helpers, credproxy fail-fast latch, tide resume clears the halt (HALT-01)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 13-03-PLAN.md — Chart drops --subagent-image; subagent.defaults.image becomes the live default channel; kind/acceptance stub opt-in + green suite (DISPATCH-02)
-- [x] 13-04-PLAN.md — BillingHalt dispatch-entry hold at all five levels + envelope backstop + run-1 regression (HALT-01)
-
-**Wave 3 — gap closure** *(from 13-VERIFICATION.md)*
-
-- [x] 13-05-PLAN.md — CR-01 milestone nil-project guard + WR-03 resume time-fence (billing-resumed-at annotation, jobStart guard, distinct latch body) (DISPATCH-01, HALT-01)
-- [x] 13-06-PLAN.md — WR-01 de-vacuate planner-level hold specs + promptPath fixture debt + WR-04 chart required guard (HALT-01, DISPATCH-02)
-
-**Wave 4 — gap closure** *(blocked on Wave 3)*
-
-- [x] 13-07-PLAN.md — Diagnose-then-fix reporter materialization failure + final full make test-int gate (DISPATCH-02)
-
-### Phase 14: Budget Enforcement + Pricing
-
-**Goal**: The pricing table resolves current model IDs without warnings, budget-cap exhaustion is visible on the Project and dashboard, and in-flight overshoot past the cap is bounded
-**Depends on**: Phase 12
-**Requirements**: BUDGET-01, BUDGET-02, BUDGET-03
-**Success Criteria** (what must be TRUE):
-
-  1. Sessions using claude-opus-4-8, claude-fable-5, and other current model IDs log no `pricing: unknown model` lines — the pricing table covers all model IDs shipped with v1.0.1
-  2. When the project budget cap is reached, a `BudgetBlocked` condition appears on the Project CR — visible via `kubectl get project -o yaml` and reflected on the dashboard project node
-  3. In-flight overshoot past the budget cap is bounded to at most one wave's worth of already-dispatched sessions — no new Jobs are created after cap breach is detected
-
-**Plans**: 7 plans (2 gap closure)
-
-Plans:
-**Wave 1**
-
-- [x] 14-01-PLAN.md — Pricing table correction (D-01) + provider-firewalled override merge & env transport (D-02 provider side)
-- [x] 14-02-PLAN.md — Foundations: BudgetBlocked condition vocabulary + helpers (D-04) + ReservationStore with restart rederivation (D-05)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 14-03-PLAN.md — TaskReconciler dispatch-gate rewrite, reserve/settle wiring, run-1 regression envtest
-- [x] 14-04-PLAN.md — Pricing-drift automation: hack script + weekly deduped-issue workflow + release checklist (D-03)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 14-05-PLAN.md — Five-site BudgetBlocked rollout + manager flags/validation/rederive runnable + additive Helm surface
-
-**Wave 4 — gap closure** *(BUDGET-02 dashboard half, per 14-VERIFICATION.md + approved 14-UI-SPEC.md)*
-
-- [x] 14-06-PLAN.md — Backend: whitelisted blockingConditions on projectSummary + informer-bridge status-only-update regression test
-- [x] 14-07-PLAN.md — Frontend: ConditionBadge primitive + TideNodeShell blocked border + ProjectNode/PlanningDAGView/api.ts wiring
-
-### Phase 15: Paper Cuts
-
-**Goal**: Seven run-1 correctness and UX regressions are closed — reporter CR labels, boundary push no-op, phase status flapping, artifact-get stub, dashboard status chip, cross-plan wave view, and file-touch overlap
-**Depends on**: Phase 12
-**Requirements**: CUTS-01, CUTS-02, CUTS-03, CUTS-04, CUTS-05, CUTS-06, CUTS-07
-**Success Criteria** (what must be TRUE):
-
-  1. Reporter-created Milestone and Phase CRs carry the `tideproject.k8s/project` label — `tide approve` discovers gated levels on the first call instead of reporting "no level awaiting approval"
-  2. `tide push` on a clean tree exits 0 with a "nothing to push" message — no `cannot create empty commit` error
-  3. Phase CRs do not oscillate between AwaitingApproval and Running on successive reconcile loops — the status condition converges and stays stable
-  4. `tide artifact-get` executes the inspector pod and streams its output — it no longer dry-run prints the pod spec
-  5. The dashboard project-node status chip displays "Complete" when the Project CR status is `Complete` — the "Pending" mapping is corrected
-  6. The dashboard offers an aggregate view of all currently-running waves across all Plans — the view reads from label-selector queries per the spec's derived-waves model
-  7. Two sibling Tasks in the same wave that both declare the same file under `fileTouchMode: strict` are rejected at Plan admission time — the duplicate is surfaced before any Job dispatches
-
-**Plans**: 7 plans (waves: 1 → 15-01..15-06 parallel; 2 → 15-07)
-
-Plans:
-**Wave 1**
-
-- [x] 15-01-PLAN.md — CUTS-01: universal project-label stamping (StampProjectLabel + reporter create site) + reconciler backfill + approve-discovery regression
-- [x] 15-02-PLAN.md — CUTS-07: PlanReconciler file-touch dispatch gate (park-not-fail) + webhook real mode resolution + planner prompt patch
-- [x] 15-03-PLAN.md — CUTS-04: real artifact-get inspector Pod (readiness wait, raw stdout, 5m timeout) + fake-seam tests
-- [x] 15-04-PLAN.md — CUTS-02/03: verify already-fixed cuts + regression pinning (clean-tree push, AwaitingApproval convergence)
-- [x] 15-05-PLAN.md — CUTS-05: Complete status vocabulary row + coerce-guard consolidation + finding-9b Vitest regressions
-- [x] 15-06-PLAN.md — CUTS-06 backend: waves.snapshot SSE aggregate (label-selector derivation, snapshot-on-subscribe)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 15-07-PLAN.md — CUTS-06 frontend: RunningWavesView + App.tsx pane swap + All waves return + Vitest contract
-
-**UI hint**: yes
-
-### Phase 16: Telemetry Completion
-
-**Goal**: The merged telemetry foundation is functional end-to-end — PROM_ENDPOINT drives the PromQL proxy, TelemetryView is mounted in AppShell, the six locked metrics emit with correct labels, PromQL panel names match, the Makefile gate is wired, and the proxy client is hardened
-**Depends on**: Phase 15
-**Requirements**: TELEM-01, TELEM-02, TELEM-03, TELEM-04, TELEM-05, TELEM-06
-**Success Criteria** (what must be TRUE):
-
-  1. The dashboard reads `PROM_ENDPOINT` from the injected environment and passes it to the PromQL proxy — changing the helm value changes the endpoint the proxy queries without a code change
-  2. AppShell renders a Telemetry tab that mounts TelemetryView; Vitest covers both degradation shapes (200 `unavailable` sentinel and 502 error)
-  3. TaskReconciler terminal branches emit all six locked metrics (`tide_tokens_{input,output,cache_read,cache_creation}_total`, `tide_cost_cents_total`, `tide_task_duration_seconds`) with `{project, phase, wave}` labels matching the MILESTONE.md table (49e93cb)
-  4. All four TelemetryView PromQL panels query the locked metric names — `tide_tasks_dispatched_total` and `tide_tokens_used_total{model}` are replaced with the correct names
-  5. `make helm-rbac-assert` and the other telemetry gate scripts in `hack/helm` execute and pass on a running cluster — the Makefile targets are wired and documented
-
-**Plans**: 8 plans (5 + 3 gap closure)
-**UI hint**: yes
-
-Plans:
-**Wave 1**
-
-- [x] 16-01-PLAN.md — TELEM-01/06: PROM_ENDPOINT config + env wiring, PromQL proxy hardening (bounded client, ctx propagation, base-path preservation)
-- [x] 16-02-PLAN.md — TELEM-03: six locked metrics registered + emitted at the three RollUpUsage terminal seams with {project, phase, plan, wave}
-- [x] 16-03-PLAN.md — TELEM-05: helm-telemetry-assert + helm-assert Makefile targets, ci.yaml helm-lint step, docstring corrections
-- [x] 16-04-PLAN.md — TELEM-04 + TELEM-02 (view): recharts charts, D-06 query fixes, scope/range toolbar, polling, budget grid, degradation Vitest
-
-**Wave 2** *(blocked on 16-04)*
-
-- [x] 16-05-PLAN.md — TELEM-02 (mount): header DAGs|Telemetry view switcher, TelemetryView body branch, App-level Vitest
-
-**Wave 3** *(gap closure — 16-VERIFICATION.md CR-01 + 16-REVIEW.md CR-02/WR-03/WR-04)*
-
-- [x] 16-06-PLAN.md — CR-01: all-projects per-project series keys in TelemetryView fetchPanel + multi-result Vitest regression
-- [x] 16-07-PLAN.md — CR-02 + WR-04: emit tasks_completed/tasks_failed at emitTaskMetrics seams, waves_dispatched at materializeWaves Create; negative-duration guard
-- [x] 16-08-PLAN.md — WR-03: delete dead prometheusEndpoint config field/tests; align MILESTONE.md + chart comment to env-only mechanism
-
-## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 12 → 13 → 14 → 15 → 16
-(14 and 15 depend only on Phase 12 and can be planned in parallel once Phase 12 is complete)
-
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 12. Gate Semantics + Reject/Resume | v1.0.1 | 5/5 | Complete    | 2026-06-11 |
-| 13. Dispatch Image Resolution + Provider Halt | v1.0.1 | 7/7 | Complete    | 2026-06-11 |
-| 14. Budget Enforcement + Pricing | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 15. Paper Cuts | v1.0.1 | 7/7 | Complete    | 2026-06-12 |
-| 16. Telemetry Completion | v1.0.1 | 8/8 | Complete    | 2026-06-12 |
+- [ ] 17-04-PLAN.md — DEBT-04: make the Plan envelope-read error non-fatal (defer to children-based succession; mirror milestone/phase Pitfall-1) (+ non-terminal-Failed regression spec)
