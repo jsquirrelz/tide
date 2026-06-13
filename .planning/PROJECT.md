@@ -8,29 +8,14 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Current State (v1.0.0 — SHIPPED 2026-06-11)
+## Current State (v1.0.1 — SHIPPED 2026-06-13)
 
-v1.0.0 is published: goreleaser binaries (5 platforms), 7 component images and
-both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated
-release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live
-medium DoD proven on minikube (Project=Complete, real authored commits pushed
-to a per-run branch). All 82 v1 requirements delivered — archive at
-[milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
+Two milestones shipped:
 
-## Current Milestone: v1.0.1 Orchestrator Trustworthiness + Telemetry Completion
+- **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
+- **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Goal:** Fix the dogfood run-1 findings so the orchestrator is trustworthy enough to gate run 2 on, and make the merged telemetry foundation functional — every fix carries a regression test reproducing the run-1 symptom.
-
-**Target features (ordered by what blocks dogfood run 2):**
-- Approve-consume gate semantics — ConsumeApprove must not advance a level to Succeeded while children are incomplete (run-1 finding 7, the run-killer); gates.md step 5 docs change with the fix
-- Reject/resume recovery — `tide reject` fail-marks children; `tide resume` must recover them (finding 9a; the kubectl status-reset recipe is the behavioral spec)
-- Subagent image resolution — implement Image in the ResolveProvider chain at the four dispatch sites; kill the dead `spec.subagent.image` config and reconsider the chart's stub default
-- Billing-400 project-wide halt — provider credit exhaustion stops the fan-out instead of burning sessions one at a time
-- Pricing + budget UX — current model IDs in the pricing table; surface BudgetBlocked on the Project; bound in-flight overshoot
-- Paper cuts — reporter CR labels, boundary-push no-op on clean tree, phase status flapping, artifact-get stub, dashboard status-chip mapping + cross-plan wave view, file-touch overlap
-- Telemetry completion — PROM_ENDPOINT config wiring, TelemetryView AppShell mount + Vitest coverage, the six locked metrics in internal/metrics, PromQL query-name alignment, Makefile gate-script wiring, proxy client timeout
-
-**Key context:** kind cluster `tide` with run-1 CRs is the repro environment for the gate-semantics fixes (do not delete without asking). Caps floors (finding 11) already landed on main (47a9aa9). Dogfood run 2 (02-codex-runtime) is gated on this milestone, not part of it. Deferred to a later milestone: full TIDE-on-TIDE headline, docs/audit/ 27-item hardening backlog.
+**Current focus:** Planning the next milestone. The headline remains full TIDE-on-TIDE — the orchestrator driving its own next milestone end-to-end. With trustworthiness landed, dogfood run 2 (02-codex-runtime) is now unblocked; the docs/audit 27-item hardening backlog remains a candidate scope.
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -115,6 +100,11 @@ Everything below this line reflects v1 planning state, preserved for reference.
 | Read-only web dashboard for v1 | All mutations go through `kubectl` / `tide` CLI for a single auth surface; viewer-only keeps scope honest | — Pending |
 | Apache 2.0 license | K8s ecosystem default; patent grant; friendliest to enterprise contributors and downstream commercial use | — Pending |
 | OpenTelemetry tracing with OpenInference conventions | Standard OTel infra compat + AI-native span attributes queryable in Phoenix/LangSmith/Arize without bespoke instrumentation | — Pending |
+| Approve gate sits at descent (review the authored artifact before children spend) | run-1 finding-1/7: approving advanced a Milestone past 5 running Phase children → premature Project=Complete; gate-at-descent holds child dispatch until approval | ✓ Validated v1.0.1 Phase 12 |
+| Provider billing-400 halts the entire project | run-1 burned ~$80 across dying sessions during two credit dry-outs; a project-wide `BillingHalt` condition stops the fan-out instead of failing one session at a time | ✓ Validated v1.0.1 Phase 13 |
+| Image resolves via `Levels.<level>.Image` → `Spec.Subagent.Image` → helm default at every dispatch site | v1.0 hard-coded the stub image; the documented chain was only honored for Model, leaving `spec.subagent.image` dead config | ✓ Validated v1.0.1 Phase 13 |
+| Reserve/settle budget accounting bounds in-flight overshoot | run-1 overshot ~$40 past the $100 cap from already-dispatched sessions; a ReservationStore (rederivable on restart) bounds overshoot to one wave | ✓ Validated v1.0.1 Phase 14 |
+| `tide resume --retry-failed` is the one sanctioned recovery verb; approve never doubles as a spend-retry | run-1 needed a kubectl status-reset recipe to recover Failed levels; codifying it as a CLI verb keeps approval semantics clean (D-07) | ✓ Validated v1.0.1 Phase 12/17 |
 
 ## Evolution
 
@@ -134,10 +124,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12 — Phase 16 (telemetry-completion) complete; TELEM-01..06 validated. v1.0.1 milestone phases 12–16 all complete.*
-
-## Current State
-
-Phase 16 (telemetry-completion) complete — 8/8 plans (5 original + 3 gap-closure), VERIFICATION passed 6/6 after one gap-closure cycle. The merged run-1 telemetry foundation is functional end-to-end: `PROM_ENDPOINT` drives the PromQL proxy (env read in `cmd/dashboard/main.go`; dead `prometheusEndpoint` YAML surface excised); the proxy is hardened (30s bounded client, `r.Context()` propagation, base-path preservation, three-shape degradation intact); the six locked metrics (`tide_tokens_{input,output,cache_read,cache_creation}_total`, `tide_cost_cents_total`, `tide_task_duration_seconds`) emit at all three `RollUpUsage` terminal seams with `{project, phase, plan, wave}` labels exactly-once, plus the previously-never-emitted `tide_waves_dispatched_total`/`tide_tasks_completed_total`/`tide_tasks_failed_total` now emit at their commit points; TelemetryView ships finished (recharts AreaCharts, locked D-06 queries, project/all-projects scope with per-project series, 24h/7d/30d range + 60s visibility-aware polling, budget card grid) mounted behind a header DAGs|Telemetry switcher; `make helm-telemetry-assert` + `helm-assert` wired into ci.yaml's helm-lint job. Validated in Phase 16: TELEM-01..TELEM-06. Known UX-polish leftovers (review WR-01/WR-02: project-switch refetch staleness ≤1 poll cycle, no stale-response guard on rapid toggles) judged non-blocking.
-
-**Milestone status:** Phase 16 was the last v1.0.1 phase — all 5 phases (12–16) complete. Next: milestone audit/completion (`/gsd:audit-milestone` → `/gsd:complete-milestone`), then dogfood run 2 (02-codex-runtime) which this milestone gates.
+*Last updated: 2026-06-13 — v1.0.1 milestone shipped (Phases 12–17 complete, 28/28 requirements, audit passed). PROJECT.md full evolution review performed at milestone close.*

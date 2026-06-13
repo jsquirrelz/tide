@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.1
-milestone_name: milestone
-status: completed
-stopped_at: Phase 16 context gathered
-last_updated: "2026-06-13T05:06:18.302Z"
-last_activity: 2026-06-13 -- Phase 17 marked complete
+milestone_name: Orchestrator Trustworthiness + Telemetry Completion
+status: Awaiting next milestone
+stopped_at: Milestone v1.0.1 complete
+last_updated: "2026-06-13T14:22:50.708Z"
+last_activity: 2026-06-13 — Milestone v1.0.1 completed and archived
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 38
+  completed_plans: 38
   percent: 100
 ---
 
@@ -18,73 +18,78 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11)
+See: .planning/PROJECT.md (updated 2026-06-13)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 17 — address-tech-debt-plan-label-backfill-gate-hardening
+**Current focus:** Planning the next milestone (headline: full TIDE-on-TIDE). Dogfood run 2 now unblocked.
 
 ## Current Position
 
-Phase: 17 — COMPLETE
-Plan: 1 of 4
-Status: Phase 17 complete
-Last activity: 2026-06-13 -- Phase 17 marked complete
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Milestone v1.0.1 complete and archived
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-13 — Milestone v1.0.1 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 34 (this milestone)
-- Average duration: —
-- Total execution time: 0 hours
+- Total plans completed: 38 (v1.0.1, Phases 12–17)
+- Tasks: 46
+- Commits since v1.0.0: 330
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| — | — | — | — |
-| 12 | 5 | - | - |
-| 13 | 7 | - | - |
-| 14 | 7 | - | - |
-| 15 | 7 | - | - |
-| 16 | 8 | - | - |
+| Phase | Plans | Status |
+|-------|-------|--------|
+| 12 | 5 | Complete |
+| 13 | 7 | Complete |
+| 14 | 7 | Complete |
+| 15 | 7 | Complete |
+| 16 | 8 | Complete |
+| 17 | 4 | Complete |
 
-*Updated after each plan completion*
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-06-13:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 260521-ccz-push-lease-cascade-9-recipe | missing |
+| quick_task | 260521-eoz-phase-03-cascade-10-filter-pillar-4-list | missing |
+| quick_task | 260521-f8x-phase-03-cascade-7-gate-plan-planner-dis | missing |
+| quick_task | 260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper | missing |
+| quick_task | 260521-hk4-phase-03-cascade-12-patchjobtofailed-mus | missing |
+| quick_task | 260521-jz0-phase-03-cascade-13-idempotency-guard-in | missing |
+| quick_task | 260526-w11-phase-5-closeout-polish-roadmap-16-16-17 | missing |
+| quick_task | 260530-h2h-boot-04-acceptance-v1-cert-manager-prere | missing |
+| quick_task | 260530-hrc-open-phase-6-v1-0-image-publish-pipeline | missing |
+| quick_task | 260531-oek-fix-cascade-12-chart-template-dispatch-i | missing |
+| quick_task | 260610-vcp-audit-codebase-against-k8s-helm-best-pra | missing |
+| quick_task | 260610-x3d-draft-the-three-tide-on-tide-dogfood-pro | missing |
+| quick_task | 260611-3o9-planning-dag-lr-orientation | unknown |
+| quick_task | 260611-439-podjob-caps-floor-bump | unknown |
+| quick_task | 260611-cz8-salvage-branch-merge-prep-4-review-fixes | missing |
+
+These are all v1.0.0-era quick-task records whose underlying work landed but whose
+artifact status fields were never flipped (same administrative pattern noted at the
+v1.0.0 close). None are v1.0.1 work. Acknowledged as non-blocking administrative debt.
 
 ## Accumulated Context
 
-### Roadmap Evolution
-
-- Phase 17 added: Address tech debt: Plan label backfill + gate hardening
-
-### Key Constraints for v1.0.1
-
-- kind cluster `tide` holds run-1 CRs — repro environment for Phase 12 gate-semantics fixes; do NOT delete without asking
-- TELEM-03 metric names/labels are locked in MILESTONE.md table (49e93cb) — Phase 16 must not re-derive them
-- Chart is a fixed contract: binary catches up to chart; DISPATCH-02 may add/change chart defaults deliberately with explicit decision
-- gates.md step 5 currently encodes the GATE-01 bug; doc change ships in the same plan as the fix
-
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- [v1.0.1 roadmap]: Phase 13 (DISPATCH + HALT) and Phase 14 (BUDGET) and Phase 15 (CUTS) all depend only on Phase 12 — can be planned in parallel once Phase 12 is complete; Phase 16 (TELEM) depends on Phase 15 for dashboard surface stability
-- [v1.0.1 roadmap]: GATE-01/02/03 + RESUME-01 grouped into one phase — they share gate-flow test infrastructure and the kind cluster repro environment
-- [v1.0.1 roadmap]: HALT-01 grouped with DISPATCH-01/02 — billing halt is triggered at the same dispatch sites that need image-resolution fixes
+Decisions are logged in PROJECT.md Key Decisions table (v1.0.1 entries added at close).
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-- Phase 12 requires the live kind cluster `tide` with run-1 CRs as the regression repro environment
+None open. (v1.0.1's kind-cluster `tide` repro-environment constraint is resolved —
+the gate-semantics regression tests are now codified in-repo.)
 
-## Session Continuity
+## Operator Next Steps
 
-Last session: 2026-06-12T20:13:50.466Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-telemetry-completion/16-CONTEXT.md
+- Start the next milestone with `/gsd:new-milestone`

@@ -1,5 +1,66 @@
 # Milestones
 
+## v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion ✅ SHIPPED 2026-06-13
+
+**One-liner:** Turn the self-hosting MVP into an orchestrator trustworthy
+enough to gate a second dogfood run on — every dogfood run-1 finding fixed
+with a regression test that reproduces its symptom, the telemetry foundation
+completed end-to-end, and the milestone-audit tech-debt subset closed.
+
+**Stats:** 6 phases (12–17) · 38 plans · 46 tasks · 330 commits ·
++43.7k/−0.9k LOC across 274 files · 2026-06-11 → 2026-06-13 (~2 days).
+28/28 requirements satisfied (milestone audit: passed, zero blockers).
+
+**Key accomplishments:**
+
+1. **Gate semantics run-killer fixed (Phase 12):** approve sits at descent
+   (review the authored artifact before children spend), approval never jumps
+   a level past incomplete children, dispatch holds while a parent is parked,
+   reject parks instead of fail-marking, and `tide resume --retry-failed` is
+   the one sanctioned recovery verb. (GATE-01..04, RESUME-01)
+
+2. **Image dispatch chain + provider halt (Phase 13):** `resolveImage`
+   precedence (`Levels.<level>.Image` → `Spec.Subagent.Image` → helm default)
+   wired at all six dispatch sites — closing the v1.0 stub-image bug — and a
+   provider billing-400 raises a project-wide `BillingHalt` instead of burning
+   sessions one at a time. (DISPATCH-01/02, HALT-01)
+
+3. **Budget enforcement made visible (Phase 14):** current model IDs resolve
+   in the pricing table (no `unknown model` fallback), a `BudgetBlocked`
+   condition surfaces on the Project CR and dashboard, in-flight overshoot is
+   bounded via a reserve/settle ReservationStore, and pricing-drift is
+   automated. (BUDGET-01/02/03)
+
+4. **Seven run-1 paper cuts closed (Phase 15):** reporter CR project labels,
+   clean-tree push no-op, phase status-flapping convergence, a real
+   `artifact-get` inspector Pod, the dashboard Complete chip, a cross-plan
+   running-waves view (label-selector–derived), and strict-mode file-touch
+   overlap rejection at admission. (CUTS-01..07)
+
+5. **Telemetry foundation completed (Phase 16):** `PROM_ENDPOINT` drives the
+   PromQL proxy, TelemetryView mounts as a tab, the six locked metrics emit
+   with `{project, phase, wave}` labels, panel queries use the real metric
+   names, the `hack/helm` gate is wired into the Makefile, and the proxy
+   client is bounded. (TELEM-01..06)
+
+6. **Audit tech-debt subset closed (Phase 17):** PlanReconciler self-heals the
+   `tideproject.k8s/project` label (with the Project→Milestone reporter-edge
+   create-site stamp), reject short-circuits ahead of reporter spawn without
+   deleting in-flight Jobs, the approve guard is narrowed to the approval
+   target, and a transient Plan envelope-read error is non-fatal. (DEBT-01..04)
+
+**Known deferred items at close:** 15 v1.0.0-era quick-task records
+acknowledged as administrative (work landed; artifact status fields never
+flipped) — see STATE.md Deferred Items. Remaining audit robustness/UX notes
+(WR-01 + Phase 13/15/16 misc) formally accepted into the docs/audit hardening
+backlog, all adjudicated non-blocking.
+
+**Archives:** [v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) ·
+[v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md) ·
+[v1.0.1-MILESTONE-AUDIT.md](milestones/v1.0.1-MILESTONE-AUDIT.md)
+
+---
+
 ## v1.0.0 — Self-Hosting MVP ✅ SHIPPED 2026-06-11
 
 **One-liner:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave)
@@ -14,20 +75,25 @@ observability, a dashboard, and a CLI.
 
 1. Six `tideproject.k8s/v1alpha1` CRDs with CEL validation + cycle-rejecting
    admission webhook; waves derived (never declared) via pure-Go layered Kahn.
+
 2. Provider-firewalled subagent dispatch: `Subagent` interface → PodJob
    backend, signed-token credproxy (raw API key never enters the agent
    process), wall-clock/iteration/token caps, secret redaction, output-path
    validation.
+
 3. Up-stack planner cascade with envelopes-as-artifacts: per-namespace PVC
    workspaces, in-namespace reporter Job materializing child CRs, ChildCount-
    gated succession, per-level boundary pushes to per-run git branches with
    gitleaks scanning and force-with-lease.
+
 4. Gates (auto/approve/pause per level + between-wave slack tide), Prometheus
    + OTel/OpenInference observability, read-only SSE dashboard (two-DAG React
    Flow), `tide` CLI (9 verbs, kubectl-plugin compatible).
+
 5. Distribution: Apache-2.0, helmify-generated chart pair on OCI, multi-arch
    images ×7, goreleaser binaries, rc-gated release pipeline whose dry-run
    simulates an external operator in Docker-in-Docker at $0 LLM cost.
+
 6. Proof: live medium DoD on minikube — Project=Complete with real
    Claude-authored commits pushed to a run branch; $0 stub flow Complete in
    ~100s on a fresh kind cluster.
