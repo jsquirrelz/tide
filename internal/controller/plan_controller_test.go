@@ -493,6 +493,102 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 // would permanently wedge the planner. The guard tested here gates dispatch on
 // Project resolution: empty PhaseRef → permanent (no requeue); non-empty
 // PhaseRef but unresolvable chain → transient (requeue after 1s).
+var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Label("envtest"), func() {
+	ctx := context.Background()
+
+	It("backfills tideproject.k8s/project on a Plan that was created without the label via Plan→Phase→Milestone→Project chain, and is idempotent on second reconcile", func() {
+		const projName = "backfill-proj-pl"
+		const msName = "backfill-ms-pl-01"
+		const phName = "backfill-phase-pl-01"
+		const planName = "backfill-plan-pl-01"
+
+		// Create Project.
+		proj := &tideprojectv1alpha1.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
+			Spec: tideprojectv1alpha1.ProjectSpec{
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+
+		// Create Milestone (with ProjectRef so the chain is traversable).
+		ms := &tideprojectv1alpha1.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+
+		// Create Phase (with MilestoneRef so Plan→Phase→Milestone→Project is traversable).
+		ph := &tideprojectv1alpha1.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
+			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+
+		// Create Plan WITHOUT the tideproject.k8s/project label (pre-v1.0.1 shape).
+		pl := &tideprojectv1alpha1.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: "default",
+				// Labels intentionally absent.
+			},
+			Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+		}
+		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
+		waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+
+		r := &PlanReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			// No Dispatcher — drives steps 1-5 only.
+		}
+
+		// First reconcile: finalizer, owner-ref, then backfill.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
+
+		// Assert the project label was backfilled.
+		var after tideprojectv1alpha1.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
+		Expect(after.Labels["tideproject.k8s/project"]).To(Equal(projName),
+			"backfill must stamp tideproject.k8s/project via Plan→Phase→Milestone→Project chain")
+
+		// Idempotency: record ResourceVersion, reconcile again, verify unchanged.
+		rvBefore := after.ResourceVersion
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 2)).To(Succeed())
+		var after2 tideprojectv1alpha1.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after2)).To(Succeed())
+		Expect(after2.ResourceVersion).To(Equal(rvBefore),
+			"second reconcile must not patch the object (idempotent backfill)")
+
+		// Cleanup.
+		after2.Finalizers = nil
+		_ = k8sClient.Update(ctx, &after2)
+		_ = k8sClient.Delete(ctx, &after2)
+		ph2 := &tideprojectv1alpha1.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, ph2); err == nil {
+			ph2.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph2)
+			_ = k8sClient.Delete(ctx, ph2)
+		}
+		ms2 := &tideprojectv1alpha1.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms2); err == nil {
+			ms2.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms2)
+			_ = k8sClient.Delete(ctx, ms2)
+		}
+		proj2 := &tideprojectv1alpha1.Project{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, proj2); err == nil {
+			proj2.Finalizers = nil
+			_ = k8sClient.Update(ctx, proj2)
+			_ = k8sClient.Delete(ctx, proj2)
+		}
+	})
+})
+
 var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label("envtest", "phase2"), func() {
 	ctx := context.Background()
 

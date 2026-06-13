@@ -398,6 +398,58 @@ func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
 	}
 }
 
+// TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite is the 15-WR-03
+// regression test: when MaterializeChildCRDs is called with a *Project parent,
+// the materialized Milestone child must carry tideproject.k8s/project ==
+// project.GetName() AT CREATE TIME — before any backfill reconcile runs.
+//
+// Previously the create-site stamp resolved the label from
+// parent.GetLabels()[owner.LabelProject], but a Project does not carry
+// tideproject.k8s/project pointing at itself, so the child Milestone was
+// created unlabeled and only healed later by the D-03 milestone backfill.
+func TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite(t *testing.T) {
+	const projectName = "test-project-create-site"
+
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("proj-uid-create-site"),
+			Name:      projectName,
+			Namespace: "default",
+			// Deliberately NO tideproject.k8s/project label — a Project does not
+			// carry a label pointing at itself.
+		},
+	}
+
+	msSpec := tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName}
+	rawSpec, err := json.Marshal(msSpec)
+	if err != nil {
+		t.Fatalf("Marshal milestone spec: %v", err)
+	}
+	children := []pkgdispatch.ChildCRDSpec{
+		{Kind: "Milestone", Name: "child-ms-create-site", Spec: runtime.RawExtension{Raw: rawSpec}},
+	}
+
+	c := fakeClientForTest(t)
+	scheme := runtime.NewScheme()
+	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	if err := MaterializeChildCRDs(context.Background(), c, scheme, project, children); err != nil {
+		t.Fatalf("MaterializeChildCRDs: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Milestone
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "child-ms-create-site"}, &got); err != nil {
+		t.Fatalf("Get Milestone: %v", err)
+	}
+
+	gotLabel := got.GetLabels()["tideproject.k8s/project"]
+	if gotLabel != projectName {
+		t.Errorf("labels[tideproject.k8s/project] = %q; want %q (15-WR-03: Project→Milestone edge must stamp label at create-site from parent.GetName())", gotLabel, projectName)
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

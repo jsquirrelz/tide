@@ -172,6 +172,26 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
+	// 4b. D-03 (CUTS-01): backfill tideproject.k8s/project on the Plan itself
+	// when the label is absent. Heals pre-v1.0.1 Plan CRs on upgraded clusters.
+	// Guard: only patch when label is missing so the second reconcile is a no-op
+	// (idempotent). Runs BEFORE dispatch so a parked AwaitingApproval Plan
+	// self-heals on its first post-upgrade reconcile. Uses resolveProjectName
+	// (Plan→Phase→Milestone→Project chain); skips silently on ErrParentUnresolved
+	// so orphan Plans stay unlabeled rather than mis-scoped (T-17-03 mitigation).
+	if plan.Labels[owner.LabelProject] == "" {
+		if name, err := r.resolveProjectName(ctx, &plan); err == nil && name != "" {
+			patch := client.MergeFrom(plan.DeepCopy())
+			if plan.Labels == nil {
+				plan.Labels = map[string]string{}
+			}
+			plan.Labels[owner.LabelProject] = name
+			if err := r.Patch(ctx, &plan, patch); err != nil {
+				return ctrl.Result{}, fmt.Errorf("backfill project label on plan %s: %w", plan.Name, err)
+			}
+		}
+	}
+
 	// 5. Dispatcher seam (REQ-SUB-01). Phase 3 splits this:
 	// 5a. Planner dispatch — fires when Plan has no Tasks yet (D-A2).
 	// 5b. Wave materialization — Phase 2 logic; runs once Tasks exist and
