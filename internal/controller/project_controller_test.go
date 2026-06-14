@@ -103,9 +103,15 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
 
-			// Reconcile 1: add the finalizer.
-			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			// Reconcile 1: add the finalizer. Regression (debug medium-http-completion-wedge):
+			// the finalizer Update changes neither generation nor annotations, so the
+			// For()-level predicate.Or(GenerationChangedPredicate, AnnotationChangedPredicate)
+			// filters out the resulting Update event. The reconcile MUST self-requeue or the
+			// Project parks at empty Status.Phase forever (never reaching the init-Job seam).
+			res, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Requeue).To(BeTrue(), //nolint:staticcheck // SA1019: asserting the controller sets the legacy Requeue field after finalizer add (the fix under test).
+				"finalizer-add reconcile must Requeue (predicate filters the finalizer Update event)")
 			// Reconcile 2: execute seam body — should create the init Job.
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())

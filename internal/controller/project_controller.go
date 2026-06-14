@@ -229,7 +229,12 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.Update(ctx, &project); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, nil
+		// Requeue explicitly — the finalizer Update changes neither generation nor
+		// annotations, so the For()-level predicate.Or(GenerationChangedPredicate,
+		// AnnotationChangedPredicate) filters out the resulting Update event. Without
+		// a self-requeue the Project would park at empty Status.Phase until the
+		// default 10h resync, never reaching reconcileProjectPhase2 (init Job + dispatch).
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// 4. Owner refs on children — Project is top-level; no parent to reference.
