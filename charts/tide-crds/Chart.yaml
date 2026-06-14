@@ -8,5 +8,5 @@ description: |
   storage). Install this chart once per cluster, then install/upgrade the
   sibling `tide` chart as often as needed.
 type: application
-version: 1.0.0
-appVersion: "1.0.0"
+version: 1.0.1
+appVersion: "1.0.1"

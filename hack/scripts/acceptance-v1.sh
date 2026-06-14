@@ -75,7 +75,7 @@ kind create cluster --name "${CLUSTER_NAME}"
 # Auto-detect: pull published images or build+kind-load locally (IMG-LOAD-01 / RESEARCH Pitfall 1).
 # Uses docker manifest inspect probe; never delegates to a Makefile target that hardcodes
 # the cluster name. Ensures all 6 D-03 chart images are present before helm install.
-IMAGE_TAG="1.0.0"  # matches chart appVersion after CHART-01
+IMAGE_TAG="1.0.1"  # matches chart appVersion after CHART-01
 bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "${CLUSTER_NAME}" "${IMAGE_TAG}"
 
 # ── cert-manager (required by charts/tide webhook + metrics Certificates) ───

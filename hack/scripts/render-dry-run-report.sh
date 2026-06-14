@@ -52,8 +52,8 @@ TIDE_VERSION=$(cd "${REPO_ROOT}" && git describe --tags --dirty 2>/dev/null || g
 # Chart versions — D-X3 lockstep bump to 1.0.0. Hard-coded here because the
 # report records the chart-version contract the dry-run exercised; if a future
 # rev bumps both charts in lockstep, this constant moves with them.
-CHART_TIDE_VERSION="1.0.0"
-CHART_TIDE_CRDS_VERSION="1.0.0"
+CHART_TIDE_VERSION="1.0.1"
+CHART_TIDE_CRDS_VERSION="1.0.1"
 
 TIMESTAMP_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 

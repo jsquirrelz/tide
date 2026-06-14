@@ -125,7 +125,7 @@ docker run --rm \
 # it uses the host Docker daemon. load-images-if-needed.sh uses docker manifest
 # inspect to probe registry availability; builds + kind-loads locally if absent.
 echo "==> loading images into tide-dry-run cluster (IMG-LOAD-01)..."
-bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "tide-dry-run" "1.0.0" 2>&1 | tee -a "${TRANSCRIPT_PATH}"
+bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "tide-dry-run" "1.0.1" 2>&1 | tee -a "${TRANSCRIPT_PATH}"
 
 # ── Pass 2: cert-manager + helm install + kubectl apply + wait ────────────────
 # Runs inside the same DinD environment. The kind cluster and /workspace/tide

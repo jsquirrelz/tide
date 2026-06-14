@@ -266,7 +266,7 @@ docker-push: ## Push docker image with the manager.
 PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 # IMAGE_TAG is used by docker-buildx-snapshot for the 6-image snapshot build.
 # Default 1.0.0 matches chart appVersion after Phase 06 CHART-01 fix.
-IMAGE_TAG ?= 1.0.0
+IMAGE_TAG ?= 1.0.1
 .PHONY: docker-buildx
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
