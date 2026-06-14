@@ -280,7 +280,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			var jobsAfter batchv1.JobList
 			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
-			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+			Expect(jobsAfter.Items).To(HaveLen(jobCountBefore),
 				"no new planner Jobs should be created while Phase is AwaitingApproval")
 		})
 	})
@@ -426,7 +426,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			var jobsAfter batchv1.JobList
 			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
-			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+			Expect(jobsAfter.Items).To(HaveLen(jobCountBefore),
 				"no planner Job must be created while Project carries reject annotation")
 		})
 	})
@@ -544,7 +544,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			// Assert: no new planner Jobs created while parent parked.
 			var jobsAfter batchv1.JobList
 			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
-			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+			Expect(jobsAfter.Items).To(HaveLen(jobCountBefore),
 				"no planner Jobs should be created while parent Milestone is AwaitingApproval (GATE-04 / run-1 finding-1)")
 
 			// Now approve the Milestone (simulate: patch Status.Phase=Running).

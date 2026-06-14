@@ -423,7 +423,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			driveMSReconcile(r, msName, 3)
 			var jobsAfter batchv1.JobList
 			Expect(mgrClient.List(ctx, &jobsAfter, client.InNamespace("default"))).To(Succeed())
-			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+			Expect(jobsAfter.Items).To(HaveLen(jobCountBefore),
 				"no new Jobs must be created while rejected")
 
 			// Simulated tide resume: clear the reject annotation via gates.ConsumeReject.

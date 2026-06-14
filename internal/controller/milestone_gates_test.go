@@ -514,7 +514,7 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			var jobsAfter batchv1.JobList
 			_ = k8sClient.List(ctx, &jobsAfter, client.InNamespace("default"))
-			Expect(len(jobsAfter.Items)).To(Equal(jobCountBefore),
+			Expect(jobsAfter.Items).To(HaveLen(jobCountBefore),
 				"no planner Job must be created while Project carries reject annotation")
 		})
 	})

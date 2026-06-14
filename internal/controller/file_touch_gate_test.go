@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -301,12 +302,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: taskB, Namespace: "default"}, &freshB); err != nil {
 					return false
 				}
-				for _, dep := range freshB.Spec.DependsOn {
-					if dep == tA.Name {
-						return true
-					}
-				}
-				return false
+				return slices.Contains(freshB.Spec.DependsOn, tA.Name)
 			}, "10s", "200ms").Should(BeTrue(), "cache should reflect dependsOn edge")
 
 			// Reconcile again — park should lift.

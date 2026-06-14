@@ -271,7 +271,7 @@ func patchJobToFailed(ns, jobName string) {
 	// readPushEnvelope (which filters on client.MatchingLabels{"job-name":
 	// pushJobName}) can locate it. Pod phase = Succeeded prevents
 	// kube-scheduler from retrying it.
-	terminationMsg := fmt.Sprintf(`{"apiVersion":"v1","kind":"PushResult","projectUID":"","branch":"","headSHA":"","exitCode":11,"reason":"lease-rejected"}`)
+	terminationMsg := `{"apiVersion":"v1","kind":"PushResult","projectUID":"","branch":"","headSHA":"","exitCode":11,"reason":"lease-rejected"}`
 	podName := jobName + "-lease-mock"
 	podYAML := fmt.Sprintf(`apiVersion: v1
 kind: Pod
@@ -322,14 +322,14 @@ spec:
 		"patch", "pod", podName, "-n", ns,
 		"--subresource=status", "--type=merge",
 		"--patch", string(podBody))
-	podOut, podErr := podCmd.CombinedOutput()
+	_, podErr := podCmd.CombinedOutput()
 	if podErr != nil {
 		// Fall back to non-subresource patch on older kube-apiserver.
 		podCmd = exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 			"patch", "pod", podName, "-n", ns,
 			"--type=merge", "--patch", string(podBody))
-		podOut, podErr = podCmd.CombinedOutput()
-		Expect(podErr).NotTo(HaveOccurred(),
+		podOut, fallbackErr := podCmd.CombinedOutput()
+		Expect(fallbackErr).NotTo(HaveOccurred(),
 			"fallback patch Pod status failed: %s", podOut)
 	}
 

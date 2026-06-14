@@ -133,4 +133,3 @@ func TestConfigLoad_RejectsNegativeValues(t *testing.T) {
 		t.Errorf("error %q should mention executorConcurrency", err.Error())
 	}
 }
-
