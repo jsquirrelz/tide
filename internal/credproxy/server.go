@@ -173,7 +173,7 @@ func (p *Proxy) Handler() (http.Handler, error) {
 			return nil
 		}
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		// Always restore the body before returning, even on read error.
 		if err != nil {
 			resp.Body = io.NopCloser(bytes.NewReader(nil))

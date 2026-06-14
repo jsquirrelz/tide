@@ -116,7 +116,7 @@ func (h *PrometheusHandler) proxy(w http.ResponseWriter, r *http.Request, path s
 		})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		h.Log.Info("prometheus upstream non-2xx", "status", resp.StatusCode, "url", upstream.String())

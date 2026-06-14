@@ -118,7 +118,8 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 				return fmt.Errorf("patch metadata (billing-resumed-at stamp): %w", err)
 			}
 			if out != nil {
-				fmt.Fprintln(out, "tide: cleared BillingHalt (billing recovery); pre-resume in-flight sessions can no longer re-trip the halt")
+				fmt.Fprintln(out, "tide: cleared BillingHalt (billing recovery); "+
+					"pre-resume in-flight sessions can no longer re-trip the halt")
 			}
 		}
 	}

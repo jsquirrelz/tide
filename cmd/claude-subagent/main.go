@@ -58,7 +58,10 @@ type anthropicRunner interface {
 	Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdispatch.EnvelopeOut, error)
 }
 
-var newSubagent = func(claudeBinary, workspaceRoot string, pricingOverrides map[string]pkgdispatch.PriceOverride) anthropicRunner {
+var newSubagent = func(
+	claudeBinary, workspaceRoot string,
+	pricingOverrides map[string]pkgdispatch.PriceOverride,
+) anthropicRunner {
 	return anthropic.New(anthropic.Options{
 		ClaudeBinary:     claudeBinary,
 		WorkspaceRoot:    workspaceRoot,

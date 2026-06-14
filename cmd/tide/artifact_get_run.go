@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,14 +55,6 @@ import (
 // inspectorPodRunner creates and streams the inspector pod. Function var so
 // tests can inject without a live apiserver (mirrors tail.go's tailStreamer).
 var inspectorPodRunner = defaultInspectorPodRunner
-
-// inspectorPodRunnerFunc is the signature for the inspectorPodRunner seam.
-type inspectorPodRunnerFunc func(
-	ctx context.Context,
-	cs kubernetes.Interface,
-	ns, projectUID, artifactPath, pvcName string,
-	out, errOut io.Writer,
-) error
 
 // parseArtifactRef splits the operator-provided "<ns>/<project>/<path>" form
 // into its three components. The path component may itself contain slashes;
@@ -102,10 +95,8 @@ func parseArtifactRef(ref string) (namespace, project, path string, err error) {
 //   - shell metacharacters: single/double quotes, backtick, $, ;, &, |, whitespace
 func validateArtifactPath(path string) error {
 	// Directory traversal guard.
-	for _, part := range strings.Split(path, "/") {
-		if part == ".." {
-			return fmt.Errorf("artifact path %q contains '..' (directory traversal not allowed)", path)
-		}
+	if slices.Contains(strings.Split(path, "/"), "..") {
+		return fmt.Errorf("artifact path %q contains '..' (directory traversal not allowed)", path)
 	}
 	// Absolute path guard.
 	if strings.HasPrefix(path, "/") {

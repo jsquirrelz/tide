@@ -201,7 +201,8 @@ func approveLevel(ctx context.Context, c client.Client, ns, projectName string) 
 	} else if obj != nil {
 		detail := buildFailureDetail(obj)
 		return fmt.Errorf(
-			"tide: level %q (%s) has failed%s; approval never retries failed work — use 'tide resume %s --retry-failed' to recover",
+			"tide: level %q (%s) has failed%s; approval never retries failed work — "+
+				"use 'tide resume %s --retry-failed' to recover",
 			obj.GetName(), kind, detail, projectName,
 		)
 	}
@@ -235,7 +236,8 @@ func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object,
 	if targetPhase == "Failed" {
 		detail := buildFailureDetail(obj)
 		return fmt.Errorf(
-			"tide: level %q (%s) has failed%s; approval never retries failed work — use 'tide resume %s --retry-failed' to recover",
+			"tide: level %q (%s) has failed%s; approval never retries failed work — "+
+				"use 'tide resume %s --retry-failed' to recover",
 			obj.GetName(), level, detail, projectName,
 		)
 	}

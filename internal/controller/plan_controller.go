@@ -237,6 +237,8 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // are server-side-created from EnvelopeOut.ChildCRDs; Wave creation is left
 // to reconcileWaveMaterialization (Phase 2 path) which fires once the
 // admission webhook stamps ValidationState="Validated" on the Plan.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
 func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, bool, error) {
 	// Phase 12 CR-02 / CR-01 fix: AwaitingApproval early-return placed at the VERY
 	// TOP — BEFORE the tasks-exist List — because a parked Plan with
@@ -475,6 +477,8 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 //
 // Note: This does NOT create Waves — the existing reconcileWaveMaterialization
 // handles that once the admission webhook stamps ValidationState=Validated.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
 func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha1.Plan, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := r.resolveProjectForPlan(ctx, plan)
@@ -807,6 +811,8 @@ func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *ti
 
 // patchPlanFailed sets Plan.Status.Phase=Failed with the given reason/message.
 // Used by the Plan 04-05 gate-policy hook (genuine planner-Job failure classification).
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.patchPlanFailed(...)` in the reconcile chain
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "Failed"

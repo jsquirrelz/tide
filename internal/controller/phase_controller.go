@@ -229,6 +229,8 @@ func (r *PhaseReconciler) resolveProjectNameForPhase(ctx context.Context, ph *ti
 // reconcilePlannerDispatch mirrors MilestoneReconciler one level down.
 // Dispatches tide-phase-<phase-uid>-<attempt>; on completion materializes
 // Plan child CRDs from EnvelopeOut.ChildCRDs.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
 func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tideprojectv1alpha1.Phase) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	if ph.Status.Phase == "Succeeded" || ph.Status.Phase == "Failed" {
@@ -443,6 +445,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	return ctrl.Result{}, nil
 }
 
+//nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
 func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideprojectv1alpha1.Phase, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := r.resolveProject(ctx, ph)
@@ -706,22 +709,6 @@ func (r *PhaseReconciler) patchPhaseAwaitingApproval(ctx context.Context, ph *ti
 	ph.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ph, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func (r *PhaseReconciler) patchPhaseFailed(ctx context.Context, ph *tideprojectv1alpha1.Phase, reason, message string) (ctrl.Result, error) {
-	patch := client.MergeFrom(ph.DeepCopy())
-	ph.Status.Phase = "Failed"
-	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionFailed,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,

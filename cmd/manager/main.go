@@ -373,9 +373,10 @@ func main() {
 	//       Without this, plan_controller.go:121 and task_controller.go:167 short-circuit
 	//       and no Job is ever created in production.
 	dispatcher := &podjob.PodJobBackend{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		SubagentImage:        helmProviderDefaults.Image, // Phase 13: use post-shim default tier (CRD fields resolved inline in Run)
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		// Phase 13: use post-shim default tier (CRD fields resolved inline in Run).
+		SubagentImage:        helmProviderDefaults.Image,
 		CredproxyImage:       credproxyImage,
 		SigningKey:           signingKey,
 		EnvReader:            envReader,

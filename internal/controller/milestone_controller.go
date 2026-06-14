@@ -234,6 +234,8 @@ func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context
 // patches Status.Phase=Running with Condition AuthoringPlanner=True, then
 // on Job terminal state calls handleJobCompletion to materialize Phase
 // child CRDs from EnvelopeOut.ChildCRDs.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
 func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *tideprojectv1alpha1.Milestone) (ctrl.Result, error) {
 	// Step 1: Terminal short-circuit.
 	if ms.Status.Phase == "Succeeded" || ms.Status.Phase == "Failed" {
@@ -492,6 +494,8 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 // Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
 // T-09-13: idempotent spawn (AlreadyExists = ok) protects against re-entry when
 // the reporter Job's own completion re-enqueues this reconciler.
+//
+//nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
 func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha1.Milestone, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -792,22 +796,6 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 	ms.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ms, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
-}
-
-func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha1.Milestone, reason, message string) (ctrl.Result, error) {
-	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = "Failed"
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionFailed,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,

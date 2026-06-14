@@ -64,6 +64,11 @@ const taskFinalizer = "tideproject.k8s/task-cleanup"
 // Registered in SetupWithManager; used by listSiblingTasks.
 const taskPlanRefIndexKey = ".spec.planRef"
 
+// outputPathsViolation is the EnvelopeOut.Result sentinel emitted when an
+// executor wrote outside its DeclaredOutputPaths. Drives both the failure
+// classification and the budget/metric reason mapping.
+const outputPathsViolation = "output-paths-violation"
+
 // ErrParentUnresolved signals that resolveProject (or walkOwnerChainToProject)
 // could not locate the owning Project via either the label fast-path or the
 // bounded owner-ref chain walk. Callers convert this to a
@@ -750,26 +755,6 @@ func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojec
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
-// patchTaskFailed patches Task.Status.Phase=Failed with the supplied reason
-// + message. Used by genuine failure classification (executor Job failure, etc.).
-//
-//nolint:unparam // ctrl.Result kept so callers can `return r.patchTaskFailed(...)` in the reconcile chain
-func (r *TaskReconciler) patchTaskFailed(ctx context.Context, task *tideprojectv1alpha1.Task, reason, message string) (ctrl.Result, error) {
-	patch := client.MergeFrom(task.DeepCopy())
-	task.Status.Phase = "Failed"
-	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionFailed,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, task, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
-}
-
 // patchTaskAwaitingApproval parks the Task at Status.Phase=AwaitingApproval
 // per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue; an
 // AnnotationChangedPredicate-driven re-reconcile is the only path forward).
@@ -839,7 +824,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Output-path validation (Warning #5 — wires HARN-05 into dispatch chain).
 	// Performed controller-side in Phase 2 (RESEARCH.md Responsibility Map deviation).
 	// Phase 3 moves validation into the Pod once the harness-wrapped runtime lands.
-	if out.Result != "output-paths-violation" && len(task.Spec.DeclaredOutputPaths) > 0 && task.Status.StartedAt != nil {
+	if out.Result != outputPathsViolation && len(task.Spec.DeclaredOutputPaths) > 0 && task.Status.StartedAt != nil {
 		taskWorkspaceRoot := fmt.Sprintf("/workspaces/%s/workspace", string(project.UID))
 		violations, skipped, vErr := validateControllerOutputPaths(taskWorkspaceRoot, task.Status.StartedAt.Time, task.Spec.DeclaredOutputPaths)
 		if vErr != nil {
@@ -908,7 +893,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 
 	// Standard result interpretation.
 	patch := client.MergeFrom(task.DeepCopy())
-	if out.ExitCode != 0 || out.Result == "cap-hit" || out.Result == "output-paths-violation" {
+	if out.ExitCode != 0 || out.Result == "cap-hit" || out.Result == outputPathsViolation {
 		task.Status.Phase = "Failed"
 		reason := conditionReasonFromEnvelopeResult(out.Result, out.ExitCode)
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
@@ -1029,7 +1014,7 @@ func metricFailureReason(envelopeResult string, exitCode int) string {
 	switch envelopeResult {
 	case "cap-hit":
 		return "budget"
-	case "output-paths-violation":
+	case outputPathsViolation:
 		// Policy violation surfaced by the controller (not a CLI exit class).
 		return "internal"
 	default:
@@ -1054,6 +1039,8 @@ func metricFailureReason(envelopeResult string, exitCode int) string {
 // increments TasksFailedTotal with the given reason. Note: TasksCompletedTotal
 // and TasksFailedTotal carry only {project, phase, plan} (no wave label) per
 // registry.go — arity differs from the six TELEM-03 metrics above.
+//
+//nolint:unparam // error return kept so callers can `if err := r.emitTaskMetrics(...); err != nil` in the reconcile chain
 func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha1.Task, project *tideprojectv1alpha1.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string) error {
 	logger := logf.FromContext(ctx)
 	wave := r.resolveWave(task)
