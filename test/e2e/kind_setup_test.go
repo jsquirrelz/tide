@@ -415,6 +415,14 @@ func kindApplyChart() {
 		"--set", "images.stubSubagent.pullPolicy=IfNotPresent",
 		"--set", "images.credProxy.tag="+kindE2EImageTag,
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
+		// Phase 13 D-01/D-02: the planner/executor subagent image flows from
+		// subagent.defaults.image → CLAUDE_SUBAGENT_IMAGE (the old --subagent-image
+		// flag was dropped). Without this override the chart default resolves to
+		// claude-subagent:<appVersion>, which the fresh kind node cannot pull —
+		// the gate_flow milestone planner ErrImagePulls and the Milestone never
+		// reaches AwaitingApproval. Point it at the kind-loaded stub, mirroring
+		// helmControllerArgs() in the integration suite (suite_test.go).
+		"--set", "subagent.defaults.image=" + kindE2EStubSubagentImage,
 		// kind's default local-path provisioner only supports RWO.
 		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
 		"--wait", "--timeout", "5m",
