@@ -90,6 +90,25 @@ None.
 None open. (v1.0.1's kind-cluster `tide` repro-environment constraint is resolved —
 the gate-semantics regression tests are now codified in-repo.)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260614-exo | Clear ~31 accumulated golangci-lint offenses → `make lint` green (Phase 12–17 debt) | 2026-06-14 | f4af5c2 | [260614-exo-clear-accumulated-golangci-lint-offenses](./quick/260614-exo-clear-accumulated-golangci-lint-offenses/) |
+
+### Post-Milestone CI Repairs (2026-06-14)
+
+After the v1.0.1 milestone-close push, the `release` (tag) and `ci`/`Lint` jobs were
+found red — pre-existing, not caused by the close (milestone commits touched only
+`.planning/`). Repaired:
+- **Chart reproducibility** (`ci` + `release`): `hack/helm/augment-tide-chart.sh` +
+  `tide-values.yaml` were stale vs the Phase 13/14/16 chart edits → `make helm` reverted
+  them. Synced the generator; `make helm` now reproduces `charts/` with zero drift.
+  (debug session: [resolved/chart-helmify-reproducibility](./debug/resolved/chart-helmify-reproducibility.md), commit 6264d8a)
+- **Lint** (~31 offenses): quick task 260614-exo above.
+- The `v1.0.1` git tag was deleted (local + origin) — it had tripped the rc-gated release
+  pre-flight. A real software release should go through the `v1.0.1-rc.*` dry-run flow.
+
 ## Operator Next Steps
 
 - Start the next milestone with `/gsd:new-milestone`
