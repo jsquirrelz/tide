@@ -96,18 +96,26 @@ the gate-semantics regression tests are now codified in-repo.)
 |---|-------------|------|--------|-----------|
 | 260614-exo | Clear ~31 accumulated golangci-lint offenses → `make lint` green (Phase 12–17 debt) | 2026-06-14 | f4af5c2 | [260614-exo-clear-accumulated-golangci-lint-offenses](./quick/260614-exo-clear-accumulated-golangci-lint-offenses/) |
 
-### Post-Milestone CI Repairs (2026-06-14)
+### Post-Milestone CI Repairs + v1.0.1 RELEASE (2026-06-14)
 
-After the v1.0.1 milestone-close push, the `release` (tag) and `ci`/`Lint` jobs were
-found red — pre-existing, not caused by the close (milestone commits touched only
-`.planning/`). Repaired:
+After the v1.0.1 milestone-close push, CI + the rc dry-run + nightly were red —
+all **pre-existing**, none caused by the close (milestone commits touched only
+`.planning/`). A 4-deep masked cascade was root-caused and fixed, the release was
+rc-gated, and **v1.0.1 was published and verified** (7 images, 2 OCI charts, 5
+binaries + checksums, GitHub release — all anonymously confirmed).
+
+Fixes, in order (each masked the next):
 - **Chart reproducibility** (`ci` + `release`): `hack/helm/augment-tide-chart.sh` +
   `tide-values.yaml` were stale vs the Phase 13/14/16 chart edits → `make helm` reverted
-  them. Synced the generator; `make helm` now reproduces `charts/` with zero drift.
-  (debug session: [resolved/chart-helmify-reproducibility](./debug/resolved/chart-helmify-reproducibility.md), commit 6264d8a)
-- **Lint** (~31 offenses): quick task 260614-exo above.
-- The `v1.0.1` git tag was deleted (local + origin) — it had tripped the rc-gated release
-  pre-flight. A real software release should go through the `v1.0.1-rc.*` dry-run flow.
+  them. Synced the generator. (debug: [resolved/chart-helmify-reproducibility](./debug/resolved/chart-helmify-reproducibility.md), `6264d8a`)
+- **Lint** (~31 golangci offenses + a cross-controller goconst whack-a-mole): quick task 260614-exo (`f4af5c2`) + `2dcdba4`.
+- **nightly #1** — `tide-git-http-server` fixture not built in nightly (private ghcr pkg → ImagePullBackOff): `d45909b`. (debug: [resolved/nightly-git-http-imagepull](./debug/resolved/nightly-git-http-imagepull.md))
+- **nightly #2 / dogfood** — ProjectReconciler missing self-requeue after finalizer add (latent since Phase 02-10; finalizer Update filtered by the Generation-OR predicate): `6286dab`. (debug: [resolved/medium-http-completion-wedge](./debug/resolved/medium-http-completion-wedge.md))
+- **rc dry-run** — chart `appVersion` never bumped to 1.0.1 → dry-run reran the published v1.0.0 manager binary against v1.0.1 chart flags → crash. Version-bumped chart + image-tag refs to 1.0.1: `4dcc193`.
+- **nightly #3 (kind_e2e)** — gate_flow E2E helm install never overrode `subagent.defaults.image` (Phase 13 mechanism) → planner ErrImagePull → Milestone never reached AwaitingApproval. Test-harness fix: `01dd3b4`.
+
+Released via `v1.0.1-rc.2` dry-run → formal `v1.0.1` tag. The earlier accidental bare
+`v1.0.1` tag (from the milestone close) was deleted before the rc flow.
 
 ## Operator Next Steps
 
