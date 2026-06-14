@@ -137,9 +137,12 @@ cp "${HACK_DIR}/projects-pvc.yaml" "${CHART_DIR}/templates/projects-pvc.yaml"
 cp "${HACK_DIR}/per-namespace-rolebinding.yaml" "${CHART_DIR}/templates/per-namespace-rolebinding.yaml"
 
 # 8. Phase 2 Deployment augmentation: envFrom (TIDE_SIGNING_KEY secret), Phase 2 CLI
-#    args (--subagent-image, --credproxy-image, --default-file-touch-mode,
-#    --rate-limit-default-rpm, --rate-limit-default-burst), and the tide-projects PVC
-#    volume + volumeMount at /workspaces (no subPath).
+#    args (--credproxy-image, --default-file-touch-mode, --rate-limit-default-rpm,
+#    --rate-limit-default-burst) plus Phase 14 args (--budget-reserve-per-dispatch-cents
+#    and the conditional --pricing-overrides-json). The Phase 13 D-01 --subagent-image
+#    stub flag is deliberately NOT injected (it forced the stub in every v1.0.0 install;
+#    the subagent default now flows via CLAUDE_SUBAGENT_IMAGE env — see 8e below). Also
+#    the tide-projects PVC volume + volumeMount at /workspaces (no subPath).
 #    Idempotent: Python checks for the presence of the Phase 2 markers before inserting.
 if [ -f "${DEPLOY}" ]; then
   python3 - "${DEPLOY}" <<'PYEOF'
@@ -173,11 +176,14 @@ if ENVFROM_MARKER not in content:
 ARGS_MARKER = "# phase2-args-injected"
 PHASE2_ARGS_REPLACEMENT = """args:
           {{- toYaml .Values.controllerManager.manager.args | nindent 10 }}
-          - --subagent-image={{ .Values.images.stubSubagent.repository }}:{{ .Values.images.stubSubagent.tag | default .Chart.AppVersion }}
           - --credproxy-image={{ .Values.images.credProxy.repository }}:{{ .Values.images.credProxy.tag | default .Chart.AppVersion }}
           - --default-file-touch-mode={{ .Values.planAdmission.fileTouchMode | default "warn" }}
           - --rate-limit-default-rpm={{ .Values.rateLimits.defaults.requestsPerMinute | default 60 }}
           - --rate-limit-default-burst={{ .Values.rateLimits.defaults.burst | default 10 }}
+          - --budget-reserve-per-dispatch-cents={{ .Values.budget.reservePerDispatchCents | default 100 }}
+          {{- if .Values.pricing.overrides }}
+          - --pricing-overrides-json={{ .Values.pricing.overrides | toJson }}
+          {{- end }}
           # phase2-args-injected"""
 if ARGS_MARKER not in content:
     content = re.sub(
@@ -227,8 +233,28 @@ if VOLUME_MARKER not in content:
 ENV3_MARKER = "# phase3-env-injected"
 ENV3_BLOCK = """        - name: TIDE_PUSH_IMAGE
           value: "{{ .Values.images.tidePush.repository }}:{{ .Values.images.tidePush.tag | default .Chart.AppVersion }}"
+        # Phase 13 D-01: subagent image default channel.
+        # Resolution chain (highest priority wins):
+        #   Levels.<level>.Image (Project CRD per-level override)
+        #   → Spec.Subagent.Image (Project CRD per-project default)
+        #   → CLAUDE_SUBAGENT_IMAGE (this env — Helm chart default)
+        #
+        # The startup flag injecting the stub image has been removed (Phase 13
+        # D-01 deliberate fixed-contract exception). This env is now the sole
+        # default tier.
+        #
+        # Stub opt-in for tests/CI:
+        #   --set subagent.defaults.image=ghcr.io/jsquirrelz/tide-stub-subagent:<tag>
+        # Tag- or digest-qualified values (containing \":\" after last \"/\" or \"@sha256:\")
+        # pass through verbatim. Bare refs get \":<appVersion>\" appended automatically.
+        # Digest pinning passes through unchanged — recommended for production.
         - name: CLAUDE_SUBAGENT_IMAGE
-          value: "{{ .Values.images.claudeSubagent.repository }}:{{ .Values.images.claudeSubagent.tag | default .Chart.AppVersion }}"
+          {{- $img := required \"subagent.defaults.image must be a non-empty image ref (e.g. ghcr.io/jsquirrelz/tide-stub-subagent:latest)\" .Values.subagent.defaults.image }}
+          {{- if or (regexMatch \":[^/]+$\" $img) (contains \"@\" $img) }}
+          value: {{ $img | quote }}
+          {{- else }}
+          value: {{ printf \"%s:%s\" $img .Chart.AppVersion | quote }}
+          {{- end }}
         - name: TIDE_DEFAULT_MODEL_MILESTONE
           value: "{{ .Values.subagent.levels.milestone.model | default \"claude-opus-4-7\" }}"
         - name: TIDE_DEFAULT_MODEL_PHASE
