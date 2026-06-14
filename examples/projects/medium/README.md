@@ -80,10 +80,23 @@ Deployment (read/write via the HTTP server).
   (default for most clusters; see
   [`docs/rwx-drivers.md`](../../../docs/rwx-drivers.md) for the matrix).
 - `kubectl` configured against your target cluster.
-- `docker` (for building the git-http-server image if not pre-pulled).
-- The following images pullable by your cluster (or pre-loaded into kind):
-  - `ghcr.io/jsquirrelz/tide-demo-init:1.0.0`
-  - `ghcr.io/jsquirrelz/tide-git-http-server:1.0.0`
+- `docker` (for building the two demo fixture images below).
+- The two demo fixture images below. **These are demo/test fixtures and are
+  NOT published to a public registry** — build them locally and make them
+  available to your cluster (for kind, `kind load`; for other clusters, push
+  to a registry your nodes can pull and update the image refs in
+  `demo-remote-init-job.yaml` + `git-http-server-deployment.yaml`):
+
+  ```bash
+  docker build -t ghcr.io/jsquirrelz/tide-demo-init:1.0.0 \
+    -f images/tide-demo-init/Dockerfile .
+  docker build -t ghcr.io/jsquirrelz/tide-git-http-server:1.0.0 \
+    -f images/tide-git-http-server/Dockerfile .
+
+  # kind clusters: load the freshly built images so IfNotPresent resolves them
+  kind load docker-image ghcr.io/jsquirrelz/tide-demo-init:1.0.0
+  kind load docker-image ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+  ```
 
 ## Apply Sequence (9 steps — order matters)
 
