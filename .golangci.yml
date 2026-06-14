@@ -25,13 +25,16 @@ linters:
     - logcheck
   settings:
     goconst:
-      # The TIDE domain vocabulary (phase-status values, CRD-Kind/level names,
-      # K8s defaults, and mode flags) is used as bare literals consistently
-      # across all controllers, webhooks, and CLIs. A const indirection for
-      # these single-word tokens hurts switch/comparison readability without
-      # adding safety. goconst still flags any OTHER repeated literal.
+      # The TIDE domain vocabulary (phase-status values, ValidationState values,
+      # CRD-Kind/level names, K8s defaults, mode flags, and metric-label
+      # sentinels) is used as bare literals consistently across all controllers,
+      # webhooks, and CLIs. A const indirection for these single-word tokens
+      # hurts switch/comparison readability without adding safety. `unknown` is
+      # the D-09 metric-label sentinel shared by the task/plan reconcilers;
+      # `FileTouchMismatch` is a ValidationState value (sibling of the already-
+      # listed `Validated`). goconst still flags any OTHER repeated literal.
       ignore-string-values:
-        - '^(Pending|Running|Succeeded|Failed|AwaitingApproval|BudgetExceeded|PushLeaseFailed|PushLeakBlocked|Validated|milestone|Milestone|phase|Phase|plan|Plan|task|Task|wave|Wave|project|Project|default|strict|warn|subagent|true|false)$'
+        - '^(Pending|Running|Succeeded|Failed|AwaitingApproval|BudgetExceeded|PushLeaseFailed|PushLeakBlocked|Validated|FileTouchMismatch|unknown|milestone|Milestone|phase|Phase|plan|Plan|task|Task|wave|Wave|project|Project|default|strict|warn|subagent|true|false)$'
     errcheck:
       # The fmt.Fprint* family writes to stdout/stderr (CLI diagnostics, banners,
       # tabwriter buffers). A failed write to those is not actionable in this
