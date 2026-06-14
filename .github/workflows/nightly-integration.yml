@@ -96,13 +96,20 @@ jobs:
         timeout-minutes: 10
         run: |
           set -e
-          # Build the three images from the repo root using the canonical Dockerfiles.
+          # Build the fixture images from the repo root using the canonical Dockerfiles.
           docker build -t ghcr.io/jsquirrelz/tide-push:1.0.0 \
             -f images/tide-push/Dockerfile .
           docker build -t ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0 \
             -f images/claude-subagent/Dockerfile .
           docker build -t ghcr.io/jsquirrelz/tide-demo-init:1.0.0 \
             -f images/tide-demo-init/Dockerfile .
+          # tide-git-http-server is a Layer-B test fixture (medium_http_test.go),
+          # NOT a published prod image — its ghcr package is private, so the suite's
+          # IfNotPresent pull 403s unless the image exists locally for kind load.
+          # Build it here alongside demo-init so loadImageIfNeeded() can load it
+          # (this is what the other three fixtures already rely on).
+          docker build -t ghcr.io/jsquirrelz/tide-git-http-server:1.0.0 \
+            -f images/tide-git-http-server/Dockerfile .
 
           # SC-1a: tide-push must NOT contain git (pure-Go go-git HTTP/SSH transport).
           # `which git` exits 0 if found; `!` inverts so the step FAILS if git IS found.
