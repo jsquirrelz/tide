@@ -1,0 +1,3 @@
+{"type":"system/init","session_id":"sess-eval-001"}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"eval fixture output"}}}
+{"type":"result","result":"eval fixture final text","usage":{"input_tokens":500,"output_tokens":100,"cache_read_input_tokens":800,"cache_creation_input_tokens":1200},"total_cost_usd":0.0012}
