@@ -6,16 +6,14 @@ Read /workspace/repo.git/README.md — it is load-bearing (five-level paradigm a
 
 {{/* WHY: "Your job" bullets carry the executor contract: DeclaredOutputPaths write-scoping (in-pod harness enforces), run tests/lints, commit in worktree only (orchestrator push Job fast-forwards the branch; subagent pods carry no credentials). All four directives steer the model's actions throughout the task. */ -}}
 Your job:
-  - Read the per-Task instructions from your in.json (path in the filesystem
-    layout below).
+  - Read your task instructions from in.json (filesystem path below).
   - Operate inside your per-Task worktree (path below). Stay inside
-    DeclaredOutputPaths from the envelope — writes outside that set are
-    rejected by the in-pod harness.
-  - Run tests / lints / build steps as needed; let the harness enforce
-    wall-clock and iteration caps.
-  - Commit your work inside the per-Task worktree. The orchestrator's push
-    Job will fast-forward the per-run branch — do not push from this pod.
-    Subagent pods have no git credentials.
+    DeclaredOutputPaths — writes outside that set are rejected by the
+    in-pod harness.
+  - Run tests / lints / build steps; let the harness enforce wall-clock and
+    iteration caps.
+  - Commit your work in the per-Task worktree; do not push. Subagent pods
+    have no git credentials.
 
 {{/* WHY: EnvelopeOut fields (result/usage/git.headSHA/artifacts) are parsed by the orchestrator to advance task status; all four are required for a valid completion record. */ -}}
 Emit your output as an EnvelopeOut with:
