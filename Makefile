@@ -202,6 +202,23 @@ test-e2e-live: ## Live nightly E2E (requires ANTHROPIC_API_KEY env) — incurs c
 	fi
 	go test -tags=live_e2e ./test/e2e/... -timeout=15m -v
 
+.PHONY: eval
+eval: ## count_tokens pre-flight (online, requires TIDE_PROXY_ENDPOINT + TIDE_SIGNED_TOKEN; POSTs to credproxy, reports per-template real token counts + 1024-floor pass/fail).
+	@if [ -z "$$TIDE_PROXY_ENDPOINT" ]; then \
+		echo "ERROR: TIDE_PROXY_ENDPOINT env not set — refusing to run eval"; \
+		echo "       Start a credproxy and export TIDE_PROXY_ENDPOINT=https://127.0.0.1:8443"; \
+		exit 1; \
+	fi
+	@if [ -z "$$TIDE_SIGNED_TOKEN" ]; then \
+		echo "ERROR: TIDE_SIGNED_TOKEN env not set — refusing to run eval"; \
+		echo "       Export a valid HMAC signed token for the running credproxy"; \
+		exit 1; \
+	fi
+	go run -tags eval ./cmd/tide-eval/ \
+		-proxy "$(TIDE_PROXY_ENDPOINT)" \
+		-token "$(TIDE_SIGNED_TOKEN)" \
+		-model "$(or $(EVAL_MODEL),claude-sonnet-4-6)"
+
 .PHONY: lint
 lint: demo-fixture golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
