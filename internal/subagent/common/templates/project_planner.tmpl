@@ -41,7 +41,9 @@ are ignored. The orchestrator reads every *.json there into typed child CRDs.
 {{/* WHY: two-artifact contract — model must produce both; Markdown is human-review surface, JSON is machine-parsed input to downstream controllers; "both must be produced" is explicit enforcement */ -}}
 Markdown (MILESTONE.md) is the human-review surface; the JSON file is the
 machine contract — both must be produced.
-{{/* SharedContext slot — populated in Phase 20 (CACHE-02/03) */}}
+{{if .SharedContext}}
+{{.SharedContext}}
+{{end}}
 TaskUID: {{.TaskUID}}
 Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)
 

@@ -46,7 +46,9 @@ Each file MUST be a single JSON object with this exact shape:
 Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
 Markdown is the human-review surface; the JSON files are the machine contract.
-{{/* SharedContext slot — populated in Phase 20 (CACHE-02/03) */}}
+{{if .SharedContext}}
+{{.SharedContext}}
+{{end}}
 
 TaskUID: {{.TaskUID}}
 Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)

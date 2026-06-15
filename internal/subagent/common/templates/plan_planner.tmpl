@@ -93,7 +93,9 @@ tab as \t, and double-quote as \". Do NOT put a raw (literal) line break inside
 a quoted string; keep multi-line descriptions on one line using \n escapes.
 
 Markdown is the human-review surface; the JSON files are the machine contract.
-{{/* SharedContext slot — populated in Phase 20 (CACHE-02/03) */}}
+{{if .SharedContext}}
+{{.SharedContext}}
+{{end}}
 
 TaskUID: {{.TaskUID}}
 Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)
