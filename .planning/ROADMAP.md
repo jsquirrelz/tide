@@ -56,7 +56,12 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
   3. A PR that breaks child-CRD parse success, declared output-path presence, or DAG acyclicity is caught by the protocol-compliance gate in `make test-unit`.
   4. `make eval` (behind `//go:build eval`) counts tokens via the Anthropic `count_tokens` endpoint through the existing credproxy using stdlib `net/http`, and prints per-template counts.
   5. Cost deltas computed by the harness delegate to the existing `estimatedCostCents` function and report REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 18-01-PLAN.md — Freeze v1.0.1 baseline: eval package + goldie golden renders + byte ratchets (EVAL-01/03/06)
+- [ ] 18-02-PLAN.md — Deterministic protocol-compliance gate + estimatedCostCents parity/realized-savings (EVAL-02/04)
+- [ ] 18-03-PLAN.md — cmd/tide-eval count_tokens pre-flight + make eval target (EVAL-05)
 
 ### Phase 19: Template Reorder + Token Minimization
 **Goal**: All five prompt templates are restructured stable-prefix-first so wave-sibling dispatches share an identical cache-eligible prefix, and non-essential boilerplate is trimmed — each change gated green by the Phase 18 eval harness.
