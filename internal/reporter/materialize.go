@@ -43,6 +43,16 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
+// maxSharedContextBytes is the etcd DoS guard for LLM-authored SharedContext
+// blobs (T-20-03-01). etcd imposes a hard ~1.5 MiB per-object limit; curated
+// wave-scoped summaries are expected to be ~300–700 tokens (~300–700 bytes),
+// well within this cap. 64 KiB is a conservative ceiling that provides a large
+// operational headroom above realistic use while remaining far below the etcd
+// limit even when the blob is stamped onto N sibling child CRDs. Fail-closed:
+// oversized input returns an error before any child CRD Create is attempted.
+// See CONTEXT.md D-04 and RESEARCH.md Security Domain for rationale.
+const maxSharedContextBytes = 64 * 1024
+
 // ChildKindAllowlist is the T-308 mitigation gate: only these Kinds may
 // pass through MaterializeChildCRDs. Anything else returns an error
 // before any K8s API call is made. The set matches the five TIDE CRD
@@ -194,6 +204,12 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 		if !ChildKindAllowlist[child.Kind] {
 			return fmt.Errorf("MaterializeChildCRDs: kind %q not in allowlist (allowed: Milestone, Phase, Plan, Task, Wave); refusing to create — T-308 mitigation", child.Kind)
 		}
+		// T-20-03-01: reject oversized SharedContext before any Create (etcd DoS guard).
+		// maxSharedContextBytes (64 KiB) is a conservative ceiling well below etcd's
+		// ~1.5 MiB per-object limit; curated wave-scoped blobs are expected ~300–700 bytes.
+		if len(child.SharedContext) > maxSharedContextBytes {
+			return fmt.Errorf("MaterializeChildCRDs: child %q SharedContext size %d bytes exceeds maxSharedContextBytes (%d); refusing to create — T-20-03-01 etcd DoS guard", child.Name, len(child.SharedContext), maxSharedContextBytes)
+		}
 	}
 
 	for _, child := range children {
@@ -204,18 +220,25 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			if err := json.Unmarshal(child.Spec.Raw, &ms.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Milestone %q spec: %w", child.Name, err)
 			}
+			// D-05/D-07: stamp the parent-curated blob byte-identically (mirrors
+			// tk.Spec.PromptPath = child.SourcePath at the Task branch below).
+			ms.Spec.SharedContext = child.SharedContext
 			obj = ms
 		case "Phase":
 			ph := &tideprojectv1alpha1.Phase{}
 			if err := json.Unmarshal(child.Spec.Raw, &ph.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Phase %q spec: %w", child.Name, err)
 			}
+			// D-05/D-07: stamp SharedContext byte-identically onto the Phase spec.
+			ph.Spec.SharedContext = child.SharedContext
 			obj = ph
 		case "Plan":
 			pl := &tideprojectv1alpha1.Plan{}
 			if err := json.Unmarshal(child.Spec.Raw, &pl.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Plan %q spec: %w", child.Name, err)
 			}
+			// D-05/D-07: stamp SharedContext byte-identically onto the Plan spec.
+			pl.Spec.SharedContext = child.SharedContext
 			obj = pl
 		case "Task":
 			tk := &tideprojectv1alpha1.Task{}
@@ -231,6 +254,10 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			// SourcePath fails Create with a clear validation error rather than
 			// silently dispatching an empty-prompt executor (the #4 class).
 			tk.Spec.PromptPath = child.SourcePath
+			// D-05/D-07: stamp SharedContext byte-identically onto the Task spec
+			// (mirrors the PromptPath = child.SourcePath stamp above; CACHE-02
+			// lock is enforced at dispatch time by buildEnvelopeIn which omits it).
+			tk.Spec.SharedContext = child.SharedContext
 			obj = tk
 		case "Wave":
 			wv := &tideprojectv1alpha1.Wave{}
