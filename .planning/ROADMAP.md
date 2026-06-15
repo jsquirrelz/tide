@@ -129,7 +129,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 20-02-PLAN.md — {{.SharedContext}} interpolation in four planner templates + golden/ratchet re-baseline (CACHE-03)
+- [x] 20-02-PLAN.md — {{.SharedContext}} interpolation in four planner templates + golden/ratchet re-baseline (CACHE-03)
 - [ ] 20-03-PLAN.md — BuildPlannerEnvelope stamp + materializer byte-identical carry + size cap + executor-omit lock (CACHE-02/04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -181,5 +181,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
-| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 2/5 | In Progress|  |
+| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 3/5 | In Progress|  |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
