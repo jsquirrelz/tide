@@ -59,3 +59,7 @@ cmd/tide-demo-init/fixture/
 # GSD ephemeral session state
 .planning/RESUME.md
 .planning/HANDOFF.json
+
+# Local secrets (real API keys) — never commit
+.secrets/
+*.key
