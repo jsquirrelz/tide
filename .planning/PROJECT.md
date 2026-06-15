@@ -8,6 +8,22 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current Milestone: v1.0.2 Ebb Tide — Token & Cost Optimization
+
+**Goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
+
+**Target features:**
+- Token minimization across the compiled planner/executor prompt templates (trim static boilerplate; curate the interpolated context fed per dispatch) — provider-agnostic.
+- Cache-aware prompt structuring: order context stable-prefix-first so Claude Code's own caching (and OpenAI's automatic prefix caching) is maximized, and shared wave/plan context becomes a reusable prefix across wave-sibling dispatches.
+- A reusable quality + cost eval harness: measures a baseline DoD, regression-gates future prompt/template changes, and reports token/cost deltas (incl. cache-read vs cache-write accounting).
+- Cost/efficiency observability: surface the already-emitted cache + token metrics (cache-hit ratio, tokens-per-level) meaningfully on the dashboard.
+
+**Key constraints for this milestone:**
+- Stay CLI-based — no direct-SDK `cache_control` subagent backend.
+- Provider-agnostic by design, live-verified on the Claude path; no Anthropic-only assumptions.
+- Best-effort reduction, quality-gated — no hard numeric cost target; the eval harness guards that token cuts don't regress output.
+- Out of scope (→ next milestone): the OpenAI/Codex subagent backend and dogfood run #2 itself.
+
 ## Current State (v1.0.1 — SHIPPED 2026-06-13)
 
 Two milestones shipped:
@@ -15,7 +31,7 @@ Two milestones shipped:
 - **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 - **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Current focus:** Planning the next milestone. The headline remains full TIDE-on-TIDE — the orchestrator driving its own next milestone end-to-end. With trustworthiness landed, dogfood run 2 (02-codex-runtime) is now unblocked; the docs/audit 27-item hardening backlog remains a candidate scope.
+**Current focus:** Executing milestone **v1.0.2 Ebb Tide — Token & Cost Optimization** (see the Current Milestone section above). This is the cost-reduction prep ahead of dogfood run #2; the run itself and the OpenAI/Codex runtime backend are deferred to the following milestone. The headline beyond that remains full TIDE-on-TIDE.
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -124,4 +140,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-13 — v1.0.1 milestone shipped (Phases 12–17 complete, 28/28 requirements, audit passed). PROJECT.md full evolution review performed at milestone close.*
+*Last updated: 2026-06-15 — v1.0.2 Ebb Tide (Token & Cost Optimization) milestone started.*

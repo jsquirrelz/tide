@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.1
-milestone_name: Orchestrator Trustworthiness + Telemetry Completion
-status: Awaiting next milestone
-stopped_at: Milestone v1.0.1 complete
-last_updated: "2026-06-13T14:22:50.708Z"
-last_activity: 2026-06-13 — Milestone v1.0.1 completed and archived
+milestone: v1.0.2
+milestone_name: Ebb Tide — Token & Cost Optimization
+status: planning
+last_updated: "2026-06-15T13:30:56.273Z"
+last_activity: 2026-06-15
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 38
-  completed_plans: 38
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-13)
 
 ## Current Position
 
-Phase: Milestone v1.0.1 complete and archived
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-13 — Milestone v1.0.1 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-15 — Milestone v1.0.2 started
 
 ## Performance Metrics
 
@@ -105,9 +104,11 @@ rc-gated, and **v1.0.1 was published and verified** (7 images, 2 OCI charts, 5
 binaries + checksums, GitHub release — all anonymously confirmed).
 
 Fixes, in order (each masked the next):
+
 - **Chart reproducibility** (`ci` + `release`): `hack/helm/augment-tide-chart.sh` +
   `tide-values.yaml` were stale vs the Phase 13/14/16 chart edits → `make helm` reverted
   them. Synced the generator. (debug: [resolved/chart-helmify-reproducibility](./debug/resolved/chart-helmify-reproducibility.md), `6264d8a`)
+
 - **Lint** (~31 golangci offenses + a cross-controller goconst whack-a-mole): quick task 260614-exo (`f4af5c2`) + `2dcdba4`.
 - **nightly #1** — `tide-git-http-server` fixture not built in nightly (private ghcr pkg → ImagePullBackOff): `d45909b`. (debug: [resolved/nightly-git-http-imagepull](./debug/resolved/nightly-git-http-imagepull.md))
 - **nightly #2 / dogfood** — ProjectReconciler missing self-requeue after finalizer add (latent since Phase 02-10; finalizer Update filtered by the Generation-OR predicate): `6286dab`. (debug: [resolved/medium-http-completion-wedge](./debug/resolved/medium-http-completion-wedge.md))
