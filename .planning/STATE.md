@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Ebb Tide — Token & Cost Optimization
 status: executing
-stopped_at: Phase 20 context gathered
-last_updated: "2026-06-15T23:40:14.059Z"
+stopped_at: Completed 20-03 SharedContext injection + CACHE-02 carry path
+last_updated: "2026-06-15T23:53:42.214Z"
 last_activity: 2026-06-15
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 12
-  completed_plans: 10
+  completed_plans: 11
   percent: 50
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-15)
 ## Current Position
 
 Phase: 20 (sharedcontext-injection-cache-verification-spike) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-15
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [████████░░] 83%
 | 17 | 4 | Complete |
 | Phase 20 P01 | 15m | 2 tasks | 11 files |
 | Phase 20 P04 | 35 | 2 tasks | 5 files |
+| Phase 20-sharedcontext-injection-cache-verification-spike P03 | 25 | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -60,6 +61,9 @@ Progress: [████████░░] 83%
 Decisions are logged in PROJECT.md Key Decisions table (v1.0.1 entries added at close).
 
 Key constraint for v1.0.2: TIDE stays CLI-based (`claude -p --bare`); no direct-SDK `cache_control`. Cache is an outcome of prompt structuring, not a lever we control.
+
+- [Phase ?]: Project level passes empty string for BuildPlannerEnvelope sharedContext (ProjectSpec has no SharedContext field; project is the DAG root with no parent)
+- [Phase ?]: maxSharedContextBytes = 64 KiB etcd DoS guard in MaterializeChildCRDs (fail-closed pre-flight check before any child CRD Create, T-20-03-01)
 
 ### Pending Todos
 
@@ -101,6 +105,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-15T23:40:14.045Z
-Stopped at: Phase 20 context gathered
+Last session: 2026-06-15T23:53:42.201Z
+Stopped at: Completed 20-03 SharedContext injection + CACHE-02 carry path
 Resume file: None
