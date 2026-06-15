@@ -122,11 +122,20 @@ Plans:
 **Plans**: 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 20-01-PLAN.md — SharedContext fields on EnvelopeIn/Out, ChildCRDSpec, and all four CRD specs (CACHE-02 contract)
+- [ ] 20-04-PLAN.md — tide-spike cross-pod cache harness + credproxy FAIL-path body tee (CACHE-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 20-02-PLAN.md — {{.SharedContext}} interpolation in four planner templates + golden/ratchet re-baseline (CACHE-03)
 - [ ] 20-03-PLAN.md — BuildPlannerEnvelope stamp + materializer byte-identical carry + size cap + executor-omit lock (CACHE-02/04)
-- [ ] 20-04-PLAN.md — tide-spike cross-pod cache harness + credproxy FAIL-path body tee (CACHE-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 20-05-PLAN.md — live spike run, PROJECT.md decision, provider-neutrality, D-08 contingency (CACHE-01/05)
+
 **UI hint**: no
 
 ### Phase 21: Cost & Cache Observability
