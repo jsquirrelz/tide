@@ -84,7 +84,13 @@ Plans:
   4. `make test-unit` runs green after each boilerplate-trim commit, confirming protocol-compliance (child-CRD parse, output paths, DAG acyclicity) is preserved throughout.
   5. The golden baselines in `testdata/baselines/` are updated to reflect the reordered templates, and the token-count ratchet confirms no accidental growth relative to the trimmed target.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 19-01-PLAN.md — Annotate/reorder/trim milestone_planner + project_planner (golden+ratchet)
+- [ ] 19-02-PLAN.md — Annotate/reorder/trim phase_planner + plan_planner (FILE-TOUCH/JSON-escape preserved)
+- [ ] 19-03-PLAN.md — Annotate/reorder/trim task_executor (consolidate 6 UID occurrences to volatile suffix)
+- [ ] 19-04-PLAN.md — PROMPT-05 regression guard + full make test gate + D-05 human-review checkpoint
 
 ### Phase 20: SharedContext Injection + Cache Verification Spike
 
