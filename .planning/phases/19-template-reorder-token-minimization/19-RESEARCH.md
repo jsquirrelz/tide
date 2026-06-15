@@ -638,12 +638,15 @@ ratchet/golden files, which are the phase's own artifacts.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+Both items below are CONTEXT.md "Claude's Discretion" decisions, not locked requirements; the recommendations are adopted as the resolution.
 
 1. **DRY: shared template partial or self-contained per file?**
    - What we know: Option A (self-contained) requires no code change; Option B requires
      updating `LoadPromptTemplate` + a new `shared_preamble.tmpl`.
    - Recommendation: planner chooses Option A for Phase 19 (pure template edit scope).
+   - **RESOLVED:** Option A (self-contained per file). No `LoadPromptTemplate` change — matches the locked "pure template edit, no render-code change" scope (D-01).
 
 2. **Exact wording of compressed paradigm preamble (Claude's Discretion)**
    - What we know: Must preserve "Read the project spec at `/workspace/repo.git/README.md`
@@ -655,6 +658,7 @@ ratchet/golden files, which are the phase's own artifacts.
      /workspace/repo.git/README.md before authoring — it is load-bearing." This preserves the
      directive while removing the "Milestone → Phase → Plan → Task → Wave DAG, dispatched as
      Kubernetes subagent Jobs" explanation (redundant with the spec itself).
+   - **RESOLVED:** Adopt the recommended one-line compression (spec-read directive verbatim; condense the acronym/DAG explanation). Final per-template wording stays the executor's conservative-trim call under PROMPT-04, proven by the ratchet + golden diff.
 
 ---
 

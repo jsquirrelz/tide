@@ -1,9 +1,9 @@
 ---
 phase: 19
 slug: template-reorder-token-minimization
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-15
 ---
 
@@ -67,11 +67,11 @@ created: 2026-06-15
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify (eval gate) or are manual-only with documented reason
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (none — existing harness covers all)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < ~1s (quick eval run)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify (eval gate) or are manual-only with documented reason
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (none — existing harness covers all)
+- [x] No watch-mode flags
+- [x] Feedback latency < ~1s (quick eval run)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-06-15
