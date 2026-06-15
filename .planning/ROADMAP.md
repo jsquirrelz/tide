@@ -64,8 +64,8 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
 Plans:
 **Wave 1**
 
-- [ ] 18-01-PLAN.md — Freeze v1.0.1 baseline: eval package + goldie golden renders + byte ratchets (EVAL-01/03/06)
-- [ ] 18-03-PLAN.md — cmd/tide-eval count_tokens pre-flight + make eval target (EVAL-05)
+- [x] 18-01-PLAN.md — Freeze v1.0.1 baseline: eval package + goldie golden renders + byte ratchets (EVAL-01/03/06)
+- [x] 18-03-PLAN.md — cmd/tide-eval count_tokens pre-flight + make eval target (EVAL-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -144,7 +144,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete | 2026-06-12 |
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
-| 18. Eval Harness | v1.0.2 | 0/TBD | Not started | - |
+| 18. Eval Harness | v1.0.2 | 2/3 | In Progress|  |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 0/TBD | Not started | - |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
