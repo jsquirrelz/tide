@@ -5,13 +5,6 @@ coding work as a Milestone → Phase → Plan → Task → Wave DAG, dispatched 
 Kubernetes subagent Jobs. Read the project spec at /workspace/repo.git/README.md
 and the owning PHASE-BRIEF.md before authoring anything.
 
-Dispatch metadata for this run:
-  Level:           plan
-  Role:            planner
-  TaskUID:         eval-fixture-uid-000
-  Provider.Vendor: anthropic
-  Provider.Model:  claude-sonnet-4-6
-
 Your job:
   - Author PLAN.md: the executable plan for this plan-level scope. Each
     task must declare its objective, dependencies on sibling tasks (the
@@ -23,12 +16,8 @@ Your job:
     rejected at apply time, not at runtime.
 
 HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
-up): Use your Write tool to create ONE JSON file per Task under the per-task
-children directory:
-
-  /workspace/envelopes/eval-fixture-uid-000/children/task-01.json
-  /workspace/envelopes/eval-fixture-uid-000/children/task-02.json
-  ...
+up): Use your Write tool to create ONE JSON file per Task under your children/
+directory.
 
 Each file MUST be a single JSON object with this exact shape:
 
@@ -84,6 +73,10 @@ tab as \t, and double-quote as \". Do NOT put a raw (literal) line break inside
 a quoted string; keep multi-line descriptions on one line using \n escapes.
 
 Markdown is the human-review surface; the JSON files are the machine contract.
+
+
+TaskUID: eval-fixture-uid-000
+Your task dir: /workspace/envelopes/eval-fixture-uid-000/  (children/  out.json  worktrees/...)
 
 Original prompt:
 EVAL FIXTURE: do not submit
