@@ -29,6 +29,15 @@ type MilestoneSpec struct {
 	// DependsOn lists sibling Milestone names in the same Project. Optional.
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string stamped by the
+	// orchestrator at object creation time (Phase 20 D-05). Byte-identical
+	// across all siblings in the same wave. Read by BuildPlannerEnvelope when
+	// dispatching this object's planner Job (D-07 uniform path).
+	// Vestigial at the Milestone level (no parent planner above Project) but
+	// kept uniform to avoid a level-conditional branch (D-07).
+	// +optional
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
 // MilestoneStatus defines the observed state of Milestone.

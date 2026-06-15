@@ -107,6 +107,16 @@ type TaskSpec struct {
 	// enum constraint, mirroring the Gates pattern in shared_types.go.
 	// +optional
 	Dev TaskDev `json:"dev,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string stamped by the
+	// orchestrator at Task creation time (Phase 20 D-05). Populated from the
+	// parent planner's EnvelopeOut.SharedContext; byte-identical across all
+	// sibling Tasks in the same wave. The dispatcher reads this at Task
+	// dispatch time and places it in EnvelopeIn.SharedContext (D-07).
+	// Empty for Tasks authored before Phase 20 or where the parent planner
+	// emitted no SharedContext; omitempty keeps older CRD objects small.
+	// +optional
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task.

@@ -138,6 +138,16 @@ spec:
                   so it resolves under both the controller PVC mount and the executor pod mount.
                 minLength: 1
                 type: string
+              sharedContext:
+                description: |-
+                  SharedContext is the wave-scoped shared context string stamped by the
+                  orchestrator at Task creation time (Phase 20 D-05). Populated from the
+                  parent planner's EnvelopeOut.SharedContext; byte-identical across all
+                  sibling Tasks in the same wave. The dispatcher reads this at Task
+                  dispatch time and places it in EnvelopeIn.SharedContext (D-07).
+                  Empty for Tasks authored before Phase 20 or where the parent planner
+                  emitted no SharedContext; omitempty keeps older CRD objects small.
+                type: string
             required:
             - declaredOutputPaths
             - filesTouched

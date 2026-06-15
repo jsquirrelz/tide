@@ -29,6 +29,13 @@ type PhaseSpec struct {
 	// DependsOn lists sibling Phase names in the same Milestone. Optional.
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string stamped by the
+	// orchestrator at object creation time (Phase 20 D-05). Byte-identical
+	// across all siblings in the same wave. Read by BuildPlannerEnvelope when
+	// dispatching this object's planner Job (D-07 uniform path).
+	// +optional
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
 // PhaseStatus defines the observed state of Phase.

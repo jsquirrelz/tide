@@ -53,6 +53,13 @@ spec:
                 description: PhaseRef is the name of the owning Phase (same namespace).
                 minLength: 1
                 type: string
+              sharedContext:
+                description: |-
+                  SharedContext is the wave-scoped shared context string stamped by the
+                  orchestrator at object creation time (Phase 20 D-05). Byte-identical
+                  across all siblings in the same wave. Read by BuildPlannerEnvelope when
+                  dispatching this object's planner Job (D-07 uniform path).
+                type: string
             required:
             - phaseRef
             type: object
