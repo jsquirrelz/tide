@@ -95,7 +95,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 19-04-PLAN.md — PROMPT-05 regression guard + full make test gate + D-05 human-review checkpoint
+- [x] 19-04-PLAN.md — PROMPT-05 regression guard + full make test gate + D-05 human-review checkpoint
 
 **Cross-cutting constraints:**
 
@@ -164,6 +164,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
-| 19. Template Reorder + Token Minimization | v1.0.2 | 3/4 | In Progress|  |
+| 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
