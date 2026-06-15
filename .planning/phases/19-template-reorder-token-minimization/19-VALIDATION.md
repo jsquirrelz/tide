@@ -41,7 +41,7 @@ created: 2026-06-15
 | Req ID | Behavior | Test Type | Automated Command |
 |--------|----------|-----------|-------------------|
 | PROMPT-01 | Five templates in canonical D-03 order (role → instructions → shared-context slot → volatile suffix → prompt) | golden render diff | `go test ./internal/eval/ -run TestGoldenRender_` |
-| PROMPT-02 | `{{.TaskUID}}`/`{{.Provider.*}}` in volatile suffix only (exactly 1 TaskUID per template) | golden render + grep | `go test ./internal/eval/ -run TestGoldenRender_` + `grep -c TaskUID internal/subagent/common/templates/*.tmpl` |
+| PROMPT-02 | `{{.TaskUID}}`/`{{.Provider.*}}`/`Level:`/`Role:` absent from the STABLE PREFIX (before the SharedContext slot marker); UID concentrated in the volatile suffix (2 occurrences for planners, 5 for task_executor) | golden render + windowed invariant check | `go test ./internal/eval/ -run TestGoldenRender_` + per template `awk '/SharedContext slot/{f=1} !f && /\{\{\.TaskUID\}\}/{c++} END{exit c}' <template>.tmpl` (exits 0 ⇔ zero UID in stable prefix) + `sed -n '/SharedContext slot/,$p' <template>.tmpl \| grep -q "{{.TaskUID}}"` (≥1 in suffix) |
 | PROMPT-03 | "Why-this-line" annotation comments present before any trim | human review of annotated diff | Code review (no automated check — annotations are zero-token `{{/* */}}` comments) |
 | PROMPT-04 | Each section trim preserves protocol compliance | protocol-compliance gate | `go test ./internal/eval/` (child-CRD parse / declared-output-path / DAG acyclicity) |
 | PROMPT-05 | No map-typed data interpolated into stable prefix (confirmed no-op) | grep guard | `grep -rn "Params" internal/subagent/common/templates/*.tmpl` returns zero hits |
