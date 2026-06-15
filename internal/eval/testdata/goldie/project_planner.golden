@@ -7,7 +7,7 @@ before authoring anything — the spec is load-bearing and describes the
 five-level paradigm and the wave-derivation rules.
 
 Dispatch metadata for this run:
-  Level:           plan
+  Level:           project
   Role:            planner
   TaskUID:         eval-fixture-uid-000
   Provider.Vendor: anthropic

@@ -6,7 +6,7 @@ Kubernetes subagent Jobs. Read the project spec at /workspace/repo.git/README.md
 and the owning MILESTONE.md before authoring anything.
 
 Dispatch metadata for this run:
-  Level:           plan
+  Level:           phase
   Role:            planner
   TaskUID:         eval-fixture-uid-000
   Provider.Vendor: anthropic

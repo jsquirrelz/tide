@@ -6,8 +6,8 @@ this task because all of its declared dependencies have completed
 successfully. Your output will be consumed by sibling and downstream tasks.
 
 Dispatch metadata for this run:
-  Level:           plan
-  Role:            planner
+  Level:           task
+  Role:            executor
   TaskUID:         eval-fixture-uid-000
   Provider.Vendor: anthropic
   Provider.Model:  claude-sonnet-4-6

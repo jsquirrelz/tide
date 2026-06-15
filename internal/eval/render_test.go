@@ -29,17 +29,18 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
-// fixedEnvelope is the deterministic fixture used for all golden renders and
-// byte ratchet tests. Every field is a compile-time constant; Provider.Params
-// is nil to avoid map-iteration ordering flap. TaskUID is fixed because it is
+// baseEnvelope holds the deterministic fixture fields shared across all five
+// template renders. Every field is a compile-time constant; Provider.Params is
+// nil to avoid map-iteration ordering flap. TaskUID is fixed because it is
 // interpolated in plan_planner.tmpl and task_executor.tmpl, making it
-// load-bearing for golden determinism.
-var fixedEnvelope = pkgdispatch.EnvelopeIn{
+// load-bearing for golden determinism. Role and Level are deliberately NOT set
+// here — they are filled per-template by envelopeFor so each template renders
+// with the (role, level) production actually dispatches it under, rather than a
+// single planner/plan body that production never sends.
+var baseEnvelope = pkgdispatch.EnvelopeIn{
 	APIVersion:          "tideproject.k8s/v1alpha1",
 	Kind:                "TaskEnvelopeIn",
 	TaskUID:             "eval-fixture-uid-000",
-	Role:                "planner",
-	Level:               "plan",
 	Prompt:              "EVAL FIXTURE: do not submit",
 	DeclaredOutputPaths: []string{"internal/eval/testdata/placeholder.go"},
 	Provider: pkgdispatch.ProviderSpec{
@@ -47,6 +48,19 @@ var fixedEnvelope = pkgdispatch.EnvelopeIn{
 		Model:  "claude-sonnet-4-6",
 		// Params intentionally nil: avoids map-iteration ordering nondeterminism.
 	},
+}
+
+// envelopeFor returns a copy of baseEnvelope with Role and Level set to the
+// production dispatch shape for the template under test. All five templates
+// interpolate {{.Role}} and {{.Level}} (template lines 9-11), so each golden,
+// ratchet, and count_tokens floor must measure the body production sends:
+// planners as ("planner", <level>) and the executor as ("executor", "task")
+// (the values task_controller.go assigns at dispatch).
+func envelopeFor(role, level string) pkgdispatch.EnvelopeIn {
+	e := baseEnvelope
+	e.Role = role
+	e.Level = level
+	return e
 }
 
 // templateCases enumerates all five (role, level) → goldie-name pairs.
@@ -94,8 +108,9 @@ func TestGoldenRender_TaskExecutor(t *testing.T) {
 	goldenAssert(t, "executor", "task", "task_executor")
 }
 
-// goldenAssert loads the (role, level) template, renders it with fixedEnvelope,
-// and calls goldie.Assert to compare against the committed golden file.
+// goldenAssert loads the (role, level) template, renders it with the matching
+// per-template envelope, and calls goldie.Assert to compare against the
+// committed golden file.
 func goldenAssert(t *testing.T, role, level, name string) {
 	t.Helper()
 	tmpl, err := common.LoadPromptTemplate(role, level)
@@ -103,7 +118,7 @@ func goldenAssert(t *testing.T, role, level, name string) {
 		t.Fatalf("load template (%s, %s): %v", role, level, err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, fixedEnvelope); err != nil {
+	if err := tmpl.Execute(&buf, envelopeFor(role, level)); err != nil {
 		t.Fatalf("render template (%s, %s): %v", role, level, err)
 	}
 	g := goldie.New(t, goldie.WithFixtureDir("testdata/goldie"))
@@ -140,10 +155,14 @@ func TestByteRatchet_TaskExecutor(t *testing.T) {
 	ratchetAssert(t, "executor", "task", "task_executor")
 }
 
-// ratchetAssert renders the (role, level) template with fixedEnvelope and
-// compares len(rendered) against the integer in testdata/ratchets/<name>.txt.
-// A missing or malformed ratchet file is a fatal error. Exceeding the ceiling
-// is a non-fatal error that names the ratchet file and instructs the maintainer.
+// ratchetAssert renders the (role, level) template with its matching envelope
+// and compares len(rendered) against the integer in testdata/ratchets/<name>.txt.
+// A missing or malformed ratchet file is a fatal error. This is a STRICT
+// frozen-byte-count ratchet: any divergence — growth OR shrink — fails, forcing
+// a deliberate ratchet update in the same commit as the template change. (A
+// growth-only ratchet would let a later trim silently leave a loose ceiling that
+// then permits re-growth back to the old size, defeating the "ratchet down after
+// trimming" intent — WR-03.)
 func ratchetAssert(t *testing.T, role, level, name string) {
 	t.Helper()
 	tmpl, err := common.LoadPromptTemplate(role, level)
@@ -151,7 +170,7 @@ func ratchetAssert(t *testing.T, role, level, name string) {
 		t.Fatalf("load template (%s, %s): %v", role, level, err)
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, fixedEnvelope); err != nil {
+	if err := tmpl.Execute(&buf, envelopeFor(role, level)); err != nil {
 		t.Fatalf("render template (%s, %s): %v", role, level, err)
 	}
 
@@ -160,13 +179,13 @@ func ratchetAssert(t *testing.T, role, level, name string) {
 	if err != nil {
 		t.Fatalf("missing ratchet file %s — create it with the rendered byte count to activate the ratchet: %v", ratchetFile, err)
 	}
-	ceiling, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	frozen, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	if err != nil {
 		t.Fatalf("ratchet file %s malformed (expected single integer): %v", ratchetFile, err)
 	}
 	actual := buf.Len()
-	if actual > ceiling {
-		t.Errorf("template %s grew: rendered %d bytes, ratchet ceiling %d — update %s if growth is intentional",
-			name, actual, ceiling, ratchetFile)
+	if actual != frozen {
+		t.Errorf("template %s byte count changed: rendered %d bytes, frozen ratchet %d — this is a frozen byte-count baseline; update %s in the same deliberate commit if the template change is intentional",
+			name, actual, frozen, ratchetFile)
 	}
 }
