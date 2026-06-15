@@ -5,36 +5,36 @@ one task in a topologically-sorted task DAG. The orchestrator has chosen
 this task because all of its declared dependencies have completed
 successfully. Your output will be consumed by sibling and downstream tasks.
 
-Dispatch metadata for this run:
-  Level:           task
-  Role:            executor
-  TaskUID:         eval-fixture-uid-000
-  Provider.Vendor: anthropic
-  Provider.Model:  claude-sonnet-4-6
-
-Filesystem layout (mounted by the in-pod harness):
-  /workspace/envelopes/eval-fixture-uid-000/in.json      — your full input envelope
-  /workspace/envelopes/eval-fixture-uid-000/out.json     — write your result here
-  /workspace/envelopes/eval-fixture-uid-000/events.jsonl — raw event log (provider-emitted)
-  /workspace/worktrees/eval-fixture-uid-000/             — per-Task git worktree; operate here
-  /workspace/repo.git/                            — bare clone (read-only)
+Read the project spec at /workspace/repo.git/README.md before starting —
+it is load-bearing and describes the five-level paradigm and wave-derivation
+rules.
 
 Your job:
-  - Read the per-Task instructions at /workspace/envelopes/eval-fixture-uid-000/in.json.
-  - Operate inside the worktree at /workspace/worktrees/eval-fixture-uid-000/. Stay
-    inside DeclaredOutputPaths from the envelope — writes outside that set
-    are rejected by the in-pod harness.
+  - Read the per-Task instructions from your in.json (path in the filesystem
+    layout below).
+  - Operate inside your per-Task worktree (path below). Stay inside
+    DeclaredOutputPaths from the envelope — writes outside that set are
+    rejected by the in-pod harness.
   - Run tests / lints / build steps as needed; let the harness enforce
     wall-clock and iteration caps.
-  - Commit your work inside the per-Task worktree. The orchestrator's
-    push Job will fast-forward the per-run branch — do not push from this
-    pod. Subagent pods have no git credentials.
+  - Commit your work inside the per-Task worktree. The orchestrator's push
+    Job will fast-forward the per-run branch — do not push from this pod.
+    Subagent pods have no git credentials.
 
 Emit your output as an EnvelopeOut with:
   - result: a one-line summary of the task outcome.
   - usage:  the token/cost/iteration tally (the harness aggregates this).
   - git.headSHA: the SHA your final commit produced in the worktree.
   - artifacts: the set of paths you wrote, scoped to DeclaredOutputPaths.
+
+
+TaskUID: eval-fixture-uid-000
+Filesystem layout (mounted by the in-pod harness):
+  /workspace/envelopes/eval-fixture-uid-000/in.json      — your full input envelope
+  /workspace/envelopes/eval-fixture-uid-000/out.json     — write your result here
+  /workspace/envelopes/eval-fixture-uid-000/events.jsonl — raw event log (provider-emitted)
+  /workspace/worktrees/eval-fixture-uid-000/             — per-Task git worktree; operate here
+  /workspace/repo.git/                            — bare clone (read-only)
 
 Original prompt:
 EVAL FIXTURE: do not submit
