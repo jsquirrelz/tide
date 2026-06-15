@@ -24,6 +24,13 @@ limitations under the License.
 // and prints per-template real token counts plus a 1,024-token Sonnet/Opus
 // cache-floor pass/fail.
 //
+// The reported count is a FLOOR on billed input, not the full billed count: it
+// measures the rendered template body alone (sent as a single user message with
+// no system prompt). In production the template is delivered to the Claude Code
+// CLI over stdin, and the CLI prepends its own system prompt and tool schemas
+// before building the real request — so the true billed input is higher. Treat
+// these counts as a lower bound when reasoning about cache-floor thresholds.
+//
 // Usage:
 //
 //	make eval                            # uses TIDE_PROXY_ENDPOINT + TIDE_SIGNED_TOKEN env
@@ -48,6 +55,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jsquirrelz/tide/internal/subagent/common"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -65,21 +73,31 @@ var templates = []struct{ role, level, name string }{
 	{"executor", "task", "task_executor"},
 }
 
-// fixedEnvelope is the deterministic fixture used to render each template.
-// All fields are compile-time constants; Provider.Params is nil to avoid
-// map-iteration ordering non-determinism.
-var fixedEnvelope = pkgdispatch.EnvelopeIn{
+// baseEnvelope holds the deterministic fixture fields shared across all five
+// template renders. All fields are compile-time constants; Provider.Params is
+// nil to avoid map-iteration ordering non-determinism. Role and Level are set
+// per-template by envelopeFor so each template's token count measures the body
+// production actually dispatches it under (e.g. the executor as
+// "executor"/"task"), matching the offline render_test.go fixture exactly.
+var baseEnvelope = pkgdispatch.EnvelopeIn{
 	APIVersion:          "tideproject.k8s/v1alpha1",
 	Kind:                pkgdispatch.KindTaskEnvelopeIn,
 	TaskUID:             "eval-fixture-uid-000",
-	Role:                "planner",
-	Level:               "plan",
 	Prompt:              "EVAL FIXTURE: do not submit",
 	DeclaredOutputPaths: []string{"internal/eval/testdata/placeholder.go"},
 	Provider: pkgdispatch.ProviderSpec{
 		Vendor: "anthropic",
 		Model:  "claude-sonnet-4-6",
 	},
+}
+
+// envelopeFor returns a copy of baseEnvelope with Role and Level set to the
+// production dispatch shape for the template under test.
+func envelopeFor(role, level string) pkgdispatch.EnvelopeIn {
+	e := baseEnvelope
+	e.Role = role
+	e.Level = level
+	return e
 }
 
 // countTokensReq is the request body for POST /v1/messages/count_tokens.
@@ -118,12 +136,17 @@ func main() {
 	fmt.Fprintf(os.Stdout, "tide-eval: model: %s\n", *model)
 	fmt.Fprintln(os.Stdout, "")
 
-	client := &http.Client{}
+	// Timeout guards against a credproxy that accepts the connection but stalls
+	// (hung upstream / half-open socket / stuck TLS) — without it, make eval
+	// could block forever (WR-04).
+	client := &http.Client{Timeout: 30 * time.Second}
 	endpoint := strings.TrimRight(proxy, "/") + "/v1/messages/count_tokens"
 
 	allPassed := true
 	for _, tmplSpec := range templates {
-		n, err := countTokens(client, endpoint, token, *model, tmplSpec.role, tmplSpec.level)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		n, err := countTokens(ctx, client, endpoint, token, *model, tmplSpec.role, tmplSpec.level)
+		cancel()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tide-eval: %s: error: %v\n", tmplSpec.name, err)
 			os.Exit(1)
@@ -147,15 +170,16 @@ func main() {
 }
 
 // countTokens renders the template for (role, level) and POSTs to the
-// count_tokens endpoint, returning the reported input_tokens count.
-func countTokens(client *http.Client, endpoint, token, modelName, role, level string) (int64, error) {
+// count_tokens endpoint, returning the reported input_tokens count. The ctx
+// carries a deadline so a stalled credproxy cannot hang the call indefinitely.
+func countTokens(ctx context.Context, client *http.Client, endpoint, token, modelName, role, level string) (int64, error) {
 	tmpl, err := common.LoadPromptTemplate(role, level)
 	if err != nil {
 		return 0, fmt.Errorf("load template (%s, %s): %w", role, level, err)
 	}
 
 	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, fixedEnvelope); err != nil {
+	if err := tmpl.Execute(&rendered, envelopeFor(role, level)); err != nil {
 		return 0, fmt.Errorf("render template (%s, %s): %w", role, level, err)
 	}
 
@@ -171,7 +195,7 @@ func countTokens(client *http.Client, endpoint, token, modelName, role, level st
 		return 0, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return 0, fmt.Errorf("build request: %w", err)
 	}

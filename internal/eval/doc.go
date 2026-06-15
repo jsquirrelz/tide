@@ -23,16 +23,23 @@ limitations under the License.
 // internal/subagent/common/templates/ is gated automatically by these tests.
 //
 // The online surface is cmd/tide-eval, invoked by `make eval`. It calls the
-// Anthropic count_tokens API to measure the actual billed token count for each
-// rendered template against a fixed fixture. `make eval` requires
-// TIDE_PROXY_ENDPOINT + TIDE_SIGNED_TOKEN and incurs a small API cost; it is
-// separate from `make test` so normal CI does not require credentials.
+// Anthropic count_tokens API to measure the real token count of each rendered
+// template body against a fixed fixture. This is a FLOOR on billed input, not
+// the full billed count: in production the rendered template is delivered to
+// the Claude Code CLI over stdin, and the CLI prepends its own system prompt,
+// tool schemas, and conversation scaffolding before constructing the real
+// /v1/messages request. tide-eval measures the template's contribution alone
+// (no system prompt), so treat its counts as a lower bound when reasoning about
+// cache-floor thresholds. `make eval` requires TIDE_PROXY_ENDPOINT +
+// TIDE_SIGNED_TOKEN and incurs a small API cost; it is separate from `make test`
+// so normal CI does not require credentials.
 //
 // Offline ratchet proxy: the render_test.go byte ratchets (testdata/ratchets/)
-// use len(rendered) as an offline proxy for token count (D-01a). A PR that
-// grows any template's rendered byte count beyond the committed per-template
-// ceiling fails `make test` automatically, without an API call. Phase 18 freezes
-// the ceilings at the un-trimmed v1.0.1 byte counts; a later phase ratchets
+// use len(rendered) as an offline proxy for token count (D-01a). The ratchet is
+// a strict frozen-byte-count baseline — any change (grow or shrink) to a
+// template's rendered size fails `make test` until the committed per-template
+// count is updated in the same deliberate commit, without an API call. Phase 18
+// freezes the counts at the un-trimmed v1.0.1 byte counts; a later phase ratchets
 // them down after template trimming lands.
 //
 // Import boundary — this package MUST NOT import:
