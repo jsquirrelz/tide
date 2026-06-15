@@ -155,6 +155,49 @@ func TestByteRatchet_TaskExecutor(t *testing.T) {
 	ratchetAssert(t, "executor", "task", "task_executor")
 }
 
+// TestNoMapInterpolation guards PROMPT-05 against future regression. PROMPT-05
+// ("structured data serialized deterministically") is a confirmed no-op for
+// Phase 19: the five templates interpolate only scalar string fields (.Level,
+// .Role, .TaskUID, .Prompt, .Provider.Vendor, .Provider.Model). The only
+// map-typed field on EnvelopeIn is ProviderSpec.Params (map[string]string), and
+// no template references it. This test asserts that invariant remains true —
+// if a future edit introduces {{range .Provider.Params}} or any other map-range
+// iteration, the test fails CI, signaling that stable-key-order serialization
+// must be added (per PROMPT-05 scope). The guard is deterministic and
+// zero-network.
+func TestNoMapInterpolation(t *testing.T) {
+	// templateStem derives the .tmpl filename stem from (level, role), mirroring
+	// the naming convention in LoadPromptTemplate: <level>_<role>.tmpl.
+	for _, tc := range templateCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			path := "../subagent/common/templates/" + tc.name + ".tmpl"
+			src, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read template source %s: %v", path, err)
+			}
+			text := string(src)
+			// Assert no .Params reference — ProviderSpec.Params is the only
+			// map[string]string field on EnvelopeIn; its use in a template would
+			// introduce map-iteration nondeterminism in the stable prefix.
+			if strings.Contains(text, ".Params") {
+				t.Errorf("template %s references .Params (map[string]string field); "+
+					"map-typed interpolation in the stable prefix introduces key-order "+
+					"nondeterminism — add stable-key-order serialization per PROMPT-05 "+
+					"before using .Params in a template", tc.name)
+			}
+			// Assert no {{range}} action — a range over a map produces
+			// nondeterministic key ordering in Go text/template output.
+			if strings.Contains(text, "{{range") || strings.Contains(text, "{{ range") {
+				t.Errorf("template %s contains a {{range}} action; if this iterates a "+
+					"map, key-order nondeterminism contaminates the stable prefix — "+
+					"verify the range target is a slice (safe) or add stable-key-order "+
+					"serialization per PROMPT-05 if it iterates a map", tc.name)
+			}
+		})
+	}
+}
+
 // ratchetAssert renders the (role, level) template with its matching envelope
 // and compares len(rendered) against the integer in testdata/ratchets/<name>.txt.
 // A missing or malformed ratchet file is a fatal error. This is a STRICT

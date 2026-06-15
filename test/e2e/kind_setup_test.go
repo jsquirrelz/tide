@@ -422,7 +422,7 @@ func kindApplyChart() {
 		// the gate_flow milestone planner ErrImagePulls and the Milestone never
 		// reaches AwaitingApproval. Point it at the kind-loaded stub, mirroring
 		// helmControllerArgs() in the integration suite (suite_test.go).
-		"--set", "subagent.defaults.image=" + kindE2EStubSubagentImage,
+		"--set", "subagent.defaults.image="+kindE2EStubSubagentImage,
 		// kind's default local-path provisioner only supports RWO.
 		"--set", "workspaces.pvc.accessModes={ReadWriteOnce}",
 		"--wait", "--timeout", "5m",
