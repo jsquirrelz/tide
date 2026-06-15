@@ -144,6 +144,17 @@ type EnvelopeIn struct {
 	// (RESEARCH.md Pitfall 9 / D-F1). The field is omitted from JSON when nil
 	// so production envelopes are not polluted with "dev: null".
 	Dev *Dev `json:"dev,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string emitted by the
+	// parent planner and stamped byte-identically onto all wave siblings by
+	// the controller at child dispatch time (Phase 20 CACHE-02/D-05). Grows
+	// the stable prefix toward the provider's cacheable minimum (≥1,024 tokens
+	// for Sonnet/Opus; 4,096 for Haiku — see PROJECT.md provider floor table).
+	//
+	// Planner templates reference {{.SharedContext}} in the D-07 reserved slot.
+	// Executor dispatches (role="executor") never populate this field (CACHE-02
+	// lock) — the executor template does not reference it.
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
 // EnvelopeOut is the result document written by the in-pod harness to
@@ -211,6 +222,13 @@ type EnvelopeOut struct {
 	// out.json via FilesystemEnvelopeReader the field falls back to
 	// len(ChildCRDs) in the planner controllers (non-Option-C path).
 	ChildCount int `json:"childCount,omitempty"`
+
+	// SharedContext is the curated wave-scoped shared context string the
+	// parent planner emits for the orchestrator to stamp byte-identically onto
+	// each sibling child's EnvelopeIn.SharedContext at dispatch time (D-05).
+	// Empty for executor-level dispatches and genuine leaf planners (no
+	// children to annotate). omitempty keeps executor out.json documents small.
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
 // GitOutput carries git-side output fields a dispatch produces, populated by

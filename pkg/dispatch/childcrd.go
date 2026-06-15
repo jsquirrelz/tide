@@ -64,4 +64,13 @@ type ChildCRDSpec struct {
 	// from the PVC on every dispatch. Empty for non-Task children and for planner
 	// JSON that did not originate from a file read. Not authored by the model.
 	SourcePath string `json:"sourcePath,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string to stamp onto this
+	// child CRD's Spec.SharedContext at materialization time (Phase 20 D-05).
+	// Set by the orchestrator from EnvelopeOut.SharedContext; NOT authored by
+	// the LLM (the model emits ChildCRDSpec.Spec, not this field). The
+	// materializer copies it into the typed child Spec, mirroring how SourcePath
+	// is copied into Task.Spec.PromptPath. omitempty so child JSON stays small
+	// when the parent planner emits no SharedContext.
+	SharedContext string `json:"sharedContext,omitempty"`
 }

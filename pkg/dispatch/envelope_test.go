@@ -738,6 +738,104 @@ func TestNewTerminationStub_ChildCount(t *testing.T) {
 	}
 }
 
+// --- Phase 20 plan 01: SharedContext field tests ---
+
+// TestEnvelopeIn_SharedContext_OmittedWhenEmpty asserts that an EnvelopeIn with
+// SharedContext="" marshals to JSON that does NOT contain the key "sharedContext"
+// (omitempty suppression — CACHE-02 planner-only field; empty serializes as absent
+// so existing fixtures remain byte-identical).
+func TestEnvelopeIn_SharedContext_OmittedWhenEmpty(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.SharedContext = "" // explicit zero value
+
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal(EnvelopeIn): %v", err)
+	}
+	if strings.Contains(string(data), `"sharedContext"`) {
+		t.Errorf(`serialized JSON contains "sharedContext" key but SharedContext was empty; got: %s`, string(data))
+	}
+}
+
+// TestEnvelopeIn_SharedContext_RoundTrip asserts that an EnvelopeIn with a
+// non-empty SharedContext round-trips through json.Marshal/Unmarshal preserving
+// the exact bytes (CACHE-02 byte-identity requirement).
+func TestEnvelopeIn_SharedContext_RoundTrip(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.SharedContext = "wave-blob: parent goal + load-bearing constraints + sibling map"
+
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal(EnvelopeIn): %v", err)
+	}
+	if !strings.Contains(string(data), `"sharedContext"`) {
+		t.Errorf(`serialized JSON missing "sharedContext" key; got: %s`, string(data))
+	}
+	var got EnvelopeIn
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal(EnvelopeIn): %v", err)
+	}
+	if got.SharedContext != in.SharedContext {
+		t.Errorf("SharedContext round-trip: got %q, want %q", got.SharedContext, in.SharedContext)
+	}
+}
+
+// TestEnvelopeOut_SharedContext_RoundTrip asserts that an EnvelopeOut with
+// SharedContext="wave-blob" and ChildCRDs round-trips preserving SharedContext
+// (D-05 carry path: parent planner emits one blob; controller stamps it
+// identically onto all siblings).
+func TestEnvelopeOut_SharedContext_RoundTrip(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.SharedContext = "wave-blob: parent goal + load-bearing constraints + sibling map"
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("json.Marshal(EnvelopeOut): %v", err)
+	}
+	if !strings.Contains(string(data), `"sharedContext"`) {
+		t.Errorf(`serialized JSON missing "sharedContext" key; got: %s`, string(data))
+	}
+	var got EnvelopeOut
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal(EnvelopeOut): %v", err)
+	}
+	if got.SharedContext != out.SharedContext {
+		t.Errorf("SharedContext round-trip: got %q, want %q", got.SharedContext, out.SharedContext)
+	}
+	// ChildCRDs must also survive the round-trip.
+	if len(got.ChildCRDs) != len(out.ChildCRDs) {
+		t.Errorf("ChildCRDs length: got %d, want %d", len(got.ChildCRDs), len(out.ChildCRDs))
+	}
+}
+
+// TestChildCRDSpec_SharedContext_RoundTrip asserts that a ChildCRDSpec with
+// SharedContext="wave-blob" round-trips preserving SharedContext (D-05: the
+// orchestrator stamps EnvelopeOut.SharedContext onto each ChildCRDSpec before
+// materializing child objects).
+func TestChildCRDSpec_SharedContext_RoundTrip(t *testing.T) {
+	child := ChildCRDSpec{
+		Kind:          "Phase",
+		Name:          "phase-foo",
+		Spec:          runtime.RawExtension{Raw: []byte(`{"projectRef":"p1"}`)},
+		SharedContext: "wave-blob: parent goal + load-bearing constraints + sibling map",
+	}
+
+	data, err := json.Marshal(child)
+	if err != nil {
+		t.Fatalf("json.Marshal(ChildCRDSpec): %v", err)
+	}
+	if !strings.Contains(string(data), `"sharedContext"`) {
+		t.Errorf(`serialized JSON missing "sharedContext" key; got: %s`, string(data))
+	}
+	var got ChildCRDSpec
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal(ChildCRDSpec): %v", err)
+	}
+	if got.SharedContext != child.SharedContext {
+		t.Errorf("SharedContext round-trip: got %q, want %q", got.SharedContext, child.SharedContext)
+	}
+}
+
 // TestNewTerminationStub_ChildCountJSON asserts that ChildCount serializes
 // under the "childCount" JSON key and the stub still stays < 4096 bytes with
 // ChildCount populated alongside a large EnvelopeOut.
