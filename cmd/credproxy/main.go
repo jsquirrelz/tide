@@ -61,11 +61,13 @@ func main() {
 	var certDir string
 	var upstreamURL string
 	var certValidity time.Duration
+	var teeBodyDir string
 
 	flag.StringVar(&listenAddr, "listen-addr", "127.0.0.1:8443", "Address for the HTTPS proxy listener")
 	flag.StringVar(&certDir, "cert-dir", "/etc/tide/proxy", "Directory for minted TLS cert and key")
 	flag.StringVar(&upstreamURL, "upstream-url", "https://api.anthropic.com", "Upstream URL to proxy requests to")
 	flag.DurationVar(&certValidity, "cert-validity", 24*time.Hour, "Validity duration for the self-signed cert")
+	flag.StringVar(&teeBodyDir, "tee-body-dir", "", "Optional: directory to write teed /v1/messages request bodies (CACHE-01 FAIL-path diff; disabled when empty). Caller must create the dir with 0700 perms.")
 	flag.Parse()
 
 	// Set up zap-behind-logr (same backend as cmd/manager/main.go; leaner setup
@@ -124,6 +126,11 @@ func main() {
 		CertFile:           certDir + "/cert.pem",
 		KeyFile:            certDir + "/key.pem",
 		ExtraAllowedRoutes: extraRoutes,
+		TeeBodyDir:         teeBodyDir,
+	}
+	if teeBodyDir != "" {
+		log.Info("tee-body-dir enabled — writing /v1/messages request bodies for FAIL-path diff",
+			"teeBodyDir", teeBodyDir)
 	}
 
 	// 5. Install signal handler for graceful shutdown on SIGTERM/SIGINT.

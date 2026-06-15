@@ -20,6 +20,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -532,6 +534,192 @@ func TestBillingLatch_SyntheticBodyDoesNotContainCreditBalance(t *testing.T) {
 	// this is the manufactured-evidence channel that WR-03 closes.
 	if strings.Contains(strings.ToLower(string(syntheticBody)), "credit balance") {
 		t.Errorf("WR-03: synthetic latch body must NOT contain 'credit balance' substring; got body: %s", string(syntheticBody))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Plan 20-04 Task 1 — CACHE-01 FAIL-path body tee (Phase 20 D-02)
+// ---------------------------------------------------------------------------
+
+// TestTeeBodyDir_WritesRequestBodyToFile asserts that when TeeBodyDir is set,
+// each /v1/messages request body is written to a sequentially-numbered file
+// under that directory, and the request still reaches the upstream (body is
+// restored for forwarding).
+func TestTeeBodyDir_WritesRequestBodyToFile(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-tee"
+
+	var upstreamBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	teeDir := t.TempDir()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+		TeeBodyDir:      teeDir,
+	}
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	token, err := Sign(key, taskUID, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	const body = `{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"hello"}]}`
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages",
+		strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200; got %d", resp.StatusCode)
+	}
+
+	// The tee file req-1.json must exist and contain the request body.
+	teeFile := filepath.Join(teeDir, "req-1.json")
+	teed, err := os.ReadFile(teeFile)
+	if err != nil {
+		t.Fatalf("tee file %s not found: %v", teeFile, err)
+	}
+	if string(teed) != body {
+		t.Errorf("tee file contents = %q; want %q", string(teed), body)
+	}
+
+	// The upstream must also have received the full body (restore path works).
+	if string(upstreamBody) != body {
+		t.Errorf("upstream body = %q; want %q", string(upstreamBody), body)
+	}
+
+	// T-20-04-01: tee file must NOT contain API key or Authorization header.
+	// The key is a header, not body — this asserts it doesn't leak into body.
+	if strings.Contains(strings.ToLower(string(teed)), "x-api-key") ||
+		strings.Contains(strings.ToLower(string(teed)), "authorization") ||
+		strings.Contains(strings.ToLower(string(teed)), "sk-real-key") {
+		t.Errorf("tee file must not contain API key or auth header; got: %s", string(teed))
+	}
+}
+
+// TestTeeBodyDir_SequentialNumbering asserts that two sequential requests
+// produce req-1.json and req-2.json (not overwritten).
+func TestTeeBodyDir_SequentialNumbering(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-tee-seq"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	teeDir := t.TempDir()
+
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+		TeeBodyDir:      teeDir,
+	}
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	send := func(body string) {
+		t.Helper()
+		token, err := Sign(key, taskUID, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages",
+			strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		resp.Body.Close() //nolint:errcheck
+	}
+
+	send(`{"dispatch":"A"}`)
+	send(`{"dispatch":"B"}`)
+
+	b1, err1 := os.ReadFile(filepath.Join(teeDir, "req-1.json"))
+	b2, err2 := os.ReadFile(filepath.Join(teeDir, "req-2.json"))
+	if err1 != nil || err2 != nil {
+		t.Fatalf("expected req-1.json and req-2.json; err1=%v err2=%v", err1, err2)
+	}
+	if string(b1) != `{"dispatch":"A"}` {
+		t.Errorf("req-1.json = %q; want dispatch A", string(b1))
+	}
+	if string(b2) != `{"dispatch":"B"}` {
+		t.Errorf("req-2.json = %q; want dispatch B", string(b2))
+	}
+}
+
+// TestTeeBodyDir_DisabledByDefault asserts that when TeeBodyDir is empty,
+// no tee files are written and the request path is unchanged.
+func TestTeeBodyDir_DisabledByDefault(t *testing.T) {
+	key := []byte("12345678901234567890123456789012")
+	const taskUID = "task-uid-tee-off"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	// TeeBodyDir intentionally NOT set.
+	p := &Proxy{
+		SigningKey:      key,
+		ExpectedTaskUID: taskUID,
+		UpstreamBaseURL: upstream.URL,
+		RealAPIKey:      "sk-real-key",
+		ListenAddr:      "127.0.0.1:0",
+	}
+	h, err := p.Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	token, err := Sign(key, taskUID, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/messages",
+		strings.NewReader(`{"model":"test"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	// Just confirm the request succeeded without panicking or failing.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on default (no-tee) path; got %d", resp.StatusCode)
 	}
 }
 

@@ -26,7 +26,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -69,10 +72,29 @@ type Proxy struct {
 	// removed — operator additions are additive, never restrictive.
 	ExtraAllowedRoutes []RouteSpec
 
+	// TeeBodyDir, when non-empty, enables the FAIL-path body capture for the
+	// CACHE-01 spike (Phase 20 D-02). Each forwarded /v1/messages request body
+	// is written to a sequentially-numbered file (req-1.json, req-2.json, …)
+	// inside TeeBodyDir so the two-pod request bodies can be diffed for prefix
+	// divergence. Default empty = disabled (no behavior change to normal runs).
+	//
+	// Security invariants enforced by the tee:
+	//   - Only the outbound request BODY is written; the real ANTHROPIC_API_KEY
+	//     is a header injected by the Director and does not appear in the body.
+	//   - ANTHROPIC_API_KEY and x-api-key headers are never captured.
+	//   - Each tee file is capped at teeBodMaxSize bytes.
+	//   - The caller (the spike) must create TeeBodyDir with 0700 permissions
+	//     and clean it up after the spike exits.
+	TeeBodyDir string
+
 	// billingHalted is set to 1 by ModifyResponse on the first detected
 	// credit-exhaustion 400 (D-04). Subsequent requests short-circuit before
 	// reaching the upstream. Uses atomic.Bool for safe concurrent access.
 	billingHalted atomic.Bool
+
+	// teeMu guards teeSeq for atomic-increment-safe sequential numbering.
+	teeMu  sync.Mutex
+	teeSeq int
 }
 
 // isCreditExhaustion returns true if the upstream HTTP response body contains
@@ -128,6 +150,35 @@ func (p *Proxy) isAllowedRoute(method, path string) bool {
 		}
 	}
 	return false
+}
+
+// teeBodyMaxSize caps the number of request body bytes written to each tee
+// file. Requests larger than this limit are truncated at the cap — the prefix
+// is sufficient for diffing the per-pod system prompt divergence.
+const teeBodyMaxSize = 1 << 20 // 1 MiB
+
+// teeBody writes a copy of body to a sequentially-numbered file under
+// p.TeeBodyDir (e.g. req-1.json, req-2.json). Called only when TeeBodyDir is
+// non-empty. Write errors are logged but do not abort the request — the tee is
+// diagnostic; the upstream path must not be disrupted by a tee failure.
+//
+// Security: body is the raw request body forwarded to the upstream; it does NOT
+// contain the real ANTHROPIC_API_KEY (that is a header injected by the Director
+// after the body is read). Signing tokens in the Authorization / x-api-key
+// request headers are likewise not captured here.
+func (p *Proxy) teeBody(body []byte) {
+	if len(body) > teeBodyMaxSize {
+		body = body[:teeBodyMaxSize]
+	}
+	p.teeMu.Lock()
+	p.teeSeq++
+	seq := p.teeSeq
+	p.teeMu.Unlock()
+
+	name := filepath.Join(p.TeeBodyDir, fmt.Sprintf("req-%d.json", seq))
+	if err := os.WriteFile(name, body, 0600); err != nil {
+		log.Printf("credproxy: tee-body-dir: failed to write %s: %v", name, err)
+	}
 }
 
 // Handler returns an http.Handler that validates incoming bearer tokens and
@@ -206,6 +257,24 @@ func (p *Proxy) Handler() (http.Handler, error) {
 		if !p.isAllowedRoute(r.Method, r.URL.Path) {
 			http.Error(w, "forbidden: route not allowed", http.StatusForbidden)
 			return
+		}
+
+		// CACHE-01 FAIL-path body tee (Phase 20 D-02). When TeeBodyDir is set,
+		// snapshot the outbound request body before forwarding so the two-pod
+		// prefix divergence can be diffed. The body is read, teed, then restored
+		// on r.Body so the reverse-proxy Director can forward it unmodified.
+		// This branch only runs for /v1/messages (the spike target route).
+		if p.TeeBodyDir != "" && r.URL.Path == "/v1/messages" && r.Body != nil {
+			raw, readErr := io.ReadAll(io.LimitReader(r.Body, teeBodyMaxSize+1))
+			_ = r.Body.Close()
+			if readErr == nil {
+				p.teeBody(raw)
+			} else {
+				log.Printf("credproxy: tee-body-dir: failed to read request body: %v", readErr)
+			}
+			// Restore body so the reverse-proxy can forward it normally.
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			r.ContentLength = int64(len(raw))
 		}
 
 		// Phase 13 D-04: fail-fast latch. After the first credit-exhaustion 400,
