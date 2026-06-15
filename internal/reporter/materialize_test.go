@@ -457,3 +457,179 @@ func mustJSON(t *testing.T, v any) []byte {
 	}
 	return b
 }
+
+// ---------- SharedContext stamp tests (Phase 20 CACHE-02/D-04/D-05) ----------
+
+// TestMaterializeChildCRDsSharedContextIdentity verifies that MaterializeChildCRDs
+// stamps ChildCRDSpec.SharedContext byte-identically onto every child's
+// Spec.SharedContext across all four supported kinds (Milestone, Phase, Plan, Task).
+// D-03/D-05: one parent-curated blob → N identical child specs.
+func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
+	c := fakeClientForTest(t)
+	scheme := runtime.NewScheme()
+	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	parent := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("proj-uid-sc-identity"),
+			Name:      "project-sc-identity",
+			Namespace: "default",
+		},
+	}
+
+	blob := "Parent goal: build the API layer.\nLoad-bearing constraints: use REST.\nSiblings: [01 auth, 02 api, 03 db]"
+
+	// Build children across all four kinds, each carrying the same blob.
+	msSpec := tideprojectv1alpha1.MilestoneSpec{}
+	rawMS, _ := json.Marshal(msSpec)
+
+	phSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "project-sc-identity"}
+	rawPh, _ := json.Marshal(phSpec)
+
+	plSpec := tideprojectv1alpha1.PlanSpec{PhaseRef: "project-sc-identity"}
+	rawPl, _ := json.Marshal(plSpec)
+
+	tkSpec := tideprojectv1alpha1.TaskSpec{PlanRef: "project-sc-identity", FilesTouched: []string{"main.go"}}
+	rawTk, _ := json.Marshal(tkSpec)
+
+	children := []pkgdispatch.ChildCRDSpec{
+		{Kind: "Milestone", Name: "sc-ms-a", Spec: runtime.RawExtension{Raw: rawMS}, SharedContext: blob},
+		{Kind: "Phase", Name: "sc-ph-a", Spec: runtime.RawExtension{Raw: rawPh}, SharedContext: blob},
+		{Kind: "Plan", Name: "sc-pl-a", Spec: runtime.RawExtension{Raw: rawPl}, SharedContext: blob},
+		{Kind: "Task", Name: "sc-tk-a", Spec: runtime.RawExtension{Raw: rawTk}, SourcePath: "children/task-01.json", SharedContext: blob},
+	}
+
+	if err := MaterializeChildCRDs(context.Background(), c, scheme, parent, children); err != nil {
+		t.Fatalf("MaterializeChildCRDs: %v", err)
+	}
+
+	// Verify every child got the blob stamped byte-identically.
+	var gotMS tideprojectv1alpha1.Milestone
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ms-a"}, &gotMS); err != nil {
+		t.Fatalf("Get Milestone: %v", err)
+	}
+	if gotMS.Spec.SharedContext != blob {
+		t.Errorf("Milestone.Spec.SharedContext = %q, want %q", gotMS.Spec.SharedContext, blob)
+	}
+
+	var gotPh tideprojectv1alpha1.Phase
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ph-a"}, &gotPh); err != nil {
+		t.Fatalf("Get Phase: %v", err)
+	}
+	if gotPh.Spec.SharedContext != blob {
+		t.Errorf("Phase.Spec.SharedContext = %q, want %q", gotPh.Spec.SharedContext, blob)
+	}
+
+	var gotPl tideprojectv1alpha1.Plan
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-pl-a"}, &gotPl); err != nil {
+		t.Fatalf("Get Plan: %v", err)
+	}
+	if gotPl.Spec.SharedContext != blob {
+		t.Errorf("Plan.Spec.SharedContext = %q, want %q", gotPl.Spec.SharedContext, blob)
+	}
+
+	var gotTk tideprojectv1alpha1.Task
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-tk-a"}, &gotTk); err != nil {
+		t.Fatalf("Get Task: %v", err)
+	}
+	if gotTk.Spec.SharedContext != blob {
+		t.Errorf("Task.Spec.SharedContext = %q, want %q", gotTk.Spec.SharedContext, blob)
+	}
+}
+
+// TestMaterializeChildCRDsSharedContextSizeCap verifies the etcd DoS guard (T-20-03-01):
+// a ChildCRDSpec.SharedContext exceeding maxSharedContextBytes is rejected with an
+// error before any Create is attempted — fail-closed behavior.
+func TestMaterializeChildCRDsSharedContextSizeCap(t *testing.T) {
+	c := fakeClientForTest(t)
+	scheme := runtime.NewScheme()
+	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	parent := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("proj-uid-sc-cap"),
+			Name:      "project-sc-cap",
+			Namespace: "default",
+		},
+	}
+
+	// Construct a blob that exceeds the cap.
+	oversized := make([]byte, maxSharedContextBytes+1)
+	for i := range oversized {
+		oversized[i] = 'x'
+	}
+
+	msSpec := tideprojectv1alpha1.MilestoneSpec{}
+	rawMS, _ := json.Marshal(msSpec)
+
+	children := []pkgdispatch.ChildCRDSpec{
+		{Kind: "Milestone", Name: "sc-ms-oversized", Spec: runtime.RawExtension{Raw: rawMS}, SharedContext: string(oversized)},
+	}
+
+	err := MaterializeChildCRDs(context.Background(), c, scheme, parent, children)
+	if err == nil {
+		t.Fatal("MaterializeChildCRDs accepted oversized SharedContext; expected error")
+	}
+	if !strings.Contains(err.Error(), "SharedContext") && !strings.Contains(err.Error(), "size") && !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error %q should mention SharedContext size/exceeds cap", err.Error())
+	}
+
+	// Verify the Milestone was NOT created (fail-closed).
+	var ms tideprojectv1alpha1.Milestone
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ms-oversized"}, &ms); err == nil {
+		t.Error("Milestone was created despite oversized SharedContext (fail-closed violated)")
+	}
+}
+
+// TestMaterializeChildCRDsTaskPromptPathNoRegression verifies that the existing
+// Task SourcePath → PromptPath stamp still works alongside the new SharedContext stamp.
+func TestMaterializeChildCRDsTaskPromptPathNoRegression(t *testing.T) {
+	c := fakeClientForTest(t)
+	scheme := runtime.NewScheme()
+	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("AddToScheme: %v", err)
+	}
+
+	plan := &tideprojectv1alpha1.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("plan-uid-sc-nreg"),
+			Name:      "parent-plan-sc-nreg",
+			Namespace: "default",
+		},
+	}
+
+	taskSpec := tideprojectv1alpha1.TaskSpec{
+		PlanRef:             "parent-plan-sc-nreg",
+		FilesTouched:        []string{"main.go"},
+		DeclaredOutputPaths: []string{"main.go"},
+	}
+	rawSpec, _ := json.Marshal(taskSpec)
+
+	const wantPath = "envelopes/plan-uid-nreg/children/task-01.json"
+	const wantCtx = "wave-scoped context blob"
+
+	children := []pkgdispatch.ChildCRDSpec{
+		{Kind: "Task", Name: "task-nreg-01", Spec: runtime.RawExtension{Raw: rawSpec}, SourcePath: wantPath, SharedContext: wantCtx},
+	}
+
+	if err := MaterializeChildCRDs(context.Background(), c, scheme, plan, children); err != nil {
+		t.Fatalf("MaterializeChildCRDs: %v", err)
+	}
+
+	var got tideprojectv1alpha1.Task
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "task-nreg-01"}, &got); err != nil {
+		t.Fatalf("Get task: %v", err)
+	}
+	// PromptPath stamped from SourcePath (existing behavior, no regression).
+	if got.Spec.PromptPath != wantPath {
+		t.Errorf("Task.Spec.PromptPath = %q, want %q (no regression)", got.Spec.PromptPath, wantPath)
+	}
+	// SharedContext stamped from ChildCRDSpec.SharedContext (new Phase 20 behavior).
+	if got.Spec.SharedContext != wantCtx {
+		t.Errorf("Task.Spec.SharedContext = %q, want %q", got.Spec.SharedContext, wantCtx)
+	}
+}
