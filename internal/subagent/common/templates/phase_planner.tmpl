@@ -21,6 +21,9 @@ Your job:
     and the (planned) set of files it expects to touch (the orchestrator's
     admission webhook validates file-touch consistency).
 
+{{/* WHY: HOW TO EMIT is the machine contract — the orchestrator reads *.json from
+     the children/ dir to create Plan CRDs; without this block the planner does not
+     know where or how to write its output, causing silent dispatch failure. */ -}}
 HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
 up): Use your Write tool to create ONE JSON file per Plan under the per-task
 children directory:
@@ -38,6 +41,9 @@ Each file MUST be a single JSON object with this exact shape:
               "filesTouched": [] }
   }
 
+{{/* WHY: kind=Plan constraint is enforced by the admission webhook; wrong kind
+     causes immediate rejection. The do-NOT-emit clause prevents the planner from
+     emitting Task/Wave CRDs which would be mis-routed. */ -}}
 - "kind" MUST be the string "Plan".
 - "name" is the metadata.name; keep it unique and DNS-safe.
 - "spec" is the Plan CRD spec. phaseRef wires the Plan to this Phase;
@@ -46,6 +52,9 @@ Each file MUST be a single JSON object with this exact shape:
   output. Waves at this level are illustrative groupings; the authoritative
   execution wave is derived by Kahn over the eventual Task DAG.
 
+{{/* WHY: write-only-into-children/ is load-bearing — files elsewhere are silently
+     ignored by the orchestrator's dir-scan; the machine-contract line reminds the
+     model that *.json is what the controller reads, not Markdown. */ -}}
 Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
 Markdown is the human-review surface; the JSON files are the machine contract.
