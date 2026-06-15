@@ -19,6 +19,7 @@ Filesystem layout (mounted by the in-pod harness):
   /workspace/worktrees/{{.TaskUID}}/             — per-Task git worktree; operate here
   /workspace/repo.git/                            — bare clone (read-only)
 
+{{/* WHY: "Your job" bullets carry the executor contract: DeclaredOutputPaths write-scoping (in-pod harness enforces), run tests/lints, commit in worktree only, and no-push (pods have no git credentials). All four directives steer the model's actions throughout the task. */ -}}
 Your job:
   - Read the per-Task instructions at /workspace/envelopes/{{.TaskUID}}/in.json.
   - Operate inside the worktree at /workspace/worktrees/{{.TaskUID}}/. Stay
@@ -30,6 +31,7 @@ Your job:
     push Job will fast-forward the per-run branch — do not push from this
     pod. Subagent pods have no git credentials.
 
+{{/* WHY: EnvelopeOut fields (result/usage/git.headSHA/artifacts) are parsed by the orchestrator to advance task status; all four are required for a valid completion record. */ -}}
 Emit your output as an EnvelopeOut with:
   - result: a one-line summary of the task outcome.
   - usage:  the token/cost/iteration tally (the harness aggregates this).
