@@ -198,6 +198,84 @@ func TestNoMapInterpolation(t *testing.T) {
 	}
 }
 
+// sharedContextFixture is a deterministic wave-scoped SharedContext blob
+// representative of D-04 content: parent goal + load-bearing constraints +
+// one-line sibling-set overview. Fixed to ensure golden determinism.
+// This blob exercises CACHE-03's ordering assertion: it must appear BEFORE
+// TaskUID: in every planner template's rendered output.
+const sharedContextFixture = `Wave context (curated by parent planner):
+Goal: Ship the v1.0.2 SharedContext injection so stable-prefix bytes grow toward the provider cache floor.
+Constraints: CLI-based dispatch only (claude -p --bare); no direct-SDK cache_control; ratchets must not regress.
+This wave: 5 plans — [20-01 envelope fields, 20-02 template injection, 20-03 controller stamp, 20-04 spike harness, 20-05 eval gate].`
+
+// goldenAssertWithSharedContext loads the (role, level) template, renders it
+// with a non-empty SharedContext set on the envelope, and calls goldie.Assert
+// to compare against the committed golden file. The test also asserts that the
+// SharedContext blob appears BEFORE the "TaskUID:" line in the rendered output,
+// proving CACHE-03's stable-prefix ordering (blob is in the cacheable prefix,
+// not after the volatile suffix).
+func goldenAssertWithSharedContext(t *testing.T, role, level, name string) {
+	t.Helper()
+	tmpl, err := common.LoadPromptTemplate(role, level)
+	if err != nil {
+		t.Fatalf("load template (%s, %s): %v", role, level, err)
+	}
+	e := envelopeFor(role, level)
+	e.SharedContext = sharedContextFixture
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, e); err != nil {
+		t.Fatalf("render template (%s, %s): %v", role, level, err)
+	}
+	rendered := buf.String()
+
+	// CACHE-03 ordering assertion: SharedContext blob must appear before
+	// "TaskUID:" in the rendered output (stable prefix precedes volatile suffix).
+	scIdx := strings.Index(rendered, sharedContextFixture)
+	uidIdx := strings.Index(rendered, "TaskUID:")
+	if scIdx < 0 {
+		t.Errorf("template %s: SharedContext blob not found in rendered output", name)
+	}
+	if uidIdx < 0 {
+		t.Errorf("template %s: 'TaskUID:' not found in rendered output", name)
+	}
+	if scIdx >= 0 && uidIdx >= 0 && scIdx >= uidIdx {
+		t.Errorf("template %s: SharedContext blob (offset %d) does not precede TaskUID: (offset %d) — "+
+			"CACHE-03 ordering violated: blob must be in the stable prefix, before the volatile suffix",
+			name, scIdx, uidIdx)
+	}
+
+	g := goldie.New(t, goldie.WithFixtureDir("testdata/goldie"))
+	g.Assert(t, name, buf.Bytes())
+}
+
+// TestGoldenRender_MilestonePlannerWithSharedContext asserts that the
+// milestone_planner template renders the non-empty SharedContext blob in the
+// stable prefix (before TaskUID:), proving CACHE-03 ordering.
+// Golden file: testdata/goldie/milestone_planner_with_shared_context.golden
+// This golden + ratchet are deliberately re-baselined in Plan 20-02; the
+// empty-fixture golden/ratchet (milestone=1862) is unchanged.
+func TestGoldenRender_MilestonePlannerWithSharedContext(t *testing.T) {
+	goldenAssertWithSharedContext(t, "planner", "milestone", "milestone_planner_with_shared_context")
+}
+
+// TestGoldenRender_ProjectPlannerWithSharedContext asserts CACHE-03 ordering
+// for the project_planner template with a non-empty SharedContext.
+func TestGoldenRender_ProjectPlannerWithSharedContext(t *testing.T) {
+	goldenAssertWithSharedContext(t, "planner", "project", "project_planner_with_shared_context")
+}
+
+// TestGoldenRender_PhasePlannerWithSharedContext asserts CACHE-03 ordering
+// for the phase_planner template with a non-empty SharedContext.
+func TestGoldenRender_PhasePlannerWithSharedContext(t *testing.T) {
+	goldenAssertWithSharedContext(t, "planner", "phase", "phase_planner_with_shared_context")
+}
+
+// TestGoldenRender_PlanPlannerWithSharedContext asserts CACHE-03 ordering
+// for the plan_planner template with a non-empty SharedContext.
+func TestGoldenRender_PlanPlannerWithSharedContext(t *testing.T) {
+	goldenAssertWithSharedContext(t, "planner", "plan", "plan_planner_with_shared_context")
+}
+
 // ratchetAssert renders the (role, level) template with its matching envelope
 // and compares len(rendered) against the integer in testdata/ratchets/<name>.txt.
 // A missing or malformed ratchet file is a fatal error. This is a STRICT
