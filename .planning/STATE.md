@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-15)
 Phase: 18 of 21 (Eval Harness)
 Plan: — (not started)
 Status: Ready to plan
-Last activity: 2026-06-15 — v1.0.2 roadmap created (Phases 18–21, 19 requirements mapped)
+Last activity: 2026-06-15 — Completed quick task 260615-gos: polyglot subagent-runtime (LangGraph strategy) backlog milestone
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -66,6 +66,12 @@ None.
 ### Blockers/Concerns
 
 - Phase 20 contingency: cross-pod cache scoping under `claude -p --bare` is unverified. CACHE-01 spike gates CACHE-02/03. If the CLI embeds a per-pod working-directory path in its system prompt, shared-prefix caching never fires and Phase 20 reframes to token-minimization-only. Surface outcome as an explicit PROJECT.md decision regardless.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260615-gos | Explore CLI-as-strategy + second SDK/LangGraph strategy — semi-scoped backlog milestone | 2026-06-15 | bb794d5 | [260615-gos-explore-abstracting-cli-to-be-a-single-s](./quick/260615-gos-explore-abstracting-cli-to-be-a-single-s/) |
 
 ## Deferred Items
 

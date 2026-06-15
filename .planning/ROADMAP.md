@@ -5,6 +5,8 @@
 - ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11)
 - ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13)
 - 🚧 **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (in progress)
+- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; phases TBD)
+- 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
 ## Phases
 
@@ -92,6 +94,22 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
   3. The read-only dashboard's TelemetryView includes a cache-efficiency panel displaying hit ratio, cache-creation tokens, and realized savings — reading the existing counters with no backend dispatch-path changes.
 **Plans**: TBD
 **UI hint**: yes
+
+<details>
+<summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
+
+Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Sequenced after v1.0.2 "Ebb Tide."
+
+</details>
+
+<details>
+<summary>📋 v1.x — Polyglot Subagent Runtimes: LangGraph Strategy (Backlog)</summary>
+
+Architecture locked; task breakdown deferred. The `claude` CLI subagent becomes one named strategy behind the existing `pkg/dispatch.Subagent` image contract; a second Python/LangGraph container image implements the same envelope contract for full agent-loop parity. Sequenced after v1.0.2 "Ebb Tide" and after the OpenAI-backend milestone.
+
+See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-subagent-MILESTONE.md) for the full framing: parity inventory, contract-conformance table, provider-firewall gap analysis, alternatives considered, and open questions.
+
+</details>
 
 ## Progress
 
