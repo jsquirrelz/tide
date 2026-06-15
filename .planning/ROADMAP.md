@@ -89,9 +89,9 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 19-01-PLAN.md — Annotate/reorder/trim milestone_planner + project_planner (golden+ratchet)
-- [ ] 19-02-PLAN.md — Annotate/reorder/trim phase_planner + plan_planner (FILE-TOUCH/JSON-escape preserved)
-- [ ] 19-03-PLAN.md — Annotate/reorder/trim task_executor (consolidate 6 UID occurrences to volatile suffix)
+- [x] 19-01-PLAN.md — Annotate/reorder/trim milestone_planner + project_planner (golden+ratchet)
+- [x] 19-02-PLAN.md — Annotate/reorder/trim phase_planner + plan_planner (FILE-TOUCH/JSON-escape preserved)
+- [x] 19-03-PLAN.md — Annotate/reorder/trim task_executor (consolidate 6 UID occurrences to volatile suffix)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -164,6 +164,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
-| 19. Template Reorder + Token Minimization | v1.0.2 | 0/TBD | Not started | - |
+| 19. Template Reorder + Token Minimization | v1.0.2 | 3/4 | In Progress|  |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
