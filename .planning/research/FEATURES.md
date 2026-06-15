@@ -1,364 +1,414 @@
-# Feature Research — TIDE v1
+# Feature Research — TIDE v1.0.2 Ebb Tide: Token & Cost Optimization
 
-**Domain:** Kubernetes-native orchestrator for hierarchical agentic coding work (DAG-driven multi-agent code generation)
-**Researched:** 2026-05-12
-**Confidence:** HIGH for K8s/workflow features and AI orchestration norms (Context7-/official-docs-verified); MEDIUM for some 2026 trend claims (vendor-blog-sourced); HIGH for what is in/out of v1 scope (cross-referenced against `.planning/PROJECT.md` and `README.md`).
+**Domain:** Cost optimization features for a CLI-based agentic LLM orchestrator (TIDE)
+**Researched:** 2026-06-15
+**Confidence:** HIGH for provider caching mechanics (official docs verified); HIGH for prompt
+structuring techniques (multiple cross-verified sources); MEDIUM for eval harness patterns
+(WebSearch + practical synthesis, no single authoritative spec); HIGH for TIDE-specific
+dependency mapping (direct inspection of codebase).
 
 ---
 
-## Method note
+## Research Context
 
-The reference frames for this survey are three populations of comparable systems:
+TIDE dispatches LLM subagents by shelling out to the Claude Code CLI (`claude -p --bare`,
+prompt via stdin). The CLI manages its own prompt caching — TIDE does NOT set
+`cache_control` directly. The levers available to TIDE are:
 
-1. **K8s-native workflow engines** — Argo Workflows, Tekton Pipelines, Kueue. These set baseline expectations for *how* a K8s orchestrator behaves (CRDs, suspend/resume, retries, dashboards).
-2. **AI agent runtimes on K8s** — kagent (CNCF Sandbox), Dapr Agents v1.0, LangGraph deployments, sigs.k8s.io/agent-sandbox. These set baseline expectations for *what* a multi-agent system on K8s looks like (declarative agent CRDs, MCP/A2A protocols, OTel/OpenInference observability).
-3. **Agentic coding orchestrators** — Composio Agent Orchestrator, Claude Code Auto Mode, GitHub Copilot agent assignment, Aider, OpenCode, Cursor agent mode. These set baseline expectations for *coding-specific* features (git worktrees, PR-based review, CI fix loops, per-task agent isolation).
+1. **Prompt structuring** — ordering template content stable-first so Claude Code's
+   automatic prefix caching (and OpenAI/Codex's automatic prefix caching) maximizes cache
+   hits across wave-sibling dispatches.
+2. **Token minimization** — trimming static boilerplate, curating interpolated context,
+   deduplicating shared context across wave-sibling dispatches.
+3. **Quality + cost eval harness** — a reusable harness to regression-gate prompt/template
+   changes and report token/cost deltas (including cache-read vs cache-write accounting).
+4. **Observability surface** — surfacing already-emitted cache + token metrics meaningfully
+   on the dashboard.
 
-The local reference TIDE is generalizing is `~/.claude/get-shit-done/` (56 Markdown workflows, single-host, GSD subagent types `gsd-executor / gsd-planner / gsd-verifier / gsd-debugger / gsd-codebase-mapper / gsd-phase-researcher / gsd-plan-checker`). TIDE reimplements GSD's *paradigm* (five-level hierarchy + two-DAG + Kahn-layered waves) in a portable Go controller — it does not vendor GSD's Markdown.
+---
 
-Categorization rules used below:
-- **Table stakes** — present in two or more comparable systems *and* breaks the paradigm or the user contract if absent.
-- **Differentiator** — present in zero or one comparable system *or* uniquely enabled by the two-DAG + 5-level + Kahn-layered shape.
-- **Anti-feature** — explicitly out-of-scope per `PROJECT.md` or `README.md`, with the rejection reason intact.
-- **Deferred** — table-stakes-shaped but the spec/PROJECT.md punts to post-v1; cited with the rationale.
+## Provider Caching Mechanics Reference
+
+Understanding these mechanics directly shapes which prompt-structuring techniques matter
+and which are irrelevant from TIDE's CLI-based vantage point.
+
+### Anthropic (Claude Code CLI path — the live v1 path)
+
+**How Claude Code handles caching automatically (HIGH confidence — official docs):**
+
+Claude Code adds `cache_control` breakpoints automatically, structured in three layers:
+
+| Layer | Content | Invalidated when |
+|-------|---------|-----------------|
+| System prompt | Core instructions, tool definitions, output style | Tool set changes, Claude Code upgrade |
+| Project context | CLAUDE.md, auto-memory, unscoped rules | Session start, after `/clear` or `/compact` |
+| Conversation | Messages, responses, tool results | Every turn (append-only) |
+
+When TIDE dispatches `claude -p --bare`, each invocation is a fresh one-turn session:
+- Layer 1 (system + tool definitions) is cached after the first dispatch.
+- Layer 2 (project context — the CLAUDE.md in the worktree) is cached after the first
+  dispatch for that worktree.
+- Layer 3 (the conversation) is always the volatile `{{.Prompt}}` suffix — this is the
+  only part that changes per-task.
+
+Key cache mechanics:
+- **Minimum 1,024 tokens** before caching activates (Sonnet/Opus); 4,096 for Haiku 4.5
+  and Opus 4.5/4.6. TIDE's current templates (project_planner + task_executor) are well
+  below 1,024 tokens each — caching does NOT currently activate for TIDE's own prompts
+  without growth.
+- **TTL:** 5 minutes on API key (default); 1 hour on Claude subscription
+  (`ENABLE_PROMPT_CACHING_1H=1`). Wave siblings dispatched in parallel within a 5-minute
+  window share the cache.
+- **Cache prefix ordering is fixed:** tools → system → project context → conversation.
+  Any change earlier in the chain busts everything after it.
+- **Subagent sessions (which is what TIDE creates) use 5-minute TTL** even on a
+  subscription. The Claude Code doc explicitly states: "Subagents use the five-minute TTL
+  even on a subscription."
+- **Cache is scoped per working directory.** TIDE's per-task worktrees each have a
+  distinct path — the system prompt embeds the working directory. Wave siblings each in a
+  different worktree do NOT share the cache prefix, even if their templates are identical.
+
+**Implication for TIDE:** The system prompt + tool definitions layer is the stable
+prefix. The `{{.Prompt}}` is the volatile suffix. The structural gain from putting
+stable boilerplate first is already correct in the templates — but the templates are
+currently too short to cross the 1,024-token caching threshold. The path to caching is:
+grow the stable prefix to ≥1,024 tokens with shared context (wave/plan context as a
+reusable prefix), then keep `{{.Prompt}}` as the last volatile block.
+
+### OpenAI / Codex (next milestone — provider-agnostic design now)
+
+**Mechanics (HIGH confidence — official docs):**
+- **Automatic, no opt-in.** No `cache_control` field; the API detects prefix matches
+  automatically on ≥1,024-token prompts (128-token increment granularity).
+- **TTL:** 5–10 minutes inactivity (up to 1 hour maximum; 24 hours on gpt-5.x).
+- **Prompt cache key** parameter available to improve routing stickiness for parallel
+  dispatches — wave-sibling calls sharing the same prefix should use the same key.
+- **What breaks cache:** any character difference in the prefix (including JSON key order,
+  whitespace, timestamps, UUIDs).
+- **Stable prefix ordering:** identical to Anthropic — role/persona first, instructions,
+  tool definitions, conversation history, current query last.
+
+**Implication for TIDE:** The same template-structuring discipline that maximizes Claude
+Code cache hits also maximizes OpenAI prefix cache hits. Provider-agnostic by design is
+achievable by following the stable-prefix-first rule universally.
+
+### Other providers (Bedrock, Vertex, LLM gateways)
+
+- **Bedrock:** Anthropic-style explicit cache_control required; support varies by model
+  and region; minimum prefix length requirements differ per model.
+- **Vertex AI:** Separate context caching API with explicit TTL; different from Anthropic's
+  breakpoint model.
+- **LLM gateways (LiteLLM, OpenRouter):** Forwarding varies; cache behavior depends on
+  the target provider. TIDE should not assume gateway-level caching works.
+
+For v1.0.2, model these as "design for Anthropic + OpenAI; verify gateway behavior
+per-provider at integration time."
 
 ---
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These — v1 Must Have)
+### Table Stakes (Users Expect These — v1.0.2 Must Have)
 
-| # | Feature | Why Expected | Complexity | Notes |
-|---|---------|--------------|------------|-------|
-| TS-1 | **Apply-a-Project lifecycle**: `kubectl apply -f project.yaml` (or `tide apply`) submits a run; controller reconciles to terminal state | Standard K8s operator UX. Argo Workflows, Tekton, kagent, Dapr all work this way. Without it, TIDE isn't K8s-native — it's a script in a Pod. | MEDIUM | `Project` CRD already in PROJECT.md Active set. Reconciler walks Project → Milestone → Phase → Plan → Task CRDs. |
-| TS-2 | **Watch / status**: live status via `kubectl get tideruns -w` and `tide watch` | K8s convention. Argo `argo watch`, Tekton `tkn pr logs -f`, kagent watches A2A streams. Without it, users can't tell if work is progressing. | LOW | CRD `.status` blocks updated per reconcile; OK to start with `kubectl`-level UX before dashboard exists. |
-| TS-3 | **Cancel / terminate**: `tide cancel` or `kubectl delete tiderun` stops in-flight subagents | Long-running agentic work is expensive (LLM tokens, compute). Argo Workflows supports `argo terminate`. Without cancel, users can't stop a runaway run mid-wave. | MEDIUM | Job deletion + propagation policy. Finalizer to ensure subagent Pods are reaped. Spec §"Failure handling at wave boundaries" is the post-cancel resumption contract. |
-| TS-4 | **Resume after restart**: orchestrator restart re-derives waves from artifacts + completed-task set in O(V+E) | Spec §"Failure handling at wave boundaries" requires this. CRD-status-only persistence (PROJECT.md) makes it the only correctness story. Temporal, Argo, LangGraph all support resume; without it, an orchestrator restart wastes everything in flight. | HIGH | This is the load-bearing correctness property. Indegree map + completed-task set is the persisted state. Verify on every controller restart in tests. |
-| TS-5 | **Retry on transient failure**: per-task retry policy (count + backoff) | Argo `retryStrategy`, Tekton retries, Composio AO `retries: 2`. LLM tool calls + network calls fail transiently; without retries, a 95%-reliable subagent run aborts ~5% of waves. | LOW | Configurable on the Task CRD; default to `retries: 2` with exponential backoff (matches Composio AO default). Distinguish transient (timeout, rate-limit, exit-code-1-on-flaky-test) from permanent (cycle, plan-validation-error) failures. |
-| TS-6 | **Cycle detection at plan-validation time**, reject + surface | Spec §"Why this specific algorithm" — cycles are bugs, not runtime conditions. Falls out of Kahn's termination check for free. | LOW | Already part of the algorithm; just needs a clean error surface on the CRD `.status.conditions`. |
-| TS-7 | **Wave-derived execution schedule**: waves are output of Kahn-layered, not input | Spec §"Wave computation". CLAUDE.md: "Waves are derived, not declared." Re-derive on every plan edit (O(V+E), no caching). | LOW | Algorithm itself is textbook; the discipline is *not* accepting a wave list at the API boundary. CRD validation rejects any attempt to declare a `wave` field on a Task. |
-| TS-8 | **Pod-per-task isolation**: each Task dispatches a K8s Job whose Pod runs one subagent invocation | PROJECT.md decision. Matches how Claude Code is typically run; matches sigs.k8s.io/agent-sandbox model. Filesystem isolation per task means failure of one task can't corrupt sibling tasks in the same wave. | MEDIUM | The Subagent contract is `Job + typed result envelope on PVC + exit code`. Shared PVC for artifacts within a run; ephemeral container filesystem otherwise. |
-| TS-9 | **Capacity caps**: separate `plannerConcurrency` and `executorConcurrency` budgets on Project (or controller-wide defaults) | Spec §"Two parallelism budgets" + CLAUDE.md. Kueue exists in the ecosystem precisely because raw `Job.parallelism` doesn't compose with multi-tenant quota concerns. v1 doesn't need Kueue integration but does need per-pool caps so a runaway wave can't OOM the cluster. | LOW | Two integer fields on the Project CRD; the executor honors them by dispatching `min(|W_k|, capacity)` per spec §3. No Kueue dependency v1. |
-| TS-10 | **Per-level human gates with policy in the Project CRD**: approve every milestone but auto-pass plans (or any other combination) | Spec §"Why this is advantageous" point 7. CLAUDE.md: "Human gates are configurable per level." Argo Workflows supports `suspend` templates; Tekton has manual-approval-gate; Composio AO has `escalateAfter` timers. Without per-level gates, TIDE's paradigm value proposition collapses to "an Argo Workflow." | MEDIUM | `gates: { milestone: required, phase: auto, plan: auto, task: auto }` on the Project. Implementation: controller pauses reconcile + writes a `Pending Approval` condition; `tide approve` (or `kubectl annotate`) clears it. |
-| TS-11 | **Artifact persistence at level boundaries**: `MILESTONE.md`, phase brief, `PLAN.md`, task diff written to shared PVC during run; pushed to target git remote at each level boundary | Spec §"Artifacts as source of truth." Without artifact persistence, the resumability story (TS-4) is impossible — there's nothing to resume *from*. Argo artifacts go to S3/GCS; TIDE's choice is PVC + git, which fits the reviewable-artifact-cadence model better. | MEDIUM | PVC for in-run; git push at level boundary. Single cred surface (git remote). |
-| TS-12 | **Git remote integration**: clone target repo on Project apply, push at level boundaries, run on a per-Project branch | Composio AO uses git worktrees per agent; Argo Workflows supports git artifact inputs; every agentic coding tool integrates with git. Without git, TIDE produces orphaned PVC files. | MEDIUM | Use `go-git` or shelled-out `git`; the abstraction must be host-agnostic (GitHub, GitLab, Gitea, Bitbucket — see TS-22). Auth via K8s Secret (TS-19). |
-| TS-13 | **Per-task structured logs streamed via `kubectl logs`** | Argo, Tekton, kagent — all stream Pod logs. Anthropic 2026 Agentic Coding Trends Report notes long-running agents (hours) make live log streams necessary for trust. Without it, users can't debug a stalled subagent. | LOW | Standard K8s; orchestrator + subagents emit structured JSON to stdout. Already in PROJECT.md. |
-| TS-14 | **Structured JSON logs from orchestrator + Prometheus metrics**: waves dispatched, tasks completed, dispatch latency, failure rate | PROJECT.md Active. Argo and Tekton export equivalent metrics. Without metrics, capacity tuning is guesswork. | LOW | Standard `controller-runtime` exposes `/metrics`. Add domain counters/histograms in reconciler. |
-| TS-15 | **OpenTelemetry tracing with OpenInference conventions** for Milestone→Phase→Plan→Task spans | PROJECT.md constraint. OpenInference is the de-facto standard for AI agent spans (Phoenix, LangSmith, Arize all consume it). Plain OTel GenAI conventions are still Experimental as of early 2026. Without OpenInference, traces require bespoke instrumentation downstream. | MEDIUM | Use `arize-ai/openinference` Go SDK if available, else hand-rolled span attributes following the spec's ten span kinds (CHAIN, LLM, TOOL, AGENT, etc.). Verify against current OpenInference spec at implementation time. |
-| TS-16 | **Strict-by-default failure profile** at wave boundaries: failed task → dependents never dispatch, non-dependents in later waves continue | Spec §"Failure handling at wave boundaries" requires this contract exactly. PROJECT.md decision. CLAUDE.md: "Keep this contract intact when implementing the executor." Without it, the "failed task fails its wave, not its plan" property in spec §"Why this is advantageous" point 5 is broken. | MEDIUM | The reconciler must distinguish "dependent-of-failed" from "non-dependent" when scheduling the next wave. Indegree map already encodes this; just need the conditional dispatch. |
-| TS-17 | **Plan validation before dispatch**: CRD admission webhook (or controller-side validation) rejects cyclic DAGs and dangling deps before any subagent is dispatched | Argo refuses to start workflows with invalid DAGs. Tekton rejects unconnected tasks. Without pre-dispatch validation, a bad plan wastes a wave's worth of subagent dispatches before failing. | MEDIUM | Pure Go validator; reuse the Kahn algorithm's cycle-detection branch. Optional CRD admission webhook for a faster failure surface. |
-| TS-18 | **CRD set: Project, Milestone, Phase, Plan, Task** with their typed status blocks | PROJECT.md Active. The five-level paradigm is the product; CRDs are how it's expressed in K8s. Collapsing any level invalidates the spec. | HIGH | Kubebuilder scaffolding + per-CRD reconciler. Per-Task CRD size stays small to respect etcd's 1.5 MiB limit (PROJECT.md constraint). |
-| TS-19 | **Credentials via K8s Secret references on Project**: LLM API keys, git push creds | PROJECT.md Active. kagent uses K8s Secrets. Plain Secrets is the lowest-friction starting point; ESO (External Secrets Operator) integration is anti-feature for v1 (see AF-9). | LOW | `spec.credentials: { llmSecretRef, gitSecretRef }`. Mount as env vars into subagent Pods via the dispatch interface. |
-| TS-20 | **Namespace-per-project tenancy** with namespace-scoped RBAC | PROJECT.md decision. Standard K8s tenancy posture; kagent/Argo behave the same way. Full multi-tenant (cross-tenant quotas) is anti-feature for v1 (AF-1). | LOW | RBAC bundled in the Helm chart (TS-23). One TIDE install per cluster; one namespace per project. |
-| TS-21 | **Pluggable Subagent interface — provider-agnostic dispatch** | PROJECT.md constraint. The OSS posture demands no vendor lock-in; the spec is model-agnostic ("Opus for milestone synthesis, Haiku for mechanical task execution"). kagent supports OpenAI/Azure/Anthropic/Vertex/Ollama; TIDE must match that ceiling structurally even if v1 ships only Claude-backed concrete impl. | MEDIUM | Define `Subagent` interface in Go: `Dispatch(ctx, spec) → (resultEnvelope, error)`. Concrete impl: Pod-spec template + Job dispatch + envelope reader on the PVC. Configurable per-level model selector. |
-| TS-22 | **Git-host-agnostic remote push** (GitHub, GitLab, Gitea minimum) | PROJECT.md constraint. The OSS posture requires no hard-coded git host. Composio AO is tracker-agnostic (GitHub + Linear); kagent doesn't bind to any single source-of-truth. | LOW | Use generic git protocol (HTTPS or SSH) via `go-git`; the URL is a `Project` field. Per-host PR-creation is anti-feature for v1 (AF-12) — push only, humans open PRs. |
-| TS-23 | **Helm chart distribution** with CRDs + controller + RBAC bundled | PROJECT.md Active. Argo, Tekton, kagent, Dapr all ship Helm charts. Without one, "deploy TIDE to your cluster" becomes a multi-step manual install. | MEDIUM | `helm install tide tide/tide` + values for `plannerConcurrency`, `executorConcurrency`, `image.tag`. CRDs in `/templates/` (not `/crds/`) so `helm upgrade` can roll them. |
-| TS-24 | **`tide` CLI** wrapping common ops: apply, watch, tail, approve, cancel, resume, inspect-wave | PROJECT.md Active. Argo has `argo`, Tekton has `tkn`, Dapr has `dapr`. Without a CLI, the only interface is raw `kubectl` + custom resources, which is hostile for new users. | MEDIUM | Cobra-based; thin wrapper over the K8s API. Mutations only via CLI/`kubectl` since dashboard is read-only (PROJECT.md + AF-3). |
-| TS-25 | **Read-only web dashboard** rendering Planning DAG + Execution DAG, wave progress, per-task status, click-through to artifacts; streams `kubectl logs` from running task Pods | PROJECT.md Active. Argo UI, Tekton Dashboard, kagent UI all exist. Anthropic 2026 Agentic Coding Trends Report: long-running agents (hours) make live visibility necessary for trust. Without it, the only view into a run is `kubectl get` polling. | HIGH | Separate Deployment; reads CRDs via the K8s API, streams logs via the API server's log endpoint. **Read-only** is the discipline: all mutations route through CLI / `kubectl` for a single auth surface (PROJECT.md, AF-3). |
-| TS-26 | **End-to-end self-hosting demo**: TIDE in a kind cluster drives its own next milestone on this repo, producing artifacts + merged commits | PROJECT.md Core Value: "TIDE-on-TIDE must work — that's the bar for 'v1 ships.'" Without it, the paradigm isn't proven and the implementation isn't proven; they're proven together or not at all. | HIGH | This is the integration test for everything. Not a unit test; the full pipeline. |
-| TS-27 | **Apache 2.0 license + docs sufficient for an external operator to install and run a project end-to-end** | PROJECT.md Active. K8s ecosystem default. Without an external user being able to install + run, "open source" is aspirational. | LOW | LICENSE file + README.md (already exists, doubles as spec) + quickstart docs. |
+| # | Feature | Why Expected | Complexity | TIDE Dependency |
+|---|---------|--------------|------------|-----------------|
+| TS-C1 | **Stable-prefix-first prompt template ordering** — system role + static boilerplate first, `{{.Prompt}}` last in all five templates | Cache hit requires exact prefix match; the volatile task prompt is the only thing that should change across wave siblings. Any static content appearing after `{{.Prompt}}` is a cache buster. Current templates already put `{{.Prompt}}` last but the stable prefix is ~200 tokens (far below the 1,024 minimum). | LOW | `internal/subagent/common/templates/*.tmpl` — modify template ordering |
+| TS-C2 | **No volatile data in the stable prefix** — strip timestamps, UUIDs, request IDs, and per-dispatch metadata from the fixed portion of templates | Even one UUID injected into the boilerplate before `{{.Prompt}}` invalidates the entire prefix. Current templates include `{{.TaskUID}}` and `{{.Provider.Vendor}}` inline in the stable boilerplate — these are per-dispatch volatile data that break the prefix. | LOW | `internal/subagent/common/templates/*.tmpl` + `pkg/dispatch/EnvelopeIn` |
+| TS-C3 | **Shared wave/plan context block as reusable stable prefix across wave-sibling dispatches** — wave siblings share the same plan-level context (phase brief, plan objective, milestone outcome); injecting this as a stable block before `{{.Prompt}}` lets siblings share a ≥1,024-token cached prefix | Wave siblings in the same plan all need the same plan context. If each subagent re-reads it cold, zero cache reuse. If it's the shared stable prefix (injected identically into all siblings), they all hit the same cache entry after the first dispatch warms it. | MEDIUM | Requires the dispatch layer to inject a `SharedContext` block from the owning Plan/Phase CRD into the template execution context |
+| TS-C4 | **Deterministic context serialization** — any structured data (task lists, dependency lists, file sets) injected into the stable prefix must be serialized in sorted, deterministic order | JSON key ordering is part of the cache key. Non-deterministic serialization (e.g. Go map iteration, unordered JSON) produces different token sequences across dispatches → cache miss every time. | LOW | `pkg/dispatch/` + template data preparation code |
+| TS-C5 | **Boilerplate audit and trim** — measure current token count per template; identify and remove redundant verbosity; target ≥1,024-token stable prefix, ≤30% overhead vs task-specific content | The TIDE-specific preamble ("TIDE (Topologically-Indexed Dependency Execution) runs hierarchical agentic coding work as a Milestone → Phase → Plan → Task → Wave DAG…") is repeated verbatim in all five templates. It counts as stable boilerplate — good for caching once padded — but should also be audited for density. Over-trimming degrades quality; under-trimming wastes tokens. The target is a stable prefix that is: (a) sufficient to hit the 1,024-token threshold, (b) semantically correct and complete for the level, (c) not padded with filler. | MEDIUM | All five templates + a token-counting utility |
+| TS-C6 | **Token budget enforcement at template render time** — check rendered token count for the stable prefix portion before dispatch; log a warning if the stable prefix falls below 1,024 tokens (cache inactive) or if the total prompt exceeds a configurable per-level ceiling | Prevents silently spending full input-token rates when the template is too short to cache. Also prevents runaway context growth from verbose `SharedContext` injection. | LOW | `pkg/dispatch/` + `internal/subagent/common/prompt_templates.go` |
+| TS-C7 | **Cache hit rate metric** — track `cache_read_input_tokens` and `cache_creation_input_tokens` from the `events.jsonl` envelope already written by the harness; compute cache hit rate = `cache_read / (cache_read + cache_creation + input)` per dispatch; expose as a Prometheus gauge | TIDE already emits `events.jsonl` with provider-emitted raw events. Cache token fields are already present in the usage data. Surfacing the hit rate as a metric closes the feedback loop — without measurement, there's no way to know if restructuring worked. | LOW | `internal/reporter/` + `events.jsonl` parsing already in place |
+| TS-C8 | **Per-level token and cost accounting in the existing metrics** — `cache_read_tokens`, `cache_write_tokens`, `input_tokens`, `output_tokens` broken out by level (project/milestone/phase/plan/task) as Prometheus labels | v1.0.1 already ships raw token + cost metrics. The gap is per-level breakout: which level is spending the most? Planner levels tend to be smaller; executor levels accumulate tool-call context. Per-level labeling makes the expensive levels visible. | LOW | Extends existing Prometheus metrics in `internal/reporter/` |
 
-### Differentiators (Where TIDE's Design Pays Off — v1 Differentiation)
+### Differentiators (Competitive Advantage — Meaningful for v1.0.2)
 
-These are the features that justify TIDE existing alongside Argo / Temporal / kagent rather than being a `Workflow` template inside one of them.
+| # | Feature | Value Proposition | Complexity | TIDE Dependency |
+|---|---------|-------------------|------------|-----------------|
+| D-C1 | **Wave-sibling prefix warm-up dispatch** — before dispatching wave N, emit a single no-content "warm-up" call (or use the first dispatch) that seeds the shared stable prefix into the provider's cache; subsequent siblings in the same wave are cache hits | Wave siblings are dispatched in parallel. With a cold cache, the first sibling to land warms it; all others race against the cache-write settling time. An explicit warm-up (or carefully sequenced first dispatch) seeds the cache before siblings arrive. For Anthropic, this could be a `max_tokens=0` probe if the CLI supports it; more practically, just ensure the first dispatch in each wave uses the identical stable prefix as all siblings. | HIGH | Requires orchestrator-level wave dispatch sequencing; the dispatcher would send one "seed" job first, then fan out siblings. Significant change to the wave dispatch loop. |
+| D-C2 | **Context curation for plan-level shared context** — select and inject only task-relevant context into `SharedContext` (phase objective + plan DAG summary + sibling task summaries) rather than dumping the full `PLAN.md`; prefer summaries over verbatim content | Full `PLAN.md` dumps into the subagent context are a common anti-pattern in multi-agent systems. Token overhead is paid on every dispatch; most tasks only need a 3–5 sentence oriented summary. Curated context = lower token spend + tighter stable prefix = better cache hit rate + less distraction for the subagent. Research shows content quality matters more than presence — LLM-generated context additions produce only marginal gains (4%) at 20% token overhead. | MEDIUM | Requires a `SharedContext` builder in the dispatcher that summarizes rather than verbatim-includes |
+| D-C3 | **Per-template token budget profiles configurable per level** — Helm values / Project CRD fields for `maxStablePrefix` and `maxTaskPrompt` per level | Milestone planners produce richer prompts than task executors. Allowing per-level token budgets prevents over-constraining executors (which need tool-call context to grow) while capping planner verbosity. | LOW | Helm values + CRD field + dispatch-time enforcement |
+| D-C4 | **Cost + quality dashboard panel** — surface cache hit rate, tokens-per-level, cost-per-run, and cost-per-task-type as a dashboard panel; compare current run vs baseline | v1.0.1 ships token + budget metrics but they're not surfaced visually. A cost panel answers "did this template change reduce cost?" at a glance. Pairs with the eval harness (D-C5) for the feedback loop. | MEDIUM | Dashboard component; reads existing Prometheus metrics |
+| D-C5 | **Quality + cost eval harness** — a reusable Go test package (`internal/eval/`) that: (a) runs a fixed set of canonical dispatch scenarios against the real CLI, (b) records output quality scores (LLM-as-judge rubric on structured JSON output), (c) records token/cost/cache metrics, (d) compares against a stored baseline, (e) fails CI if quality degrades beyond a threshold | This is the regression gate for all future prompt/template changes. Without it, every template edit is a manual quality check. With it, `make eval` catches regressions before they ship. The harness is the thing that makes "trim boilerplate" safe — you can verify quality is preserved. | HIGH | New `internal/eval/` package; depends on `events.jsonl` parsing + a golden-set fixture directory |
+| D-C6 | **LLM-as-judge rubric for agentic coding task quality** — a structured JSON rubric applied by a judge LLM (separate from the task executor) scoring: completeness (did it produce all required files?), correctness (do produced artifacts satisfy the acceptance criterion?), instruction-following (did it follow the declared-output-paths contract?), and plan coherence (for planners: does the child-CRD set make sense?) | Research consensus: boolean scoring per dimension is more reliable than 1–10 scales; require evidence before score; target ≥0.80 Spearman correlation with human expert judgment for production deployment. The four dimensions map directly to TIDE's output contract (files, acceptance criteria, envelope contract, plan shape). | MEDIUM | Requires a judge LLM call in the eval harness; judge prompt should be a separate template with its own golden set |
 
-| # | Feature | Value Proposition | Complexity | Notes |
-|---|---------|-------------------|------------|-------|
-| D-1 | **Two typed DAGs (Planning + Execution) at the API boundary, not one unified `Workflow.spec.dag`** | Argo and Tekton both model a flat DAG. The spec argues planning fans out wide (most phases plan in parallel from one architecture spec) and execution fans out narrow (file-level deps serialize work). Two separate DAGs let TIDE size two separate parallelism budgets (TS-9) and run two distinct review cadences — value that's literally impossible to express in Argo's data model. | MEDIUM | CRD field names keep them apart: `Project.spec.planningGraph` vs `.executionGraph`. Same Kahn-layered algorithm runs on both, but the *types* are different and the CRDs distinguish them. CLAUDE.md: "APIs and CRDs should keep these typed apart, not unified into one 'DAG' abstraction." |
-| D-2 | **Five-level hierarchy expressed as five CRDs** (Project, Milestone, Phase, Plan, Task), each with its own typed reviewable artifact | Argo has Workflow + Template + Step. Tekton has Pipeline + Task. kagent has Agent + Tool. None of them model the milestone-phase-plan-task-wave cognitive hierarchy that bounded-context agentic work needs (spec §"Why this is advantageous" point 1: "Context-window economics"). The five-level shape is what makes Opus-for-milestones-and-Haiku-for-tasks even *expressible* (spec §"Why this is advantageous" point 6). | HIGH | Each level needs its own controller, status block, and dispatch profile. The big one. Five well-shaped CRDs with proper validation will be a substantial part of v1. |
-| D-3 | **Wave-derived schedule, re-derived on every plan edit** — orchestrator never accepts a wave list as input | Argo accepts an explicit DAG of tasks but doesn't expose "waves" as a first-class queryable concept. Temporal exposes activities but not a wave abstraction. TIDE's `WaveStatus` on the Plan/Task CRD is queryable: "give me all tasks in wave 3 of plan A.1.1" is a label selector. Spec §"Wave computation" property 5: monotonic under DAG edits, so a plan revision mid-run is well-behaved. | MEDIUM | The orchestrator's reconciler recomputes waves whenever a Plan's task DAG changes; no schedule cache. CLAUDE.md: "If the persistence layer starts wanting to store the full schedule, that's a smell — re-derive instead." |
-| D-4 | **Indegree-map + completed-task-set resumption** (and *only* that — no in-flight wave snapshots, no scheduler state) | Temporal persists full workflow state (event history); LangGraph persists checkpoints to PostgreSQL. TIDE's resumption state is *the minimum possible*: indegree map (derivable from artifacts) + completed-task set (derivable from git history). This is the property that lets TIDE survive controller-pod-eviction without an external DB — and it's a direct consequence of the Kahn-layered choice. | MEDIUM | CLAUDE.md: "Resumption state is minimal: indegree map + completed-task set. If the persistence layer starts wanting to store the full schedule, that's a smell." This is the load-bearing property that makes "CRD-status-only persistence" (PROJECT.md) viable. |
-| D-5 | **Per-level model selection** (e.g., Opus for milestone synthesis, Haiku for plan execution) configured on the Project CRD | Spec §"Why this is advantageous" point 6. kagent supports multi-LLM but per-agent, not per-cognitive-level. Argo and Temporal don't model cognitive levels at all. TIDE makes this a first-class field. | LOW | `spec.subagents.milestone.model`, `.phase.model`, `.plan.model`, `.task.model` — defaults sensible, override-able. Honored by the Subagent dispatch interface (TS-21). |
-| D-6 | **Per-level human gate policy as a Project CRD field** (combinatorial: approve-milestones-auto-pass-plans, or any other combination) | Argo has `suspend` templates but they're per-template, not policy-by-level. Tekton manual-approval-gate is per-PipelineRun. Composio AO has `escalateAfter` but it's a single timer. TIDE's per-*level* gates (Milestone / Phase / Plan / Task each independently) express the spec's "scales from fully supervised to fully autonomous without restructuring" property. | MEDIUM | See TS-10. The differentiation is the *combinatorial* per-level policy, not just the existence of gates. |
-| D-7 | **Slack-tide review checkpoints between waves**, with optional human review of wave outputs | Argo's `suspend` templates are insertable between tasks but require explicit graph edits. TIDE's wave model gives free between-wave checkpoints by construction — every wave is a natural review boundary, no extra graph nodes needed. Maps the spec's "Slack tide" vocabulary onto a controller behavior. | MEDIUM | Optional per-Project: `betweenWaveReview: { phase: required, plan: auto }`. When required, controller writes a `Pending Wave Review` condition after each wave's join barrier. |
-| D-8 | **Live planning + execution DAG dashboards (two distinct views)** rendering both DAGs side-by-side | Argo UI shows one DAG. kagent shows agent topology, not work topology. None of the comparables render the two-DAG split visually. TIDE's dashboard makes the structural distinction legible to a human reviewer. | HIGH | Folded into TS-25 but the *content* is the differentiator — two graphs, not one. Mermaid/D3 rendering of nested Project→Milestone→Phase→Plan→Task containment for Planning; flat wave-subgraph view for Execution (matches spec's Mermaid diagrams). |
-| D-9 | **Artifacts-as-source-of-truth, CRDs-as-index**: resumption reads from artifacts (`MILESTONE.md`, `PLAN.md`, task diffs), CRD `.status` is a cache | Temporal's source of truth is the event history in its DB. Argo's is the Workflow object. TIDE inverts: the source of truth is the Markdown files in the target repo, which means a human can hand-edit a `PLAN.md` between waves and TIDE re-derives the schedule on next reconcile. Spec + PROJECT.md + CLAUDE.md all hammer this. | MEDIUM | Reconcile flow: read artifacts → diff against `.status` → re-derive waves → dispatch. Disagreement between artifact and `.status` always defers to artifact. |
-| D-10 | **Cycle-as-bug, not cycle-as-runtime-condition** | Argo has a `DAGRetryStrategy` that could in principle support cyclic graphs (it doesn't, but the door isn't slammed). TIDE refuses to start a run on a cyclic DAG — there is no recovery path. The spec is explicit. | LOW | Falls out of TS-6 + TS-17. The *differentiation* is the discipline: no future PR will add cycle-recovery features (CLAUDE.md, README §"Failure handling"). |
-| D-11 | **Water/tide vocabulary** in CRD names, log lines, dashboard, docs (Rising tide, Slack tide, Tidal lock, Tidepool, TIDE pod) | Argo's vocabulary is generic. Tekton's is CI-shaped. TIDE's vocabulary is consistent and load-bearing — the K8s pun on "TIDE pod" is intentional (CLAUDE.md). Vocabulary discipline is a quality signal for an OSS project. | LOW | Code review enforces it. PROJECT.md Context: "Used in code names, CRD names, log lines, docs." |
-| D-12 | **Two separately-sized worker pools** (planner concurrency != executor concurrency) reflected in the Helm chart values + Project CRD | Argo has a single `parallelism`. Kueue has cohorts/cluster-queues but they're capacity primitives, not cognitive-pool primitives. The fact that planning DAGs fan out wide and execution DAGs fan out narrow is a spec-level argument that TIDE materializes into two integer fields. | LOW | Helm: `plannerConcurrency: 8`, `executorConcurrency: 4`. CRD-level override per Project. The split is what justifies the architecture. |
-| D-13 | **Self-hosting demonstration as v1 acceptance test** — TIDE drives its own next milestone | Argo doesn't run Argo's own development. Temporal doesn't either. The dogfood test is real and high-bar: if TIDE can't drive its own next milestone, the paradigm is wrong, the controller is wrong, or both. | HIGH | TS-26 is the table-stakes form ("does it work end-to-end"); D-13 is the *narrative* form ("this is how we know it's good"). Listed in both intentionally. |
+### Anti-Features (Deliberately NOT in v1.0.2)
 
-### Anti-Features (Deliberately NOT in v1, With Reason)
-
-These are features that comparable systems have or that users will plausibly request — and that we are not building in v1. Citing the rejection rationale prevents re-litigation in phase research later.
-
-| # | Anti-Feature | Why Requested | Why Rejected for v1 | Alternative / Future Path |
-|---|--------------|---------------|---------------------|---------------------------|
-| AF-1 | **Multi-tenant cluster posture** (cross-tenant quotas, per-tenant RBAC isolation, OIDC integration) | Enterprise users running multiple teams' agents in one cluster will eventually want this. | PROJECT.md Out of Scope: "Namespace-per-project covers the OSS user; full tenant isolation is real work that doesn't move the paradigm." | Post-v1. Namespace-per-project (TS-20) is a forward-compatible foundation. |
-| AF-2 | **gRPC streaming subagent protocol** (or any non-Job dispatch mechanism for v1) | Streaming partial results from a long-running subagent is lower-latency than the Job-+-PVC-+-exit-code envelope. kagent uses A2A streaming. | PROJECT.md Out of Scope: "Pod-per-task Job + result envelope is enough for v1. A streaming sidecar can be added later behind the same Subagent interface without redesign." | v2 — slot a streaming concrete impl behind the existing Subagent interface (TS-21). Don't redesign the interface for v1. |
-| AF-3 | **Mutation actions on the dashboard** (retry wave, edit plan, pause/resume, approve gate, cancel) | Argo UI supports all of these. Users will absolutely ask for them. | PROJECT.md Out of Scope: "v1 dashboard is read-only. Mutations route through `tide` CLI / `kubectl` so there's a single auth surface." Read-only also keeps the dashboard component shippable in v1. | Post-v1, behind the same RBAC the CLI uses. The CLI is the v1 mutation surface. |
-| AF-4 | **External database (Postgres / SQLite) for run history, scheduling cache, or audit trail** | Temporal needs a DB. LangGraph deployments need Postgres. The instinct will be "we should persist runs somewhere queryable." | PROJECT.md Out of Scope: "CRD-status-only is technically sufficient at the scale of one human watching one run. Re-evaluate only if dashboard query shapes outgrow label-selector queries." Spec + CLAUDE.md: "the orchestrator's database is a cache/index, not the truth." | Post-v1 — and only if dashboard query needs actually outgrow label-selector queries. The artifacts in git are the durable record. |
-| AF-5 | **Vendored GSD Markdown workflows** (copying `~/.claude/get-shit-done/workflows/*.md` into the orchestrator container) | It would be faster to ship if the planner just shelled out to Claude Code with the existing GSD Markdown. | PROJECT.md Out of Scope: "TIDE reads `get-shit-done` as design reference but the planner/executor logic and prompts are reimplemented in Go. Markdown workflows would lock TIDE to one bootstrap host." Portability is the v1 OSS posture; vendoring locks TIDE to a single bootstrap. | Reimplement the GSD *paradigm* in Go; embed prompts as Go templates owned by TIDE. Provider/host portable by construction. |
-| AF-6 | **Critical-path / HEFT / heterogeneous-resource schedulers at the wave layer** | When subagent pools become heterogeneous (Opus for hard tasks, Haiku for mechanical), there's a real argument for CPM-style scheduling. | Spec §"Alternatives considered and rejected": "Premature at the paradigm layer. If subagent pools become heterogeneous, TIDE adds a wave-internal sub-scheduler rather than replacing Kahn-layered at the wave level." PROJECT.md Out of Scope. | v2+ — wave-internal sub-scheduling, *behind* Kahn-layered at the wave level. Layered Kahn stays the wave producer. |
-| AF-7 | **Wave or cycle "recovery"** (automatic cycle resolution, wave retry-with-relaxed-deps) | Users may ask "the plan has a cycle, can you fix it?" or "the wave failed, can you retry with task X removed?" | PROJECT.md + CLAUDE.md + spec: "Cycles are bugs detected at plan-validation time. Refuse and surface, don't recover." The plan is the source of truth; if the plan is wrong, the human fixes the plan. | None. This stays rejected. |
-| AF-8 | **Non-Kubernetes runtime** (Docker Compose, bare metal, Nomad, local-process orchestration) | Some users will want to run TIDE on a single Mac without K8s. | PROJECT.md Out of Scope: "The K8s pun is load-bearing; pod isolation, RBAC, watches, and Jobs are what make the dispatch model tractable." | For local-Mac users: that's what GSD is for. TIDE is the K8s generalization. Run TIDE in `kind` if you need a local cluster. |
-| AF-9 | **External Secrets Operator (ESO) / Vault first-class integration** | Enterprise users want ESO/Vault. kagent supports SPIFFE for workload identity. | PROJECT.md Out of Scope: "Plain K8s Secrets only for v1. ESO docs/examples can land later without changing the CRD contract." | The `Project.spec.credentials.{llmSecretRef, gitSecretRef}` contract is forward-compatible with ESO — ESO can write the K8s Secret. Docs example in v1.x. |
-| AF-10 | **Vendor lock-in to one LLM provider** (Anthropic-specific code in the orchestrator) | It would be faster to ship if the orchestrator could call the Anthropic SDK directly. | PROJECT.md Out of Scope. The Subagent interface (TS-21) is provider-agnostic by construction. | Anthropic-backed concrete impl ships in v1; the interface forbids the orchestrator from knowing it's Anthropic. |
-| AF-11 | **Cycle-recovery, schedule-caching, full-event-history storage** (any persistence pattern beyond indegree-map + completed-task-set) | Temporal-pattern thinking: "let's store the schedule for fast resume." | CLAUDE.md: "If the persistence layer starts wanting to store the full schedule, that's a smell — re-derive instead." Re-derivation is O(V+E) and cheap. | None. Re-derive. |
-| AF-12 | **Per-git-host PR creation** (open the PR via GitHub API / GitLab API / Gitea API) | Composio AO does this; users will want it. | The host abstraction (TS-22) is "push to a remote." The *human* opens the PR in their host's UI v1. Per-host PR creation is a 3-way matrix of API integrations that's premature before v1 ships. | v1.x — a PR-opener plugin per host, behind a `Project.spec.git.prAutomation: { provider: github | gitlab | gitea }` field that doesn't exist v1. |
-| AF-13 | **Auto-CI-fix feedback loop** (subagent reads CI failure, patches, re-pushes) | Composio AO does this; GitHub Copilot agent-assignment does this; Claude Code Auto Mode does this. | Out of scope for v1 — TIDE's "execution complete" boundary is "task diff merged into the project branch." What happens *after* the branch lands (PR review, CI, merge to main) is a downstream concern. Trying to include CI fix loops in v1 expands the project surface area significantly without moving the paradigm. | v1.x — a `Project.spec.postExecution.ciFixLoop: bool` field, implemented as additional subagent dispatches against CI-failure artifacts. |
-| AF-14 | **Multi-cluster dispatch** (Kueue MultiKueue-style) | Kueue is prioritizing MultiKueue for 2026. Enterprise users running pooled GPU clusters will want this. | Not requested. v1 = single cluster. PROJECT.md Out of Scope (implicit via "one TIDE install per cluster"). | v2+. |
-| AF-15 | **MCP / A2A protocol surface** (TIDE-as-MCP-server, TIDE-agent-as-A2A-callable) | kagent makes a big deal of MCP + A2A support. Users coming from kagent will expect it. | Out of scope. TIDE's subagents *may* speak MCP internally (the Claude-Code-backed impl does), but TIDE itself is not an MCP server; it's an orchestrator. A2A is for inter-agent comms, not orchestrator-to-agent. | If demand emerges post-v1, expose a TIDE-as-MCP server that wraps `tide apply` / `tide watch`. v2+. |
-| AF-16 | **Drag-to-edit DAG in the dashboard** | "Why can't I just drag the boxes around to add a dep?" | Dashboard is read-only (AF-3). Plan edits go through `PLAN.md` in git, which is the source of truth (D-9). | None. The artifact is the editor. |
-
-### Deferred (Table-Stakes-Shaped Features Punted to Post-v1)
-
-These look like table stakes but PROJECT.md explicitly punts them, with rationale.
-
-| # | Feature | Looks Like Table Stakes Because | Why Deferred |
-|---|---------|-------------------------------|--------------|
-| DF-1 | **Conservative failure profile** (halt wave on first task failure, including non-dependent siblings) | Spec §"Failure handling" explicitly names it as a configurable profile. Some users will want it from day one. | Strict-by-default is the v1 default per PROJECT.md. Conservative profile lands as a per-Project setting "later if needed." Not in v1 scope. |
-| DF-2 | **PR-opening + comment-resolution loops** | Composio AO, GitHub Copilot agent-assignment, Claude Code Auto Mode all do it. Users coming from those will expect it. | AF-12 + AF-13. The v1 boundary is "diff pushed to remote branch." PR lifecycle is downstream and per-git-host. v1.x. |
-| DF-3 | **Custom resource validation webhook** (vs controller-side validation only) | All mature K8s operators ship admission webhooks for faster rejection. | TS-17 covers correctness; the webhook is an optimization on rejection latency. Helm chart can include a cert-manager-based webhook in v1.x. |
-| DF-4 | **MultiKueue / Kueue integration for capacity management** | Kueue is the K8s-native solution for capacity quotas; TIDE's `plannerConcurrency`/`executorConcurrency` is a poor substitute at scale. | v1 caps are integer-on-the-Project. Kueue integration is real work that doesn't move the paradigm. v2+. |
-| DF-5 | **OLM bundle + OperatorHub listing** | Mature operators ship OLM bundles. OpenShift users will expect it. | Helm chart (TS-23) is the v1 distribution. OLM bundle can be generated from the Helm chart later; not v1 scope. |
-| DF-6 | **Agent Sandbox / gVisor / Kata Containers integration** for stronger pod isolation | sigs.k8s.io/agent-sandbox is the K8s SIG Apps recommendation for AI agent sandboxing. kagent's SandboxAgent CRD wraps it. | v1 uses standard K8s Pods with pod-per-task isolation; gVisor/Kata sandboxing is a hardening layer, not a correctness requirement. v2+. |
-| DF-7 | **Workflow templates / Project templates** ("scaffold me a TIDE Project for a typical web-app milestone") | Argo has `WorkflowTemplate`, Tekton has `ClusterTask`. Lowers the barrier to first run. | v1 ships docs + examples; templating CRD comes after the CRDs themselves are stable. v1.x. |
-| DF-8 | **External notification hooks** (Slack on gate pending, email on milestone complete) | Most workflow engines have webhook outputs. | v1 emits structured logs + Prometheus metrics; downstream tooling (Alertmanager, OTel exporters) covers notification by composition. Native webhooks v1.x. |
+| # | Anti-Feature | Why Requested | Why Rejected | Alternative |
+|---|--------------|---------------|--------------|-------------|
+| AF-C1 | **Direct Anthropic SDK backend with explicit `cache_control`** | Would let TIDE set cache breakpoints at exactly the right location, giving full control over TTL and breakpoint placement without depending on CLI behavior | PROJECT.md v1.0.2 constraint: "Stay CLI-based — no direct-SDK `cache_control` subagent backend." The CLI path is the v1 contract; adding a direct SDK path this milestone expands scope significantly without proving the prompt-structuring approach first. | Stay CLI-based; verify that proper template structuring achieves ≥70% cache hit rate via metrics; SDK path is a future milestone if the gap proves unbridgeable. |
+| AF-C2 | **Aggressive boilerplate removal that degrades output quality** | Shorter prompts = lower token cost per dispatch. | Quality is the constraint, not token count. Research on context trimming shows "implicit-contract loss" when instructions are trimmed below task-completion threshold. Eval harness (D-C5) must gate all trimming. "Best-effort reduction, quality-gated" is the milestone constraint. | Trim incrementally; run eval harness after each reduction; stop trimming when quality score drops. |
+| AF-C3 | **Per-task prompt compression / summarization using a secondary LLM** | Prompt compression (e.g., LLMLingua-style) can reduce long task prompts by 5–10×. | Adds latency (a compression LLM call before every dispatch), cost (another LLM call), and a quality risk (compressed prompts lose precision). TIDE's task prompts are authored by the plan planner — they're already designed to be concise. Compression adds complexity for marginal gain. | Ensure plan-planner templates instruct the planner to write concise task prompts; the plan_planner.tmpl already says "Write it as if briefing an engineer." Enforce this at the prompt level, not with a runtime compressor. |
+| AF-C4 | **KV-cache sharing across worktrees** (forcing all wave siblings to use the same working directory to share the Claude Code cache) | Claude Code's cache is scoped per working directory. If all siblings shared one directory, they'd share the cache prefix. | Violates the per-task worktree isolation model (TS-8 in v1 FEATURES.md). Worktrees are the isolation unit; sharing them for cache savings trades correctness for cost. | The correct solution is provider-level shared prefix caching (the prefix match is by content, not path — restructure the stable prefix to not include the path, or investigate the `prompt_cache_key` parameter for OpenAI path once that backend ships). |
+| AF-C5 | **Per-task `events.jsonl` real-time streaming parsing for live cache hit feedback** | Would allow live dashboard updates showing cache hit/miss per turn within a running task. | TIDE's executor-level dispatch is single-turn for planner levels; multi-turn only for task executor sessions. The `events.jsonl` is already written; parsing it post-completion is sufficient for metrics. Real-time streaming adds significant complexity to the reporter pipeline for marginal dashboard value at this milestone. | Parse `events.jsonl` post-completion as today; surface aggregated metrics per dispatch and per-run. |
+| AF-C6 | **OpenAI/Codex subagent backend** | Natural partner to the prompt-structuring work; would allow verifying provider-agnostic cache behavior. | Explicitly out of scope for v1.0.2 per PROJECT.md: "Out of scope (→ next milestone): the OpenAI/Codex subagent backend and dogfood run #2 itself." | Design prompt structuring to be provider-agnostic (it is, by the stable-prefix-first rule); verify on the OpenAI path in the next milestone. |
+| AF-C7 | **Eval harness with human annotation pipeline** | LLM-as-judge calibrated against human expert annotations is more reliable. | Human annotation pipeline is infra-heavy (annotation UI, annotator pool, disagreement resolution) and out of scope for v1.0.2. The eval harness is a CI tool, not a research platform. | Ship with LLM-as-judge (D-C6); calibrate judge against a small hand-labeled golden set (10–20 canonical scenarios); defer annotation pipeline to post-v1.0.2. |
+| AF-C8 | **Cache pre-warming service** (a persistent sidecar that re-issues warm-up calls before cache TTL expires) | Would keep the 5-minute cache warm indefinitely, effectively making all dispatches cache hits. | Adds a persistent process, requires tracking TTL per provider per model, and is Anthropic-path-specific (OpenAI cache TTL is not directly controllable). At TIDE's dispatch frequency, wave siblings arrive within 30–60 seconds — the cache stays warm naturally during an active run. | Rely on natural cache warming during active runs; accept cold-start cost on the first dispatch per wave. |
 
 ---
 
 ## Feature Dependencies
 
-The dependency graph between features (read top to bottom; arrows = "requires"):
-
 ```
-TS-18 (CRD set)
-    ├──> TS-1 (Project lifecycle)
-    │       ├──> TS-2 (watch/status)
-    │       ├──> TS-3 (cancel)
-    │       ├──> TS-17 (plan validation)
-    │       └──> TS-19 (creds via Secret)
-    │
-    ├──> TS-7 (wave-derived) ──> TS-6 (cycle detection) ──> TS-17 (plan validation)
-    │       └──> TS-16 (strict-by-default failure profile)
-    │               └──> TS-4 (resume after restart)
-    │                       └──> D-4 (indegree-map+completed-set resumption)
-    │
-    └──> TS-8 (pod-per-task) ──> TS-11 (artifact PVC) ──> TS-12 (git push)
-                                                              └──> TS-22 (host-agnostic remote)
+TS-C4 (deterministic serialization)
+    └──requires──> TS-C3 (SharedContext injection)
+                       └──requires──> TS-C1 (stable-prefix ordering)
+                                          └──requires──> TS-C2 (no volatile data in prefix)
 
-TS-21 (pluggable Subagent interface)
-    ├──> D-5 (per-level model selection)
-    ├──> TS-5 (retry on transient failure)
-    └──> AF-10 prevention (no Anthropic-specific code in orchestrator)
+TS-C6 (token budget enforcement)
+    └──requires──> TS-C5 (boilerplate audit)
+                       └──requires──> TS-C1 (stable-prefix ordering)
 
-TS-9 (capacity caps)
-    └──> D-12 (two separately-sized pools)
+TS-C7 (cache hit rate metric)
+    ├──requires──> existing events.jsonl parsing (already in internal/reporter/)
+    └──enhances──> D-C4 (cost+quality dashboard panel)
 
-TS-10 (per-level human gates)
-    ├──> D-6 (per-level gate policy as Project CRD field)
-    └──> D-7 (slack-tide between-wave review)
+TS-C8 (per-level token accounting)
+    └──enhances──> D-C4 (cost+quality dashboard panel)
 
-TS-13 (per-task logs) + TS-14 (metrics) + TS-15 (OTel/OpenInference traces)
-    └──> TS-25 (dashboard) ──> D-8 (two-DAG dashboard view)
+D-C5 (eval harness)
+    ├──requires──> TS-C7 (cache hit rate metric) — harness reports cache deltas
+    ├──requires──> TS-C8 (per-level token accounting) — harness reports cost deltas
+    └──requires──> D-C6 (LLM-as-judge rubric) — harness needs a quality scorer
 
-TS-23 (Helm chart) + TS-24 (CLI) + TS-25 (dashboard) + TS-27 (license + docs)
-    └──> TS-26 (self-hosting demo) ──> D-13 (self-hosting as v1 acceptance)
+D-C6 (LLM-as-judge)
+    └──requires──> D-C5 (eval harness) — judge runs within the harness
 
-D-1 (two typed DAGs) ──> D-2 (five CRDs) ──> D-3 (wave-derived schedule queryable)
-                                                  └──> D-9 (artifacts-as-truth)
+D-C1 (warm-up dispatch)
+    └──requires──> TS-C3 (SharedContext injection) — warm-up only makes sense if siblings share a stable prefix
+
+D-C2 (context curation)
+    └──enhances──> TS-C3 (SharedContext injection) — curation determines what goes in SharedContext
+
+TS-C1, TS-C2, TS-C5 (template restructuring)
+    └──gated-by──> D-C5 (eval harness) — don't ship template changes without regression gate
 ```
 
 ### Dependency notes
 
-- **The five CRDs (D-2) are the longest-pole dependency.** Every other Active item in PROJECT.md hangs off them. Get the CRDs right (correct Spec/Status separation, proper validation, +kubebuilder:subresource:status everywhere) before reconcilers grow real logic.
-- **D-4 (minimal resumption state) is what makes AF-4 (no external DB) viable.** If D-4 is wrong, the v1 persistence story collapses and you'll be reaching for Postgres.
-- **TS-21 (pluggable Subagent interface) is what makes AF-10 (no vendor lock-in) enforceable.** Define the interface in the controller package; concrete impl lives in a separate package. If reconciler code ever imports the Anthropic SDK directly, you've broken the contract.
-- **D-1 (two typed DAGs) is what makes D-12 (two parallelism pools) and D-6 (per-level gates) coherent.** If you collapse to one DAG, you lose the cognitive-level argument that justifies the rest.
-- **TS-26 (self-hosting demo) is the only feature that exercises every other feature simultaneously.** Plan for it to fail the first N times you try; it's the integration-test-of-everything.
+- **TS-C1 + TS-C2 are the foundation.** Every caching benefit depends on the stable
+  prefix being truly stable (no volatile data). These are template edits — low complexity,
+  but they must be done first.
+- **TS-C3 (SharedContext) is the highest-leverage structural change.** Without it, wave
+  siblings each start with a cold cache for the plan/phase context. With it, after the
+  first sibling, all subsequent siblings in the same wave hit the cache for the largest
+  portion of their input. This is where the token spend actually drops.
+- **D-C5 (eval harness) must gate all template changes.** The correct sequence is:
+  implement harness → establish baseline → restructure templates → verify quality preserved →
+  ship. Doing template changes before the harness exists is unsafe.
+- **D-C1 (warm-up dispatch) is HIGH complexity and depends on D-C5.** Do not build it
+  without first verifying that the simpler TS-C1/C2/C3 changes don't already achieve
+  sufficient cache hit rate.
 
 ---
 
 ## MVP Definition
 
-### Launch With (v1) — Bound by PROJECT.md Active
+### Launch With (v1.0.2 — "Ebb Tide")
 
-These are the v1 cuts. All are either in PROJECT.md Active or are direct table-stakes/differentiator dependencies of those items.
+Minimum viable cost optimization — sufficient to reduce token spend measurably while
+proving quality is preserved.
 
-- [ ] **TS-18 — CRD set: Project / Milestone / Phase / Plan / Task** (the five-level hierarchy as K8s API objects) — load-bearing for everything else
-- [ ] **TS-1 to TS-3 — Lifecycle: apply / watch / cancel** — basic K8s operator UX
-- [ ] **TS-4 + D-4 — Resume after orchestrator restart** with minimal persistence (indegree map + completed-task set) — the correctness property
-- [ ] **TS-6 + TS-7 + TS-17 — Wave-derived schedule, cycle detection, plan validation** — the algorithm
-- [ ] **D-1 + D-2 + D-3 — Two typed DAGs, five CRDs, wave-derived schedule queryable** — the structural differentiation
-- [ ] **TS-8 + TS-11 + TS-12 + TS-22 — Pod-per-task isolation, artifact PVC, git push at level boundary, host-agnostic remote** — the dispatch + artifact path
-- [ ] **TS-16 — Strict-by-default failure profile at wave boundaries** — the contract
-- [ ] **TS-5 — Retry on transient failure** (default 2 retries, exponential backoff)
-- [ ] **TS-9 + D-12 — Separate planner / executor concurrency caps** — the two-budget split
-- [ ] **TS-10 + D-6 + D-7 — Per-level human gates, gate policy as CRD field, slack-tide between-wave review** — the human-in-the-loop differentiation
-- [ ] **TS-13 + TS-14 + TS-15 — Structured logs, Prometheus metrics, OTel+OpenInference traces** — the observability baseline
-- [ ] **TS-19 + TS-20 — K8s Secret creds, namespace-per-project tenancy** — the security/tenancy minimum
-- [ ] **TS-21 + D-5 + AF-10 prevention — Pluggable Subagent interface, per-level model selection, no Anthropic-specific code in orchestrator** — the OSS portability promise
-- [ ] **TS-23 + TS-24 + TS-25 + D-8 — Helm chart, CLI, read-only dashboard with two-DAG view** — the distribution + UX surface
-- [ ] **TS-26 + D-13 — Self-hosting demo: TIDE drives its own next milestone on this repo** — the acceptance test
-- [ ] **TS-27 — Apache 2.0 + docs sufficient for an external operator** — the OSS posture
-- [ ] **D-10 — Cycle-as-bug discipline** — codified in `CONTRIBUTING.md` and PR review
-- [ ] **D-11 — Water/tide vocabulary** in CRD names, log lines, dashboard, docs
-- [ ] **D-9 — Artifacts-as-source-of-truth, CRDs-as-index** — codified in reconciler comments + tests
+- [ ] **TS-C1** — Stable-prefix-first ordering in all five templates — *why essential:
+  zero cache benefit is achievable without this; it's the structural prerequisite for
+  everything else*
+- [ ] **TS-C2** — Remove `{{.TaskUID}}`, `{{.Provider.Vendor}}`, `{{.Provider.Model}}`
+  from the stable boilerplate section of templates — *why essential: current templates
+  include volatile dispatch metadata in the prefix, busting cache on every unique TaskUID*
+- [ ] **TS-C5** — Boilerplate audit: measure token count per template; grow stable prefix
+  to ≥1,024 tokens with the SharedContext block; document the template token budget — *why
+  essential: caching simply does not activate below 1,024 tokens — TIDE's current ~200-token
+  templates get zero cache benefit*
+- [ ] **TS-C4** — Deterministic serialization for any structured data in the stable prefix
+  — *why essential: non-deterministic Go map serialization produces different token sequences,
+  busting cache silently*
+- [ ] **TS-C7** — Cache hit rate metric from events.jsonl — *why essential: without
+  measurement, there's no signal that restructuring worked*
+- [ ] **TS-C8** — Per-level token accounting as Prometheus labels — *why essential:
+  identifies which level to optimize first*
+- [ ] **D-C5** — Eval harness (`internal/eval/`) with golden-set fixtures and baseline
+  storage — *why essential: the quality gate that makes all template changes safe to ship*
+- [ ] **D-C6** — LLM-as-judge rubric (four dimensions: completeness, correctness,
+  instruction-following, plan coherence) — *why essential: harness is useless without a
+  quality scorer*
+- [ ] **TS-C3** — SharedContext injection block — plan objective + phase brief summary
+  injected identically into all wave-sibling dispatches — *why essential: this is where
+  the actual per-wave cache savings come from*
 
-### Add After Validation (v1.x)
+### Add After Validation (v1.0.2 extension)
 
-Triggered after v1 ships and real users surface real needs.
+Add these once the baseline is established and the eval harness is green.
 
-- [ ] **DF-1 — Conservative failure profile** — if users hit cascading non-dependent failures and want hard-stop behavior
-- [ ] **DF-3 — Validation webhook** — if users complain about late rejection of invalid plans
-- [ ] **DF-5 — OLM bundle** — if OpenShift users request it
-- [ ] **DF-7 — Project templates** — if first-run-friction is the bottleneck on adoption
-- [ ] **DF-8 — Notification hooks (Slack / webhook)** — if structured logs + Alertmanager aren't enough for ops users
-- [ ] **AF-9 → ESO/Vault docs+examples** — once enterprise users start asking
-- [ ] **AF-12 → Per-host PR creation** — implemented behind a `prAutomation` field, GitHub first
-- [ ] **AF-13 → Auto-CI-fix feedback loop** — behind a `postExecution.ciFixLoop` field
+- [ ] **D-C4** — Cost + quality dashboard panel — *trigger: TS-C7 + TS-C8 metrics exist;
+  add visualization once the data is there*
+- [ ] **D-C2** — Context curation (summaries over verbatim content in SharedContext) —
+  *trigger: SharedContext (TS-C3) is working; tune what goes in it based on eval harness
+  quality scores*
+- [ ] **D-C3** — Per-level token budget profiles (Helm/CRD config) — *trigger: enough
+  runs to know which levels need different budgets*
 
-### Future Consideration (v2+)
+### Future Consideration (v1.0.3+)
 
-Real work that doesn't move the v1 paradigm.
-
-- [ ] **AF-1 — Full multi-tenant posture** (per-tenant quotas, cross-tenant RBAC, OIDC)
-- [ ] **AF-2 — gRPC streaming subagent protocol** (behind the existing Subagent interface)
-- [ ] **AF-3 — Dashboard mutation actions** (retry wave, edit plan, pause/resume from UI)
-- [ ] **AF-4 — External DB** (re-evaluate only if dashboard query shapes outgrow label selectors)
-- [ ] **AF-6 — Wave-internal sub-scheduler** for heterogeneous subagent pools (HEFT-like, behind Kahn-layered)
-- [ ] **AF-14 — Multi-cluster dispatch** (Kueue MultiKueue integration)
-- [ ] **AF-15 — MCP/A2A protocol surface** (if demand emerges)
-- [ ] **DF-4 — Kueue integration** for capacity management at scale
-- [ ] **DF-6 — Agent Sandbox / gVisor / Kata Containers** for hardened pod isolation
+- [ ] **D-C1** — Wave-sibling warm-up dispatch — *why defer: high complexity; only
+  worthwhile if natural cache warming doesn't suffice at TIDE's dispatch cadence*
+- [ ] **AF-C1 reversed** — Direct SDK backend with explicit `cache_control` — *why defer:
+  proves CLI path first; SDK path unlocks explicit TTL control and 1-hour cache if needed*
+- [ ] **AF-C6 reversed** — OpenAI/Codex backend + provider-agnostic cache verification
+  — *scope-constrained to next milestone explicitly*
 
 ---
 
 ## Feature Prioritization Matrix
 
-Selecting the top-priority items (the long poles) — full prioritization is the table sets above.
-
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| TS-18 (CRD set) | HIGH | HIGH | P1 |
-| TS-26 + D-13 (self-hosting demo) | HIGH (it's the v1 acceptance test) | HIGH | P1 |
-| TS-4 + D-4 (resume with minimal state) | HIGH (load-bearing correctness) | HIGH | P1 |
-| TS-21 (pluggable Subagent interface) | HIGH (OSS portability) | MEDIUM | P1 |
-| D-1 + D-2 (two typed DAGs, five CRDs) | HIGH (structural differentiation) | HIGH | P1 |
-| TS-10 + D-6 (per-level gates as CRD field) | HIGH (paradigm value) | MEDIUM | P1 |
-| TS-25 + D-8 (dashboard, two-DAG view) | HIGH (trust signal for long-running agents) | HIGH | P1 |
-| TS-23 (Helm chart) | HIGH (OSS distribution) | MEDIUM | P1 |
-| TS-15 (OTel + OpenInference) | MEDIUM (queryability in standard tools) | MEDIUM | P1 |
-| TS-5 (retry on transient failure) | HIGH (every LLM-driven system has flaky calls) | LOW | P1 |
-| TS-9 + D-12 (two-pool concurrency) | MEDIUM (correctness in capacity-bound runs) | LOW | P1 |
-| DF-1 (conservative failure profile) | LOW initially (becomes HIGH if cascading non-dependent failures surface) | LOW | P2 |
-| AF-13 (auto-CI-fix loop, post-v1) | HIGH (Composio AO / Copilot expectation) | HIGH | P2 |
-| AF-2 (gRPC streaming, post-v1) | MEDIUM (latency improvement, not correctness) | HIGH | P3 |
-| AF-1 (multi-tenant posture, post-v1) | HIGH for enterprise | HIGH | P3 |
+| TS-C1 (stable-prefix ordering) | HIGH — prerequisite for all caching | LOW — template edits | P1 |
+| TS-C2 (no volatile data in prefix) | HIGH — currently breaks all caching | LOW — template edits | P1 |
+| TS-C5 (boilerplate audit, grow to 1,024 tokens) | HIGH — caching inactive below threshold | MEDIUM — requires token counting | P1 |
+| D-C5 (eval harness) | HIGH — quality gate for all changes | HIGH — new package + golden sets | P1 |
+| D-C6 (LLM-as-judge rubric) | HIGH — makes eval harness useful | MEDIUM — judge prompt + fixture labels | P1 |
+| TS-C3 (SharedContext injection) | HIGH — the main per-wave savings source | MEDIUM — dispatcher changes | P1 |
+| TS-C4 (deterministic serialization) | MEDIUM — silent cache buster | LOW — sort keys everywhere | P1 |
+| TS-C7 (cache hit rate metric) | HIGH — measurement proves the work | LOW — parse existing events.jsonl | P1 |
+| TS-C8 (per-level token accounting) | MEDIUM — identifies hot levels | LOW — extend existing metrics | P1 |
+| D-C4 (cost+quality dashboard panel) | MEDIUM — visibility | MEDIUM — dashboard component | P2 |
+| D-C2 (context curation) | MEDIUM — marginal savings over SharedContext | MEDIUM — curation logic | P2 |
+| D-C3 (per-level token budget profiles) | LOW — tuning knob | LOW — Helm values + enforcement | P2 |
+| D-C1 (wave warm-up dispatch) | MEDIUM — cache-hit guarantee for wave siblings | HIGH — dispatch loop change | P3 |
 
 **Priority key:**
-- P1: Must have for v1 — directly in PROJECT.md Active
-- P2: v1.x — add post-launch if validated by real use
-- P3: v2+ — real work that doesn't move the v1 paradigm
+- P1: Required for v1.0.2 — directly delivers the milestone goal
+- P2: Add after baseline established, within milestone
+- P3: Future milestone
 
 ---
 
-## Competitor Feature Analysis
+## Implementation Notes by Category
 
-A side-by-side of the closest comparables on the features that most distinguish TIDE.
+### Template Restructuring (TS-C1, TS-C2, TS-C5)
 
-| Feature | Argo Workflows | Tekton Pipelines | kagent | Temporal | Composio AO | LangGraph deploy | TIDE v1 |
-|---------|---------------|------------------|--------|----------|-------------|------------------|---------|
-| K8s-native CRDs | Yes (Workflow) | Yes (Pipeline/Task) | Yes (Agent/Tool) | No (its own DB) | No (host process) | No (host process + Postgres) | **Yes (5 CRDs)** |
-| DAG support | Flat DAG | Flat DAG | Multi-agent topology, not a work DAG | Activity graph | Task list per agent | StateGraph | **Two typed DAGs (Planning + Execution)** |
-| Cycle detection | Yes (rejection at submit) | Yes | n/a | n/a | n/a | n/a | **Yes (rejection at validation, Kahn-derived)** |
-| Wave abstraction | No (DAG levels not exposed) | No | n/a | No | No | No | **Yes (Kahn-layered, queryable)** |
-| Pod-per-task | Yes (default) | Yes (default) | Per agent | n/a | Process or container | n/a | **Yes (Job-per-Task)** |
-| Per-task retries | Yes (retryStrategy) | Yes | n/a | Yes | Yes (`retries: 2`) | Yes (graph node retry) | **Yes (2 default)** |
-| Suspend / resume | Yes (suspend template) | Yes (TaskRun pending) | n/a | Yes (durable) | n/a | Yes (checkpointed) | **Yes (per-level gates)** |
-| Cancel | Yes (terminate) | Yes (cancel) | n/a | Yes | n/a | n/a | **Yes** |
-| Resume after orchestrator restart | Yes (workflow object survives) | Yes (PipelineRun survives) | n/a | Yes (DB-backed) | n/a (host process state) | Yes (Postgres checkpoint) | **Yes (indegree map + completed-set, no DB)** |
-| Artifact handling | S3/GCS/MinIO | PVC | n/a | Inline / state | Git worktree | n/a | **PVC + git push at level boundary** |
-| Git integration | Input artifact via git clone | Yes (resolvers) | Indirect | Indirect | Yes (worktrees + PRs) | Indirect | **Yes (clone + push, host-agnostic)** |
-| PR automation | No | No (CI tools layer on top) | No | No | **Yes (full PR lifecycle)** | No | **No (v1) — push only, PR opening v1.x** |
-| Human approval gates | Yes (suspend template) | Yes (manual-approval-gate) | n/a | Yes (HITL) | Yes (`escalateAfter`) | Yes (interrupt) | **Yes, per-level policy on CRD** |
-| Per-level gate policy | No (per-template, not per-cognitive-level) | No | n/a | No | No (single timer) | No | **Yes — paradigm differentiator** |
-| Multi-LLM support | n/a | n/a | Yes (multi-provider) | Via SDK | Agent-agnostic | Yes | **Yes (interface) — Anthropic-first concrete impl** |
-| Per-level model selection | n/a | n/a | Per-agent, not per-cognitive-level | n/a | n/a | n/a | **Yes — paradigm differentiator** |
-| Read-only dashboard | Yes (Argo UI) | Yes (Tekton Dashboard) | Yes | Yes (Temporal UI) | Yes | Yes (LangSmith) | **Yes — two-DAG view (differentiator)** |
-| Dashboard mutations | Yes | Yes | Yes | Yes | Yes | Yes | **No (read-only — single auth surface)** |
-| OTel tracing | Yes | Yes | Yes (OpenTelemetry + A2A) | Yes | n/a | Yes (LangSmith) | **Yes (OpenInference conventions)** |
-| OpenInference conventions | No (OTel generic) | No | Yes | No | No | Partial | **Yes — paradigm-aligned** |
-| Helm chart | Yes | Yes | Yes | Yes (Cloud or self-host) | n/a (CLI tool) | Yes (LangSmith chart) | **Yes (Apache 2.0)** |
-| OLM bundle / OperatorHub | Yes | Yes | Likely (CNCF Sandbox) | No | n/a | No | **No v1 (DF-5)** |
-| Multi-tenant | Per-namespace | Per-namespace | Per-namespace | Per-namespace + tenant cloud | n/a (per-user) | Yes (self-host) | **Namespace-per-project v1 (AF-1 for full)** |
-| Self-hosting demo | Argo doesn't run Argo's CI | n/a | n/a | n/a | The CLAUDE.md self-improvement loop | n/a | **Yes — v1 acceptance test (D-13)** |
-| Vocabulary | Generic ("workflow", "step") | CI-shaped ("pipeline", "task") | Generic | Generic ("workflow", "activity") | Generic | Graph-shaped | **Water/tide, consistent and load-bearing** |
+Current templates (`internal/subagent/common/templates/*.tmpl`) structure:
 
-### Key competitor takeaways
+```
+[TIDE preamble paragraph — ~200 tokens, stable]
+[Dispatch metadata block with {{.TaskUID}}, {{.Provider.Vendor}}, {{.Provider.Model}} — volatile]
+[Role-specific instructions — stable]
+[HOW TO EMIT child CRDs block — stable]
+Original prompt:
+{{.Prompt}}
+```
 
-- **No comparable system has the two-typed-DAGs property.** Every other system has a single DAG primitive (or no DAG at all, in Temporal's case). This is genuine differentiation — not just marketing.
-- **No comparable system has the five-level hierarchy as five CRDs.** kagent has Agent + Tool; Argo has Workflow + WorkflowTemplate + Step. The cognitive-level argument is unique to TIDE.
-- **kagent is the closest neighbor.** Same posture (K8s-native, CRD-driven, multi-LLM, OTel-instrumented, Helm-distributed). It does *agent topology*; TIDE does *work topology*. The CNCF Sandbox listing for kagent is a good model for TIDE's eventual donation path.
-- **Composio Agent Orchestrator is the closest functional neighbor in the coding-specific space.** Same parallel-agent-on-coding-work shape. But Composio AO runs as a host process (not K8s) and includes PR-lifecycle automation that TIDE deliberately defers (AF-12, AF-13). The split is intentional: TIDE wins on K8s-native + paradigm clarity; Composio AO wins on out-of-the-box completeness for GitHub-centric flows.
-- **Temporal's durable-execution model is what TIDE achieves *without* a database.** The minimal-resumption-state property (D-4) is the structural argument for that — and it's a direct consequence of choosing Kahn-layered over event-history-based scheduling.
+Target structure:
 
----
+```
+[Role declaration — stable, ~50 tokens]
+[TIDE system context paragraph — stable, ~200 tokens]
+[SharedContext block — stable for all siblings in the same wave, ~500-800 tokens]
+  - Milestone outcome (1-2 sentences)
+  - Phase objective (1-2 sentences)
+  - Plan scope summary (3-5 sentences for plan/task levels; absent for project/milestone)
+  - Sibling task list (for task executor: what other tasks exist in this wave, declared-output-paths)
+[Role-specific instructions — stable for each level, ~200 tokens]
+[Output contract / child-CRD format — stable for each level, ~200 tokens]
+[Filesystem layout (task executor only) — stable, ~100 tokens]
+Original prompt:
+{{.Prompt}}
+```
 
-## Implications for the Roadmap (Phase Ordering)
+Target total stable prefix: ≥1,024 tokens across all five templates.
+Target `{{.Prompt}}` suffix: the minimum per-task instruction, no shared context repeated.
 
-The dependency graph above implies a natural phase ordering for v1:
+The key changes:
+1. Move `{{.TaskUID}}` out of the stable body — it can appear in a metadata header that's
+   explicitly NOT part of the cached prefix (i.e., after `{{.Prompt}}`), or be removed
+   entirely if the executor already reads it from `in.json`.
+2. Move `{{.Provider.Vendor}}` and `{{.Provider.Model}}` to the volatile suffix or remove
+   them (the subagent already knows its model; stating it in the prompt is redundant).
+3. Add a `{{.SharedContext}}` template variable populated by the dispatcher from the
+   owning Plan/Phase/Milestone CRD. This is the same across all siblings.
 
-1. **CRDs first** (TS-18, D-2). Five CRDs with proper Spec/Status separation and validation. Reconcilers are no-op stubs at this stage.
-2. **Kahn-layered algorithm + plan validation** (TS-6, TS-7, TS-17, D-3). Pure-Go library, no controller dependencies. Cycle detection + wave derivation. Unit tests against the spec's worked example.
-3. **Subagent interface + concrete Claude-Code impl** (TS-21, D-5, AF-10 prevention). Define interface; ship a Pod-spec-based concrete impl; verify zero Anthropic SDK imports outside the concrete impl package.
-4. **Reconciler + dispatch path** (TS-1 to TS-3, TS-8, TS-9, TS-11, TS-16). The orchestrator's reconcile loops. Strict-by-default failure profile. PVC artifact handling. Pod-per-task dispatch.
-5. **Resumption + minimal persistence** (TS-4, D-4, D-9). Indegree-map + completed-task-set. Controller-restart integration test. Artifacts-as-truth reconcile flow.
-6. **Git integration** (TS-12, TS-22, TS-19). Clone on apply; push at level boundary. Host-agnostic via `go-git`. Secret-based creds.
-7. **Human gates** (TS-10, D-6, D-7). Per-level gate policy on Project CRD. `tide approve` CLI. Slack-tide between-wave review.
-8. **Observability** (TS-13, TS-14, TS-15). Structured logs; Prometheus metrics; OTel + OpenInference spans.
-9. **CLI** (TS-24). Cobra-based wrapper.
-10. **Dashboard** (TS-25, D-8). Read-only, two-DAG view, log streaming.
-11. **Distribution** (TS-23, TS-27). Helm chart with CRDs + controller + RBAC. Apache 2.0. README/docs.
-12. **Self-hosting demo** (TS-26, D-13). The acceptance test. Likely to surface bugs across all prior phases — budget time accordingly.
+### Eval Harness Design (D-C5, D-C6)
 
-Phases 1–3 are the foundation. Phase 4 is the largest. Phases 5–11 can fan out somewhat (artifacts/git, gates, observability, CLI, dashboard, distribution can be parallel after phase 4). Phase 12 is sequential and the longest pole on calendar time because it's the integration of everything.
+The harness is a Go test package at `internal/eval/` with:
+
+- **Golden scenarios directory** (`internal/eval/testdata/scenarios/`) — each scenario is:
+  - `input.json` — an `EnvelopeIn` struct for one dispatch
+  - `expected_output_schema.json` — the JSON schema the output must satisfy
+  - `quality_criteria.json` — the four rubric dimensions with pass/fail thresholds
+  - `baseline.json` — recorded token counts, cache metrics, quality scores from the
+    approved baseline run
+
+- **Harness runner** — dispatches each scenario through the real template rendering
+  pipeline (not a mock); records actual output + token usage
+
+- **LLM-as-judge scorer** — submits `(scenario_input, actual_output, quality_criteria)`
+  to a judge LLM (separate Claude call, not the same dispatch); receives structured JSON
+  with per-dimension boolean scores + evidence
+
+- **Comparison and gate** — compares quality scores + token metrics against `baseline.json`;
+  fails if any quality dimension regresses; reports token/cost delta vs baseline
+
+- **CI integration** — `make eval` runs the harness; required green before merging any
+  template or dispatcher change
+
+Judge LLM rubric (four dimensions, boolean each):
+
+| Dimension | Pass Criterion |
+|-----------|---------------|
+| Completeness | All declared-output-paths files were produced |
+| Correctness | Produced artifacts satisfy the task acceptance criterion |
+| Instruction-following | Output conforms to the envelope contract (JSON only in children/, no prose) |
+| Plan coherence (planners) | Child CRDs form a valid, non-cyclic dependency graph |
+
+### SharedContext Construction (TS-C3)
+
+The dispatcher must build a `SharedContext` string that is:
+1. **Identical** for all tasks in the same wave of the same plan (determinism required)
+2. **Stable** across dispatch calls (no timestamps, no run IDs)
+3. **Concise** — 500–800 tokens, not a verbatim PLAN.md dump
+
+Content of SharedContext per level:
+
+| Template level | SharedContext content |
+|---------------|----------------------|
+| `project_planner` | Project outcome statement only (already in `{{.Prompt}}`; SharedContext may be empty at this level) |
+| `milestone_planner` | Milestone scope from Project outcome + project constraints summary |
+| `phase_planner` | Milestone outcome + sibling phase names + declared dependency edges |
+| `plan_planner` | Phase objective + plan scope + sibling plan names + file-touch constraints |
+| `task_executor` | Plan objective + wave number + sibling task names + their declared-output-paths |
 
 ---
 
 ## Sources
 
-### Comparable systems (K8s workflow engines)
-- [Argo Workflows official documentation](https://argo-workflows.readthedocs.io/en/latest/) — DAG, retries, suspend/resume, artifacts
-- [Tekton Pipelines v1.11.0 release blog](https://tekton.dev/blog/2026/03/30/tekton-pipelines-v1.11.0-taskrun-pending-multi-url-hub-resolver-and-pvc-auto-cleanup/) — TaskRun pending status (approval gates)
-- [Tekton manual approval gate](https://tekton.dev/vault/operator-main/manualapprovalgate/)
-- [Kueue overview](https://kueue.sigs.k8s.io/docs/overview/) — capacity, quotas, multi-cluster
-- [Argo Workflows suspending walk-through](https://argo-workflows.readthedocs.io/en/latest/walk-through/suspending/)
+### Provider caching mechanics (HIGH confidence — official docs)
 
-### Comparable systems (AI agent runtimes on K8s)
-- [kagent docs and CRD model](https://kagent.dev/) — agent CRDs, multi-LLM, OTel + A2A
-- [kagent GitHub](https://github.com/kagent-dev/kagent)
-- [sigs.k8s.io/agent-sandbox blog](https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/) — Pod-per-agent isolation, gVisor
-- [Dapr Agents v1.0 release](https://www.diagrid.io/blog/dapr-agents-1-0-durable-cloud-native-production-ready) — durable multi-agent workflows
-- [LangGraph + LangSmith self-hosted deployment](https://docs.langchain.com/langsmith/self-hosted)
-- [Temporal for AI](https://temporal.io/solutions/ai) — durable execution model
+- [Claude Code prompt caching official docs](https://code.claude.com/docs/en/prompt-caching) — the authoritative source on how Claude Code's three-layer cache structure works, subagent TTL behavior, what invalidates the cache, working directory scoping
+- [Anthropic API prompt caching docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — cache_control breakpoints, minimum token thresholds per model (verified: 1,024 for Sonnet/Opus, 4,096 for Haiku 4.5 and Opus 4.5/4.6), TTL options (5 min default, 1 hr opt-in), pricing multipliers
+- [OpenAI API prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching) — automatic prefix caching mechanics, 1,024-token minimum, 128-token increment granularity, prompt_cache_key parameter
 
-### Comparable systems (agentic coding orchestrators)
-- [Composio Agent Orchestrator](https://github.com/ComposioHQ/agent-orchestrator) — parallel coding agents, git worktrees, PRs
-- [9 open-source agent orchestrators for AI coding (2026)](https://www.augmentcode.com/tools/open-source-agent-orchestrators)
-- [AI coding tools compared (Claude Code, OpenCode, Cursor, Aider) — 2026](https://www.requesty.ai/blog/agentic-coding-tools-compared-2026-claude-code-cursor-codex-aider)
-- [Claude Code Auto Mode (InfoQ)](https://www.infoq.com/news/2026/05/anthropic-claude-code-auto-mode/)
+### Prompt structuring for cache maximization (HIGH confidence — cross-verified)
 
-### Standards and conventions
-- [OpenInference semantic conventions](https://arize-ai.github.io/openinference/spec/) — AI span kinds, attribute schema
-- [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) — generic LLM span conventions (still Experimental as of early 2026)
+- [KV-Cache aware prompt engineering](https://ankitbko.github.io/blog/2025/08/prompt-engineering-kv-cache/) — stable prefix / volatile suffix pattern, what content belongs where, concrete examples of cache-busting content (timestamps, UUIDs, dynamic personalization)
+- [Prompt cache hit rate engineering 2026](https://agentmarketcap.ai/blog/2026/04/11/prompt-cache-hit-rate-engineering-2026) — measuring cache hit rate formula, what breaks cache hits, token layout playbook, case study (7% → 74% hit rate from prefix optimization)
+- [OpenAI Prompt Caching 201 cookbook](https://developers.openai.com/cookbook/examples/prompt_caching_201) — multi-agent / parallel dispatch structuring, prompt_cache_key for routing stickiness, ~15 RPM per prefix limit
 
-### Research and trend reports
-- [Anthropic 2026 Agentic Coding Trends Report](https://resources.anthropic.com/hubfs/2026%20Agentic%20Coding%20Trends%20Report.pdf) — multi-agent coordination, long-running agents, HITL patterns
-- [MAST — Multi-Agent System Failure Taxonomy](https://arxiv.org/abs/2503.13657) — 14 failure modes in multi-agent LLM systems (validates the importance of TS-16 strict failure semantics + D-10 cycle-as-bug)
+### Token minimization and context curation (MEDIUM confidence — WebSearch, multiple sources)
 
-### Kubernetes/controller best practices
-- [Kubebuilder book — status subresource](https://book.kubebuilder.io/cronjob-tutorial/controller-implementation.html)
-- [controller-runtime package docs](https://pkg.go.dev/sigs.k8s.io/controller-runtime)
-- [OpenShift Pipelines manual approval pattern](https://docs.redhat.com/en/documentation/red_hat_openshift_pipelines/1.15/html/creating_cicd_pipelines/using-manual-approval)
+- [AI Agent Loop Token Costs: Context Constraints (Augment Code)](https://www.augmentcode.com/guides/ai-agent-loop-token-cost-context-constraints) — sliding-window context trimming, implicit-contract loss from over-trimming, must pair trimming with pinned state
+- [Escaping the Context Bottleneck (arxiv 2604.11462)](https://arxiv.org/html/2604.11462v1) — active context curation with RL; human-curated context: 4% gain at 20% token overhead; quality matters more than presence
+- [Contextual Memory Virtualisation (arxiv 2602.22402)](https://arxiv.org/pdf/2602.22402) — structurally lossless trimming: mechanical overhead (file dumps, base64, metadata) consumes most context tokens; streaming algorithm strips overhead while preserving message content
+- [Stop Wasting Your Tokens (arxiv 2510.26585)](https://arxiv.org/html/2510.26585v2) — sub-agent returns 1,000–1,500 token condensed findings; orchestrator works with summaries, not full reasoning chains
 
-### TIDE-internal references (load-bearing for categorization decisions)
-- `/Users/justinsearles/Projects/tide/README.md` — design spec (load-bearing for all feature rationale)
-- `/Users/justinsearles/Projects/tide/.planning/PROJECT.md` — Active / Out of Scope (load-bearing for v1 in/out decisions)
-- `/Users/justinsearles/Projects/tide/CLAUDE.md` — implementation discipline (load-bearing for anti-feature rationale)
-- `~/.claude/get-shit-done/workflows/` — the reference paradigm TIDE generalizes (56 workflows, single-host, GSD subagent types)
+### Eval harness patterns (MEDIUM confidence — WebSearch synthesis)
+
+- [Building an Evaluation Harness for Production AI Agents (Towards Data Science)](https://towardsdatascience.com/building-an-evaluation-harness-for-production-ai-agents-a-12-metric-framework-from-100-deployments/) — 12-metric framework from 100+ deployments; self-improving loop: online eval flags failures → offline golden set grows
+- [LLM-as-a-Judge: A Practical Guide (Towards Data Science)](https://towardsdatascience.com/llm-as-a-judge-a-practical-guide/) — boolean scoring more reliable than 1–10; require evidence before score; target ≥0.80 Spearman correlation with human expert for production
+- [Rubric-Based Evaluations & LLM-as-a-Judge (Medium, Adnan Masood)](https://medium.com/@adnanmasood/rubric-based-evals-llm-as-a-judge-methodologies-and-empirical-validation-in-domain-context-71936b989e80) — structured JSON output with evidence citations, calibrated against human annotation, concrete rubric design for domain-specific contexts
+- [Agent Evaluation Framework (Galileo)](https://galileo.ai/blog/agent-evaluation-framework-metrics-rubrics-benchmarks) — assesses task completion quality, tool selection rationale, planning effectiveness as distinct rubric axes
 
 ---
-*Feature research for: TIDE v1 — Kubernetes-native hierarchical agentic coding orchestrator*
-*Researched: 2026-05-12*
+
+*Feature research for: TIDE v1.0.2 Ebb Tide — Token & Cost Optimization*
+*Researched: 2026-06-15*
+*Scope: NEW cost-optimization + eval features only; v1 features are in the prior FEATURES.md version (2026-05-12)*

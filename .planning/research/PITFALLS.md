@@ -915,3 +915,694 @@ Verified against (HIGH = official docs / spec, MEDIUM = 2026 industry reporting)
 ---
 *Pitfalls research for: TIDE — Kubernetes-native hierarchical agentic coding orchestrator*
 *Researched: 2026-05-12*
+
+
+---
+
+## v1.0.2 Ebb Tide — Token/Cost Optimization & Eval Harness Pitfalls
+
+> Scope. The following pitfalls are specific to **adding** token/cost optimization
+> and a quality-gated eval harness to TIDE v1.0.2. They are distinct from the v1
+> build pitfalls above. TIDE's dispatch path shells out to `claude -p --bare` (the
+> Claude Code CLI); it does NOT call the Anthropic Messages API directly and cannot
+> set `cache_control` on individual request blocks. Every caching pitfall must be
+> understood in that CLI-mediated context.
+>
+> Source confidence: HIGH where verified against the official Claude Code caching
+> docs (code.claude.com) and the official Anthropic API pricing docs. MEDIUM where
+> supported by multiple 2026 industry sources. LOW where extrapolated from TIDE's
+> specific dispatch architecture.
+
+---
+
+### Pitfall 25: Over-trimming prompts removes load-bearing instructions
+
+**Severity:** Catastrophic (quality regression; not caught until a real run)
+
+**What goes wrong:**
+A prompt-trimming pass targets visible boilerplate: the repeated five-level
+paradigm description, wave-derivation rules, the file-touch section, the child-CRD
+JSON format specification. The tokens drop measurably. The next eval run looks
+cheaper. But a subset of those instructions are the structural contract the LLM
+uses to produce valid child-CRD JSON, to declare DAG edges rather than implicit
+prose dependencies, and to stay inside `DeclaredOutputPaths`. Removing them silently
+regresses the model's compliance rate. The eval harness may not detect this if it
+judges on outcome quality (did the code compile?) rather than on protocol compliance
+(did the child CRD round-trip through the K8s admission webhook?).
+
+**Why it happens:**
+Token count is a visible, easy metric. Instruction quality is invisible until it
+fails. Trimming "repetitive" instructions from templates feels safe because the
+developer already knows the protocol implicitly. The model does not.
+
+Looking at the actual templates: `task_executor.tmpl` starts with role context and
+dispatch metadata (`{{.Level}}`, `{{.TaskUID}}`, etc.) — the Kubernetes path
+constants like `/workspace/envelopes/{{.TaskUID}}/in.json` are not decoration; the
+harness enforces those exact paths. Removing the path section causes the subagent
+to write to the wrong location. The `plan_planner.tmpl` has a multi-paragraph
+child-CRD spec section with explicit JSON shape and two IMPORTANT blocks about
+raw-linebreak escaping and machine-only JSON — every clause exists because a
+production failure occurred without it (the Phase 10 cascade on JSON control
+characters).
+
+**How to avoid:**
+- Categorize every sentence in each template as: (a) structural contract the
+  harness or downstream parser enforces, (b) guard against observed production
+  failure modes, or (c) context/framing that is truly optional. Remove only (c).
+- Maintain a "why-this-line" annotation file alongside each template that records
+  the production cascade or spec reference that caused each clause to exist. If a
+  clause has no entry, it is a candidate for removal. If it has an entry, it is not.
+- The eval harness MUST include protocol-compliance checks (child-CRD parses as
+  valid JSON, passes Kind allowlist, produces non-empty Name and SourcePath) in
+  addition to code-quality checks. A cheaper token count with a 30% child-CRD
+  parse failure rate is a regression, not an improvement.
+- Trim only one template section at a time, run the eval harness, gate.
+- Regression signal: `readChildCRDs` parse error rate rises after a template edit.
+
+**Warning signs:**
+- Child-CRD parse errors increase in integration tests after a prompt edit.
+- `sanitizeJSONStringControls` calls fire more frequently post-trimming (sign the
+  model is reverting to unescaped literals without the IMPORTANT block).
+- Plans arrive with `filesTouched: []` or `declaredOutputPaths: []` (the guard
+  language was removed).
+- Subagents write output to wrong paths (path constants trimmed).
+
+**Phase to address:**
+Phase 1 of v1.0.2 (prompt audit and template-structure map). Annotate before
+trimming. The annotation is the gating artifact.
+
+---
+
+### Pitfall 26: Volatile content in the prefix silently busts the prefix cache every dispatch
+
+**Severity:** Serious (negates all cache benefit; spend is worse than no caching)
+
+**What goes wrong:**
+The template renders `{{.TaskUID}}` in the first few lines of the prompt (the
+dispatch metadata block). TaskUID is a Kubernetes UID — a unique UUID per dispatch.
+The Claude Code CLI caches by strict prefix match: if the first kilobyte of the
+prompt differs by a single character between two wave-sibling dispatches, neither
+hits the other's cache. Because the dispatch metadata block (Level, Role, TaskUID,
+Provider.Model) appears at the top of every template, every dispatch produces a
+unique prefix from line 9 onward. The stable system context (role definition,
+paradigm description, file-path contract) always follows the volatile UID, so the
+cache anchor point is *below* the volatile content — exactly backwards.
+
+This is confirmed by the official Claude Code caching docs: "The match is exact, so
+a change anywhere in the prefix recomputes everything after it. There is no per-file
+or per-segment caching." Any content change before the breakpoint invalidates
+everything after it.
+
+Looking at the actual template layout (`task_executor.tmpl` lines 1-20): the very
+first interpolated field is `{{.Level}}` on line 9, `{{.TaskUID}}` on line 10.
+Wave-sibling dispatches share the same Level (e.g. "task") but have different
+TaskUIDs — so the prefix diverges at line 10. All 40 stable lines below line 10
+are in a different cache entry per dispatch.
+
+**Why it happens:**
+Dispatch metadata at the top is natural for human readers (who are the target
+audience for "what is this run?"). Cache ordering puts stable content first and
+volatile content last — the opposite of natural narrative order. The tension is not
+obvious unless you know the cache is prefix-based.
+
+**How to avoid:**
+- Restructure each template so all stable content (role definition, paradigm
+  description, paradigm rules, file-path contract, output-format spec) precedes any
+  interpolated field. The stable section becomes the shared prefix that benefits
+  from cache reuse across wave-sibling dispatches that use the same template.
+- Volatile dispatch metadata (TaskUID, Provider.Model, Prompt) moves to the end
+  of the template, explicitly labeled as "dispatch-specific context" so it is clear
+  to future editors why it lives at the bottom.
+- Provider.Model is also volatile across multi-model waves (e.g. Haiku for tasks,
+  Sonnet for planners). Group dispatches by model within a wave when possible to
+  maximize sibling cache reuse.
+- Do NOT put a `{{.TaskUID}}` or per-dispatch run ID in any stable block, even as
+  a comment or reference. One character difference busts the prefix.
+- Accept that cross-dispatch cache reuse across different sessions (cold starts)
+  requires even tighter prefix discipline: the stable prefix must be identical
+  between a Haiku-4-5 planner run this week and the same template run next week
+  — no date stamps, no version strings in the stable section.
+
+**Warning signs:**
+- `CacheCreationTokens` reported in `Usage` is consistently equal to (or near)
+  `InputTokens` for every dispatch — meaning no cache hit, every dispatch pays
+  the full write premium.
+- Cache hit rate stays near 0% across wave-sibling dispatches that use the same
+  template and model.
+- The ratio `CacheReadTokens / (CacheReadTokens + CacheCreationTokens)` does not
+  improve as a wave progresses (earlier siblings should warm the cache for later
+  ones).
+- Template diff shows a new field moved into the stable prefix section.
+
+**Phase to address:**
+Phase 1 of v1.0.2 (prompt-structure reorder). This is the single highest-ROI
+structural change and must land before any other cache-related work.
+
+---
+
+### Pitfall 27: Assuming cache hits are observable or controllable via the CLI path
+
+**Severity:** Serious (eval harness may report false metrics; optimization may target the wrong layer)
+
+**What goes wrong:**
+TIDE shells out to `claude -p --bare` — the Claude Code CLI. It does NOT call the
+Anthropic Messages API directly and therefore does NOT and CANNOT set
+`cache_control: { type: "ephemeral" }` on individual prompt blocks. The CLI manages
+caching internally. The subagent's `stream_parser.go` already extracts
+`cache_read_input_tokens` and `cache_creation_input_tokens` from the CLI's
+`stream-json` output — these fields ARE present and ARE reliable (confirmed by the
+Claude Code docs: the `current_usage` object carries these counters per turn). So
+cache hit data IS available from the stream. What TIDE cannot do is:
+(a) force a cache breakpoint at a specific position in the prompt,
+(b) choose between the 5-minute and 1-hour TTL on API-key auth (the CLI picks),
+(c) observe which content block was cached vs. freshly processed.
+
+The practical implication: the only caching lever available to TIDE is prompt
+ordering (stable content first) and model+tool-set stability (same model across
+sibling dispatches). Anything requiring explicit `cache_control` placement is not
+achievable without moving to a direct SDK integration — which is explicitly out of
+scope for v1.0.2.
+
+A second gap: the CLI uses a 5-minute TTL by default on API-key auth. Two sibling
+task dispatches that run more than 5 minutes apart will not share a warm cache even
+if the prefix is identical. Long waves with many tasks spread over many minutes
+will see diminishing cache returns for later tasks in the wave.
+
+**Why it happens:**
+The natural mental model for "prompt caching" comes from the Anthropic SDK's
+`cache_control` API. The CLI exposes no equivalent flag. Operators reading the
+Anthropic docs expect to be able to mark breakpoints; TIDE's CLI path offers no
+such control surface.
+
+**How to avoid:**
+- Explicitly document in the eval harness that cache hit rate is an _outcome_ metric
+  derived from prompt ordering, NOT a configurable parameter. The harness measures;
+  it does not control.
+- The eval harness reports `CacheReadTokens`, `CacheCreationTokens`, and the
+  derived hit ratio using the existing `Usage` struct fields already populated by
+  `ParseStream` → `estimatedCostCents`. No new parsing is needed.
+- Do not promise a specific cache-hit rate in v1.0.2 requirements. The target is
+  "ordering improves the ratio" — verified by before/after comparison.
+- If cache observability beyond what the CLI stream provides is needed for the eval
+  harness (e.g. per-block cache attribution), that requires moving to the
+  Anthropic Go SDK and becomes a future milestone.
+- Evaluate the 5-minute TTL risk for long waves: if a wave's dispatch-to-dispatch
+  interval regularly exceeds 5 minutes (due to rate-limiting backoff or executor
+  pool limits), cache reuse between siblings will be partial. Model this in the
+  eval so unexpectedly low hit rates don't look like a bug.
+
+**Warning signs:**
+- Eval harness code tries to set `cache_control` by injecting it into the prompt
+  string or via a CLI flag — neither path exists.
+- The harness reports a 0% cache hit rate and concludes "caching is not working"
+  when the true cause is volatile-prefix ordering (Pitfall 26).
+- Requirements docs promise explicit cache breakpoint placement without switching
+  to a direct SDK backend.
+
+**Phase to address:**
+Phase 1 of v1.0.2 (eval harness design). Document the CLI-vs-SDK gap in the
+harness architecture before building the measurement layer.
+
+---
+
+### Pitfall 28: Provider-specific caching assumptions leak into provider-agnostic design
+
+**Severity:** Serious (OSS posture violation; next milestone blocker)
+
+**What goes wrong:**
+The v1.0.2 prompt-restructuring work is done with Anthropic's explicit-breakpoint
+model in mind (stable prefix → volatile suffix). When the OpenAI subagent backend
+lands in the next milestone, it uses automatic prefix caching with a different
+minimum threshold (1,024 tokens for most models) and a different pricing structure
+(50% discount on cached reads, zero write premium — unlike Anthropic's 90%
+discount with a 25% write premium). If the v1.0.2 work bakes in Anthropic-specific
+assumptions — e.g. "the first 1,024 tokens are always cached" or "cache writes cost
+1.25× input" — the eval harness will misreport cost for OpenAI and the optimization
+strategy will be wrong for models with different thresholds.
+
+Concrete differences between providers (verified 2026):
+- Anthropic: requires stable prefix ≥ 1,024 tokens for claude-haiku-4-5 (the
+  minimum threshold is 4,096 tokens for Haiku per current docs), ≥ 1,024 for
+  other models; charges write premium at 1.25× input; provides 90% read discount.
+  TTL is 5 min (API key) or 1 hr (subscription).
+- OpenAI: fully automatic — no explicit cache_control needed; caches prefixes ≥
+  1,024 tokens; 50% read discount; no write premium.
+- Bedrock: prompt caching support and minimum-token thresholds vary per model and
+  region; the one-hour TTL may not be available for all models.
+
+The TIDE pricing table in `pricing.go` already correctly puts cache accounting
+behind the provider firewall (D-C1 confirmed). The risk is the eval harness
+treating Anthropic cache semantics as universal.
+
+**Why it happens:**
+The v1.0.2 work is verified live on the Claude path. It is easy to treat the Claude
+path as the model and not test whether the harness's cost reporting logic works
+correctly when `CacheCreationTokens` is always 0 (OpenAI: no write premium) or when
+the minimum cacheable size is different.
+
+**How to avoid:**
+- The eval harness reports cache metrics using the provider-agnostic `Usage` struct
+  fields (`CacheReadTokens`, `CacheCreationTokens`) and does NOT assume a 1.25×
+  write premium or a 10% read cost in its provider-agnostic display layer. Those
+  constants belong only in `internal/subagent/anthropic/pricing.go`.
+- The harness's cost accounting delegates entirely to `estimatedCostCents` (which
+  already uses per-model, per-instance price tables from `pricing.go`). Never
+  hard-code `cacheWriteMultiplier = 1.25` in the harness.
+- Add a provider-agnostic test fixture that sets `CacheCreationTokens = 0` and
+  `CacheReadTokens > 0` (simulating OpenAI automatic caching) and verifies the
+  harness does not report negative savings or divide by zero.
+- Document the minimum-cacheable-token threshold per provider in the eval harness
+  output. For prompts below 1,024 tokens total, no provider will cache — report
+  this explicitly rather than letting the harness show 0% hit rate as a mystery.
+
+**Warning signs:**
+- The eval harness imports `internal/subagent/anthropic/` — this violates the D-C1
+  provider firewall and means provider-specific constants have leaked into harness code.
+- Harness cost displays show "cache write cost: 1.25×" on a page that claims to be
+  provider-agnostic.
+- A test fixture with an OpenAI-shaped Usage (no CacheCreationTokens) causes the
+  harness to panic or report an impossible hit ratio.
+
+**Phase to address:**
+Phase 1 of v1.0.2 (eval harness design). The provider-agnostic abstraction must
+be verified in the harness before any optimization numbers are published.
+
+---
+
+### Pitfall 29: The cache-write premium makes caching net-negative for short single-dispatch runs
+
+**Severity:** Moderate (misleading cost metrics; can make "optimization" look worse)
+
+**What goes wrong:**
+For Anthropic's explicit caching model, the first call that populates a cache entry
+costs 1.25× the base input price (the write premium). The 90% read discount only
+pays for itself if the same prefix is re-read within the TTL window. For TIDE task
+dispatches that are truly one-shot (a single task that runs once and never re-runs
+within 5 minutes with the same prefix), caching is net-negative: the write premium
+is always paid, the read discount is never collected.
+
+Concrete numbers using `claude-haiku-4-5` ($1/M input, $0.1/M cache read, $1.25/M
+cache write): a 5,000-token stable prefix paid as a cache write costs 5,000 × $1.25/M
+= $0.00625. The same prefix paid as uncached input costs $0.005. Break-even requires
+at least three reads within the TTL window to recover the write premium. A wave of
+10 Haiku-4-5 tasks with the same 5,000-token prefix that all dispatch within 5
+minutes: the first task pays the write premium, the next 9 read at 0.1× — net
+savings is substantial. A single task dispatched once: slight net negative.
+
+The eval harness must compute savings accounting for the write premium correctly,
+or it will report false positives.
+
+**Why it happens:**
+The write premium is not obvious from the cached-read discount. "Cache = savings"
+is the mental model. The full model is "cache = savings if and only if enough reads
+happen within the TTL."
+
+**How to avoid:**
+- The eval harness computes realized savings as:
+  `(input_tokens × input_rate) - (cache_creation_tokens × write_rate + cache_read_tokens × read_rate)`
+  where all rates are per-model from `pricing.go`. This is what `estimatedCostCents`
+  already computes correctly via the four-field `Usage` struct. The harness should
+  display this realized savings number, not a theoretical "if we had cached X tokens
+  we'd save Y."
+- Report cache ROI per wave (multiple dispatches) rather than per dispatch (single
+  call). ROI is only meaningful when measured across all siblings that share a prefix.
+- Flag waves where the stable prefix is below the minimum-cacheable threshold
+  (< 1,024 tokens for most models, < 4,096 tokens for claude-haiku-4-5 per current
+  docs) as "cache-ineligible" rather than "0% cache hit" — the expected hit rate is
+  0 by design, not a bug.
+- For a project-level cost report, disaggregate into: (a) uncached tokens, (b)
+  cache-write tokens, (c) cache-read tokens, and display the blended effective rate.
+  The blended rate declining over a run (as writes amortize across reads) is the
+  correct success signal.
+
+**Warning signs:**
+- Eval harness shows "caching saved $X" without accounting for write premium — the
+  actual savings may be smaller or negative for infrequent dispatches.
+- Per-dispatch savings reported on waves of one (no siblings to share the cache).
+- "Cache hit rate 100%" reported on a wave where the first dispatch always pays the
+  write premium (100% hit rate is impossible by definition — the first call must
+  write, not read).
+
+**Phase to address:**
+Phase 2 of v1.0.2 (eval harness cost accounting). The savings formula must be
+correct before any optimization decisions are made from it.
+
+---
+
+### Pitfall 30: Model or tool-set change mid-wave silently busts cache for all subsequent dispatches
+
+**Severity:** Moderate (unexpected cost spike; hard to trace)
+
+**What goes wrong:**
+Claude Code's cache is keyed on (model, tool-set, prefix content). Changing the
+model mid-wave — e.g. because a per-Task `Levels.task.Model` override is set
+differently from the default, or because the Helm chart defaults changed in a
+redeployment, or because the credproxy routes to a different model alias — means
+each task hits a different cache namespace. Two sibling tasks using `claude-haiku-4-5`
+and `claude-sonnet-4-6` respectively will never share a cache entry, even if they
+have identical prompt prefixes.
+
+The official Claude Code docs confirm: "Each model has its own cache. Switching
+models recomputes the entire request even when the content is identical."
+
+For TIDE specifically, the `Provider.Model` field is already stamped into
+`EnvelopeIn` at dispatch time from `Levels.<level>.Model → Spec.Subagent.Model →
+helm default` chain. If this chain resolves differently for different tasks in the
+same wave (a realistic scenario when per-level model overrides exist), cache reuse
+between siblings is zero.
+
+**Why it happens:**
+Model selection feels orthogonal to caching. The connection between "same model"
+and "shared cache" is not documented in most operator guides; it surfaces only in
+the Claude Code caching docs.
+
+**How to avoid:**
+- Before restructuring prompts for cache reuse, audit the model-resolution chain
+  per task type. Wave siblings that should share a cache must resolve to the same
+  model string.
+- Log the resolved model at dispatch time (already available in `in.Provider.Model`)
+  and surface it in the eval harness's per-task report. Anomalous model diversity
+  within a wave is immediately visible.
+- The eval harness groups cache statistics by (template, model) tuple, not just by
+  template. A "0% hit rate" on a task group is only informative if all tasks in the
+  group share the same model.
+- MCP server connect/disconnect events also bust the cache (confirmed by Claude Code
+  docs). Since TIDE's CLI invocation uses `--bare` (which suppresses auto-discovery
+  of `.mcp.json`), MCP tools are not loaded from the host, and this risk is
+  mitigated by the `--bare` flag. However, if the CLI version changes between
+  dispatches (a TIDE upgrade mid-wave), the system prompt changes and the cache is
+  re-warmed. Pin the Claude Code CLI version tightly in the subagent image.
+
+**Warning signs:**
+- Cache hit rate breaks down by model reveals that one model has high hit rate and
+  another has 0% hit rate for the same template.
+- `Provider.Model` values in `events.jsonl` vary within the same wave.
+- A cache warmup from task 1 is never reused by tasks 2-N in the same wave.
+
+**Phase to address:**
+Phase 1 of v1.0.2 (prompt audit). Model consistency within a wave is a prerequisite
+for cache reuse. Audit before any restructuring.
+
+---
+
+### Pitfall 31: LLM-as-judge evals are flaky, biased, and easy to game
+
+**Severity:** Serious (an unreliable quality gate is worse than no quality gate)
+
+**What goes wrong:**
+The eval harness uses an LLM judge to score "was this planner output quality good?"
+The judge is called once per eval run. Because LLM outputs are non-deterministic,
+the same run scores 7/10 on Monday and 5/10 on Wednesday with no code change. The
+team debugs prompt changes chasing noise. Worse: the judge model is the same model
+being optimized — it has verbosity bias (longer outputs score higher), self-enhancement
+bias (it prefers responses that match its own style), and position bias (it scores
+the first-presented option higher). An optimizer that trims prompts to be shorter
+sees the judge penalize it for brevity even if the shorter output is functionally
+equivalent. Over time, prompt changes are optimized for judge approval rather than
+actual TIDE run quality.
+
+Research: judge models score identically formatted outputs inconsistently; position
+bias can flip a winner/loser comparison by reordering. Studies show multi-judge
+consensus with Cohen's Kappa ~0.95 requires aggregating many independent evaluations.
+
+**Why it happens:**
+"Ask an LLM to grade the LLM" is the fastest path to a quality harness. The biases
+are subtle and invisible until the harness produces counterintuitive results.
+
+**How to avoid:**
+- Use deterministic, protocol-compliance checks as the primary quality gate:
+  - Child-CRD round-trip (parse → admission → serialize → re-parse produces
+    identical structure).
+  - All declared `filesTouched` paths were actually written.
+  - DAG declared by the planner is acyclic (Kahn succeeds).
+  - Output paths stay within `DeclaredOutputPaths`.
+  - Prompt contains no raw control characters that would fail `sanitizeJSONStringControls`.
+  These pass/fail deterministically with no LLM judge involved.
+- If LLM judging is used for semantic quality (e.g. "is this PLAN.md coherent?"),
+  use a different, ideally stronger model than the one being evaluated; aggregate
+  at least 5 independent judge calls per sample and report median + IQR; use rubrics
+  with binary criteria (yes/no per criterion) rather than holistic scores.
+- Establish a frozen baseline sample set of known-good outputs from v1.0.1. Judge
+  those outputs and record the distribution. Use that distribution as the null
+  hypothesis for "no regression." A change is a regression only if it moves the
+  distribution significantly (p < 0.05 with adequate n).
+- Never run a single-sample eval to gate a merge. Minimum n for statistical signal
+  depends on variance; for LLM-as-judge with typical variance, n ≥ 20 samples per
+  condition is a lower bound.
+- Lock the judge model version. A judge model update can shift all scores regardless
+  of the actual quality change.
+
+**Warning signs:**
+- Eval scores vary by more than 1 point (on a 10-point scale) between consecutive
+  runs of the same unchanged prompt.
+- Prompt changes that reduce token count by 20% show reduced judge scores even though
+  no functional regression is detected.
+- The team debates whether a low eval score reflects a quality regression or judge
+  flakiness — this ambiguity signals the harness is not trustworthy.
+- Judge and protocol-compliance metrics diverge (judge says quality improved; child-CRD
+  parse failure rate rose).
+
+**Phase to address:**
+Phase 2 of v1.0.2 (eval harness quality measurement). Protocol-compliance checks
+ship first and are the primary gate. LLM judging is supplementary and governed by
+the statistical guard rails above.
+
+---
+
+### Pitfall 32: No stable baseline means every eval measures against a moving target
+
+**Severity:** Serious (renders all delta-measurement meaningless)
+
+**What goes wrong:**
+The eval harness runs before and after a prompt change and reports "cost dropped 15%,
+quality unchanged." But "before" and "after" share the same live prompt templates —
+if another PR landed between the two runs, or if a model update deployed to the
+provider between runs, the before/after delta is not attributable to the change
+being tested. After 10 prompt changes, the team cannot say which ones helped and
+which ones hurt.
+
+**Why it happens:**
+Establishing a frozen baseline feels like extra work up front. In practice it is the
+only thing that makes optimization measurements valid.
+
+**How to avoid:**
+- Freeze a baseline at the start of v1.0.2: a snapshot of all five templates as they
+  exist in the v1.0.1 tag, run against a fixed fixture project (the existing
+  `examples/projects/medium/` fixture), with a specific pinned model. Record:
+  `InputTokens`, `OutputTokens`, `CacheReadTokens`, `CacheCreationTokens`,
+  `EstimatedCostCents`, and all protocol-compliance checks. Store this as a checked-in
+  `eval/baseline.json` artifact.
+- Every subsequent eval run compares against `eval/baseline.json`, not against the
+  previous run. A regression is a deviation from baseline beyond a configurable
+  tolerance, not just a delta from the last run.
+- If the baseline needs to be updated (e.g. a model version change that shifts all
+  costs uniformly), do so explicitly with a PR that explains why, not as a side
+  effect of a prompt change.
+- CI: eval runs on every PR that touches a `*.tmpl` file; the eval produces a
+  `eval/results.json`; the PR fails if any protocol-compliance check regresses from
+  baseline; cost delta is informational only (no hard cost target).
+
+**Warning signs:**
+- Two engineers report different eval results for the same prompt change run on
+  different days.
+- The eval harness does not have a checked-in `baseline.json` artifact.
+- Eval results are reported as absolute numbers ("cost was $0.12") rather than
+  as deltas from baseline ("cost decreased 18% from baseline").
+- The model version used for eval changes between runs without a documented baseline
+  refresh.
+
+**Phase to address:**
+Phase 2 of v1.0.2 (eval harness baseline). Baseline must be frozen before any
+prompt edits land.
+
+---
+
+### Pitfall 33: Optimizing the eval metric instead of actual run quality (Goodhart's Law)
+
+**Severity:** Serious (produces a system that looks cheaper but isn't actually better)
+
+**What goes wrong:**
+The eval harness measures token count and a compliance score. The team optimizes
+prompts to minimize both. A prompt that says "author a plan with exactly 3 tasks,
+all depending on each other except task-1" will produce a low token count and high
+compliance score — the plan is structurally valid — but it is a useless plan for
+any real project. The optimizer has learned to satisfy the metric without satisfying
+the underlying goal (high-quality artifacts that advance the TIDE project).
+
+More concretely: removing the "author MILESTONE.md describing the milestone's
+outcome scope" instruction from `milestone_planner.tmpl` reduces token count by ~200
+tokens per dispatch. The eval harness measures whether the child-CRD was emitted
+(yes) and whether the model cost less (yes). It does not measure whether the
+MILESTONE.md was coherent, appropriately scoped, or matched the spec's voice.
+
+**Why it happens:**
+Measurable metrics are optimized; unmeasurable outcomes are not. Cost and
+protocol-compliance are measurable. Document quality, planning coherence, and
+self-hosting readiness are not.
+
+**How to avoid:**
+- The eval harness measures two orthogonal dimensions and does not trade between them:
+  (1) Protocol compliance (deterministic, automated — primary gate).
+  (2) Token cost (measured, informational — not a gating criterion by itself).
+  A change that reduces cost by trading protocol compliance is always rejected.
+  A change that increases cost but improves compliance is worth analyzing.
+- Include at least one "live run" eval per milestone: run the optimized prompts on a
+  real (small) project in the dogfood cluster and review the artifacts by hand.
+  The reviewer verifies: does the MILESTONE.md look like something a senior engineer
+  would write? Does the PLAN.md decompose work at the right granularity? Metric-only
+  optimization cannot substitute for this.
+- Treat any prompt change that removes instructions for human-readable artifact
+  quality (markdown structure, spec voice, level-appropriate scope) as suspect even
+  if compliance metrics pass. These are the "looks done but isn't" cases.
+- Log the actual authored artifacts (PLAN.md, MILESTONE.md) for each eval run and
+  diff them against baseline. A mechanically-valid but stylistically-wrong plan is a
+  regression.
+
+**Warning signs:**
+- Eval scores improve but the authored plans decompose work into suspiciously few
+  or trivially simple tasks.
+- The team debates whether a particular protocol-compliance metric is the right proxy
+  for quality — this signals the metric may already be gamed.
+- "The eval says it's fine" used to close a review without examining the actual
+  artifact.
+
+**Phase to address:**
+Phase 2 of v1.0.2 (eval harness quality measurement). Encode the two-dimension
+independence constraint in the harness design before running any optimization loops.
+
+---
+
+### Pitfall 34: Attributing cost wrong — double-counting tokens and misreading cache-write vs cache-read contributions
+
+**Severity:** Moderate (produces wrong optimization decisions)
+
+**What goes wrong:**
+The `Usage` struct has four fields: `InputTokens`, `OutputTokens`, `CacheReadTokens`,
+`CacheCreationTokens`. The common mistake is treating `InputTokens` as the total
+input cost, ignoring the cache breakdown. In fact:
+- `InputTokens` from the CLI stream already EXCLUDES tokens served from cache.
+  Uncached input cost = `InputTokens × input_rate`.
+- `CacheCreationTokens` is additional input that was freshly processed AND written
+  to cache at the write premium. Cache-write cost = `CacheCreationTokens × write_rate`.
+- `CacheReadTokens` is input served from cache at the read discount.
+  Cache-read cost = `CacheReadTokens × read_rate`.
+- Output cost is always at the output rate: `OutputTokens × output_rate`.
+
+The `estimatedCostCents` in `pricing.go` computes this correctly with four separate
+multiplications. A naive eval that just reports `InputTokens + CacheCreationTokens`
+and applies the input rate uniformly double-counts the cache-creation tokens
+(they are already a subset of what would have been input tokens if there were no
+caching) AND underpays the write premium AND ignores the read discount.
+
+Looking at the actual code: `numerator = u.InputTokens × input_rate + u.OutputTokens × output_rate + u.CacheReadTokens × cacheRead_rate + u.CacheCreationTokens × cacheWrite_rate`. This is correct. A harness that re-implements cost calculation instead of using this function will almost certainly be wrong.
+
+**Why it happens:**
+The four-field split is non-obvious. The Anthropic API docs present them as additive,
+but their relationship to the "billed input" concept differs from the raw stream
+counters.
+
+**How to avoid:**
+- The eval harness MUST NOT re-implement cost calculation. It MUST call
+  `estimatedCostCents` from `pricing.go` or consume the `EstimatedCostCents` field
+  already populated in `EnvelopeOut.Usage` by the subagent. Every cost number in
+  the eval report traces to that function.
+- When displaying cost breakdowns, use the four-field breakdown: show uncached input,
+  cache-write, cache-read, and output as separate line items. Do not aggregate input
+  + cache-creation into one "input" number.
+- Write a test: given a known Usage struct with specific cache breakdown, assert the
+  harness-computed cost matches `estimatedCostCents` within 1 cent. This test will
+  catch any re-implementation drift.
+- For wave-level cost rollup, sum the four fields independently across all tasks in
+  the wave, then apply rates once. Do not apply rates per-task and sum cents — integer
+  ceiling arithmetic compounds error.
+
+**Warning signs:**
+- Eval harness imports pricing rates as local constants rather than calling
+  `estimatedCostCents`.
+- Cost report shows "total input tokens" as `InputTokens + CacheCreationTokens`
+  rather than showing them separately.
+- Wave-level cost does not match the sum of per-task `EstimatedCostCents` values
+  from `EnvelopeOut.Usage`.
+- "Cache saved X tokens" reported without also reporting the write-premium cost of
+  establishing those cached tokens.
+
+**Phase to address:**
+Phase 2 of v1.0.2 (eval harness cost accounting). The cost formula is correct in
+`pricing.go`; the harness must use it, not duplicate it.
+
+---
+
+## v1.0.2 Technical Debt Patterns
+
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| Trim templates without annotation file | Faster token reduction | Regression when load-bearing instructions are rediscovered mid-run | Never |
+| Put volatile TaskUID at top of prompt "for readability" | Human-friendly template order | Cache prefix diverges at line 9; siblings never share cache | Never |
+| Use `cache_control` from Anthropic SDK instead of CLI | Fine-grained cache control | Breaks the CLI-based dispatch path; requires SDK backend | Next milestone only |
+| Judge quality with same model being optimized | No extra API cost for judge | Self-enhancement and verbosity bias; judge can be gamed | Never as sole gate |
+| Single-run eval for a prompt change | Fast feedback loop | Too much variance to be meaningful; wrong decisions | Never for gating changes |
+| Re-implement cost math in eval harness | Local control of formula | Diverges from `estimatedCostCents`; will be wrong | Never; call the existing function |
+| Skip provider-agnostic harness abstraction | Simpler v1.0.2 impl | Next milestone's OpenAI backend breaks the harness | Never; keep D-C1 firewall intact |
+
+---
+
+## v1.0.2 Integration Gotchas
+
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| Claude Code CLI caching | Assuming `cache_control` can be set from outside the CLI | Accept that the CLI manages cache internally; optimize by ordering, not by marking |
+| Claude Code CLI caching | Treating 5-minute TTL as permanent for long waves | Measure actual hit rates; model the TTL risk for waves with > 5-min dispatch spread |
+| Anthropic pricing | Assuming cache saves always reduce cost | Compute realized savings = uncached_cost - (write_premium + read_discount); can be negative for one-shot dispatches |
+| claude-haiku-4-5 | Assuming 1,024-token minimum cacheable threshold | Haiku's minimum is 4,096 tokens per current docs; verify the stable prefix meets this threshold or caching will never fire |
+| LLM-as-judge | Calling the judge once and treating the score as ground truth | Aggregate ≥ 5 independent calls; report median + IQR; use binary rubric criteria |
+| stream-json usage fields | Treating `InputTokens` as total billed input | `InputTokens` is uncached input only; total billed = `InputTokens + CacheCreationTokens + CacheReadTokens` |
+
+---
+
+## v1.0.2 "Looks Done But Isn't" Checklist
+
+- [ ] **Prompt reorder:** verify `CacheReadTokens > 0` appears in at least one task's Usage for a wave with identical-template siblings — if still 0%, the stable prefix is not actually stable.
+- [ ] **Token minimization:** verify child-CRD parse success rate is unchanged or improved after every template edit. Rising parse errors = load-bearing instruction removed.
+- [ ] **Eval baseline:** verify `eval/baseline.json` is checked in and the harness compares against it, not against the previous run.
+- [ ] **Cost formula:** verify eval harness cost total matches sum of `EnvelopeOut.Usage.EstimatedCostCents` per dispatch, within 1 cent per task.
+- [ ] **Provider firewall:** verify eval harness code does not import `internal/subagent/anthropic/`. Cost computation must go through `pkg/dispatch.Usage` only.
+- [ ] **Judge reproducibility:** run the same eval twice with no code change; verify judge scores are within the documented variance envelope (IQR ≤ 2 on a 10-point scale).
+- [ ] **Minimum-cacheable check:** verify the restructured stable prefix for claude-haiku-4-5 dispatches exceeds 4,096 tokens. Below that threshold, Haiku will never cache.
+- [ ] **Write-premium accounting:** verify eval output distinguishes "realized savings after write premium" from "gross read discount" — they are not the same number.
+
+---
+
+## v1.0.2 Pitfall-to-Phase Mapping
+
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| 25. Over-trimming load-bearing instructions | Phase 1: prompt audit + annotation file | Child-CRD parse success rate ≥ v1.0.1 baseline |
+| 26. Volatile prefix busts cache | Phase 1: template reorder (stable-first) | `CacheReadTokens > 0` for ≥ 1 sibling in each wave |
+| 27. CLI-vs-SDK observability gap | Phase 1: harness architecture doc | Harness correctly sources cache counters from `Usage` struct only |
+| 28. Provider-specific assumptions in harness | Phase 1: harness design | Harness imports only `pkg/dispatch`; provider firewall lint passes |
+| 29. Cache-write premium net-negative on one-shots | Phase 2: cost accounting | Realized savings formula accounts for write premium; shown as separate line item |
+| 30. Model change mid-wave busts cache | Phase 1: prompt audit | Model consistency verified per wave in eval report |
+| 31. Flaky LLM-as-judge | Phase 2: eval quality measurement | Judge variance envelope documented; deterministic checks are primary gate |
+| 32. No stable baseline | Phase 2: baseline freezing | `eval/baseline.json` checked in before first prompt edit |
+| 33. Optimizing the metric | Phase 2: harness design | Two-dimension independence: cost is informational; compliance is the gate |
+| 34. Wrong cost attribution | Phase 2: cost accounting | Harness delegates to `estimatedCostCents`; test asserts parity |
+
+---
+
+## v1.0.2 Sources
+
+- HIGH: [How Claude Code uses prompt caching — official Claude Code docs](https://code.claude.com/docs/en/prompt-caching) (verified 2026-06-15; confirms TTL, prefix-match invariant, model-keyed cache, tool-set invalidation, observable counters)
+- HIGH: [Prompt caching — Anthropic API docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) (cache_control placement, minimum token thresholds, pricing 1.25×/0.10×)
+- HIGH: TIDE `internal/subagent/anthropic/stream_parser.go` — confirms `cache_read_input_tokens` and `cache_creation_input_tokens` are extracted from the CLI's `stream-json` output and mapped to `Usage.CacheReadTokens` / `Usage.CacheCreationTokens`
+- HIGH: TIDE `internal/subagent/anthropic/pricing.go` — confirms correct four-field cost formula and conservative-tier fallback
+- HIGH: TIDE `internal/subagent/common/templates/*.tmpl` — confirms current volatile-first template ordering (TaskUID at line 10 of every template)
+- MEDIUM: [Anthropic Prompt Caching Saves 90% — the write-premium caveat — DEV Community](https://dev.to/gabrielanhaia/anthropic-prompt-caching-saves-90-heres-the-one-caveat-nobody-mentions-258k) (confirms net-negative for one-shot dispatches)
+- MEDIUM: [Prompt Caching for Anthropic and OpenAI — DigitalOcean Blog](https://www.digitalocean.com/blog/prompt-caching-with-digital-ocean) (provider comparison: OpenAI automatic vs Anthropic explicit; zero write premium for OpenAI)
+- MEDIUM: [PromptHub: Prompt Caching with OpenAI, Anthropic, and Google](https://www.prompthub.us/blog/prompt-caching-with-openai-anthropic-and-google-models) (minimum token thresholds per provider)
+- MEDIUM: [Judge Reliability Harness — arxiv 2603.05399](https://arxiv.org/pdf/2603.05399) (LLM judge non-determinism, bias taxonomy)
+- MEDIUM: [Evaluating Scoring Bias in LLM-as-a-Judge — ResearchGate](https://www.researchgate.net/publication/393148710_Evaluating_Scoring_Bias_in_LLM-as-a-Judge) (position bias, verbosity bias quantification)
+- MEDIUM: [Claude prompt caching miss troubleshooting — apiyi.com](https://help.apiyi.com/en/claude-prompt-caching-not-hit-minimum-token-troubleshooting-en.html) (Haiku 4,096-token minimum threshold)
+- MEDIUM: [Cache TTL regression from 1h to 5m — claude-code GitHub issue #46829](https://github.com/anthropics/claude-code/issues/46829) (TTL behavior on API key vs subscription auth)
+
+---
+*v1.0.2 Ebb Tide pitfalls appended: 2026-06-15*
