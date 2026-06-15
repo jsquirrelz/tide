@@ -150,10 +150,36 @@ spec:
   # Default image + model for the planner pool (Claude).
   # Codex executor pool is wired via subagent.levels.task.image override
   # once the codex subagent image is built by this run.
-  # Cheaper alternatives: model: claude-sonnet-4-6, claude-haiku-4-5
+  # Default planner model is Sonnet (claude-sonnet-4-6); pricier: claude-opus-4-8.
+  #
+  # Per-level model selection (Phase 3 D-C2). Resolution per level is
+  # subagent.levels.<level>.model -> subagent.model -> Helm default.
+  #   - milestone: claude-opus-4-8 — the highest-leverage plan; the 1M-context
+  #     Opus tier ($5/$25 per 1M input/output tokens) for the milestone planner.
+  #   - task:      claude-haiku-4-5 — high-volume executor pool; the cheapest tier
+  #     (200K context, $1/$5 per 1M input/output tokens) keeps task spend down.
+  #   - phase/plan inherit subagent.model (claude-sonnet-4-6) below — the
+  #     speed/intelligence balance tier (1M context, $3/$15 per 1M tokens).
+  #
+  # ON PROVIDER/VENDOR (read before expecting heterogeneous dispatch here):
+  # In v1.0 the resolved provider VENDOR is pinned to "anthropic"
+  # (internal/controller/dispatch_helpers.go ResolveProvider). So the `levels`
+  # block below selects MODELS within the Anthropic vendor — it does NOT yet
+  # switch providers per level. The Claude-planner / Codex-executor split this
+  # run exists to build (via subagent.levels.task.image pointing at a Codex
+  # image, plus internal/subagent/codex/) is the DELIVERABLE of this run, not a
+  # shipped feature: until that lands, a non-Anthropic image at levels.task
+  # would be selected by resolveImage but rejected at runtime (the image's
+  # vendor sentinel expects an "anthropic" envelope). Treat per-level model
+  # overrides as live today; per-level provider overrides as forthcoming.
   subagent:
     image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
-    model: claude-opus-4-7
+    model: claude-sonnet-4-6
+    levels:
+      milestone:
+        model: claude-opus-4-8
+      task:
+        model: claude-haiku-4-5
 
   # Phase 3 D-B6: per-project git target + creds.
   git:

@@ -153,11 +153,27 @@ spec:
     rollingWindowCapCents: 7500
     rollingWindowDuration: 24h
 
-  # claude-opus-4-7 for real multi-phase feature work.
-  # Cheaper alternatives: model: claude-sonnet-4-6, claude-haiku-4-5
+  # Default planner model is Sonnet (claude-sonnet-4-6); pricier: claude-opus-4-8.
+  #
+  # Per-level model selection (Phase 3 D-C2). Resolution per level is
+  # subagent.levels.<level>.model -> subagent.model -> Helm default.
+  #   - milestone: claude-opus-4-8 — highest-leverage plan; 1M-context Opus tier
+  #     ($5/$25 per 1M input/output tokens).
+  #   - task:      claude-haiku-4-5 — high-volume executor pool; cheapest tier
+  #     (200K context, $1/$5 per 1M input/output tokens).
+  #   - phase/plan inherit subagent.model (claude-sonnet-4-6) below — the
+  #     speed/intelligence balance tier (1M context, $3/$15 per 1M tokens).
+  # These overrides select models within the Anthropic vendor — vendor is pinned
+  # to "anthropic" in v1.0. See 02-codex-runtime-project.yaml for the full note
+  # on why per-level *provider* (not just model) selection is forthcoming.
   subagent:
     image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
-    model: claude-opus-4-7
+    model: claude-sonnet-4-6
+    levels:
+      milestone:
+        model: claude-opus-4-8
+      task:
+        model: claude-haiku-4-5
 
   # Phase 3 D-B6: per-project git target + creds.
   git:
