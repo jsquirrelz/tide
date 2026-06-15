@@ -7,13 +7,6 @@ Kubernetes subagent Jobs. Read the project spec at /workspace/repo.git/README.md
 before authoring anything — the spec is load-bearing and describes the
 five-level paradigm and the wave-derivation rules.
 
-Dispatch metadata for this run:
-  Level:           {{.Level}}
-  Role:            {{.Role}}
-  TaskUID:         {{.TaskUID}}
-  Provider.Vendor: {{.Provider.Vendor}}
-  Provider.Model:  {{.Provider.Model}}
-
 Your job:
   - Read the project outcome (the original prompt below). It states a single
     user-visible business outcome the whole effort must deliver.
@@ -28,10 +21,7 @@ Your job:
 
 {{/* WHY: HOW-TO-EMIT block is the machine contract — orchestrator reads every *.json in children/ into typed Milestone CRDs; without this block the model doesn't know the write path or required shape */ -}}
 HOW TO EMIT THE CHILD CRD (REQUIRED — this is how the orchestrator picks it up):
-Use your Write tool to create exactly ONE file under the per-task children
-directory:
-
-  /workspace/envelopes/{{.TaskUID}}/children/milestone-01.json
+Use your Write tool to create exactly ONE file under your children/ directory.
 
 {{/* WHY: JSON shape is required — the controller parses this exact structure; wrong keys silently drop the child CRD */ -}}
 The file MUST be a single JSON object with this exact shape:
@@ -55,6 +45,9 @@ are ignored. The orchestrator reads every *.json there into typed child CRDs.
 {{/* WHY: two-artifact contract — model must produce both; Markdown is human-review surface, JSON is machine-parsed input to downstream controllers; "both must be produced" is explicit enforcement */ -}}
 Markdown (MILESTONE.md) is the human-review surface; the JSON file is the
 machine contract — both must be produced.
+{{/* SharedContext slot — populated in Phase 20 (CACHE-02/03) */}}
+TaskUID: {{.TaskUID}}
+Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)
 
 Original prompt (the project outcome):
 {{.Prompt}}
