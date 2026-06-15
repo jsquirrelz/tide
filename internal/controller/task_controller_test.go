@@ -989,3 +989,59 @@ func TestTaskReconciler_RateLimitStormAbsorbed(t *testing.T) {
 	// This stub ensures the test name appears in `go test -v` output for grep matching.
 	t.Log("TestTaskReconciler_RateLimitStormAbsorbed: see Ginkgo suite")
 }
+
+// TestBuildEnvelopeInExecutorIgnoresSharedContext asserts the CACHE-02 lock:
+// buildEnvelopeIn (executor path) produces an EnvelopeIn with SharedContext==""
+// regardless of what is set on the task spec. The field is absent by
+// construction in buildEnvelopeIn — this test proves that invariant.
+func TestBuildEnvelopeInExecutorIgnoresSharedContext(t *testing.T) {
+	// Minimal TaskReconciler — only Deps.HelmProviderDefaults is needed by buildEnvelopeIn.
+	r := &TaskReconciler{
+		Deps: TaskReconcilerDeps{
+			HelmProviderDefaults: ProviderDefaults{},
+		},
+	}
+
+	task := &tideprojectv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:  types.UID("task-uid-executor-sc-test"),
+			Name: "task-sc-test",
+		},
+		Spec: tideprojectv1alpha1.TaskSpec{
+			PromptPath:   "children/task-01.json",
+			SharedContext: "this blob must not appear in the executor envelope (CACHE-02)",
+		},
+	}
+	project := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Status: tideprojectv1alpha1.ProjectStatus{
+			Git: tideprojectv1alpha1.GitStatus{BranchName: "worktree-agent-001"},
+		},
+	}
+
+	envIn, envBytes, err := r.buildEnvelopeIn(context.Background(), task, project, 1, "signed-token")
+	if err != nil {
+		t.Fatalf("buildEnvelopeIn: %v", err)
+	}
+
+	// CACHE-02 lock: executor EnvelopeIn must never carry SharedContext.
+	if envIn.SharedContext != "" {
+		t.Errorf("executor EnvelopeIn.SharedContext = %q, want empty (CACHE-02 lock violated)", envIn.SharedContext)
+	}
+
+	// Also verify via the marshaled bytes — SharedContext must be absent (omitempty).
+	if containsBytes(envBytes, `"sharedContext"`) {
+		t.Errorf("executor envelope JSON contains \"sharedContext\" key (CACHE-02 lock violated): %s", envBytes)
+	}
+}
+
+// containsBytes reports whether b contains the UTF-8 encoding of sub.
+func containsBytes(b []byte, sub string) bool {
+	s := string(b)
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

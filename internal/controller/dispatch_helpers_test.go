@@ -300,3 +300,94 @@ func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 		t.Errorf("outcomePromptOf(project) = %q, want %q", got, project.Spec.OutcomePrompt)
 	}
 }
+
+// ---------- SharedContext param tests (Phase 20 CACHE-02/D-07) ----------
+
+// TestBuildPlannerEnvelopeSharedContext: BuildPlannerEnvelope stamps the
+// supplied sharedContext into EnvelopeIn.SharedContext; two calls with the
+// same blob produce byte-identical SharedContext (sibling identity — D-03/D-04).
+func TestBuildPlannerEnvelopeSharedContext(t *testing.T) {
+	proj := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+		Spec: tideprojectv1alpha1.ProjectSpec{
+			OutcomePrompt: "Build the auth service.",
+		},
+	}
+	milestone := &tideprojectv1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:  types.UID("ms-uid-sc-001"),
+			Name: "ms-sc-test",
+		},
+	}
+	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 10}
+	blob := "Parent goal: build auth service.\nLoad-bearing constraints: use JWT.\nSiblings: [01 api, 02 db, 03 auth]"
+
+	// Call #1 — sibling A.
+	envA, bytesA, err := BuildPlannerEnvelope("milestone", milestone, proj, 1, "tok-a", "prompt", caps, "https://127.0.0.1:8443", ProviderDefaults{}, blob)
+	if err != nil {
+		t.Fatalf("BuildPlannerEnvelope (A): %v", err)
+	}
+	if envA.SharedContext != blob {
+		t.Errorf("sibling A SharedContext = %q, want %q", envA.SharedContext, blob)
+	}
+
+	// Call #2 with same blob — sibling B. SharedContext must be byte-identical (D-03).
+	envB, bytesB, err := BuildPlannerEnvelope("milestone", milestone, proj, 1, "tok-b", "prompt", caps, "https://127.0.0.1:8443", ProviderDefaults{}, blob)
+	if err != nil {
+		t.Fatalf("BuildPlannerEnvelope (B): %v", err)
+	}
+	if envB.SharedContext != envA.SharedContext {
+		t.Errorf("sibling B SharedContext = %q, want byte-identical to A %q", envB.SharedContext, envA.SharedContext)
+	}
+
+	// Both blobs in the serialized bytes must be byte-identical.
+	var rtA, rtB pkgdispatch.EnvelopeIn
+	if err := json.Unmarshal(bytesA, &rtA); err != nil {
+		t.Fatalf("unmarshal A: %v", err)
+	}
+	if err := json.Unmarshal(bytesB, &rtB); err != nil {
+		t.Fatalf("unmarshal B: %v", err)
+	}
+	if rtA.SharedContext != rtB.SharedContext {
+		t.Errorf("round-trip SharedContext mismatch: A=%q B=%q", rtA.SharedContext, rtB.SharedContext)
+	}
+}
+
+// TestBuildPlannerEnvelopeSharedContextEmpty: sharedContext="" yields
+// EnvelopeIn.SharedContext=="" and the marshaled bytes contain no
+// "sharedContext" key (omitempty).
+func TestBuildPlannerEnvelopeSharedContextEmpty(t *testing.T) {
+	proj := &tideprojectv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+	}
+	ms := &tideprojectv1alpha1.Milestone{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID("ms-uid-sc-empty"), Name: "ms-sc-empty"},
+	}
+	caps := pkgdispatch.Caps{WallClockSeconds: 300, Iterations: 5}
+
+	envIn, envBytes, err := BuildPlannerEnvelope("milestone", ms, proj, 1, "tok", "prompt", caps, "https://127.0.0.1:8443", ProviderDefaults{}, "")
+	if err != nil {
+		t.Fatalf("BuildPlannerEnvelope: %v", err)
+	}
+	if envIn.SharedContext != "" {
+		t.Errorf("SharedContext = %q, want empty string", envIn.SharedContext)
+	}
+	// omitempty: the key must be absent from the serialized JSON.
+	if json.Valid(envBytes) && contains(string(envBytes), `"sharedContext"`) {
+		t.Errorf("marshaled JSON contains \"sharedContext\" key when value is empty (omitempty expected to suppress it): %s", envBytes)
+	}
+}
+
+// contains is a small helper used in SharedContext tests to avoid importing strings.
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsHelper(s, sub))
+}
+
+func containsHelper(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
