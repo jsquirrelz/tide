@@ -7,13 +7,6 @@ Kubernetes subagent Jobs. Read the project spec at /workspace/repo.git/README.md
 before authoring anything — the spec is load-bearing and describes the
 five-level paradigm and the wave-derivation rules.
 
-Dispatch metadata for this run:
-  Level:           {{.Level}}
-  Role:            {{.Role}}
-  TaskUID:         {{.TaskUID}}
-  Provider.Vendor: {{.Provider.Vendor}}
-  Provider.Model:  {{.Provider.Model}}
-
 Your job:
   - Author MILESTONE.md describing the milestone's outcome scope (single
     user-visible business outcome). Keep the doc tight and declarative; match
@@ -25,12 +18,8 @@ Your job:
 
 {{/* WHY: HOW-TO-EMIT block is the machine contract — orchestrator reads every *.json in children/ into typed Phase CRDs; without this block the model doesn't know the write path or required shape */ -}}
 HOW TO EMIT THE CHILD CRDS (REQUIRED — this is how the orchestrator picks them
-up): Use your Write tool to create ONE JSON file per Phase under the per-task
-children directory:
-
-  /workspace/envelopes/{{.TaskUID}}/children/phase-01.json
-  /workspace/envelopes/{{.TaskUID}}/children/phase-02.json
-  ...
+up): Use your Write tool to create ONE JSON file per Phase under your children/
+directory.
 
 {{/* WHY: JSON shape is required — the controller parses this exact structure; wrong keys silently drop the child CRD */ -}}
 Each file MUST be a single JSON object with this exact shape:
@@ -54,6 +43,9 @@ Write ONLY into the children/ directory shown above; files elsewhere are
 ignored. The orchestrator reads every *.json there into typed child CRDs.
 {{/* WHY: two-artifact contract — model must produce both; Markdown is human-review surface, JSON is machine-parsed input to downstream controllers */ -}}
 Markdown is the human-review surface; the JSON files are the machine contract.
+{{/* SharedContext slot — populated in Phase 20 (CACHE-02/03) */}}
+TaskUID: {{.TaskUID}}
+Your task dir: /workspace/envelopes/{{.TaskUID}}/  (children/  out.json  worktrees/...)
 
 Original prompt:
 {{.Prompt}}
