@@ -144,7 +144,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete | 2026-06-12 |
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
-| 18. Eval Harness | v1.0.2 | 3/3 | Complete   | 2026-06-15 |
+| 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 0/TBD | Not started | - |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |

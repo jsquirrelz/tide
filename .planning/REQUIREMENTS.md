@@ -19,12 +19,12 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 The quality + cost gate. Must land before any prompt/template change.
 
-- [ ] **EVAL-01**: A maintainer can capture a frozen baseline (golden renders of all five templates + a recorded usage snapshot) from the current v1.0.1 templates, committed under `testdata/`, so later changes are measured against a stable reference.
-- [ ] **EVAL-02**: The harness runs deterministic protocol-compliance checks as the primary quality gate — child-CRD parse success, declared-output-path presence, and DAG acyclicity — with no LLM judge required for the gate.
-- [ ] **EVAL-03**: The harness golden-file snapshot-tests every rendered template (via `goldie/v2`, test-only), runs in `make test-unit` with zero network, and flags accidental prompt growth.
-- [ ] **EVAL-04**: The harness computes cost deltas by delegating to the existing `estimatedCostCents` (asserting parity, no re-implementation), and reports REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
-- [ ] **EVAL-05**: A maintainer can run pre-flight token counting via the Anthropic `count_tokens` endpoint through the existing credproxy (stdlib `net/http`, no SDK) behind a `//go:build eval` tag, exposed as a `make eval` target.
-- [ ] **EVAL-06**: The harness regression-gates prompt/template changes — a change that grows tokens beyond a tuned threshold or fails a protocol-compliance check is caught in CI.
+- [x] **EVAL-01**: A maintainer can capture a frozen baseline (golden renders of all five templates + a recorded usage snapshot) from the current v1.0.1 templates, committed under `testdata/`, so later changes are measured against a stable reference.
+- [x] **EVAL-02**: The harness runs deterministic protocol-compliance checks as the primary quality gate — child-CRD parse success, declared-output-path presence, and DAG acyclicity — with no LLM judge required for the gate.
+- [x] **EVAL-03**: The harness golden-file snapshot-tests every rendered template (via `goldie/v2`, test-only), runs in `make test-unit` with zero network, and flags accidental prompt growth.
+- [x] **EVAL-04**: The harness computes cost deltas by delegating to the existing `estimatedCostCents` (asserting parity, no re-implementation), and reports REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
+- [x] **EVAL-05**: A maintainer can run pre-flight token counting via the Anthropic `count_tokens` endpoint through the existing credproxy (stdlib `net/http`, no SDK) behind a `//go:build eval` tag, exposed as a `make eval` target.
+- [x] **EVAL-06**: The harness regression-gates prompt/template changes — a change that grows tokens beyond a tuned threshold or fails a protocol-compliance check is caught in CI.
 
 ### Prompt Structuring & Token Minimization (PROMPT)
 
@@ -84,12 +84,12 @@ Which phases cover which requirements. Filled in during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVAL-01 | Phase 18 | Pending |
-| EVAL-02 | Phase 18 | Pending |
-| EVAL-03 | Phase 18 | Pending |
-| EVAL-04 | Phase 18 | Pending |
-| EVAL-05 | Phase 18 | Pending |
-| EVAL-06 | Phase 18 | Pending |
+| EVAL-01 | Phase 18 | Complete |
+| EVAL-02 | Phase 18 | Complete |
+| EVAL-03 | Phase 18 | Complete |
+| EVAL-04 | Phase 18 | Complete |
+| EVAL-05 | Phase 18 | Complete |
+| EVAL-06 | Phase 18 | Complete |
 | PROMPT-01 | Phase 19 | Pending |
 | PROMPT-02 | Phase 19 | Pending |
 | PROMPT-03 | Phase 19 | Pending |

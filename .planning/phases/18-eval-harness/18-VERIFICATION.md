@@ -1,13 +1,14 @@
 ---
 phase: 18-eval-harness
 verified: 2026-06-15T00:00:00Z
-status: human_needed
-score: 6/6 must-haves verified (automated); 1 live check needs human
+status: verified
+score: 6/6 must-haves verified (automated); live EVAL-05 check PASSED (2026-06-15)
 overrides_applied: 0
 human_verification:
   - test: "Run `make eval` against a reachable credproxy with a valid signed token (EVAL-05 live surface)."
     expected: "Per-template real `input_tokens` printed for all five templates, each with a 1024-token cache-floor PASS/FAIL line; signed token value never appears in output (only `token present: true`); target fails closed if TIDE_PROXY_ENDPOINT or TIDE_SIGNED_TOKEN is unset."
     why_human: "The count_tokens POST crosses the credproxy network boundary and needs real Anthropic credentials. Zero-network verification can only confirm the tool compiles under -tags eval, is excluded from the default build, wires the count_tokens route + anthropic-version header, and the Makefile guards both env vars. It cannot exercise the live HTTP path."
+    result: "PASSED 2026-06-15 — ran live against the real Anthropic count_tokens API via a locally-run credproxy. All 4 criteria met (per-template tokens for all five: project 660 / milestone 612 / phase 648 / plan 1168 / task 559; cache-floor PASS/FAIL per line; token never printed; fail-closed confirmed). Tool exit=1 = correct below-floor signal (4/5 below 1024). Evidence: 18-EVAL-05-LIVE-RESULT.md."
 notes:
   - "WR-01 (advisory): task_executor.golden + ratchet + count_tokens floor are rendered with the single planner/plan fixture (Role: planner, Level: plan), a body production never sends (executor dispatches are Role: executor / Level: task). The frozen baseline EXISTS and is deterministic for all five templates, so the phase GOAL (a frozen baseline + deterministic gate) is met — but one of five templates' baseline is non-representative. This is a baseline-fidelity defect, not a goal failure or unmet requirement. Recommend fixing before Phase 19 trims the executor template, since the executor ratchet currently guards the wrong body."
   - "REQUIREMENTS.md EVAL-03/06 reference `make test-unit`; the phase implemented under the D-02a design decision (no test-unit target — eval tests run in the existing `make test` / `go test ./...` tier). The roadmap success-criteria wording (`make test-unit`, `testdata/baselines/`) predates D-02a; the actual implementation (`testdata/goldie/` + `testdata/ratchets/` under `make test`) satisfies the requirement's INTENT (zero-network golden gate auto-run in CI). Verified the intent, noting the wording drift."
