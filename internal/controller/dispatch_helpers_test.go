@@ -121,7 +121,7 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 10}
 	defaults := ProviderDefaults{Models: map[string]string{"milestone": "claude-opus-4-7"}}
 
-	envIn, envBytes, err := BuildPlannerEnvelope("milestone", milestone, project, 1, "signed-token-abc", "author the first milestone", caps, "https://127.0.0.1:8443", defaults)
+	envIn, envBytes, err := BuildPlannerEnvelope("milestone", milestone, project, 1, "signed-token-abc", "author the first milestone", caps, "https://127.0.0.1:8443", defaults, "")
 	if err != nil {
 		t.Fatalf("BuildPlannerEnvelope: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 	}
 	caps := pkgdispatch.Caps{WallClockSeconds: 600, Iterations: 10}
 
-	envIn, envBytes, err := BuildPlannerEnvelope("project", project, project, 1, "tok-xyz", project.Spec.OutcomePrompt, caps, "https://127.0.0.1:8443", ProviderDefaults{})
+	envIn, envBytes, err := BuildPlannerEnvelope("project", project, project, 1, "tok-xyz", project.Spec.OutcomePrompt, caps, "https://127.0.0.1:8443", ProviderDefaults{}, "")
 	if err != nil {
 		t.Fatalf("BuildPlannerEnvelope: %v", err)
 	}

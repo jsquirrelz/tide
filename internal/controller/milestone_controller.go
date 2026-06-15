@@ -416,7 +416,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, ms.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}

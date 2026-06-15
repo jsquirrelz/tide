@@ -215,7 +215,12 @@ func outcomePromptOf(project *tideprojectv1alpha1.Project) string {
 	return project.Spec.OutcomePrompt
 }
 
-func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha1.Project, attempt int, token, prompt string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults) (pkgdispatch.EnvelopeIn, []byte, error) {
+// BuildPlannerEnvelope constructs and marshals an EnvelopeIn for a
+// planner-level dispatch. The sharedContext parameter (Phase 20 D-07) is
+// stamped byte-identically into EnvelopeIn.SharedContext for all wave siblings
+// dispatched with the same parent-curated blob (CACHE-02 uniform population).
+// Callers pass the parent CRD's Spec.SharedContext; test fixtures pass "".
+func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha1.Project, attempt int, token, prompt string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults, sharedContext string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	envIn := pkgdispatch.EnvelopeIn{
 		APIVersion:    pkgdispatch.APIVersionV1Alpha1,
 		Kind:          pkgdispatch.KindTaskEnvelopeIn,
@@ -227,6 +232,7 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 		ProxyEndpoint: proxyEndpoint,
 		SignedToken:   token,
 		Provider:      ResolveProvider(project, level, helmDefaults),
+		SharedContext: sharedContext, // D-07: uniform stamp; empty for executor path (CACHE-02 lock)
 	}
 
 	// Stamp parentName into the dedicated Dispatch metadata field so the stub

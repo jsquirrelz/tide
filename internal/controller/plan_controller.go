@@ -398,7 +398,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	_, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.HelmProviderDefaults)
+	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, plan.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
 	}
