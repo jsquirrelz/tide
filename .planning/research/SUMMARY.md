@@ -1,156 +1,115 @@
-# TIDE — Project Research Summary
+# Project Research Summary
 
-**Project:** TIDE — Topologically-Indexed Dependency Execution
-**Domain:** Kubernetes-native orchestrator for hierarchical agentic coding work
-**Researched:** 2026-05-12
-**Overall confidence:** HIGH
+**Project:** TIDE v1.0.2 — Ebb Tide: Token & Cost Optimization
+**Domain:** Prompt engineering + eval harness additions to a K8s-native agentic LLM orchestrator
+**Researched:** 2026-06-15
+**Confidence:** HIGH
 
 ## Executive Summary
 
-TIDE is a K8s-native operator that runs the five-level paradigm (Project → Milestone → Phase → Plan → Task, with Waves derived) as five CRDs and six reconcilers on a single controller-runtime Manager. The four research dimensions converge on a tight, opinionated technical posture: Go 1.26 + controller-runtime v0.24 + kubebuilder v4.14, one reconciler per Kind, one Manager with two separately-sized parallelism budgets (planner pool ~16, executor pool ~4), a pluggable `Subagent` interface whose v1 concrete impl is Claude Code (with Anthropic SDK fallback) dispatched as `Pod-per-Task Job + envelope on PVC + exit code`, CRD-`.status`-only persistence with resumption state being exactly `indegree map + completed-task set` re-derived from artifacts on every reconcile, a read-only React Flow dashboard as a separate Deployment, Helm + Apache 2.0 distribution, and a single self-hosting acceptance test ("TIDE in kind drives its own next milestone on this repo") as the v1 bar.
+TIDE v1.0.2 is a targeted cost-optimization milestone, not a new product. The research reveals a sharp reframing that must lead all planning: TIDE's current five prompt templates are approximately 200 tokens each — well below the 1,024-token prefix-caching minimum for Sonnet/Opus and the 4,096-token minimum for Haiku 4.5. **Caching never fires today.** Compounding this, `{{.TaskUID}}` and `{{.Provider.Vendor}}` appear in the stable boilerplate near the top of every template, so even if the threshold were met, wave-sibling dispatches would diverge at line 9-10 and each produce a unique cache entry. The templates are structured backwards for caching: volatile dispatch metadata first, stable instructions after. Fixing this ordering — putting stable content first, moving `{{.TaskUID}}` and `{{.Prompt}}` to the suffix — is the single highest-ROI structural change in the entire milestone.
 
-The load-bearing structural commitments — two typed DAGs sharing one pure `pkg/dag` Kahn-layered implementation, artifacts-as-source-of-truth with CRDs as cache, cycles-as-bugs (no recovery), strict-by-default wave-boundary failure semantics — are reinforced from at least three of the four research dimensions and should be treated as hard contracts the roadmap and CRD schemas must encode, not soft preferences subject to refactor pressure. The paradigm itself is the differentiator: no comparable system (Argo, Tekton, Temporal, kagent, LangGraph, Composio AO) ships two typed DAGs, five cognitive levels as CRDs, or per-level human gate policy on a single object.
+The path to realized savings requires building a quality gate before making any template change. The correct sequence is: (1) freeze a baseline from v1.0.1 templates, (2) build the eval harness with protocol-compliance checks as the primary gate (child-CRD parse success, declared output paths, DAG acyclicity — all deterministic, no LLM judge required for the gate), (3) reorder templates stable-first and trim non-essential boilerplate, (4) add a `SharedContext` field to `EnvelopeIn` so wave-sibling dispatches share an identical plan/phase context block as a hoisted stable prefix, growing the shared prefix to ≥1,024 tokens where caching activates. The cache-write premium (1.25× on Anthropic) means caching is net-negative for one-shot dispatches; realized savings only materialize when wave siblings share the warm cache within the 5-minute TTL window. The eval harness must compute this correctly using the existing `estimatedCostCents` function — not a re-implementation.
 
-The dominant risk concentration is Phase 1 (CRD schema + controller scaffold), which all four dimensions independently flag as the densest pitfall window: long-running reconcile, status-as-truth resumption bugs, DAG unification, unified worker pool collapse, RBAC scope creep, breaking CRD schema changes, finalizer leaks, and wrong owner refs all bake in here. Phase 2 (Kahn + Subagent harness + admission) follows with the load-bearing security and correctness hazards: subagent context bleed via shared PVC, runaway agent loops draining budget, LLM rate-limit cascade failures, secret leakage, watch-lag duplicate dispatch. The bootstrap-deadlock pitfall (Pitfall 12) is uniquely addressed at the roadmap-construction phase — the roadmap itself must name an explicit M0 ("TIDE-on-host runs TIDE-on-self via GSD") and M_self ("TIDE-in-cluster authors same artifacts") with bounded scope.
+The cost accounting and metrics infrastructure is already correct and complete. `stream_parser.go` reads the right source (the `result` event, not streaming placeholders). `pricing.go` applies four-field cost calculation with correct cache-read discount and write premium. All six Prometheus counters already emit the needed data. The dashboard just needs a cache-hit-ratio panel reading those existing counters. The primary risk is over-trimming load-bearing instructions — every clause in the current templates exists because a production cascade demonstrated its necessity. The annotation gate (categorize each clause before trimming) and the eval harness's protocol-compliance checks together prevent quality regression.
 
 ## Key Findings
 
-**Recommended Stack (HIGH):** Go 1.26 + controller-runtime v0.24 + kubebuilder v4.14; native K8s Jobs (not Argo/Tekton — they encode DAG semantics that would shadow TIDE's); Anthropic SDK v1.42 + Claude Code v2.1.139+ headless mode; CRD `.status` only, no DB; CEL CRD validation (K8s 1.29 GA); Helm 3 + helmify; `prometheus/client_golang` + OTel v1.43; **OpenInference attribute conventions hand-emitted (no Go SDK exists in 2026)** wrapped in `pkg/otelai`; React Flow v12 + dagre + Tailwind v4 + SSE for the dashboard; `go-chi/chi/v5` HTTP router (composes with `manager.Runnable`); `go-git/v5` HTTPS+PAT default; Ginkgo v2 + envtest + kind v0.31 for testing.
+### Recommended Stack
 
-**Expected Features (HIGH):** 27 table-stakes (TS-1..27), 13 differentiators (D-1..13), 16 anti-features (AF-1..16), 8 deferred (DF-1..8). Closest neighbor by posture is kagent (does *agent topology*; TIDE does *work topology*). Closest by functional shape is Composio AO (parallel coding agents, but host-process and includes PR-lifecycle automation TIDE defers). v1 must-have spans: apply/watch/cancel/resume lifecycle, Pod-per-Task isolation, wave-derived schedule + cycle detection + plan validation, strict-by-default failure profile, resume via indegree+completed-set, artifacts on PVC + git push at level boundaries (host-agnostic), five CRDs, per-level gate policy, two-pool concurrency, pluggable Subagent interface, per-level model selection, read-only two-DAG dashboard, structured logs + Prometheus + OTel/OpenInference, K8s Secret refs, namespace-per-project, Helm chart, Apache 2.0 + docs, **self-hosting demo as v1 acceptance test**. Unique TIDE differentiators: two typed DAGs at the API boundary, five-level hierarchy as five CRDs, slack-tide between-wave checkpoints, two-DAG dashboard view, self-hosting as acceptance test, water/tide vocabulary.
+No net-new production dependencies. One new test module: `github.com/sebdah/goldie/v2 v2.8.0` (golden-file snapshot testing, test-only). The `count_tokens` API is useful offline in the eval harness via a four-line `net/http` call to the credproxy (already allowlisted); the Anthropic Go SDK must not be added.
 
-**Architecture Approach (HIGH):** Single in-cluster control plane (one TIDE Deployment per cluster install, leader-elected, namespace-per-Project tenancy). Six reconcilers on one Manager — `Project/Milestone/Phase/Plan/Wave/Task`. `pkg/dag` (pure Go, no K8s deps) consumed twice with typed-apart call sites. `pkg/dispatch` Subagent interface + `PodJobBackend`. Two `chan struct{}` semaphores for two budgets, pre-charged on restart from live Job state. Six CRDs with owner-reference cascade + same-namespace + `BlockOwnerDeletion: true`. One PVC per Project (RWX, layout `/workspace/{repo,artifacts/M-N/P-N/L-N,envelopes}`). One subagent image with role/level flags (not two — divergence is prompt + tool-allowance, not binary). Git push at level boundaries **from orchestrator, not subagent pods** (one cred handler, one process). Dashboard as separate Deployment with read-only ServiceAccount, direct apiserver `pods/log` WebSocket proxy. `tide` CLI as thin stateless cobra wrapper.
+**Core additions:**
+- `github.com/sebdah/goldie/v2 v2.8.0` — golden-file snapshot testing for rendered templates; `AssertJson` for structured diffs; test-only import.
+- `net/http` + `encoding/json` (stdlib) — pre-flight token counting via `POST /v1/messages/count_tokens` through the existing credproxy; no SDK, no new module.
+- `internal/eval/` (new package, zero new deps) — deterministic test files (prompt size ratchet, stable prefix length, offline cost replay, structural quality gate); runs in `make test-unit`, no network, no LLM calls.
+- `internal/subagent/anthropic/tokencounter.go` (new file, stdlib only) — `CountTokens(...)` behind `//go:build eval`.
 
-**Critical Pitfalls (HIGH):** 24 named pitfalls, **9 Catastrophic**. Top critical and prevention:
+**Must NOT add:** tiktoken or any local Claude tokenizer (wrong by design), Anthropic Go SDK (CLAUDE.md constraint), external SaaS eval platforms, any separate eval database.
 
-1. **Bootstrap deadlock (Pitfall 12)** — explicit M0 + M_self in roadmap, single CRD schema across the bridge. *Phase 0.*
-2. **Long-running reconcile (Pitfall 1)** — event-driven `Owns(&batchv1.Job{})`, lint rule against Sleep/blocking. *Phase 1.*
-3. **Status-as-truth resumption bug (Pitfall 4)** — `.status` is observation, not derivation; schema review checklist. *Phase 1.*
-4. **Cached wave schedule (Pitfall 2)** — wave-derivation function is pure; review-block any `Status.Waves`/`Status.Schedule` PR. *Phase 2.*
-5. **Subagent context bleed via shared PVC (Pitfall 7)** — per-Job mount scoping; harness validates diff against declared output paths. *Phase 2.*
-6. **Runaway agent loops draining budget (Pitfall 8)** — per-Task wall-clock/iteration/token caps, per-Project rolling-window gate, per-Project absolute cap. *Phase 2.*
-7. **Secret leakage in artifacts/logs (Pitfall 18)** — harness signed-token proxy, log redaction, gitleaks at push boundary. *Phases 2+3.*
-8. **Breaking CRD schema changes (Pitfall 16)** — alpha versioning, conversion-webhook scaffold from day one, dedicated CRD subchart. *Phase 1.*
-9. **OSS adoption death by missing docs (Pitfall 24)** — external-operator dry-run, <30min clone-to-first-run. *Phase 5.*
+### Expected Features
 
-Plus 15 Serious: DAG unification (Pitfall 3), cycle "recovery" creep (5), unified worker pool (6), RBAC scope creep (15), finalizer leaks (21), wrong owner refs (23), indegree-on-partial-failure (10), watch-lag duplicate dispatch (11), rate-limit cascade (9), TIDE-overwrites-human-commits (13), hallucinated `depends_on` (19), provider/host leaks (14), observability data volume (17), dashboard websocket leaks (22), test-cost flakiness (20).
+**Must have (P1 — all required for v1.0.2):**
+- Stable-prefix-first ordering in all five templates; `{{.TaskUID}}` and `{{.Provider.*}}` removed from stable sections.
+- Boilerplate audit: measure token count; grow stable prefix to ≥1,024 tokens with SharedContext.
+- Deterministic serialization of structured data in the stable prefix.
+- Eval harness `internal/eval/` with golden-set baseline + deterministic test types.
+- Protocol-compliance checks as the primary eval gate: child-CRD parse success, declared output paths, DAG acyclicity.
+- `SharedContext string` on `EnvelopeIn`, populated identically for all wave siblings.
+- Cache hit rate metric from events.jsonl as a Prometheus gauge.
+- Per-level token accounting as Prometheus labels on existing counters.
 
-## Convergence: Hard Contracts (3+ Dimensions Agree)
+**Should have (P2 — after baseline established):**
+- Cost + quality dashboard panel surfacing cache hit ratio and tokens-per-level.
+- Context curation: summaries over verbatim PLAN.md dumps in SharedContext.
+- Per-level token budget profiles as Helm values / CRD fields.
 
-Sixteen items where multiple dimensions converge. These are non-negotiable for v1:
+**Defer to v1.0.3+:** wave-sibling warm-up dispatch, direct SDK backend with explicit `cache_control`, OpenAI/Codex backend, full LLM-as-judge semantic scoring pipeline.
 
-| Contract | Stack | Features | Architecture | Pitfalls |
-|----------|:-----:|:--------:|:------------:|:--------:|
-| `pkg/dag` pure-Go, stdlib-only Kahn-layered library | rejects Gonum/dominikbraun | TS-7, TS-6, D-3 | Pattern 3 | P2, P3, P10 |
-| Two CRD-typed DAGs, never unified | rejects Argo flat DAG | D-1 | typed apart | P3 Serious |
-| Pod-per-Task Job + envelope on PVC + exit code | Claude Code stream-json | TS-8, TS-21 | Pattern 5 | P7, P11 |
-| CRD `.status` only, no DB/SQLite | rejects Postgres/SQLite | TS-4, D-4 | Pattern 4 | P4 catastrophic |
-| Resumption = indegree + completed-set, O(V+E) | derived | TS-4, D-4 | Resumption Flow | P2, P4 |
-| Two separately-sized parallelism budgets | Helm values | TS-9, D-12 | Pattern 4 | P6 Serious |
-| Pluggable Subagent interface; zero Anthropic in orchestrator | interface firewall | TS-21, AF-10 | Pattern 5 | P14 lint rule |
-| Cycles rejected at plan-validation, no recovery | CEL/webhook | TS-6, TS-17, D-10 | PlanReconciler | P5 Serious |
-| Strict-by-default wave-boundary failure | — | TS-16, DF-1 deferred | strict-profile | P10 |
-| Artifacts-as-source-of-truth, CRDs as cache | — | D-9 | Resumption Flow | P4 |
-| One reconciler per CRD Kind | controller-runtime best practice | TS-18 | Pattern 1 + AP1 | P1, P6 |
-| Read-only dashboard, mutations via CLI/kubectl | React Flow + SSE | AF-3, D-8 | Pattern 8 | P22 |
-| Helm + Apache 2.0 + namespace-per-project | helmify | TS-20, TS-23, TS-27 | namespace tenancy | P15, P24 |
-| Self-hosting MVP as v1 acceptance test | kind v0.31 | TS-26, D-13 | step 13 | P12 |
-| OpenInference on OTel (no Go SDK, hand-rolled) | hand-rolled | TS-15 | pkg/otel | P17 |
-| Water/tide vocabulary across CRDs/logs/dashboard | — | D-11 | — | culturally enforced |
+**Confirmed anti-features:** `cache_control` injection via `ProviderSpec.Params` (not possible on the CLI path), KV-cache sharing via forced shared worktree (violates isolation), per-task real-time events.jsonl streaming for live cache feedback.
 
-## Divergence: Open Questions for Requirements / Roadmap
+### Architecture Approach
 
-Eleven places where dimensions diverged or left a real decision unresolved. The roadmap author should not re-decide silently:
+All five components slot cleanly into the existing dispatch pipeline without touching the hot path. Template restructuring is pure `.tmpl` changes; `tmpl.Execute(&buf, in)` handles new fields automatically. The SharedContext field is additive (`omitempty`; executor dispatches ignore it). The eval harness imports only `internal/subagent/common` and `internal/subagent/anthropic` — not `internal/controller` or CRD types beyond `pkg/dispatch`.
 
-1. **CEL-only vs. validating admission webhook** for CRD invariants — Stack prefers CEL; Pitfall 5 says "webhook on Plan and Task" for cycle detection. Resolution: CEL for what it handles cleanly, webhook only if cross-object cycle check exceeds CEL. (Phase 1.)
-2. **`go-git` HTTPS+PAT vs SSH vs shell-out to `git`** — Stack notes SSH host-key fussiness. Resolution: default HTTPS+PAT; SSH documented with caveat. (Phase 3.)
-3. **PVC RWX driver matrix the Helm chart documents** — MEDIUM confidence per Architecture. Resolution: leave `storageClassName` empty; docs enumerate EFS/Filestore/Azure Files/NFS-CSI/Longhorn; kind dev loop uses `csi-driver-nfs`. (Phase 3/5.)
-4. **Per-Project vs global semaphores when many Projects share a cluster** — flagged as v1.1 tuning. Resolution: v1 = global simple; v1.1 if starvation surfaces.
-5. **React Flow vs htmx + Mermaid for dashboard** — Stack calls this taste-driven. Resolution: React Flow v1; htmx alternative documented. (Phase 4.)
-6. **`Wave` as its own CRD Kind vs inline field of `Plan`** — Architecture argues strongly for separate Kind; PROJECT.md leaves it ambiguous. Resolution: separate `Wave` Kind. (Phase 1.)
-7. **Dashboard inside Manager vs separate Deployment** — Architecture Pattern 8 is opinionated about separate Deployment. Resolution: separate. (Phase 4.)
-8. **Conservative vs strict failure profile as v1 default** — Resolution: strict per PROJECT.md; conservative becomes per-Project setting only after real cascading-failure cases.
-9. **CRD versioning strategy (alpha free-iteration vs formal alpha→beta→v1)** — Pitfall 16 prefers formal tiers. Resolution: v1alpha1 for all of v1; conversion-webhook scaffolding from day one. (Phase 1.)
-10. **Per-level model selection in v1 CRD vs hard-coded defaults** — Feature D-5 argues for CRD field; PROJECT.md ambiguous. Resolution: expose in CRD because differentiation argument depends on it. (Phase 2/4.)
-11. **File-touch derived edges as admission validation** — Pitfall 19 strongly recommends; Features/Architecture don't surface explicitly. Resolution: add as Phase 2 admission validation (mismatch = warning or strict-mode rejection).
+**Major components:**
+1. Template restructuring (`templates/*.tmpl`) — role preamble → fixed instructions → `{{.SharedContext}}` → volatile metadata (TaskUID, Branch) → `{{.Prompt}}`.
+2. SharedContext field (`pkg/dispatch/envelope.go` + `dispatch_helpers.go`) — additive; identical across all tasks in a wave; grows shared cacheable prefix to ≥1,024 tokens.
+3. Eval harness (`internal/eval/`) — deterministic test files; golden baselines in `testdata/baselines/`; recorded `events.jsonl` fixtures; runs in `make test-unit`, no network.
+4. Token minimization pass (`templates/*.tmpl`) — annotation-gated; one section at a time; harness gates each commit.
+5. Dashboard cache observability (React frontend) — cache-hit-ratio panel consuming existing `tide_tokens_cache_read_total` / `tide_tokens_cache_creation_total`; no backend changes.
+
+**Files that do NOT change:** `stream_parser.go`, `pricing.go`, `budget/tally.go`, `metrics/registry.go`, `task_controller.go` (executor path), `credproxy/server.go`, `pkg/dispatch/provider.go`.
+
+### Critical Pitfalls
+
+1. **Over-trimming load-bearing instructions (Catastrophic)** — every template clause exists because a production cascade proved its necessity. Prevention: annotation file before trimming; child-CRD parse success rate as gate criterion.
+2. **Volatile `{{.TaskUID}}` in stable prefix busts every wave-sibling cache (Serious)** — currently near line 10 of every template. Prevention: stable-first restructure as the first change.
+3. **CLI-vs-SDK gap: no `cache_control` lever (Serious)** — TIDE cannot set cache breakpoints; cache hit rate is an outcome metric, not a configurable parameter. Do not promise explicit breakpoint placement.
+4. **Cache-write premium net-negative on one-shot dispatches (Moderate)** — savings only materialize across wave siblings within the 5-min TTL. Harness reports REALIZED savings per-wave, not per-dispatch.
+5. **Cost re-implementation in eval harness diverges from `estimatedCostCents` (Moderate)** — delegate all cost math to `estimatedCostCents`; assert parity within 1 cent.
+
+**Additional:** LLM-as-judge flakiness (deterministic checks are the gate), no stable baseline (freeze before first edit), provider-specific assumptions in harness (import only `pkg/dispatch`), Haiku 4,096-token minimum possibly unmet (verify or document Sonnet/Opus-only benefit).
 
 ## Implications for Roadmap
 
-The build order in `ARCHITECTURE.md` ("Build Order Implications" §) is the strongest baseline. STACK pins technologies into phases; FEATURES says which capabilities each phase delivers; PITFALLS says which phase carries the densest baked-in risks (Phase 1) vs. security/correctness fanout (Phase 2). Suggested shape:
+Suggested phases: **4**
 
-**Phase 0: Roadmap Construction** — Uniquely addresses Pitfall 12 (bootstrap deadlock). Names M0 (TIDE-on-host runs TIDE-on-self via GSD, bounded scope) and M_self (TIDE-in-cluster authors same artifacts via fresh-kind-cluster acceptance test). Commits to v1alpha1 stability across the bridge.
+### Phase 1: Baseline Capture and Eval Harness Foundation
+Quality gate must exist before any template change. No dependencies. Delivers `internal/eval/` with deterministic test types, `testdata/baselines/` golden files from v1.0.1 templates, recorded `events.jsonl` fixtures, frozen baseline snapshot, goldie v2 snapshot tests. Avoids the no-stable-baseline and cost-re-implementation pitfalls.
 
-**Phase 1: Foundation — CRDs + Controller Scaffold + `pkg/dag`** — Densest pitfall window. Delivers: `pkg/dag` (pure Go Kahn-layered with cycle detection), six CRD types (`Project/Milestone/Phase/Plan/Task/Wave`) with Spec/Status separation + alpha versioning + conversion-webhook scaffolding, owner-ref helper (same-namespace + `BlockOwnerDeletion: true`), six reconciler stubs on one Manager with independent `MaxConcurrentReconciles`, two `chan struct{}` semaphores wired with `plannerConcurrency`/`executorConcurrency` Helm values, kubebuilder RBAC markers (no wildcards), finalizers with bounded deadline + idempotence. Implements TS-18, TS-9, D-12, TS-6, TS-7, D-1, D-2, D-10, D-11. Avoids Pitfalls 1, 3, 4, 6, 15, 16, 21, 23.
+### Phase 2: Template Reorder and Token Minimization
+Highest-ROI change; must precede SharedContext so the stable prefix is structurally correct before being grown. Delivers all five templates restructured stable-first; `{{.TaskUID}}`/`{{.Provider.*}}` moved to the volatile suffix; per-template "why-this-line" annotation; trimmed boilerplate with protocol-compliance preserved; deterministic serialization. Avoids over-trimming, volatile-prefix, and mid-wave-model-change pitfalls.
 
-**Phase 2: Subagent Dispatch + Plan Validation + Innermost Reconcilers** — The dogfood-critical pair (`TaskReconciler` + `WaveReconciler`). Delivers: `pkg/dispatch` interface + `PodJobBackend` + `stub-subagent` (for tests), subagent image (one image, role/level flags, budget caps, signed-token proxy, log redaction), token-bucket rate limiter (`tide_provider_rate_limit_hits_total`), idempotent Job dispatch (deterministic Job names `tide-task-{task-uid}-{attempt}`), per-task indegree decrement (not per-wave), plan admission with cycle detection + file-touch-derived-edge reconciliation against LLM-declared `depends_on`, strict-by-default wave-boundary failure handling, custom go-analyzer lint rule (no Anthropic SDK imports in orchestrator package). Implements TS-21, TS-8, TS-5, TS-16, TS-17, D-5, AF-10 prevention. Avoids Pitfalls 2, 5, 7, 8, 9, 10, 11, 14, 18 (harness side), 19, 20.
+### Phase 3: SharedContext Injection and Planner Wiring
+Widest blast radius (`pkg/dispatch/envelope.go` + controller + three planner templates + eval fixtures); comes after simpler changes are proven. Delivers `SharedContext string` on `EnvelopeIn`; `BuildPlannerEnvelope` populates it identically per wave; planner templates reference `{{.SharedContext}}`; stable prefix grows to ≥1,024 tokens; updated baselines. **Needs a research sub-phase** (see flags).
 
-**Phase 3: Artifacts + Git Integration + Up-Stack Reconcilers** — Delivers: PVC layout helper, `pkg/git` (HTTPS+PAT default, host-agnostic, per-run branches `tide/run-<project>-<timestamp>`, `--force-with-lease` only, never `main`), gitleaks scanner at every push (fail on pattern match), `PlanReconciler`/`PhaseReconciler`/`MilestoneReconciler`/`ProjectReconciler`, real Claude-Code-backed subagent image replacing stub, resumption acceptance test (kill orchestrator mid-wave, verify resume from CRD status + PVC only). Implements TS-11, TS-12, TS-22, TS-19, TS-4, D-4, D-9, TS-1, TS-2, TS-3, TS-20. Avoids Pitfalls 13, 18 (push side).
+### Phase 4: Metrics, Observability, and Dashboard
+All data already flows; this phase makes it visible. Independent; parallelizable with Phases 2-3 once metric names are confirmed. Delivers per-level token accounting labels, cache-hit-rate metric, dashboard cache-efficiency panel (hit ratio, creation tokens, realized savings), `make eval` target.
 
-**Phase 4: Human Gates + Observability + Dashboard + CLI** — Parallelizable after Phase 3. Delivers: per-level gate policy on Project CRD + `tide approve` + slack-tide between-wave review, structured JSON logs (zap-behind-logr), Prometheus metrics with bounded cardinality (project/phase/plan only, no per-task labels), OTel tracing with hand-rolled `pkg/otelai` emitting OpenInference attributes + tail-sampling + LLM payloads as artifact refs, `tide` CLI (cobra: apply/watch/tail/approve/cancel/resume/inspect-wave/artifact-get), read-only dashboard (React Flow + dagre + Tailwind + SSE for status + WebSocket for pod logs via apiserver) on separate Deployment with separate read-only ServiceAccount + idle-timeout + stream-rate cap + per-task log opt-in. Implements TS-10, D-6, D-7, TS-13, TS-14, TS-15, TS-24, TS-25, D-8. Avoids Pitfalls 17, 22.
+### Research Flags
 
-**Phase 5: Distribution + OSS Readiness + Self-Hosting Demo** — Delivers: Helm chart (CRDs + controller Deployment + dashboard Deployment + RBAC + namespace; dedicated CRD subchart for upgrades; ServiceMonitor gated), Apache 2.0 LICENSE, docs (install + Project authoring with 3 sample CRDs + provider configuration + git remote configuration + failure recovery + RBAC reference + troubleshooting), external-operator dry-run acceptance test (<30 min clone-to-first-run), **self-hosting demo: fresh kind + Helm install + `kubectl apply -f project.yaml` drives this repo's next milestone end-to-end**. Implements TS-23, TS-26, D-13, TS-27. Avoids Pitfall 24.
+**Needs research during Phase 3 planning:**
+- **Cross-pod cache scoping with `--bare` (most critical):** the assumption that stable-prefix-first ordering yields cache hits across wave siblings in different pods must be experimentally verified before Phase 3. If cross-pod cache is path-scoped (each pod has a unique working directory embedded in the CLI system prompt), SharedContext provides zero benefit and the milestone reframes to "best-effort token minimization only."
+- **SharedContext source design:** controller PVC read vs. CRD `.status` summary for populating `SharedContext`.
+- **Wave dispatch interval vs. 5-minute TTL:** measure actual cache-hit degradation for long waves (>5 min spread).
+- **Haiku 4,096-token gap:** verify whether the restructured templates reach Haiku's minimum; if not, document caching benefit as Sonnet/Opus-only.
 
-**Phase ordering rationale:** Foundation before fanout (Phase 1 is longest-pole AND densest pitfall window). Dispatch correctness before up-stack (Phase 2 with stub before Phase 3 with real LLM decouples K8s-time learning from LLM-time learning). Observability + UX in parallel after dispatch (Phase 4 components don't depend on each other). Self-hosting last and longest (Phase 5 exercises everything simultaneously — budget for it being the longest calendar item).
-
-**Research flags** — Phases likely needing `/gsd:research-phase` during planning:
-- **Phase 2:** densest novel territory (per-Job mount scoping, signed-token proxy, harness budget enforcement, rate-bucket-aware dispatch, file-touch-derived-edges admission).
-- **Phase 3:** `go-git` vs shell-out tradeoffs for non-GitHub hosts; RWX PVC driver matrix testing; per-run branch + `--force-with-lease` integration design.
-- **Phase 4:** React Flow vs htmx is contributor-pool-shaping; two-DAG view UX needs prototyping; SSE-through-ingress concerns.
-- **Phase 5:** self-hosting demo exercises everything; map demo's exact apply→author→plan→dispatch→push sequence against TIDE-on-host behavior to surface drift before integration test runs.
-
-Phases with established patterns (skip research-phase):
-- **Phase 1:** kubebuilder good-practices well-documented; follow them carefully.
-
-## v1 Feature Consensus (For Requirements Author)
-
-All four dimensions agree these ship in v1:
-
-- Five CRDs (Project/Milestone/Phase/Plan/Task) + Wave CRD, alpha versioning, conversion-webhook scaffolding
-- `pkg/dag` Kahn-layered + cycle detection (pure Go, stdlib only)
-- Six reconcilers on one Manager, event-driven, independent concurrency
-- Two parallelism budgets (`plannerConcurrency`, `executorConcurrency`)
-- Pluggable Subagent interface + `PodJobBackend` + `stub-subagent` (zero Anthropic SDK imports in orchestrator)
-- One subagent image (role/level flags, budget caps, signed-token proxy, log redaction)
-- CRD `.status` only for persistence; resumption = indegree + completed-set, O(V+E)
-- Strict-by-default failure profile (per-task indegree decrement, not per-wave)
-- Cycle rejection at admission (CEL or webhook) with useful error
-- File-touch-derived-edge reconciliation in admission
-- Idempotent Job dispatch (deterministic names)
-- Token-bucket rate limiter; 429 → controller retry
-- Per-Task budget caps + per-Project rolling-window + absolute cost cap
-- One PVC per Project, RWX, layout `/workspace/{repo,artifacts,envelopes}`
-- Git push at level boundaries from orchestrator (HTTPS+PAT, host-agnostic, per-run branches, `--force-with-lease`, never `main`, gitleaks scanner)
-- K8s Secret refs for LLM + git creds; namespace-per-project
-- Per-level human gate policy on Project CRD; slack-tide between-wave review (optional)
-- Per-level model selection on Project CRD
-- Structured JSON logs + Prometheus metrics (bounded cardinality) + OTel tracing (OpenInference hand-emitted, tail-sampling)
-- `tide` CLI (cobra, stateless)
-- Read-only dashboard (separate Deployment, React Flow, two-DAG view, apiserver log proxy, idle-timeout, per-task log opt-in)
-- Helm chart (CRDs + controller + dashboard + RBAC + dedicated CRD subchart; ServiceMonitor gated)
-- Kubebuilder RBAC markers — no wildcards anywhere
-- Finalizers with bounded deadline + idempotence + documented manual unstick
-- Owner-ref helper (same-namespace + `BlockOwnerDeletion: true`)
-- Three test tiers (unit no-LLM <30s; integration with stub-subagent <5min; live E2E nightly cost-capped)
-- Apache 2.0 + docs sufficient for external operator
-- **Self-hosting demo as v1 acceptance test** (fresh kind + Helm install + Project apply, <30 min clone-to-first-run for unfamiliar operator)
-
-**Explicitly v1.x or v2+ — do NOT add to v1:** multi-tenant posture, gRPC streaming subagent, external DB/SQLite, dashboard mutations, vendored GSD Markdown, CPM/HEFT schedulers, cycle/wave recovery, non-K8s runtime, vendor lock-in, ESO/Vault first-class, per-host PR creation, auto-CI-fix loop, multi-cluster dispatch, MCP/A2A surface, drag-to-edit DAG, Kueue integration, OLM bundle, Agent Sandbox/gVisor, Project templates, native notifications, conservative failure profile, validation webhook for everything.
+**Standard patterns (no research phase needed):** Phase 1 (eval harness + golden files), Phase 2 (template reorder + trim), Phase 4 (dashboard panel).
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All core tech verified against May-2026 upstream releases. MEDIUM only for OpenInference-on-Go (no SDK, hand-rolled) and React-vs-htmx (taste-driven). |
-| Features | HIGH | K8s/workflow + AI orchestration norms verified; v1 in/out cross-referenced against PROJECT.md and README spec. MEDIUM only for some 2026 trend claims. |
-| Architecture | HIGH | K8s operator patterns + CRD ownership well-documented. MEDIUM on dashboard log-streaming topology (opinionated) and PVC RWX driver choice (deploy-time, deferred to docs). |
-| Pitfalls | HIGH | Cross-verified against spec + PROJECT.md + controller-runtime docs + 2026 industry reporting. Each mapping has explicit prevention/verification. |
+| Stack | HIGH | Direct codebase inspection; single new test module |
+| Features | HIGH | Provider caching mechanics from official docs; TIDE mapping from codebase |
+| Architecture | HIGH | All findings from direct production codebase inspection |
+| Pitfalls | HIGH | Template/pricing findings from source; caching foot-guns cross-verified |
 
-**Overall: HIGH.**
+**Overall confidence:** HIGH
 
-**Gaps:** The eleven divergence items above are the active gaps. Most resolve at specific phase-design times. Additional gap: dashboard two-DAG-view UX prototyping — recommend a Phase 4 wireframe/Figma spike before React Flow code lands.
-
-## Sources
-
-**Primary (HIGH):** `README.md` (TIDE spec), `.planning/PROJECT.md`, `CLAUDE.md`, controller-runtime v0.24.x releases, kubebuilder v4.14.0 releases, Anthropic Go SDK v1.42.0, Claude Code v2.1.139+, OTel Go v1.43.0, OpenInference semantic conventions, prometheus/client_golang v1.23.2, kind v0.31.0, Kubebuilder Book (Good Practices, EnvTest, Finalizers), Kubernetes Finalizers / CRD Versioning / RBAC Good Practices / cascading deletion / etcd limits / 1.31 WebSocket transition.
-
-**Secondary (MEDIUM):** kagent, Argo Workflows, Tekton Pipelines, Composio AO, LangGraph/Temporal, React Flow xyflow, helmify, go-git/v5, chi router, Anthropic 2026 Agentic Coding Trends Report, MAST failure taxonomy (arxiv:2503.13657), 2026 industry reporting (OneUptime, Uptrace, RelayPlane, LangWatch, GitGuardian, Microsoft Security, arxiv prompt-injection papers), Bootstrapping (compilers) Wikipedia.
+### Gaps to Address
+- Cross-pod cache scoping with `--bare` (most critical — verify before Phase 3; could reframe the milestone).
+- Haiku 4,096-token threshold (verify; may scope caching benefit to Sonnet/Opus).
+- Annotation file format convention (agree before Phase 2).
+- LLM-as-judge scope decision for v1.0.2 (deterministic checks are the gate; decide if any supplementary judging is in scope before Phase 1).
