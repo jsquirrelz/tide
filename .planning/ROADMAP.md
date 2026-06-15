@@ -40,7 +40,7 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
 **Milestone Goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
 
 - [ ] **Phase 18: Eval Harness** - Freeze a v1.0.1 baseline and build the quality gate before any template change
-- [ ] **Phase 19: Template Reorder + Token Minimization** - Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness
+- [x] **Phase 19: Template Reorder + Token Minimization** - Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness
 - [ ] **Phase 20: SharedContext Injection + Cache Verification Spike** - Spike cross-pod cache scoping, then add SharedContext to grow the cacheable shared prefix (or reframe to token-minimization-only)
 - [ ] **Phase 21: Cost & Cache Observability** - Surface per-level token accounting and cache-hit metrics on the dashboard
 
