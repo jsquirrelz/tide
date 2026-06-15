@@ -4,7 +4,7 @@
 
 - ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11)
 - ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13)
-- 📋 **Next milestone** — unscoped (headline: full TIDE-on-TIDE) — run `/gsd:new-milestone`
+- 🚧 **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (in progress)
 
 ## Phases
 
@@ -33,9 +33,65 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
 
 </details>
 
-### 📋 Next milestone (unscoped)
+### 🚧 v1.0.2 — Ebb Tide: Token & Cost Optimization (In Progress)
 
-Run `/gsd:new-milestone` to scope it. Headline candidate: full TIDE-on-TIDE (the orchestrator driving its own next milestone end-to-end). Dogfood run 2 (02-codex-runtime) is now unblocked; the docs/audit 27-item hardening backlog is a candidate.
+**Milestone Goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
+
+- [ ] **Phase 18: Eval Harness** - Freeze a v1.0.1 baseline and build the quality gate before any template change
+- [ ] **Phase 19: Template Reorder + Token Minimization** - Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness
+- [ ] **Phase 20: SharedContext Injection + Cache Verification Spike** - Spike cross-pod cache scoping, then add SharedContext to grow the cacheable shared prefix (or reframe to token-minimization-only)
+- [ ] **Phase 21: Cost & Cache Observability** - Surface per-level token accounting and cache-hit metrics on the dashboard
+
+## Phase Details
+
+### Phase 18: Eval Harness
+**Goal**: A frozen v1.0.1 baseline and deterministic quality gate exist, so every subsequent template or prompt change can be measured and regression-gated without manual review.
+**Depends on**: Phase 17 (v1.0.1 shipped)
+**Requirements**: EVAL-01, EVAL-02, EVAL-03, EVAL-04, EVAL-05, EVAL-06
+**Success Criteria** (what must be TRUE):
+  1. A maintainer runs `make test-unit` and the golden-file snapshot tests confirm that all five rendered templates match the committed `testdata/baselines/` snapshots (zero-network, deterministic).
+  2. A PR that grows any template's token count beyond the tuned threshold fails CI automatically, without requiring manual inspection.
+  3. A PR that breaks child-CRD parse success, declared output-path presence, or DAG acyclicity is caught by the protocol-compliance gate in `make test-unit`.
+  4. `make eval` (behind `//go:build eval`) counts tokens via the Anthropic `count_tokens` endpoint through the existing credproxy using stdlib `net/http`, and prints per-template counts.
+  5. Cost deltas computed by the harness delegate to the existing `estimatedCostCents` function and report REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
+**Plans**: TBD
+
+### Phase 19: Template Reorder + Token Minimization
+**Goal**: All five prompt templates are restructured stable-prefix-first so wave-sibling dispatches share an identical cache-eligible prefix, and non-essential boilerplate is trimmed — each change gated green by the Phase 18 eval harness.
+**Depends on**: Phase 18
+**Requirements**: PROMPT-01, PROMPT-02, PROMPT-03, PROMPT-04, PROMPT-05
+**Success Criteria** (what must be TRUE):
+  1. All five templates follow the order: role preamble → fixed instructions → shared context → volatile metadata → per-task prompt; the `{{.TaskUID}}` and `{{.Provider.*}}` fields appear only in the volatile suffix.
+  2. Every template section carries a "why-this-line" annotation committed before any trim, so load-bearing instructions (proven by prior production cascades) are identifiable and preserved.
+  3. Structured data interpolated into the stable prefix is serialized with stable key order so identical inputs render identical bytes (deterministic diffing under goldie).
+  4. `make test-unit` runs green after each boilerplate-trim commit, confirming protocol-compliance (child-CRD parse, output paths, DAG acyclicity) is preserved throughout.
+  5. The golden baselines in `testdata/baselines/` are updated to reflect the reordered templates, and the token-count ratchet confirms no accidental growth relative to the trimmed target.
+**Plans**: TBD
+
+### Phase 20: SharedContext Injection + Cache Verification Spike
+**Goal**: A spike verifies whether stable-prefix-first ordering yields cross-pod prefix-cache hits across wave siblings under `claude -p --bare`; if it does, `EnvelopeIn` gains a `SharedContext` field populated identically for all wave siblings to grow the shared cacheable prefix to ≥1,024 tokens; if it does not, this phase closes as best-effort token minimization with the spike decision recorded.
+**Depends on**: Phase 19
+**Requirements**: CACHE-01, CACHE-02, CACHE-03, CACHE-04, CACHE-05
+**Notes/Risks**: CACHE-01 is a verification spike that gates CACHE-02/03. If cross-pod caching does not fire (because the CLI embeds a working-directory path that differs per pod, making each dispatch's prefix unique), CACHE-02/03 reframe to token-minimization-only and the SharedContext field is still added but only for reducing context size — not for cache benefit. This contingency must be explicitly recorded as a decision in PROJECT.md regardless of outcome.
+**Success Criteria** (what must be TRUE):
+  1. The spike result is committed as a decision in PROJECT.md — either "cross-pod prefix-cache hits confirmed under `claude -p --bare`" or "cross-pod caching does not fire; reframed to token-minimization-only."
+  2. `EnvelopeIn` gains a `SharedContext string` (omitempty) field that the executor path ignores, and `BuildPlannerEnvelope` populates it identically for all tasks in a wave.
+  3. Planner templates reference `{{.SharedContext}}` in the stable prefix section; the combined stable prefix (role + instructions + SharedContext) reaches ≥1,024 tokens on Sonnet/Opus (or the Haiku gap is documented explicitly).
+  4. SharedContext is populated from curated summaries rather than verbatim PLAN.md / phase-brief dumps, so the token growth is efficient rather than additive bulk.
+  5. The design carries no Anthropic-only assumptions: SharedContext is a field on the provider-agnostic `EnvelopeIn`, and the decision record notes OpenAI/Codex parity is deferred to the next milestone.
+**Plans**: TBD
+**UI hint**: no
+
+### Phase 21: Cost & Cache Observability
+**Goal**: Per-level token accounting and cache efficiency are visible on the dashboard so operators can observe the results of the Phase 18–20 work in a running cluster.
+**Depends on**: Phase 18 (metric names confirmed); can parallelize with Phases 19–20 once Phase 18 is complete
+**Requirements**: OBSV-01, OBSV-02, OBSV-03
+**Success Criteria** (what must be TRUE):
+  1. The existing Prometheus token counters carry labels that attribute spend per level (project/phase/plan/wave), queryable via PromQL without additional instrumentation.
+  2. A `tide_cache_hit_rate` (or equivalent) gauge derived from `cache_read` vs `cache_creation` dispatch usage is emitted via the existing Prometheus surface and visible in the TelemetryView.
+  3. The read-only dashboard's TelemetryView includes a cache-efficiency panel displaying hit ratio, cache-creation tokens, and realized savings — reading the existing counters with no backend dispatch-path changes.
+**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
 
@@ -48,3 +104,7 @@ Run `/gsd:new-milestone` to scope it. Headline candidate: full TIDE-on-TIDE (the
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete | 2026-06-12 |
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
+| 18. Eval Harness | v1.0.2 | 0/TBD | Not started | - |
+| 19. Template Reorder + Token Minimization | v1.0.2 | 0/TBD | Not started | - |
+| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
+| 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |

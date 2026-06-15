@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Ebb Tide — Token & Cost Optimization
 status: planning
-last_updated: "2026-06-15T13:30:56.273Z"
+last_updated: "2026-06-15"
 last_activity: 2026-06-15
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,27 +17,28 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-13)
+See: .planning/PROJECT.md (updated 2026-06-15)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Planning the next milestone (headline: full TIDE-on-TIDE). Dogfood run 2 now unblocked.
+**Current focus:** v1.0.2 Ebb Tide — Phase 18: Eval Harness (roadmap created; ready to plan).
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-15 — Milestone v1.0.2 started
+Phase: 18 of 21 (Eval Harness)
+Plan: — (not started)
+Status: Ready to plan
+Last activity: 2026-06-15 — v1.0.2 roadmap created (Phases 18–21, 19 requirements mapped)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
-
 - Total plans completed: 38 (v1.0.1, Phases 12–17)
 - Tasks: 46
-- Commits since v1.0.0: 330
+- Commits since v1.0.0: 330+
 
-**By Phase:**
+**By Phase (v1.0.1):**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
@@ -48,9 +49,25 @@ Last activity: 2026-06-15 — Milestone v1.0.2 started
 | 16 | 8 | Complete |
 | 17 | 4 | Complete |
 
+## Accumulated Context
+
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table (v1.0.1 entries added at close).
+
+Key constraint for v1.0.2: TIDE stays CLI-based (`claude -p --bare`); no direct-SDK `cache_control`. Cache is an outcome of prompt structuring, not a lever we control.
+
+### Pending Todos
+
+None.
+
+### Blockers/Concerns
+
+- Phase 20 contingency: cross-pod cache scoping under `claude -p --bare` is unverified. CACHE-01 spike gates CACHE-02/03. If the CLI embeds a per-pod working-directory path in its system prompt, shared-prefix caching never fires and Phase 20 reframes to token-minimization-only. Surface outcome as an explicit PROJECT.md decision regardless.
+
 ## Deferred Items
 
-Items acknowledged and deferred at milestone close on 2026-06-13:
+Items acknowledged and deferred at v1.0.1 milestone close on 2026-06-13:
 
 | Category | Item | Status |
 |----------|------|--------|
@@ -70,54 +87,10 @@ Items acknowledged and deferred at milestone close on 2026-06-13:
 | quick_task | 260611-439-podjob-caps-floor-bump | unknown |
 | quick_task | 260611-cz8-salvage-branch-merge-prep-4-review-fixes | missing |
 
-These are all v1.0.0-era quick-task records whose underlying work landed but whose
-artifact status fields were never flipped (same administrative pattern noted at the
-v1.0.0 close). None are v1.0.1 work. Acknowledged as non-blocking administrative debt.
+All v1.0.0-era quick-task records. Work landed; artifact status fields never flipped. Non-blocking administrative debt.
 
-## Accumulated Context
+## Session Continuity
 
-### Decisions
-
-Decisions are logged in PROJECT.md Key Decisions table (v1.0.1 entries added at close).
-
-### Pending Todos
-
-None.
-
-### Blockers/Concerns
-
-None open. (v1.0.1's kind-cluster `tide` repro-environment constraint is resolved —
-the gate-semantics regression tests are now codified in-repo.)
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260614-exo | Clear ~31 accumulated golangci-lint offenses → `make lint` green (Phase 12–17 debt) | 2026-06-14 | f4af5c2 | [260614-exo-clear-accumulated-golangci-lint-offenses](./quick/260614-exo-clear-accumulated-golangci-lint-offenses/) |
-
-### Post-Milestone CI Repairs + v1.0.1 RELEASE (2026-06-14)
-
-After the v1.0.1 milestone-close push, CI + the rc dry-run + nightly were red —
-all **pre-existing**, none caused by the close (milestone commits touched only
-`.planning/`). A 4-deep masked cascade was root-caused and fixed, the release was
-rc-gated, and **v1.0.1 was published and verified** (7 images, 2 OCI charts, 5
-binaries + checksums, GitHub release — all anonymously confirmed).
-
-Fixes, in order (each masked the next):
-
-- **Chart reproducibility** (`ci` + `release`): `hack/helm/augment-tide-chart.sh` +
-  `tide-values.yaml` were stale vs the Phase 13/14/16 chart edits → `make helm` reverted
-  them. Synced the generator. (debug: [resolved/chart-helmify-reproducibility](./debug/resolved/chart-helmify-reproducibility.md), `6264d8a`)
-
-- **Lint** (~31 golangci offenses + a cross-controller goconst whack-a-mole): quick task 260614-exo (`f4af5c2`) + `2dcdba4`.
-- **nightly #1** — `tide-git-http-server` fixture not built in nightly (private ghcr pkg → ImagePullBackOff): `d45909b`. (debug: [resolved/nightly-git-http-imagepull](./debug/resolved/nightly-git-http-imagepull.md))
-- **nightly #2 / dogfood** — ProjectReconciler missing self-requeue after finalizer add (latent since Phase 02-10; finalizer Update filtered by the Generation-OR predicate): `6286dab`. (debug: [resolved/medium-http-completion-wedge](./debug/resolved/medium-http-completion-wedge.md))
-- **rc dry-run** — chart `appVersion` never bumped to 1.0.1 → dry-run reran the published v1.0.0 manager binary against v1.0.1 chart flags → crash. Version-bumped chart + image-tag refs to 1.0.1: `4dcc193`.
-- **nightly #3 (kind_e2e)** — gate_flow E2E helm install never overrode `subagent.defaults.image` (Phase 13 mechanism) → planner ErrImagePull → Milestone never reached AwaitingApproval. Test-harness fix: `01dd3b4`.
-
-Released via `v1.0.1-rc.2` dry-run → formal `v1.0.1` tag. The earlier accidental bare
-`v1.0.1` tag (from the milestone close) was deleted before the rc flow.
-
-## Operator Next Steps
-
-- Start the next milestone with `/gsd:new-milestone`
+Last session: 2026-06-15
+Stopped at: v1.0.2 roadmap created — Phases 18–21 defined, all 19 requirements mapped, REQUIREMENTS.md traceability filled.
+Resume file: None

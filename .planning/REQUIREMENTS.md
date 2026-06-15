@@ -84,31 +84,31 @@ Which phases cover which requirements. Filled in during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVAL-01 | TBD | Pending |
-| EVAL-02 | TBD | Pending |
-| EVAL-03 | TBD | Pending |
-| EVAL-04 | TBD | Pending |
-| EVAL-05 | TBD | Pending |
-| EVAL-06 | TBD | Pending |
-| PROMPT-01 | TBD | Pending |
-| PROMPT-02 | TBD | Pending |
-| PROMPT-03 | TBD | Pending |
-| PROMPT-04 | TBD | Pending |
-| PROMPT-05 | TBD | Pending |
-| CACHE-01 | TBD | Pending |
-| CACHE-02 | TBD | Pending |
-| CACHE-03 | TBD | Pending |
-| CACHE-04 | TBD | Pending |
-| CACHE-05 | TBD | Pending |
-| OBSV-01 | TBD | Pending |
-| OBSV-02 | TBD | Pending |
-| OBSV-03 | TBD | Pending |
+| EVAL-01 | Phase 18 | Pending |
+| EVAL-02 | Phase 18 | Pending |
+| EVAL-03 | Phase 18 | Pending |
+| EVAL-04 | Phase 18 | Pending |
+| EVAL-05 | Phase 18 | Pending |
+| EVAL-06 | Phase 18 | Pending |
+| PROMPT-01 | Phase 19 | Pending |
+| PROMPT-02 | Phase 19 | Pending |
+| PROMPT-03 | Phase 19 | Pending |
+| PROMPT-04 | Phase 19 | Pending |
+| PROMPT-05 | Phase 19 | Pending |
+| CACHE-01 | Phase 20 | Pending |
+| CACHE-02 | Phase 20 | Pending |
+| CACHE-03 | Phase 20 | Pending |
+| CACHE-04 | Phase 20 | Pending |
+| CACHE-05 | Phase 20 | Pending |
+| OBSV-01 | Phase 21 | Pending |
+| OBSV-02 | Phase 21 | Pending |
+| OBSV-03 | Phase 21 | Pending |
 
 **Coverage:**
 - Milestone requirements: 19 total
-- Mapped to phases: 0 (set by roadmapper)
-- Unmapped: 19 ⚠️ (resolved at roadmap creation)
+- Mapped to phases: 19
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-15*
-*Last updated: 2026-06-15 — initial v1.0.2 definition*
+*Last updated: 2026-06-15 — traceability filled at roadmap creation*
