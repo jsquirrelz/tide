@@ -36,7 +36,7 @@ The quality + cost gate. Must land before any prompt/template change.
 
 ### Cache-Aware Shared Context (CACHE)
 
-- [ ] **CACHE-01**: A spike verifies whether stable-prefix-first ordering yields cross-pod prefix-cache hits across wave siblings under `claude -p --bare` (the working-directory-embedding question); its result gates CACHE-02/03 and is recorded as a decision.
+- [x] **CACHE-01**: A spike verifies whether stable-prefix-first ordering yields cross-pod prefix-cache hits across wave siblings under `claude -p --bare` (the working-directory-embedding question); its result gates CACHE-02/03 and is recorded as a decision.
 - [x] **CACHE-02**: `EnvelopeIn` gains an additive `SharedContext` field (omitempty; executor path ignores it) that the controller populates identically for all wave siblings.
 - [ ] **CACHE-03**: Planner templates reference `SharedContext`, hoisting shared plan/phase context into the stable prefix and growing it toward the provider's cacheable minimum (≥1,024 tokens Sonnet/Opus; documented gap for Haiku 4,096).
 - [ ] **CACHE-04**: Shared context is fed as curated summaries rather than verbatim PLAN.md / phase-brief dumps, cutting tokens without losing the load-bearing context.
@@ -95,7 +95,7 @@ Which phases cover which requirements. Filled in during roadmap creation.
 | PROMPT-03 | Phase 19 | Pending |
 | PROMPT-04 | Phase 19 | Pending |
 | PROMPT-05 | Phase 19 | Pending |
-| CACHE-01 | Phase 20 | Pending |
+| CACHE-01 | Phase 20 | Complete |
 | CACHE-02 | Phase 20 | Complete |
 | CACHE-03 | Phase 20 | Pending |
 | CACHE-04 | Phase 20 | Pending |
