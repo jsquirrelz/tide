@@ -124,7 +124,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 20-01-PLAN.md — SharedContext fields on EnvelopeIn/Out, ChildCRDSpec, and all four CRD specs (CACHE-02 contract)
+- [x] 20-01-PLAN.md — SharedContext fields on EnvelopeIn/Out, ChildCRDSpec, and all four CRD specs (CACHE-02 contract)
 - [ ] 20-04-PLAN.md — tide-spike cross-pod cache harness + credproxy FAIL-path body tee (CACHE-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -181,5 +181,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
-| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 0/TBD | Not started | - |
+| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 1/5 | In Progress|  |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
