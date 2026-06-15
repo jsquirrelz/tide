@@ -219,6 +219,23 @@ eval: ## count_tokens pre-flight (online, requires TIDE_PROXY_ENDPOINT + TIDE_SI
 		-token "$(TIDE_SIGNED_TOKEN)" \
 		-model "$(or $(EVAL_MODEL),claude-sonnet-4-6)"
 
+.PHONY: spike
+spike: ## cross-pod cache prefix spike (online, requires TIDE_PROXY_ENDPOINT + TIDE_SIGNED_TOKEN; dispatches two real claude -p --bare calls with distinct --add-dir paths and reports a PASS/FAIL cache hit verdict).
+	@if [ -z "$$TIDE_PROXY_ENDPOINT" ]; then \
+		echo "ERROR: TIDE_PROXY_ENDPOINT env not set — refusing to run spike"; \
+		echo "       Start a credproxy on kind-tide-dogfood and export TIDE_PROXY_ENDPOINT=https://127.0.0.1:8443"; \
+		exit 1; \
+	fi
+	@if [ -z "$$TIDE_SIGNED_TOKEN" ]; then \
+		echo "ERROR: TIDE_SIGNED_TOKEN env not set — refusing to run spike"; \
+		echo "       Mint and export a valid HMAC signed token for the running credproxy"; \
+		exit 1; \
+	fi
+	go run -tags spike ./cmd/tide-spike/ \
+		-proxy "$(TIDE_PROXY_ENDPOINT)" \
+		-token "$(TIDE_SIGNED_TOKEN)" \
+		-model "$(or $(EVAL_MODEL),claude-sonnet-4-6)"
+
 .PHONY: lint
 lint: demo-fixture golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
