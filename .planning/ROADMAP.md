@@ -87,10 +87,23 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 19-01-PLAN.md — Annotate/reorder/trim milestone_planner + project_planner (golden+ratchet)
 - [ ] 19-02-PLAN.md — Annotate/reorder/trim phase_planner + plan_planner (FILE-TOUCH/JSON-escape preserved)
 - [ ] 19-03-PLAN.md — Annotate/reorder/trim task_executor (consolidate 6 UID occurrences to volatile suffix)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 19-04-PLAN.md — PROMPT-05 regression guard + full make test gate + D-05 human-review checkpoint
+
+**Cross-cutting constraints:**
+
+- The STABLE PREFIX (everything before the `SharedContext slot` marker) of each template contains ZERO {{.TaskUID}}, {{.Provider.*}}, `Level:`, or `Role:` tokens; all {{.TaskUID}} occurrences are concentrated in the volatile suffix AFTER the marker (the suffix legitimately has 2: the `TaskUID:` label line + the task-dir path-mapping line, per D-01)
+- No {{.Provider.*}}, {{.Level}}, or {{.Role}} interpolation remains anywhere in either template
+- Every surviving load-bearing line carries a {{/* WHY ... */ -}} annotation committed before any trim
+- Locked decisions implemented by this plan: D-02 (drop printed Level/Role/Provider.* lines; .Provider stays on the struct), D-04 (conservative trim — pure redundancy/formatting slack only, every directive's semantics preserved), D-06 (inline {{/* WHY */ -}} annotations for surviving load-bearing lines; removal rationale in commit message), D-07 (bare {{/* SharedContext slot */}} marker, no trim markers)
+- go test ./internal/eval/ exits 0 at every commit boundary
 
 ### Phase 20: SharedContext Injection + Cache Verification Spike
 
