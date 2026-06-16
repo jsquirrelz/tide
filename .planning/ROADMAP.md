@@ -88,7 +88,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   4. Wave derivation/ownership is moved off `Plan` to the global (Project) scope, and the locked metric label set `{project,phase,plan,wave}` is preserved with `wave` resemanticized to the global index (the `task` label stays forbidden per the metriccardinality analyzer).
   5. A documented migration/conversion path carries an in-flight Project from the old per-plan schema to the new global schema with a version bump and no silent data loss.
 **Plans**: 3 plans
-- [ ] 23-01-PLAN.md — Introduce api/v1alpha2 (WaveSpec re-owned Plan→Project, dependsOn broadened any-level, storageversion moved, schemaRevision discriminator); regen deepcopy/CRDs; extend verify-no-aggregates glob (SCHEMA-01, DEPS-01, DEPS-02)
+- [x] 23-01-PLAN.md — Introduce api/v1alpha2 (WaveSpec re-owned Plan→Project, dependsOn broadened any-level, storageversion moved, schemaRevision discriminator); regen deepcopy/CRDs; extend verify-no-aggregates glob (SCHEMA-01, DEPS-01, DEPS-02)
 - [ ] 23-02-PLAN.md — Migration wiring: register v1alpha2 scheme, mark v1alpha1 unserved, delete conversion Hub(), re-register D-B1 Wave webhook for v1alpha2, filter per-plan cycle webhook to task-only edges, stub materializeWaves + wave_controller against v1alpha2 (Phase-24 TODOs), write reinstall migration doc (SCHEMA-03, DEPS-01)
 - [ ] 23-03-PLAN.md — Controller guards: old-object fail-closed RequiresReinstall guard + global cross-scope cycle gate (involved nodes surfaced), confirm wave metric label is global-sourced + lock {project,phase,plan,wave} arity (SCHEMA-02, SCHEMA-03, DEPS-03)
 
@@ -157,7 +157,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 (Ebb, superseded) | 5/5 | Complete | 2026-06-16 |
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
 | 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
-| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 1/3 | In Progress|  |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
