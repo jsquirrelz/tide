@@ -207,7 +207,10 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha2.WaveSpec{
-					ProjectRef: planName,
+					// WR-01: roll-up scopes members by project; member Tasks are
+					// stamped tideproject.k8s/project=indegreeTestProject by
+					// makeTaskWithWaveLabel, so the Wave must reference that project.
+					ProjectRef: indegreeTestProject,
 					WaveIndex:  0,
 				},
 			}
@@ -258,7 +261,10 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha2.WaveSpec{
-					ProjectRef: planName,
+					// WR-01: roll-up scopes members by project; member Tasks are
+					// stamped tideproject.k8s/project=indegreeTestProject by
+					// makeTaskWithWaveLabel, so the Wave must reference that project.
+					ProjectRef: indegreeTestProject,
 					WaveIndex:  0,
 				},
 			}
