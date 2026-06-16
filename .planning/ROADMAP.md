@@ -87,7 +87,10 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   3. Applying a global dependency set that forms a cycle across plan/phase/milestone boundaries is rejected at validation time with the involved nodes surfaced — no run starts, no recovery attempted.
   4. Wave derivation/ownership is moved off `Plan` to the global (Project) scope, and the locked metric label set `{project,phase,plan,wave}` is preserved with `wave` resemanticized to the global index (the `task` label stays forbidden per the metriccardinality analyzer).
   5. A documented migration/conversion path carries an in-flight Project from the old per-plan schema to the new global schema with a version bump and no silent data loss.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 23-01-PLAN.md — Introduce api/v1alpha2 (WaveSpec re-owned Plan→Project, dependsOn broadened any-level, storageversion moved, schemaRevision discriminator); regen deepcopy/CRDs; extend verify-no-aggregates glob (SCHEMA-01, DEPS-01, DEPS-02)
+- [ ] 23-02-PLAN.md — Migration wiring: register v1alpha2 scheme, mark v1alpha1 unserved, delete conversion Hub(), re-register D-B1 Wave webhook for v1alpha2, filter per-plan cycle webhook to task-only edges, stub materializeWaves + wave_controller against v1alpha2 (Phase-24 TODOs), write reinstall migration doc (SCHEMA-03, DEPS-01)
+- [ ] 23-03-PLAN.md — Controller guards: old-object fail-closed RequiresReinstall guard + global cross-scope cycle gate (involved nodes surfaced), confirm wave metric label is global-sourced + lock {project,phase,plan,wave} arity (SCHEMA-02, SCHEMA-03, DEPS-03)
 
 ### Phase 24: Global Wave Derivation Engine
 **Goal**: Once project planning completes, the orchestrator assembles ONE global Execution DAG of every Task across all Milestones/Phases/Plans and derives a single monotonic wave schedule by layered Kahn — queryable both directions and re-derived cheaply with no cached schedule.
