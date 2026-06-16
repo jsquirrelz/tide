@@ -653,22 +653,27 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> All three resolved during planning (plans 23-01/02/03). Resolutions recorded inline below.
 
 1. **Exact old-object discriminator for isV2Shape**
    - What we know: v1alpha1 `ProjectSpec.TargetRepo` was already `+kubebuilder:validation:MinLength=1` so it is required in both versions.
    - What's unclear: There is no field present in v1alpha2 but absent in v1alpha1 without adding one.
    - Recommendation: Add a marker field `SchemaRevision string` to v1alpha2 `ProjectSpec` with a CEL rule requiring its presence and defaulting to `"v1alpha2"` via a mutating webhook, OR rely solely on CRD admission schema (v1alpha1 objects fail CRD admission when applied after the upgrade, so the controller guard is only for objects already in etcd). The simplest position: trust the CRD admission schema as the primary gate; the controller guard is belt-and-suspenders for etcd-stranded objects.
+   - **RESOLVED:** Add `SchemaRevision string` (Required, `Enum=v1alpha2`) to v1alpha2 `ProjectSpec` (plan 23-01 Task 1); the Project reconciler fail-closed guard discriminates on `project.Spec.SchemaRevision != "v1alpha2"` → `RequiresReinstall` condition (plan 23-03 Task 1). CRD admission is the primary gate; the controller guard is belt-and-suspenders for etcd-stranded objects, paired with a documented CRD delete+reapply reinstall (plan 23-02 Task 3) so no stranded objects exist on the dogfood-only clean break.
 
 2. **Wave webhook D-B1 client-apply rejection for v1alpha2**
    - What we know: `wave_webhook.go` enforces D-B1 (only WaveReconciler may create Waves). After the schema change, the webhook must reference v1alpha2.Wave.
    - What's unclear: Whether the webhook is repurposed (re-registered for v1alpha2) or deleted as part of the webhook cleanup sweep.
    - Recommendation: Re-register the webhook for v1alpha2 Wave (same D-B1 logic, updated import); don't delete it. D-B1 remains a valid invariant. Phase 23 plan should include this as an explicit task.
+   - **RESOLVED:** Re-register for v1alpha2 — plan 23-02 Task 2 creates `internal/webhook/v1alpha2/wave_webhook.go` porting the D-B1 guard and deletes the v1alpha1 wave webhook (whose marker would route to the unserved version).
 
 3. **Fan-out of coarse scope deps in cycle gate**
    - What we know: Phase 23's `assembleProjectDepGraph` skips coarse refs (those naming Plans/Phases/Milestones rather than Tasks). This means the cycle gate can't detect cycles involving scope-level deps until Phase 24 implements fan-out.
    - What's unclear: Whether Phase 23 should partially implement scope-level dep expansion for cycle detection.
    - Recommendation: Skip scope deps in Phase 23's cycle gate (they are conservative — adding them later can only ADD edges, never remove them, so the Phase-23 gate is never more permissive than the final Phase-24 gate). Document the limitation.
+   - **RESOLVED:** Skip coarse scope deps in the Phase-23 cycle gate; the global gate validates task-level edges only with an in-code comment citing this OQ (plan 23-03 Task 1). Conservative by construction — Phase 24 fan-out can only ADD edges, never make the gate more permissive.
 
 ---
 
