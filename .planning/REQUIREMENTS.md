@@ -75,4 +75,26 @@ Deferred to later milestones:
 
 ## Traceability
 
-REQ-ID → Phase mapping is filled by the roadmap (phases 22+).
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| FIX-01 | Phase 22 | Pending |
+| SCHEMA-01 | Phase 23 | Pending |
+| SCHEMA-02 | Phase 23 | Pending |
+| SCHEMA-03 | Phase 23 | Pending |
+| DEPS-01 | Phase 23 | Pending |
+| DEPS-02 | Phase 23 | Pending |
+| DEPS-03 | Phase 23 | Pending |
+| EXEC-01 | Phase 24 | Pending |
+| EXEC-02 | Phase 24 | Pending |
+| EXEC-03 | Phase 24 | Pending |
+| EXEC-04 | Phase 24 | Pending |
+| DISP-01 | Phase 25 | Pending |
+| DISP-02 | Phase 25 | Pending |
+| DISP-03 | Phase 25 | Pending |
+| RESUME-01 | Phase 25 | Pending |
+| MS-01 | Phase 26 | Pending |
+| MS-02 | Phase 26 | Pending |
+| MS-03 | Phase 26 | Pending |
+| SPEC-01 | Phase 26 | Pending |
+
+**Coverage:** 19/19 v1.0.2 Spring Tide requirements mapped to exactly one phase. No orphans, no duplicates.

@@ -5,7 +5,7 @@
 - ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11) — ⚠ shipped on an invalid execution foundation (per-plan waves; see v1.0.2 Spring Tide)
 - ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13) — ⚠ same invalid foundation
 - ⊘ **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (completed; **SUPERSEDED — will not be released**, artifacts preserved). Superseded after dogfood run #2 surfaced the per-plan-waves defect.
-- 🚧 **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22+ (planning). Re-architect execution to ONE global Execution DAG — the patch that makes the Topologically-Indexed paradigm real. Supersedes Ebb Tide; preempts the OpenAI/dogfood milestone.
+- 🚧 **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22–26 (planning). Re-architect execution to ONE global Execution DAG spanning the entire Project — the patch that makes the Topologically-Indexed paradigm real. Supersedes Ebb Tide; preempts the OpenAI/dogfood milestone.
 - 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.2 Spring Tide landing a correct execution layer)
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
@@ -36,141 +36,101 @@ Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [m
 
 </details>
 
-### 🚧 v1.0.2 — Ebb Tide: Token & Cost Optimization (In Progress)
+<details>
+<summary>⊘ v1.0.2 — Ebb Tide: Token & Cost Optimization (Phases 18–21) — COMPLETED but SUPERSEDED, will not be released</summary>
 
-**Milestone Goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
+**Milestone Goal (as scoped):** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
 
-- [ ] **Phase 18: Eval Harness** - Freeze a v1.0.1 baseline and build the quality gate before any template change
-- [x] **Phase 19: Template Reorder + Token Minimization** - Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness
-- [x] **Phase 20: SharedContext Injection + Cache Verification Spike** - Spike cross-pod cache scoping, then add SharedContext to grow the cacheable shared prefix (or reframe to token-minimization-only)
-- [ ] **Phase 21: Cost & Cache Observability** - Surface per-level token accounting and cache-hit metrics on the dashboard
+- [x] **Phase 18: Eval Harness** — Freeze a v1.0.1 baseline and build the quality gate before any template change (3/3 plans) — completed 2026-06-15
+- [x] **Phase 19: Template Reorder + Token Minimization** — Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness (4/4 plans) — completed 2026-06-15
+- [x] **Phase 20: SharedContext Injection + Cache Verification Spike** — Spike cross-pod cache scoping, then add SharedContext to grow the cacheable shared prefix (reframed to token-minimization-only per CACHE-01 verdict) (5/5 plans) — completed 2026-06-16
+- [x] **Phase 21: Cost & Cache Observability** — Surface per-level token accounting and cache-hit metrics on the dashboard (2/2 plans) — Needs Review
+
+Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect. Token/cost + observability work is preserved and folds forward where it still applies; the CACHE-01 decision record lives in PROJECT.md. The detailed phase breakdown for 18–21 is archived in git history (this ROADMAP, pre-Spring-Tide revision) and the per-phase directories under `.planning/phases/`.
+
+</details>
+
+### 🚧 v1.0.2 — Spring Tide: Global Execution DAG (In Progress)
+
+**Milestone Goal:** Re-architect execution so waves are derived from ONE global Execution DAG spanning the entire Project (all milestones/phases/plans), assembled after planning completes — making the Topologically-Indexed paradigm real. v1.0.0/v1.0.1 shipped a per-plan-waves layer (`Plan` has no deps, `Task.dependsOn` is plan-local per D-F1, waves are per-plan via `materializeWaves`, no global indegree map). This is the corrective patch that makes the 1.0 line actually be what it claimed.
+
+**Build order (this is a re-architecture):** the breaking CRD/schema foundation and cross-scope dependency model land first; the global scheduler / wave-derivation engine builds on that schema; global dispatch + failure semantics + gates-as-holds + resumption compose over the scheduler; multi-milestone exercise and spec-conformance close the milestone. FIX-01 (dashboard embed) is independent and ships first as a standalone phase.
+
+- [ ] **Phase 22: Dashboard Embed Freshness Fix** — Published images can never ship an SPA bundle older than source; verified against the Telemetry tab
+- [ ] **Phase 23: Schema Migration + Cross-Scope Dependency Model** — Breaking CRD changes (Wave re-owned to Project scope, global `wave` label) with a migration path, plus cross-plan/phase/milestone task deps reconciled into one global DAG with cyclic rejection
+- [ ] **Phase 24: Global Wave Derivation Engine** — Assemble ONE global Execution DAG after planning and derive global waves via layered Kahn; the bidirectional global wave index, re-derived O(V+E) with no cached schedule
+- [ ] **Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption** — Dispatch off the global indegree map vs the completed-task set; wave-boundary failure contract preserved exactly at global scope; gates compose as holds; restart re-derives the whole schedule
+- [ ] **Phase 26: Multi-Milestone Drive + Spec Conformance** — A Project drives multiple Milestones via the Milestone DAG with cross-milestone global waves and per-milestone gate policy; the README worked example is an executable conformance test
 
 ## Phase Details
 
-### Phase 18: Eval Harness
-
-**Goal**: A frozen v1.0.1 baseline and deterministic quality gate exist, so every subsequent template or prompt change can be measured and regression-gated without manual review.
-**Depends on**: Phase 17 (v1.0.1 shipped)
-**Requirements**: EVAL-01, EVAL-02, EVAL-03, EVAL-04, EVAL-05, EVAL-06
+### Phase 22: Dashboard Embed Freshness Fix
+**Goal**: Every published TIDE image embeds the current dashboard SPA, so a release can never ship a bundle older than its source — closing the dogfood run #2 finding that v1.0.0/v1.0.1 images froze the embedded bundle at pre-telemetry commit `6d7a28f`.
+**Depends on**: Nothing (independent of the execution re-architecture; ships first)
+**Requirements**: FIX-01
 **Success Criteria** (what must be TRUE):
-
-  1. A maintainer runs `make test-unit` and the golden-file snapshot tests confirm that all five rendered templates match the committed `testdata/baselines/` snapshots (zero-network, deterministic).
-  2. A PR that grows any template's token count beyond the tuned threshold fails CI automatically, without requiring manual inspection.
-  3. A PR that breaks child-CRD parse success, declared output-path presence, or DAG acyclicity is caught by the protocol-compliance gate in `make test-unit`.
-  4. `make eval` (behind `//go:build eval`) counts tokens via the Anthropic `count_tokens` endpoint through the existing credproxy using stdlib `net/http`, and prints per-template counts.
-  5. Cost deltas computed by the harness delegate to the existing `estimatedCostCents` function and report REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
-
-**Plans**: 3 plans
-
-Plans:
-**Wave 1**
-
-- [x] 18-01-PLAN.md — Freeze v1.0.1 baseline: eval package + goldie golden renders + byte ratchets (EVAL-01/03/06)
-- [x] 18-03-PLAN.md — cmd/tide-eval count_tokens pre-flight + make eval target (EVAL-05)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 18-02-PLAN.md — Deterministic protocol-compliance gate + estimatedCostCents parity/realized-savings (EVAL-02/04)
-
-### Phase 19: Template Reorder + Token Minimization
-
-**Goal**: All five prompt templates are restructured stable-prefix-first so wave-sibling dispatches share an identical cache-eligible prefix, and non-essential boilerplate is trimmed — each change gated green by the Phase 18 eval harness.
-**Depends on**: Phase 18
-**Requirements**: PROMPT-01, PROMPT-02, PROMPT-03, PROMPT-04, PROMPT-05
-**Success Criteria** (what must be TRUE):
-
-  1. All five templates follow the order: role preamble → fixed instructions → shared context → volatile metadata → per-task prompt; the `{{.TaskUID}}` and `{{.Provider.*}}` fields appear only in the volatile suffix.
-  2. Every template section carries a "why-this-line" annotation committed before any trim, so load-bearing instructions (proven by prior production cascades) are identifiable and preserved.
-  3. Structured data interpolated into the stable prefix is serialized with stable key order so identical inputs render identical bytes (deterministic diffing under goldie).
-  4. `make test-unit` runs green after each boilerplate-trim commit, confirming protocol-compliance (child-CRD parse, output paths, DAG acyclicity) is preserved throughout.
-  5. The golden baselines in `testdata/baselines/` are updated to reflect the reordered templates, and the token-count ratchet confirms no accidental growth relative to the trimmed target.
-
-**Plans**: 4 plans
-
-Plans:
-**Wave 1**
-
-- [x] 19-01-PLAN.md — Annotate/reorder/trim milestone_planner + project_planner (golden+ratchet)
-- [x] 19-02-PLAN.md — Annotate/reorder/trim phase_planner + plan_planner (FILE-TOUCH/JSON-escape preserved)
-- [x] 19-03-PLAN.md — Annotate/reorder/trim task_executor (consolidate 6 UID occurrences to volatile suffix)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 19-04-PLAN.md — PROMPT-05 regression guard + full make test gate + D-05 human-review checkpoint
-
-**Cross-cutting constraints:**
-
-- The STABLE PREFIX (everything before the `SharedContext slot` marker) of each template contains ZERO {{.TaskUID}}, {{.Provider.*}}, `Level:`, or `Role:` tokens; all {{.TaskUID}} occurrences are concentrated in the volatile suffix AFTER the marker (the suffix legitimately has 2: the `TaskUID:` label line + the task-dir path-mapping line, per D-01)
-- No {{.Provider.*}}, {{.Level}}, or {{.Role}} interpolation remains anywhere in either template
-- Every surviving load-bearing line carries a {{/* WHY ... */ -}} annotation committed before any trim
-- Locked decisions implemented by this plan: D-02 (drop printed Level/Role/Provider.* lines; .Provider stays on the struct), D-04 (conservative trim — pure redundancy/formatting slack only, every directive's semantics preserved), D-06 (inline {{/* WHY */ -}} annotations for surviving load-bearing lines; removal rationale in commit message), D-07 (bare {{/* SharedContext slot */}} marker, no trim markers)
-- go test ./internal/eval/ exits 0 at every commit boundary
-
-### Phase 20: SharedContext Injection + Cache Verification Spike
-
-**Goal**: A spike verifies whether stable-prefix-first ordering yields cross-pod prefix-cache hits across wave siblings under `claude -p --bare`; if it does, `EnvelopeIn` gains a `SharedContext` field populated identically for all wave siblings to grow the shared cacheable prefix to ≥1,024 tokens; if it does not, this phase closes as best-effort token minimization with the spike decision recorded.
-**Depends on**: Phase 19
-**Requirements**: CACHE-01, CACHE-02, CACHE-03, CACHE-04, CACHE-05
-**Notes/Risks**: CACHE-01 is a verification spike that gates CACHE-02/03. If cross-pod caching does not fire (because the CLI embeds a working-directory path that differs per pod, making each dispatch's prefix unique), CACHE-02/03 reframe to token-minimization-only and the SharedContext field is still added but only for reducing context size — not for cache benefit. This contingency must be explicitly recorded as a decision in PROJECT.md regardless of outcome.
-**Success Criteria** (what must be TRUE):
-
-  1. The spike result is committed as a decision in PROJECT.md — either "cross-pod prefix-cache hits confirmed under `claude -p --bare`" or "cross-pod caching does not fire; reframed to token-minimization-only."
-  2. `EnvelopeIn` gains a `SharedContext string` (omitempty) field that the executor path ignores, and `BuildPlannerEnvelope` populates it identically for all tasks in a wave.
-  3. Planner templates reference `{{.SharedContext}}` in the stable prefix section; the combined stable prefix (role + instructions + SharedContext) reaches ≥1,024 tokens on Sonnet/Opus (or the Haiku gap is documented explicitly).
-  4. SharedContext is populated from curated summaries rather than verbatim PLAN.md / phase-brief dumps, so the token growth is efficient rather than additive bulk.
-  5. The design carries no Anthropic-only assumptions: SharedContext is a field on the provider-agnostic `EnvelopeIn`, and the decision record notes OpenAI/Codex parity is deferred to the next milestone.
-
-**Plans**: 5 plans
-
-Plans:
-**Wave 1**
-
-- [x] 20-01-PLAN.md — SharedContext fields on EnvelopeIn/Out, ChildCRDSpec, and all four CRD specs (CACHE-02 contract)
-- [x] 20-04-PLAN.md — tide-spike cross-pod cache harness + credproxy FAIL-path body tee (CACHE-01)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 20-02-PLAN.md — {{.SharedContext}} interpolation in four planner templates + golden/ratchet re-baseline (CACHE-03)
-- [x] 20-03-PLAN.md — BuildPlannerEnvelope stamp + materializer byte-identical carry + size cap + executor-omit lock (CACHE-02/04)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 20-05-PLAN.md — live spike run, PROJECT.md decision, provider-neutrality, D-08 contingency (CACHE-01/05)
-
-**UI hint**: no
-
-### Phase 21: Cost & Cache Observability
-
-**Goal**: Per-level token accounting and cache efficiency are visible on the dashboard so operators can observe the results of the Phase 18–20 work in a running cluster.
-**Depends on**: Phase 18 (metric names confirmed); can parallelize with Phases 19–20 once Phase 18 is complete
-**Requirements**: OBSV-01, OBSV-02, OBSV-03
-**Success Criteria** (what must be TRUE):
-
-  1. The existing Prometheus token counters carry labels that attribute spend per level (project/phase/plan/wave), queryable via PromQL without additional instrumentation.
-  2. A `tide_cache_hit_rate` (or equivalent) gauge derived from `cache_read` vs `cache_creation` dispatch usage is emitted via the existing Prometheus surface and visible in the TelemetryView.
-  3. The read-only dashboard's TelemetryView includes a cache-efficiency panel displaying hit ratio, cache-creation tokens, and realized savings — reading the existing counters with no backend dispatch-path changes.
-
-**Plans**: 2 plans
-
-Plans:
-**Wave 1** *(both plans run in parallel — zero file overlap)*
-
-- [x] 21-01-PLAN.md — Go backend: savings counter end-to-end (cacheSavingsCents in pricing.go, Usage carry field, CacheSavingsCentsTotal in registry, emitTaskMetrics emission, tests) (OBSV-01/02)
-- [x] 21-02-PLAN.md — Dashboard: CacheEfficiencyPanel + per-level BreakdownKind selector in TelemetryView (OBSV-01/03)
-
+  1. A maintainer builds the dashboard image from a clean checkout and the embedded `cmd/dashboard/embed/dist` bundle is regenerated from current source as part of the image/release path (not committed-stale).
+  2. CI fails a build whose embedded `dist` is older than the dashboard source (a staleness gate catches a forgotten regenerate before publish).
+  3. A freshly built image, run against a cluster, renders the Telemetry tab — proving the embedded bundle is the current post-telemetry SPA, not the frozen pre-telemetry one.
+**Plans**: TBD
 **UI hint**: yes
+
+### Phase 23: Schema Migration + Cross-Scope Dependency Model
+**Goal**: The CRD surface is re-shaped so wave derivation/ownership lives at Project scope and tasks can declare dependencies across plan/phase/milestone boundaries — all reconciled into one global Execution DAG that rejects cycles at validation — shipped behind a documented migration path that never silently corrupts an in-flight Project.
+**Depends on**: Nothing (foundation; Phase 24 builds on this schema). Can run alongside Phase 22.
+**Requirements**: SCHEMA-01, SCHEMA-02, SCHEMA-03, DEPS-01, DEPS-02, DEPS-03
+**Success Criteria** (what must be TRUE):
+  1. A Task can declare a dependency on a Task in another Plan, Phase, OR Milestone via a qualified reference, and the orchestrator resolves it into the global DAG (the plan-local D-F1 restriction is retired).
+  2. Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the same global task DAG (coarse interface edges resolve to / coexist with task-level edges).
+  3. Applying a global dependency set that forms a cycle across plan/phase/milestone boundaries is rejected at validation time with the involved nodes surfaced — no run starts, no recovery attempted.
+  4. Wave derivation/ownership is moved off `Plan` to the global (Project) scope, and the locked metric label set `{project,phase,plan,wave}` is preserved with `wave` resemanticized to the global index (the `task` label stays forbidden per the metriccardinality analyzer).
+  5. A documented migration/conversion path carries an in-flight Project from the old per-plan schema to the new global schema with a version bump and no silent data loss.
+**Plans**: TBD
+
+### Phase 24: Global Wave Derivation Engine
+**Goal**: Once project planning completes, the orchestrator assembles ONE global Execution DAG of every Task across all Milestones/Phases/Plans and derives a single monotonic wave schedule by layered Kahn — queryable both directions and re-derived cheaply with no cached schedule.
+**Depends on**: Phase 23 (cross-scope deps + global-scope Wave ownership)
+**Requirements**: EXEC-01, EXEC-02, EXEC-03, EXEC-04
+**Success Criteria** (what must be TRUE):
+  1. After planning completes and before any execution dispatch, the orchestrator has assembled a single global Execution DAG containing every Task in the Project across all Milestones/Phases/Plans.
+  2. Waves are derived by layered Kahn over that global DAG and carry global, monotonic wave indices — not per-plan `tide-wave-<plan.UID>-<i>` indices.
+  3. Given any Task you can resolve its global wave, and given any global wave you can list its Tasks (the README:54 namesake invariant holds Project-wide, not just within a plan).
+  4. Adding or completing a task re-derives the whole Project's waves in O(V+E) from the DAG + completed-task set with no schedule cached in `.status` (PERSIST-03 guards still pass).
+**Plans**: TBD
+
+### Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption
+**Goal**: Execution dispatches off ONE global indegree map versus the completed-task set, the wave-boundary failure contract holds exactly at global scope, gates compose as holds over the global scheduler, and an orchestrator restart re-derives the entire schedule from minimal state.
+**Depends on**: Phase 24 (global wave index + re-derivation)
+**Requirements**: DISP-01, DISP-02, DISP-03, RESUME-01
+**Success Criteria** (what must be TRUE):
+  1. A Task dispatches only when ALL its global dependencies are complete (global indegree 0 vs the completed-task set), regardless of which Plan/Phase/Milestone authored it.
+  2. When a task fails, its independent siblings in the same global wave continue, its global dependents are never dispatched (their global indegree never reaches zero), and non-dependents dispatch in strict / halt in conservative — exactly the spec §"Failure handling at wave boundaries" contract, now at global scope.
+  3. A gate (milestone/phase/plan/task approve) withholds a globally-ready Task until approved and releases it on approval without bypassing dependency readiness; human-gate-policy stays configurable per Project (controller reads policy, does not bake it in).
+  4. An orchestrator restart re-derives the entire Project execution schedule from the global indegree map + completed-task set alone, with no other persisted execution state and no cached schedule.
+**Plans**: TBD
+
+### Phase 26: Multi-Milestone Drive + Spec Conformance
+**Goal**: A single Project drives multiple Milestones end-to-end via the Milestone DAG, with Tasks from different Milestones sharing global waves and per-milestone gate policy composing across the DAG — and the README cross-plan/cross-phase/cross-milestone worked example is pinned as an executable conformance test.
+**Depends on**: Phase 25 (global dispatch + gates + failure semantics)
+**Requirements**: MS-01, MS-02, MS-03, SPEC-01
+**Success Criteria** (what must be TRUE):
+  1. Planning emits a Milestone DAG from `Milestone.dependsOn` (schema-present, never exercised), and every milestone's Tasks join the single global Execution DAG so one Project drives multiple Milestones.
+  2. A Task in one Milestone can share a global wave with a Task in another Milestone, and cross-milestone task dependencies are expressible and honored (the literal README execution example).
+  3. Milestone-level gate policy composes across the Milestone DAG — approve-every-milestone works for N milestones, and full-auto and full-supervised remain expressible.
+  4. The README execution-DAG worked example (tasks α…θ, cross-plan/phase/milestone edges) is encoded as an executable test that produces the documented global wave schedule `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`, and the README and implementation agree.
+**Plans**: TBD
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
 
-Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Sequenced after v1.0.2 "Ebb Tide."
+Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Gated on v1.0.2 Spring Tide landing a correct execution layer.
 
 </details>
 
 <details>
 <summary>📋 v1.x — Polyglot Subagent Runtimes: LangGraph Strategy (Backlog)</summary>
 
-Architecture locked; task breakdown deferred. The `claude` CLI subagent becomes one named strategy behind the existing `pkg/dispatch.Subagent` image contract; a second Python/LangGraph container image implements the same envelope contract for full agent-loop parity. Sequenced after v1.0.2 "Ebb Tide" and after the OpenAI-backend milestone.
+Architecture locked; task breakdown deferred. The `claude` CLI subagent becomes one named strategy behind the existing `pkg/dispatch.Subagent` image contract; a second Python/LangGraph container image implements the same envelope contract for full agent-loop parity. Sequenced after v1.0.2 "Spring Tide" and after the OpenAI-backend milestone.
 
 See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-subagent-MILESTONE.md) for the full framing: parity inventory, contract-conformance table, provider-firewall gap analysis, alternatives considered, and open questions.
 
@@ -187,7 +147,14 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 15. Paper Cuts | v1.0.1 | 7/7 | Complete | 2026-06-12 |
 | 16. Telemetry Completion | v1.0.1 | 8/8 | Complete | 2026-06-12 |
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
-| 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
-| 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
-| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 5/5 | Complete    | 2026-06-16 |
-| 21. Cost & Cache Observability | v1.0.2 | 2/2 | Needs Review | - |
+| 18. Eval Harness | v1.0.2 (Ebb, superseded) | 3/3 | Complete | 2026-06-15 |
+| 19. Template Reorder + Token Minimization | v1.0.2 (Ebb, superseded) | 4/4 | Complete | 2026-06-15 |
+| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 (Ebb, superseded) | 5/5 | Complete | 2026-06-16 |
+| 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
+| 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+</content>
+</invoke>
