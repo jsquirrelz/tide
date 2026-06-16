@@ -45,7 +45,11 @@ jobs:
   helmify-verify:
     name: Helmify chart reproducibility (D-X2 verify-only)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bumped from 5 to 10 minutes (FIX-01): the added verify-dashboard-freshness
+    # step runs `npm ci` + vite build (~45s local, ~2-3min on a cold CI runner).
+    # The chart-reproducibility steps remain fast; 10 min gives safe headroom
+    # without masking a genuine hang.
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -85,6 +89,22 @@ jobs:
             exit 1
           fi
           echo "PASS: charts/ tree matches helmify+augment output"
+
+      # FIX-01: dashboard embed freshness gate (defense-in-depth before publish).
+      # Mirrors the same step pair in ci.yaml's test job. Runs AFTER the chart-
+      # reproducibility gate so a stale dist/ fails HERE before `release` or
+      # `build-images` fire (both `needs: [helmify-verify, ...]`).
+      # Node 22 matches the Dockerfile.dashboard spa-builder stage digest.
+      # Cache keyed on lockfile so npm ci is fast on a warm cache.
+      - name: Setup Node (dashboard freshness gate)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: dashboard/web/package-lock.json
+
+      - name: Verify dashboard embed freshness (FIX-01)
+        run: make verify-dashboard-freshness
 
   # Gate 2 — verify the parent-version-matched rc dry-run succeeded (D-D3).
   #
