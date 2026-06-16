@@ -56,7 +56,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 
 **Build order (this is a re-architecture):** the breaking CRD/schema foundation and cross-scope dependency model land first; the global scheduler / wave-derivation engine builds on that schema; global dispatch + failure semantics + gates-as-holds + resumption compose over the scheduler; multi-milestone exercise and spec-conformance close the milestone. FIX-01 (dashboard embed) is independent and ships first as a standalone phase.
 
-- [ ] **Phase 22: Dashboard Embed Freshness Fix** — Published images can never ship an SPA bundle older than source; verified against the Telemetry tab
+- [x] **Phase 22: Dashboard Embed Freshness Fix** — Published images can never ship an SPA bundle older than source; verified against the Telemetry tab
 - [ ] **Phase 23: Schema Migration + Cross-Scope Dependency Model** — Breaking CRD changes (Wave re-owned to Project scope, global `wave` label) with a migration path, plus cross-plan/phase/milestone task deps reconciled into one global DAG with cyclic rejection
 - [ ] **Phase 24: Global Wave Derivation Engine** — Assemble ONE global Execution DAG after planning and derive global waves via layered Kahn; the bidirectional global wave index, re-derived O(V+E) with no cached schedule
 - [ ] **Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption** — Dispatch off the global indegree map vs the completed-task set; wave-boundary failure contract preserved exactly at global scope; gates compose as holds; restart re-derives the whole schedule
