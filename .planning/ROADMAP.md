@@ -149,7 +149,14 @@ Plans:
   2. A `tide_cache_hit_rate` (or equivalent) gauge derived from `cache_read` vs `cache_creation` dispatch usage is emitted via the existing Prometheus surface and visible in the TelemetryView.
   3. The read-only dashboard's TelemetryView includes a cache-efficiency panel displaying hit ratio, cache-creation tokens, and realized savings — reading the existing counters with no backend dispatch-path changes.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+**Wave 1** *(both plans run in parallel — zero file overlap)*
+
+- [ ] 21-01-PLAN.md — Go backend: savings counter end-to-end (cacheSavingsCents in pricing.go, Usage carry field, CacheSavingsCentsTotal in registry, emitTaskMetrics emission, tests) (OBSV-01/02)
+- [ ] 21-02-PLAN.md — Dashboard: CacheEfficiencyPanel + per-level BreakdownKind selector in TelemetryView (OBSV-01/03)
+
 **UI hint**: yes
 
 <details>
@@ -182,4 +189,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 5/5 | Complete    | 2026-06-16 |
-| 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |
+| 21. Cost & Cache Observability | v1.0.2 | 0/2 | In progress | - |
