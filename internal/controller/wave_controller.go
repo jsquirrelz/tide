@@ -37,6 +37,7 @@ import (
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
+	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 )
 
@@ -106,7 +107,6 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// reconciler no longer needs to look up the parent here. Phase 24 will re-own
 	// Wave under Project; this step will then resolve ProjectRef → Project and set
 	// the owner ref. For now, skip the owner-ref walk — materializeWaves stamps it.
-	_ = wave.Spec.ProjectRef // referenced to avoid "declared but not used" on the field
 
 	// 5. Phase 2 observational roll-up body (D-B2, D-B4 — NO Job creation).
 	if r.Dispatcher != nil {
@@ -145,9 +145,17 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	// association mechanism since PlanRef no longer exists in WaveSpec.
 	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
 	var taskList tideprojectv1alpha1.TaskList
+	// Scope the roll-up to THIS Wave's project (interim WR-01 fix): wave-index is a
+	// small integer reused per-plan, so a bare wave-index match cross-contaminates
+	// Tasks from sibling plans/projects in the same namespace. Filtering by
+	// owner.LabelProject == wave.Spec.ProjectRef removes that contamination until the
+	// Phase-24 global wave index lands (see the TODO above).
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(wave.Namespace),
-		client.MatchingLabels{"tideproject.k8s/wave-index": waveIndexLabel},
+		client.MatchingLabels{
+			"tideproject.k8s/wave-index": waveIndexLabel,
+			owner.LabelProject:           wave.Spec.ProjectRef,
+		},
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list tasks for wave %s: %w", wave.Name, err)
 	}

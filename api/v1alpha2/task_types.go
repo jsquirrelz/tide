@@ -83,6 +83,7 @@ type TaskSpec struct {
 	// in-memory at assembly time (D-05); authored coarse dependsOn is the only
 	// persisted truth.
 	// +optional
+	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
 	DependsOn []string `json:"dependsOn,omitempty"`
 
@@ -164,6 +165,7 @@ type TaskStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a task cannot depend on itself"
 
 // Task is the Schema for the tasks API
 type Task struct {

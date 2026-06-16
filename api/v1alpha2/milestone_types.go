@@ -33,6 +33,8 @@ type MilestoneSpec struct {
 	// Progressive refinement (D-03) enables coarse-to-fine dependency narrowing
 	// as deeper structure materializes.
 	// +optional
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// SharedContext is the wave-scoped shared context string stamped by the
@@ -64,6 +66,7 @@ type MilestoneStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a milestone cannot depend on itself"
 
 // Milestone is the Schema for the milestones API
 type Milestone struct {

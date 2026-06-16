@@ -35,6 +35,8 @@ type PlanSpec struct {
 	// MA-P3-PB → MB requires MA-P3-PB-task-07. Resolved in-memory at assembly
 	// time (D-05); authored coarse dependsOn is the only persisted truth.
 	// +optional
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// SharedContext is the wave-scoped shared context string stamped by the
@@ -85,6 +87,7 @@ type PlanStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a plan cannot depend on itself"
 
 // Plan is the Schema for the plans API
 type Plan struct {
