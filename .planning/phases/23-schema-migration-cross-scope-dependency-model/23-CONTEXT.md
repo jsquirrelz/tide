@@ -119,3 +119,19 @@ This phase delivers the **schema + dependency-reference model only**. The actual
 
 *Phase: 23-schema-migration-cross-scope-dependency-model*
 *Context gathered: 2026-06-16*
+
+---
+
+## Post-Execution Scope Expansion (recorded 2026-06-16)
+
+**Discovered during Wave-2 post-merge gate:** Plans 23-01/02/03 unserved v1alpha1 and flipped storage to v1alpha2, but only migrated the webhooks + Wave controller. All other controllers (Project/Milestone/Phase/Plan/Task), gates, reporter, CLI, and dashboard (16 prod files) plus ~80 test files still operate on `tideprojectv1alpha1` types — so the operator would watch unserved GVKs and `go vet ./...` fails (`test/integration/envtest/suite_test.go` references the moved webhook setup funcs). The discuss/research/plan/check pipeline all under-scoped this: a clean break (D-09, no conversion webhook) requires migrating every consumer to v1alpha2.
+
+**User decision (fix-shape fork):** **Full migration to v1alpha2 now.** Migrate all consumers (134 files importing `api/v1alpha1`, ~2,700 alias usages) to v1alpha2 so the operator runs on the served version. Tracked as gap-closure plan(s) 23-04+.
+
+**Recon for the migration:**
+- Import aliases to repoint: `tideprojectv1alpha1` (87 files), `tidev1alpha1` (50 files) → `api/v1alpha2`. v1alpha2 exposes symmetric `AddToScheme`/`GroupVersion`/`SchemeBuilder`.
+- Semantic delta 1 — `Wave.Spec.PlanRef` removed → `ProjectRef`+`WaveIndex` (~13 files build/read WaveSpec: wave_controller(_test), plan_controller, reporter/materialize, dashboard waves/informer_bridge, indegree_test, etc.).
+- Semantic delta 2 — 23-03's reconciler guard rejects any v1alpha2 Project with `Spec.SchemaRevision != "v1alpha2"`; ~60 test files construct Projects and must set `SchemaRevision: "v1alpha2"` (or the guard blocks them).
+- Semantic delta 3 — `internal/webhook/v1alpha1/{file_touch_utils.go,strict_mode.go}` are the only remnants of the v1alpha1 webhook package (consumed by plan_controller); retype to v1alpha2 / relocate.
+- Exclusions: `api/v1alpha1/*` definition files + their own schema tests legitimately keep v1alpha1; the old-object-rejection test must keep a deliberately-invalid `SchemaRevision` to prove the guard fires (no silent corruption).
+- Coherence: consumers form one import chain (gates ← controllers ← cmd ← tests) — must migrate as one coherent compile-unit, not split across parallel worktrees.
