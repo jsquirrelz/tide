@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Ebb Tide — Token & Cost Optimization
-status: planning
-stopped_at: Phase 21 context gathered
-last_updated: "2026-06-16T01:29:01.920Z"
-last_activity: 2026-06-16
+status: executing
+stopped_at: Phase 21 UI-SPEC approved
+last_updated: "2026-06-16T02:05:31.999Z"
+last_activity: 2026-06-16 -- Phase 21 planning complete
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 12
+  total_plans: 14
   completed_plans: 12
   percent: 75
 ---
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-15)
 
 Phase: 21
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-06-16
+Status: Ready to execute
+Last activity: 2026-06-16 -- Phase 21 planning complete
 
 Progress: [█████████░] 92%
 
@@ -105,6 +105,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-16T01:29:01.906Z
-Stopped at: Phase 21 context gathered
-Resume file: .planning/phases/21-cost-cache-observability/21-CONTEXT.md
+Last session: 2026-06-16T01:45:20.806Z
+Stopped at: Phase 21 UI-SPEC approved
+Resume file: .planning/phases/21-cost-cache-observability/21-UI-SPEC.md
