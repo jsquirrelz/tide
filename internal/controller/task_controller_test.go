@@ -1008,7 +1008,7 @@ func TestBuildEnvelopeInExecutorIgnoresSharedContext(t *testing.T) {
 			Name: "task-sc-test",
 		},
 		Spec: tideprojectv1alpha1.TaskSpec{
-			PromptPath:   "children/task-01.json",
+			PromptPath:    "children/task-01.json",
 			SharedContext: "this blob must not appear in the executor envelope (CACHE-02)",
 		},
 	}
