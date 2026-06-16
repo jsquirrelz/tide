@@ -102,7 +102,11 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   2. Waves are derived by layered Kahn over that global DAG and carry global, monotonic wave indices — not per-plan `tide-wave-<plan.UID>-<i>` indices.
   3. Given any Task you can resolve its global wave, and given any global wave you can list its Tasks (the README:54 namesake invariant holds Project-wide, not just within a plan).
   4. Adding or completing a task re-derives the whole Project's waves in O(V+E) from the DAG + completed-task set with no schedule cached in `.status` (PERSIST-03 guards still pass).
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 24-01-PLAN.md — Wave 0 envtest scaffold: global-derivation test (README worked example, RED) + cross-scope fixture helpers (EXEC-01..04 contract)
+- [ ] 24-02-PLAN.md — Extend assembleProjectDepGraph to full fan-out over all four dependsOn carriers (in-memory, de-duped); assemble-once refactor sharing (nodes,edges) with the cycle gate (EXEC-01)
+- [ ] 24-03-PLAN.md — deriveGlobalWaves + stampGlobalTaskLabels: Project-scoped Wave CRs (tide-wave-<project>-<N>, create/prune, exactly-once metric) + global wave-index label + Owns(&Wave{}); no cached schedule (EXEC-02/03/04)
+- [ ] 24-04-PLAN.md — Remove per-plan materializeWaves/stampTaskLabels + Owns(&Wave{}); close the four WaveReconciler Phase-24 TODOs (O(1) global mapper); full test-int + verify-guard gate (EXEC-02/03)
 
 ### Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption
 **Goal**: Execution dispatches off ONE global indegree map versus the completed-task set, the wave-boundary failure contract holds exactly at global scope, gates compose as holds over the global scheduler, and an orchestrator restart re-derives the entire schedule from minimal state.
@@ -159,7 +163,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
 | 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
-| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/4 | Planned     | - |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 </content>
