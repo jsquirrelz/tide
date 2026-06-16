@@ -267,9 +267,10 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if blocked, result, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges); blocked {
 			return result, gErr
 		}
-		// Plan 03 will add: r.deriveGlobalWaves(ctx, &v2project, depNodes, depEdges)
-		_ = depNodes
-		_ = depEdges
+		// Derive global waves and reconcile Wave CR set (EXEC-02/03/04, Plan 03).
+		if waveErr := r.deriveGlobalWaves(ctx, &v2project, depNodes, depEdges); waveErr != nil {
+			return ctrl.Result{}, fmt.Errorf("derive global waves for project %s: %w", v2project.Name, waveErr)
+		}
 	}
 
 	// 5. Phase 2: dispatcher seam — init Job + budget gate + bypass watch (REQ-SUB-01).
@@ -1624,6 +1625,160 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 	return nodes, edges, nil
 }
 
+// deriveGlobalWaves calls pkg/dag.ComputeWaves on the assembled (nodes, edges) to
+// produce the global wave schedule, then reconciles the Wave CR set for the Project:
+//   - Creates Wave CRs named tide-wave-<project>-<N> with WaveSpec{ProjectRef, WaveIndex},
+//     owned by the Project (BlockOwnerDeletion). Increment WavesDispatchedTotal exactly
+//     once on Create; AlreadyExists and reconcile-replay paths do NOT increment.
+//   - Prunes Wave CRs whose WaveIndex >= len(globalWaves) (stale after re-derivation).
+//     Phase 25 should gate prune on Wave.Status.Phase == "Succeeded" to avoid pruning
+//     an in-flight Wave — see Open Question 3 in RESEARCH.md.
+//   - Stamps each Task's tideproject.k8s/wave-index = <globalN> label (EXEC-03
+//     bidirectional index). The stamp is idempotent — no patch if already correct.
+//
+// The computed schedule is NEVER written to Project.status (PERSIST-03 / D-05 / D-10).
+// Re-derivation is O(V+E) and runs on every reconcile that passes checkGlobalCycleGate.
+func (r *ProjectReconciler) deriveGlobalWaves(
+	ctx context.Context,
+	project *tidev1alpha2.Project,
+	nodes []dag.NodeID,
+	edges []dag.Edge,
+) error {
+	logger := logf.FromContext(ctx)
+
+	globalWaves, err := dag.ComputeWaves(nodes, edges)
+	if err != nil {
+		// Defensive: a cycle should have been caught by checkGlobalCycleGate upstream.
+		// Treat it as a transient error and let the reconcile requeue; the cycle gate
+		// will surface CycleDetected on the next pass.
+		return fmt.Errorf("ComputeWaves for project %s: %w", project.Name, err)
+	}
+
+	// Reconcile Wave CRs: create missing, skip existing (idempotent).
+	for i := range globalWaves {
+		waveName := fmt.Sprintf("tide-wave-%s-%d", project.Name, i)
+		wave := &tidev1alpha2.Wave{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      waveName,
+				Namespace: project.Namespace,
+			},
+			Spec: tidev1alpha2.WaveSpec{
+				ProjectRef: project.Name,
+				WaveIndex:  i,
+			},
+		}
+
+		var existing tidev1alpha2.Wave
+		if getErr := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: waveName}, &existing); getErr != nil {
+			if client.IgnoreNotFound(getErr) != nil {
+				return fmt.Errorf("get wave %s: %w", waveName, getErr)
+			}
+			// Wave does not exist — set owner ref and create.
+			if ownerErr := owner.EnsureOwnerRef(wave, project, r.Scheme); ownerErr != nil {
+				return fmt.Errorf("ensure owner ref wave %s: %w", waveName, ownerErr)
+			}
+			if createErr := r.Create(ctx, wave); createErr != nil {
+				if !apierrors.IsAlreadyExists(createErr) {
+					return fmt.Errorf("create wave %s: %w", waveName, createErr)
+				}
+				// AlreadyExists: watch-lag race — idempotent success. The reconcile
+				// that successfully created this Wave already counted it; do NOT increment.
+			} else {
+				// Create succeeded — exactly-once dispatch commit point (CR-02 / D-08).
+				// Sentinel "global" for phase/plan — never emit empty label values (Pitfall 3).
+				tidemetrics.WavesDispatchedTotal.WithLabelValues(project.Name, "global", "global").Inc()
+				logger.Info("created global wave", "wave", waveName, "index", i)
+			}
+		} else {
+			// Wave exists — ensure owner ref (may be absent on first reconcile after restart).
+			// Do NOT increment WavesDispatchedTotal — this is a reconcile replay.
+			if ownerErr := owner.EnsureOwnerRef(&existing, project, r.Scheme); ownerErr == nil {
+				_ = r.Update(ctx, &existing)
+			}
+		}
+	}
+
+	// Prune stale Wave CRs whose WaveIndex >= len(globalWaves) (re-derivation produced
+	// fewer waves, e.g., a dependency was removed). Phase 25 should gate this prune on
+	// Wave.Status.Phase == "Succeeded" to avoid deleting an in-flight Wave (RESEARCH OQ-3).
+	var allWaves tidev1alpha2.WaveList
+	if listErr := r.List(ctx, &allWaves,
+		client.InNamespace(project.Namespace),
+		client.MatchingLabels{owner.LabelProject: project.Name},
+	); listErr != nil {
+		return fmt.Errorf("list waves for prune (project %s): %w", project.Name, listErr)
+	}
+	for i := range allWaves.Items {
+		w := &allWaves.Items[i]
+		if w.Spec.ProjectRef == project.Name && w.Spec.WaveIndex >= len(globalWaves) {
+			if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
+				return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
+			}
+			logger.Info("pruned stale global wave", "wave", w.Name, "waveIndex", w.Spec.WaveIndex, "currentWaveCount", len(globalWaves))
+		}
+	}
+
+	// Stamp global wave-index labels on Tasks (EXEC-03 bidirectional index).
+	// The taskList is re-used from the assembler's listing; pass all Tasks currently
+	// known in the namespace so no redundant Gets are issued.
+	var taskList tidev1alpha2.TaskList
+	if listErr := r.List(ctx, &taskList,
+		client.InNamespace(project.Namespace),
+		client.MatchingLabels{owner.LabelProject: project.Name},
+	); listErr != nil {
+		return fmt.Errorf("list tasks for label stamp (project %s): %w", project.Name, listErr)
+	}
+	return r.stampGlobalTaskLabels(ctx, taskList.Items, globalWaves, project.Name)
+}
+
+// stampGlobalTaskLabels patches each Task with its global tideproject.k8s/wave-index
+// label (= the global wave index from deriveGlobalWaves) and tideproject.k8s/project
+// (= projectName). Ported verbatim in idiom from PlanReconciler.stampTaskLabels
+// (plan_controller.go:1421-1455).
+//
+// Skip-if-already-correct prevents patch churn when the schedule is unchanged.
+// Uses client.MergeFrom + r.Patch to avoid ResourceVersion conflicts (D-09).
+func (r *ProjectReconciler) stampGlobalTaskLabels(
+	ctx context.Context,
+	tasks []tidev1alpha2.Task,
+	globalWaves [][]dag.NodeID,
+	projectName string,
+) error {
+	// Build a task-name → global wave index map.
+	taskWave := make(map[string]int, len(tasks))
+	for waveIdx, wave := range globalWaves {
+		for _, name := range wave {
+			taskWave[name] = waveIdx
+		}
+	}
+
+	for i := range tasks {
+		t := &tasks[i]
+		waveIdx, ok := taskWave[t.Name]
+		if !ok {
+			continue
+		}
+		waveIndexStr := fmt.Sprintf("%d", waveIdx)
+		// Skip patch if both labels are already correct — no churn on re-derivation.
+		if t.Labels["tideproject.k8s/wave-index"] == waveIndexStr &&
+			(projectName == "" || t.Labels[owner.LabelProject] == projectName) {
+			continue
+		}
+		patch := client.MergeFrom(t.DeepCopy())
+		if t.Labels == nil {
+			t.Labels = map[string]string{}
+		}
+		t.Labels["tideproject.k8s/wave-index"] = waveIndexStr
+		if projectName != "" {
+			t.Labels[owner.LabelProject] = projectName
+		}
+		if err := r.Patch(ctx, t, patch); err != nil {
+			return fmt.Errorf("stamp global wave label on task %s: %w", t.Name, err)
+		}
+	}
+	return nil
+}
+
 // checkGlobalCycleGate is the DEPS-03 / D-10 validation-time cross-scope cycle
 // detector. It accepts pre-assembled (nodes, edges) from assembleProjectDepGraph
 // and calls pkg/dag.ComputeWaves. On a CycleError it surfaces the involved nodes
@@ -1712,6 +1867,10 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Owns(&batchv1.Job{}).
 		Owns(&tidev1alpha2.Milestone{}).
+		// Wave CRs are created by ProjectReconciler (global derivation, Plan 03).
+		// Owning them re-enqueues the Project when Wave status changes — Phase 25
+		// dispatch will read Wave status to drive wave-boundary progression.
+		Owns(&tidev1alpha2.Wave{}).
 		// Watch (not Owns) Tasks: a Task DependsOn edit must re-run the global
 		// cycle gate so the CycleDetected condition clears when the operator
 		// breaks the cycle (WR-02). Tasks are not owned by Project.

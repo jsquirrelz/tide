@@ -19,6 +19,7 @@ package envtest_integration
 import (
 	"context"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -67,6 +68,45 @@ func createSimpleMilestone(ctx context.Context, name, projectRef string) {
 	Eventually(func() error {
 		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
 	}, "5s", "100ms").Should(Succeed())
+}
+
+// makeGlobalWaveTask creates a Task in globalWaveNamespace stamped with
+// globalWaveTestProject as the tideproject.k8s/project label. This is the
+// equivalent of makeTask from indegree_test.go, but stamps the correct project
+// label for the global wave derivation test suite.
+//
+// The global derivation engine (ProjectReconciler) lists Tasks by:
+//
+//	client.MatchingLabels{owner.LabelProject: project.Name}
+//
+// so Tasks MUST carry the correct project label to be picked up by the reconciler.
+func makeGlobalWaveTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha2.Task {
+	if files == nil {
+		files = []string{name + ".go"}
+	}
+	labels := map[string]string{
+		"tideproject.k8s/project": globalWaveTestProject,
+	}
+	task := &tideprojectv1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: globalWaveNamespace,
+			Labels:    labels,
+		},
+		Spec: tideprojectv1alpha2.TaskSpec{
+			PlanRef:             planRef,
+			PromptPath:          "envelopes/test/children/" + name + ".json",
+			DependsOn:           dependsOn,
+			FilesTouched:        files,
+			DeclaredOutputPaths: files,
+		},
+	}
+	Expect(k8sClient.Create(ctx, task)).To(Succeed())
+	Eventually(func() error {
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Task{})
+	}, "5s", "100ms").Should(Succeed())
+	time.Sleep(50 * time.Millisecond) // allow indexer to propagate
+	return task
 }
 
 // assertWaveExists asserts that a global Wave CR named tide-wave-<projectName>-<waveIdx>
@@ -158,14 +198,14 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			// Tasks α,β,γ in plan-A; δ,ε in plan-B; ζ,η,θ in plan-C.
 			// Edges: α→δ, β→δ, γ→η, ζ→η, δ→ε, η→θ.
 			// All tasks carry the project label (makeTask stamps it).
-			alpha := makeTask(ctx, "gw-alpha", "global-plan-a", nil, []string{"alpha.go"})
-			beta := makeTask(ctx, "gw-beta", "global-plan-a", nil, []string{"beta.go"})
-			gamma := makeTask(ctx, "gw-gamma", "global-plan-a", nil, []string{"gamma.go"})
-			_ = makeTask(ctx, "gw-delta", "global-plan-b", []string{alpha.Name, beta.Name}, []string{"delta.go"})
-			_ = makeTask(ctx, "gw-epsilon", "global-plan-b", []string{"gw-delta"}, []string{"epsilon.go"})
-			zeta := makeTask(ctx, "gw-zeta", "global-plan-c", nil, []string{"zeta.go"})
-			_ = makeTask(ctx, "gw-eta", "global-plan-c", []string{gamma.Name, zeta.Name}, []string{"eta.go"})
-			_ = makeTask(ctx, "gw-theta", "global-plan-c", []string{"gw-eta"}, []string{"theta.go"})
+			alpha := makeGlobalWaveTask(ctx, "gw-alpha", "global-plan-a", nil, []string{"alpha.go"})
+			beta := makeGlobalWaveTask(ctx, "gw-beta", "global-plan-a", nil, []string{"beta.go"})
+			gamma := makeGlobalWaveTask(ctx, "gw-gamma", "global-plan-a", nil, []string{"gamma.go"})
+			_ = makeGlobalWaveTask(ctx, "gw-delta", "global-plan-b", []string{alpha.Name, beta.Name}, []string{"delta.go"})
+			_ = makeGlobalWaveTask(ctx, "gw-epsilon", "global-plan-b", []string{"gw-delta"}, []string{"epsilon.go"})
+			zeta := makeGlobalWaveTask(ctx, "gw-zeta", "global-plan-c", nil, []string{"zeta.go"})
+			_ = makeGlobalWaveTask(ctx, "gw-eta", "global-plan-c", []string{gamma.Name, zeta.Name}, []string{"eta.go"})
+			_ = makeGlobalWaveTask(ctx, "gw-theta", "global-plan-c", []string{"gw-eta"}, []string{"theta.go"})
 
 			// The global derivation engine (Plans 02/03) should produce three global
 			// Wave CRs named tide-wave-<project>-0, -1, -2 owned by the Project.
@@ -185,14 +225,14 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			createSimplePlan(ctx, "gwi-plan-b")
 			createSimplePlan(ctx, "gwi-plan-c")
 
-			alpha := makeTask(ctx, "gwi-alpha", "gwi-plan-a", nil, []string{"alpha.go"})
-			beta := makeTask(ctx, "gwi-beta", "gwi-plan-a", nil, []string{"beta.go"})
-			gamma := makeTask(ctx, "gwi-gamma", "gwi-plan-a", nil, []string{"gamma.go"})
-			_ = makeTask(ctx, "gwi-delta", "gwi-plan-b", []string{alpha.Name, beta.Name}, []string{"delta.go"})
-			_ = makeTask(ctx, "gwi-epsilon", "gwi-plan-b", []string{"gwi-delta"}, []string{"epsilon.go"})
-			zeta := makeTask(ctx, "gwi-zeta", "gwi-plan-c", nil, []string{"zeta.go"})
-			_ = makeTask(ctx, "gwi-eta", "gwi-plan-c", []string{gamma.Name, zeta.Name}, []string{"eta.go"})
-			_ = makeTask(ctx, "gwi-theta", "gwi-plan-c", []string{"gwi-eta"}, []string{"theta.go"})
+			alpha := makeGlobalWaveTask(ctx, "gwi-alpha", "gwi-plan-a", nil, []string{"alpha.go"})
+			beta := makeGlobalWaveTask(ctx, "gwi-beta", "gwi-plan-a", nil, []string{"beta.go"})
+			gamma := makeGlobalWaveTask(ctx, "gwi-gamma", "gwi-plan-a", nil, []string{"gamma.go"})
+			_ = makeGlobalWaveTask(ctx, "gwi-delta", "gwi-plan-b", []string{alpha.Name, beta.Name}, []string{"delta.go"})
+			_ = makeGlobalWaveTask(ctx, "gwi-epsilon", "gwi-plan-b", []string{"gwi-delta"}, []string{"epsilon.go"})
+			zeta := makeGlobalWaveTask(ctx, "gwi-zeta", "gwi-plan-c", nil, []string{"zeta.go"})
+			_ = makeGlobalWaveTask(ctx, "gwi-eta", "gwi-plan-c", []string{gamma.Name, zeta.Name}, []string{"eta.go"})
+			_ = makeGlobalWaveTask(ctx, "gwi-theta", "gwi-plan-c", []string{"gwi-eta"}, []string{"theta.go"})
 
 			// Wave 0: {α,β,γ,ζ} — assert correct WaveIndex and ProjectRef.
 			Eventually(func() error {
@@ -248,9 +288,9 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Simple two-plan fixture: tasks P and Q in plan-a (no deps, wave-0),
 			// task R in plan-b depending on P (wave-1).
-			taskP := makeTask(ctx, "bi-task-p", "bi-plan-a", nil, []string{"p.go"})
-			taskQ := makeTask(ctx, "bi-task-q", "bi-plan-a", nil, []string{"q.go"})
-			_ = makeTask(ctx, "bi-task-r", "bi-plan-b", []string{taskP.Name}, []string{"r.go"})
+			taskP := makeGlobalWaveTask(ctx, "bi-task-p", "bi-plan-a", nil, []string{"p.go"})
+			taskQ := makeGlobalWaveTask(ctx, "bi-task-q", "bi-plan-a", nil, []string{"q.go"})
+			_ = makeGlobalWaveTask(ctx, "bi-task-r", "bi-plan-b", []string{taskP.Name}, []string{"r.go"})
 
 			// task→wave: bi-task-p and bi-task-q should have wave-index label "0".
 			Eventually(func() string {
@@ -311,8 +351,8 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			createSimplePlan(ctx, "wd-plan-b")
 
 			// Initial fixture: task-x → task-y (two waves: {x}, {y}).
-			makeTask(ctx, "wd-task-x", "wd-plan-a", nil, []string{"x.go"})
-			makeTask(ctx, "wd-task-y", "wd-plan-b", []string{"wd-task-x"}, []string{"y.go"})
+			makeGlobalWaveTask(ctx, "wd-task-x", "wd-plan-a", nil, []string{"x.go"})
+			makeGlobalWaveTask(ctx, "wd-task-y", "wd-plan-b", []string{"wd-task-x"}, []string{"y.go"})
 
 			// Initial schedule: waves 0 and 1 exist.
 			assertWaveExists(ctx, globalWaveTestProject, 0)
@@ -329,7 +369,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 				"tide-wave-<project>-2 should not exist before wd-task-z is added")
 
 			// Add task-z depending on task-y (wave-1) — extends the schedule to wave 2.
-			makeTask(ctx, "wd-task-z", "wd-plan-b", []string{"wd-task-y"}, []string{"z.go"})
+			makeGlobalWaveTask(ctx, "wd-task-z", "wd-plan-b", []string{"wd-task-y"}, []string{"z.go"})
 
 			// Re-derivation should create Wave 2.
 			assertWaveExists(ctx, globalWaveTestProject, 2)
@@ -337,7 +377,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 		It("asserts Project.Status has no Schedule/Waves[] cached aggregate (PERSIST-03)", func() {
 			createSimplePlan(ctx, "nc-plan-a")
-			makeTask(ctx, "nc-task-a", "nc-plan-a", nil, []string{"nc-a.go"})
+			makeGlobalWaveTask(ctx, "nc-task-a", "nc-plan-a", nil, []string{"nc-a.go"})
 
 			// Wait for at least one reconcile to occur (wave 0 should appear).
 			assertWaveExists(ctx, globalWaveTestProject, 0)
@@ -371,8 +411,8 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Plan A has two independent tasks (wave 0 candidates).
 			createSimplePlan(ctx, "cm-plan-a")
-			makeTask(ctx, "cm-task-a1", "cm-plan-a", nil, []string{"a1.go"})
-			makeTask(ctx, "cm-task-a2", "cm-plan-a", nil, []string{"a2.go"})
+			makeGlobalWaveTask(ctx, "cm-task-a1", "cm-plan-a", nil, []string{"a1.go"})
+			makeGlobalWaveTask(ctx, "cm-task-a2", "cm-plan-a", nil, []string{"a2.go"})
 
 			// Plan B has one task with a coarse Plan-level DependsOn targeting Plan A.
 			// This should fan out to: cm-task-b1 depends on {cm-task-a1, cm-task-a2}.
@@ -393,7 +433,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// cm-task-b1 declares no DependsOn itself; coarse fan-out from Plan B's
 			// DependsOn should create edges from {cm-task-a1, cm-task-a2} to cm-task-b1.
-			makeTask(ctx, "cm-task-b1", "cm-plan-b", nil, []string{"b1.go"})
+			makeGlobalWaveTask(ctx, "cm-task-b1", "cm-plan-b", nil, []string{"b1.go"})
 
 			// Expected global waves: wave-0={cm-task-a1, cm-task-a2}, wave-1={cm-task-b1}.
 			// The global engine (Plans 02/03) must expand Plan-level DependsOn to task edges.

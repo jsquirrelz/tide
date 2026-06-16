@@ -1495,7 +1495,9 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha2.Plan{}).
-		Owns(&tideprojectv1alpha2.Wave{}).
+		// Wave CRs are now owned by ProjectReconciler (global derivation, Phase 24 Plan 03).
+		// PlanReconciler no longer owns Waves — removing Owns(&Wave{}) prevents spurious
+		// Plan reconciles triggered by Project-owned Wave creates/updates (Pitfall 1).
 		Owns(&tideprojectv1alpha2.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(

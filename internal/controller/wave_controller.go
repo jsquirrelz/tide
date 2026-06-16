@@ -101,11 +101,9 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// 4. Owner ref to parent (CRD-02, Pitfall 23 prevention).
-	// TODO(phase-24): in v1alpha2 Wave carries ProjectRef not PlanRef; the per-plan
-	// materializeWaves stub (Plan 23-02) sets the owner-ref at create time so the
-	// reconciler no longer needs to look up the parent here. Phase 24 will re-own
-	// Wave under Project; this step will then resolve ProjectRef → Project and set
-	// the owner ref. For now, skip the owner-ref walk — materializeWaves stamps it.
+	// Owner ref is set at Wave create time by ProjectReconciler.deriveGlobalWaves via
+	// owner.EnsureOwnerRef(wave, project, r.Scheme). No action needed here for new
+	// Waves. The WaveReconciler trusts the owner ref written at create time.
 
 	// 5. Phase 2 observational roll-up body (D-B2, D-B4 — NO Job creation).
 	if r.Dispatcher != nil {
@@ -131,17 +129,11 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // the Dispatcher seam (step 5 of the six-step pattern). Per D-B2 and D-B4,
 // this method is PURELY observational — it NEVER creates Jobs.
 func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha2.Wave) (ctrl.Result, error) {
-	// TODO(phase-24): re-wire Wave→Task association off the global wave index;
-	// ProjectRef-scoped listing lands with the global scheduler (Phase 24). The
-	// per-plan field indexer (taskPlanRefIndexKey) cannot be used because v1alpha2
-	// WaveSpec carries ProjectRef not PlanRef. Use the wave-index label approach
-	// instead: list all Tasks in the namespace and filter by wave-index label.
-	// This is a best-effort stub that preserves the Ready condition write path.
-
-	// Step 1: List Tasks by the tideproject.k8s/wave-index label stamped by PlanReconciler.
-	// In the per-plan stub (Phase 23), waves are still per-plan but the index label
-	// is still stamped by stampTaskLabels. Use label-based listing as the interim
-	// association mechanism since PlanRef no longer exists in WaveSpec.
+	// Step 1: List Tasks by the tideproject.k8s/wave-index label stamped by
+	// ProjectReconciler.stampGlobalTaskLabels (Phase 24 Plan 03). The global wave
+	// index is Project-scoped: wave-index=<N> AND project=<ProjectRef> identifies
+	// exactly the Tasks in global wave N. This is the correct bidirectional index
+	// (EXEC-03 / README:54 namesake invariant).
 	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
 	var taskList tideprojectv1alpha2.TaskList
 	// Scope the roll-up to THIS Wave's project (interim WR-01 fix): wave-index is a
@@ -229,37 +221,29 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	return ctrl.Result{}, nil
 }
 
-// taskToWaveMapper returns reconcile requests for all v1alpha2 Waves in the same
-// namespace as the changed Task. This drives WaveReconciler re-evaluation when any
-// member Task's status changes.
+// taskToWaveMapper returns the reconcile request for the one Wave that owns this
+// Task, using the global wave-index label stamped by ProjectReconciler.stampGlobalTaskLabels
+// (Phase 24 Plan 03). The Wave name is derived deterministically:
 //
-// TODO(phase-24): re-wire the mapper off the global wave index; the Phase 24
-// assembler will provide a ProjectRef-scoped index so this can enumerate only the
-// Waves whose task set includes the changed task, not all Waves in the namespace.
-// For now, enqueue all Waves in the namespace so no status update is missed.
-func (r *WaveReconciler) taskToWaveMapper(ctx context.Context, obj client.Object) []reconcile.Request {
+//	tide-wave-<projectName>-<waveIndex>
+//
+// This is an O(1) lookup — no List call required. Returns nil if the Task does not
+// yet carry the project or wave-index labels (e.g., still awaiting first reconcile).
+func (r *WaveReconciler) taskToWaveMapper(_ context.Context, obj client.Object) []reconcile.Request {
 	task, ok := obj.(*tideprojectv1alpha2.Task)
 	if !ok {
 		return nil
 	}
-	if task.Spec.PlanRef == "" {
+	labels := task.GetLabels()
+	projectName := labels[owner.LabelProject]
+	waveIndexStr := labels["tideproject.k8s/wave-index"]
+	if projectName == "" || waveIndexStr == "" {
 		return nil
 	}
-	// TODO(phase-24): associate Wave→Task via global wave index (ProjectRef-scoped).
-	// For now, list all v1alpha2 Waves in the same namespace and enqueue them all.
-	var waveList tideprojectv1alpha2.WaveList
-	if err := r.List(ctx, &waveList,
-		client.InNamespace(task.Namespace),
-	); err != nil {
-		return nil
-	}
-	reqs := make([]reconcile.Request, 0, len(waveList.Items))
-	for _, w := range waveList.Items {
-		reqs = append(reqs, reconcile.Request{
-			NamespacedName: client.ObjectKey{Namespace: w.Namespace, Name: w.Name},
-		})
-	}
-	return reqs
+	waveName := fmt.Sprintf("tide-wave-%s-%s", projectName, waveIndexStr)
+	return []reconcile.Request{{
+		NamespacedName: client.ObjectKey{Namespace: task.Namespace, Name: waveName},
+	}}
 }
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02, a
