@@ -106,7 +106,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 - [x] 24-01-PLAN.md — Wave 0 envtest scaffold: global-derivation test (README worked example, RED) + cross-scope fixture helpers (EXEC-01..04 contract)
 - [x] 24-02-PLAN.md — Extend assembleProjectDepGraph to full fan-out over all four dependsOn carriers (in-memory, de-duped); assemble-once refactor sharing (nodes,edges) with the cycle gate (EXEC-01)
 - [x] 24-03-PLAN.md — deriveGlobalWaves + stampGlobalTaskLabels: Project-scoped Wave CRs (tide-wave-<project>-<N>, create/prune, exactly-once metric) + global wave-index label + Owns(&Wave{}); no cached schedule (EXEC-02/03/04)
-- [ ] 24-04-PLAN.md — Remove per-plan materializeWaves/stampTaskLabels + Owns(&Wave{}); close the four WaveReconciler Phase-24 TODOs (O(1) global mapper); full test-int + verify-guard gate (EXEC-02/03)
+- [x] 24-04-PLAN.md — Remove per-plan materializeWaves/stampTaskLabels + Owns(&Wave{}); close the four WaveReconciler Phase-24 TODOs (O(1) global mapper); full test-int + verify-guard gate (EXEC-02/03)
 
 ### Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption
 **Goal**: Execution dispatches off ONE global indegree map versus the completed-task set, the wave-boundary failure contract holds exactly at global scope, gates compose as holds over the global scheduler, and an orchestrator restart re-derives the entire schedule from minimal state.
@@ -163,7 +163,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
 | 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
-| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 3/4 | In Progress|  |
+| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete   | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 </content>
