@@ -46,7 +46,6 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
-	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
@@ -1088,10 +1087,9 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		return ctrl.Result{}, fmt.Errorf("compute waves for plan %s: %w", plan.Name, err)
 	}
 
-	// Step 4: Materialize Waves (independent of Project resolution — DAG-only).
-	if err := r.materializeWaves(ctx, plan, taskList.Items, layers); err != nil {
-		return ctrl.Result{}, err
-	}
+	// Wave CR creation and wave-index label stamping are now owned exclusively by
+	// ProjectReconciler.deriveGlobalWaves (Phase 24 Plan 03, D-03). PlanReconciler
+	// no longer creates Wave CRs or stamps tideproject.k8s/wave-index on Tasks.
 
 	// Step 4b: Per-wave integration gate (D-02 / SC-3 / Plan 11-03).
 	// For each wave boundary (wave k → wave k+1), we must ensure wave k's
@@ -1109,9 +1107,7 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	//   IntegratedThroughWave < k+1: dispatch the integration Job and requeue.
 	//
 	//   RESPONSIBILITY C — Gate:
-	//   materializeWaves is called above; the per-wave integration field
-	//   gates task dispatch inside materializeWaves (enforced there).
-	//   Here we block if any wave boundary requires integration.
+	//   Per-wave integration boundary check follows immediately below.
 
 	// Resolve project for wave integration jobs (need Project for push job spec).
 	project := r.resolveProjectForPlan(ctx, plan)
@@ -1127,33 +1123,6 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		if handled || err != nil {
 			return res, err
 		}
-	}
-
-	// Step 5: Resolve the project name for Task label stamping.
-	// Phase 04.1 P1.4: on miss, set ConditionParentUnresolved and requeue after 30s
-	// so Tasks can still be dispatched on the next cycle once the label is stamped.
-	// Wave materialization above completes regardless (it is label-independent).
-	projectName, projectErr := r.resolveProjectName(ctx, plan)
-	if errors.Is(projectErr, ErrParentUnresolved) {
-		patch := client.MergeFrom(plan.DeepCopy())
-		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionParentUnresolved,
-			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonNoProjectLabel,
-			Message:            "No Project found via label or owner-ref chain; awaiting owner-ref wiring by PhaseReconciler",
-			LastTransitionTime: metav1.Now(),
-		})
-		if perr := r.Status().Patch(ctx, plan, patch); perr != nil {
-			return ctrl.Result{}, fmt.Errorf("patch parent-unresolved condition on plan: %w", perr)
-		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	if projectErr != nil {
-		return ctrl.Result{}, fmt.Errorf("resolve project name: %w", projectErr)
-	}
-
-	if err := r.stampTaskLabels(ctx, taskList.Items, layers, projectName); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// REQ-7b: check whether all owned Tasks have Succeeded. When true, stamp
@@ -1334,124 +1303,6 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
-}
-
-// materializeWaves creates or gets one Wave per layer. Each Wave has a
-// deterministic name tide-wave-{plan.UID}-{N} and is owned by the Plan.
-// AlreadyExists is treated as success (idempotent on PERSIST-03 re-invocations).
-//
-// CR-02: increments tide_waves_dispatched_total{project,phase,plan} ONLY on the
-// r.Create success path — not on AlreadyExists (watch-lag race) and not on the
-// Get-existing branch (reconcile replay). This mirrors D-12's exactly-once shape:
-// the reconcile whose Create succeeded already counted it; replays Get the Wave.
-func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideprojectv1alpha2.Plan, _ []tideprojectv1alpha2.Task, layers [][]dag.NodeID) error {
-	logger := logf.FromContext(ctx)
-
-	// Resolve metric label values once before the layer loop.
-	// resolveProjectName is non-fatal — on error use "unknown" (Metric Label Sentinel,
-	// Pitfall 4 — never emit an empty label value). Wave materialization proceeds
-	// regardless of label resolution success.
-	projectName, err := r.resolveProjectName(ctx, plan)
-	if err != nil {
-		projectName = "unknown"
-	}
-	phaseName := plan.Spec.PhaseRef
-	if phaseName == "" {
-		phaseName = "unknown"
-	}
-
-	for i := range layers {
-		waveName := fmt.Sprintf("tide-wave-%s-%d", plan.UID, i)
-		// TODO(phase-24): replace per-plan materializeWaves with global derivation;
-		// name becomes tide-wave-<project.UID>-<globalIndex> and ownership moves to Project.
-		// For now, Wave is owned by Plan and keyed on plan.UID (per-plan stub).
-		wave := &tideprojectv1alpha2.Wave{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      waveName,
-				Namespace: plan.Namespace,
-			},
-			Spec: tideprojectv1alpha2.WaveSpec{
-				ProjectRef: projectName,
-				WaveIndex:  i,
-			},
-		}
-
-		// Check if Wave already exists.
-		var existing tideprojectv1alpha2.Wave
-		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: waveName}, &existing); err != nil {
-			if client.IgnoreNotFound(err) != nil {
-				return fmt.Errorf("get wave %s: %w", waveName, err)
-			}
-			// Wave does not exist — set owner ref and create.
-			if err := owner.EnsureOwnerRef(wave, plan, r.Scheme); err != nil {
-				return fmt.Errorf("ensure owner ref wave %s: %w", waveName, err)
-			}
-			if err := r.Create(ctx, wave); err != nil {
-				if !apierrors.IsAlreadyExists(err) {
-					return fmt.Errorf("create wave %s: %w", waveName, err)
-				}
-				// AlreadyExists: idempotent success — watch-lag race (CR-01).
-				// The reconcile that successfully created this Wave already counted it;
-				// do NOT increment WavesDispatchedTotal here.
-			} else {
-				// Create succeeded — this is the once-only dispatch commit point.
-				// Increment adjacent to logger.Info per CR-02 plan (D-23).
-				tidemetrics.WavesDispatchedTotal.WithLabelValues(projectName, phaseName, plan.Name).Inc()
-			}
-			logger.Info("created wave", "wave", waveName, "index", i)
-		} else {
-			// Wave exists — ensure owner ref is set (may be missing on first reconcile
-			// after a restart where the Wave was created but the Plan was not owner-set).
-			// Do NOT increment WavesDispatchedTotal — this is a reconcile replay.
-			if err := owner.EnsureOwnerRef(&existing, plan, r.Scheme); err == nil {
-				// Patch if owner ref changed.
-				_ = r.Update(ctx, &existing)
-			}
-		}
-	}
-	return nil
-}
-
-// stampTaskLabels patches each Task in layers[N] with:
-//   - tideproject.k8s/wave-index=<N>
-//   - tideproject.k8s/project=<projectName>
-//
-// These labels are the contract WaveReconciler and TaskReconciler depend on for
-// fast lookups (RESEARCH.md Open Question #8).
-func (r *PlanReconciler) stampTaskLabels(ctx context.Context, tasks []tideprojectv1alpha2.Task, layers [][]dag.NodeID, projectName string) error {
-	// Build a name → layer-index map.
-	taskLayer := make(map[string]int, len(tasks))
-	for i, layer := range layers {
-		for _, name := range layer {
-			taskLayer[name] = i
-		}
-	}
-
-	for i := range tasks {
-		t := &tasks[i]
-		layerIdx, ok := taskLayer[t.Name]
-		if !ok {
-			continue
-		}
-		waveIndexStr := fmt.Sprintf("%d", layerIdx)
-		// Skip if labels are already correct.
-		if t.Labels["tideproject.k8s/wave-index"] == waveIndexStr &&
-			(projectName == "" || t.Labels["tideproject.k8s/project"] == projectName) {
-			continue
-		}
-		patch := client.MergeFrom(t.DeepCopy())
-		if t.Labels == nil {
-			t.Labels = map[string]string{}
-		}
-		t.Labels["tideproject.k8s/wave-index"] = waveIndexStr
-		if projectName != "" {
-			t.Labels["tideproject.k8s/project"] = projectName
-		}
-		if err := r.Patch(ctx, t, patch); err != nil {
-			return fmt.Errorf("stamp task labels on %s: %w", t.Name, err)
-		}
-	}
-	return nil
 }
 
 // resolveProjectName returns the Project name for this Plan via:
