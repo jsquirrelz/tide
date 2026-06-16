@@ -83,6 +83,21 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # FIX-01: dashboard embed freshness gate.
+      # Rebuilds the SPA from dashboard/web/src and fails if cmd/dashboard/embed/dist/
+      # is stale — catches a commit that edits dashboard source without regenerating
+      # the tracked dist/ tree. Requires Node 22 + npm (same version as Dockerfile.dashboard
+      # spa-builder stage). Cache is keyed on the lockfile so npm ci is fast on cache hit.
+      - name: Setup Node (dashboard freshness gate)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: dashboard/web/package-lock.json
+
+      - name: Verify dashboard embed freshness (FIX-01)
+        run: make verify-dashboard-freshness
+
       # Pre-fetch test scaffolding (manifests/generate/fmt/vet/setup-envtest)
       # BEFORE the timed test step so the TEST-01 180s budget measures actual
       # test runtime, not envtest binary download or controller-gen invocation.
