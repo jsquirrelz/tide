@@ -498,7 +498,9 @@ This phase makes no network-exposed changes. No new ASVS categories apply. The n
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three questions were resolved during planning (Phase 22 plans `22-01`/`22-02`) and locked into the plans' `<locked_decisions>` blocks: (1) RESOLVED — omit `npm run test` from the Dockerfile node stage; (2) RESOLVED — add the gate as a STEP in the existing `helmify-verify` job, not a new job; (3) RESOLVED — `node:22-alpine` for the spa-builder stage.
 
 1. **Should `npm run test` (vitest bundle-size gate) run inside the Dockerfile node stage?**
    - What we know: bundle-size.test.ts reads from `dist/` after `npm run build` — technically runnable in the node stage. Adds ~30-60s to every `docker build`.
