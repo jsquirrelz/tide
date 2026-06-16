@@ -104,6 +104,16 @@ Prefer extending the metaphor naturally over coining unrelated terms. If a name 
 
 (Provider/host/auth abstraction, pluggable subagent runtime, artifacts-as-source-of-truth, and resumability rules live in the Project Constraints and Stack Anti-patterns sections — don't restate here.)
 
+### Subagent model tuning (Claude Code CLI dispatch)
+
+The anthropic subagent shells out to the `claude` CLI (`internal/subagent/anthropic/subagent.go:285`) with `--model`, `--bare`, `--permission-mode acceptEdits`. Per the Opus 4.8 prompting guidance ([prompting-claude-opus-4-8](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8)), the load-bearing levers on Opus 4.x are:
+
+- **`--effort` is an available, currently-unused lever.** TIDE passes no `--effort`, so every subagent runs the CLI default. The guidance: `xhigh` for agentic/coding work (the task executor), minimum `high` for intelligence-sensitive decomposition (the planners) — effort calibrates reasoning depth and is "more important for this model than any prior Opus." The `claude` CLI (v2.1.178) accepts `--effort {low,medium,high,xhigh,max}`, verified present. Wiring per-level `effort` (alongside the existing per-level `model` in `values.yaml`) is the highest-value tuning change — but it's a chart + provider-schema + subagent change, so route through GSD; `values.yaml` is the FIXED contract (binary catches up to chart, never reverse).
+- **The `Provider.Params` allowlist (`temperature`/`thinking_budget`/`top_p`/`top_k`, validated at `subagent.go:68`) is a dead end on this dispatch surface.** The `claude` CLI exposes `--effort` and `--model` but no temperature/thinking/top_p/top_k flags, and `--bare` strips `settings.json`. Those four validated params cannot reach the model today; only `--effort` and `--model` can. Treat `--effort` as the real knob; don't add params that can't be plumbed.
+- **Write compiled-in templates for literal instruction-following.** Opus 4.x interprets prompts literally and does not generalize a directive from one item to the rest. Where a template directive must apply broadly ("emit one child-CRD per phase," "for every declared output path"), state the scope explicitly. Favor positive concision examples over "don't" lists.
+- **A future review/verify subagent must prompt for coverage, not conservatism.** None exists today (only the five planner/executor templates). When one is added: Opus 4.8 honors "be conservative / only high-severity" literally and will drop real low-severity bugs — prompt the finding stage for coverage plus confidence/severity tags and filter downstream.
+- **Dashboard UI generation needs an explicit palette.** Opus 4.8's house style (cream/off-white, serif display, terracotta accent) reads as editorial/hospitality and is wrong for a dev-tool dashboard. When generating or restyling the React dashboard, specify a concrete dev-tool palette/typeface or have the model propose directions first — generic "make it clean" shifts it to another fixed default, not the right one.
+
 ## Structural conventions in the spec document
 
 When editing `README.md` (the spec) itself:
