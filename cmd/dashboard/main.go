@@ -61,7 +61,7 @@ import (
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
@@ -99,7 +99,7 @@ func main() {
 	//    informers from the first reconcile loop).
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
 
 	// 2. Construct the controller-runtime Manager. LeaderElection: false
 	//    — the dashboard is a stateless read replica (D-D2). The

@@ -31,7 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -41,7 +41,7 @@ const reporterNS = "default"
 
 // rmPhaseSpec encodes a PhaseSpec as a runtime.RawExtension for use in ChildCRDSpec.
 func rmPhaseSpec(milestoneRef string) runtime.RawExtension {
-	raw, err := json.Marshal(tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneRef})
+	raw, err := json.Marshal(tideprojectv1alpha2.PhaseSpec{MilestoneRef: milestoneRef})
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "marshal PhaseSpec")
 	return runtime.RawExtension{Raw: raw}
 }
@@ -53,12 +53,12 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 	// name collisions across the Describe suite. (The suite-level manager may
 	// reconcile these objects; Gomega Eventually in AfterEach is safe.)
 	AfterEach(func() {
-		phases := &tideprojectv1alpha1.PhaseList{}
+		phases := &tideprojectv1alpha2.PhaseList{}
 		_ = k8sClient.List(ctx, phases, client.InNamespace(reporterNS))
 		for i := range phases.Items {
 			_ = k8sClient.Delete(ctx, &phases.Items[i])
 		}
-		milestones := &tideprojectv1alpha1.MilestoneList{}
+		milestones := &tideprojectv1alpha2.MilestoneList{}
 		_ = k8sClient.List(ctx, milestones, client.InNamespace(reporterNS))
 		for i := range milestones.Items {
 			_ = k8sClient.Delete(ctx, &milestones.Items[i])
@@ -70,12 +70,12 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 	Describe("TC-1: create child CR with ownerRef + specRef", func() {
 		It("creates a Phase with Milestone ownerRef and milestoneRef set", func() {
 			milestoneName := "rm-milestone-tc1"
-			milestone := &tideprojectv1alpha1.Milestone{
+			milestone := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      milestoneName,
 					Namespace: reporterNS,
 				},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: "rm-project-tc1"},
+				Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "rm-project-tc1"},
 			}
 			Expect(k8sClient.Create(ctx, milestone)).To(Succeed())
 
@@ -92,7 +92,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			Expect(reporter.MaterializeChildCRDs(ctx, k8sClient, mgrClient.Scheme(), milestone, children)).To(Succeed())
 
 			// Assert: Phase exists in the parent's namespace.
-			var phase tideprojectv1alpha1.Phase
+			var phase tideprojectv1alpha2.Phase
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: "rm-phase-tc1"}, &phase)).To(Succeed())
 
 			// Assert: Phase namespace = parent namespace (same-namespace ownerRef).
@@ -121,12 +121,12 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 	Describe("TC-2: idempotent re-run", func() {
 		It("does not create a duplicate Phase on second materialize", func() {
 			milestoneName := "rm-milestone-tc2"
-			milestone := &tideprojectv1alpha1.Milestone{
+			milestone := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      milestoneName,
 					Namespace: reporterNS,
 				},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: "rm-project-tc2"},
+				Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "rm-project-tc2"},
 			}
 			Expect(k8sClient.Create(ctx, milestone)).To(Succeed())
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: milestoneName}, milestone)).To(Succeed())
@@ -139,7 +139,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			Expect(reporter.MaterializeChildCRDs(ctx, k8sClient, mgrClient.Scheme(), milestone, children)).To(Succeed())
 
 			// Verify child exists before second call.
-			var phase tideprojectv1alpha1.Phase
+			var phase tideprojectv1alpha2.Phase
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: "rm-phase-tc2"}, &phase)).To(Succeed())
 			firstUID := phase.UID
 
@@ -152,7 +152,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			Expect(reporter.MaterializeChildCRDs(ctx, k8sClient, mgrClient.Scheme(), milestone, children)).To(Succeed())
 
 			// The child UID is unchanged (no replacement).
-			var phaseAfter tideprojectv1alpha1.Phase
+			var phaseAfter tideprojectv1alpha2.Phase
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: "rm-phase-tc2"}, &phaseAfter)).To(Succeed())
 			Expect(phaseAfter.UID).To(Equal(firstUID), "Phase UID must not change on idempotent re-materialize")
 
@@ -160,7 +160,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			// Use a manual filter — .spec.milestoneRef is not registered as a field
 			// indexer on k8sClient (only on mgrClient via SetupWithManager). A List +
 			// manual filter is reliable across both the envtest and fake client.
-			var allPhases tideprojectv1alpha1.PhaseList
+			var allPhases tideprojectv1alpha2.PhaseList
 			Expect(k8sClient.List(ctx, &allPhases, client.InNamespace(reporterNS))).To(Succeed())
 			count := 0
 			for _, ph := range allPhases.Items {
@@ -178,12 +178,12 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 	Describe("TC-3: stub-authored and real-authored fixture shapes", func() {
 		It("materializes children from a fixture EnvelopeOut as written by stub or real subagent", func() {
 			milestoneName := "rm-milestone-tc3"
-			milestone := &tideprojectv1alpha1.Milestone{
+			milestone := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      milestoneName,
 					Namespace: reporterNS,
 				},
-				Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: "rm-project-tc3"},
+				Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "rm-project-tc3"},
 			}
 			Expect(k8sClient.Create(ctx, milestone)).To(Succeed())
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: milestoneName}, milestone)).To(Succeed())
@@ -209,7 +209,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 
 			// Both child Phases must exist.
 			for _, phaseName := range []string{"rm-phase-tc3a", "rm-phase-tc3b"} {
-				var ph tideprojectv1alpha1.Phase
+				var ph tideprojectv1alpha2.Phase
 				Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: reporterNS, Name: phaseName}, &ph)).
 					To(Succeed(), "Phase %q must exist after materialize", phaseName)
 				Expect(ph.Spec.MilestoneRef).To(Equal(milestoneName))

@@ -33,7 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const admissionNamespace = "default"
@@ -43,12 +43,12 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 
 	AfterEach(func() {
 		// Best-effort cleanup — webhook tests may leave Plans in various states.
-		plans := &tideprojectv1alpha1.PlanList{}
+		plans := &tideprojectv1alpha2.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(admissionNamespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		tasks := &tideprojectv1alpha1.TaskList{}
+		tasks := &tideprojectv1alpha2.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(admissionNamespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
@@ -61,24 +61,24 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 		It("rejects a Plan whose Tasks form a cycle (A→B, B→A)", func() {
 			planName := "admission-cyclic-plan"
 
-			plan := &tideprojectv1alpha1.Plan{
+			plan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      planName,
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{
+				Spec: tideprojectv1alpha2.PlanSpec{
 					PhaseRef: "phase-test",
 				},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 
 			// Create two Tasks with a cycle: A depends on B, B depends on A.
-			taskA := &tideprojectv1alpha1.Task{
+			taskA := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "admission-task-a",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/admission-task-a.json",
 					DependsOn:           []string{"admission-task-b"},
@@ -86,12 +86,12 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 					DeclaredOutputPaths: []string{"a.go"},
 				},
 			}
-			taskB := &tideprojectv1alpha1.Task{
+			taskB := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "admission-task-b",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/admission-task-b.json",
 					DependsOn:           []string{"admission-task-a"},
@@ -104,7 +104,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 
 			// Wait for the Tasks to be indexed by the webhook's field indexer.
 			Eventually(func() int {
-				taskList := &tideprojectv1alpha1.TaskList{}
+				taskList := &tideprojectv1alpha2.TaskList{}
 				_ = mgrClient.List(ctx, taskList,
 					client.InNamespace(admissionNamespace),
 					client.MatchingFields{".spec.planRef": planName},
@@ -120,7 +120,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 			// with Eventually so a slow webhook is permitted, but a final
 			// nil-error counts as a regression.
 			Eventually(func() error {
-				freshPlan := &tideprojectv1alpha1.Plan{}
+				freshPlan := &tideprojectv1alpha2.Plan{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan); err != nil {
 					return err
 				}
@@ -142,36 +142,36 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 		It("admits a Plan whose Tasks form an acyclic DAG (A→B)", func() {
 			planName := "admission-acyclic-plan"
 
-			plan := &tideprojectv1alpha1.Plan{
+			plan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      planName,
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{
+				Spec: tideprojectv1alpha2.PlanSpec{
 					PhaseRef: "phase-test",
 				},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 
 			// Create two Tasks with a valid dependency: A then B.
-			taskA := &tideprojectv1alpha1.Task{
+			taskA := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "acyclic-task-a",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/acyclic-task-a.json",
 					FilesTouched:        []string{"a.go"},
 					DeclaredOutputPaths: []string{"a.go"},
 				},
 			}
-			taskB := &tideprojectv1alpha1.Task{
+			taskB := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "acyclic-task-b",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/acyclic-task-b.json",
 					DependsOn:           []string{"acyclic-task-a"},
@@ -183,7 +183,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 			Expect(k8sClient.Create(ctx, taskB)).To(Succeed())
 
 			// Verify the Plan was created successfully (no rejection).
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, &tideprojectv1alpha1.Plan{})).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, &tideprojectv1alpha2.Plan{})).To(Succeed())
 		})
 	})
 
@@ -192,7 +192,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 		It("rejects (strict mode annotation) a Plan where two tasks share a file path without dependsOn", func() {
 			planName := "admission-strict-plan"
 
-			plan := &tideprojectv1alpha1.Plan{
+			plan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      planName,
 					Namespace: admissionNamespace,
@@ -201,31 +201,31 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 						"tideproject.k8s/file-touch-mode": "strict",
 					},
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{
+				Spec: tideprojectv1alpha2.PlanSpec{
 					PhaseRef: "phase-strict",
 				},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 
 			// Both tasks share "shared.go" but have no dependsOn edge.
-			taskA := &tideprojectv1alpha1.Task{
+			taskA := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "strict-task-a",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/strict-task-a.json",
 					FilesTouched:        []string{"shared.go"},
 					DeclaredOutputPaths: []string{"shared.go"},
 				},
 			}
-			taskB := &tideprojectv1alpha1.Task{
+			taskB := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "strict-task-b",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/strict-task-b.json",
 					FilesTouched:        []string{"shared.go"},
@@ -237,7 +237,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 
 			// Wait for Tasks to be indexed.
 			Eventually(func() int {
-				taskList := &tideprojectv1alpha1.TaskList{}
+				taskList := &tideprojectv1alpha2.TaskList{}
 				_ = mgrClient.List(ctx, taskList,
 					client.InNamespace(admissionNamespace),
 					client.MatchingFields{".spec.planRef": planName},
@@ -250,7 +250,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 			// result ("_ = Update(...)") so the Pitfall B fall-through and a
 			// real strict-mode regression were indistinguishable.
 			Eventually(func() error {
-				freshPlan := &tideprojectv1alpha1.Plan{}
+				freshPlan := &tideprojectv1alpha2.Plan{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, freshPlan); err != nil {
 					return err
 				}
@@ -273,36 +273,36 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 			planName := "admission-warn-plan"
 
 			// warn mode is the cluster default (set in BeforeSuite).
-			plan := &tideprojectv1alpha1.Plan{
+			plan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      planName,
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{
+				Spec: tideprojectv1alpha2.PlanSpec{
 					PhaseRef: "phase-warn",
 				},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 
 			// Tasks share a file but have no edge — warn mode should still admit.
-			taskA := &tideprojectv1alpha1.Task{
+			taskA := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "warn-task-a",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/warn-task-a.json",
 					FilesTouched:        []string{"warn-shared.go"},
 					DeclaredOutputPaths: []string{"warn-shared.go"},
 				},
 			}
-			taskB := &tideprojectv1alpha1.Task{
+			taskB := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "warn-task-b",
 					Namespace: admissionNamespace,
 				},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					PromptPath:          "envelopes/test/children/warn-task-b.json",
 					FilesTouched:        []string{"warn-shared.go"},
@@ -313,7 +313,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 			Expect(k8sClient.Create(ctx, taskB)).To(Succeed())
 
 			// Plan creation should have succeeded.
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, &tideprojectv1alpha1.Plan{})).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: admissionNamespace}, &tideprojectv1alpha2.Plan{})).To(Succeed())
 		})
 	})
 
@@ -383,7 +383,7 @@ func isForbiddenOrBadRequest(err error) bool {
 var _ = Describe("Project CEL targetRepo admission", Label("envtest"), func() {
 	ctx := context.Background()
 
-	var createdProjects []*tideprojectv1alpha1.Project
+	var createdProjects []*tideprojectv1alpha2.Project
 
 	AfterEach(func() {
 		// Best-effort cleanup for successfully-created Projects.
@@ -397,16 +397,16 @@ var _ = Describe("Project CEL targetRepo admission", Label("envtest"), func() {
 	// ProviderSecretRef is set to "any-secret" — CEL validation does not check
 	// the secret exists. Budget.AbsoluteCapCents=0 is valid (0 = disabled per
 	// sample notes). No spec.git block (D-04: git ops skipped when spec.git is nil).
-	newProject := func(name, targetRepo string) *tideprojectv1alpha1.Project {
-		return &tideprojectv1alpha1.Project{
+	newProject := func(name, targetRepo string) *tideprojectv1alpha2.Project {
+		return &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: admissionNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo:        targetRepo,
 				ProviderSecretRef: "any-secret",
-				Budget: tideprojectv1alpha1.BudgetConfig{
+				Budget: tideprojectv1alpha2.BudgetConfig{
 					AbsoluteCapCents: 0,
 				},
 			},

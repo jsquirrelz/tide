@@ -18,7 +18,7 @@ limitations under the License.
 package gates
 
 import (
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // Exported policy constants — these are the only three values the CEL enum
@@ -29,16 +29,16 @@ import (
 const (
 	// PolicyAuto — advance through the level boundary immediately. Today's
 	// pre-Phase-4 behavior for every level. Default for phase/plan/task.
-	PolicyAuto tideprojectv1alpha1.GatePolicy = "auto"
+	PolicyAuto tideprojectv1alpha2.GatePolicy = "auto"
 
 	// PolicyApprove — pause at the boundary; resume when the matching
 	// tideproject.k8s/approve-<level> annotation arrives (D-G3). Default for
 	// milestone (D-G1 — least-friction sane default).
-	PolicyApprove tideprojectv1alpha1.GatePolicy = "approve"
+	PolicyApprove tideprojectv1alpha2.GatePolicy = "approve"
 
 	// PolicyPause — halt at the boundary; resume requires explicit `tide
 	// resume` (D-G2). Stronger than approve: no annotation polling.
-	PolicyPause tideprojectv1alpha1.GatePolicy = "pause"
+	PolicyPause tideprojectv1alpha2.GatePolicy = "pause"
 )
 
 // DefaultGates returns the locked default gate-policy configuration per
@@ -50,8 +50,8 @@ const (
 //
 // Callers should treat the return value as immutable; copy via struct value
 // (Gates has no pointer fields) before mutating.
-func DefaultGates() tideprojectv1alpha1.Gates {
-	return tideprojectv1alpha1.Gates{
+func DefaultGates() tideprojectv1alpha2.Gates {
+	return tideprojectv1alpha2.Gates{
 		Milestone:         PolicyApprove,
 		Phase:             PolicyAuto,
 		Plan:              PolicyAuto,
@@ -68,7 +68,7 @@ func DefaultGates() tideprojectv1alpha1.Gates {
 // (the production reconcilers never pass one) safely returns PolicyAuto — the
 // function is deliberately non-panicking so a typo in a downstream reconciler
 // surface degrades to today's behavior instead of crashing the manager.
-func EvaluatePolicy(g tideprojectv1alpha1.Gates, level string) tideprojectv1alpha1.GatePolicy {
+func EvaluatePolicy(g tideprojectv1alpha2.Gates, level string) tideprojectv1alpha2.GatePolicy {
 	switch level {
 	case "milestone":
 		if g.Milestone == "" {

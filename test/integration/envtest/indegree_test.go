@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const indegreeNamespace = "default"
@@ -47,12 +47,12 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 		// TaskReconciler.resolveProject requires a Project in the same namespace.
 		// In production, PlanReconciler stamps the project label; tests bypass it.
 		makeBoundPVC(ctx, "tide-projects", indegreeNamespace)
-		project := &tideprojectv1alpha1.Project{
+		project := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      indegreeTestProject,
 				Namespace: indegreeNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/indegree-test.git",
 			},
 		}
@@ -63,22 +63,22 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 	})
 
 	AfterEach(func() {
-		tasks := &tideprojectv1alpha1.TaskList{}
+		tasks := &tideprojectv1alpha2.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(indegreeNamespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
-		plans := &tideprojectv1alpha1.PlanList{}
+		plans := &tideprojectv1alpha2.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(indegreeNamespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		waves := &tideprojectv1alpha1.WaveList{}
+		waves := &tideprojectv1alpha2.WaveList{}
 		_ = k8sClient.List(ctx, waves, client.InNamespace(indegreeNamespace))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
 		}
-		projects := &tideprojectv1alpha1.ProjectList{}
+		projects := &tideprojectv1alpha2.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(indegreeNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -104,7 +104,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wait for tasks to be created and reconciled.
 			Eventually(func() string {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskA.Name, Namespace: indegreeNamespace}, t); err != nil {
 					return ""
 				}
@@ -113,7 +113,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// taskB should remain Pending (indegree > 0) while taskA hasn't completed.
 			Consistently(func() string {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskB.Name, Namespace: indegreeNamespace}, t); err != nil {
 					return "error"
 				}
@@ -134,7 +134,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wait for the reconciler to process the task and set an attempt number.
 			Eventually(func() int {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: task.Name, Namespace: indegreeNamespace}, t); err != nil {
 					return -1
 				}
@@ -154,7 +154,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wait for at least one reconcile to occur.
 			Eventually(func() bool {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: task.Name, Namespace: indegreeNamespace}, t); err != nil {
 					return false
 				}
@@ -175,7 +175,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wait for owner ref to be stamped by the PlanReconciler.
 			Eventually(func() bool {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskName, Namespace: indegreeNamespace}, t); err != nil {
 					return false
 				}
@@ -198,7 +198,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 			}
 
 			// Create a Wave that owns the tasks.
-			wave := &tideprojectv1alpha1.Wave{
+			wave := &tideprojectv1alpha2.Wave{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      waveName,
 					Namespace: indegreeNamespace,
@@ -206,7 +206,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
 					},
 				},
-				Spec: tideprojectv1alpha1.WaveSpec{
+				Spec: tideprojectv1alpha2.WaveSpec{
 					ProjectRef: planName,
 					WaveIndex:  0,
 				},
@@ -216,7 +216,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 			// Patch all Tasks to Succeeded.
 			for _, tn := range taskNames {
 				Eventually(func() error {
-					t := &tideprojectv1alpha1.Task{}
+					t := &tideprojectv1alpha2.Task{}
 					if err := k8sClient.Get(ctx, client.ObjectKey{Name: tn, Namespace: indegreeNamespace}, t); err != nil {
 						return err
 					}
@@ -227,7 +227,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wave should roll up to Succeeded.
 			Eventually(func() string {
-				w := &tideprojectv1alpha1.Wave{}
+				w := &tideprojectv1alpha2.Wave{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: indegreeNamespace}, w); err != nil {
 					return ""
 				}
@@ -249,7 +249,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				makeTaskWithWaveLabel(ctx, tn, planName, nil, []string{tn + ".go"}, 0)
 			}
 
-			wave := &tideprojectv1alpha1.Wave{
+			wave := &tideprojectv1alpha2.Wave{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      waveName,
 					Namespace: indegreeNamespace,
@@ -257,7 +257,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
 					},
 				},
-				Spec: tideprojectv1alpha1.WaveSpec{
+				Spec: tideprojectv1alpha2.WaveSpec{
 					ProjectRef: planName,
 					WaveIndex:  0,
 				},
@@ -266,7 +266,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// First task Fails; others Succeed.
 			Eventually(func() error {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskNames[0], Namespace: indegreeNamespace}, t); err != nil {
 					return err
 				}
@@ -276,7 +276,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			for _, tn := range taskNames[1:] {
 				Eventually(func() error {
-					t := &tideprojectv1alpha1.Task{}
+					t := &tideprojectv1alpha2.Task{}
 					if err := k8sClient.Get(ctx, client.ObjectKey{Name: tn, Namespace: indegreeNamespace}, t); err != nil {
 						return err
 					}
@@ -287,7 +287,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 			// Wave should roll up to Failed.
 			Eventually(func() string {
-				w := &tideprojectv1alpha1.Wave{}
+				w := &tideprojectv1alpha2.Wave{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: indegreeNamespace}, w); err != nil {
 					return ""
 				}
@@ -300,24 +300,24 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 
 // createSimplePlan creates a minimal Plan in the indegreeNamespace for testing.
 func createSimplePlan(ctx context.Context, name string) {
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: indegreeNamespace,
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{
+		Spec: tideprojectv1alpha2.PlanSpec{
 			PhaseRef: "test-phase",
 		},
 	}
 	Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 	// Wait for the plan to be visible in the manager cache.
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: indegreeNamespace}, &tideprojectv1alpha1.Plan{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: indegreeNamespace}, &tideprojectv1alpha2.Plan{})
 	}, "5s", "100ms").Should(Succeed())
 }
 
 // makeTask creates a Task in the indegreeNamespace for testing and returns it.
-func makeTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha1.Task {
+func makeTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha2.Task {
 	return makeTaskWithWaveLabel(ctx, name, planRef, dependsOn, files, -1)
 }
 
@@ -326,7 +326,7 @@ func makeTask(ctx context.Context, name, planRef string, dependsOn, files []stri
 // always stamped (PlanReconciler does this in production; tests bypass it)
 // so TaskReconciler.resolveProject's fast path works deterministically even
 // when other suites leave stray Projects in the shared 'default' namespace.
-func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn, files []string, waveIndex int) *tideprojectv1alpha1.Task {
+func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn, files []string, waveIndex int) *tideprojectv1alpha2.Task {
 	if files == nil {
 		files = []string{name + ".go"}
 	}
@@ -336,13 +336,13 @@ func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn,
 	if waveIndex >= 0 {
 		labels["tideproject.k8s/wave-index"] = fmt.Sprintf("%d", waveIndex)
 	}
-	task := &tideprojectv1alpha1.Task{
+	task := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: indegreeNamespace,
 			Labels:    labels,
 		},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             planRef,
 			PromptPath:          "envelopes/test/children/" + name + ".json",
 			DependsOn:           dependsOn,
@@ -353,7 +353,7 @@ func makeTaskWithWaveLabel(ctx context.Context, name, planRef string, dependsOn,
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
 	// Wait for cache visibility.
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: indegreeNamespace}, &tideprojectv1alpha1.Task{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: indegreeNamespace}, &tideprojectv1alpha2.Task{})
 	}, "5s", "100ms").Should(Succeed())
 	time.Sleep(50 * time.Millisecond) // allow indexer to propagate
 	return task

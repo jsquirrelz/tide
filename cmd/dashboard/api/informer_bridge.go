@@ -55,7 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -79,12 +79,12 @@ func BridgeInformerToHub(ctx context.Context, c cache.Cache, cli client.Reader, 
 		typePrefix string // "project", "milestone", "phase", "plan", "task", "wave"
 	}
 	wirings := []kindWiring{
-		{&tidev1alpha1.Project{}, "project"},
-		{&tidev1alpha1.Milestone{}, "milestone"},
-		{&tidev1alpha1.Phase{}, "phase"},
-		{&tidev1alpha1.Plan{}, "plan"},
-		{&tidev1alpha1.Task{}, "task"},
-		{&tidev1alpha1.Wave{}, "wave"},
+		{&tidev1alpha2.Project{}, "project"},
+		{&tidev1alpha2.Milestone{}, "milestone"},
+		{&tidev1alpha2.Phase{}, "phase"},
+		{&tidev1alpha2.Plan{}, "plan"},
+		{&tidev1alpha2.Task{}, "task"},
+		{&tidev1alpha2.Wave{}, "wave"},
 	}
 
 	for _, w := range wirings {
@@ -191,13 +191,13 @@ func newKindHandler(ctx context.Context, cli client.Reader, h *hub.Hub, log logr
 // "drop the event".
 func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object) (string, error) {
 	switch v := obj.(type) {
-	case *tidev1alpha1.Project:
+	case *tidev1alpha2.Project:
 		return v.GetName(), nil
 
-	case *tidev1alpha1.Milestone:
+	case *tidev1alpha2.Milestone:
 		return v.Spec.ProjectRef, nil
 
-	case *tidev1alpha1.Phase:
+	case *tidev1alpha2.Phase:
 		ms, err := getMilestone(ctx, cli, v.GetNamespace(), v.Spec.MilestoneRef)
 		if err != nil {
 			return "", err
@@ -207,7 +207,7 @@ func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object
 		}
 		return ms.Spec.ProjectRef, nil
 
-	case *tidev1alpha1.Plan:
+	case *tidev1alpha2.Plan:
 		ph, err := getPhase(ctx, cli, v.GetNamespace(), v.Spec.PhaseRef)
 		if err != nil {
 			return "", err
@@ -217,7 +217,7 @@ func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object
 		}
 		return resolveProjectKey(ctx, cli, ph)
 
-	case *tidev1alpha1.Task:
+	case *tidev1alpha2.Task:
 		pl, err := getPlan(ctx, cli, v.GetNamespace(), v.Spec.PlanRef)
 		if err != nil {
 			return "", err
@@ -227,7 +227,7 @@ func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object
 		}
 		return resolveProjectKey(ctx, cli, pl)
 
-	case *tidev1alpha1.Wave:
+	case *tidev1alpha2.Wave:
 		// v1alpha2 Waves are global-scope and reference the owning Project
 		// directly via Spec.ProjectRef (no Plan indirection); resolve to the
 		// project key in one hop, like Milestone above.
@@ -238,11 +238,11 @@ func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object
 	}
 }
 
-func getMilestone(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha1.Milestone, error) {
+func getMilestone(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha2.Milestone, error) {
 	if name == "" {
 		return nil, nil
 	}
-	var m tidev1alpha1.Milestone
+	var m tidev1alpha2.Milestone
 	if err := cli.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &m); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -252,11 +252,11 @@ func getMilestone(ctx context.Context, cli client.Reader, ns, name string) (*tid
 	return &m, nil
 }
 
-func getPhase(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha1.Phase, error) {
+func getPhase(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha2.Phase, error) {
 	if name == "" {
 		return nil, nil
 	}
-	var p tidev1alpha1.Phase
+	var p tidev1alpha2.Phase
 	if err := cli.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -266,11 +266,11 @@ func getPhase(ctx context.Context, cli client.Reader, ns, name string) (*tidev1a
 	return &p, nil
 }
 
-func getPlan(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha1.Plan, error) {
+func getPlan(ctx context.Context, cli client.Reader, ns, name string) (*tidev1alpha2.Plan, error) {
 	if name == "" {
 		return nil, nil
 	}
-	var p tidev1alpha1.Plan
+	var p tidev1alpha2.Plan
 	if err := cli.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, nil
@@ -299,26 +299,26 @@ func minimalProjection(obj client.Object) map[string]string {
 		"resourceVersion": obj.GetResourceVersion(),
 	}
 	switch v := obj.(type) {
-	case *tidev1alpha1.Project:
+	case *tidev1alpha2.Project:
 		p["kind"] = "Project"
 		p["phase"] = v.Status.Phase
-	case *tidev1alpha1.Milestone:
+	case *tidev1alpha2.Milestone:
 		p["kind"] = "Milestone"
 		p["phase"] = v.Status.Phase
 		p["projectRef"] = v.Spec.ProjectRef
-	case *tidev1alpha1.Phase:
+	case *tidev1alpha2.Phase:
 		p["kind"] = "Phase"
 		p["phase"] = v.Status.Phase
 		p["milestoneRef"] = v.Spec.MilestoneRef
-	case *tidev1alpha1.Plan:
+	case *tidev1alpha2.Plan:
 		p["kind"] = "Plan"
 		p["phase"] = v.Status.Phase
 		p["phaseRef"] = v.Spec.PhaseRef
-	case *tidev1alpha1.Task:
+	case *tidev1alpha2.Task:
 		p["kind"] = "Task"
 		p["phase"] = v.Status.Phase
 		p["planRef"] = v.Spec.PlanRef
-	case *tidev1alpha1.Wave:
+	case *tidev1alpha2.Wave:
 		p["kind"] = "Wave"
 		p["phase"] = v.Status.Phase
 		// v1alpha2 Waves are global-scope: surface ProjectRef (Wave→Plan

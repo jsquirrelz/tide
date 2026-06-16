@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newTestRouter builds a Dependencies with a fake client (zero objects)
@@ -36,7 +36,7 @@ import (
 func newTestRouter(t *testing.T) chi.Router {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("add v1alpha1 scheme: %v", err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -287,7 +287,7 @@ func TestPrometheusEndpointWiringThroughRegisterRoutes(t *testing.T) {
 	defer upstream.Close()
 
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("add v1alpha1 scheme: %v", err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()

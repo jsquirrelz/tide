@@ -54,7 +54,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const bareProjectNS = "bare-project-test"
@@ -105,7 +105,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		By("Wait for Milestone to materialize (owner=bare-project)")
 		var milestoneName string
 		Eventually(func() error {
-			var list tideprojectv1alpha1.MilestoneList
+			var list tideprojectv1alpha2.MilestoneList
 			if err := k8sClient.List(ctx, &list, client.InNamespace(bareProjectNS)); err != nil {
 				return err
 			}
@@ -131,7 +131,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		// ------------------------------------------------------------------
 		By("Wait for Milestone to reach Succeeded")
 		Eventually(func() error {
-			var ms tideprojectv1alpha1.Milestone
+			var ms tideprojectv1alpha2.Milestone
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      milestoneName,
 				Namespace: bareProjectNS,
@@ -154,7 +154,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		By("Wait for Phase to materialize (owner=milestone)")
 		var phaseName string
 		Eventually(func() error {
-			var list tideprojectv1alpha1.PhaseList
+			var list tideprojectv1alpha2.PhaseList
 			if err := k8sClient.List(ctx, &list, client.InNamespace(bareProjectNS)); err != nil {
 				return err
 			}
@@ -180,7 +180,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		By("Wait for Plan to materialize (owner=phase)")
 		var planName string
 		Eventually(func() error {
-			var list tideprojectv1alpha1.PlanList
+			var list tideprojectv1alpha2.PlanList
 			if err := k8sClient.List(ctx, &list, client.InNamespace(bareProjectNS)); err != nil {
 				return err
 			}
@@ -205,7 +205,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		// ------------------------------------------------------------------
 		By("Wait for Plan.Status.ValidationState to reach Validated (REQ-7a)")
 		Eventually(func() error {
-			var pl tideprojectv1alpha1.Plan
+			var pl tideprojectv1alpha2.Plan
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      planName,
 				Namespace: bareProjectNS,
@@ -228,7 +228,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		By("Wait for Task to materialize (owner=plan)")
 		var taskName string
 		Eventually(func() error {
-			var list tideprojectv1alpha1.TaskList
+			var list tideprojectv1alpha2.TaskList
 			if err := k8sClient.List(ctx, &list, client.InNamespace(bareProjectNS)); err != nil {
 				return err
 			}
@@ -253,7 +253,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		// ------------------------------------------------------------------
 		By("Wait for Wave to materialize in bare-project-test namespace (REQ-7a: ValidationState unblocked wave derivation)")
 		Eventually(func() error {
-			var list tideprojectv1alpha1.WaveList
+			var list tideprojectv1alpha2.WaveList
 			if err := k8sClient.List(ctx, &list, client.InNamespace(bareProjectNS)); err != nil {
 				return err
 			}
@@ -272,7 +272,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		// ------------------------------------------------------------------
 		By("Wait for Task to reach Succeeded (REQ-7b: executor Job ran)")
 		Eventually(func() error {
-			var t tideprojectv1alpha1.Task
+			var t tideprojectv1alpha2.Task
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      taskName,
 				Namespace: bareProjectNS,
@@ -297,7 +297,7 @@ var _ = Describe("bare Project self-bootstraps full cascade to Project=Complete 
 		// ------------------------------------------------------------------
 		By("Wait for Project bare-project to reach Complete (REQ-4)")
 		Eventually(func() error {
-			var proj tideprojectv1alpha1.Project
+			var proj tideprojectv1alpha2.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "bare-project",
 				Namespace: bareProjectNS,

@@ -41,7 +41,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
 
@@ -120,7 +120,7 @@ type ReporterOptions struct {
 //     completion event).
 func BuildReporterJob(
 	parent metav1.Object,
-	project *tideprojectv1alpha1.Project,
+	project *tideprojectv1alpha2.Project,
 	pvcName string,
 	taskUID string,
 	parentKind string,

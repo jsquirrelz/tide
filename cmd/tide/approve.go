@@ -51,7 +51,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -112,7 +112,7 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 	// Verify the Project exists so the operator gets a clear NotFound rather
 	// than a "Plan not found" error when the plan name is correct but the
 	// project name is wrong.
-	var proj tidev1alpha1.Project
+	var proj tidev1alpha2.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
@@ -120,7 +120,7 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 		return fmt.Errorf("get project: %w", err)
 	}
 
-	var plan tidev1alpha1.Plan
+	var plan tidev1alpha2.Plan
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: planName}, &plan); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: plan %q not found in namespace %q", planName, ns)
@@ -161,7 +161,7 @@ func approveWave(ctx context.Context, c client.Client, ns, projectName, waveFlag
 // conditions directly, since the AwaitingApproval state lives on the child
 // itself per plan 04-05's patchMilestoneAwaitingApproval / etc.).
 func approveLevel(ctx context.Context, c client.Client, ns, projectName string) error {
-	var proj tidev1alpha1.Project
+	var proj tidev1alpha2.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
@@ -224,13 +224,13 @@ func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object,
 	// both AwaitingApproval status and a Failed condition simultaneously).
 	var targetPhase string
 	switch v := obj.(type) {
-	case *tidev1alpha1.Milestone:
+	case *tidev1alpha2.Milestone:
 		targetPhase = v.Status.Phase
-	case *tidev1alpha1.Phase:
+	case *tidev1alpha2.Phase:
 		targetPhase = v.Status.Phase
-	case *tidev1alpha1.Plan:
+	case *tidev1alpha2.Plan:
 		targetPhase = v.Status.Phase
-	case *tidev1alpha1.Task:
+	case *tidev1alpha2.Task:
 		targetPhase = v.Status.Phase
 	}
 	if targetPhase == "Failed" {
@@ -249,7 +249,7 @@ func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object,
 // project. Returns the object and its kind string ("milestone", "phase",
 // "plan", "task"), or (nil, "", nil) when none is found.
 func findFailedLevel(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
-	var msList tidev1alpha1.MilestoneList
+	var msList tidev1alpha2.MilestoneList
 	if err := c.List(ctx, &msList, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list milestones: %w", err)
 	}
@@ -263,7 +263,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		}
 	}
 
-	var phList tidev1alpha1.PhaseList
+	var phList tidev1alpha2.PhaseList
 	if err := c.List(ctx, &phList, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list phases: %w", err)
 	}
@@ -277,7 +277,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		}
 	}
 
-	var plList tidev1alpha1.PlanList
+	var plList tidev1alpha2.PlanList
 	if err := c.List(ctx, &plList, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list plans: %w", err)
 	}
@@ -291,7 +291,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		}
 	}
 
-	var tkList tidev1alpha1.TaskList
+	var tkList tidev1alpha2.TaskList
 	if err := c.List(ctx, &tkList, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list tasks: %w", err)
 	}
@@ -315,32 +315,32 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 func buildFailureDetail(obj client.Object) string {
 	var reason, message string
 	switch v := obj.(type) {
-	case *tidev1alpha1.Milestone:
-		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+	case *tidev1alpha2.Milestone:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
 		if c == nil && len(v.Status.Conditions) > 0 {
 			c = &v.Status.Conditions[0]
 		}
 		if c != nil {
 			reason, message = c.Reason, c.Message
 		}
-	case *tidev1alpha1.Phase:
-		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+	case *tidev1alpha2.Phase:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
 		if c == nil && len(v.Status.Conditions) > 0 {
 			c = &v.Status.Conditions[0]
 		}
 		if c != nil {
 			reason, message = c.Reason, c.Message
 		}
-	case *tidev1alpha1.Plan:
-		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+	case *tidev1alpha2.Plan:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
 		if c == nil && len(v.Status.Conditions) > 0 {
 			c = &v.Status.Conditions[0]
 		}
 		if c != nil {
 			reason, message = c.Reason, c.Message
 		}
-	case *tidev1alpha1.Task:
-		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+	case *tidev1alpha2.Task:
+		c := meta.FindStatusCondition(v.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
 		if c == nil && len(v.Status.Conditions) > 0 {
 			c = &v.Status.Conditions[0]
 		}
@@ -361,7 +361,7 @@ func buildFailureDetail(obj client.Object) string {
 func findAwaitingMilestone(
 	ctx context.Context, c client.Client, ns, projectName string,
 ) (client.Object, string, error) {
-	var list tidev1alpha1.MilestoneList
+	var list tidev1alpha2.MilestoneList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list milestones: %w", err)
 	}
@@ -378,7 +378,7 @@ func findAwaitingMilestone(
 }
 
 func findAwaitingPhase(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
-	var list tidev1alpha1.PhaseList
+	var list tidev1alpha2.PhaseList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list phases: %w", err)
 	}
@@ -395,7 +395,7 @@ func findAwaitingPhase(ctx context.Context, c client.Client, ns, projectName str
 }
 
 func findAwaitingPlan(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
-	var list tidev1alpha1.PlanList
+	var list tidev1alpha2.PlanList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list plans: %w", err)
 	}
@@ -412,7 +412,7 @@ func findAwaitingPlan(ctx context.Context, c client.Client, ns, projectName stri
 }
 
 func findAwaitingTask(ctx context.Context, c client.Client, ns, projectName string) (client.Object, string, error) {
-	var list tidev1alpha1.TaskList
+	var list tidev1alpha2.TaskList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, "", fmt.Errorf("list tasks: %w", err)
 	}

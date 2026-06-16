@@ -19,7 +19,7 @@ package podjob
 import (
 	"testing"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // TestDefaultCaps asserts the wall-clock floor application across nil, zero,
@@ -29,7 +29,7 @@ import (
 func TestDefaultCaps(t *testing.T) {
 	cases := []struct {
 		name             string
-		in               *tidev1alpha1.Caps
+		in               *tidev1alpha2.Caps
 		kind             JobKind
 		wantWallClock    int32
 		wantIterations   int32
@@ -45,38 +45,38 @@ func TestDefaultCaps(t *testing.T) {
 		},
 		{
 			name:          "executor: zero WallClockSeconds → 1200s floor",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: 0},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: 0},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
 			name:          "executor: negative WallClockSeconds → 1200s floor",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: -1},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: -1},
 			kind:          JobKindExecutor,
 			wantWallClock: executorCapsFloorSeconds,
 		},
 		{
 			name:          "executor: 60s WallClockSeconds → 60s (under floor but operator-set is honored)",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: 60},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: 60},
 			kind:          JobKindExecutor,
 			wantWallClock: 60,
 		},
 		{
 			name:          "executor: 600s WallClockSeconds → 600s (under floor but operator-set is honored)",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: 600},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: 600},
 			kind:          JobKindExecutor,
 			wantWallClock: 600,
 		},
 		{
 			name:           "executor: zero WallClockSeconds + non-zero Iterations → 1200s floor, Iterations preserved",
-			in:             &tidev1alpha1.Caps{WallClockSeconds: 0, Iterations: 50},
+			in:             &tidev1alpha2.Caps{WallClockSeconds: 0, Iterations: 50},
 			kind:           JobKindExecutor,
 			wantWallClock:  executorCapsFloorSeconds,
 			wantIterations: 50,
 		},
 		{
 			name:             "executor: zero WallClockSeconds + non-zero Token caps → 1200s floor, tokens preserved",
-			in:               &tidev1alpha1.Caps{WallClockSeconds: 0, InputTokens: 100000, OutputTokens: 50000},
+			in:               &tidev1alpha2.Caps{WallClockSeconds: 0, InputTokens: 100000, OutputTokens: 50000},
 			kind:             JobKindExecutor,
 			wantWallClock:    executorCapsFloorSeconds,
 			wantInputTokens:  100000,
@@ -91,19 +91,19 @@ func TestDefaultCaps(t *testing.T) {
 		},
 		{
 			name:          "planner: zero WallClockSeconds → 1800s floor",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: 0},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: 0},
 			kind:          JobKindPlanner,
 			wantWallClock: plannerCapsFloorSeconds,
 		},
 		{
 			name:          "planner: 60s WallClockSeconds → 60s (operator-set is honored regardless of Kind)",
-			in:            &tidev1alpha1.Caps{WallClockSeconds: 60},
+			in:            &tidev1alpha2.Caps{WallClockSeconds: 60},
 			kind:          JobKindPlanner,
 			wantWallClock: 60,
 		},
 		{
 			name:           "planner: zero WallClockSeconds + Iterations preserved across Kind",
-			in:             &tidev1alpha1.Caps{WallClockSeconds: 0, Iterations: 20},
+			in:             &tidev1alpha2.Caps{WallClockSeconds: 0, Iterations: 20},
 			kind:           JobKindPlanner,
 			wantWallClock:  plannerCapsFloorSeconds,
 			wantIterations: 20,

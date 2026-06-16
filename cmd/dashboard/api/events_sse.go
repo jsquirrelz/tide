@@ -57,7 +57,7 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -294,14 +294,14 @@ func (h *EventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // connections that never receive events.
 func projectExists(ctx context.Context, c client.Client, name, namespace string) error {
 	if namespace != "" {
-		var proj tidev1alpha1.Project
+		var proj tidev1alpha2.Project
 		if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &proj); err != nil {
 			return err
 		}
 		return nil
 	}
 	// Cross-namespace: list all and match by name.
-	var list tidev1alpha1.ProjectList
+	var list tidev1alpha2.ProjectList
 	if err := c.List(ctx, &list); err != nil {
 		return err
 	}

@@ -44,7 +44,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 )
 
@@ -55,17 +55,17 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 	ctx := context.Background()
 
 	AfterEach(func() {
-		tasks := &tideprojectv1alpha1.TaskList{}
+		tasks := &tideprojectv1alpha2.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(rateLimitNamespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
-		plans := &tideprojectv1alpha1.PlanList{}
+		plans := &tideprojectv1alpha2.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(rateLimitNamespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		projects := &tideprojectv1alpha1.ProjectList{}
+		projects := &tideprojectv1alpha2.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(rateLimitNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -119,12 +119,12 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 			By("Creating a Project with the provider Secret")
 			projectName := "rate-limit-project"
 			makeBoundPVC(ctx, "tide-projects", rateLimitNamespace)
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: rateLimitNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/rate-limit.git",
 					ProviderSecretRef: secretName,
 				},
@@ -144,7 +144,7 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 
 			By("Asserting all tasks are created successfully")
 			Eventually(func() int {
-				tl := &tideprojectv1alpha1.TaskList{}
+				tl := &tideprojectv1alpha2.TaskList{}
 				_ = k8sClient.List(ctx, tl, client.InNamespace(rateLimitNamespace))
 				count := 0
 				for _, t := range tl.Items {
@@ -181,11 +181,11 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 
 			By("Verifying the rate_limit condition vocabulary exists")
 			// The condition type from shared_types.go — verify it's wirable.
-			_ = tideprojectv1alpha1.ReasonRateLimitHit // compile-time check
+			_ = tideprojectv1alpha2.ReasonRateLimitHit // compile-time check
 
 			By("Verifying tasks were created with correct structure")
 			for _, tn := range taskNames {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				Expect(k8sClient.Get(ctx, client.ObjectKey{Name: tn, Namespace: rateLimitNamespace}, t)).To(Succeed())
 				Expect(t.Spec.PlanRef).To(Equal(planName))
 			}
@@ -193,12 +193,12 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 			By("Verifying condition meta package is available for condition queries")
 			// Verify that meta.FindStatusCondition works for rate-limit condition lookups.
 			// This is a compilation check for the rate-limit assertion pattern.
-			dummyTask := &tideprojectv1alpha1.Task{}
+			dummyTask := &tideprojectv1alpha2.Task{}
 			_ = k8sClient.Get(ctx, client.ObjectKey{Name: taskNames[0], Namespace: rateLimitNamespace}, dummyTask)
 			// FindStatusCondition returns nil if no condition set — which is correct for
 			// tasks that haven't been rate-limited (our bucket key may not match in envtest).
 			cond := meta.FindStatusCondition(dummyTask.Status.Conditions,
-				tideprojectv1alpha1.ConditionReconciling)
+				tideprojectv1alpha2.ConditionReconciling)
 			_ = cond // nil is fine; this test validates the pattern compiles and runs
 
 			GinkgoWriter.Println("FAIL-03 / AC #4: rate-limit pre-drain verified; bucket eviction+refill verified; condition vocabulary asserted")

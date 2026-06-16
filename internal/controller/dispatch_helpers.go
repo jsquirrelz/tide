@@ -50,7 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -69,7 +69,7 @@ func spawnReporterIfNeeded(
 	c client.Client,
 	scheme *runtime.Scheme,
 	parent metav1.Object,
-	project *tideprojectv1alpha1.Project,
+	project *tideprojectv1alpha2.Project,
 	parentKind string,
 	reporterImage string,
 ) (bool, error) {
@@ -135,9 +135,9 @@ type ProviderDefaults struct {
 // Params merge: level Params copied first, then Project-level Params
 // inserted only for keys NOT already set at the level â i.e., level
 // wins on key conflict.
-func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDefaults ProviderDefaults) pkgdispatch.ProviderSpec {
+func ResolveProvider(project *tideprojectv1alpha2.Project, level string, helmDefaults ProviderDefaults) pkgdispatch.ProviderSpec {
 	// Helper to read per-level overrides.
-	var levelCfg *tideprojectv1alpha1.LevelConfig
+	var levelCfg *tideprojectv1alpha2.LevelConfig
 	if project != nil {
 		switch level {
 		case "milestone":
@@ -208,7 +208,7 @@ func ResolveProvider(project *tideprojectv1alpha1.Project, level string, helmDef
 // (resolveProject / resolveProjectForPlan), which returns nil on a not-yet-
 // visible chain. A nil project yields "" — the same empty-prompt shape the
 // real subagent already guards (EMPTY_PROMPT warning) rather than a panic.
-func outcomePromptOf(project *tideprojectv1alpha1.Project) string {
+func outcomePromptOf(project *tideprojectv1alpha2.Project) string {
 	if project == nil {
 		return ""
 	}
@@ -220,7 +220,7 @@ func outcomePromptOf(project *tideprojectv1alpha1.Project) string {
 // stamped byte-identically into EnvelopeIn.SharedContext for all wave siblings
 // dispatched with the same parent-curated blob (CACHE-02 uniform population).
 // Callers pass the parent CRD's Spec.SharedContext; test fixtures pass "".
-func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha1.Project, attempt int, token, prompt string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults, sharedContext string) (pkgdispatch.EnvelopeIn, []byte, error) {
+func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideprojectv1alpha2.Project, attempt int, token, prompt string, caps pkgdispatch.Caps, proxyEndpoint string, helmDefaults ProviderDefaults, sharedContext string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	envIn := pkgdispatch.EnvelopeIn{
 		APIVersion:    pkgdispatch.APIVersionV1Alpha1,
 		Kind:          pkgdispatch.KindTaskEnvelopeIn,
@@ -266,8 +266,8 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 // as a config error rather than dispatching a Job with an empty image field.
 // Level "project" has no entry in the switch (the CRD has no Levels.Project);
 // resolution falls straight to Spec.Subagent.Image, then helmDefaults.Image.
-func resolveImage(project *tideprojectv1alpha1.Project, level string, helmDefaults ProviderDefaults) string {
-	var levelCfg *tideprojectv1alpha1.LevelConfig
+func resolveImage(project *tideprojectv1alpha2.Project, level string, helmDefaults ProviderDefaults) string {
+	var levelCfg *tideprojectv1alpha2.LevelConfig
 	if project != nil {
 		switch level {
 		case "milestone":
@@ -313,19 +313,19 @@ func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, p
 	}
 	switch parentKind {
 	case "Milestone":
-		var ms tideprojectv1alpha1.Milestone
+		var ms tideprojectv1alpha2.Milestone
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ms); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
 		return ms.Status.Phase == "AwaitingApproval", nil
 	case "Phase":
-		var ph tideprojectv1alpha1.Phase
+		var ph tideprojectv1alpha2.Phase
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ph); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
 		return ph.Status.Phase == "AwaitingApproval", nil
 	case "Plan":
-		var plan tideprojectv1alpha1.Plan
+		var plan tideprojectv1alpha2.Plan
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &plan); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}

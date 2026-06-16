@@ -34,7 +34,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 var _ = Describe("Wall-clock cap enforcement (AC5 / HARN-02)", Label("kind"), func() {
@@ -92,7 +92,7 @@ spec:
 
 		// Wait for the task to be created.
 		Eventually(func() error {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			return k8sClient.Get(ctx, client.ObjectKey{Name: "hang-task", Namespace: capsNS}, t)
 		}, 30*time.Second, time.Second).Should(Succeed())
 
@@ -131,7 +131,7 @@ spec:
 
 		// The Task should also reach Failed phase.
 		Eventually(func() string {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: "hang-task", Namespace: capsNS}, t); err != nil {
 				return ""
 			}

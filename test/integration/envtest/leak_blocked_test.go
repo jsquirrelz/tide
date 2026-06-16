@@ -30,7 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
@@ -130,7 +130,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 				Namespace: namespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion:         tideprojectv1alpha1.GroupVersion.String(),
+						APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
 						Kind:               "Project",
 						Name:               projectName,
 						UID:                uid,
@@ -201,7 +201,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			p := pods.Items[i]
 			_ = k8sClient.Delete(ctx, &p)
 		}
-		proj := &tideprojectv1alpha1.Project{}
+		proj := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 			proj.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj)
@@ -221,24 +221,24 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			tidemetrics.SecretLeakBlockedTotal.Reset()
 			ensureBoundPVCIT(pvcName, "default")
 
-			proj := &tideprojectv1alpha1.Project{
+			proj := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/test.git",
-					Git: &tideprojectv1alpha1.GitConfig{
+					Git: &tideprojectv1alpha2.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
 						CredsSecretRef: "test-creds",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			waitITCacheSync(projectName, &tideprojectv1alpha1.Project{})
+			waitITCacheSync(projectName, &tideprojectv1alpha2.Project{})
 
-			var got tideprojectv1alpha1.Project
+			var got tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 			// Drive Project into PhaseComplete with BranchName so the push-job dispatch path runs.
 			statusPatch := client.MergeFrom(got.DeepCopy())
-			got.Status.Phase = tideprojectv1alpha1.PhaseComplete
+			got.Status.Phase = tideprojectv1alpha2.PhaseComplete
 			got.Status.Git.BranchName = "tide/run-" + projectName + "-1747200000"
 			Expect(k8sClient.Status().Patch(ctx, &got, statusPatch)).To(Succeed())
 
@@ -264,10 +264,10 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			driveProjectReconcile(r, projectName, 5)
 
 			Eventually(func(g Gomega) {
-				var p tideprojectv1alpha1.Project
+				var p tideprojectv1alpha2.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
-				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeakBlocked))
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionPushLeakBlocked)
+				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha2.PhasePushLeakBlocked))
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionPushLeakBlocked)
 				g.Expect(c).NotTo(BeNil(), "ConditionPushLeakBlocked should be set on leak-detected")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal("LeakDetected"))
@@ -292,23 +292,23 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			tidemetrics.SecretLeakBlockedTotal.Reset()
 			ensureBoundPVCIT(pvcName, "default")
 
-			proj := &tideprojectv1alpha1.Project{
+			proj := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/test.git",
-					Git: &tideprojectv1alpha1.GitConfig{
+					Git: &tideprojectv1alpha2.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
 						CredsSecretRef: "test-creds",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			waitITCacheSync(projectName, &tideprojectv1alpha1.Project{})
+			waitITCacheSync(projectName, &tideprojectv1alpha2.Project{})
 
-			var got tideprojectv1alpha1.Project
+			var got tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 			statusPatch := client.MergeFrom(got.DeepCopy())
-			got.Status.Phase = tideprojectv1alpha1.PhaseComplete
+			got.Status.Phase = tideprojectv1alpha2.PhaseComplete
 			got.Status.Git.BranchName = "tide/run-" + projectName + "-1747200001"
 			Expect(k8sClient.Status().Patch(ctx, &got, statusPatch)).To(Succeed())
 
@@ -334,10 +334,10 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			driveProjectReconcile(r, projectName, 5)
 
 			Eventually(func(g Gomega) {
-				var p tideprojectv1alpha1.Project
+				var p tideprojectv1alpha2.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
-				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionPushLeaseFailed)
+				g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha2.PhasePushLeaseFailed))
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionPushLeaseFailed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())

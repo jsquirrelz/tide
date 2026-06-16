@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newTestProjectReconciler returns a ProjectReconciler wired to the shared
@@ -86,12 +86,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-create-init-job",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -117,7 +117,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			// Re-fetch project to get the UID.
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			expectedJobName := "tide-init-" + string(fetched.UID)
@@ -171,12 +171,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-idempotent",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -198,7 +198,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			// Re-fetch project to get UID.
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			jobName := "tide-init-" + string(fetched.UID)
@@ -224,12 +224,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-success",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -244,7 +244,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Succeeded init Job.
@@ -297,12 +297,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-revert-from-complete",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -317,7 +317,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Succeeded init Job (mirror lines 243-271 of the canonical test).
@@ -360,7 +360,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			// Succeeded in the cluster — a subsequent Reconcile will re-enter
 			// handleInitJobCompletion's isJobSucceeded branch.
 			statusPatch := client.MergeFrom(fetched.DeepCopy())
-			fetched.Status.Phase = tideprojectv1alpha1.PhaseComplete
+			fetched.Status.Phase = tideprojectv1alpha2.PhaseComplete
 			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
 
 			// Sanity check the patch landed.
@@ -390,12 +390,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-fail",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -410,7 +410,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Failed init Job.
@@ -464,14 +464,14 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-budget-exceeded",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha1.BudgetConfig{
+					Budget: tideprojectv1alpha2.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -480,7 +480,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			// Patch status to exceed the cap.
 			statusPatch := fetched.DeepCopy()
@@ -513,7 +513,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass-oneshot",
 					Namespace: ns,
@@ -521,9 +521,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha1.BudgetConfig{
+					Budget: tideprojectv1alpha2.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -532,7 +532,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Patch status to BudgetExceeded with overspend.
@@ -571,7 +571,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			})
 
 			futureTime := time.Now().Add(time.Hour).Format(time.RFC3339)
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass-ttl",
 					Namespace: ns,
@@ -579,9 +579,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget-until": futureTime,
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha1.BudgetConfig{
+					Budget: tideprojectv1alpha2.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -590,7 +590,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Patch status to BudgetExceeded with overspend.
@@ -641,12 +641,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			ns := "default"
 			// Deliberately do NOT create the shared PVC for this test.
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-pvc",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -669,7 +669,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				"should requeue after 30s when shared PVC is missing (Pitfall 1 — non-blocking)")
 
 			// No init Job should have been created.
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			var jobList batchv1.JobList
 			Expect(k8sClient.List(ctx, &jobList, client.InNamespace(ns))).To(Succeed())
@@ -686,12 +686,12 @@ var _ = Describe("Project Controller", func() {
 		ctx := context.Background()
 
 		It("accepts a valid Project CRD apply", func() {
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "valid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -702,12 +702,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("rejects a Project with an invalid targetRepo (CEL XValidation)", func() {
-			invalid := &tideprojectv1alpha1.Project{
+			invalid := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "not-a-valid-url",
 				},
 			}
@@ -718,12 +718,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("sets the finalizer on create (CTRL-05)", func() {
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "finalizer-set",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -740,7 +740,7 @@ var _ = Describe("Project Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Finalizers).To(ContainElement("tideproject.k8s/project-cleanup"))
 
@@ -752,12 +752,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("removes finalizer on deletion (TestFinalizerLifecycle, Pitfall 21)", func() {
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "finalizer-lifecycle",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -773,7 +773,7 @@ var _ = Describe("Project Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha1.Project{}
+			fetched := &tideprojectv1alpha2.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Finalizers).To(ContainElement("tideproject.k8s/project-cleanup"))
 
@@ -789,7 +789,7 @@ var _ = Describe("Project Controller", func() {
 
 			// The object should be GC'd within a short window.
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, name, &tideprojectv1alpha1.Project{})
+				err := k8sClient.Get(ctx, name, &tideprojectv1alpha2.Project{})
 				return apierrors.IsNotFound(err)
 			}, 10*time.Second, 250*time.Millisecond).Should(BeTrue(),
 				"expected Project to be garbage-collected after finalizer removal")
@@ -799,7 +799,7 @@ var _ = Describe("Project Controller", func() {
 
 // buildSucceededInitJob builds a pre-created init Job for testing — Spec only,
 // caller patches Status separately since envtest requires separate status updates.
-func buildSucceededInitJob(project *tideprojectv1alpha1.Project, _ string) *batchv1.Job {
+func buildSucceededInitJob(project *tideprojectv1alpha2.Project, _ string) *batchv1.Job {
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	return &batchv1.Job{
@@ -827,7 +827,7 @@ func buildSucceededInitJob(project *tideprojectv1alpha1.Project, _ string) *batc
 }
 
 // buildFailedInitJob builds a pre-created init Job for testing — Spec only.
-func buildFailedInitJob(project *tideprojectv1alpha1.Project, _ string) *batchv1.Job {
+func buildFailedInitJob(project *tideprojectv1alpha2.Project, _ string) *batchv1.Job {
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	return &batchv1.Job{

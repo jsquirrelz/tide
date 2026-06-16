@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const budgetNamespace = "default"
@@ -37,7 +37,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 	ctx := context.Background()
 
 	AfterEach(func() {
-		projects := &tideprojectv1alpha1.ProjectList{}
+		projects := &tideprojectv1alpha2.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(budgetNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -56,14 +56,14 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			projectName := "budget-cap-project"
 			makeBoundPVC(ctx, "tide-projects", budgetNamespace)
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: budgetNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/budget-test.git",
-					Budget: tideprojectv1alpha1.BudgetConfig{
+					Budget: tideprojectv1alpha2.BudgetConfig{
 						AbsoluteCapCents: 100, // $1.00 cap
 					},
 				},
@@ -72,7 +72,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 
 			// Directly patch BudgetStatus to exceed the cap.
 			Eventually(func() error {
-				p := &tideprojectv1alpha1.Project{}
+				p := &tideprojectv1alpha2.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return err
 				}
@@ -95,11 +95,11 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			// and simply retry on the next poll.
 			kickN := 0
 			Eventually(func() string {
-				p := &tideprojectv1alpha1.Project{}
+				p := &tideprojectv1alpha2.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return ""
 				}
-				if p.Status.Phase != tideprojectv1alpha1.PhaseBudgetExceeded {
+				if p.Status.Phase != tideprojectv1alpha2.PhaseBudgetExceeded {
 					kickN++
 					if p.Annotations == nil {
 						p.Annotations = map[string]string{}
@@ -108,7 +108,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 					_ = k8sClient.Update(ctx, p)
 				}
 				return p.Status.Phase
-			}, "60s", "1s").Should(Equal(tideprojectv1alpha1.PhaseBudgetExceeded),
+			}, "60s", "1s").Should(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
 				"Project.Status.Phase should be BudgetExceeded when cost exceeds cap")
 		})
 	})
@@ -122,14 +122,14 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			// that PVC too so the seam body's PVC-bound check passes.
 			makeBoundPVC(ctx, "tide-projects", budgetNamespace)
 
-			project := &tideprojectv1alpha1.Project{
+			project := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: budgetNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/bypass-test.git",
-					Budget: tideprojectv1alpha1.BudgetConfig{
+					Budget: tideprojectv1alpha2.BudgetConfig{
 						AbsoluteCapCents: 50,
 					},
 				},
@@ -138,18 +138,18 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 
 			// Force BudgetExceeded status.
 			Eventually(func() error {
-				p := &tideprojectv1alpha1.Project{}
+				p := &tideprojectv1alpha2.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return err
 				}
 				p.Status.Budget.CostSpentCents = 100
-				p.Status.Phase = tideprojectv1alpha1.PhaseBudgetExceeded
+				p.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
 				return k8sClient.Status().Update(ctx, p)
 			}, "30s", "200ms").Should(Succeed())
 
 			// Apply the one-shot bypass annotation (also kicks the watch).
 			Eventually(func() error {
-				p := &tideprojectv1alpha1.Project{}
+				p := &tideprojectv1alpha2.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return err
 				}
@@ -175,7 +175,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 			// bypass annotation is observed consumed.
 			kickN := 0
 			Eventually(func() bool {
-				p := &tideprojectv1alpha1.Project{}
+				p := &tideprojectv1alpha2.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: budgetNamespace}, p); err != nil {
 					return false
 				}
@@ -237,7 +237,7 @@ func makeBoundPVC(ctx context.Context, name, ns string) {
 // invoking reconciler.Reconcile() multiple times, but via the real queue.
 func kickProjectReconcile(ctx context.Context, name, ns, kickValue string) {
 	Eventually(func() error {
-		p := &tideprojectv1alpha1.Project{}
+		p := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, p); err != nil {
 			return err
 		}

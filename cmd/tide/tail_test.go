@@ -32,22 +32,22 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
-func makeTaskForTail(name, jobName string, phase string) *tidev1alpha1.Task {
-	return &tidev1alpha1.Task{
+func makeTaskForTail(name, jobName string, phase string) *tidev1alpha2.Task {
+	return &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("test-uid"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "my-plan",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/out/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: phase},
+		Status: tidev1alpha2.TaskStatus{Phase: phase},
 	}
 }
 

@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // fileTouchGateReconciler constructs a PlanReconciler wired for the file-touch
@@ -61,37 +61,37 @@ func fileTouchGateReconciler() *PlanReconciler {
 // the admission webhook on every reconcile cycle and block strict-mode Plans that
 // already have overlapping Tasks in the indexer cache).
 func makeFileTouchProject(ctx context.Context, projectName, ftMode string) {
-	proj := &tideprojectv1alpha1.Project{
+	proj := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/ft-test.git",
-			Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
-			PlanAdmission: tideprojectv1alpha1.PlanAdmissionConfig{
+			Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+			PlanAdmission: tideprojectv1alpha2.PlanAdmissionConfig{
 				FileTouchMode: ftMode,
 			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-	waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+	waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 }
 
 // cleanupFileTouchFixture removes all objects created for a file-touch gate test.
 func cleanupFileTouchFixture(ctx context.Context, projectName, planName string, taskNames []string) {
 	for _, tn := range taskNames {
-		t := &tideprojectv1alpha1.Task{}
+		t := &tideprojectv1alpha2.Task{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: tn, Namespace: "default"}, t); err == nil {
 			t.Finalizers = nil
 			_ = k8sClient.Update(ctx, t)
 			_ = k8sClient.Delete(ctx, t)
 		}
 	}
-	p := &tideprojectv1alpha1.Plan{}
+	p := &tideprojectv1alpha2.Plan{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(ctx, p)
 		_ = k8sClient.Delete(ctx, p)
 	}
-	proj := &tideprojectv1alpha1.Project{}
+	proj := &tideprojectv1alpha2.Project{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 		proj.Finalizers = nil
 		_ = k8sClient.Update(ctx, proj)
@@ -100,10 +100,10 @@ func cleanupFileTouchFixture(ctx context.Context, projectName, planName string, 
 }
 
 // mkFileTouchTask creates a Task CRD in the cluster for file-touch gate tests.
-func mkFileTouchTask(ctx context.Context, name, planRef string, dependsOn, filesTouched []string) *tideprojectv1alpha1.Task {
-	t := &tideprojectv1alpha1.Task{
+func mkFileTouchTask(ctx context.Context, name, planRef string, dependsOn, filesTouched []string) *tideprojectv1alpha2.Task {
+	t := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             planRef,
 			DependsOn:           dependsOn,
 			FilesTouched:        filesTouched,
@@ -119,8 +119,8 @@ func mkFileTouchTask(ctx context.Context, name, planRef string, dependsOn, files
 // with the project name for reconciler resolution, and uses a non-existent phase
 // name to prevent the reconciler's owner-ref update from triggering the webhook
 // with overlapping Tasks in view (which would cause a strict-mode rejection).
-func mkFileTouchPlan(planName, projectName string) *tideprojectv1alpha1.Plan {
-	return &tideprojectv1alpha1.Plan{
+func mkFileTouchPlan(planName, projectName string) *tideprojectv1alpha2.Plan {
+	return &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
@@ -134,7 +134,7 @@ func mkFileTouchPlan(planName, projectName string) *tideprojectv1alpha1.Plan {
 		// Use a non-existent phase name: the reconciler's step-4 gets NotFound,
 		// skips the r.Update(plan) owner-ref call, and never fires the admission
 		// webhook with overlapping Tasks in view.
-		Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: "ft-phase-stub"},
+		Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "ft-phase-stub"},
 	}
 }
 
@@ -167,7 +167,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			// Create a Plan and stamp it as Validated (the gate only runs after Validated).
 			plan := mkFileTouchPlan(planName, projectName)
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 			// Stamp ValidationState=Validated so the gate runs (status subresource —
 			// no admission webhook fires on status patches).
@@ -181,7 +181,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Wait for tasks to appear in the manager's field-indexer cache.
 			Eventually(func() int {
-				var tl tideprojectv1alpha1.TaskList
+				var tl tideprojectv1alpha2.TaskList
 				_ = mgrClient.List(ctx, &tl, client.InNamespace("default"),
 					client.MatchingFields{taskPlanRefIndexKey: planName})
 				return len(tl.Items)
@@ -193,13 +193,13 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Assert: ValidationState=FileTouchMismatch.
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.ValidationState).To(Equal("FileTouchMismatch"),
 					"strict + shared file + no edge must park with ValidationState=FileTouchMismatch")
 
 				// Condition names both task names and the shared path.
-				cond := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				cond := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				g.Expect(cond).NotTo(BeNil(), "WaveOrLevelPaused condition must be set")
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(cond.Reason).To(Equal("FileTouchMismatch"))
@@ -211,7 +211,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			// Assert: ZERO Jobs were dispatched whose name contains this plan's UID.
 			// We scope to jobs whose name prefix matches tide-plan-<uid> to avoid
 			// false positives from Jobs created by other concurrent test specs.
-			var afterPlan tideprojectv1alpha1.Plan
+			var afterPlan tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &afterPlan)).To(Succeed())
 			planUID := string(afterPlan.UID)
 
@@ -232,7 +232,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			}
 
 			// Assert: Status.Phase is NOT Failed (park-not-fail doctrine).
-			var afterFinal tideprojectv1alpha1.Plan
+			var afterFinal tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &afterFinal)).To(Succeed())
 			Expect(afterFinal.Status.Phase).NotTo(Equal("Failed"),
 				"the file-touch gate must park-not-fail; Phase=Failed must never be set by this gate")
@@ -257,7 +257,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 		It("clears FileTouchMismatch park when the dependsOn edge is added", func() {
 			plan := mkFileTouchPlan(planName, projectName)
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 			// Stamp Validated.
 			patchValidated := client.MergeFrom(plan.DeepCopy())
@@ -269,7 +269,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			_ = mkFileTouchTask(ctx, taskB, planName, nil, []string{"pkg/shared/lib.go"})
 
 			Eventually(func() int {
-				var tl tideprojectv1alpha1.TaskList
+				var tl tideprojectv1alpha2.TaskList
 				_ = mgrClient.List(ctx, &tl, client.InNamespace("default"),
 					client.MatchingFields{taskPlanRefIndexKey: planName})
 				return len(tl.Items)
@@ -280,14 +280,14 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// First: confirm parked.
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.ValidationState).To(Equal("FileTouchMismatch"))
 			}, "10s", "100ms").Should(Succeed())
 
 			// Fix the overlap: add dependsOn edge on taskB → taskA.
 			Eventually(func() error {
-				fresh := &tideprojectv1alpha1.Task{}
+				fresh := &tideprojectv1alpha2.Task{}
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: taskB, Namespace: "default"}, fresh); err != nil {
 					return err
 				}
@@ -298,7 +298,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Wait for cache to reflect the updated Task.
 			Eventually(func() bool {
-				var freshB tideprojectv1alpha1.Task
+				var freshB tideprojectv1alpha2.Task
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: taskB, Namespace: "default"}, &freshB); err != nil {
 					return false
 				}
@@ -310,12 +310,12 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Assert: ValidationState cleared back to Validated (park lifted).
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.ValidationState).To(Equal("Validated"),
 					"adding dependsOn edge must lift the FileTouchMismatch park (ValidationState returns to Validated)")
 				// Paused condition should be cleared (Status=False).
-				cond := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				cond := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				if cond != nil {
 					g.Expect(cond.Status).To(Equal(metav1.ConditionFalse),
 						"WaveOrLevelPaused condition must be cleared (Status=False) after park lifts")
@@ -342,7 +342,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 		It("does not park when mode is warn even with overlapping filesTouched", func() {
 			plan := mkFileTouchPlan(planName, projectName)
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 			// Stamp Validated.
 			patchValidated := client.MergeFrom(plan.DeepCopy())
@@ -354,7 +354,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			mkFileTouchTask(ctx, taskB, planName, nil, []string{"pkg/shared/util.go"})
 
 			Eventually(func() int {
-				var tl tideprojectv1alpha1.TaskList
+				var tl tideprojectv1alpha2.TaskList
 				_ = mgrClient.List(ctx, &tl, client.InNamespace("default"),
 					client.MatchingFields{taskPlanRefIndexKey: planName})
 				return len(tl.Items)
@@ -365,7 +365,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Assert: ValidationState is NOT FileTouchMismatch (should remain Validated or unset).
 			Consistently(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.ValidationState).NotTo(Equal("FileTouchMismatch"),
 					"warn mode must NOT park on file-touch overlap")
@@ -391,7 +391,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 		It("never sets Status.Phase=Failed when parking for FileTouchMismatch", func() {
 			plan := mkFileTouchPlan(planName, projectName)
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 			patchValidated := client.MergeFrom(plan.DeepCopy())
 			plan.Status.ValidationState = "Validated"
@@ -401,7 +401,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			mkFileTouchTask(ctx, taskB, planName, nil, []string{"pkg/shared/model.go"})
 
 			Eventually(func() int {
-				var tl tideprojectv1alpha1.TaskList
+				var tl tideprojectv1alpha2.TaskList
 				_ = mgrClient.List(ctx, &tl, client.InNamespace("default"),
 					client.MatchingFields{taskPlanRefIndexKey: planName})
 				return len(tl.Items)
@@ -412,13 +412,13 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 
 			// Poll for the parked state.
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.ValidationState).To(Equal("FileTouchMismatch"))
 			}, "10s", "100ms").Should(Succeed())
 
 			// Assert that Status.Phase is NEVER Failed.
-			var after tideprojectv1alpha1.Plan
+			var after tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 			Expect(after.Status.Phase).NotTo(Equal("Failed"),
 				"file-touch gate must park-not-fail (D-05 doctrine): Status.Phase=Failed must never be set by this gate")

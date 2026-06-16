@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // PlanCustomValidator no-op behavior (Plan 07 Task 2 / revision Warning 9).
@@ -43,7 +43,7 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 		// in Terminating state because envtest doesn't run the GC controller,
 		// but the Delete request itself exercises ValidateDelete and that's
 		// what matters for this suite.
-		plans := &tideprojectv1alpha1.PlanList{}
+		plans := &tideprojectv1alpha2.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(namespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
@@ -51,12 +51,12 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 	})
 
 	It("allows ValidateCreate (Phase 1 no-op)", func() {
-		plan := &tideprojectv1alpha1.Plan{
+		plan := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-create-plan",
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{
+			Spec: tideprojectv1alpha2.PlanSpec{
 				PhaseRef: "some-phase",
 			},
 		}
@@ -65,12 +65,12 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 	})
 
 	It("allows ValidateUpdate (Phase 1 no-op)", func() {
-		plan := &tideprojectv1alpha1.Plan{
+		plan := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-update-plan",
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{
+			Spec: tideprojectv1alpha2.PlanSpec{
 				PhaseRef: "phase-a",
 			},
 		}
@@ -79,7 +79,7 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 		// Re-fetch then mutate to avoid resource-version conflicts with the
 		// PlanReconciler's finalizer/owner-ref stamping.
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -90,12 +90,12 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 	})
 
 	It("allows ValidateDelete (Phase 1 no-op)", func() {
-		plan := &tideprojectv1alpha1.Plan{
+		plan := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-delete-plan",
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{
+			Spec: tideprojectv1alpha2.PlanSpec{
 				PhaseRef: "some-phase",
 			},
 		}
@@ -112,9 +112,9 @@ var _ = Describe("PlanCustomValidator (Phase 1 no-op)", func() {
 		// authoritative gate for non-graph invariants. The webhook does NOT
 		// fire on schema-invalid objects because admission decoder rejects
 		// them earlier.
-		bad := &tideprojectv1alpha1.Plan{
+		bad := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{Name: "bad-plan", Namespace: namespace},
-			Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: ""},
+			Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: ""},
 		}
 		err := k8sClient.Create(ctx, bad)
 		Expect(err).To(HaveOccurred(),
@@ -132,27 +132,27 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 	const namespace = "default"
 
 	// mkPlan creates a Plan object (not yet applied to the cluster).
-	mkPlan := func(name string, annotations map[string]string) *tideprojectv1alpha1.Plan {
-		return &tideprojectv1alpha1.Plan{
+	mkPlan := func(name string, annotations map[string]string) *tideprojectv1alpha2.Plan {
+		return &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        name,
 				Namespace:   namespace,
 				Annotations: annotations,
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{
+			Spec: tideprojectv1alpha2.PlanSpec{
 				PhaseRef: "some-phase",
 			},
 		}
 	}
 
 	// mkTask creates a Task object referencing the given Plan.
-	mkTask := func(name, planRef string, dependsOn, filesTouched []string) *tideprojectv1alpha1.Task {
-		return &tideprojectv1alpha1.Task{
+	mkTask := func(name, planRef string, dependsOn, filesTouched []string) *tideprojectv1alpha2.Task {
+		return &tideprojectv1alpha2.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha1.TaskSpec{
+			Spec: tideprojectv1alpha2.TaskSpec{
 				PlanRef:             planRef,
 				DependsOn:           dependsOn,
 				FilesTouched:        filesTouched,
@@ -164,13 +164,13 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 	AfterEach(func() {
 		// Best-effort cleanup of Plans and Tasks created during each test.
-		tasks := &tideprojectv1alpha1.TaskList{}
+		tasks := &tideprojectv1alpha2.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(namespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
 
-		plans := &tideprojectv1alpha1.PlanList{}
+		plans := &tideprojectv1alpha2.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(namespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
@@ -197,7 +197,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		// Update the Plan to trigger ValidateUpdate with Tasks now visible.
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -231,7 +231,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		// once Eventually returns the cyclic graph IS visible to the webhook
 		// and rejection becomes deterministic.
 		Eventually(func() int {
-			var taskList tideprojectv1alpha1.TaskList
+			var taskList tideprojectv1alpha2.TaskList
 			_ = mgrClient.List(ctx, &taskList,
 				client.InNamespace(namespace),
 				client.MatchingFields{".spec.planRef": plan.Name},
@@ -243,7 +243,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		// Now trigger an update; since Tasks are guaranteed visible, the
 		// webhook MUST reject (no Pitfall B fall-through).
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -279,7 +279,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		// field-indexer cache before triggering the update so the webhook
 		// must reject (instead of falling through to Pitfall B warn).
 		Eventually(func() int {
-			var taskList tideprojectv1alpha1.TaskList
+			var taskList tideprojectv1alpha2.TaskList
 			_ = mgrClient.List(ctx, &taskList,
 				client.InNamespace(namespace),
 				client.MatchingFields{".spec.planRef": plan.Name},
@@ -290,7 +290,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		// Strict mode: with both Tasks indexed, the update MUST be rejected.
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -320,7 +320,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		// Warn mode: Plan update should be admitted (warnings returned, not rejection).
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -349,7 +349,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		// No common exact path → no warnings. Plan update succeeds cleanly.
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -410,42 +410,42 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		phaseName := "d08-phase"
 		planName := "d08-plan-strict"
 
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: namespace},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/d08-test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/d08-test.git",
 					CredsSecretRef: "test-creds",
 				},
 				// strict mode set on Project — should propagate to webhook mode resolution.
-				PlanAdmission: tideprojectv1alpha1.PlanAdmissionConfig{
+				PlanAdmission: tideprojectv1alpha2.PlanAdmissionConfig{
 					FileTouchMode: "strict",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: namespace},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 
-		phase := &tideprojectv1alpha1.Phase{
+		phase := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: namespace},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 		}
 		Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
 		// Plan with NO file-touch-mode annotation — mode must come from Project.Spec.
-		plan := &tideprojectv1alpha1.Plan{
+		plan := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{
+			Spec: tideprojectv1alpha2.PlanSpec{
 				PhaseRef: phaseName,
 			},
 		}
@@ -459,7 +459,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		// WR-05: wait for Tasks to surface in the .spec.planRef indexer.
 		Eventually(func() int {
-			var taskList tideprojectv1alpha1.TaskList
+			var taskList tideprojectv1alpha2.TaskList
 			_ = mgrClient.List(ctx, &taskList,
 				client.InNamespace(namespace),
 				client.MatchingFields{".spec.planRef": planName},
@@ -473,7 +473,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		// This distinguishes D-08 from the old nil-project path which would have
 		// fallen through to cluster default "warn" and admitted with warnings.
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}
@@ -513,7 +513,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 		// Attempt to trigger update; event may be emitted on rejection.
 		var admissionRejected bool
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha1.Plan{}
+			fresh := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(plan), fresh); err != nil {
 				return err
 			}

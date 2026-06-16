@@ -32,7 +32,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -63,7 +63,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 
 		// Wait for alpha task to exist.
 		Eventually(func() error {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			return k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "alpha",
 				Namespace: "tide-int-test",
@@ -75,7 +75,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 		for _, taskName := range []string{"alpha", "beta", "gamma"} {
 			name := taskName // capture for closure
 			Eventually(func() string {
-				t := &tideprojectv1alpha1.Task{}
+				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{
 					Name:      name,
 					Namespace: "tide-int-test",
@@ -94,7 +94,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	It("AC1: wave 1 (gamma) does not dispatch until wave 0 tasks complete", func() {
 		// Wait for alpha and beta to exist.
 		Eventually(func() error {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			return k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "alpha",
 				Namespace: "tide-int-test",
@@ -104,7 +104,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 		// gamma should not be Running while alpha/beta haven't completed.
 		// (this is a Consistently check over a short window immediately after apply)
 		Consistently(func() string {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "gamma",
 				Namespace: "tide-int-test",
@@ -121,7 +121,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 func skipIfCRDsOnlyMode() {
 	// Check if the controller is ready by listing Projects.
 	// If the Project CRD is not installed (CRDs-only mode), we skip.
-	pl := &tideprojectv1alpha1.ProjectList{}
+	pl := &tideprojectv1alpha2.ProjectList{}
 	if err := k8sClient.List(ctx, pl); err != nil {
 		Skip("CRDs not installed or controller not ready; skipping kind test")
 	}

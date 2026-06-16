@@ -41,7 +41,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -123,7 +123,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = tideprojectv1alpha1.AddToScheme(scheme.Scheme)
+	err = tideprojectv1alpha2.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// admissionregistration/v1 is required so envtest can install
@@ -194,10 +194,10 @@ var _ = BeforeSuite(func() {
 	// (taskToWaveMapper via field-indexed list). Registered once here per
 	// PATTERNS.md "Single envtest BeforeSuite".
 	Expect(mgr.GetFieldIndexer().IndexField(context.Background(),
-		&tideprojectv1alpha1.Task{},
+		&tideprojectv1alpha2.Task{},
 		taskPlanRefIndexKey,
 		func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha1.Task) //nolint:forcetypeassert
+			task := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert
 			return []string{task.Spec.PlanRef}
 		},
 	)).To(Succeed())

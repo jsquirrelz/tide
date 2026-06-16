@@ -30,21 +30,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(tidev1alpha1.AddToScheme(s))
+	utilruntime.Must(tidev1alpha2.AddToScheme(s))
 	return s
 }
 
 // makeTask builds a Task fixture stamped with the canonical labels.
-func makeTask(name, projectName, wave, phase string, attempt int, ageMin int) *tidev1alpha1.Task {
+func makeTask(name, projectName, wave, phase string, attempt int, ageMin int) *tidev1alpha2.Task {
 	created := metav1.NewTime(time.Now().Add(-time.Duration(ageMin) * time.Minute))
-	return &tidev1alpha1.Task{
+	return &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              name,
 			Namespace:         "default",
@@ -54,19 +54,19 @@ func makeTask(name, projectName, wave, phase string, attempt int, ageMin int) *t
 				"tideproject.k8s/wave-index": wave,
 			},
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "my-plan",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/out/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{
+		Status: tidev1alpha2.TaskStatus{
 			Phase:   phase,
 			Attempt: attempt,
 		},
 	}
 }
 
-func newInspectWaveContext(t *testing.T, tasks ...*tidev1alpha1.Task) client.Client {
+func newInspectWaveContext(t *testing.T, tasks ...*tidev1alpha2.Task) client.Client {
 	t.Helper()
 	objs := make([]client.Object, 0, len(tasks))
 	for _, tk := range tasks {

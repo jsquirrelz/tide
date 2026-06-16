@@ -48,7 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
@@ -56,7 +56,7 @@ import (
 // projectAnnotationCleanup deletes a Project + clears any finalizers so
 // re-runs of the test do not collide on the same Project name.
 func projectAnnotationCleanup(name string) {
-	var p tideprojectv1alpha1.Project
+	var p tideprojectv1alpha2.Project
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(context.Background(), &p)
@@ -65,7 +65,7 @@ func projectAnnotationCleanup(name string) {
 }
 
 func milestoneAnnotationCleanup(name string) {
-	var m tideprojectv1alpha1.Milestone
+	var m tideprojectv1alpha2.Milestone
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &m); err == nil {
 		m.Finalizers = nil
 		_ = k8sClient.Update(context.Background(), &m)
@@ -97,7 +97,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 			})
 
 			It("MergeFrom patch drops the approve-milestone annotation from the apiserver state", func() {
-				ms := &tideprojectv1alpha1.Milestone{
+				ms := &tideprojectv1alpha2.Milestone{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      msName,
 						Namespace: "default",
@@ -106,12 +106,12 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 							"unrelated.example.com/keep":                "preserved-value",
 						},
 					},
-					Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: "any"},
+					Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "any"},
 				}
 				Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 
 				// Re-read so we have the apiserver-assigned resourceVersion etc.
-				var fresh tideprojectv1alpha1.Milestone
+				var fresh tideprojectv1alpha2.Milestone
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &fresh)).To(Succeed())
 
 				// Apply the same shape the reconciler uses.
@@ -121,7 +121,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 				Expect(k8sClient.Patch(ctx, &fresh, patch)).To(Succeed())
 
 				assertAnnotationRemovedFromAPIServer(func() map[string]string {
-					var got tideprojectv1alpha1.Milestone
+					var got tideprojectv1alpha2.Milestone
 					if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
 						return nil
 					}
@@ -137,7 +137,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 			})
 
 			It("MergeFrom patch drops the bypass-budget annotation from the apiserver state", func() {
-				proj := &tideprojectv1alpha1.Project{
+				proj := &tideprojectv1alpha2.Project{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      projectName,
 						Namespace: "default",
@@ -146,13 +146,13 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 							"unrelated.example.com/keep":    "preserved-value",
 						},
 					},
-					Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+					Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 						TargetRepo: "https://github.com/example/wr14.git",
 					},
 				}
 				Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 
-				var fresh tideprojectv1alpha1.Project
+				var fresh tideprojectv1alpha2.Project
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &fresh)).To(Succeed())
 
 				newAnno := budget.ConsumeBypass(&fresh)
@@ -161,7 +161,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 				Expect(k8sClient.Patch(ctx, &fresh, patch)).To(Succeed())
 
 				assertAnnotationRemovedFromAPIServer(func() map[string]string {
-					var got tideprojectv1alpha1.Project
+					var got tideprojectv1alpha2.Project
 					if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got); err != nil {
 						return nil
 					}

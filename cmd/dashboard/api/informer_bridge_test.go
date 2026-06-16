@@ -35,13 +35,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
 // TestExtractProjectKeyForProject — a Project's "owner project" is itself.
 func TestExtractProjectKeyForProject(t *testing.T) {
-	p := &tidev1alpha1.Project{
+	p := &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "alpha", Namespace: "default"},
 	}
 	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).Build()
@@ -57,9 +57,9 @@ func TestExtractProjectKeyForProject(t *testing.T) {
 // TestExtractProjectKeyForMilestone — a Milestone's owner project comes
 // from Spec.ProjectRef.
 func TestExtractProjectKeyForMilestone(t *testing.T) {
-	m := &tidev1alpha1.Milestone{
+	m := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "alpha"},
 	}
 	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).Build()
 	got, err := resolveProjectKey(context.Background(), c, m)
@@ -73,13 +73,13 @@ func TestExtractProjectKeyForMilestone(t *testing.T) {
 
 // TestExtractProjectKeyForPhase — Phase → Milestone → Project.
 func TestExtractProjectKeyForPhase(t *testing.T) {
-	m := &tidev1alpha1.Milestone{
+	m := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "alpha"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "m1"},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: "m1"},
 	}
 	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).WithObjects(m).Build()
 	got, err := resolveProjectKey(context.Background(), c, ph)
@@ -93,17 +93,17 @@ func TestExtractProjectKeyForPhase(t *testing.T) {
 
 // TestExtractProjectKeyForPlan — Plan → Phase → Milestone → Project.
 func TestExtractProjectKeyForPlan(t *testing.T) {
-	m := &tidev1alpha1.Milestone{
+	m := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "alpha"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "m1"},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: "m1"},
 	}
-	pl := &tidev1alpha1.Plan{
+	pl := &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl1", Namespace: "default"},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "p1"},
+		Spec:       tidev1alpha2.PlanSpec{PhaseRef: "p1"},
 	}
 	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).WithObjects(m, ph).Build()
 	got, err := resolveProjectKey(context.Background(), c, pl)
@@ -117,21 +117,21 @@ func TestExtractProjectKeyForPlan(t *testing.T) {
 
 // TestExtractProjectKeyForTask — Task → Plan → Phase → Milestone → Project.
 func TestExtractProjectKeyForTask(t *testing.T) {
-	m := &tidev1alpha1.Milestone{
+	m := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "alpha"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "m1"},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: "m1"},
 	}
-	pl := &tidev1alpha1.Plan{
+	pl := &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl1", Namespace: "default"},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "p1"},
+		Spec:       tidev1alpha2.PlanSpec{PhaseRef: "p1"},
 	}
-	tk := &tidev1alpha1.Task{
+	tk := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "tk1", Namespace: "default"},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "pl1",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
@@ -151,9 +151,9 @@ func TestExtractProjectKeyForTask(t *testing.T) {
 // the owning Project directly via Spec.ProjectRef (resolved in one hop, no Plan
 // walk).
 func TestExtractProjectKeyForWave(t *testing.T) {
-	wv := &tidev1alpha1.Wave{
+	wv := &tidev1alpha2.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "wv1", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "alpha", WaveIndex: 0},
+		Spec:       tidev1alpha2.WaveSpec{ProjectRef: "alpha", WaveIndex: 0},
 	}
 	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).Build()
 	got, err := resolveProjectKey(context.Background(), c, wv)
@@ -214,9 +214,9 @@ func TestInformerBridgePublishesOnAdd(t *testing.T) {
 	if handler == nil {
 		t.Fatal("no Project handler registered")
 	}
-	handler.OnAdd(&tidev1alpha1.Project{
+	handler.OnAdd(&tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "alpha", Namespace: "default"},
-		Status:     tidev1alpha1.ProjectStatus{Phase: "Running"},
+		Status:     tidev1alpha2.ProjectStatus{Phase: "Running"},
 	}, false)
 
 	select {
@@ -254,10 +254,10 @@ func TestInformerBridgePublishesMilestoneCreateWithProjectKey(t *testing.T) {
 	if handler == nil {
 		t.Fatal("no Milestone handler registered")
 	}
-	handler.OnAdd(&tidev1alpha1.Milestone{
+	handler.OnAdd(&tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
-		Status:     tidev1alpha1.MilestoneStatus{Phase: "Pending"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "alpha"},
+		Status:     tidev1alpha2.MilestoneStatus{Phase: "Pending"},
 	}, false)
 
 	select {
@@ -304,25 +304,25 @@ func TestInformerBridgePublishesOnStatusOnlyProjectUpdate(t *testing.T) {
 	//   - newObj.Status.Conditions gains a True BudgetBlocked metav1.Condition
 	//   - newObj.ResourceVersion is bumped ("1" → "2")
 	// This mirrors the shape of a controller status-only MergeFrom patch.
-	oldObj := &tidev1alpha1.Project{
+	oldObj := &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "alpha",
 			Namespace:       "default",
 			ResourceVersion: "1",
 		},
-		Status: tidev1alpha1.ProjectStatus{Phase: "Running"},
+		Status: tidev1alpha2.ProjectStatus{Phase: "Running"},
 	}
-	newObj := &tidev1alpha1.Project{
+	newObj := &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            "alpha",
 			Namespace:       "default",
 			ResourceVersion: "2",
 		},
-		Status: tidev1alpha1.ProjectStatus{
+		Status: tidev1alpha2.ProjectStatus{
 			Phase: "Running",
 			Conditions: []metav1.Condition{
 				{
-					Type:               tidev1alpha1.ConditionBudgetBlocked,
+					Type:               tidev1alpha2.ConditionBudgetBlocked,
 					Status:             metav1.ConditionTrue,
 					Reason:             "BudgetCapReached",
 					Message:            "cap reached",
@@ -358,20 +358,20 @@ func TestInformerBridgePublishesOnStatusOnlyProjectUpdate(t *testing.T) {
 func TestInformerBridgeTaskUpdatePublishesBothTaskAndWavesSnapshot(t *testing.T) {
 	// Seed the owner chain needed by resolveProjectKey for a Task:
 	// Task.Spec.PlanRef → Plan.Spec.PhaseRef → Phase.Spec.MilestoneRef → Milestone.Spec.ProjectRef
-	ms := &tidev1alpha1.Milestone{
+	ms := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "ms1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "proj1"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "proj1"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: "ph1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "ms1"},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: "ms1"},
 	}
-	pl := &tidev1alpha1.Plan{
+	pl := &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-x", Namespace: "default"},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "ph1"},
+		Spec:       tidev1alpha2.PlanSpec{PhaseRef: "ph1"},
 	}
 	// The Task itself — with wave labels so computeRunningWaves finds it.
-	tk := &tidev1alpha1.Task{
+	tk := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-run-1",
 			Namespace: "default",
@@ -380,12 +380,12 @@ func TestInformerBridgeTaskUpdatePublishesBothTaskAndWavesSnapshot(t *testing.T)
 				labelWaveIndex: "0",
 			},
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "plan-x",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: "Running"},
+		Status: tidev1alpha2.TaskStatus{Phase: "Running"},
 	}
 
 	scheme := testInformerScheme(t)
@@ -463,7 +463,7 @@ func mapKeys[V any](m map[string]V) []string {
 func testInformerScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(s); err != nil {
+	if err := tidev1alpha2.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme(v1alpha1): %v", err)
 	}
 	if err := corev1.AddToScheme(s); err != nil {

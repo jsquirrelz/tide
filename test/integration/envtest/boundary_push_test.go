@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -113,21 +113,21 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	}
 
-	makeProjectBP := func(name string) *tideprojectv1alpha1.Project {
-		proj := &tideprojectv1alpha1.Project{
+	makeProjectBP := func(name string) *tideprojectv1alpha2.Project {
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/tide.git",
-				Git: &tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/tide.git",
 					CredsSecretRef: "test-creds",
 				},
-				Gates: tideprojectv1alpha1.Gates{}, // all auto
+				Gates: tideprojectv1alpha2.Gates{}, // all auto
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitITCacheSync(name, &tideprojectv1alpha1.Project{})
-		var got tideprojectv1alpha1.Project
+		waitITCacheSync(name, &tideprojectv1alpha2.Project{})
+		var got tideprojectv1alpha2.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		statusPatch := client.MergeFrom(got.DeepCopy())
 		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
@@ -143,7 +143,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			_ = k8sClient.Delete(ctx, &j)
 		}
 		if planName != "" {
-			pl := &tideprojectv1alpha1.Plan{}
+			pl := &tideprojectv1alpha2.Plan{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, pl); err == nil {
 				pl.Finalizers = nil
 				_ = k8sClient.Update(ctx, pl)
@@ -151,7 +151,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			}
 		}
 		if phName != "" {
-			ph := &tideprojectv1alpha1.Phase{}
+			ph := &tideprojectv1alpha2.Phase{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, ph); err == nil {
 				ph.Finalizers = nil
 				_ = k8sClient.Update(ctx, ph)
@@ -159,14 +159,14 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			}
 		}
 		if msName != "" {
-			ms := &tideprojectv1alpha1.Milestone{}
+			ms := &tideprojectv1alpha2.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
 				ms.Finalizers = nil
 				_ = k8sClient.Update(ctx, ms)
 				_ = k8sClient.Delete(ctx, ms)
 			}
 		}
-		proj := &tideprojectv1alpha1.Project{}
+		proj := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 			proj.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj)
@@ -199,19 +199,19 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 		It("phase boundary dispatches `tide: phase <name> authored`", func() {
 			proj := makeProjectBP(projectName)
 
-			ms := &tideprojectv1alpha1.Milestone{
+			ms := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
+			waitITCacheSync(msName, &tideprojectv1alpha2.Milestone{})
 
-			ph := &tideprojectv1alpha1.Phase{
+			ph := &tideprojectv1alpha2.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-			waitITCacheSync(phaseName, &tideprojectv1alpha1.Phase{})
+			waitITCacheSync(phaseName, &tideprojectv1alpha2.Phase{})
 
 			envReader := newMapEnvReader()
 			r := &controller.PhaseReconciler{
@@ -225,7 +225,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			drive(r.Reconcile, phaseName, 5)
-			var got tideprojectv1alpha1.Phase
+			var got tideprojectv1alpha2.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
 
 			// Phase 04.1: create the Succeeded child Plan BEFORE marking the
@@ -235,7 +235,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			// Phase=Succeeded — which short-circuits subsequent reconciles and
 			// the push Job never fires (CR-03 boundary gate).
 			truePtr := true
-			childPlan := &tideprojectv1alpha1.Plan{
+			childPlan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      phaseName + "-child",
 					Namespace: "default",
@@ -248,17 +248,17 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 						BlockOwnerDeletion: &truePtr,
 					}},
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
+				Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: phaseName},
 			}
 			Expect(k8sClient.Create(ctx, childPlan)).To(Succeed())
-			waitITCacheSync(childPlan.Name, &tideprojectv1alpha1.Plan{})
-			var freshPlan tideprojectv1alpha1.Plan
+			waitITCacheSync(childPlan.Name, &tideprojectv1alpha2.Plan{})
+			var freshPlan tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: childPlan.Name, Namespace: "default"}, &freshPlan)).To(Succeed())
 			planPatch := client.MergeFrom(freshPlan.DeepCopy())
 			freshPlan.Status.Phase = "Succeeded"
 			Expect(k8sClient.Status().Patch(ctx, &freshPlan, planPatch)).To(Succeed())
 			Eventually(func() string {
-				var g tideprojectv1alpha1.Plan
+				var g tideprojectv1alpha2.Plan
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: childPlan.Name, Namespace: "default"}, &g); err != nil {
 					return ""
 				}
@@ -287,26 +287,26 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 		It("plan boundary dispatches `tide: plan <name> authored + executed`", func() {
 			proj := makeProjectBP(projectName)
 
-			ms := &tideprojectv1alpha1.Milestone{
+			ms := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitITCacheSync(msName, &tideprojectv1alpha1.Milestone{})
+			waitITCacheSync(msName, &tideprojectv1alpha2.Milestone{})
 
-			ph := &tideprojectv1alpha1.Phase{
+			ph := &tideprojectv1alpha2.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-			waitITCacheSync(phaseName, &tideprojectv1alpha1.Phase{})
+			waitITCacheSync(phaseName, &tideprojectv1alpha2.Phase{})
 
-			plan := &tideprojectv1alpha1.Plan{
+			plan := &tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: phaseName},
+				Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: phaseName},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitITCacheSync(planName, &tideprojectv1alpha1.Plan{})
+			waitITCacheSync(planName, &tideprojectv1alpha2.Plan{})
 
 			envReader := newMapEnvReader()
 			r := &controller.PlanReconciler{
@@ -320,7 +320,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			drive(r.Reconcile, planName, 5)
-			var got tideprojectv1alpha1.Plan
+			var got tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
 			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-plan-%s-1", got.UID), "default")).To(Succeed())

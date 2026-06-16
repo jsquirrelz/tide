@@ -16,39 +16,39 @@ package gates
 import (
 	"testing"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // Test 1-2 + 3-4-5: EvaluatePolicy covers default + explicit + unknown level.
 func TestEvaluatePolicy(t *testing.T) {
 	cases := []struct {
 		name  string
-		gates tideprojectv1alpha1.Gates
+		gates tideprojectv1alpha2.Gates
 		level string
-		want  tideprojectv1alpha1.GatePolicy
+		want  tideprojectv1alpha2.GatePolicy
 	}{
 		// Test 1: milestone default = approve.
-		{"empty/milestone -> approve", tideprojectv1alpha1.Gates{}, "milestone", PolicyApprove},
+		{"empty/milestone -> approve", tideprojectv1alpha2.Gates{}, "milestone", PolicyApprove},
 		// Test 2: phase/plan/task defaults = auto.
-		{"empty/phase -> auto", tideprojectv1alpha1.Gates{}, "phase", PolicyAuto},
-		{"empty/plan -> auto", tideprojectv1alpha1.Gates{}, "plan", PolicyAuto},
-		{"empty/task -> auto", tideprojectv1alpha1.Gates{}, "task", PolicyAuto},
+		{"empty/phase -> auto", tideprojectv1alpha2.Gates{}, "phase", PolicyAuto},
+		{"empty/plan -> auto", tideprojectv1alpha2.Gates{}, "plan", PolicyAuto},
+		{"empty/task -> auto", tideprojectv1alpha2.Gates{}, "task", PolicyAuto},
 		// Test 3: explicit milestone override wins.
-		{"explicit/milestone=pause", tideprojectv1alpha1.Gates{Milestone: PolicyPause}, "milestone", PolicyPause},
-		{"explicit/milestone=auto", tideprojectv1alpha1.Gates{Milestone: PolicyAuto}, "milestone", PolicyAuto},
+		{"explicit/milestone=pause", tideprojectv1alpha2.Gates{Milestone: PolicyPause}, "milestone", PolicyPause},
+		{"explicit/milestone=auto", tideprojectv1alpha2.Gates{Milestone: PolicyAuto}, "milestone", PolicyAuto},
 		// Test 4: explicit phase override wins.
-		{"explicit/phase=approve", tideprojectv1alpha1.Gates{Phase: PolicyApprove}, "phase", PolicyApprove},
-		{"explicit/phase=pause", tideprojectv1alpha1.Gates{Phase: PolicyPause}, "phase", PolicyPause},
+		{"explicit/phase=approve", tideprojectv1alpha2.Gates{Phase: PolicyApprove}, "phase", PolicyApprove},
+		{"explicit/phase=pause", tideprojectv1alpha2.Gates{Phase: PolicyPause}, "phase", PolicyPause},
 		// Explicit overrides at all four levels.
-		{"explicit/plan=approve", tideprojectv1alpha1.Gates{Plan: PolicyApprove}, "plan", PolicyApprove},
-		{"explicit/plan=pause", tideprojectv1alpha1.Gates{Plan: PolicyPause}, "plan", PolicyPause},
-		{"explicit/task=approve", tideprojectv1alpha1.Gates{Task: PolicyApprove}, "task", PolicyApprove},
-		{"explicit/task=pause", tideprojectv1alpha1.Gates{Task: PolicyPause}, "task", PolicyPause},
+		{"explicit/plan=approve", tideprojectv1alpha2.Gates{Plan: PolicyApprove}, "plan", PolicyApprove},
+		{"explicit/plan=pause", tideprojectv1alpha2.Gates{Plan: PolicyPause}, "plan", PolicyPause},
+		{"explicit/task=approve", tideprojectv1alpha2.Gates{Task: PolicyApprove}, "task", PolicyApprove},
+		{"explicit/task=pause", tideprojectv1alpha2.Gates{Task: PolicyPause}, "task", PolicyPause},
 		// Test 5: unknown level falls back to PolicyAuto (safe default; never
 		// happens in production but must not panic).
-		{"unknown level -> auto", tideprojectv1alpha1.Gates{}, "bogus", PolicyAuto},
+		{"unknown level -> auto", tideprojectv1alpha2.Gates{}, "bogus", PolicyAuto},
 		{"unknown level even with all gates set -> auto",
-			tideprojectv1alpha1.Gates{Milestone: PolicyPause, Phase: PolicyPause, Plan: PolicyPause, Task: PolicyPause},
+			tideprojectv1alpha2.Gates{Milestone: PolicyPause, Phase: PolicyPause, Plan: PolicyPause, Task: PolicyPause},
 			"wave", PolicyAuto},
 	}
 	for _, tc := range cases {
@@ -84,7 +84,7 @@ func TestDefaultGatesAndRoundTrip(t *testing.T) {
 	// Round-trip: EvaluatePolicy(DefaultGates(), <level>) matches the per-level defaults.
 	roundTrip := []struct {
 		level string
-		want  tideprojectv1alpha1.GatePolicy
+		want  tideprojectv1alpha2.GatePolicy
 	}{
 		{"milestone", PolicyApprove},
 		{"phase", PolicyAuto},
@@ -103,7 +103,7 @@ func TestDefaultGatesAndRoundTrip(t *testing.T) {
 // string values (the CEL-validated enum on the CRD field).
 func TestPolicyConstants(t *testing.T) {
 	cases := []struct {
-		got  tideprojectv1alpha1.GatePolicy
+		got  tideprojectv1alpha2.GatePolicy
 		want string
 	}{
 		{PolicyAuto, "auto"},

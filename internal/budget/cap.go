@@ -21,7 +21,7 @@ import (
 	"maps"
 	"time"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // IsCapExceeded returns true iff the Project's cumulative cost spend exceeds a
@@ -41,7 +41,7 @@ import (
 // dispatch and refuses to create a Job if it returns true. Per D-D2.
 //
 // Phase 04.1 P4.1: RollingWindowCapCents check added (previously doc-only WR-02).
-func IsCapExceeded(project *tidev1alpha1.Project) bool {
+func IsCapExceeded(project *tidev1alpha2.Project) bool {
 	if project == nil {
 		return false
 	}
@@ -68,7 +68,7 @@ func IsCapExceeded(project *tidev1alpha1.Project) bool {
 // The TTL form is recommended (RESEARCH.md Pitfall 7 — TTL is raceless).
 //
 // Returns false if project is nil or neither annotation is set / valid.
-func IsBypassed(project *tidev1alpha1.Project, now time.Time) bool {
+func IsBypassed(project *tidev1alpha2.Project, now time.Time) bool {
 	if project == nil {
 		return false
 	}
@@ -95,7 +95,7 @@ func IsBypassed(project *tidev1alpha1.Project, now time.Time) bool {
 //
 // The caller is responsible for Patching the Project with the returned annotations
 // map. Returns nil if project is nil.
-func ConsumeBypass(project *tidev1alpha1.Project) map[string]string {
+func ConsumeBypass(project *tidev1alpha2.Project) map[string]string {
 	if project == nil {
 		return nil
 	}

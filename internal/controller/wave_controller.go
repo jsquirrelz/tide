@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
@@ -144,7 +143,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	// is still stamped by stampTaskLabels. Use label-based listing as the interim
 	// association mechanism since PlanRef no longer exists in WaveSpec.
 	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
-	var taskList tideprojectv1alpha1.TaskList
+	var taskList tideprojectv1alpha2.TaskList
 	// Scope the roll-up to THIS Wave's project (interim WR-01 fix): wave-index is a
 	// small integer reused per-plan, so a bare wave-index match cross-contaminates
 	// Tasks from sibling plans/projects in the same namespace. Filtering by
@@ -163,7 +162,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	// Step 2: Filter by tideproject.k8s/wave-index = wave.Spec.WaveIndex label.
 	// The label was already used to filter in the List call above; this pass
 	// provides a secondary filter in case the label index is not exact-match only.
-	var members []tideprojectv1alpha1.Task
+	var members []tideprojectv1alpha2.Task
 	for _, t := range taskList.Items {
 		if t.Labels["tideproject.k8s/wave-index"] == waveIndexLabel {
 			members = append(members, t)
@@ -239,7 +238,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 // Waves whose task set includes the changed task, not all Waves in the namespace.
 // For now, enqueue all Waves in the namespace so no status update is missed.
 func (r *WaveReconciler) taskToWaveMapper(ctx context.Context, obj client.Object) []reconcile.Request {
-	task, ok := obj.(*tideprojectv1alpha1.Task)
+	task, ok := obj.(*tideprojectv1alpha2.Task)
 	if !ok {
 		return nil
 	}
@@ -280,7 +279,7 @@ func (r *WaveReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha2.Wave{}).
 		Watches(
-			&tideprojectv1alpha1.Task{},
+			&tideprojectv1alpha2.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.taskToWaveMapper),
 		).
 		Watches(

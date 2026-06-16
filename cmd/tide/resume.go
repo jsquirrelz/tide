@@ -49,7 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -68,7 +68,7 @@ import (
 // when the caller does not need feedback (e.g. tests checking annotation-only
 // behaviour).
 func resumeRun(ctx context.Context, c client.Client, ns, projectName string, retryFailed bool, out io.Writer) error {
-	var proj tidev1alpha1.Project
+	var proj tidev1alpha2.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
@@ -91,11 +91,11 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		return fmt.Errorf("re-get project for BillingHalt clear: %w", err)
 	}
-	haltCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha1.ConditionBillingHalt)
+	haltCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionBillingHalt)
 	if haltCond != nil {
 		hadBillingHalt := haltCond.Status == metav1.ConditionTrue
 		patch2 := client.MergeFrom(proj.DeepCopy())
-		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha1.ConditionBillingHalt)
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha2.ConditionBillingHalt)
 		if err := c.Status().Patch(ctx, &proj, patch2); err != nil {
 			return fmt.Errorf("patch status (clear BillingHalt): %w", err)
 		}
@@ -112,7 +112,7 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 			if ann == nil {
 				ann = make(map[string]string)
 			}
-			ann[tidev1alpha1.AnnotationBillingResumedAt] = time.Now().UTC().Format(time.RFC3339)
+			ann[tidev1alpha2.AnnotationBillingResumedAt] = time.Now().UTC().Format(time.RFC3339)
 			proj.SetAnnotations(ann)
 			if err := c.Patch(ctx, &proj, metaPatch); err != nil {
 				return fmt.Errorf("patch metadata (billing-resumed-at stamp): %w", err)
@@ -137,15 +137,15 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName string, out io.Writer) error {
 	resetCount := 0
 	resumedByUser := metav1.Condition{
-		Type:               tidev1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tidev1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tidev1alpha1.ReasonResumedByUser,
+		Reason:             tidev1alpha2.ReasonResumedByUser,
 		Message:            "Level reset by tide resume --retry-failed; reconciler will re-dispatch",
 		LastTransitionTime: metav1.Now(),
 	}
 
 	// Milestone
-	var msList tidev1alpha1.MilestoneList
+	var msList tidev1alpha2.MilestoneList
 	if err := c.List(ctx, &msList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -170,7 +170,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Phase
-	var phList tidev1alpha1.PhaseList
+	var phList tidev1alpha2.PhaseList
 	if err := c.List(ctx, &phList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -195,7 +195,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Plan
-	var plList tidev1alpha1.PlanList
+	var plList tidev1alpha2.PlanList
 	if err := c.List(ctx, &plList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -220,7 +220,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Task
-	var tkList tidev1alpha1.TaskList
+	var tkList tidev1alpha2.TaskList
 	if err := c.List(ctx, &tkList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},

@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -43,23 +43,23 @@ func fakeSchemeForWaveInteg(t *testing.T) *runtime.Scheme {
 // the owner of a Plan via the tideproject.k8s/project label. This lets
 // resolveProjectForPlan find the Project so triggerWaveIntegrationJob can
 // dispatch the integration Job.
-func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha1.Project {
+func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha2.Project {
 	t.Helper()
-	return &tideprojectv1alpha1.Project{
+	return &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("proj-uid-wave-integ"),
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/test.git",
-			Git: &tideprojectv1alpha1.GitConfig{
+			Git: &tideprojectv1alpha2.GitConfig{
 				RepoURL:        "https://github.com/example/test.git",
 				CredsSecretRef: "test-creds",
 			},
 		},
-		Status: tideprojectv1alpha1.ProjectStatus{
-			Git: tideprojectv1alpha1.GitStatus{
+		Status: tideprojectv1alpha2.ProjectStatus{
+			Git: tideprojectv1alpha2.GitStatus{
 				BranchName: "tide/run-test-1",
 			},
 		},
@@ -74,13 +74,13 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 		WithScheme(scheme).
 		WithObjects(objs...).
 		WithStatusSubresource(
-			&tideprojectv1alpha1.Plan{},
-			&tideprojectv1alpha1.Task{},
+			&tideprojectv1alpha2.Plan{},
+			&tideprojectv1alpha2.Task{},
 			&batchv1.Job{},
-			&tideprojectv1alpha1.Project{},
+			&tideprojectv1alpha2.Project{},
 		).
-		WithIndex(&tideprojectv1alpha1.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha1.Task) //nolint:forcetypeassert
+		WithIndex(&tideprojectv1alpha2.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
+			task := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert
 			return []string{task.Spec.PlanRef}
 		}).
 		Build()
@@ -101,21 +101,21 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 
 // makeWaveIntegTask creates a Task with the given planRef, UID, and phase.
 // All Tasks in a Plan are executor tasks — no Role field exists on TaskSpec.
-func makeWaveIntegTask(name, uid, planRef, phase string, dependsOn []string) *tideprojectv1alpha1.Task {
-	task := &tideprojectv1alpha1.Task{
+func makeWaveIntegTask(name, uid, planRef, phase string, dependsOn []string) *tideprojectv1alpha2.Task {
+	task := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID(uid),
 		},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             planRef,
 			DependsOn:           dependsOn,
 			PromptPath:          "envelopes/test/" + name + ".json",
 			FilesTouched:        []string{"src/" + name + ".go"},
 			DeclaredOutputPaths: []string{"artifacts/" + name + ".txt"},
 		},
-		Status: tideprojectv1alpha1.TaskStatus{
+		Status: tideprojectv1alpha2.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -126,7 +126,7 @@ func makeWaveIntegTask(name, uid, planRef, phase string, dependsOn []string) *ti
 func reconcileWaveIntegPlan(t *testing.T, r *PlanReconciler, planName string) (reconcile.Result, error) {
 	t.Helper()
 	// First re-fetch the plan so we have a fresh copy.
-	var plan tideprojectv1alpha1.Plan
+	var plan tideprojectv1alpha2.Plan
 	if err := r.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &plan); err != nil {
 		return reconcile.Result{}, fmt.Errorf("get plan: %w", err)
 	}
@@ -167,15 +167,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 
 	// Plan with two waves: wave-0 (task1, task2, no deps) and wave-1 (task3 depends on task1).
 	// Label tideproject.k8s/project allows resolveProjectForPlan fast-path.
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-1"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha1.PlanStatus{
+		Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{
 			ValidationState: "Validated",
 		},
 	}
@@ -189,7 +189,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2, task3)
 
 	// Patch Project status (WithStatusSubresource requires Status().Update for status).
-	var projGot tideprojectv1alpha1.Project
+	var projGot tideprojectv1alpha2.Project
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: projectName, Namespace: "default"}, &projGot); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	}
 
 	// IntegratedThroughWave must still be 0 (Job dispatched, not yet Succeeded).
-	var freshPlan tideprojectv1alpha1.Plan
+	var freshPlan tideprojectv1alpha2.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &freshPlan); err != nil {
 		t.Fatalf("step (a) get plan: %v", err)
 	}
@@ -304,15 +304,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	// --- Step (e): Permanently-failed integration Job ---
 	// Reset to a fresh plan with wave-0 all-Succeeded and no integration Job.
 	const plan2Name = "wave-integ-plan-e"
-	plan2 := &tideprojectv1alpha1.Plan{
+	plan2 := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plan2Name,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-2"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-2"},
-		Status: tideprojectv1alpha1.PlanStatus{
+		Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-2"},
+		Status: tideprojectv1alpha2.PlanStatus{
 			ValidationState: "Validated",
 		},
 	}
@@ -329,7 +329,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		t.Fatalf("step (e) create task5: %v", err)
 	}
 	// Patch plan2 status to Validated (WithStatusSubresource strips status from Create).
-	var pp2 tideprojectv1alpha1.Plan
+	var pp2 tideprojectv1alpha2.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &pp2); err != nil {
 		t.Fatalf("step (e) get plan2: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		t.Fatalf("step (e) patch plan2 status: %v", err)
 	}
 	// Patch task4 status to Succeeded.
-	var t4 tideprojectv1alpha1.Task
+	var t4 tideprojectv1alpha2.Task
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: "task4-e", Namespace: "default"}, &t4); err != nil {
 		t.Fatalf("step (e) get task4: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	}
 
 	// Assert: Plan.Status.Phase == "Failed".
-	var plan2Fresh tideprojectv1alpha1.Plan
+	var plan2Fresh tideprojectv1alpha2.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &plan2Fresh); err != nil {
 		t.Fatalf("step (e-iii) get plan2: %v", err)
 	}
@@ -390,15 +390,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	// Assert: ConditionFailed condition with Reason WaveIntegrationFailed.
 	foundFailedCondition := false
 	for _, cond := range plan2Fresh.Status.Conditions {
-		if cond.Type == tideprojectv1alpha1.ConditionFailed &&
-			cond.Reason == tideprojectv1alpha1.ReasonWaveIntegrationFailed {
+		if cond.Type == tideprojectv1alpha2.ConditionFailed &&
+			cond.Reason == tideprojectv1alpha2.ReasonWaveIntegrationFailed {
 			foundFailedCondition = true
 			break
 		}
 	}
 	if !foundFailedCondition {
 		t.Errorf("step (e): ConditionFailed with Reason %q not found; conditions: %v",
-			tideprojectv1alpha1.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
+			tideprojectv1alpha2.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
 	}
 	// Assert: no RequeueAfter (no livelock).
 	if result.RequeueAfter != 0 {

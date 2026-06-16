@@ -27,7 +27,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newTasksHandler returns a TasksHandler with a fake controller-runtime
@@ -36,7 +36,7 @@ import (
 func newTasksHandler(t *testing.T, cs kubernetes.Interface, objs ...runtime.Object) (*TasksHandler, http.Handler) {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme(v1alpha1): %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -57,44 +57,44 @@ func newTasksHandler(t *testing.T, cs kubernetes.Interface, objs ...runtime.Obje
 // resolution chain (and a matching Wave that places the Task on waveIndex 1).
 // Used by the happy-path test to exercise every rich-detail field.
 func newFullChain() []runtime.Object {
-	prj := &tidev1alpha1.Project{
+	prj := &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
-			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: 10000},
+			Budget:     tidev1alpha2.BudgetConfig{AbsoluteCapCents: 10000},
 		},
-		Status: tidev1alpha1.ProjectStatus{Phase: "Running"},
+		Status: tidev1alpha2.ProjectStatus{Phase: "Running"},
 	}
-	ms := &tidev1alpha1.Milestone{
+	ms := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "ms-1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "prj-1"},
-		Status:     tidev1alpha1.MilestoneStatus{Phase: "Running"},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: "prj-1"},
+		Status:     tidev1alpha2.MilestoneStatus{Phase: "Running"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: "ph-1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "ms-1"},
-		Status:     tidev1alpha1.PhaseStatus{Phase: "Running"},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: "ms-1"},
+		Status:     tidev1alpha2.PhaseStatus{Phase: "Running"},
 	}
-	pl := &tidev1alpha1.Plan{
+	pl := &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1", Namespace: "default"},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "ph-1"},
-		Status:     tidev1alpha1.PlanStatus{Phase: "Running"},
+		Spec:       tidev1alpha2.PlanSpec{PhaseRef: "ph-1"},
+		Status:     tidev1alpha2.PlanStatus{Phase: "Running"},
 	}
 	started := metav1.NewTime(time.Now().Add(-30 * time.Second))
-	caps := &tidev1alpha1.Caps{Iterations: 5}
-	tk := &tidev1alpha1.Task{
+	caps := &tidev1alpha2.Caps{Iterations: 5}
+	tk := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-007",
 			Namespace: "default",
 			UID:       types.UID("task-uid-007"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "pl-1",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 			Caps:                caps,
 		},
-		Status: tidev1alpha1.TaskStatus{
+		Status: tidev1alpha2.TaskStatus{
 			Phase:     "Running",
 			Attempt:   2,
 			StartedAt: &started,
@@ -108,15 +108,15 @@ func newFullChain() []runtime.Object {
 			},
 		},
 	}
-	w0 := &tidev1alpha1.Wave{
+	w0 := &tidev1alpha2.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w0", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 0},
-		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-pre"}},
+		Spec:       tidev1alpha2.WaveSpec{ProjectRef: "prj-1", WaveIndex: 0},
+		Status:     tidev1alpha2.WaveStatus{TaskRefs: []string{"task-pre"}},
 	}
-	w1 := &tidev1alpha1.Wave{
+	w1 := &tidev1alpha2.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w1", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 1},
-		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-007"}},
+		Spec:       tidev1alpha2.WaveSpec{ProjectRef: "prj-1", WaveIndex: 1},
+		Status:     tidev1alpha2.WaveStatus{TaskRefs: []string{"task-007"}},
 	}
 	return []runtime.Object{prj, ms, ph, pl, tk, w0, w1}
 }
@@ -221,18 +221,18 @@ func TestTasksHandlerNotFound(t *testing.T) {
 // pointing to a missing Plan → projectName="", planName="" — 200 with
 // graceful degradation (NOT 500).
 func TestTasksHandlerResolutionChainBreak(t *testing.T) {
-	tk := &tidev1alpha1.Task{
+	tk := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "orphan",
 			Namespace: "default",
 			UID:       types.UID("orphan-uid"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing-plan",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: "Pending"},
+		Status: tidev1alpha2.TaskStatus{Phase: "Pending"},
 	}
 	_, router := newTasksHandler(t, nil, tk)
 	srv := httptest.NewServer(router)
@@ -265,28 +265,28 @@ func TestTasksHandlerResolutionChainBreak(t *testing.T) {
 // TestTasksHandlerExitCode covers case 4: exitCode null vs set. Two
 // sub-cases: nil → JSON `null`; set → JSON number.
 func TestTasksHandlerExitCode(t *testing.T) {
-	tNil := &tidev1alpha1.Task{
+	tNil := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "t-nilcode", Namespace: "default", UID: types.UID("u-nilcode"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: "Running"},
+		Status: tidev1alpha2.TaskStatus{Phase: "Running"},
 	}
 	zero := 0
-	tZero := &tidev1alpha1.Task{
+	tZero := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "t-zerocode", Namespace: "default", UID: types.UID("u-zerocode"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: "Succeeded", ExitCode: &zero},
+		Status: tidev1alpha2.TaskStatus{Phase: "Succeeded", ExitCode: &zero},
 	}
 
 	_, router := newTasksHandler(t, nil, tNil, tZero)
@@ -338,16 +338,16 @@ func TestTasksHandlerElapsedText(t *testing.T) {
 	now := time.Now()
 	startedFinished := metav1.NewTime(now.Add(-90 * time.Second))
 	completed := metav1.NewTime(now.Add(-5 * time.Second))
-	tFinished := &tidev1alpha1.Task{
+	tFinished := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "t-fin", Namespace: "default", UID: types.UID("u-fin"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{
+		Status: tidev1alpha2.TaskStatus{
 			Phase:       "Succeeded",
 			StartedAt:   &startedFinished,
 			CompletedAt: &completed,
@@ -355,31 +355,31 @@ func TestTasksHandlerElapsedText(t *testing.T) {
 	}
 
 	startedRunning := metav1.NewTime(now.Add(-45 * time.Second))
-	tRunning := &tidev1alpha1.Task{
+	tRunning := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "t-run", Namespace: "default", UID: types.UID("u-run"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{
+		Status: tidev1alpha2.TaskStatus{
 			Phase:     "Running",
 			StartedAt: &startedRunning,
 		},
 	}
 
-	tNeither := &tidev1alpha1.Task{
+	tNeither := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "t-neither", Namespace: "default", UID: types.UID("u-neither"),
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "missing",
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{Phase: "Pending"},
+		Status: tidev1alpha2.TaskStatus{Phase: "Pending"},
 	}
 
 	_, router := newTasksHandler(t, nil, tFinished, tRunning, tNeither)

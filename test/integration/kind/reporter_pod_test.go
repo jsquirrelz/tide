@@ -61,7 +61,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const reporterPodNS = "reporter-pod-test"
@@ -118,7 +118,7 @@ spec:
 		// reporter Job name: "tide-reporter-<project-UID>"
 		// ------------------------------------------------------------------
 		By("Wait for Project to exist and obtain its UID")
-		var project tideprojectv1alpha1.Project
+		var project tideprojectv1alpha2.Project
 		Eventually(func() error {
 			return k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "reporter-test-project",
@@ -178,7 +178,7 @@ spec:
 		// ------------------------------------------------------------------
 		By("Wait for child Milestone to materialize (reporter Job created it)")
 		Eventually(func() error {
-			var milestones tideprojectv1alpha1.MilestoneList
+			var milestones tideprojectv1alpha2.MilestoneList
 			if err := k8sClient.List(ctx, &milestones, client.InNamespace(reporterPodNS)); err != nil {
 				return err
 			}

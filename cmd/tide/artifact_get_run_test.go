@@ -46,14 +46,14 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // makeProjectForArtifactGet builds a Project fixture with a stable UID for
 // artifact-get tests. Uses a different name from approve_test.go's makeProject
 // to avoid redeclaration in the same test package.
-func makeProjectForArtifactGet(name, ns string) *tidev1alpha1.Project {
-	return &tidev1alpha1.Project{
+func makeProjectForArtifactGet(name, ns string) *tidev1alpha2.Project {
+	return &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,

@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -100,8 +100,8 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 	name := parent.GetName()
 
 	switch p := parent.(type) {
-	case *tideprojectv1alpha1.Project:
-		var children tideprojectv1alpha1.MilestoneList
+	case *tideprojectv1alpha2.Project:
+		var children tideprojectv1alpha2.MilestoneList
 		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
 			return false, fmt.Errorf("idempotency: list milestones: %w", err)
 		}
@@ -110,8 +110,8 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 				return true, nil
 			}
 		}
-	case *tideprojectv1alpha1.Milestone:
-		var children tideprojectv1alpha1.PhaseList
+	case *tideprojectv1alpha2.Milestone:
+		var children tideprojectv1alpha2.PhaseList
 		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
 			return false, fmt.Errorf("idempotency: list phases: %w", err)
 		}
@@ -120,8 +120,8 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 				return true, nil
 			}
 		}
-	case *tideprojectv1alpha1.Phase:
-		var children tideprojectv1alpha1.PlanList
+	case *tideprojectv1alpha2.Phase:
+		var children tideprojectv1alpha2.PlanList
 		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
 			return false, fmt.Errorf("idempotency: list plans: %w", err)
 		}
@@ -130,8 +130,8 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 				return true, nil
 			}
 		}
-	case *tideprojectv1alpha1.Plan:
-		var children tideprojectv1alpha1.TaskList
+	case *tideprojectv1alpha2.Plan:
+		var children tideprojectv1alpha2.TaskList
 		if err := c.List(ctx, &children, client.InNamespace(ns)); err != nil {
 			return false, fmt.Errorf("idempotency: list tasks: %w", err)
 		}
@@ -165,13 +165,13 @@ func ChildrenAlreadyMaterialized(ctx context.Context, c client.Client, parent me
 // way ownerRef is already authoritative rather than LLM-trusted.
 func stampParentRef(obj client.Object, parentName string) {
 	switch o := obj.(type) {
-	case *tideprojectv1alpha1.Milestone:
+	case *tideprojectv1alpha2.Milestone:
 		o.Spec.ProjectRef = parentName
-	case *tideprojectv1alpha1.Phase:
+	case *tideprojectv1alpha2.Phase:
 		o.Spec.MilestoneRef = parentName
-	case *tideprojectv1alpha1.Plan:
+	case *tideprojectv1alpha2.Plan:
 		o.Spec.PhaseRef = parentName
-	case *tideprojectv1alpha1.Task:
+	case *tideprojectv1alpha2.Task:
 		o.Spec.PlanRef = parentName
 		// Wave has no parent-ref spec field (it is derived, not declared) —
 		// nothing to stamp.
@@ -181,7 +181,7 @@ func stampParentRef(obj client.Object, parentName string) {
 // MaterializeChildCRDs server-side-creates child CRDs from
 // EnvelopeOut.ChildCRDs.
 //
-// Each child is allocated to its concrete *tideprojectv1alpha1 pointer
+// Each child is allocated to its concrete *tideprojectv1alpha2 pointer
 // based on Kind (only the allowlist-approved Kinds advance to creation —
 // T-308 mitigation). The child's Spec is decoded from child.Spec.Raw via
 // json.Unmarshal directly into the typed Spec field. ObjectMeta.Name is
@@ -216,7 +216,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 		var obj client.Object
 		switch child.Kind {
 		case "Milestone":
-			ms := &tideprojectv1alpha1.Milestone{}
+			ms := &tideprojectv1alpha2.Milestone{}
 			if err := json.Unmarshal(child.Spec.Raw, &ms.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Milestone %q spec: %w", child.Name, err)
 			}
@@ -225,7 +225,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			ms.Spec.SharedContext = child.SharedContext
 			obj = ms
 		case "Phase":
-			ph := &tideprojectv1alpha1.Phase{}
+			ph := &tideprojectv1alpha2.Phase{}
 			if err := json.Unmarshal(child.Spec.Raw, &ph.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Phase %q spec: %w", child.Name, err)
 			}
@@ -233,7 +233,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			ph.Spec.SharedContext = child.SharedContext
 			obj = ph
 		case "Plan":
-			pl := &tideprojectv1alpha1.Plan{}
+			pl := &tideprojectv1alpha2.Plan{}
 			if err := json.Unmarshal(child.Spec.Raw, &pl.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Plan %q spec: %w", child.Name, err)
 			}
@@ -241,7 +241,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			pl.Spec.SharedContext = child.SharedContext
 			obj = pl
 		case "Task":
-			tk := &tideprojectv1alpha1.Task{}
+			tk := &tideprojectv1alpha2.Task{}
 			if err := json.Unmarshal(child.Spec.Raw, &tk.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Task %q spec: %w", child.Name, err)
 			}
@@ -260,7 +260,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 			tk.Spec.SharedContext = child.SharedContext
 			obj = tk
 		case "Wave":
-			wv := &tideprojectv1alpha1.Wave{}
+			wv := &tideprojectv1alpha2.Wave{}
 			if err := json.Unmarshal(child.Spec.Raw, &wv.Spec); err != nil {
 				return fmt.Errorf("MaterializeChildCRDs: unmarshal Wave %q spec: %w", child.Name, err)
 			}
@@ -285,7 +285,7 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 		// tideproject.k8s/project pointing at itself, so resolve the project
 		// name from parent.GetName() when the parent IS a Project.
 		projectName := parent.GetLabels()[owner.LabelProject]
-		if _, isProject := parent.(*tideprojectv1alpha1.Project); isProject {
+		if _, isProject := parent.(*tideprojectv1alpha2.Project); isProject {
 			projectName = parent.GetName()
 		}
 		owner.StampProjectLabel(obj, projectName)

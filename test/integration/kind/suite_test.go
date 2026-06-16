@@ -52,7 +52,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const (
@@ -128,7 +128,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithTimeout(context.Background(), kindTestTimeout)
 
 	By("Ensuring TIDE CRD types are registered in the scheme")
-	Expect(tideprojectv1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(tideprojectv1alpha2.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	By("Checking if kind is available")
 	if _, err := exec.LookPath("kind"); err != nil {

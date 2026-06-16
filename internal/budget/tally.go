@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -53,11 +53,11 @@ import (
 // immediately after roll-up.
 //
 // Returns nil on success. Wraps Get/Status().Patch errors with context.
-func RollUpUsage(ctx context.Context, c client.Client, project *tidev1alpha1.Project, usage pkgdispatch.Usage) error {
+func RollUpUsage(ctx context.Context, c client.Client, project *tidev1alpha2.Project, usage pkgdispatch.Usage) error {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Re-fetch so the increment applies to the latest tally, not a stale
 		// read captured before a concurrent completion's patch landed.
-		latest := &tidev1alpha1.Project{}
+		latest := &tidev1alpha2.Project{}
 		if err := c.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ func RollUpUsage(ctx context.Context, c client.Client, project *tidev1alpha1.Pro
 // on Status patch failure.
 //
 // Phase 04.1 P4.1.
-func MaybeResetWindow(ctx context.Context, c client.Client, project *tidev1alpha1.Project, now time.Time) (bool, error) {
+func MaybeResetWindow(ctx context.Context, c client.Client, project *tidev1alpha2.Project, now time.Time) (bool, error) {
 	if project == nil {
 		return false, nil
 	}

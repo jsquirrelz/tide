@@ -23,18 +23,18 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
-func makeRejectedProject(name, reason string) *tidev1alpha1.Project {
-	return &tidev1alpha1.Project{
+func makeRejectedProject(name, reason string) *tidev1alpha2.Project {
+	return &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   "default",
 			Annotations: map[string]string{"tideproject.k8s/reject": reason},
 		},
-		Spec:   tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
-		Status: tidev1alpha1.ProjectStatus{Phase: "Running"},
+		Spec:   tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Status: tidev1alpha2.ProjectStatus{Phase: "Running"},
 	}
 }
 
@@ -45,7 +45,7 @@ func TestResumeClearsRejectAnnotation(t *testing.T) {
 	if err := resumeRun(context.Background(), c, "default", "my-project", false, nil); err != nil {
 		t.Fatalf("resumeRun: %v", err)
 	}
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestResumePreservesOtherAnnotations(t *testing.T) {
 	if err := resumeRun(context.Background(), c, "default", "my-project", false, nil); err != nil {
 		t.Fatalf("resumeRun: %v", err)
 	}
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got)
 	if got.Annotations["other/key"] != "preserve-me" {
 		t.Errorf("expected other annotations preserved; got %v", got.Annotations)
@@ -90,28 +90,28 @@ func TestResumeNoOpWhenNoReject(t *testing.T) {
 
 // makeFailedPlan builds a Plan fixture with Status.Phase="Failed" and the
 // project label so the retry-failed walker can find it.
-func makeFailedPlan(name, projectName string) *tidev1alpha1.Plan {
-	return &tidev1alpha1.Plan{
+func makeFailedPlan(name, projectName string) *tidev1alpha2.Plan {
+	return &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tidev1alpha1.PlanSpec{PhaseRef: "some-phase"},
-		Status: tidev1alpha1.PlanStatus{Phase: "Failed"},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "some-phase"},
+		Status: tidev1alpha2.PlanStatus{Phase: "Failed"},
 	}
 }
 
 // makeRunningPlan builds a Plan fixture with Status.Phase="Running".
-func makeRunningPlan(name, projectName string) *tidev1alpha1.Plan {
-	return &tidev1alpha1.Plan{
+func makeRunningPlan(name, projectName string) *tidev1alpha2.Plan {
+	return &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tidev1alpha1.PlanSpec{PhaseRef: "some-phase"},
-		Status: tidev1alpha1.PlanStatus{Phase: "Running"},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "some-phase"},
+		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
 	}
 }
 
@@ -124,7 +124,7 @@ func TestResumeRunRetryFailed(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p, pl).
-		WithStatusSubresource(&tidev1alpha1.Milestone{}, &tidev1alpha1.Phase{}, &tidev1alpha1.Plan{}, &tidev1alpha1.Task{}).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
 		Build()
 
 	var buf bytes.Buffer
@@ -132,18 +132,18 @@ func TestResumeRunRetryFailed(t *testing.T) {
 		t.Fatalf("resumeRun(retryFailed=true): %v", err)
 	}
 
-	var got tidev1alpha1.Plan
+	var got tidev1alpha2.Plan
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-one"}, &got); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
 	if got.Status.Phase == "Failed" {
 		t.Errorf("expected Status.Phase cleared; still 'Failed'")
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha1.ConditionWaveOrLevelPaused)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
 	if cond == nil {
 		t.Fatal("expected WaveOrLevelPaused condition stamped on reset Plan; got nil")
 	}
-	if cond.Reason != tidev1alpha1.ReasonResumedByUser {
+	if cond.Reason != tidev1alpha2.ReasonResumedByUser {
 		t.Errorf("expected Reason=ResumedByUser; got %q", cond.Reason)
 	}
 	if cond.Status != metav1.ConditionFalse {
@@ -165,7 +165,7 @@ func TestResumeRetryFailedSkipsRunning(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p, pl).
-		WithStatusSubresource(&tidev1alpha1.Milestone{}, &tidev1alpha1.Phase{}, &tidev1alpha1.Plan{}, &tidev1alpha1.Task{}).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
 		Build()
 
 	var buf bytes.Buffer
@@ -173,7 +173,7 @@ func TestResumeRetryFailedSkipsRunning(t *testing.T) {
 		t.Fatalf("resumeRun(retryFailed=true): %v", err)
 	}
 
-	var got tidev1alpha1.Plan
+	var got tidev1alpha2.Plan
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-running"}, &got); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
@@ -196,14 +196,14 @@ func TestResumeWithoutFlagLeavesFailed(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p, pl).
-		WithStatusSubresource(&tidev1alpha1.Milestone{}, &tidev1alpha1.Phase{}, &tidev1alpha1.Plan{}, &tidev1alpha1.Task{}).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
 		Build()
 
 	if err := resumeRun(context.Background(), c, "default", "my-project", false, nil); err != nil {
 		t.Fatalf("resumeRun(retryFailed=false): %v", err)
 	}
 
-	var got tidev1alpha1.Plan
+	var got tidev1alpha2.Plan
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-fail"}, &got); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
@@ -218,39 +218,39 @@ func TestResumeWithoutFlagLeavesFailed(t *testing.T) {
 func TestResumeRetryFailedAllFourKinds(t *testing.T) {
 	p := makeProject("my-project")
 
-	ms := &tidev1alpha1.Milestone{
+	ms := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-failed",
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
 		},
-		Spec:   tidev1alpha1.MilestoneSpec{ProjectRef: "my-project"},
-		Status: tidev1alpha1.MilestoneStatus{Phase: "Failed"},
+		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha2.MilestoneStatus{Phase: "Failed"},
 	}
-	ph := &tidev1alpha1.Phase{
+	ph := &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ph-failed",
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
 		},
-		Spec:   tidev1alpha1.PhaseSpec{MilestoneRef: "ms-failed"},
-		Status: tidev1alpha1.PhaseStatus{Phase: "Failed"},
+		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-failed"},
+		Status: tidev1alpha2.PhaseStatus{Phase: "Failed"},
 	}
 	pl := makeFailedPlan("pl-failed", "my-project")
-	tk := &tidev1alpha1.Task{
+	tk := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tk-failed",
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
 		},
-		Spec:   tidev1alpha1.TaskSpec{PlanRef: "pl-failed"},
-		Status: tidev1alpha1.TaskStatus{Phase: "Failed"},
+		Spec:   tidev1alpha2.TaskSpec{PlanRef: "pl-failed"},
+		Status: tidev1alpha2.TaskStatus{Phase: "Failed"},
 	}
 
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p, ms, ph, pl, tk).
-		WithStatusSubresource(&tidev1alpha1.Milestone{}, &tidev1alpha1.Phase{}, &tidev1alpha1.Plan{}, &tidev1alpha1.Task{}).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
 		Build()
 
 	var buf bytes.Buffer
@@ -258,25 +258,25 @@ func TestResumeRetryFailedAllFourKinds(t *testing.T) {
 		t.Fatalf("resumeRun(retryFailed=true): %v", err)
 	}
 
-	var gotMS tidev1alpha1.Milestone
+	var gotMS tidev1alpha2.Milestone
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-failed"}, &gotMS)
 	if gotMS.Status.Phase == "Failed" {
 		t.Errorf("Milestone still Failed after retry-failed")
 	}
 
-	var gotPH tidev1alpha1.Phase
+	var gotPH tidev1alpha2.Phase
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ph-failed"}, &gotPH)
 	if gotPH.Status.Phase == "Failed" {
 		t.Errorf("Phase still Failed after retry-failed")
 	}
 
-	var gotPL tidev1alpha1.Plan
+	var gotPL tidev1alpha2.Plan
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-failed"}, &gotPL)
 	if gotPL.Status.Phase == "Failed" {
 		t.Errorf("Plan still Failed after retry-failed")
 	}
 
-	var gotTK tidev1alpha1.Task
+	var gotTK tidev1alpha2.Task
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "tk-failed"}, &gotTK)
 	if gotTK.Status.Phase == "Failed" {
 		t.Errorf("Task still Failed after retry-failed")
@@ -288,16 +288,16 @@ func TestResumeRetryFailedAllFourKinds(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // makeBillingHaltedProject builds a Project fixture with BillingHalt=True.
-func makeBillingHaltedProject(name string) *tidev1alpha1.Project {
-	p := &tidev1alpha1.Project{
+func makeBillingHaltedProject(name string) *tidev1alpha2.Project {
+	p := &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec:       tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
-		Status:     tidev1alpha1.ProjectStatus{Phase: "Running"},
+		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Status:     tidev1alpha2.ProjectStatus{Phase: "Running"},
 	}
 	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha1.ConditionBillingHalt,
+		Type:               tidev1alpha2.ConditionBillingHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha1.ReasonCreditBalanceTooLow,
+		Reason:             tidev1alpha2.ReasonCreditBalanceTooLow,
 		LastTransitionTime: metav1.Now(),
 	})
 	return p
@@ -316,12 +316,12 @@ func TestResumeClearsBillingHalt(t *testing.T) {
 		t.Fatalf("resumeRun: %v", err)
 	}
 
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "halt-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
 	for _, cond := range got.Status.Conditions {
-		if cond.Type == tidev1alpha1.ConditionBillingHalt && cond.Status == metav1.ConditionTrue {
+		if cond.Type == tidev1alpha2.ConditionBillingHalt && cond.Status == metav1.ConditionTrue {
 			t.Errorf("BillingHalt=True condition should be cleared after resume; still present: %+v", cond)
 		}
 	}
@@ -348,13 +348,13 @@ func TestResumeStampsBillingResumedAt(t *testing.T) {
 	}
 	after := time.Now().UTC().Add(2 * time.Second)
 
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "halt-annotate-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	v, ok := got.Annotations[tidev1alpha1.AnnotationBillingResumedAt]
+	v, ok := got.Annotations[tidev1alpha2.AnnotationBillingResumedAt]
 	if !ok {
-		t.Fatalf("expected %q annotation stamped after resume; annotations=%v", tidev1alpha1.AnnotationBillingResumedAt, got.Annotations)
+		t.Fatalf("expected %q annotation stamped after resume; annotations=%v", tidev1alpha2.AnnotationBillingResumedAt, got.Annotations)
 	}
 	ts, err := time.Parse(time.RFC3339, v)
 	if err != nil {
@@ -382,11 +382,11 @@ func TestResumeWithoutBillingHalt_DoesNotStampAnnotation(t *testing.T) {
 		t.Fatalf("resumeRun: %v", err)
 	}
 
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "no-halt-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	if _, ok := got.Annotations[tidev1alpha1.AnnotationBillingResumedAt]; ok {
+	if _, ok := got.Annotations[tidev1alpha2.AnnotationBillingResumedAt]; ok {
 		t.Errorf("expected NO AnnotationBillingResumedAt on project without BillingHalt; annotations=%v", got.Annotations)
 	}
 }

@@ -17,7 +17,7 @@ limitations under the License.
 package podjob
 
 import (
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // JobKind discriminates planner from executor Jobs for caps-default purposes.
@@ -96,7 +96,7 @@ const plannerCapsFloorSeconds int32 = 1800
 // deadlines match within DefaultWallClockGraceSeconds for EACH Kind, which the
 // structural routing makes a tautology — the test fails only if a future
 // maintainer routes one consumer around this helper.
-func DefaultCaps(caps *tidev1alpha1.Caps, kind JobKind) *tidev1alpha1.Caps {
+func DefaultCaps(caps *tidev1alpha2.Caps, kind JobKind) *tidev1alpha2.Caps {
 	if caps != nil && caps.WallClockSeconds > 0 {
 		return caps
 	}
@@ -104,7 +104,7 @@ func DefaultCaps(caps *tidev1alpha1.Caps, kind JobKind) *tidev1alpha1.Caps {
 	if kind == JobKindPlanner {
 		floor = plannerCapsFloorSeconds
 	}
-	out := tidev1alpha1.Caps{
+	out := tidev1alpha2.Caps{
 		WallClockSeconds: floor,
 	}
 	if caps != nil {

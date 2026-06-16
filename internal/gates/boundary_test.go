@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // fakeClientForGatesTest returns a fake controller-runtime client with TIDE
@@ -32,32 +32,32 @@ import (
 func fakeClientForGatesTest(t *testing.T) (client.Client, *runtime.Scheme) {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(s); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	return fake.NewClientBuilder().WithScheme(s).Build(), s
 }
 
-func mkMilestoneForBoundary(name, namespace string) *tideprojectv1alpha1.Milestone {
-	return &tideprojectv1alpha1.Milestone{
+func mkMilestoneForBoundary(name, namespace string) *tideprojectv1alpha2.Milestone {
+	return &tideprojectv1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID(name + "-uid"),
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: "proj1"},
+		Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "proj1"},
 	}
 }
 
-func mkPhaseChild(t *testing.T, parent *tideprojectv1alpha1.Milestone, name string, statusPhase string, scheme *runtime.Scheme) *tideprojectv1alpha1.Phase {
+func mkPhaseChild(t *testing.T, parent *tideprojectv1alpha2.Milestone, name string, statusPhase string, scheme *runtime.Scheme) *tideprojectv1alpha2.Phase {
 	t.Helper()
-	ph := &tideprojectv1alpha1.Phase{
+	ph := &tideprojectv1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: parent.Namespace,
 		},
-		Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: parent.Name},
-		Status: tideprojectv1alpha1.PhaseStatus{
+		Spec: tideprojectv1alpha2.PhaseSpec{MilestoneRef: parent.Name},
+		Status: tideprojectv1alpha2.PhaseStatus{
 			Phase: statusPhase,
 		},
 	}
@@ -249,16 +249,16 @@ func TestBoundaryDetectedSupportedKinds(t *testing.T) {
 			var child client.Object
 			switch ck {
 			case "Milestone":
-				p := &tideprojectv1alpha1.Project{
+				p := &tideprojectv1alpha2.Project{
 					ObjectMeta: metav1.ObjectMeta{UID: "p-uid", Name: "p1", Namespace: "default"},
 				}
 				if err := c.Create(context.Background(), p); err != nil {
 					t.Fatalf("create project: %v", err)
 				}
-				m := &tideprojectv1alpha1.Milestone{
+				m := &tideprojectv1alpha2.Milestone{
 					ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-					Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: "p1"},
-					Status:     tideprojectv1alpha1.MilestoneStatus{Phase: "Succeeded"},
+					Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: "p1"},
+					Status:     tideprojectv1alpha2.MilestoneStatus{Phase: "Succeeded"},
 				}
 				if err := controllerutil.SetControllerReference(p, m, scheme); err != nil {
 					t.Fatalf("setcontrollerref: %v", err)
@@ -278,17 +278,17 @@ func TestBoundaryDetectedSupportedKinds(t *testing.T) {
 				}
 				parent, child = m, ph
 			case "Plan":
-				ph := &tideprojectv1alpha1.Phase{
+				ph := &tideprojectv1alpha2.Phase{
 					ObjectMeta: metav1.ObjectMeta{UID: "ph-uid", Name: "ph1", Namespace: "default"},
-					Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: "m1"},
+					Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: "m1"},
 				}
 				if err := c.Create(context.Background(), ph); err != nil {
 					t.Fatalf("create phase: %v", err)
 				}
-				pl := &tideprojectv1alpha1.Plan{
+				pl := &tideprojectv1alpha2.Plan{
 					ObjectMeta: metav1.ObjectMeta{Name: "pl1", Namespace: "default"},
-					Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: "ph1"},
-					Status:     tideprojectv1alpha1.PlanStatus{Phase: "Succeeded"},
+					Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "ph1"},
+					Status:     tideprojectv1alpha2.PlanStatus{Phase: "Succeeded"},
 				}
 				if err := controllerutil.SetControllerReference(ph, pl, scheme); err != nil {
 					t.Fatalf("setcontrollerref: %v", err)
@@ -298,21 +298,21 @@ func TestBoundaryDetectedSupportedKinds(t *testing.T) {
 				}
 				parent, child = ph, pl
 			case "Task":
-				pl := &tideprojectv1alpha1.Plan{
+				pl := &tideprojectv1alpha2.Plan{
 					ObjectMeta: metav1.ObjectMeta{UID: "pl-uid", Name: "pl1", Namespace: "default"},
-					Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: "ph1"},
+					Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "ph1"},
 				}
 				if err := c.Create(context.Background(), pl); err != nil {
 					t.Fatalf("create plan: %v", err)
 				}
-				tk := &tideprojectv1alpha1.Task{
+				tk := &tideprojectv1alpha2.Task{
 					ObjectMeta: metav1.ObjectMeta{Name: "tk1", Namespace: "default"},
-					Spec: tideprojectv1alpha1.TaskSpec{
+					Spec: tideprojectv1alpha2.TaskSpec{
 						PlanRef:             "pl1",
 						FilesTouched:        []string{"f1"},
 						DeclaredOutputPaths: []string{"out1"},
 					},
-					Status: tideprojectv1alpha1.TaskStatus{Phase: "Succeeded"},
+					Status: tideprojectv1alpha2.TaskStatus{Phase: "Succeeded"},
 				}
 				if err := controllerutil.SetControllerReference(pl, tk, scheme); err != nil {
 					t.Fatalf("setcontrollerref: %v", err)

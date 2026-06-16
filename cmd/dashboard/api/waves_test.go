@@ -28,11 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // makeTask is a minimal Task factory for wave test fixtures.
-func makeTask(name, projectName, planRef, waveIdx, phase string) *tidev1alpha1.Task {
+func makeTask(name, projectName, planRef, waveIdx, phase string) *tidev1alpha2.Task {
 	labels := map[string]string{
 		labelProject:   projectName,
 		labelWaveIndex: waveIdx,
@@ -42,18 +42,18 @@ func makeTask(name, projectName, planRef, waveIdx, phase string) *tidev1alpha1.T
 			labelProject: projectName,
 		}
 	}
-	t := &tidev1alpha1.Task{
+	t := &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    labels,
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             planRef,
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha1.TaskStatus{
+		Status: tidev1alpha2.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -64,7 +64,7 @@ func makeTask(name, projectName, planRef, waveIdx, phase string) *tidev1alpha1.T
 func newWaveTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(s); err != nil {
+	if err := tidev1alpha2.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	return s

@@ -39,7 +39,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const (
@@ -381,25 +381,25 @@ data:
 		// The stub-subagent ignores the LLM calls but the clone/push Jobs use
 		// targetRepo for the real go-git HTTP transport path (exercising SC-5).
 		projName := fmt.Sprintf("medium-http-project-%d", GinkgoRandomSeed())
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: mediumHTTPNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha2.ProjectSpec{
 				TargetRepo:        mediumHTTPTargetRepo,
 				ProviderSecretRef: "tide-secrets",
-				Budget: tideprojectv1alpha1.BudgetConfig{
+				Budget: tideprojectv1alpha2.BudgetConfig{
 					AbsoluteCapCents: 0,
 				},
-				Subagent: tideprojectv1alpha1.SubagentConfig{
+				Subagent: tideprojectv1alpha2.SubagentConfig{
 					Model: "stub",
 				},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        mediumHTTPTargetRepo,
 					CredsSecretRef: "tide-secrets",
 				},
-				Gates: tideprojectv1alpha1.Gates{
+				Gates: tideprojectv1alpha2.Gates{
 					Milestone:         "auto",
 					Phase:             "auto",
 					Plan:              "auto",
@@ -418,7 +418,7 @@ data:
 		// Wait for Project to reach Complete within 10 minutes.
 		By("Waiting for medium Project to reach Complete over http://")
 		Eventually(func() error {
-			var current tideprojectv1alpha1.Project
+			var current tideprojectv1alpha2.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      projName,
 				Namespace: mediumHTTPNamespace,
@@ -439,7 +439,7 @@ data:
 
 // mediumLastConditionMessage returns the last condition message for a Project,
 // for diagnostic output in Eventually error messages.
-func mediumLastConditionMessage(proj tideprojectv1alpha1.Project) string {
+func mediumLastConditionMessage(proj tideprojectv1alpha2.Project) string {
 	conds := proj.Status.Conditions
 	if len(conds) == 0 {
 		return "(no conditions)"

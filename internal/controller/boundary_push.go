@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -60,7 +60,7 @@ func triggerBoundaryPush(
 	c client.Client,
 	scheme *runtime.Scheme,
 	parent client.Object,
-	project *tideprojectv1alpha1.Project,
+	project *tideprojectv1alpha2.Project,
 	level string,
 	tidePushImage string,
 	sharedPVCName string,
@@ -147,8 +147,8 @@ func triggerWaveIntegrationJob(
 	ctx context.Context,
 	c client.Client,
 	scheme *runtime.Scheme,
-	plan *tideprojectv1alpha1.Plan,
-	project *tideprojectv1alpha1.Project,
+	plan *tideprojectv1alpha2.Plan,
+	project *tideprojectv1alpha2.Project,
 	waveIndex int,
 	branches []string,
 	tidePushImage string,
@@ -197,12 +197,12 @@ func triggerWaveIntegrationJob(
 // or rejected level NEVER pushes) and BEFORE patchMilestoneSucceeded
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
-func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project) error {
+func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
 	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, "", nil)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
-func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project) error {
+func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
 	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, "", nil)
 }
 
@@ -212,7 +212,7 @@ func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent c
 // fires. It collects the branch names of all Succeeded tasks and passes
 // them as IntegrateTaskBranches so the push Job runs D-04 integration
 // before staging planner artifacts.
-func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha1.Project, taskItems []tideprojectv1alpha1.Task) error {
+func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project, taskItems []tideprojectv1alpha2.Task) error {
 	var branches []string
 	for _, t := range taskItems {
 		if t.Status.Phase == "Succeeded" {

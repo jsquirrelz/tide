@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // Debug defect #13b — boundary-push observability + bounded controller-driven
@@ -46,8 +46,8 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		}
 	}
 
-	getProject := func(name string) tideprojectv1alpha1.Project {
-		var got tideprojectv1alpha1.Project
+	getProject := func(name string) tideprojectv1alpha2.Project {
+		var got tideprojectv1alpha2.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		return got
 	}
@@ -57,23 +57,23 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 	// makeComplete creates a Project, sets it to Complete with a run branch, and
 	// (when attempts > 0) seeds the BoundaryPush retry tally so the
 	// re-derived-from-status cap path is exercised.
-	makeComplete := func(name string, attempts int32) *tideprojectv1alpha1.Project {
-		proj := &tideprojectv1alpha1.Project{
+	makeComplete := func(name string, attempts int32) *tideprojectv1alpha2.Project {
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
 
 		got := getProject(name)
 		patch := client.MergeFrom(got.DeepCopy())
-		got.Status.Phase = tideprojectv1alpha1.PhaseComplete
+		got.Status.Phase = tideprojectv1alpha2.PhaseComplete
 		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
 		got.Status.BoundaryPush.Attempts = attempts
 		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
@@ -87,7 +87,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 				Name:      name,
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         tideprojectv1alpha1.GroupVersion.String(),
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
 					Kind:               "Project",
 					Name:               projectName,
 					UID:                uid,
@@ -184,7 +184,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 			p := pods.Items[i]
 			_ = k8sClient.Delete(ctx, &p)
 		}
-		var p tideprojectv1alpha1.Project
+		var p tideprojectv1alpha2.Project
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
 			p.Finalizers = nil
 			_ = k8sClient.Update(ctx, &p)
@@ -218,13 +218,13 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 
 			Eventually(func(g Gomega) {
 				got := getProject(name)
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhaseComplete))
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete))
 				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1))
 				g.Expect(got.Status.BoundaryPush.LastError).NotTo(BeEmpty())
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPushing))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
 				// A push Job exists again (recreated, not left deleted).
 				var job batchv1.Job
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
@@ -247,10 +247,10 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 
 			Eventually(func(g Gomega) {
 				got := getProject(name)
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPushed))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushed))
 				g.Expect(got.Status.BoundaryPush.LastError).To(BeEmpty(), "retry state cleared on success")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
@@ -282,12 +282,12 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 
 			Eventually(func(g Gomega) {
 				got := getProject(name)
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhaseComplete),
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete),
 					"exhausted retry must NOT regress Complete")
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPushFailed))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushFailed))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// No push Job was created at cap.
@@ -312,7 +312,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 			reconcileN(r, name, 3)
 
 			got := getProject(name)
-			Expect(got.Status.Phase).To(Equal(tideprojectv1alpha1.PhaseComplete),
+			Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete),
 				"Complete must hold regardless of boundary-push outcome")
 		})
 	})
@@ -343,10 +343,10 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 			got := getProject(name)
 			Expect(got.Status.BoundaryPush.Attempts).To(Equal(int32(1)),
 				"in-flight requeue must not increment attempts")
-			c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+			c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
 			Expect(c).NotTo(BeNil())
 			Expect(c.Status).To(Equal(metav1.ConditionFalse))
-			Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPushing))
+			Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
 		})
 	})
 })

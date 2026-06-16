@@ -37,7 +37,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // PlansHandler serves GET /api/v1/plans/{name}. Per D-D2 the Client is the
@@ -85,7 +85,7 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 		namespace = "default"
 	}
 
-	var pl tidev1alpha1.Plan
+	var pl tidev1alpha2.Plan
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &pl); err != nil {
 		if apierrors.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("plan %s not found", name))
@@ -99,14 +99,14 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Tasks — filtered by Spec.PlanRef == pl.Name. On error, the response
 	// still returns 200 with the Plan metadata and an empty task list (the
 	// partial-result contract; the SSE refresh path will re-fetch).
-	var tasks tidev1alpha1.TaskList
+	var tasks tidev1alpha2.TaskList
 	if err := h.Client.List(ctx, &tasks, client.InNamespace(namespace)); err != nil {
 		h.Log.Error(err, "list tasks failed", "plan", name)
 	}
 
 	// Waves — filtered by Spec.PlanRef == pl.Name. Each Wave's Status.TaskRefs
 	// is the source of truth for waveIndex assignment per Task.
-	var waves tidev1alpha1.WaveList
+	var waves tidev1alpha2.WaveList
 	if err := h.Client.List(ctx, &waves, client.InNamespace(namespace)); err != nil {
 		h.Log.Error(err, "list waves failed", "plan", name)
 	}

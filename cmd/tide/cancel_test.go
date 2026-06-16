@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 func cancelFixture(t *testing.T) client.Client {
@@ -30,13 +30,13 @@ func cancelFixture(t *testing.T) client.Client {
 	p := makeProject("my-project")
 	// Child fixtures stamped with the canonical project label so --dry-run can
 	// enumerate them for the operator.
-	m1 := &tidev1alpha1.Milestone{
+	m1 := &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-alpha",
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
 		},
-		Spec: tidev1alpha1.MilestoneSpec{ProjectRef: "my-project"},
+		Spec: tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
 	}
 	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, m1).Build()
 }
@@ -52,7 +52,7 @@ func TestCancelRequiresForce(t *testing.T) {
 		t.Errorf("error should mention --force; got %q", err.Error())
 	}
 	// Project must still exist when --force is absent.
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if gerr := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); gerr != nil {
 		t.Errorf("project should still exist; got err=%v", gerr)
 	}
@@ -65,7 +65,7 @@ func TestCancelForceDeletes(t *testing.T) {
 		t.Fatalf("cancelRun: %v", err)
 	}
 	// Project must be gone.
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	gerr := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got)
 	if gerr == nil || !apierrors.IsNotFound(gerr) {
 		t.Errorf("expected project gone (NotFound); got err=%v", gerr)
@@ -95,7 +95,7 @@ func TestCancelDryRunListsChildren(t *testing.T) {
 		t.Fatalf("cancelRun dry-run: %v", err)
 	}
 	// Project still exists (dry-run does not delete).
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if gerr := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); gerr != nil {
 		t.Errorf("dry-run should not delete project; got err=%v", gerr)
 	}

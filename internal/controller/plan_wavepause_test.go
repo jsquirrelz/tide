@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -40,27 +40,27 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 	// Milestone+Phase chain so resolveProjectForPlan succeeds, then a Plan with
 	// a 2-wave Task DAG. Returns the Plan name.
 	makeProjectWithPause := func(projectName, msName, phaseName, planName string, pause bool) string {
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/tide.git",
-				Gates:      tideprojectv1alpha1.Gates{PauseBetweenWaves: pause},
+				Gates:      tideprojectv1alpha2.Gates{PauseBetweenWaves: pause},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
-		ms := &tideprojectv1alpha1.Milestone{
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
-		ph := &tideprojectv1alpha1.Phase{
+		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+		ph := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(phaseName, "default", &tideprojectv1alpha1.Phase{})
+		waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
 		makePlan(planName, phaseName, "Validated")
 		// 2-wave DAG: alpha (w0), beta (w0), gamma DependsOn alpha (w1).
 		makeTask(planName+"-alpha", planName, nil, projectName)
@@ -74,13 +74,13 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			cleanupTask(planName + suffix)
 		}
 		cleanupPlanFixture(planName, nil)
-		ph := &tideprojectv1alpha1.Phase{}
+		ph := &tideprojectv1alpha2.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, ph); err == nil {
 			ph.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph)
 			_ = k8sClient.Delete(ctx, ph)
 		}
-		ms := &tideprojectv1alpha1.Milestone{}
+		ms := &tideprojectv1alpha2.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
@@ -119,12 +119,12 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, planNS, &after)).To(Succeed())
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonPausedAtBoundary))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPausedAtBoundary))
 				g.Expect(c.Message).To(ContainSubstring("wave 1"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
@@ -157,16 +157,16 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 
 			// Sanity: pause condition is set.
 			Eventually(func() bool {
-				var p tideprojectv1alpha1.Plan
+				var p tideprojectv1alpha2.Plan
 				if err := mgrClient.Get(ctx, planNS, &p); err != nil {
 					return false
 				}
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				return c != nil && c.Status == metav1.ConditionTrue
 			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
 
 			// Apply approve-wave-1 annotation.
-			var current tideprojectv1alpha1.Plan
+			var current tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, planNS, &current)).To(Succeed())
 			patch := client.MergeFrom(current.DeepCopy())
 			if current.Annotations == nil {
@@ -179,9 +179,9 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, planNS, &after)).To(Succeed())
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
 				_, has := after.Annotations[gates.AnnotationApproveWavePrefix+"1"]
@@ -217,9 +217,9 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			Expect(err).NotTo(HaveOccurred())
 
 			Consistently(func(g Gomega) {
-				var after tideprojectv1alpha1.Plan
+				var after tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, planNS, &after)).To(Succeed())
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				if c == nil {
 					return // never set — happy path
 				}

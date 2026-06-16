@@ -32,14 +32,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // makeWaveWithTasks creates a Wave and N Tasks for testing WaveReconciler.
 // All tasks are assigned the given wave-index label.
 // Waits for each object to appear in the mgrClient cache before returning.
-func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []string) *tideprojectv1alpha1.Wave {
-	wave := &tideprojectv1alpha1.Wave{
+func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []string) *tideprojectv1alpha2.Wave {
+	wave := &tideprojectv1alpha2.Wave{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      waveName,
 			Namespace: "default",
@@ -47,7 +47,7 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 				{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planRef, UID: "dummy-uid"},
 			},
 		},
-		Spec: tideprojectv1alpha1.WaveSpec{
+		Spec: tideprojectv1alpha2.WaveSpec{
 			// v1alpha2 Waves are global-scope: ProjectRef replaces the removed
 			// PlanRef. The planRef arg is reused as a non-empty ref identifier for
 			// these WaveReconciler tests (TODO(phase-24): plumb a real ProjectRef
@@ -60,11 +60,11 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 	Eventually(func() error {
 		return mgrClient.Get(context.Background(),
 			types.NamespacedName{Name: waveName, Namespace: "default"},
-			&tideprojectv1alpha1.Wave{})
+			&tideprojectv1alpha2.Wave{})
 	}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 	for _, name := range taskNames {
-		t := &tideprojectv1alpha1.Task{
+		t := &tideprojectv1alpha2.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "default",
@@ -72,7 +72,7 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 					"tideproject.k8s/wave-index": fmt.Sprintf("%d", waveIndex),
 				},
 			},
-			Spec: tideprojectv1alpha1.TaskSpec{
+			Spec: tideprojectv1alpha2.TaskSpec{
 				PlanRef:             planRef,
 				FilesTouched:        []string{"src/main.go"},
 				DeclaredOutputPaths: []string{"artifacts/out.txt"},
@@ -84,7 +84,7 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 		Eventually(func() error {
 			return mgrClient.Get(context.Background(),
 				types.NamespacedName{Name: taskName, Namespace: "default"},
-				&tideprojectv1alpha1.Task{})
+				&tideprojectv1alpha2.Task{})
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 	}
 	return wave
@@ -93,14 +93,14 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 // setTaskPhase patches a Task's status Phase and waits for the cache to reflect
 // the update before returning, so reconcilers using mgrClient see the new phase.
 func setTaskPhase(name, phase string) {
-	task := &tideprojectv1alpha1.Task{}
+	task := &tideprojectv1alpha2.Task{}
 	Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, task)).To(Succeed())
 	patch := client.MergeFrom(task.DeepCopy())
 	task.Status.Phase = phase
 	Expect(k8sClient.Status().Patch(context.Background(), task, patch)).To(Succeed())
 	// Wait for the cache to reflect the updated phase.
 	Eventually(func() string {
-		var t tideprojectv1alpha1.Task
+		var t tideprojectv1alpha2.Task
 		if err := mgrClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &t); err != nil {
 			return ""
 		}
@@ -110,7 +110,7 @@ func setTaskPhase(name, phase string) {
 
 // cleanupWave deletes a Wave and its member tasks.
 func cleanupWave(waveName string, taskNames []string) {
-	wave := &tideprojectv1alpha1.Wave{}
+	wave := &tideprojectv1alpha2.Wave{}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: waveName, Namespace: "default"}, wave); err == nil {
 		r := &WaveReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 		_ = k8sClient.Delete(context.Background(), wave)
@@ -121,7 +121,7 @@ func cleanupWave(waveName string, taskNames []string) {
 		}
 	}
 	for _, name := range taskNames {
-		t := &tideprojectv1alpha1.Task{}
+		t := &tideprojectv1alpha2.Task{}
 		if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, t); err == nil {
 			_ = k8sClient.Delete(context.Background(), t)
 		}
@@ -188,7 +188,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			_, err := reconcileWaveN(r, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			var wave tideprojectv1alpha1.Wave
+			var wave tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, wavNS, &wave)).To(Succeed())
 			Expect(wave.Status.Phase).To(Equal("Succeeded"))
 		})
@@ -219,7 +219,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			_, err := reconcileWaveN(r, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			var wave tideprojectv1alpha1.Wave
+			var wave tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, wavNS, &wave)).To(Succeed())
 			Expect(wave.Status.Phase).To(Equal("Failed"))
 		})
@@ -249,7 +249,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			_, err := reconcileWaveN(r, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			var wave tideprojectv1alpha1.Wave
+			var wave tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, wavNS, &wave)).To(Succeed())
 			Expect(wave.Status.Phase).To(Equal("Running"))
 		})
@@ -276,7 +276,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			_, err := reconcileWaveN(r, wavNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: taskNames[0], Namespace: "default"}, &task)).To(Succeed())
 
 			var jobList batchv1.JobList
@@ -309,7 +309,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			_, err := reconcileWaveN(r, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
-			var wave tideprojectv1alpha1.Wave
+			var wave tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, wavNS, &wave)).To(Succeed())
 			Expect(wave.Status.TaskRefs).To(ConsistOf(taskNames))
 		})
@@ -330,7 +330,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		It("verifies taskToWaveMapper enqueues the correct Wave when a Task changes", func() {
 			r := newWaveReconciler()
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: taskNames[0], Namespace: "default"}, &task)).To(Succeed())
 
 			// Call the mapper directly — it should return a request for our Wave.

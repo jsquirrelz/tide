@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -33,7 +33,7 @@ import (
 func fakeClientForTest(t *testing.T) client.Client {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(s); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	return fake.NewClientBuilder().WithScheme(s).Build()
@@ -43,11 +43,11 @@ func fakeClientForTest(t *testing.T) client.Client {
 func TestMaterializeChildCRDsHappyPath(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	milestone := &tideprojectv1alpha1.Milestone{
+	milestone := &tideprojectv1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("milestone-uid-002"),
 			Name:      "parent-milestone",
@@ -55,7 +55,7 @@ func TestMaterializeChildCRDsHappyPath(t *testing.T) {
 		},
 	}
 
-	phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "parent-milestone"}
+	phaseSpec := tideprojectv1alpha2.PhaseSpec{MilestoneRef: "parent-milestone"}
 	rawSpec, err := json.Marshal(phaseSpec)
 	if err != nil {
 		t.Fatalf("Marshal phase spec: %v", err)
@@ -72,7 +72,7 @@ func TestMaterializeChildCRDsHappyPath(t *testing.T) {
 
 	// Verify both Phase CRDs were created.
 	for _, name := range []string{"child-phase-1", "child-phase-2"} {
-		var got tideprojectv1alpha1.Phase
+		var got tideprojectv1alpha2.Phase
 		if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: name}, &got); err != nil {
 			t.Errorf("Get %q: %v", name, err)
 			continue
@@ -102,11 +102,11 @@ func TestMaterializeChildCRDsHappyPath(t *testing.T) {
 func TestMaterializeChildCRDsRejectsUnknownKind(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	milestone := &tideprojectv1alpha1.Milestone{
+	milestone := &tideprojectv1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("milestone-uid-003"),
 			Name:      "parent-milestone",
@@ -127,7 +127,7 @@ func TestMaterializeChildCRDsRejectsUnknownKind(t *testing.T) {
 	}
 
 	// Verify the Pod was NOT created (no get-by-name; check nothing leaked).
-	var phases tideprojectv1alpha1.PhaseList
+	var phases tideprojectv1alpha2.PhaseList
 	if err := c.List(context.Background(), &phases, client.InNamespace("default")); err != nil {
 		t.Fatalf("List phases: %v", err)
 	}
@@ -140,11 +140,11 @@ func TestMaterializeChildCRDsRejectsUnknownKind(t *testing.T) {
 func TestMaterializeChildCRDsIdempotent(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	milestone := &tideprojectv1alpha1.Milestone{
+	milestone := &tideprojectv1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("milestone-uid-004"),
 			Name:      "parent-milestone",
@@ -153,18 +153,18 @@ func TestMaterializeChildCRDsIdempotent(t *testing.T) {
 	}
 
 	// Pre-create the Phase.
-	existing := &tideprojectv1alpha1.Phase{
+	existing := &tideprojectv1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pre-existing-phase",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: "parent-milestone"},
+		Spec: tideprojectv1alpha2.PhaseSpec{MilestoneRef: "parent-milestone"},
 	}
 	if err := c.Create(context.Background(), existing); err != nil {
 		t.Fatalf("pre-create Phase: %v", err)
 	}
 
-	phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "parent-milestone"}
+	phaseSpec := tideprojectv1alpha2.PhaseSpec{MilestoneRef: "parent-milestone"}
 	rawSpec, _ := json.Marshal(phaseSpec)
 
 	children := []pkgdispatch.ChildCRDSpec{
@@ -178,7 +178,7 @@ func TestMaterializeChildCRDsIdempotent(t *testing.T) {
 	}
 
 	// And the original Phase is still there.
-	var got tideprojectv1alpha1.Phase
+	var got tideprojectv1alpha2.Phase
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "pre-existing-phase"}, &got); err != nil {
 		t.Errorf("Get pre-existing Phase: %v", err)
 	}
@@ -196,11 +196,11 @@ func TestMaterializeChildCRDsIdempotent(t *testing.T) {
 func TestMaterializeChildCRDsTaskPromptPath(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("plan-uid-010b"),
 			Name:      "parent-plan",
@@ -209,7 +209,7 @@ func TestMaterializeChildCRDsTaskPromptPath(t *testing.T) {
 	}
 
 	// Model-authored Task spec — note: NO promptPath here (the controller injects it).
-	taskSpec := tideprojectv1alpha1.TaskSpec{
+	taskSpec := tideprojectv1alpha2.TaskSpec{
 		PlanRef:             "parent-plan",
 		FilesTouched:        []string{"main.go"},
 		DeclaredOutputPaths: []string{"main.go"},
@@ -228,7 +228,7 @@ func TestMaterializeChildCRDsTaskPromptPath(t *testing.T) {
 		t.Fatalf("MaterializeChildCRDs: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Task
+	var got tideprojectv1alpha2.Task
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "task-01-impl"}, &got); err != nil {
 		t.Fatalf("Get task: %v", err)
 	}
@@ -256,38 +256,38 @@ func TestMaterializeChildCRDsStampsParentRef(t *testing.T) {
 	}{
 		{
 			name:       "project->milestone",
-			parent:     &tideprojectv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{UID: "proj-uid", Name: "project-01", Namespace: "default"}},
+			parent:     &tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{UID: "proj-uid", Name: "project-01", Namespace: "default"}},
 			childKind:  "Milestone",
 			childName:  "milestone-01",
-			rawSpec:    mustJSON(t, tideprojectv1alpha1.MilestoneSpec{ProjectRef: "project-99-wrong"}),
-			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Milestone).Spec.ProjectRef },
+			rawSpec:    mustJSON(t, tideprojectv1alpha2.MilestoneSpec{ProjectRef: "project-99-wrong"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha2.Milestone).Spec.ProjectRef },
 			realParent: "project-01",
 		},
 		{
 			name:       "milestone->phase",
-			parent:     &tideprojectv1alpha1.Milestone{ObjectMeta: metav1.ObjectMeta{UID: "ms-uid", Name: "milestone-01-time-formatting", Namespace: "default"}},
+			parent:     &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{UID: "ms-uid", Name: "milestone-01-time-formatting", Namespace: "default"}},
 			childKind:  "Phase",
 			childName:  "phase-01",
-			rawSpec:    mustJSON(t, tideprojectv1alpha1.PhaseSpec{MilestoneRef: "milestone-02-time-formatting"}),
-			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Phase).Spec.MilestoneRef },
+			rawSpec:    mustJSON(t, tideprojectv1alpha2.PhaseSpec{MilestoneRef: "milestone-02-time-formatting"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha2.Phase).Spec.MilestoneRef },
 			realParent: "milestone-01-time-formatting",
 		},
 		{
 			name:       "phase->plan",
-			parent:     &tideprojectv1alpha1.Phase{ObjectMeta: metav1.ObjectMeta{UID: "ph-uid", Name: "phase-01", Namespace: "default"}},
+			parent:     &tideprojectv1alpha2.Phase{ObjectMeta: metav1.ObjectMeta{UID: "ph-uid", Name: "phase-01", Namespace: "default"}},
 			childKind:  "Plan",
 			childName:  "plan-01",
-			rawSpec:    mustJSON(t, tideprojectv1alpha1.PlanSpec{PhaseRef: "phase-77-wrong"}),
-			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Plan).Spec.PhaseRef },
+			rawSpec:    mustJSON(t, tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-77-wrong"}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha2.Plan).Spec.PhaseRef },
 			realParent: "phase-01",
 		},
 		{
 			name:       "plan->task",
-			parent:     &tideprojectv1alpha1.Plan{ObjectMeta: metav1.ObjectMeta{UID: "pl-uid", Name: "plan-01", Namespace: "default"}},
+			parent:     &tideprojectv1alpha2.Plan{ObjectMeta: metav1.ObjectMeta{UID: "pl-uid", Name: "plan-01", Namespace: "default"}},
 			childKind:  "Task",
 			childName:  "task-01",
-			rawSpec:    mustJSON(t, tideprojectv1alpha1.TaskSpec{PlanRef: "plan-42-wrong", FilesTouched: []string{"main.go"}, DeclaredOutputPaths: []string{"main.go"}}),
-			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha1.Task).Spec.PlanRef },
+			rawSpec:    mustJSON(t, tideprojectv1alpha2.TaskSpec{PlanRef: "plan-42-wrong", FilesTouched: []string{"main.go"}, DeclaredOutputPaths: []string{"main.go"}}),
+			wantRefOf:  func(o client.Object) string { return o.(*tideprojectv1alpha2.Task).Spec.PlanRef },
 			realParent: "plan-01",
 		},
 	}
@@ -296,7 +296,7 @@ func TestMaterializeChildCRDsStampsParentRef(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fakeClientForTest(t)
 			scheme := runtime.NewScheme()
-			if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+			if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 				t.Fatalf("AddToScheme: %v", err)
 			}
 
@@ -310,13 +310,13 @@ func TestMaterializeChildCRDsStampsParentRef(t *testing.T) {
 			var got client.Object
 			switch tc.childKind {
 			case "Milestone":
-				got = &tideprojectv1alpha1.Milestone{}
+				got = &tideprojectv1alpha2.Milestone{}
 			case "Phase":
-				got = &tideprojectv1alpha1.Phase{}
+				got = &tideprojectv1alpha2.Phase{}
 			case "Plan":
-				got = &tideprojectv1alpha1.Plan{}
+				got = &tideprojectv1alpha2.Plan{}
 			case "Task":
-				got = &tideprojectv1alpha1.Task{}
+				got = &tideprojectv1alpha2.Task{}
 			}
 			if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: tc.childName}, got); err != nil {
 				t.Fatalf("Get %s/%s: %v", tc.childKind, tc.childName, err)
@@ -358,11 +358,11 @@ func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := fakeClientForTest(t)
 			scheme := runtime.NewScheme()
-			if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+			if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 				t.Fatalf("AddToScheme: %v", err)
 			}
 
-			milestone := &tideprojectv1alpha1.Milestone{
+			milestone := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					UID:       types.UID("ms-uid-cuts01"),
 					Name:      "parent-milestone",
@@ -371,7 +371,7 @@ func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
 				},
 			}
 
-			phaseSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "parent-milestone"}
+			phaseSpec := tideprojectv1alpha2.PhaseSpec{MilestoneRef: "parent-milestone"}
 			rawSpec, err := json.Marshal(phaseSpec)
 			if err != nil {
 				t.Fatalf("Marshal phase spec: %v", err)
@@ -384,7 +384,7 @@ func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
 				t.Fatalf("MaterializeChildCRDs: %v", err)
 			}
 
-			var got tideprojectv1alpha1.Phase
+			var got tideprojectv1alpha2.Phase
 			if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "child-phase-cuts01"}, &got); err != nil {
 				t.Fatalf("Get Phase: %v", err)
 			}
@@ -409,7 +409,7 @@ func TestMaterializeChildCRDsStampsProjectLabel(t *testing.T) {
 func TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite(t *testing.T) {
 	const projectName = "test-project-create-site"
 
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("proj-uid-create-site"),
 			Name:      projectName,
@@ -419,7 +419,7 @@ func TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite(t *testing.T) 
 		},
 	}
 
-	msSpec := tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName}
+	msSpec := tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName}
 	rawSpec, err := json.Marshal(msSpec)
 	if err != nil {
 		t.Fatalf("Marshal milestone spec: %v", err)
@@ -430,7 +430,7 @@ func TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite(t *testing.T) 
 
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
@@ -438,7 +438,7 @@ func TestMaterializeChildCRDsProjectParentStampsLabelAtCreateSite(t *testing.T) 
 		t.Fatalf("MaterializeChildCRDs: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Milestone
+	var got tideprojectv1alpha2.Milestone
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "child-ms-create-site"}, &got); err != nil {
 		t.Fatalf("Get Milestone: %v", err)
 	}
@@ -467,11 +467,11 @@ func mustJSON(t *testing.T, v any) []byte {
 func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	parent := &tideprojectv1alpha1.Project{
+	parent := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("proj-uid-sc-identity"),
 			Name:      "project-sc-identity",
@@ -482,16 +482,16 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 	blob := "Parent goal: build the API layer.\nLoad-bearing constraints: use REST.\nSiblings: [01 auth, 02 api, 03 db]"
 
 	// Build children across all four kinds, each carrying the same blob.
-	msSpec := tideprojectv1alpha1.MilestoneSpec{}
+	msSpec := tideprojectv1alpha2.MilestoneSpec{}
 	rawMS, _ := json.Marshal(msSpec)
 
-	phSpec := tideprojectv1alpha1.PhaseSpec{MilestoneRef: "project-sc-identity"}
+	phSpec := tideprojectv1alpha2.PhaseSpec{MilestoneRef: "project-sc-identity"}
 	rawPh, _ := json.Marshal(phSpec)
 
-	plSpec := tideprojectv1alpha1.PlanSpec{PhaseRef: "project-sc-identity"}
+	plSpec := tideprojectv1alpha2.PlanSpec{PhaseRef: "project-sc-identity"}
 	rawPl, _ := json.Marshal(plSpec)
 
-	tkSpec := tideprojectv1alpha1.TaskSpec{PlanRef: "project-sc-identity", FilesTouched: []string{"main.go"}}
+	tkSpec := tideprojectv1alpha2.TaskSpec{PlanRef: "project-sc-identity", FilesTouched: []string{"main.go"}}
 	rawTk, _ := json.Marshal(tkSpec)
 
 	children := []pkgdispatch.ChildCRDSpec{
@@ -506,7 +506,7 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 	}
 
 	// Verify every child got the blob stamped byte-identically.
-	var gotMS tideprojectv1alpha1.Milestone
+	var gotMS tideprojectv1alpha2.Milestone
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ms-a"}, &gotMS); err != nil {
 		t.Fatalf("Get Milestone: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 		t.Errorf("Milestone.Spec.SharedContext = %q, want %q", gotMS.Spec.SharedContext, blob)
 	}
 
-	var gotPh tideprojectv1alpha1.Phase
+	var gotPh tideprojectv1alpha2.Phase
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ph-a"}, &gotPh); err != nil {
 		t.Fatalf("Get Phase: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 		t.Errorf("Phase.Spec.SharedContext = %q, want %q", gotPh.Spec.SharedContext, blob)
 	}
 
-	var gotPl tideprojectv1alpha1.Plan
+	var gotPl tideprojectv1alpha2.Plan
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-pl-a"}, &gotPl); err != nil {
 		t.Fatalf("Get Plan: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 		t.Errorf("Plan.Spec.SharedContext = %q, want %q", gotPl.Spec.SharedContext, blob)
 	}
 
-	var gotTk tideprojectv1alpha1.Task
+	var gotTk tideprojectv1alpha2.Task
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-tk-a"}, &gotTk); err != nil {
 		t.Fatalf("Get Task: %v", err)
 	}
@@ -545,11 +545,11 @@ func TestMaterializeChildCRDsSharedContextIdentity(t *testing.T) {
 func TestMaterializeChildCRDsSharedContextSizeCap(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	parent := &tideprojectv1alpha1.Project{
+	parent := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("proj-uid-sc-cap"),
 			Name:      "project-sc-cap",
@@ -563,7 +563,7 @@ func TestMaterializeChildCRDsSharedContextSizeCap(t *testing.T) {
 		oversized[i] = 'x'
 	}
 
-	msSpec := tideprojectv1alpha1.MilestoneSpec{}
+	msSpec := tideprojectv1alpha2.MilestoneSpec{}
 	rawMS, _ := json.Marshal(msSpec)
 
 	children := []pkgdispatch.ChildCRDSpec{
@@ -579,7 +579,7 @@ func TestMaterializeChildCRDsSharedContextSizeCap(t *testing.T) {
 	}
 
 	// Verify the Milestone was NOT created (fail-closed).
-	var ms tideprojectv1alpha1.Milestone
+	var ms tideprojectv1alpha2.Milestone
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "sc-ms-oversized"}, &ms); err == nil {
 		t.Error("Milestone was created despite oversized SharedContext (fail-closed violated)")
 	}
@@ -590,11 +590,11 @@ func TestMaterializeChildCRDsSharedContextSizeCap(t *testing.T) {
 func TestMaterializeChildCRDsTaskPromptPathNoRegression(t *testing.T) {
 	c := fakeClientForTest(t)
 	scheme := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(scheme); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("plan-uid-sc-nreg"),
 			Name:      "parent-plan-sc-nreg",
@@ -602,7 +602,7 @@ func TestMaterializeChildCRDsTaskPromptPathNoRegression(t *testing.T) {
 		},
 	}
 
-	taskSpec := tideprojectv1alpha1.TaskSpec{
+	taskSpec := tideprojectv1alpha2.TaskSpec{
 		PlanRef:             "parent-plan-sc-nreg",
 		FilesTouched:        []string{"main.go"},
 		DeclaredOutputPaths: []string{"main.go"},
@@ -620,7 +620,7 @@ func TestMaterializeChildCRDsTaskPromptPathNoRegression(t *testing.T) {
 		t.Fatalf("MaterializeChildCRDs: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Task
+	var got tideprojectv1alpha2.Task
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "task-nreg-01"}, &got); err != nil {
 		t.Fatalf("Get task: %v", err)
 	}

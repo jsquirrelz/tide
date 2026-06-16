@@ -15,7 +15,7 @@ limitations under the License.
 */
 
 // Package budget unit tests for cap.go: IsCapExceeded, IsBypassed, ConsumeBypass.
-// Uses stdlib testing; constructs synthetic *tidev1alpha1.Project objects directly
+// Uses stdlib testing; constructs synthetic *tidev1alpha2.Project objects directly
 // (no apiserver — these are pure-Go predicates).
 package budget
 
@@ -25,7 +25,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---- IsCapExceeded ----
@@ -55,12 +55,12 @@ func TestIsCapExceeded(t *testing.T) {
 				return
 			}
 
-			p := &tidev1alpha1.Project{
-				Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
-					Budget: tidev1alpha1.BudgetConfig{AbsoluteCapCents: tc.cap},
+			p := &tidev1alpha2.Project{
+				Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					Budget: tidev1alpha2.BudgetConfig{AbsoluteCapCents: tc.cap},
 				},
-				Status: tidev1alpha1.ProjectStatus{
-					Budget: tidev1alpha1.BudgetStatus{CostSpentCents: tc.spent},
+				Status: tidev1alpha2.ProjectStatus{
+					Budget: tidev1alpha2.BudgetStatus{CostSpentCents: tc.spent},
 				},
 			}
 			got := IsCapExceeded(p)
@@ -149,15 +149,15 @@ func TestIsCapExceeded_RollingCap(t *testing.T) {
 				return
 			}
 
-			p := &tidev1alpha1.Project{
-				Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
-					Budget: tidev1alpha1.BudgetConfig{
+			p := &tidev1alpha2.Project{
+				Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					Budget: tidev1alpha2.BudgetConfig{
 						AbsoluteCapCents:      tc.absoluteCap,
 						RollingWindowCapCents: tc.rollingCap,
 					},
 				},
-				Status: tidev1alpha1.ProjectStatus{
-					Budget: tidev1alpha1.BudgetStatus{CostSpentCents: tc.spent},
+				Status: tidev1alpha2.ProjectStatus{
+					Budget: tidev1alpha2.BudgetStatus{CostSpentCents: tc.spent},
 				},
 			}
 			got := IsCapExceeded(p)
@@ -223,7 +223,7 @@ func TestIsBypassed(t *testing.T) {
 	now := time.Now()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := &tidev1alpha1.Project{
+			p := &tidev1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: tc.annotations,
 				},
@@ -247,7 +247,7 @@ func TestIsBypassed_NilProject(t *testing.T) {
 
 func TestConsumeBypass(t *testing.T) {
 	t.Run("removes bypass-budget annotation", func(t *testing.T) {
-		p := &tidev1alpha1.Project{
+		p := &tidev1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
 					"tideproject.k8s/bypass-budget": "true",
@@ -266,7 +266,7 @@ func TestConsumeBypass(t *testing.T) {
 
 	t.Run("does not remove bypass-budget-until", func(t *testing.T) {
 		until := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
-		p := &tidev1alpha1.Project{
+		p := &tidev1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
 					"tideproject.k8s/bypass-budget":       "true",
@@ -290,7 +290,7 @@ func TestConsumeBypass(t *testing.T) {
 	})
 
 	t.Run("empty annotations returns empty map", func(t *testing.T) {
-		p := &tidev1alpha1.Project{}
+		p := &tidev1alpha2.Project{}
 		out := ConsumeBypass(p)
 		if out == nil {
 			t.Errorf("ConsumeBypass on project with nil annotations should return non-nil empty map")

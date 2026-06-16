@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -41,8 +41,8 @@ import (
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(s); err != nil {
-		t.Fatalf("AddToScheme tidev1alpha1: %v", err)
+	if err := tidev1alpha2.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tidev1alpha2: %v", err)
 	}
 	if err := batchv1.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme batchv1: %v", err)
@@ -68,8 +68,8 @@ func (f *fakeEnvReader) ReadOut(_ context.Context, _, _ string) (pkgdispatch.Env
 // PodJobBackend.resolveProject can use the label fast-path (the prior
 // projectList.Items[0] fallback was removed). In production, PlanReconciler
 // stamps this label; in tests we set it at construction time.
-func testTask(ns, name string, uid types.UID) *tidev1alpha1.Task {
-	return &tidev1alpha1.Task{
+func testTask(ns, name string, uid types.UID) *tidev1alpha2.Task {
+	return &tidev1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
@@ -78,11 +78,11 @@ func testTask(ns, name string, uid types.UID) *tidev1alpha1.Task {
 				"tideproject.k8s/project": "project-alpha",
 			},
 		},
-		Spec: tidev1alpha1.TaskSpec{
+		Spec: tidev1alpha2.TaskSpec{
 			PlanRef:             "plan-alpha",
 			FilesTouched:        []string{"foo.go"},
 			DeclaredOutputPaths: []string{"out.json"},
-			Caps: &tidev1alpha1.Caps{
+			Caps: &tidev1alpha2.Caps{
 				WallClockSeconds: 60,
 			},
 		},
@@ -90,14 +90,14 @@ func testTask(ns, name string, uid types.UID) *tidev1alpha1.Task {
 }
 
 // testProject constructs a minimal Project for backend tests.
-func testProject(ns, name string, uid types.UID) *tidev1alpha1.Project {
-	return &tidev1alpha1.Project{
+func testProject(ns, name string, uid types.UID) *tidev1alpha2.Project {
+	return &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 			UID:       uid,
 		},
-		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret",
 		},

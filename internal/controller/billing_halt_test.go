@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---------- isBillingFailureReason ----------
@@ -81,11 +81,11 @@ func TestIsBillingFailureReason_EmptyString_False(t *testing.T) {
 // ---------- checkBillingHalt ----------
 
 func TestCheckBillingHalt_TrueWhenConditionPresent(t *testing.T) {
-	project := &tideprojectv1alpha1.Project{}
+	project := &tideprojectv1alpha2.Project{}
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionBillingHalt,
+		Type:               tideprojectv1alpha2.ConditionBillingHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonCreditBalanceTooLow,
+		Reason:             tideprojectv1alpha2.ReasonCreditBalanceTooLow,
 		LastTransitionTime: metav1.Now(),
 	})
 	if !checkBillingHalt(project) {
@@ -94,16 +94,16 @@ func TestCheckBillingHalt_TrueWhenConditionPresent(t *testing.T) {
 }
 
 func TestCheckBillingHalt_FalseWhenConditionAbsent(t *testing.T) {
-	project := &tideprojectv1alpha1.Project{}
+	project := &tideprojectv1alpha2.Project{}
 	if checkBillingHalt(project) {
 		t.Error("expected checkBillingHalt=false when no conditions")
 	}
 }
 
 func TestCheckBillingHalt_FalseWhenConditionFalse(t *testing.T) {
-	project := &tideprojectv1alpha1.Project{}
+	project := &tideprojectv1alpha2.Project{}
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionBillingHalt,
+		Type:               tideprojectv1alpha2.ConditionBillingHalt,
 		Status:             metav1.ConditionFalse,
 		Reason:             "cleared",
 		LastTransitionTime: metav1.Now(),
@@ -123,12 +123,12 @@ func TestCheckBillingHalt_FalseForNilProject(t *testing.T) {
 
 func TestSetBillingHaltIfNeeded_SetsCondition(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -140,20 +140,20 @@ func TestSetBillingHaltIfNeeded_SetsCondition(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
 
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond == nil {
 		t.Fatal("expected BillingHalt condition to be set; got nil")
 	}
 	if cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected BillingHalt=True; got %q", cond.Status)
 	}
-	if cond.Reason != tideprojectv1alpha1.ReasonCreditBalanceTooLow {
-		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha1.ReasonCreditBalanceTooLow, cond.Reason)
+	if cond.Reason != tideprojectv1alpha2.ReasonCreditBalanceTooLow {
+		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha2.ReasonCreditBalanceTooLow, cond.Reason)
 	}
 	if len(cond.Message) == 0 {
 		t.Error("expected non-empty condition Message")
@@ -166,12 +166,12 @@ func TestSetBillingHaltIfNeeded_SetsCondition(t *testing.T) {
 
 func TestSetBillingHaltIfNeeded_NonBillingReason_NoOp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -182,11 +182,11 @@ func TestSetBillingHaltIfNeeded_NonBillingReason_NoOp(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond != nil {
 		t.Errorf("expected no BillingHalt condition for non-billing reason; got %+v", cond)
 	}
@@ -212,15 +212,15 @@ func TestSetBillingHaltIfNeeded_NilProject_NoOp(t *testing.T) {
 func TestSetBillingHalt_PreResumeStraggler_NoStamp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pre-resume-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+				tideprojectv1alpha2.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -233,11 +233,11 @@ func TestSetBillingHalt_PreResumeStraggler_NoStamp(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pre-resume-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond != nil && cond.Status == metav1.ConditionTrue {
 		t.Errorf("WR-03 regression: pre-resume straggler must NOT stamp BillingHalt; got condition %+v", cond)
 	}
@@ -249,15 +249,15 @@ func TestSetBillingHalt_PreResumeStraggler_NoStamp(t *testing.T) {
 func TestSetBillingHalt_PostResumeFreshFailure_Stamps(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "post-resume-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+				tideprojectv1alpha2.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -270,11 +270,11 @@ func TestSetBillingHalt_PostResumeFreshFailure_Stamps(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "post-resume-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("fresh post-resume billing failure must stamp BillingHalt; got condition %v", cond)
 	}
@@ -285,12 +285,12 @@ func TestSetBillingHalt_PostResumeFreshFailure_Stamps(t *testing.T) {
 // regardless of jobStart (initial halt path unchanged).
 func TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-annotation-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -303,11 +303,11 @@ func TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "no-annotation-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("no annotation present: must stamp BillingHalt regardless of jobStart; got condition %v", cond)
 	}
@@ -319,15 +319,15 @@ func TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart(t *testing.T) {
 func TestSetBillingHalt_ZeroJobStart_FailClosed(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	resumedAt := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "zero-jobstart-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
+				tideprojectv1alpha2.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -340,11 +340,11 @@ func TestSetBillingHalt_ZeroJobStart_FailClosed(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "zero-jobstart-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("zero jobStart must fail-closed (stamp BillingHalt); got condition %v", cond)
 	}
@@ -355,15 +355,15 @@ func TestSetBillingHalt_ZeroJobStart_FailClosed(t *testing.T) {
 // stamped (never fail open toward burning credits).
 func TestSetBillingHalt_UnparseableAnnotation_FailClosed(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "bad-annotation-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha1.AnnotationBillingResumedAt: "not-a-timestamp",
+				tideprojectv1alpha2.AnnotationBillingResumedAt: "not-a-timestamp",
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -376,11 +376,11 @@ func TestSetBillingHalt_UnparseableAnnotation_FailClosed(t *testing.T) {
 		t.Fatalf("setBillingHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha1.Project
+	var got tideprojectv1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "bad-annotation-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha1.ConditionBillingHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("unparseable annotation must fail-closed (stamp BillingHalt); got condition %v", cond)
 	}

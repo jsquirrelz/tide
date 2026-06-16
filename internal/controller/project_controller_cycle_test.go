@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
@@ -44,8 +44,8 @@ import (
 // given project (via label), with the given dependsOn list.
 // Named makeCycleTask to avoid conflicts with the existing makeTask helper in
 // task_controller_test.go (which has a different signature).
-func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tideprojectv1alpha1.Task {
-	return &tideprojectv1alpha1.Task{
+func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tideprojectv1alpha2.Task {
+	return &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -53,7 +53,7 @@ func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tid
 				owner.LabelProject: projectName,
 			},
 		},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             "plan-x",
 			FilesTouched:        []string{"dummy.go"},
 			PromptPath:          "envelopes/plan-x/children/task-01.json",

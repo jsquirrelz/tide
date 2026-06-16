@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest", "phase3"), func() {
@@ -34,19 +34,19 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 	ctx := context.Background()
 
 	AfterEach(func() {
-		p := &tideprojectv1alpha1.Plan{}
+		p := &tideprojectv1alpha2.Plan{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
 			p.Finalizers = nil
 			_ = k8sClient.Update(ctx, p)
 			_ = k8sClient.Delete(ctx, p)
 		}
-		ph := &tideprojectv1alpha1.Phase{}
+		ph := &tideprojectv1alpha2.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseRef, Namespace: "default"}, ph); err == nil {
 			ph.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph)
 			_ = k8sClient.Delete(ctx, ph)
 		}
-		ms := &tideprojectv1alpha1.Milestone{}
+		ms := &tideprojectv1alpha2.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: milestoneRefName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
@@ -67,28 +67,28 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		// (dispatch proceeds when Project chain resolves), so we create the
 		// full Project → Milestone → Phase → Plan hierarchy in-test.
 		makeProjectForTask(projectRefName)
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: milestoneRefName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectRefName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectRefName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(milestoneRefName, "default", &tideprojectv1alpha1.Milestone{})
-		ph := &tideprojectv1alpha1.Phase{
+		waitForCacheSync(milestoneRefName, "default", &tideprojectv1alpha2.Milestone{})
+		ph := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phaseRef, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: milestoneRefName},
+			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: milestoneRefName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(phaseRef, "default", &tideprojectv1alpha1.Phase{})
+		waitForCacheSync(phaseRef, "default", &tideprojectv1alpha2.Phase{})
 
 		// Plan with no Tasks and no ValidationState — should trigger planner dispatch.
-		p := &tideprojectv1alpha1.Plan{
+		p := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.PlanSpec{PhaseRef: phaseRef},
+			Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: phaseRef},
 		}
 		Expect(k8sClient.Create(ctx, p)).To(Succeed())
 		// Wait for cache.
 		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &tideprojectv1alpha1.Plan{})
+			return mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &tideprojectv1alpha2.Plan{})
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 		r := &PlanReconciler{
@@ -109,7 +109,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 
 		// Verify the planner Job exists.
 		Eventually(func(g Gomega) {
-			var got tideprojectv1alpha1.Plan
+			var got tideprojectv1alpha2.Plan
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
 			expectedJobName := fmt.Sprintf("tide-plan-%s-1", got.UID)
 			var job batchv1.Job
@@ -125,7 +125,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		taskNames := alphaThroughThetaFixture(planName)
 		defer cleanupPlanFixture(planName, taskNames)
 
-		var got tideprojectv1alpha1.Plan
+		var got tideprojectv1alpha2.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
 		planUID := got.UID
 
@@ -149,7 +149,7 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		Eventually(func(g Gomega) {
 			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
-				var wave tideprojectv1alpha1.Wave
+				var wave tideprojectv1alpha2.Wave
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed())
 			}
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())

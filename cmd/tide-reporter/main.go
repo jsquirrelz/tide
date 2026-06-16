@@ -50,7 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -140,7 +140,7 @@ func runWithClient(
 	// 2. Build the K8s client (or use the injected test override).
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
 
 	var c client.Client
 	if clientOverride != nil {
@@ -213,28 +213,28 @@ func resolveParent(ctx context.Context, c client.Client, cfg reporterConfig, std
 
 	switch cfg.ParentKind {
 	case "Project":
-		var obj tidev1alpha1.Project
+		var obj tidev1alpha2.Project
 		if err := c.Get(ctx, key, &obj); err != nil {
 			fmt.Fprintf(stderr, "tide-reporter: get Project %q: %v\n", cfg.ParentName, err)
 			return nil, exitInvariant
 		}
 		return &obj, exitSuccess
 	case "Milestone":
-		var obj tidev1alpha1.Milestone
+		var obj tidev1alpha2.Milestone
 		if err := c.Get(ctx, key, &obj); err != nil {
 			fmt.Fprintf(stderr, "tide-reporter: get Milestone %q: %v\n", cfg.ParentName, err)
 			return nil, exitInvariant
 		}
 		return &obj, exitSuccess
 	case "Phase":
-		var obj tidev1alpha1.Phase
+		var obj tidev1alpha2.Phase
 		if err := c.Get(ctx, key, &obj); err != nil {
 			fmt.Fprintf(stderr, "tide-reporter: get Phase %q: %v\n", cfg.ParentName, err)
 			return nil, exitInvariant
 		}
 		return &obj, exitSuccess
 	case "Plan":
-		var obj tidev1alpha1.Plan
+		var obj tidev1alpha2.Plan
 		if err := c.Get(ctx, key, &obj); err != nil {
 			fmt.Fprintf(stderr, "tide-reporter: get Plan %q: %v\n", cfg.ParentName, err)
 			return nil, exitInvariant

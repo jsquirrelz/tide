@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 func TestRejectWritesAnnotationWithReason(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRejectWritesAnnotationWithReason(t *testing.T) {
 	if err := rejectRun(context.Background(), c, "default", "my-project", "operator stopped"); err != nil {
 		t.Fatalf("rejectRun: %v", err)
 	}
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRejectDefaultsReasonWhenEmpty(t *testing.T) {
 	if err := rejectRun(context.Background(), c, "default", "my-project", ""); err != nil {
 		t.Fatalf("rejectRun: %v", err)
 	}
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got)
 	if v := got.Annotations["tideproject.k8s/reject"]; v != "rejected by operator" {
 		t.Errorf("expected default reason 'rejected by operator'; got %q", v)
@@ -64,7 +64,7 @@ func TestRejectPreservesOtherAnnotations(t *testing.T) {
 	if err := rejectRun(context.Background(), c, "default", "my-project", "halt now"); err != nil {
 		t.Fatalf("rejectRun: %v", err)
 	}
-	var got tidev1alpha1.Project
+	var got tidev1alpha2.Project
 	_ = c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got)
 	if got.Annotations["unrelated.example.com/key"] != "keep" {
 		t.Errorf("MergeFrom should preserve unrelated annotation; got %v", got.Annotations)

@@ -57,7 +57,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // BeforeSuite for the live-e2e suite — wires liveE2EClient + liveE2ECtx
@@ -124,7 +124,7 @@ var _ = Describe("Live Claude E2E (TEST-03)", Label("live-e2e"), Ordered, func()
 		if liveE2EClient == nil {
 			return
 		}
-		_ = liveE2EClient.Delete(liveE2ECtx, &tideprojectv1alpha1.Project{
+		_ = liveE2EClient.Delete(liveE2ECtx, &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: liveProjectName, Namespace: liveTestNamespace},
 		})
 		_ = liveE2EClient.Delete(liveE2ECtx, &corev1.Namespace{
@@ -138,7 +138,7 @@ var _ = Describe("Live Claude E2E (TEST-03)", Label("live-e2e"), Ordered, func()
 
 		By("Waiting for the Project to be picked up (Status.phase populated)")
 		Eventually(func() string {
-			p := &tideprojectv1alpha1.Project{}
+			p := &tideprojectv1alpha2.Project{}
 			err := liveE2EClient.Get(liveE2ECtx,
 				client.ObjectKey{Name: liveProjectName, Namespace: liveTestNamespace}, p)
 			if err != nil {
@@ -153,7 +153,7 @@ var _ = Describe("Live Claude E2E (TEST-03)", Label("live-e2e"), Ordered, func()
 		// planner Job; on success the Job emits a Milestone child CRD with
 		// Status.phase=Succeeded.
 		Eventually(func() (string, error) {
-			milestones := &tideprojectv1alpha1.MilestoneList{}
+			milestones := &tideprojectv1alpha2.MilestoneList{}
 			if err := liveE2EClient.List(liveE2ECtx, milestones,
 				client.InNamespace(liveTestNamespace)); err != nil {
 				return "", err
@@ -169,7 +169,7 @@ var _ = Describe("Live Claude E2E (TEST-03)", Label("live-e2e"), Ordered, func()
 		// Phase 3 D-B6: Project.Status.git.lastPushedSHA is populated after
 		// the push Job's --force-with-lease push succeeds.
 		Eventually(func() string {
-			p := &tideprojectv1alpha1.Project{}
+			p := &tideprojectv1alpha2.Project{}
 			err := liveE2EClient.Get(liveE2ECtx,
 				client.ObjectKey{Name: liveProjectName, Namespace: liveTestNamespace}, p)
 			if err != nil {
@@ -180,7 +180,7 @@ var _ = Describe("Live Claude E2E (TEST-03)", Label("live-e2e"), Ordered, func()
 			"Project.Status.git.lastPushedSHA should be set after push completes")
 
 		// Refetch the Project for the post-run assertions.
-		final := &tideprojectv1alpha1.Project{}
+		final := &tideprojectv1alpha2.Project{}
 		Expect(liveE2EClient.Get(liveE2ECtx,
 			client.ObjectKey{Name: liveProjectName, Namespace: liveTestNamespace}, final)).
 			To(Succeed())
@@ -272,7 +272,7 @@ func applyLiveFixture(apiKey string) {
 // (which would require the GIT_PAT and add cross-cluster network surface).
 // The Condition reflects the push Job's envelope-out, which the controller
 // already imported into status.
-func captureLastMilestoneCommitMessage(p *tideprojectv1alpha1.Project) string {
+func captureLastMilestoneCommitMessage(p *tideprojectv1alpha2.Project) string {
 	for _, c := range p.Status.Conditions {
 		if c.Type == "LastMilestoneCommit" || c.Type == "MilestoneAuthored" {
 			return c.Message

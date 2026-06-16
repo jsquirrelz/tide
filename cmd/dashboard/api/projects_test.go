@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newHandler returns a ProjectsHandler with a fake client populated with
@@ -33,7 +33,7 @@ import (
 func newHandler(t *testing.T, objs ...runtime.Object) (*ProjectsHandler, http.Handler) {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha1.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -52,16 +52,16 @@ func newHandler(t *testing.T, objs ...runtime.Object) (*ProjectsHandler, http.Ha
 }
 
 // newProject is a minimal project factory.
-func newProject(name, namespace, phase string) *tidev1alpha1.Project {
-	return &tidev1alpha1.Project{
+func newProject(name, namespace, phase string) *tidev1alpha2.Project {
+	return &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
-			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: 10000},
+			Budget:     tidev1alpha2.BudgetConfig{AbsoluteCapCents: 10000},
 		},
-		Status: tidev1alpha1.ProjectStatus{
+		Status: tidev1alpha2.ProjectStatus{
 			Phase: phase,
-			Budget: tidev1alpha1.BudgetStatus{
+			Budget: tidev1alpha2.BudgetStatus{
 				CostSpentCents: 100,
 			},
 		},
@@ -69,28 +69,28 @@ func newProject(name, namespace, phase string) *tidev1alpha1.Project {
 }
 
 // newMilestone is a minimal milestone factory.
-func newMilestone(name, namespace, projectRef, phase string) *tidev1alpha1.Milestone {
-	return &tidev1alpha1.Milestone{
+func newMilestone(name, namespace, projectRef, phase string) *tidev1alpha2.Milestone {
+	return &tidev1alpha2.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: projectRef},
-		Status:     tidev1alpha1.MilestoneStatus{Phase: phase},
+		Spec:       tidev1alpha2.MilestoneSpec{ProjectRef: projectRef},
+		Status:     tidev1alpha2.MilestoneStatus{Phase: phase},
 	}
 }
 
 // newPhase + newPlan are similar minimal factories.
-func newPhase(name, namespace, milestoneRef, phase string) *tidev1alpha1.Phase {
-	return &tidev1alpha1.Phase{
+func newPhase(name, namespace, milestoneRef, phase string) *tidev1alpha2.Phase {
+	return &tidev1alpha2.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: milestoneRef},
-		Status:     tidev1alpha1.PhaseStatus{Phase: phase},
+		Spec:       tidev1alpha2.PhaseSpec{MilestoneRef: milestoneRef},
+		Status:     tidev1alpha2.PhaseStatus{Phase: phase},
 	}
 }
 
-func newPlan(name, namespace, phaseRef, phase string) *tidev1alpha1.Plan {
-	return &tidev1alpha1.Plan{
+func newPlan(name, namespace, phaseRef, phase string) *tidev1alpha2.Plan {
+	return &tidev1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: phaseRef},
-		Status:     tidev1alpha1.PlanStatus{Phase: phase},
+		Spec:       tidev1alpha2.PlanSpec{PhaseRef: phaseRef},
+		Status:     tidev1alpha2.PlanStatus{Phase: phase},
 	}
 }
 
@@ -331,10 +331,10 @@ func TestXSSViaProjectName(t *testing.T) {
 	// Use a literal name field separately to inject the <script> via
 	// JSON; the dashboard surface re-encodes via json.Encoder which
 	// does the right thing.
-	_, router := newHandler(t, &tidev1alpha1.Project{
+	_, router := newHandler(t, &tidev1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: xssName, Namespace: "default"},
-		Spec:       tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/r.git"},
-		Status:     tidev1alpha1.ProjectStatus{Phase: "<script>alert(1)</script>"},
+		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/r.git"},
+		Status:     tidev1alpha2.ProjectStatus{Phase: "<script>alert(1)</script>"},
 	})
 
 	srv := httptest.NewServer(router)

@@ -49,7 +49,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 var _ = Describe("Credproxy sidecar topology and startup signal (AC5 / HARN-03)", Label("kind"), func() {
@@ -76,7 +76,7 @@ var _ = Describe("Credproxy sidecar topology and startup signal (AC5 / HARN-03)"
 
 		// Wait for the task to be created.
 		Eventually(func() error {
-			t := &tideprojectv1alpha1.Task{}
+			t := &tideprojectv1alpha2.Task{}
 			return k8sClient.Get(ctx, client.ObjectKey{Name: "credproxy-task", Namespace: credproxyNS}, t)
 		}, 30*time.Second, time.Second).Should(Succeed())
 

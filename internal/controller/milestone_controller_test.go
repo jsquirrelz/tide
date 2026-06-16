@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -101,39 +101,39 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 	BeforeEach(func() {
 		// Create the parent Project so resolveProject succeeds.
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent: tideprojectv1alpha1.SubagentConfig{
+				Subagent: tideprojectv1alpha2.SubagentConfig{
 					Model: "claude-opus-4-7",
 				},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 	})
 
 	AfterEach(func() {
 		// Cleanup Milestone (best-effort).
-		ms := &tideprojectv1alpha1.Milestone{}
+		ms := &tideprojectv1alpha2.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
 			_ = k8sClient.Delete(ctx, ms)
 		}
-		proj := &tideprojectv1alpha1.Project{}
+		proj := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 			proj.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj)
 			_ = k8sClient.Delete(ctx, proj)
 		}
 		// Cleanup any child Phases.
-		var phases tideprojectv1alpha1.PhaseList
+		var phases tideprojectv1alpha2.PhaseList
 		_ = k8sClient.List(ctx, &phases, client.InNamespace("default"))
 		for i := range phases.Items {
 			p := phases.Items[i]
@@ -152,13 +152,13 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 	It("Test 1: dispatches planner Job and patches Status.Phase=Running on first reconcile", func() {
 		// Create the Milestone.
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: milestoneName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projectName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+			return mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &tideprojectv1alpha2.Milestone{})
 		}, "5s", "100ms").Should(Succeed())
 
 		r := &MilestoneReconciler{
@@ -180,7 +180,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		// Verify Job exists with the deterministic name.
 		Eventually(func(g Gomega) {
-			var got tideprojectv1alpha1.Milestone
+			var got tideprojectv1alpha2.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: milestoneName, Namespace: "default"}, &got)).To(Succeed())
 			expectedJobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
 			var job batchv1.Job
@@ -212,28 +212,28 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 	It("Test 5 (09-08 Defect C): rolls up planner Usage to Project.Status.Budget on Job completion", func() {
 		const budgetProjectName = "test-proj-ms-budget5"
 		const budgetMilestoneName = "test-ms-budget5"
-		budgetProj := &tideprojectv1alpha1.Project{
+		budgetProj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: budgetProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
-				Gates: tideprojectv1alpha1.Gates{Milestone: tideprojectv1alpha1.GatePolicy("auto")},
+				Gates: tideprojectv1alpha2.Gates{Milestone: tideprojectv1alpha2.GatePolicy("auto")},
 			},
 		}
 		Expect(k8sClient.Create(ctx, budgetProj)).To(Succeed())
-		waitForCacheSync(budgetProjectName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(budgetProjectName, "default", &tideprojectv1alpha2.Project{})
 		DeferCleanup(func() {
-			ms := &tideprojectv1alpha1.Milestone{}
+			ms := &tideprojectv1alpha2.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, ms); err == nil {
 				ms.Finalizers = nil
 				_ = k8sClient.Update(ctx, ms)
 				_ = k8sClient.Delete(ctx, ms)
 			}
-			p := &tideprojectv1alpha1.Project{}
+			p := &tideprojectv1alpha2.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: budgetProjectName, Namespace: "default"}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -241,13 +241,13 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			}
 		})
 
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: budgetMilestoneName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: budgetProjectName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: budgetProjectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+			return mgrClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, &tideprojectv1alpha2.Milestone{})
 		}, "5s", "100ms").Should(Succeed())
 
 		envReader := newMapEnvReader()
@@ -267,7 +267,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 5)).To(Succeed())
 
-		var got tideprojectv1alpha1.Milestone
+		var got tideprojectv1alpha2.Milestone
 		Eventually(func() error {
 			return mgrClient.Get(ctx, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, &got)
 		}, "5s", "100ms").Should(Succeed())
@@ -293,7 +293,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		// Assert Project.Status.Budget.CostSpentCents >= plannerCostCents.
 		Eventually(func(g Gomega) {
-			var proj tideprojectv1alpha1.Project
+			var proj tideprojectv1alpha2.Project
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: budgetProjectName, Namespace: "default"}, &proj)).To(Succeed())
 			g.Expect(proj.Status.Budget.CostSpentCents).To(BeNumerically(">=", plannerCostCents),
 				"Project.Status.Budget.CostSpentCents must reflect planner spend (Defect C regression guard)")
@@ -307,28 +307,28 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		// boundary check; create a dedicated auto-gated Project for this case.
 		const autoProjectName = "test-proj-ms-auto9"
 		const autoMilestoneName = "test-ms-auto9"
-		autoProj := &tideprojectv1alpha1.Project{
+		autoProj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
-				Gates: tideprojectv1alpha1.Gates{Milestone: tideprojectv1alpha1.GatePolicy("auto")},
+				Gates: tideprojectv1alpha2.Gates{Milestone: tideprojectv1alpha2.GatePolicy("auto")},
 			},
 		}
 		Expect(k8sClient.Create(ctx, autoProj)).To(Succeed())
-		waitForCacheSync(autoProjectName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(autoProjectName, "default", &tideprojectv1alpha2.Project{})
 		DeferCleanup(func() {
-			p := &tideprojectv1alpha1.Project{}
+			p := &tideprojectv1alpha2.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: autoProjectName, Namespace: "default"}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
 				_ = k8sClient.Delete(ctx, p)
 			}
-			m := &tideprojectv1alpha1.Milestone{}
+			m := &tideprojectv1alpha2.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, m); err == nil {
 				m.Finalizers = nil
 				_ = k8sClient.Update(ctx, m)
@@ -336,13 +336,13 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 			}
 		})
 
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: autoMilestoneName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: autoProjectName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: autoProjectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &tideprojectv1alpha1.Milestone{})
+			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &tideprojectv1alpha2.Milestone{})
 		}, "5s", "100ms").Should(Succeed())
 
 		envReader := newMapEnvReader()
@@ -362,7 +362,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 5)).To(Succeed())
 
-		var got tideprojectv1alpha1.Milestone
+		var got tideprojectv1alpha2.Milestone
 		Eventually(func() error {
 			return mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &got)
 		}, "5s", "100ms").Should(Succeed())
@@ -386,7 +386,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		// the in-namespace tide-reporter materializes this from out.json; the Manager
 		// only observes it via the Owns(&Phase{}) watch.
 		tru := true
-		childPhase := &tideprojectv1alpha1.Phase{
+		childPhase := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "child-phase-pending",
 				Namespace: "default",
@@ -399,10 +399,10 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 					BlockOwnerDeletion: &tru,
 				}},
 			},
-			Spec: tideprojectv1alpha1.PhaseSpec{MilestoneRef: autoMilestoneName},
+			Spec: tideprojectv1alpha2.PhaseSpec{MilestoneRef: autoMilestoneName},
 		}
 		Expect(k8sClient.Create(ctx, childPhase)).To(Succeed())
-		waitForCacheSync("child-phase-pending", "default", &tideprojectv1alpha1.Phase{})
+		waitForCacheSync("child-phase-pending", "default", &tideprojectv1alpha2.Phase{})
 
 		// With a materialized-but-pending child Phase, handleJobCompletion must
 		// requeue rather than patch the Milestone Succeeded (debug #9 guard).
@@ -413,12 +413,12 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Milestone has NOT reached Succeeded while the child Phase is pending.
-		var after tideprojectv1alpha1.Milestone
+		var after tideprojectv1alpha2.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &after)).To(Succeed())
 		Expect(after.Status.Phase).NotTo(Equal("Succeeded"), "Milestone must not Succeed while child Phase pending")
 
 		// Patch the child Phase to Succeeded, then reconcile: Milestone Succeeds.
-		var child tideprojectv1alpha1.Phase
+		var child tideprojectv1alpha2.Phase
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "child-phase-pending", Namespace: "default"}, &child)).To(Succeed())
 		patch := client.MergeFrom(child.DeepCopy())
 		child.Status.Phase = "Succeeded"
@@ -427,7 +427,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 3)).To(Succeed())
 
 		Eventually(func(g Gomega) {
-			var after tideprojectv1alpha1.Milestone
+			var after tideprojectv1alpha2.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, &after)).To(Succeed())
 			g.Expect(after.Status.Phase).To(Equal("Succeeded"))
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
@@ -443,28 +443,28 @@ var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)"
 		const msName = "backfill-ms-01"
 
 		// Create parent Project (no special labels needed — the project name is enough).
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(projName, "default", &tideprojectv1alpha2.Project{})
 
 		// Create Milestone WITHOUT the tideproject.k8s/project label (simulating a
 		// pre-Phase-15 / run-1 CR created by the reporter before D-01 was in place).
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      msName,
 				Namespace: "default",
 				// Labels intentionally absent — this is the pre-Phase-15 shape.
 			},
-			Spec: tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: projName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
 
 		r := &MilestoneReconciler{
 			Client: mgrClient,
@@ -476,7 +476,7 @@ var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)"
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Assert the project label was backfilled.
-		var after tideprojectv1alpha1.Milestone
+		var after tideprojectv1alpha2.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
 		Expect(after.Labels["tideproject.k8s/project"]).To(Equal(projName),
 			"backfill must stamp tideproject.k8s/project from the OwnerRef chain")
@@ -484,7 +484,7 @@ var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)"
 		// Idempotency: record ResourceVersion, reconcile again, verify unchanged.
 		rvBefore := after.ResourceVersion
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 2)).To(Succeed())
-		var after2 tideprojectv1alpha1.Milestone
+		var after2 tideprojectv1alpha2.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after2)).To(Succeed())
 		Expect(after2.ResourceVersion).To(Equal(rvBefore),
 			"second reconcile must not patch the object (idempotent backfill)")
@@ -493,7 +493,7 @@ var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)"
 		after2.Finalizers = nil
 		_ = k8sClient.Update(ctx, &after2)
 		_ = k8sClient.Delete(ctx, &after2)
-		proj2 := &tideprojectv1alpha1.Project{}
+		proj2 := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, proj2); err == nil {
 			proj2.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj2)
@@ -520,7 +520,7 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 		const msName = "reject-ms-d02"
 
 		// Create Project with the reject annotation (simulates `tide reject`).
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: "default",
@@ -528,33 +528,33 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 					gates.AnnotationReject: "operator halt ms test",
 				},
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(projName, "default", &tideprojectv1alpha2.Project{})
 
 		// Wait until the reject annotation is visible via the manager's cached client.
 		Eventually(func() string {
-			var p tideprojectv1alpha1.Project
+			var p tideprojectv1alpha2.Project
 			if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
 				return ""
 			}
 			return p.Annotations[gates.AnnotationReject]
 		}, 5*time.Second, 50*time.Millisecond).Should(Equal("operator halt ms test"))
 
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
@@ -576,7 +576,7 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 		// before planner Job is created) — handle both paths.
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
-		var got tideprojectv1alpha1.Milestone
+		var got tideprojectv1alpha2.Milestone
 		Eventually(func() error {
 			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
@@ -592,11 +592,11 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 
 		// Load-bearing assertion (a): Milestone must be parked with RejectedByUser condition.
 		Eventually(func(g Gomega) {
-			var after tideprojectv1alpha1.Milestone
+			var after tideprojectv1alpha2.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
-			c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused)
+			c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 			g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked Rejected")
-			g.Expect(c.Reason).To(Equal(tideprojectv1alpha1.ReasonRejectedByUser),
+			g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonRejectedByUser),
 				"Milestone must be parked with RejectedByUser reason (D-05)")
 			g.Expect(c.Message).To(ContainSubstring("operator halt ms test"),
 				"reject reason must be propagated to the condition message")
@@ -604,7 +604,7 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 
 		// Load-bearing assertion (b): NO tide-reporter-<milestone-uid> Job must exist
 		// (assert NONE created, not that one was deleted — Pitfall 3 / T-17-04 / T-17-05).
-		var got2 tideprojectv1alpha1.Milestone
+		var got2 tideprojectv1alpha2.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got2)).To(Succeed())
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", got2.UID)
 		var reporterJob batchv1.Job
@@ -616,13 +616,13 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 
 		// Cleanup.
 		DeferCleanup(func() {
-			msObj := &tideprojectv1alpha1.Milestone{}
+			msObj := &tideprojectv1alpha2.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, msObj); err == nil {
 				msObj.Finalizers = nil
 				_ = k8sClient.Update(ctx, msObj)
 				_ = k8sClient.Delete(ctx, msObj)
 			}
-			projObj := &tideprojectv1alpha1.Project{}
+			projObj := &tideprojectv1alpha2.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, projObj); err == nil {
 				projObj.Finalizers = nil
 				_ = k8sClient.Update(ctx, projObj)

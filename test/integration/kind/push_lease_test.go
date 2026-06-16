@@ -47,7 +47,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), func() {
@@ -128,11 +128,11 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 
 		By("Eventually Project.Status.Phase=PushLeaseFailed + LeaseFailureCount==1")
 		Eventually(func(g Gomega) {
-			var p tideprojectv1alpha1.Project
+			var p tideprojectv1alpha2.Project
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name: "push-lease", Namespace: pushLeaseNS,
 			}, &p)).To(Succeed())
-			g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha1.PhasePushLeaseFailed),
+			g.Expect(p.Status.Phase).To(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
 				"Status.Phase must be PushLeaseFailed after push Job failure")
 			g.Expect(p.Status.Git.LeaseFailureCount).To(BeNumerically(">=", int32(1)),
 				"LeaseFailureCount must be incremented on push Job failure")
@@ -151,28 +151,28 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 		waitForPushJob(pushLeaseNS, jobName, 90*time.Second)
 		patchJobToFailed(pushLeaseNS, jobName)
 		Eventually(func() string {
-			var p tideprojectv1alpha1.Project
+			var p tideprojectv1alpha2.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name: "push-lease", Namespace: pushLeaseNS,
 			}, &p); err != nil {
 				return ""
 			}
 			return p.Status.Phase
-		}, 90*time.Second, 2*time.Second).Should(Equal(tideprojectv1alpha1.PhasePushLeaseFailed))
+		}, 90*time.Second, 2*time.Second).Should(Equal(tideprojectv1alpha2.PhasePushLeaseFailed))
 
 		By("Annotate Project with tideproject.k8s/bypass-push-lease=true")
 		annotateProjectBypass("push-lease", pushLeaseNS)
 
 		By("Eventually Project.Status.Phase != PushLeaseFailed (annotation consumed, phase cleared)")
 		Eventually(func() string {
-			var p tideprojectv1alpha1.Project
+			var p tideprojectv1alpha2.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name: "push-lease", Namespace: pushLeaseNS,
 			}, &p); err != nil {
 				return ""
 			}
 			return p.Status.Phase
-		}, 90*time.Second, 2*time.Second).ShouldNot(Equal(tideprojectv1alpha1.PhasePushLeaseFailed),
+		}, 90*time.Second, 2*time.Second).ShouldNot(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
 			"bypass-push-lease=true must clear the PushLeaseFailed phase")
 	})
 })
@@ -180,8 +180,8 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 // ---- helpers (push_lease_test.go-local) ----
 
 // waitForPushProject blocks until the Project exists in K8s and returns it.
-func waitForPushProject(name, ns string, timeout time.Duration) *tideprojectv1alpha1.Project {
-	var p tideprojectv1alpha1.Project
+func waitForPushProject(name, ns string, timeout time.Duration) *tideprojectv1alpha2.Project {
+	var p tideprojectv1alpha2.Project
 	Eventually(func() error {
 		return k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, &p)
 	}, timeout, time.Second).Should(Succeed(),
@@ -196,13 +196,13 @@ func waitForPushProject(name, ns string, timeout time.Duration) *tideprojectv1al
 // Uses kubectl patch with type=merge for the /status subresource because the
 // k8sClient.Status().Update path is racy when the controller is concurrently
 // patching status.
-func forcePushReady(p *tideprojectv1alpha1.Project, lastPushedSHA string) {
+func forcePushReady(p *tideprojectv1alpha2.Project, lastPushedSHA string) {
 	// Seed BranchName via Status patch (matches the reconciler's expected
 	// "tide/run-<name>-<unix>" format so the lease grep finds it).
 	branch := fmt.Sprintf("tide/run-%s-%d", p.Name, time.Now().Unix())
 	statusBody := map[string]any{
 		"status": map[string]any{
-			"phase": tideprojectv1alpha1.PhaseComplete,
+			"phase": tideprojectv1alpha2.PhaseComplete,
 			"git": map[string]any{
 				"branchName":    branch,
 				"lastPushedSHA": lastPushedSHA,

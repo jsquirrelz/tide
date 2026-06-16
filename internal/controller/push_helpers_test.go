@@ -20,17 +20,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // fixtureProject returns a hand-constructed Project for buildPushJob /
 // buildCloneJob testing. Pure unit-level fixture — no envtest, no client,
 // no controller-runtime machinery; the helpers are pure functions that
 // only read fields off the *Project struct.
-func fixtureProject() *tideprojectv1alpha1.Project {
-	return &tideprojectv1alpha1.Project{
+func fixtureProject() *tideprojectv1alpha2.Project {
+	return &tideprojectv1alpha2.Project{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: tideprojectv1alpha1.GroupVersion.String(),
+			APIVersion: tideprojectv1alpha2.GroupVersion.String(),
 			Kind:       "Project",
 		},
 		ObjectMeta: metav1.ObjectMeta{
@@ -38,9 +38,9 @@ func fixtureProject() *tideprojectv1alpha1.Project {
 			Namespace: "test-ns",
 			Name:      "demo-project",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/demo.git",
-			Git: &tideprojectv1alpha1.GitConfig{
+			Git: &tideprojectv1alpha2.GitConfig{
 				RepoURL:        "https://github.com/example/demo.git",
 				CredsSecretRef: "demo-git-creds",
 			},
@@ -53,7 +53,7 @@ func fixtureProject() *tideprojectv1alpha1.Project {
 func schemeForTest(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tideprojectv1alpha1.AddToScheme(s); err != nil {
+	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	return s

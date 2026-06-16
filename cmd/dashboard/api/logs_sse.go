@@ -55,7 +55,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // defaultIdleTimeout bounds an attached log stream. 5 minutes is the
@@ -272,7 +272,7 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // an empty string + nil error when no matching pod exists (caller emits
 // pod-gone). Surfaces other errors directly.
 func (h *LogsHandler) resolvePodName(ctx context.Context, ns, taskName string) (string, error) {
-	var task tidev1alpha1.Task
+	var task tidev1alpha2.Task
 	if err := h.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &task); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", nil

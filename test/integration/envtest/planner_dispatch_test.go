@@ -44,7 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/pool"
@@ -56,14 +56,14 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 	ctx := context.Background()
 
 	BeforeEach(func() {
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: pdProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/pd-test.git",
-				Subagent: tideprojectv1alpha1.SubagentConfig{
+				Subagent: tideprojectv1alpha2.SubagentConfig{
 					Model: "claude-opus-4-7",
 				},
-				Git: &tideprojectv1alpha1.GitConfig{
+				Git: &tideprojectv1alpha2.GitConfig{
 					RepoURL:        "https://github.com/example/pd-test.git",
 					CredsSecretRef: "pd-test-creds",
 				},
@@ -75,17 +75,17 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitITCacheSync(pdProjectName, &tideprojectv1alpha1.Project{})
+		waitITCacheSync(pdProjectName, &tideprojectv1alpha2.Project{})
 	})
 
 	AfterEach(func() {
-		ms := &tideprojectv1alpha1.Milestone{}
+		ms := &tideprojectv1alpha2.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: pdMilestoneName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
 			_ = k8sClient.Delete(ctx, ms)
 		}
-		proj := &tideprojectv1alpha1.Project{}
+		proj := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: pdProjectName, Namespace: "default"}, proj); err == nil {
 			proj.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj)
@@ -101,12 +101,12 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 
 	Describe("Milestone planner Job has full dispatch contract", func() {
 		It("creates a planner Job with PVC mount, credproxy sidecar, signed-token env, and correct labels", func() {
-			ms := &tideprojectv1alpha1.Milestone{
+			ms := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: pdMilestoneName, Namespace: "default"},
-				Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: pdProjectName},
+				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: pdProjectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitITCacheSync(pdMilestoneName, &tideprojectv1alpha1.Milestone{})
+			waitITCacheSync(pdMilestoneName, &tideprojectv1alpha2.Milestone{})
 
 			// Drive reconciliation with an explicit reconciler instance
 			// (not the manager's cached reconciler) so field injection is precise.
@@ -129,7 +129,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 			}
 
 			// Fetch the Milestone UID — needed for deterministic Job name.
-			var got tideprojectv1alpha1.Milestone
+			var got tideprojectv1alpha2.Milestone
 			Eventually(func() error {
 				return mgrClient.Get(ctx, types.NamespacedName{Name: pdMilestoneName, Namespace: "default"}, &got)
 			}, "5s", "100ms").Should(Succeed())
@@ -161,7 +161,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 			// --- Milestone Status assertion ---
 			By("asserting Milestone.Status.Phase=Running after dispatch")
 			Eventually(func(g Gomega) {
-				var msAfter tideprojectv1alpha1.Milestone
+				var msAfter tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: pdMilestoneName, Namespace: "default"}, &msAfter)).To(Succeed())
 				g.Expect(msAfter.Status.Phase).To(Equal("Running"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())

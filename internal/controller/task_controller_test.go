@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -134,18 +134,18 @@ func waitForCacheSync(name, namespace string, obj client.Object) {
 // Tests bypass PlanReconciler, so we stamp the production label here. The
 // stable lookup makes the dispatch suite deterministic regardless of Ginkgo's
 // randomized spec order.
-func makeTask(name, planRef string, dependsOn []string, projectName ...string) *tideprojectv1alpha1.Task {
+func makeTask(name, planRef string, dependsOn []string, projectName ...string) *tideprojectv1alpha2.Task {
 	labels := map[string]string{}
 	if len(projectName) > 0 && projectName[0] != "" {
 		labels["tideproject.k8s/project"] = projectName[0]
 	}
-	t := &tideprojectv1alpha1.Task{
+	t := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    labels,
 		},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             planRef,
 			FilesTouched:        []string{"src/main.go"},
 			DeclaredOutputPaths: []string{"artifacts/out.txt"},
@@ -155,36 +155,36 @@ func makeTask(name, planRef string, dependsOn []string, projectName ...string) *
 		},
 	}
 	Expect(k8sClient.Create(context.Background(), t)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha1.Task{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
 	return t
 }
 
 // makeProject creates a Project in the default namespace.
-func makeProjectForTask(name string) *tideprojectv1alpha1.Project {
-	p := &tideprojectv1alpha1.Project{
+func makeProjectForTask(name string) *tideprojectv1alpha2.Project {
+	p := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/tide.git",
 		},
 	}
 	Expect(k8sClient.Create(context.Background(), p)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha1.Project{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
 	return p
 }
 
 // cleanupTask deletes a Task object by name.
 func cleanupTask(name string) {
-	task := &tideprojectv1alpha1.Task{}
+	task := &tideprojectv1alpha2.Task{}
 	_ = k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, task)
 	_ = k8sClient.Delete(context.Background(), task)
 }
 
 // cleanupProject deletes a Project object by name.
 func cleanupProject(name string) {
-	p := &tideprojectv1alpha1.Project{}
+	p := &tideprojectv1alpha2.Project{}
 	_ = k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, p)
 	_ = k8sClient.Delete(context.Background(), p)
 }
@@ -192,14 +192,14 @@ func cleanupProject(name string) {
 // markTaskSucceeded patches a Task's status Phase to Succeeded and waits for
 // the manager cache to reflect the update.
 func markTaskSucceeded(name string) {
-	task := &tideprojectv1alpha1.Task{}
+	task := &tideprojectv1alpha2.Task{}
 	Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, task)).To(Succeed())
 	patch := client.MergeFrom(task.DeepCopy())
 	task.Status.Phase = "Succeeded"
 	Expect(k8sClient.Status().Patch(context.Background(), task, patch)).To(Succeed())
 	// Wait for the cache to reflect the updated phase.
 	Eventually(func() string {
-		var t tideprojectv1alpha1.Task
+		var t tideprojectv1alpha2.Task
 		if err := mgrClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &t); err != nil {
 			return ""
 		}
@@ -233,7 +233,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Assert Job exists.
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 			jobName := podjob.JobName(task.UID, task.Status.Attempt)
 			var job batchv1.Job
@@ -272,12 +272,12 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err := reconcileN(r, nameB, 4)
 			Expect(err).NotTo(HaveOccurred())
 
-			var taskBObj tideprojectv1alpha1.Task
+			var taskBObj tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, nameB, &taskBObj)).To(Succeed())
 			Expect(taskBObj.Status.Phase).To(Equal("Pending"))
 
 			// Assert no Job for B.
-			var taskAObj tideprojectv1alpha1.Task
+			var taskAObj tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, nameA, &taskAObj)).To(Succeed())
 			jobName := podjob.JobName(taskBObj.UID, 1)
 			var job batchv1.Job
@@ -319,7 +319,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err := reconcileN(r, nameB, 3)
 			Expect(err).NotTo(HaveOccurred())
 
-			var taskBObj tideprojectv1alpha1.Task
+			var taskBObj tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, nameB, &taskBObj)).To(Succeed())
 			Expect(taskBObj.Status.Phase).To(Equal("Running"))
 		})
@@ -351,7 +351,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err = reconcileN(r, name, 2)
 			Expect(err).NotTo(HaveOccurred())
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 			// Phase should remain Running (not error out).
 			Expect(task.Status.Phase).To(Or(Equal("Running"), Equal("Succeeded"), Equal("Failed")))
@@ -377,15 +377,15 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			waitForCacheSync(secretName, "default", &corev1.Secret{})
 
 			// Create Project with ProviderSecretRef pointing to the secret.
-			p := &tideprojectv1alpha1.Project{
+			p := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/ratelimit.git",
 					ProviderSecretRef: secretName,
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 
 			makeTask(taskA, planRef, nil, projectName)
 		})
@@ -460,15 +460,15 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			waitForCacheSync(secretName, "default", &corev1.Secret{})
 
-			p := &tideprojectv1alpha1.Project{
+			p := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/storm.git",
 					ProviderSecretRef: secretName,
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 
 			for i := range taskCount {
 				makeTask(fmt.Sprintf("task-storm-%d", i), planRef, nil, projectName)
@@ -549,7 +549,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			dispatched := false
 			for i := range taskCount {
 				name := types.NamespacedName{Name: fmt.Sprintf("task-storm-%d", i), Namespace: "default"}
-				var t tideprojectv1alpha1.Task
+				var t tideprojectv1alpha2.Task
 				if err := k8sClient.Get(ctx, name, &t); err != nil {
 					continue
 				}
@@ -582,14 +582,14 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			makeProjectForTask(projectName)
 			makeTask(taskA, planRef, nil, projectName)
 			// Set Project.Status.Phase=BudgetExceeded.
-			var p tideprojectv1alpha1.Project
+			var p tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
 			patch := client.MergeFrom(p.DeepCopy())
 			p.Status.Phase = "BudgetExceeded"
 			Expect(k8sClient.Status().Patch(ctx, &p, patch)).To(Succeed())
 			// Wait for cache to reflect BudgetExceeded.
 			Eventually(func() string {
-				var updated tideprojectv1alpha1.Project
+				var updated tideprojectv1alpha2.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &updated); err != nil {
 					return ""
 				}
@@ -608,7 +608,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err := reconcileN(r, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 			Expect(task.Status.Phase).NotTo(Equal("Running"),
 				"task should not be dispatched when project budget exceeded")
@@ -629,7 +629,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 		const projectName = "proj-bypass"
 
 		BeforeEach(func() {
-			p := &tideprojectv1alpha1.Project{
+			p := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: "default",
@@ -637,21 +637,21 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/bypass.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 			// Set Phase=BudgetExceeded.
-			var pp tideprojectv1alpha1.Project
+			var pp tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &pp)).To(Succeed())
 			patch := client.MergeFrom(pp.DeepCopy())
 			pp.Status.Phase = "BudgetExceeded"
 			Expect(k8sClient.Status().Patch(ctx, &pp, patch)).To(Succeed())
 			// Wait for cache to reflect BudgetExceeded.
 			Eventually(func() string {
-				var updated tideprojectv1alpha1.Project
+				var updated tideprojectv1alpha2.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &updated); err != nil {
 					return ""
 				}
@@ -672,7 +672,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err := reconcileN(r, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 			Expect(task.Status.Phase).To(Equal("Running"),
 				"task should be dispatched when bypass annotation is set")
@@ -701,7 +701,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, err := reconcileN(r, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 			firstAttempt := task.Status.Attempt
 
@@ -726,15 +726,15 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 		const projectName = "proj-maxatt"
 
 		BeforeEach(func() {
-			p := &tideprojectv1alpha1.Project{
+			p := &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:         "https://github.com/example/maxatt.git",
 					MaxAttemptsPerTask: 1,
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha1.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
 			makeTask(taskA, planRef, nil, projectName)
 		})
 		AfterEach(func() {
@@ -750,7 +750,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, _ = reconcileN(r, name, 4)
 
 			// Simulate: pre-create a Job for attempt-1 to make nextAttempt return 2.
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 
 			// Create a pre-existing job labeled attempt=1.
@@ -789,7 +789,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// (running-Job branch), and never reaches the max-attempts gate.
 			// Matches the cache-sync pattern in markTaskSucceeded.
 			Eventually(func() bool {
-				var t tideprojectv1alpha1.Task
+				var t tideprojectv1alpha2.Task
 				if err := mgrClient.Get(context.Background(), name, &t); err != nil {
 					return false
 				}
@@ -828,7 +828,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// Drive through dispatch to get task UID.
 			_, _ = reconcileN(r, name, 4)
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 
 			// Pre-populate EnvReader with a successful envelope.
@@ -888,7 +888,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Check Project.Status.Budget was updated.
-			var project tideprojectv1alpha1.Project
+			var project tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &project)).To(Succeed())
 			// Budget may have been updated; check that TokensSpent ≥ 0.
 			Expect(project.Status.Budget.TokensSpent).To(BeNumerically(">=", 0))
@@ -924,7 +924,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// Drive through dispatch.
 			_, _ = reconcileN(r, name, 4)
 
-			var task tideprojectv1alpha1.Task
+			var task tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
 
 			// Set up a clean envelope (exitCode=0, result=success).
@@ -1002,20 +1002,20 @@ func TestBuildEnvelopeInExecutorIgnoresSharedContext(t *testing.T) {
 		},
 	}
 
-	task := &tideprojectv1alpha1.Task{
+	task := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:  types.UID("task-uid-executor-sc-test"),
 			Name: "task-sc-test",
 		},
-		Spec: tideprojectv1alpha1.TaskSpec{
+		Spec: tideprojectv1alpha2.TaskSpec{
 			PromptPath:    "children/task-01.json",
 			SharedContext: "this blob must not appear in the executor envelope (CACHE-02)",
 		},
 	}
-	project := &tideprojectv1alpha1.Project{
+	project := &tideprojectv1alpha2.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
-		Status: tideprojectv1alpha1.ProjectStatus{
-			Git: tideprojectv1alpha1.GitStatus{BranchName: "worktree-agent-001"},
+		Status: tideprojectv1alpha2.ProjectStatus{
+			Git: tideprojectv1alpha2.GitStatus{BranchName: "worktree-agent-001"},
 		},
 	}
 

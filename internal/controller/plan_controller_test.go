@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // alphaThroughThetaFixture creates the α…θ Tasks matching pkg/dag/kahn_test.go:
@@ -60,12 +60,12 @@ func alphaThroughThetaFixture(planRef string) []string {
 	names := make([]string, 0, len(tasks))
 	for _, t := range tasks {
 		fullName := fmt.Sprintf("%s-%s", planRef, t.name)
-		task := &tideprojectv1alpha1.Task{
+		task := &tideprojectv1alpha2.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fullName,
 				Namespace: "default",
 			},
-			Spec: tideprojectv1alpha1.TaskSpec{
+			Spec: tideprojectv1alpha2.TaskSpec{
 				PlanRef:             planRef,
 				FilesTouched:        []string{fmt.Sprintf("src/%s.go", t.name)},
 				DeclaredOutputPaths: []string{fmt.Sprintf("artifacts/%s.txt", t.name)},
@@ -81,7 +81,7 @@ func alphaThroughThetaFixture(planRef string) []string {
 		Eventually(func() error {
 			return mgrClient.Get(context.Background(),
 				types.NamespacedName{Name: taskNameCopy, Namespace: "default"},
-				&tideprojectv1alpha1.Task{})
+				&tideprojectv1alpha2.Task{})
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 		names = append(names, fullName)
 	}
@@ -91,7 +91,7 @@ func alphaThroughThetaFixture(planRef string) []string {
 // cleanupPlanFixture deletes a Plan and all its Tasks + Waves.
 func cleanupPlanFixture(planName string, taskNames []string) {
 	for _, name := range taskNames {
-		t := &tideprojectv1alpha1.Task{}
+		t := &tideprojectv1alpha2.Task{}
 		if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, t); err == nil {
 			_ = k8sClient.Delete(context.Background(), t)
 		}
@@ -99,13 +99,13 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 	// Delete Waves with our plan UID prefix. In v1alpha2 Waves are global-scope
 	// (no Spec.PlanRef); the per-plan stub names them tide-wave-<plan.UID>-<i>,
 	// so filter on that name prefix instead.
-	var planForUID tideprojectv1alpha1.Plan
+	var planForUID tideprojectv1alpha2.Plan
 	wavePrefix := ""
 	if err := k8sClient.Get(context.Background(),
 		types.NamespacedName{Name: planName, Namespace: "default"}, &planForUID); err == nil {
 		wavePrefix = fmt.Sprintf("tide-wave-%s-", planForUID.UID)
 	}
-	var waveList tideprojectv1alpha1.WaveList
+	var waveList tideprojectv1alpha2.WaveList
 	_ = k8sClient.List(context.Background(), &waveList, client.InNamespace("default"))
 	for _, w := range waveList.Items {
 		if wavePrefix != "" && strings.HasPrefix(w.Name, wavePrefix) {
@@ -119,7 +119,7 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 			}
 		}
 	}
-	p := &tideprojectv1alpha1.Plan{}
+	p := &tideprojectv1alpha2.Plan{}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
 		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Dispatcher: &stubDispatcher{}, SigningKey: testSigningKey, CredproxyImage: testCredproxyImage}
 		_ = k8sClient.Delete(context.Background(), p)
@@ -174,13 +174,13 @@ func reconcilePlanN(r *PlanReconciler, name types.NamespacedName, n int) (ctrl.R
 
 // makePlan creates a Plan in the default namespace with the given ValidationState.
 // Waits for the manager cache to reflect the Plan (and its status patch) before returning.
-func makePlan(name, phaseRef, validationState string) *tideprojectv1alpha1.Plan {
-	p := &tideprojectv1alpha1.Plan{
+func makePlan(name, phaseRef, validationState string) *tideprojectv1alpha2.Plan {
+	p := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{
+		Spec: tideprojectv1alpha2.PlanSpec{
 			PhaseRef: phaseRef,
 		},
 	}
@@ -189,18 +189,18 @@ func makePlan(name, phaseRef, validationState string) *tideprojectv1alpha1.Plan 
 	Eventually(func() error {
 		return mgrClient.Get(context.Background(),
 			types.NamespacedName{Name: name, Namespace: "default"},
-			&tideprojectv1alpha1.Plan{})
+			&tideprojectv1alpha2.Plan{})
 	}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 	if validationState != "" {
-		var pp tideprojectv1alpha1.Plan
+		var pp tideprojectv1alpha2.Plan
 		Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &pp)).To(Succeed())
 		patch := client.MergeFrom(pp.DeepCopy())
 		pp.Status.ValidationState = validationState
 		Expect(k8sClient.Status().Patch(context.Background(), &pp, patch)).To(Succeed())
 		// Wait for cache to reflect the ValidationState.
 		Eventually(func() string {
-			var updated tideprojectv1alpha1.Plan
+			var updated tideprojectv1alpha2.Plan
 			if err := mgrClient.Get(context.Background(),
 				types.NamespacedName{Name: name, Namespace: "default"}, &updated); err != nil {
 				return ""
@@ -235,10 +235,10 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			// v1alpha2 Waves carry no Spec.PlanRef; assert that no Wave was
 			// materialized for THIS Plan by checking the per-plan stub name
 			// prefix tide-wave-<plan.UID>-.
-			var planObj tideprojectv1alpha1.Plan
+			var planObj tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, planNS, &planObj)).To(Succeed())
 			wavePrefix := fmt.Sprintf("tide-wave-%s-", planObj.UID)
-			var waveList tideprojectv1alpha1.WaveList
+			var waveList tideprojectv1alpha2.WaveList
 			Expect(k8sClient.List(ctx, &waveList,
 				client.InNamespace("default"),
 			)).To(Succeed())
@@ -257,7 +257,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 		BeforeEach(func() {
 			makePlan(planName, phaseRef, "Validated")
-			var p tideprojectv1alpha1.Plan
+			var p tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &p)).To(Succeed())
 			planUID = p.UID
 			taskNames = alphaThroughThetaFixture(planName)
@@ -277,7 +277,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			// Expect 3 Waves: tide-wave-{UID}-0, -1, -2.
 			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
-				var wave tideprojectv1alpha1.Wave
+				var wave tideprojectv1alpha2.Wave
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed(),
 					"expected wave %s to exist", waveName)
 				// v1alpha2 Waves are global-scope: ProjectRef replaces PlanRef.
@@ -299,7 +299,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 		BeforeEach(func() {
 			makePlan(planName, phaseRef, "Validated")
-			var p tideprojectv1alpha1.Plan
+			var p tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &p)).To(Succeed())
 			planUID = p.UID
 			taskNames = alphaThroughThetaFixture(planName)
@@ -321,7 +321,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			Expect(err).NotTo(HaveOccurred())
 
 			// Wave count should still be exactly 3.
-			var waveList tideprojectv1alpha1.WaveList
+			var waveList tideprojectv1alpha2.WaveList
 			Expect(k8sClient.List(ctx, &waveList, client.InNamespace("default"))).To(Succeed())
 			planWaves := 0
 			wavePrefix := fmt.Sprintf("tide-wave-%s-", planUID)
@@ -349,7 +349,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			// was removed). In production, PlanReconciler gets this label via owner-ref
 			// chain wiring; in unit tests we stamp it directly.
 			plan := makePlan(planName, phaseRef, "Validated")
-			var pp tideprojectv1alpha1.Plan
+			var pp tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(context.Background(), types.NamespacedName{Name: plan.Name, Namespace: "default"}, &pp)).To(Succeed())
 			if pp.Labels == nil {
 				pp.Labels = map[string]string{}
@@ -371,7 +371,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			Expect(err).NotTo(HaveOccurred())
 
 			for _, name := range taskNames {
-				var task tideprojectv1alpha1.Task
+				var task tideprojectv1alpha2.Task
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &task)).To(Succeed())
 				Expect(task.Labels).To(HaveKey("tideproject.k8s/wave-index"),
 					"task %s missing wave-index label", name)
@@ -387,7 +387,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 		BeforeEach(func() {
 			makePlan(planName, phaseRef, "Validated")
-			var p tideprojectv1alpha1.Plan
+			var p tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &p)).To(Succeed())
 			planUID = p.UID
 			taskNames = alphaThroughThetaFixture(planName)
@@ -405,7 +405,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 			for i := range 3 {
 				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
-				var wave tideprojectv1alpha1.Wave
+				var wave tideprojectv1alpha2.Wave
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed())
 
 				Expect(wave.OwnerReferences).NotTo(BeEmpty(),
@@ -433,14 +433,14 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 
 		BeforeEach(func() {
 			makePlan(planName, phaseRef, "Validated")
-			var p tideprojectv1alpha1.Plan
+			var p tideprojectv1alpha2.Plan
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &p)).To(Succeed())
 			planUID = p.UID
 			// Start with just 2 tasks (no deps → 1 wave).
 			for _, name := range []string{"persist03-a", "persist03-b"} {
-				t := &tideprojectv1alpha1.Task{
+				t := &tideprojectv1alpha2.Task{
 					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-					Spec: tideprojectv1alpha1.TaskSpec{
+					Spec: tideprojectv1alpha2.TaskSpec{
 						PlanRef:             planName,
 						FilesTouched:        []string{"src/main.go"},
 						DeclaredOutputPaths: []string{"artifacts/out.txt"},
@@ -463,7 +463,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			for _, tn := range []string{"persist03-a", "persist03-b"} {
 				tnCopy := tn
 				Eventually(func() error {
-					return mgrClient.Get(ctx, types.NamespacedName{Name: tnCopy, Namespace: "default"}, &tideprojectv1alpha1.Task{})
+					return mgrClient.Get(ctx, types.NamespacedName{Name: tnCopy, Namespace: "default"}, &tideprojectv1alpha2.Task{})
 				}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 			}
 
@@ -472,14 +472,14 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			Expect(err).NotTo(HaveOccurred())
 
 			wave0Name := fmt.Sprintf("tide-wave-%s-0", planUID)
-			var wave0 tideprojectv1alpha1.Wave
+			var wave0 tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: wave0Name, Namespace: "default"}, &wave0)).To(Succeed())
 			Expect(wave0.Spec.WaveIndex).To(Equal(0))
 
 			// Add a new task that depends on persist03-a → forces a second wave.
-			newTask := &tideprojectv1alpha1.Task{
+			newTask := &tideprojectv1alpha2.Task{
 				ObjectMeta: metav1.ObjectMeta{Name: "persist03-c", Namespace: "default"},
-				Spec: tideprojectv1alpha1.TaskSpec{
+				Spec: tideprojectv1alpha2.TaskSpec{
 					PlanRef:             planName,
 					FilesTouched:        []string{"src/c.go"},
 					DeclaredOutputPaths: []string{"artifacts/c.txt"},
@@ -491,7 +491,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			taskNames = append(taskNames, "persist03-c")
 			// Wait for the new task to appear in the cache before re-reconciling.
 			Eventually(func() error {
-				return mgrClient.Get(ctx, types.NamespacedName{Name: "persist03-c", Namespace: "default"}, &tideprojectv1alpha1.Task{})
+				return mgrClient.Get(ctx, types.NamespacedName{Name: "persist03-c", Namespace: "default"}, &tideprojectv1alpha2.Task{})
 			}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 			// Second reconcile: should re-derive waves and create wave 1.
@@ -499,7 +499,7 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			Expect(err).NotTo(HaveOccurred())
 
 			wave1Name := fmt.Sprintf("tide-wave-%s-1", planUID)
-			var wave1 tideprojectv1alpha1.Wave
+			var wave1 tideprojectv1alpha2.Wave
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: wave1Name, Namespace: "default"}, &wave1)).To(Succeed(),
 				"expected wave-1 to be created after adding a dependent Task (PERSIST-03 assertion)")
 		})
@@ -525,43 +525,43 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 		const planName = "backfill-plan-pl-01"
 
 		// Create Project.
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(projName, "default", &tideprojectv1alpha2.Project{})
 
 		// Create Milestone (with ProjectRef so the chain is traversable).
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
 
 		// Create Phase (with MilestoneRef so Plan→Phase→Milestone→Project is traversable).
-		ph := &tideprojectv1alpha1.Phase{
+		ph := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+		waitForCacheSync(phName, "default", &tideprojectv1alpha2.Phase{})
 
 		// Create Plan WITHOUT the tideproject.k8s/project label (pre-v1.0.1 shape).
-		pl := &tideprojectv1alpha1.Plan{
+		pl := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: "default",
 				// Labels intentionally absent.
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+			Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: phName},
 		}
 		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
-		waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+		waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 		r := &PlanReconciler{
 			Client: mgrClient,
@@ -573,7 +573,7 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
 
 		// Assert the project label was backfilled.
-		var after tideprojectv1alpha1.Plan
+		var after tideprojectv1alpha2.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after)).To(Succeed())
 		Expect(after.Labels["tideproject.k8s/project"]).To(Equal(projName),
 			"backfill must stamp tideproject.k8s/project via Plan→Phase→Milestone→Project chain")
@@ -581,7 +581,7 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 		// Idempotency: record ResourceVersion, reconcile again, verify unchanged.
 		rvBefore := after.ResourceVersion
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 2)).To(Succeed())
-		var after2 tideprojectv1alpha1.Plan
+		var after2 tideprojectv1alpha2.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &after2)).To(Succeed())
 		Expect(after2.ResourceVersion).To(Equal(rvBefore),
 			"second reconcile must not patch the object (idempotent backfill)")
@@ -590,19 +590,19 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 		after2.Finalizers = nil
 		_ = k8sClient.Update(ctx, &after2)
 		_ = k8sClient.Delete(ctx, &after2)
-		ph2 := &tideprojectv1alpha1.Phase{}
+		ph2 := &tideprojectv1alpha2.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, ph2); err == nil {
 			ph2.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph2)
 			_ = k8sClient.Delete(ctx, ph2)
 		}
-		ms2 := &tideprojectv1alpha1.Milestone{}
+		ms2 := &tideprojectv1alpha2.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms2); err == nil {
 			ms2.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms2)
 			_ = k8sClient.Delete(ctx, ms2)
 		}
-		proj2 := &tideprojectv1alpha1.Project{}
+		proj2 := &tideprojectv1alpha2.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, proj2); err == nil {
 			proj2.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj2)
@@ -628,31 +628,31 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 		const planName = "debt04-plan-01"
 
 		// Create Project → Milestone → Phase → Plan chain so resolveProjectForPlan succeeds.
-		proj := &tideprojectv1alpha1.Project{
+		proj := &tideprojectv1alpha2.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projName, "default", &tideprojectv1alpha1.Project{})
+		waitForCacheSync(projName, "default", &tideprojectv1alpha2.Project{})
 
-		ms := &tideprojectv1alpha1.Milestone{
+		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.MilestoneSpec{ProjectRef: projName},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha1.Milestone{})
+		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
 
-		ph := &tideprojectv1alpha1.Phase{
+		ph := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
-			Spec:       tideprojectv1alpha1.PhaseSpec{MilestoneRef: msName},
+			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(phName, "default", &tideprojectv1alpha1.Phase{})
+		waitForCacheSync(phName, "default", &tideprojectv1alpha2.Phase{})
 
-		pl := &tideprojectv1alpha1.Plan{
+		pl := &tideprojectv1alpha2.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: "default",
@@ -660,13 +660,13 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 					"tideproject.k8s/project": projName,
 				},
 			},
-			Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: phName},
+			Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: phName},
 		}
 		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
-		waitForCacheSync(planName, "default", &tideprojectv1alpha1.Plan{})
+		waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
 
 		// Fetch the Plan so we have its UID.
-		var plan tideprojectv1alpha1.Plan
+		var plan tideprojectv1alpha2.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan)).To(Succeed())
 
 		// Wire an EnvReader that returns an error for this Plan's UID (simulates a
@@ -701,7 +701,7 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 		//    ConditionFailed with Reason=EnvelopeReadFailed was NOT patched to etcd.
 		//    Use Eventually so the watch stream propagates if the cache is stale.
 		Consistently(func(g Gomega) {
-			var fresh tideprojectv1alpha1.Plan
+			var fresh tideprojectv1alpha2.Plan
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.Phase).NotTo(Equal("Failed"),
 				"DEBT-04: a transient envelope-read error must NOT persist terminal Failed to etcd")
@@ -710,10 +710,10 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 		// Cleanup.
 		DeferCleanup(func() {
 			for _, obj := range []client.Object{
-				&tideprojectv1alpha1.Plan{ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"}},
-				&tideprojectv1alpha1.Phase{ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"}},
-				&tideprojectv1alpha1.Milestone{ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"}},
-				&tideprojectv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"}},
+				&tideprojectv1alpha2.Plan{ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"}},
+				&tideprojectv1alpha2.Phase{ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"}},
+				&tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"}},
+				&tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"}},
 			} {
 				_ = k8sClient.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, obj)
 				obj.SetFinalizers(nil)
@@ -743,7 +743,7 @@ var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label(
 		It("should requeue without dispatching when Phase/Milestone/Project chain is unresolvable", func() {
 			r := newPlanReconciler()
 
-			var plan tideprojectv1alpha1.Plan
+			var plan tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &plan)).To(Succeed())
 			planUID := plan.UID
 
@@ -772,12 +772,12 @@ var _ = Describe("PlanReconciler nil-Project dispatch guard (cascade-7)", Label(
 		// stamp both even though the spec is otherwise empty.
 		It("should refuse dispatch without requeueing when Spec.PhaseRef is empty", func() {
 			r := newPlanReconciler()
-			plan := tideprojectv1alpha1.Plan{
+			plan := tideprojectv1alpha2.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "plan-cascade7-perm",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.PlanSpec{PhaseRef: ""},
+				Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: ""},
 			}
 			result, handled, err := r.reconcilePlannerDispatch(ctx, &plan)
 			Expect(err).NotTo(HaveOccurred())

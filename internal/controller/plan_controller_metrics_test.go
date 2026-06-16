@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
@@ -39,7 +39,7 @@ import (
 // Uses unique label values (proj-mw1) to avoid cross-test counter interference.
 func TestMaterializeWaves_CreateOnce(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "plan-mw1",
 			Namespace: "default",
@@ -48,7 +48,7 @@ func TestMaterializeWaves_CreateOnce(t *testing.T) {
 				"tideproject.k8s/project": "proj-mw1",
 			},
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{
+		Spec: tideprojectv1alpha2.PlanSpec{
 			PhaseRef: "phase-mw1",
 		},
 	}
@@ -77,7 +77,7 @@ func TestMaterializeWaves_CreateOnce(t *testing.T) {
 // Uses unique label values (proj-mw2) to avoid cross-test counter interference.
 func TestMaterializeWaves_IdempotentReplay(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "plan-mw2",
 			Namespace: "default",
@@ -86,7 +86,7 @@ func TestMaterializeWaves_IdempotentReplay(t *testing.T) {
 				"tideproject.k8s/project": "proj-mw2",
 			},
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{
+		Spec: tideprojectv1alpha2.PlanSpec{
 			PhaseRef: "phase-mw2",
 		},
 	}
@@ -123,14 +123,14 @@ func TestMaterializeWaves_IdempotentReplay(t *testing.T) {
 // Uses unique label values (plan-mw3) to avoid cross-test counter interference.
 func TestMaterializeWaves_UnknownSentinel(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	plan := &tideprojectv1alpha1.Plan{
+	plan := &tideprojectv1alpha2.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "plan-mw3",
 			Namespace: "default",
 			UID:       types.UID("uid-mw3"),
 			// No project label, no PhaseRef — both should fall back to "unknown".
 		},
-		Spec: tideprojectv1alpha1.PlanSpec{
+		Spec: tideprojectv1alpha2.PlanSpec{
 			PhaseRef: "", // empty
 		},
 	}

@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // budgetPayload is the -o json shape for `tide describe-budget`. Becomes a
@@ -49,7 +49,7 @@ type budgetPayload struct {
 // fields. It never touches Spec.SecretRefs, ProviderSecretRef, or any
 // kubeconfig-derived token; the threat-model assertion is by-construction.
 func describeBudgetRun(ctx context.Context, c client.Client, ns, name, format string, out io.Writer) error {
-	var p tidev1alpha1.Project
+	var p tidev1alpha2.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
 		return fmt.Errorf("get project %s/%s: %w", ns, name, err)
 	}
