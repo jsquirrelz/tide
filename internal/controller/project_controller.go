@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -1526,6 +1527,21 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 	return false, ctrl.Result{}, nil
 }
 
+// taskToProject maps a Task to a reconcile.Request for its owning Project,
+// read from the canonical tideproject.k8s/project label (owner.LabelProject).
+// This re-enqueues the Project on any Task DependsOn edit so checkGlobalCycleGate
+// re-runs and the sticky CycleDetected condition clears once the cycle is broken
+// (WR-02). Returns an empty slice for Tasks not yet project-labeled.
+func (r *ProjectReconciler) taskToProject(_ context.Context, obj client.Object) []reconcile.Request {
+	projectName := obj.GetLabels()[owner.LabelProject]
+	if projectName == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: projectName},
+	}}
+}
+
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02,
 // annotation-change predicate for bypass annotations (D-D4), and a
 // namespace-filter predicate per AUTH-02.
@@ -1550,6 +1566,10 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Owns(&batchv1.Job{}).
 		Owns(&tidev1alpha2.Milestone{}).
+		// Watch (not Owns) Tasks: a Task DependsOn edit must re-run the global
+		// cycle gate so the CycleDetected condition clears when the operator
+		// breaks the cycle (WR-02). Tasks are not owned by Project.
+		Watches(&tidev1alpha2.Task{}, handler.EnqueueRequestsFromMapFunc(r.taskToProject)).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("project").
