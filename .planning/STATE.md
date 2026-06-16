@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 22 — Dashboard Embed Freshness Fix (not started; first phase of Spring Tide)
-Plan: —
-Status: Roadmap drafted (Phases 22–26); ready to plan Phase 22
-Last activity: 2026-06-16 — Spring Tide roadmap created (5 phases, 19 requirements, 100% coverage)
+Phase: 22 — Dashboard Embed Freshness Fix (planned; first phase of Spring Tide)
+Plan: 22-01, 22-02 (2 plans, 2 waves; plan-checker VERIFICATION PASSED)
+Status: Phase 22 planned and verified; ready to execute (`/gsd:execute-phase 22`)
+Last activity: 2026-06-16 — Phase 22 planned: RESEARCH + VALIDATION + 2 plans (FIX-01 covered; node spa-builder Dockerfile stage + make verify-dashboard-freshness gate wired into ci.yaml/release.yaml)
 
 ## Performance Metrics
 
