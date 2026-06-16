@@ -68,7 +68,7 @@ spec:
           value: {{ printf "%s:%s" $img .Chart.AppVersion | quote }}
           {{- end }}
         - name: TIDE_DEFAULT_MODEL_MILESTONE
-          value: "{{ .Values.subagent.levels.milestone.model | default "claude-opus-4-7" }}"
+          value: "{{ .Values.subagent.levels.milestone.model | default "claude-opus-4-8" }}"
         - name: TIDE_DEFAULT_MODEL_PHASE
           value: "{{ .Values.subagent.levels.phase.model | default "claude-sonnet-4-6" }}"
         - name: TIDE_DEFAULT_MODEL_PLAN

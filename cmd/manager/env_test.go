@@ -71,7 +71,7 @@ func TestAtoiOrDefault_Garbage(t *testing.T) {
 
 // TestResolvePerLevelModels verifies that the per-level-default helper produces
 // the D-C4 default map shape when env vars are unset.
-// D-C4: milestone→claude-opus-4-7; phase→claude-sonnet-4-6; plan→claude-sonnet-4-6;
+// D-C4: milestone→claude-opus-4-8; phase→claude-sonnet-4-6; plan→claude-sonnet-4-6;
 // task→claude-haiku-4-5.
 func TestResolvePerLevelModels_AllDefaults(t *testing.T) {
 	t.Setenv("TIDE_DEFAULT_MODEL_MILESTONE", "")
@@ -80,7 +80,7 @@ func TestResolvePerLevelModels_AllDefaults(t *testing.T) {
 	t.Setenv("TIDE_DEFAULT_MODEL_TASK", "")
 	got := resolvePerLevelModels()
 	want := map[string]string{
-		"milestone": "claude-opus-4-7",
+		"milestone": "claude-opus-4-8",
 		"phase":     "claude-sonnet-4-6",
 		"plan":      "claude-sonnet-4-6",
 		"task":      "claude-haiku-4-5",

@@ -63,7 +63,7 @@ func atoiOrDefault(key string, fallback int) int {
 //
 // Defaults match D-C4 — phase brief lock-in:
 //
-//	milestone → claude-opus-4-7    (heavy planning, lowest fan-out)
+//	milestone → claude-opus-4-8    (heavy planning, lowest fan-out)
 //	phase     → claude-sonnet-4-6
 //	plan      → claude-sonnet-4-6
 //	task      → claude-haiku-4-5   (highest fan-out, cost-bounded)
@@ -77,7 +77,7 @@ func atoiOrDefault(key string, fallback int) int {
 //	TIDE_DEFAULT_MODEL_TASK
 func resolvePerLevelModels() map[string]string {
 	return map[string]string{
-		"milestone": envOrDefault("TIDE_DEFAULT_MODEL_MILESTONE", "claude-opus-4-7"),
+		"milestone": envOrDefault("TIDE_DEFAULT_MODEL_MILESTONE", "claude-opus-4-8"),
 		"phase":     envOrDefault("TIDE_DEFAULT_MODEL_PHASE", "claude-sonnet-4-6"),
 		"plan":      envOrDefault("TIDE_DEFAULT_MODEL_PLAN", "claude-sonnet-4-6"),
 		"task":      envOrDefault("TIDE_DEFAULT_MODEL_TASK", "claude-haiku-4-5"),

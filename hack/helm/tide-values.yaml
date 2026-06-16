@@ -217,7 +217,7 @@ images:
 #   --set subagent.defaults.image=ghcr.io/jsquirrelz/tide-claude-subagent@sha256:<digest>
 #
 # Per-level model defaults (D-C4) match the phase-brief lock-in:
-#   milestone → claude-opus-4-7    (heavy planning, lowest fan-out)
+#   milestone → claude-opus-4-8    (heavy planning, lowest fan-out)
 #   phase     → claude-sonnet-4-6
 #   plan      → claude-sonnet-4-6
 #   task      → claude-haiku-4-5   (highest fan-out, cost-bounded)
@@ -230,7 +230,7 @@ subagent:
     model: claude-sonnet-4-6
   levels:
     milestone:
-      model: claude-opus-4-7
+      model: claude-opus-4-8
     phase:
       model: claude-sonnet-4-6
     plan:
