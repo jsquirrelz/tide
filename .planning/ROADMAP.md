@@ -89,9 +89,9 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   5. A documented migration/conversion path carries an in-flight Project from the old per-plan schema to the new global schema with a version bump and no silent data loss.
 **Plans**: 4 plans
 - [x] 23-01-PLAN.md — Introduce api/v1alpha2 (WaveSpec re-owned Plan→Project, dependsOn broadened any-level, storageversion moved, schemaRevision discriminator); regen deepcopy/CRDs; extend verify-no-aggregates glob (SCHEMA-01, DEPS-01, DEPS-02)
-- [ ] 23-02-PLAN.md — Migration wiring: register v1alpha2 scheme, mark v1alpha1 unserved, delete conversion Hub(), re-register D-B1 Wave webhook for v1alpha2, filter per-plan cycle webhook to task-only edges, stub materializeWaves + wave_controller against v1alpha2 (Phase-24 TODOs), write reinstall migration doc (SCHEMA-03, DEPS-01)
-- [ ] 23-03-PLAN.md — Controller guards: old-object fail-closed RequiresReinstall guard + global cross-scope cycle gate (involved nodes surfaced), confirm wave metric label is global-sourced + lock {project,phase,plan,wave} arity (SCHEMA-02, SCHEMA-03, DEPS-03)
-- [ ] 23-04-PLAN.md — Consumer migration (gap closure): repoint api/v1alpha1 import path → api/v1alpha2 across all ~137 consumer files; resolve 3 semantic deltas (Wave PlanRef→ProjectRef, test SchemaRevision, webhook FileTouch helper relocation v1alpha1→v1alpha2); flip controller For()/Owns() to v1alpha2 GVKs; migrate envtest suite — operator compiles/vets/runs on the served version (SCHEMA-03)
+- [x] 23-02-PLAN.md — Migration wiring: register v1alpha2 scheme, mark v1alpha1 unserved, delete conversion Hub(), re-register D-B1 Wave webhook for v1alpha2, filter per-plan cycle webhook to task-only edges, stub materializeWaves + wave_controller against v1alpha2 (Phase-24 TODOs), write reinstall migration doc (SCHEMA-03, DEPS-01)
+- [x] 23-03-PLAN.md — Controller guards: old-object fail-closed RequiresReinstall guard + global cross-scope cycle gate (involved nodes surfaced), confirm wave metric label is global-sourced + lock {project,phase,plan,wave} arity (SCHEMA-02, SCHEMA-03, DEPS-03)
+- [x] 23-04-PLAN.md — Consumer migration (gap closure): repoint api/v1alpha1 import path → api/v1alpha2 across all ~137 consumer files; resolve 3 semantic deltas (Wave PlanRef→ProjectRef, test SchemaRevision, webhook FileTouch helper relocation v1alpha1→v1alpha2); flip controller For()/Owns() to v1alpha2 GVKs; migrate envtest suite — operator compiles/vets/runs on the served version (SCHEMA-03)
 
 ### Phase 24: Global Wave Derivation Engine
 **Goal**: Once project planning completes, the orchestrator assembles ONE global Execution DAG of every Task across all Milestones/Phases/Plans and derives a single monotonic wave schedule by layered Kahn — queryable both directions and re-derived cheaply with no cached schedule.
@@ -158,7 +158,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 (Ebb, superseded) | 5/5 | Complete | 2026-06-16 |
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
 | 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
-| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 1/3 | In Progress|  |
+| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 4/4 | Complete   | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
