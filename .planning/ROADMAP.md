@@ -73,7 +73,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   2. CI fails a build whose embedded `dist` is older than the dashboard source (a staleness gate catches a forgotten regenerate before publish).
   3. A freshly built image, run against a cluster, renders the Telemetry tab — proving the embedded bundle is the current post-telemetry SPA, not the frozen pre-telemetry one.
 **Plans**: 2 plans
-- [ ] 22-01-PLAN.md — multi-stage Dockerfile.dashboard (node spa-builder) + .dockerignore re-includes + make verify-dashboard-freshness target (freshness + telemetry-marker gate)
+- [x] 22-01-PLAN.md — multi-stage Dockerfile.dashboard (node spa-builder) + .dockerignore re-includes + make verify-dashboard-freshness target (freshness + telemetry-marker gate)
 - [ ] 22-02-PLAN.md — wire verify-dashboard-freshness into ci.yaml (PR gate) and release.yaml helmify-verify (release gate), each with actions/setup-node
 **UI hint**: yes
 
@@ -153,7 +153,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 19. Template Reorder + Token Minimization | v1.0.2 (Ebb, superseded) | 4/4 | Complete | 2026-06-15 |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 (Ebb, superseded) | 5/5 | Complete | 2026-06-16 |
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
-| 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
+| 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 1/2 | In Progress|  |
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 0/0 | Not started | - |

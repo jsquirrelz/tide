@@ -2,13 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
-status: planning
-last_updated: "2026-06-16T04:25:12.369Z"
-last_activity: 2026-06-16
+status: executing
+stopped_at: ROADMAP.md / REQUIREMENTS.md traceability / STATE.md written for v1.0.2 Spring Tide (Phases 22–26, 19/19 reqs mapped)
+last_updated: "2026-06-16T10:37:35.769Z"
+last_activity: 2026-06-16 -- Phase 22 execution started
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 2
   completed_plans: 0
   percent: 0
 ---
@@ -20,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.2 Spring Tide — Global Execution DAG (roadmap drafted, Phases 22–26)
+**Current focus:** Phase 22 — dashboard-embed-freshness-fix
 
 ## Current Position
 
-Phase: 22 — Dashboard Embed Freshness Fix (planned; first phase of Spring Tide)
-Plan: 22-01, 22-02 (2 plans, 2 waves; plan-checker VERIFICATION PASSED)
-Status: Phase 22 planned and verified; ready to execute (`/gsd:execute-phase 22`)
-Last activity: 2026-06-16 — Phase 22 planned: RESEARCH + VALIDATION + 2 plans (FIX-01 covered; node spa-builder Dockerfile stage + make verify-dashboard-freshness gate wired into ci.yaml/release.yaml)
+Phase: 22 (dashboard-embed-freshness-fix) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 22
+Last activity: 2026-06-16 -- Phase 22 execution started
 
 ## Performance Metrics
 
