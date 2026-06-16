@@ -258,17 +258,25 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Assemble the global dep graph ONCE per reconcile (Pitfall 7 — avoids
 		// double List calls from checkGlobalCycleGate + deriveGlobalWaves each
 		// calling the assembler independently). Both the cycle gate and the wave
-		// derivation step (Plan 03) consume the same (nodes, edges).
-		depNodes, depEdges, asmErr := r.assembleProjectDepGraph(ctx, &v2project)
+		// derivation step (Plan 03) consume the same (nodes, edges). The assembler
+		// also returns the task slice so deriveGlobalWaves can re-use it without
+		// a second List (IN-02 / WR-03 assemble-once contract).
+		depNodes, depEdges, asmTasks, asmErr := r.assembleProjectDepGraph(ctx, &v2project)
 		if asmErr != nil {
 			return ctrl.Result{}, fmt.Errorf("assemble dep graph for project %s: %w", v2project.Name, asmErr)
 		}
 		// Global cross-scope cycle gate: detect task-level dep cycles across plans.
-		if blocked, result, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges); blocked {
+		// Returns the computed wave schedule so deriveGlobalWaves need not recompute
+		// (WR-03 — ComputeWaves runs exactly once per reconcile).
+		blocked, globalWaves, result, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges)
+		if blocked {
 			return result, gErr
 		}
+		if gErr != nil {
+			return ctrl.Result{}, gErr
+		}
 		// Derive global waves and reconcile Wave CR set (EXEC-02/03/04, Plan 03).
-		if waveErr := r.deriveGlobalWaves(ctx, &v2project, depNodes, depEdges); waveErr != nil {
+		if waveErr := r.deriveGlobalWaves(ctx, &v2project, globalWaves, asmTasks); waveErr != nil {
 			return ctrl.Result{}, fmt.Errorf("derive global waves for project %s: %w", v2project.Name, waveErr)
 		}
 	}
@@ -1451,31 +1459,39 @@ func (r *ProjectReconciler) checkSchemaRevisionGuard(
 // Milestone.DependsOn are all iterated. A coarse ref left un-refined fans out
 // conservatively to EVERY Task in that scope (D-06). An unresolved ref
 // contributes no edge. Edges are de-duplicated before returning (Pitfall 2).
+//
+// The caller-owned task slice is returned so deriveGlobalWaves can re-use it
+// without issuing a second List for the same project-labeled Tasks (IN-02).
+//
+// NOTE(phase-25+): tasks lacking the project label (directly applied or whose
+// label backfill is pending) are not visible to this listing; WR-04 mitigation
+// emits an observable warning. Full coverage via field-index listing or admission
+// defaulting is a phase-25+ follow-up.
 func (r *ProjectReconciler) assembleProjectDepGraph(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
-) (nodes []dag.NodeID, edges []dag.Edge, err error) {
+) (nodes []dag.NodeID, edges []dag.Edge, tasks []tidev1alpha2.Task, err error) {
 	// 1. List all Tasks in the project namespace carrying the project label.
 	var taskList tidev1alpha2.TaskList
 	if listErr := r.List(ctx, &taskList,
 		client.InNamespace(project.Namespace),
 		client.MatchingLabels{owner.LabelProject: project.Name},
 	); listErr != nil {
-		return nil, nil, fmt.Errorf("list tasks for project %s: %w", project.Name, listErr)
+		return nil, nil, nil, fmt.Errorf("list tasks for project %s: %w", project.Name, listErr)
 	}
 
 	// 2. List Plans, Phases, and Milestones for coarse-scope resolution (D-04).
 	var planList tidev1alpha2.PlanList
 	if listErr := r.List(ctx, &planList, client.InNamespace(project.Namespace)); listErr != nil {
-		return nil, nil, fmt.Errorf("list plans for project %s: %w", project.Name, listErr)
+		return nil, nil, nil, fmt.Errorf("list plans for project %s: %w", project.Name, listErr)
 	}
 	var phaseList tidev1alpha2.PhaseList
 	if listErr := r.List(ctx, &phaseList, client.InNamespace(project.Namespace)); listErr != nil {
-		return nil, nil, fmt.Errorf("list phases for project %s: %w", project.Name, listErr)
+		return nil, nil, nil, fmt.Errorf("list phases for project %s: %w", project.Name, listErr)
 	}
 	var msList tidev1alpha2.MilestoneList
 	if listErr := r.List(ctx, &msList, client.InNamespace(project.Namespace)); listErr != nil {
-		return nil, nil, fmt.Errorf("list milestones for project %s: %w", project.Name, listErr)
+		return nil, nil, nil, fmt.Errorf("list milestones for project %s: %w", project.Name, listErr)
 	}
 
 	// 3. Build in-memory resolution maps (OQ-2).
@@ -1538,6 +1554,31 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 	nodes = make([]dag.NodeID, 0, len(taskList.Items))
 	for i := range taskList.Items {
 		nodes = append(nodes, taskList.Items[i].Name)
+	}
+
+	// WR-04 mitigation: warn when unlabeled Tasks in the namespace are excluded.
+	// Tasks lacking owner.LabelProject are invisible to the global derivation engine,
+	// producing a partial/incorrect global schedule with no error surfaced. Log a
+	// Warning so the gap is observable rather than silent.
+	// NOTE(phase-25+): full coverage (field-index listing or admission defaulting)
+	// is a follow-up; this cheap scan makes the exclusion visible.
+	{
+		var allNsTasks tidev1alpha2.TaskList
+		if scanErr := r.List(ctx, &allNsTasks, client.InNamespace(project.Namespace)); scanErr == nil {
+			unlabeled := 0
+			for i := range allNsTasks.Items {
+				if allNsTasks.Items[i].Labels[owner.LabelProject] != project.Name {
+					unlabeled++
+				}
+			}
+			if unlabeled > 0 {
+				logf.FromContext(ctx).Info(
+					"WARNING: tasks in namespace lack project label and are excluded from global wave derivation",
+					"project", project.Name,
+					"unlabeledCount", unlabeled,
+				)
+			}
+		}
 	}
 
 	// 6. Build de-duplicated edges (Pitfall 2 — edgeSet prevents double-indegree).
@@ -1622,11 +1663,17 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		}
 	}
 
-	return nodes, edges, nil
+	return nodes, edges, taskList.Items, nil
 }
 
-// deriveGlobalWaves calls pkg/dag.ComputeWaves on the assembled (nodes, edges) to
-// produce the global wave schedule, then reconciles the Wave CR set for the Project:
+// deriveGlobalWaves reconciles the Wave CR set for the Project using the
+// pre-computed global wave schedule from checkGlobalCycleGate (WR-03 — ComputeWaves
+// runs exactly once per reconcile; the result is threaded here rather than
+// recomputed). Accepts the assembler's task slice so no redundant List is issued
+// for the same project-labeled Tasks (IN-02 — the comment that claimed re-use
+// is now true).
+//
+// Reconciliation:
 //   - Creates Wave CRs named tide-wave-<project>-<N> with WaveSpec{ProjectRef, WaveIndex},
 //     owned by the Project (BlockOwnerDeletion). Increment WavesDispatchedTotal exactly
 //     once on Create; AlreadyExists and reconcile-replay paths do NOT increment.
@@ -1641,26 +1688,22 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 func (r *ProjectReconciler) deriveGlobalWaves(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
-	nodes []dag.NodeID,
-	edges []dag.Edge,
+	globalWaves [][]dag.NodeID,
+	assembledTasks []tidev1alpha2.Task,
 ) error {
 	logger := logf.FromContext(ctx)
-
-	globalWaves, err := dag.ComputeWaves(nodes, edges)
-	if err != nil {
-		// Defensive: a cycle should have been caught by checkGlobalCycleGate upstream.
-		// Treat it as a transient error and let the reconcile requeue; the cycle gate
-		// will surface CycleDetected on the next pass.
-		return fmt.Errorf("ComputeWaves for project %s: %w", project.Name, err)
-	}
 
 	// Reconcile Wave CRs: create missing, skip existing (idempotent).
 	for i := range globalWaves {
 		waveName := fmt.Sprintf("tide-wave-%s-%d", project.Name, i)
+		// CR-01: stamp the project label so the prune List selector actually matches
+		// these Waves (D-09 label discipline; the wave webhook only validates, it
+		// does not default labels).
 		wave := &tidev1alpha2.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      waveName,
 				Namespace: project.Namespace,
+				Labels:    map[string]string{owner.LabelProject: project.Name},
 			},
 			Spec: tidev1alpha2.WaveSpec{
 				ProjectRef: project.Name,
@@ -1690,10 +1733,15 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 				logger.Info("created global wave", "wave", waveName, "index", i)
 			}
 		} else {
-			// Wave exists — ensure owner ref (may be absent on first reconcile after restart).
-			// Do NOT increment WavesDispatchedTotal — this is a reconcile replay.
-			if ownerErr := owner.EnsureOwnerRef(&existing, project, r.Scheme); ownerErr == nil {
-				_ = r.Update(ctx, &existing)
+			// Wave exists — ensure owner ref only when absent (WR-02: avoid unconditional
+			// Update churn that bumps resourceVersion and triggers extra Project reconciles).
+			if !metav1.IsControlledBy(&existing, project) {
+				if ownerErr := owner.EnsureOwnerRef(&existing, project, r.Scheme); ownerErr != nil {
+					return fmt.Errorf("ensure owner ref on existing wave %s: %w", waveName, ownerErr)
+				}
+				if err := r.Update(ctx, &existing); err != nil {
+					return fmt.Errorf("update owner ref on wave %s: %w", waveName, err)
+				}
 			}
 		}
 	}
@@ -1701,6 +1749,7 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 	// Prune stale Wave CRs whose WaveIndex >= len(globalWaves) (re-derivation produced
 	// fewer waves, e.g., a dependency was removed). Phase 25 should gate this prune on
 	// Wave.Status.Phase == "Succeeded" to avoid deleting an in-flight Wave (RESEARCH OQ-3).
+	// CR-01: list by the project label that Waves now carry (stamped at create time above).
 	var allWaves tidev1alpha2.WaveList
 	if listErr := r.List(ctx, &allWaves,
 		client.InNamespace(project.Namespace),
@@ -1719,16 +1768,9 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 	}
 
 	// Stamp global wave-index labels on Tasks (EXEC-03 bidirectional index).
-	// The taskList is re-used from the assembler's listing; pass all Tasks currently
-	// known in the namespace so no redundant Gets are issued.
-	var taskList tidev1alpha2.TaskList
-	if listErr := r.List(ctx, &taskList,
-		client.InNamespace(project.Namespace),
-		client.MatchingLabels{owner.LabelProject: project.Name},
-	); listErr != nil {
-		return fmt.Errorf("list tasks for label stamp (project %s): %w", project.Name, listErr)
-	}
-	return r.stampGlobalTaskLabels(ctx, taskList.Items, globalWaves, project.Name)
+	// assembledTasks is threaded from assembleProjectDepGraph — no redundant List
+	// needed for the same project-labeled Tasks (IN-02 — comment now matches code).
+	return r.stampGlobalTaskLabels(ctx, assembledTasks, globalWaves, project.Name)
 }
 
 // stampGlobalTaskLabels patches each Task with its global tideproject.k8s/wave-index
@@ -1786,7 +1828,9 @@ func (r *ProjectReconciler) stampGlobalTaskLabels(
 //
 // The assembler is called ONCE in Reconcile and its result passed here (Pitfall 7
 // — avoids double List calls when the fan-out assembler lists Plans/Phases/
-// Milestones). Plan 03 consumes the same (nodes, edges) for wave derivation.
+// Milestones). The computed wave schedule is returned to the caller so
+// deriveGlobalWaves can consume it without a second ComputeWaves call (WR-03 /
+// IN-02 — ComputeWaves runs exactly once per reconcile).
 //
 // Unlike checkSchemaRevisionGuard, a cycle is NOT a TerminalError — the operator
 // can fix the cycle by editing DependsOn on the relevant Tasks and the reconciler
@@ -1799,11 +1843,12 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 	project *tidev1alpha2.Project,
 	nodes []dag.NodeID,
 	edges []dag.Edge,
-) (blocked bool, result ctrl.Result, err error) {
+) (blocked bool, waves [][]dag.NodeID, result ctrl.Result, err error) {
 	// ComputeWaves validates the graph and returns *CycleError on a cycle.
-	// The computed waves are deliberately DISCARDED — the gate only validates;
-	// it does NOT store the schedule (PERSIST-03 / verify-no-aggregates).
-	if _, computeErr := dag.ComputeWaves(nodes, edges); computeErr != nil {
+	// The computed waves are returned to the caller for use by deriveGlobalWaves
+	// (WR-03 — compute once, not twice). No schedule is stored (PERSIST-03).
+	computedWaves, computeErr := dag.ComputeWaves(nodes, edges)
+	if computeErr != nil {
 		var cyc *dag.CycleError
 		if goErrors.As(computeErr, &cyc) {
 			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
@@ -1820,12 +1865,27 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 					"involved", cyc.InvolvedNodes)
 			}
 			// NOT a TerminalError — a plan edit can remove the cycle; allow requeue.
-			return true, ctrl.Result{}, nil
+			return true, nil, ctrl.Result{}, nil
 		}
 		// Non-cycle error (e.g., unknown node from edge assembler defect) — transient requeue.
-		return false, ctrl.Result{}, fmt.Errorf("ComputeWaves error for project %s: %w", project.Name, computeErr)
+		return false, nil, ctrl.Result{}, fmt.Errorf("ComputeWaves error for project %s: %w", project.Name, computeErr)
 	}
-	return false, ctrl.Result{}, nil
+	// WR-01: no cycle — clear any prior sticky CycleDetected condition so the
+	// operator sees a self-healing signal once the cycle is broken. The doc comment
+	// on taskToProject claims this self-clears; make the code match.
+	if meta.FindStatusCondition(project.Status.Conditions, "CycleDetected") != nil {
+		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+			Type:               "CycleDetected",
+			Status:             metav1.ConditionFalse,
+			Reason:             "NoCycle",
+			Message:            "global Execution DAG is acyclic",
+			LastTransitionTime: metav1.Now(),
+		})
+		if err := r.Status().Update(ctx, project); err != nil {
+			return false, nil, ctrl.Result{}, err
+		}
+	}
+	return false, computedWaves, ctrl.Result{}, nil
 }
 
 // taskToProject maps a Task to a reconcile.Request for its owning Project,

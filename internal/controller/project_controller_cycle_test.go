@@ -108,11 +108,11 @@ func TestGlobalCycleDetection(t *testing.T) {
 			Scheme: s,
 		}
 
-		nodes, edges, asmErr := r.assembleProjectDepGraph(ctx, proj)
+		nodes, edges, _, asmErr := r.assembleProjectDepGraph(ctx, proj)
 		if asmErr != nil {
 			t.Fatalf("assembleProjectDepGraph: %v", asmErr)
 		}
-		blocked, _, err := r.checkGlobalCycleGate(ctx, proj, nodes, edges)
+		blocked, _, _, err := r.checkGlobalCycleGate(ctx, proj, nodes, edges)
 		_ = err // cycle gate may return nil for non-fatal cycle surfacing
 
 		if !blocked {
@@ -184,11 +184,11 @@ func TestGlobalCycleDetection(t *testing.T) {
 			Scheme: s,
 		}
 
-		nodes, edges, asmErr := r.assembleProjectDepGraph(ctx, proj)
+		nodes, edges, _, asmErr := r.assembleProjectDepGraph(ctx, proj)
 		if asmErr != nil {
 			t.Fatalf("assembleProjectDepGraph: %v", asmErr)
 		}
-		blocked, _, err := r.checkGlobalCycleGate(ctx, proj, nodes, edges)
+		blocked, _, _, err := r.checkGlobalCycleGate(ctx, proj, nodes, edges)
 		if blocked {
 			t.Errorf("checkGlobalCycleGate: coarse-only dep incorrectly triggered cycle gate; err=%v", err)
 		}
