@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
@@ -285,6 +286,10 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
+	// Register v1alpha2 as the served+storage version (Spring Tide breaking CRD change,
+	// Plan 23-02). v1alpha1 remains registered so the manager can decode any surviving
+	// v1alpha1 objects for the Plan-03 reinstall guard (RequiresReinstall path).
+	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	// 3. Construct the Manager (CTRL-01, CTRL-03).
