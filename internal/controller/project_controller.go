@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	goErrors "errors"
 	"fmt"
 	"time"
 
@@ -37,8 +38,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -49,6 +52,7 @@ import (
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"github.com/jsquirrelz/tide/pkg/dag"
 )
 
 // pushResultEnvelope mirrors the JSON envelope emitted by cmd/tide-push
@@ -238,6 +242,24 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// 4. Owner refs on children — Project is top-level; no parent to reference.
+
+	// 4a. Phase 23 v1alpha2 migration guards (SCHEMA-03 + DEPS-03 / Plan 23-03).
+	// Try to fetch the Project as a v1alpha2 type. If v1alpha2 is registered in
+	// the scheme and the object exists under v1alpha2 GVK (post-CRD upgrade), run
+	// the two guards. If not found (e.g., running against a pre-migration cluster
+	// or envtest with v1alpha1-only scheme), the guards are skipped gracefully —
+	// the CRD admission webhook is the primary gate; this is belt-and-suspenders.
+	var v2project tidev1alpha2.Project
+	if v2GetErr := r.Get(ctx, req.NamespacedName, &v2project); v2GetErr == nil {
+		// Schema-revision guard: reject v1alpha1-shape objects that slipped through.
+		if blocked, result, gErr := r.checkSchemaRevisionGuard(ctx, &v2project); blocked {
+			return result, gErr
+		}
+		// Global cross-scope cycle gate: detect task-level dep cycles across plans.
+		if blocked, result, gErr := r.checkGlobalCycleGate(ctx, &v2project); blocked {
+			return result, gErr
+		}
+	}
 
 	// 5. Phase 2: dispatcher seam — init Job + budget gate + bypass watch (REQ-SUB-01).
 	if r.Dispatcher != nil {
@@ -1357,6 +1379,152 @@ func isJobFailed(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Phase 23 — v1alpha2 migration guards (Plan 23-03)
+// ---------------------------------------------------------------------------
+
+// checkSchemaRevisionGuard is the SCHEMA-03 / D-09 fail-closed guard.
+// It rejects any v1alpha2 Project whose Spec.SchemaRevision is not "v1alpha2" —
+// the absence of this field signals an object that was authored under the
+// v1alpha1 schema and slipped into etcd before the CRD upgrade.
+//
+// On detection it:
+//   - Sets a Ready=False/RequiresReinstall condition on the Project status.
+//   - Persists the condition via r.Status().Update.
+//   - Returns (true, ctrl.Result{}, reconcile.TerminalError(...)) to prevent
+//     the reconciler from running and to suppress requeue storms.
+//
+// Returns (false, ctrl.Result{}, nil) when the project shape is valid.
+func (r *ProjectReconciler) checkSchemaRevisionGuard(
+	ctx context.Context,
+	project *tidev1alpha2.Project,
+) (blocked bool, result ctrl.Result, err error) {
+	if project.Spec.SchemaRevision == "v1alpha2" {
+		return false, ctrl.Result{}, nil
+	}
+
+	// The SchemaRevision is absent or wrong — this object was authored under
+	// v1alpha1. Surface a permanent failure condition and halt reconciliation.
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionReady,
+		Status:             metav1.ConditionFalse,
+		Reason:             tidev1alpha2.ReasonRequiresReinstall,
+		Message:            "Project was created with v1alpha1 schema; reinstall required: " +
+			"kubectl delete project " + project.Name +
+			" && kubectl apply -f <project.yaml> (with schemaRevision: v1alpha2 set). " +
+			"See docs/migration/v1alpha1-to-v1alpha2.md.",
+		LastTransitionTime: metav1.Now(),
+	})
+	if updateErr := r.Status().Update(ctx, project); updateErr != nil {
+		// Non-fatal: log and continue — the TerminalError below still prevents dispatch.
+		logf.FromContext(ctx).Error(updateErr,
+			"failed to update RequiresReinstall condition; condition may not be visible yet",
+			"project", project.Name)
+	}
+	return true, ctrl.Result{}, reconcile.TerminalError(
+		fmt.Errorf("project %s/%s requires reinstall (v1alpha1 schema; schemaRevision must be v1alpha2)",
+			project.Namespace, project.Name),
+	)
+}
+
+// assembleProjectDepGraph builds the task-level dependency graph for the given
+// Project by listing all v1alpha1.Tasks in the namespace that carry the project
+// label. It returns (nodes, edges, error).
+//
+// Edge filtering — CONSERVATIVE by design (RESEARCH OQ#3):
+// Only task-to-task edges are emitted. A DependsOn entry that names a Plan,
+// Phase, or Milestone (coarse scope ref) is SKIPPED because Phase 24's
+// fan-out assembler will expand those refs into task-level edges. Skipping
+// here is conservative: adding edges later can only increase the detected
+// cycle set, never reduce it, so the Phase-23 gate is never MORE permissive
+// than the final Phase-24 gate.
+func (r *ProjectReconciler) assembleProjectDepGraph(
+	ctx context.Context,
+	project *tidev1alpha2.Project,
+) (nodes []dag.NodeID, edges []dag.Edge, err error) {
+	var taskList tideprojectv1alpha1.TaskList
+	if listErr := r.List(ctx, &taskList,
+		client.InNamespace(project.Namespace),
+		client.MatchingLabels{owner.LabelProject: project.Name},
+	); listErr != nil {
+		return nil, nil, fmt.Errorf("list tasks for project %s: %w", project.Name, listErr)
+	}
+
+	taskNames := make(map[string]struct{}, len(taskList.Items))
+	for i := range taskList.Items {
+		taskNames[taskList.Items[i].Name] = struct{}{}
+	}
+
+	nodes = make([]dag.NodeID, 0, len(taskList.Items))
+	for i := range taskList.Items {
+		nodes = append(nodes, taskList.Items[i].Name)
+	}
+
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		for _, dep := range t.Spec.DependsOn {
+			// Phase 23: only wire edges when dep names a known task (task-level
+			// direct edge, DEPS-01). Coarse scope refs (dep names a Plan/Phase/
+			// Milestone not yet known to the task set) are skipped with a
+			// conservative nil-edge: Phase-24 fan-out will add those edges
+			// (RESEARCH OQ#3). Skipping is NEVER more permissive than Phase-24
+			// because fan-out can only ADD edges, not remove them.
+			if _, isTask := taskNames[dep]; isTask {
+				edges = append(edges, dag.Edge{From: dep, To: t.Name})
+			}
+		}
+	}
+	return nodes, edges, nil
+}
+
+// checkGlobalCycleGate is the DEPS-03 / D-10 validation-time cross-scope cycle
+// detector. It assembles the project-wide task-level dependency graph and calls
+// pkg/dag.ComputeWaves. On a CycleError it surfaces the involved nodes via a
+// CycleDetected Project status condition and returns blocked=true.
+//
+// Unlike checkSchemaRevisionGuard, a cycle is NOT a TerminalError — the operator
+// can fix the cycle by editing DependsOn on the relevant Tasks and the reconciler
+// will requeue on changes. No schedule is stored (PERSIST-03 / verify-no-aggregates).
+//
+// A non-cycle error (e.g., transient List failure) is returned as a plain error
+// for the controller to requeue with backoff.
+func (r *ProjectReconciler) checkGlobalCycleGate(
+	ctx context.Context,
+	project *tidev1alpha2.Project,
+) (blocked bool, result ctrl.Result, err error) {
+	nodes, edges, asmErr := r.assembleProjectDepGraph(ctx, project)
+	if asmErr != nil {
+		return false, ctrl.Result{}, fmt.Errorf("assemble dep graph for project %s: %w", project.Name, asmErr)
+	}
+
+	// ComputeWaves validates the graph and returns *CycleError on a cycle.
+	// The computed waves are deliberately DISCARDED — the gate only validates;
+	// it does NOT store the schedule (PERSIST-03 / verify-no-aggregates).
+	if _, computeErr := dag.ComputeWaves(nodes, edges); computeErr != nil {
+		var cyc *dag.CycleError
+		if goErrors.As(computeErr, &cyc) {
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               "CycleDetected",
+				Status:             metav1.ConditionTrue,
+				Reason:             tidev1alpha2.ReasonGlobalCycleDetected,
+				Message:            fmt.Sprintf("cyclic global Execution DAG involving: %v", cyc.InvolvedNodes),
+				LastTransitionTime: metav1.Now(),
+			})
+			if updateErr := r.Status().Update(ctx, project); updateErr != nil {
+				logf.FromContext(ctx).Error(updateErr,
+					"failed to update GlobalCycleDetected condition",
+					"project", project.Name,
+					"involved", cyc.InvolvedNodes)
+			}
+			// NOT a TerminalError — a plan edit can remove the cycle; allow requeue.
+			return true, ctrl.Result{}, nil
+		}
+		// Non-cycle error (e.g., unknown node from edge assembler defect) — transient requeue.
+		return false, ctrl.Result{}, fmt.Errorf("ComputeWaves error for project %s: %w", project.Name, computeErr)
+	}
+	return false, ctrl.Result{}, nil
 }
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02,
