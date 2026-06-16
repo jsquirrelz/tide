@@ -96,6 +96,29 @@ spec:
     - Non-dependents in later waves: dispatch in strict profile.
     This contract must not change when tasks run on different providers.
 
+    **Usage accounting + cost — REQUIRED for budget + observability (NEW since
+    this manifest was drafted; landed in milestone v1.0.2, Phases 18-21).**
+    The cost/budget/telemetry surfaces now depend on every Subagent populating
+    pkg/dispatch.Usage. The Codex Run() MUST normalize the OpenAI/Codex usage
+    block into that struct, or budget enforcement, tide_cost_cents_total, AND the
+    new Phase-21 cache-efficiency dashboard panel will all read $0 / blank for
+    Codex dispatches:
+    - InputTokens        <- usage.prompt_tokens
+    - OutputTokens       <- usage.completion_tokens
+    - CacheReadTokens    <- usage.prompt_tokens_details.cached_tokens
+      (OpenAI caching is AUTOMATIC, marker-free, process-independent, 1,024-token
+      floor — there is NO cache_control to set and NO separate "cache creation"
+      concept, so CacheCreationTokens stays 0. This differs from Anthropic, whose
+      field is cache_read_input_tokens / cache_creation_input_tokens.)
+    - EstimatedCostCents + CacheSavingsCents <- computed by a Codex-side pricing
+      table mirroring internal/subagent/anthropic/pricing.go (per-model cents/MTok;
+      cacheRead is OpenAI's discounted cached-input rate). Without this table the
+      run cannot honor its own budget cap and the dashboard cannot attribute Codex
+      spend. Keep the locked metric label set {project,phase,plan,wave} — the
+      `task` label remains FORBIDDEN (metriccardinality analyzer).
+    The provider-neutral SharedContext field (Phase 20) on EnvelopeIn is shared
+    Go struct state — the Codex subagent receives it for free; no special handling.
+
     **Codex CLI facts — carry verbatim, do NOT re-research:**
     - codex exec is first-class headless: one-shot, no TTY, final message
       to stdout.
@@ -140,11 +163,13 @@ spec:
   # see README.md for the openai-secrets creation step.
   providerSecretRef: tide-secrets
 
-  # Starting cap for dogfood runs — tune before applying.
-  # These are multi-phase real work runs; the cap is a safety net.
+  # Hard cap for this dogfood run: $10 (1000 cents). Deliberately tight — this
+  # run is a bounded probe of heterogeneous dispatch, not a full milestone build.
+  # Expect the run to HALT on budget mid-phase; that is the intended safety net.
+  # Watch tide_cost_cents_total + the Phase-21 cache-efficiency panel as it spends.
   budget:
-    absoluteCapCents: 10000
-    rollingWindowCapCents: 10000
+    absoluteCapCents: 1000
+    rollingWindowCapCents: 1000
     rollingWindowDuration: 24h
 
   # Default image + model for the planner pool (Claude).
