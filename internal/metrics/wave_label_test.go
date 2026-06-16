@@ -47,7 +47,7 @@ import (
 // Each entry is (metricName, withLabelValuesFn) — calling WithLabelValues with
 // 4 args panics on arity mismatch, making the call itself the arity assertion.
 var telem03labelChecks = []struct {
-	name  string
+	name   string
 	seedFn func()
 }{
 	{"tide_tokens_input_total", func() {
@@ -74,10 +74,10 @@ var telem03labelChecks = []struct {
 }
 
 // TestWaveLabel is the SCHEMA-02 arity lock:
-// 1. Each of the seven TELEM-03 metrics accepts exactly four label values
-//    {project, phase, plan, wave} — calling WithLabelValues(4 args) will panic
-//    at runtime if arity is wrong, so a successful call IS the test.
-// 2. The registry source must not carry a "task" label literal (Pitfall 17).
+//  1. Each of the seven TELEM-03 metrics accepts exactly four label values
+//     {project, phase, plan, wave} — calling WithLabelValues(4 args) will panic
+//     at runtime if arity is wrong, so a successful call IS the test.
+//  2. The registry source must not carry a "task" label literal (Pitfall 17).
 func TestWaveLabel(t *testing.T) {
 	t.Run("TELEM-03 metrics accept exactly {project,phase,plan,wave} labels", func(t *testing.T) {
 		for _, tc := range telem03labelChecks {
