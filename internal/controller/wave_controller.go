@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -129,18 +130,14 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // the Dispatcher seam (step 5 of the six-step pattern). Per D-B2 and D-B4,
 // this method is PURELY observational — it NEVER creates Jobs.
 func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha2.Wave) (ctrl.Result, error) {
-	// Step 1: List Tasks by the tideproject.k8s/wave-index label stamped by
-	// ProjectReconciler.stampGlobalTaskLabels (Phase 24 Plan 03). The global wave
-	// index is Project-scoped: wave-index=<N> AND project=<ProjectRef> identifies
-	// exactly the Tasks in global wave N. This is the correct bidirectional index
-	// (EXEC-03 / README:54 namesake invariant).
+	// Step 1: List Tasks by the global wave-index label stamped by
+	// ProjectReconciler.stampGlobalTaskLabels (Phase 24 Plan 03 — now live and
+	// authoritative). The global wave index is Project-scoped: wave-index=<N>
+	// AND project=<ProjectRef> identifies exactly the Tasks in global wave N.
+	// This is the bidirectional index described by the README:54 namesake
+	// invariant (EXEC-03): given any wave, you know its tasks.
 	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
 	var taskList tideprojectv1alpha2.TaskList
-	// Scope the roll-up to THIS Wave's project (interim WR-01 fix): wave-index is a
-	// small integer reused per-plan, so a bare wave-index match cross-contaminates
-	// Tasks from sibling plans/projects in the same namespace. Filtering by
-	// owner.LabelProject == wave.Spec.ProjectRef removes that contamination until the
-	// Phase-24 global wave index lands (see the TODO above).
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(wave.Namespace),
 		client.MatchingLabels{
@@ -151,15 +148,11 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 		return ctrl.Result{}, fmt.Errorf("list tasks for wave %s: %w", wave.Name, err)
 	}
 
-	// Step 2: Filter by tideproject.k8s/wave-index = wave.Spec.WaveIndex label.
-	// The label was already used to filter in the List call above; this pass
-	// provides a secondary filter in case the label index is not exact-match only.
-	var members []tideprojectv1alpha2.Task
-	for _, t := range taskList.Items {
-		if t.Labels["tideproject.k8s/wave-index"] == waveIndexLabel {
-			members = append(members, t)
-		}
-	}
+	// Step 2: client.MatchingLabels is exact equality — the List result is already
+	// the exact member set. Assign directly without a secondary filter pass (IN-03:
+	// the redundant loop was dead-but-misleading defensive code implying a fuzzy
+	// index; the index is exact, so the assertion below is sufficient).
+	members := taskList.Items
 
 	// Step 3: Aggregate phase.
 	// - Succeeded iff ALL members Succeeded.
@@ -218,17 +211,32 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	}
 
 	// Step 5: No Job creation (D-B2 — D-B1 reserves Job creation to TaskReconciler).
+
+	// WR-05 mitigation: a low-frequency safety resync while this tide is rising.
+	// taskToWaveMapper returns nil (drops the event) when a Task's wave-index label
+	// is absent or stale, so a dropped Task→Wave status event can leave the Wave's
+	// roll-up lagging. A periodic self-requeue self-corrects within the resync window
+	// so the Wave converges even without a Task event arriving.
+	// NOTE(phase-25+): the authoritative fix is ProjectReconciler-owned Task→Wave
+	// fan-out where the reconciler holds the live wave assignment; this resync is the
+	// cheap mitigation until that seam is built.
+	if phase == "Running" {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
 // taskToWaveMapper returns the reconcile request for the one Wave that owns this
 // Task, using the global wave-index label stamped by ProjectReconciler.stampGlobalTaskLabels
-// (Phase 24 Plan 03). The Wave name is derived deterministically:
+// (Phase 24 Plan 03 — now the live, authoritative wave assignment). The Wave name
+// is derived deterministically:
 //
 //	tide-wave-<projectName>-<waveIndex>
 //
 // This is an O(1) lookup — no List call required. Returns nil if the Task does not
-// yet carry the project or wave-index labels (e.g., still awaiting first reconcile).
+// yet carry the project or wave-index labels (e.g., still awaiting the first
+// ProjectReconciler stamp). Dropped events are self-healed by the low-frequency
+// RequeueAfter resync on Running Waves (WR-05 mitigation).
 func (r *WaveReconciler) taskToWaveMapper(_ context.Context, obj client.Object) []reconcile.Request {
 	task, ok := obj.(*tideprojectv1alpha2.Task)
 	if !ok {
