@@ -255,10 +255,21 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if blocked, result, gErr := r.checkSchemaRevisionGuard(ctx, &v2project); blocked {
 			return result, gErr
 		}
+		// Assemble the global dep graph ONCE per reconcile (Pitfall 7 — avoids
+		// double List calls from checkGlobalCycleGate + deriveGlobalWaves each
+		// calling the assembler independently). Both the cycle gate and the wave
+		// derivation step (Plan 03) consume the same (nodes, edges).
+		depNodes, depEdges, asmErr := r.assembleProjectDepGraph(ctx, &v2project)
+		if asmErr != nil {
+			return ctrl.Result{}, fmt.Errorf("assemble dep graph for project %s: %w", v2project.Name, asmErr)
+		}
 		// Global cross-scope cycle gate: detect task-level dep cycles across plans.
-		if blocked, result, gErr := r.checkGlobalCycleGate(ctx, &v2project); blocked {
+		if blocked, result, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges); blocked {
 			return result, gErr
 		}
+		// Plan 03 will add: r.deriveGlobalWaves(ctx, &v2project, depNodes, depEdges)
+		_ = depNodes
+		_ = depEdges
 	}
 
 	// 5. Phase 2: dispatcher seam — init Job + budget gate + bypass watch (REQ-SUB-01).
@@ -1430,20 +1441,20 @@ func (r *ProjectReconciler) checkSchemaRevisionGuard(
 }
 
 // assembleProjectDepGraph builds the task-level dependency graph for the given
-// Project by listing all v1alpha1.Tasks in the namespace that carry the project
-// label. It returns (nodes, edges, error).
+// Project with FULL FAN-OUT (D-04 / Phase 24). It lists all Tasks, Plans,
+// Phases, and Milestones in the namespace and resolves coarse-scope
+// DependsOn entries (naming a Plan/Phase/Milestone) into task-level edges
+// in-memory — nothing is written back to CRDs (D-05 / verify-no-aggregates).
 //
-// Edge filtering — CONSERVATIVE by design (RESEARCH OQ#3):
-// Only task-to-task edges are emitted. A DependsOn entry that names a Plan,
-// Phase, or Milestone (coarse scope ref) is SKIPPED because Phase 24's
-// fan-out assembler will expand those refs into task-level edges. Skipping
-// here is conservative: adding edges later can only increase the detected
-// cycle set, never reduce it, so the Phase-23 gate is never MORE permissive
-// than the final Phase-24 gate.
+// Fan-out carriers: Task.DependsOn, Plan.DependsOn, Phase.DependsOn, and
+// Milestone.DependsOn are all iterated. A coarse ref left un-refined fans out
+// conservatively to EVERY Task in that scope (D-06). An unresolved ref
+// contributes no edge. Edges are de-duplicated before returning (Pitfall 2).
 func (r *ProjectReconciler) assembleProjectDepGraph(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
 ) (nodes []dag.NodeID, edges []dag.Edge, err error) {
+	// 1. List all Tasks in the project namespace carrying the project label.
 	var taskList tidev1alpha2.TaskList
 	if listErr := r.List(ctx, &taskList,
 		client.InNamespace(project.Namespace),
@@ -1452,37 +1463,175 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		return nil, nil, fmt.Errorf("list tasks for project %s: %w", project.Name, listErr)
 	}
 
-	taskNames := make(map[string]struct{}, len(taskList.Items))
-	for i := range taskList.Items {
-		taskNames[taskList.Items[i].Name] = struct{}{}
+	// 2. List Plans, Phases, and Milestones for coarse-scope resolution (D-04).
+	var planList tidev1alpha2.PlanList
+	if listErr := r.List(ctx, &planList, client.InNamespace(project.Namespace)); listErr != nil {
+		return nil, nil, fmt.Errorf("list plans for project %s: %w", project.Name, listErr)
+	}
+	var phaseList tidev1alpha2.PhaseList
+	if listErr := r.List(ctx, &phaseList, client.InNamespace(project.Namespace)); listErr != nil {
+		return nil, nil, fmt.Errorf("list phases for project %s: %w", project.Name, listErr)
+	}
+	var msList tidev1alpha2.MilestoneList
+	if listErr := r.List(ctx, &msList, client.InNamespace(project.Namespace)); listErr != nil {
+		return nil, nil, fmt.Errorf("list milestones for project %s: %w", project.Name, listErr)
 	}
 
+	// 3. Build in-memory resolution maps (OQ-2).
+	taskNames := make(map[string]struct{}, len(taskList.Items))
+	tasksByPlan := make(map[string][]string) // plan.Name → []taskName
+	planToPhase := make(map[string]string)   // plan.Name → phase.Name
+	phaseToMS := make(map[string]string)     // phase.Name → milestone.Name
+
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		taskNames[t.Name] = struct{}{}
+		tasksByPlan[t.Spec.PlanRef] = append(tasksByPlan[t.Spec.PlanRef], t.Name)
+	}
+	for i := range planList.Items {
+		p := &planList.Items[i]
+		planToPhase[p.Name] = p.Spec.PhaseRef
+	}
+	for i := range phaseList.Items {
+		ph := &phaseList.Items[i]
+		phaseToMS[ph.Name] = ph.Spec.MilestoneRef
+	}
+
+	// 4. tasksForScope resolves a scope ref to its member task names (in-memory,
+	// never persisted). Returns an empty slice for unresolved refs (conservative;
+	// never invents an edge — D-06).
+	tasksForScope := func(scopeName string) []string {
+		// Direct task match.
+		if _, isTask := taskNames[scopeName]; isTask {
+			return []string{scopeName}
+		}
+		// Plan match: all tasks with spec.planRef == scopeName.
+		if tasks, ok := tasksByPlan[scopeName]; ok {
+			return tasks
+		}
+		// Phase match: union of tasks in all plans whose planToPhase == scopeName.
+		var phaseResult []string
+		for planName, phaseName := range planToPhase {
+			if phaseName == scopeName {
+				phaseResult = append(phaseResult, tasksByPlan[planName]...)
+			}
+		}
+		if len(phaseResult) > 0 {
+			return phaseResult
+		}
+		// Milestone match: all tasks transitively under phases in this milestone.
+		var msResult []string
+		for phaseName, msName := range phaseToMS {
+			if msName == scopeName {
+				for planName, phaseName2 := range planToPhase {
+					if phaseName2 == phaseName {
+						msResult = append(msResult, tasksByPlan[planName]...)
+					}
+				}
+			}
+		}
+		return msResult // empty if unresolved — skip (conservative)
+	}
+
+	// 5. Build nodes (all Task names).
 	nodes = make([]dag.NodeID, 0, len(taskList.Items))
 	for i := range taskList.Items {
 		nodes = append(nodes, taskList.Items[i].Name)
 	}
 
+	// 6. Build de-duplicated edges (Pitfall 2 — edgeSet prevents double-indegree).
+	edgeSet := make(map[string]struct{})
+	addEdge := func(from, to string) {
+		key := from + "\x00" + to
+		if _, dup := edgeSet[key]; !dup {
+			edgeSet[key] = struct{}{}
+			edges = append(edges, dag.Edge{From: from, To: to})
+		}
+	}
+
+	// 6a. Task-level DependsOn fan-out: for each Task.DependsOn entry, expand
+	// the ref to its task set and add an edge from each source to this task.
 	for i := range taskList.Items {
 		t := &taskList.Items[i]
 		for _, dep := range t.Spec.DependsOn {
-			// Phase 23: only wire edges when dep names a known task (task-level
-			// direct edge, DEPS-01). Coarse scope refs (dep names a Plan/Phase/
-			// Milestone not yet known to the task set) are skipped with a
-			// conservative nil-edge: Phase-24 fan-out will add those edges
-			// (RESEARCH OQ#3). Skipping is NEVER more permissive than Phase-24
-			// because fan-out can only ADD edges, not remove them.
-			if _, isTask := taskNames[dep]; isTask {
-				edges = append(edges, dag.Edge{From: dep, To: t.Name})
+			for _, from := range tasksForScope(dep) {
+				addEdge(from, t.Name)
 			}
 		}
 	}
+
+	// 6b. Plan-level DependsOn fan-out: Plan.DependsOn = ["scope"] means every
+	// Task in THIS plan depends on every Task in the referenced scope.
+	for i := range planList.Items {
+		p := &planList.Items[i]
+		for _, dep := range p.Spec.DependsOn {
+			fromTasks := tasksForScope(dep)
+			toTasks := tasksByPlan[p.Name]
+			for _, from := range fromTasks {
+				for _, to := range toTasks {
+					addEdge(from, to)
+				}
+			}
+		}
+	}
+
+	// 6c. Phase-level DependsOn fan-out: Phase.DependsOn = ["scope"] means every
+	// Task in THIS phase depends on every Task in the referenced scope.
+	for i := range phaseList.Items {
+		ph := &phaseList.Items[i]
+		for _, dep := range ph.Spec.DependsOn {
+			fromTasks := tasksForScope(dep)
+			// Collect all tasks in this phase (union of tasks in plans belonging here).
+			var toTasks []string
+			for planName, phaseName := range planToPhase {
+				if phaseName == ph.Name {
+					toTasks = append(toTasks, tasksByPlan[planName]...)
+				}
+			}
+			for _, from := range fromTasks {
+				for _, to := range toTasks {
+					addEdge(from, to)
+				}
+			}
+		}
+	}
+
+	// 6d. Milestone-level DependsOn fan-out: Milestone.DependsOn = ["scope"] means
+	// every Task in THIS milestone depends on every Task in the referenced scope.
+	for i := range msList.Items {
+		ms := &msList.Items[i]
+		for _, dep := range ms.Spec.DependsOn {
+			fromTasks := tasksForScope(dep)
+			// Collect all tasks in this milestone (transitively via phases/plans).
+			var toTasks []string
+			for phaseName, msName := range phaseToMS {
+				if msName == ms.Name {
+					for planName, phaseName2 := range planToPhase {
+						if phaseName2 == phaseName {
+							toTasks = append(toTasks, tasksByPlan[planName]...)
+						}
+					}
+				}
+			}
+			for _, from := range fromTasks {
+				for _, to := range toTasks {
+					addEdge(from, to)
+				}
+			}
+		}
+	}
+
 	return nodes, edges, nil
 }
 
 // checkGlobalCycleGate is the DEPS-03 / D-10 validation-time cross-scope cycle
-// detector. It assembles the project-wide task-level dependency graph and calls
-// pkg/dag.ComputeWaves. On a CycleError it surfaces the involved nodes via a
-// CycleDetected Project status condition and returns blocked=true.
+// detector. It accepts pre-assembled (nodes, edges) from assembleProjectDepGraph
+// and calls pkg/dag.ComputeWaves. On a CycleError it surfaces the involved nodes
+// via a CycleDetected Project status condition and returns blocked=true.
+//
+// The assembler is called ONCE in Reconcile and its result passed here (Pitfall 7
+// — avoids double List calls when the fan-out assembler lists Plans/Phases/
+// Milestones). Plan 03 consumes the same (nodes, edges) for wave derivation.
 //
 // Unlike checkSchemaRevisionGuard, a cycle is NOT a TerminalError — the operator
 // can fix the cycle by editing DependsOn on the relevant Tasks and the reconciler
@@ -1493,12 +1642,9 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 func (r *ProjectReconciler) checkGlobalCycleGate(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
+	nodes []dag.NodeID,
+	edges []dag.Edge,
 ) (blocked bool, result ctrl.Result, err error) {
-	nodes, edges, asmErr := r.assembleProjectDepGraph(ctx, project)
-	if asmErr != nil {
-		return false, ctrl.Result{}, fmt.Errorf("assemble dep graph for project %s: %w", project.Name, asmErr)
-	}
-
 	// ComputeWaves validates the graph and returns *CycleError on a cycle.
 	// The computed waves are deliberately DISCARDED — the gate only validates;
 	// it does NOT store the schedule (PERSIST-03 / verify-no-aggregates).
