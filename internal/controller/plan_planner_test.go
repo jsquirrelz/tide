@@ -118,9 +118,11 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
-	It("Test 6: preserves Wave materialization when Plan already has Validated Tasks", func() {
-		// Plan with Validated state and pre-existing Tasks should skip planner dispatch
-		// and run Wave materialization (Phase 2 D-E1 path).
+	It("Test 6: skips planner dispatch when Plan already has Validated Tasks", func() {
+		// Plan with Validated state and pre-existing Tasks should skip planner dispatch.
+		// (Phase 24 D-03: per-plan Wave materialization was removed from PlanReconciler;
+		// the global Wave derivation now lives in ProjectReconciler and is covered by
+		// test/integration/envtest/global_wave_derivation_test.go.)
 		makePlan(planName, phaseRef, "Validated")
 		taskNames := alphaThroughThetaFixture(planName)
 		defer cleanupPlanFixture(planName, taskNames)
@@ -144,15 +146,6 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
-
-		// Wave materialization should have created Waves (3 from α…θ fixture).
-		Eventually(func(g Gomega) {
-			for i := range 3 {
-				waveName := fmt.Sprintf("tide-wave-%s-%d", planUID, i)
-				var wave tideprojectv1alpha2.Wave
-				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed())
-			}
-		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// NO planner Job should be created (Tasks already exist).
 		expectedPlannerJob := fmt.Sprintf("tide-plan-%s-1", planUID)

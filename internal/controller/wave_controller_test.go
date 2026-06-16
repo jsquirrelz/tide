@@ -320,7 +320,10 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 
 	Describe("TestWaveReconciler_TransitiveTrigger_ViaTaskWatch", func() {
 		const planRef = "plan-wave-trigger"
-		const wName = "wave-trigger"
+		// Phase 24: taskToWaveMapper derives the Wave name from the Task's global
+		// labels (tide-wave-<project>-<wave-index>). The Wave must be named per that
+		// scheme so the mapper's derived request matches an existing Wave.
+		const wName = "tide-wave-plan-wave-trigger-95"
 		taskNames := []string{"wave-task-trig-a"}
 
 		BeforeEach(func() {
