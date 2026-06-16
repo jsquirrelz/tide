@@ -72,7 +72,9 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   1. A maintainer builds the dashboard image from a clean checkout and the embedded `cmd/dashboard/embed/dist` bundle is regenerated from current source as part of the image/release path (not committed-stale).
   2. CI fails a build whose embedded `dist` is older than the dashboard source (a staleness gate catches a forgotten regenerate before publish).
   3. A freshly built image, run against a cluster, renders the Telemetry tab — proving the embedded bundle is the current post-telemetry SPA, not the frozen pre-telemetry one.
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 22-01-PLAN.md — multi-stage Dockerfile.dashboard (node spa-builder) + .dockerignore re-includes + make verify-dashboard-freshness target (freshness + telemetry-marker gate)
+- [ ] 22-02-PLAN.md — wire verify-dashboard-freshness into ci.yaml (PR gate) and release.yaml helmify-verify (release gate), each with actions/setup-node
 **UI hint**: yes
 
 ### Phase 23: Schema Migration + Cross-Scope Dependency Model
