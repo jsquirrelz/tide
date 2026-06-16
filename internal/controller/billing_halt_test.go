@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---------- isBillingFailureReason ----------
@@ -128,7 +128,7 @@ func TestSetBillingHaltIfNeeded_SetsCondition(t *testing.T) {
 			Name:      "my-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -171,7 +171,7 @@ func TestSetBillingHaltIfNeeded_NonBillingReason_NoOp(t *testing.T) {
 			Name:      "my-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -220,7 +220,7 @@ func TestSetBillingHalt_PreResumeStraggler_NoStamp(t *testing.T) {
 				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -257,7 +257,7 @@ func TestSetBillingHalt_PostResumeFreshFailure_Stamps(t *testing.T) {
 				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -290,7 +290,7 @@ func TestSetBillingHalt_NoAnnotation_StampsRegardlessOfJobStart(t *testing.T) {
 			Name:      "no-annotation-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -327,7 +327,7 @@ func TestSetBillingHalt_ZeroJobStart_FailClosed(t *testing.T) {
 				tideprojectv1alpha1.AnnotationBillingResumedAt: resumedAt.Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).
@@ -363,7 +363,7 @@ func TestSetBillingHalt_UnparseableAnnotation_FailClosed(t *testing.T) {
 				tideprojectv1alpha1.AnnotationBillingResumedAt: "not-a-timestamp",
 			},
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(project).

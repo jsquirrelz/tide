@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -51,7 +51,7 @@ func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha1.Project {
 			Namespace: "default",
 			UID:       types.UID("proj-uid-wave-integ"),
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/test.git",
 			Git: &tideprojectv1alpha1.GitConfig{
 				RepoURL:        "https://github.com/example/test.git",

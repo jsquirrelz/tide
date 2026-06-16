@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -142,11 +141,11 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 
 	// PLAN-02: file-touch ↔ dependsOn reconciliation (D-E2).
 	project := resolveProjectForWebhook(ctx, v.Client, plan)
-	mode := resolveFileTouchMode(plan, project, v.DefaultFileTouchMode)
-	mismatches := computeFileTouchMismatches(taskList.Items)
+	mode := ResolveFileTouchMode(plan, project, v.DefaultFileTouchMode)
+	mismatches := ComputeFileTouchMismatches(taskList.Items)
 
 	if len(mismatches) > 0 {
-		summary := summariseMismatches(mismatches)
+		summary := SummariseMismatches(mismatches)
 		if mode == "strict" {
 			if v.Recorder != nil {
 				v.Recorder.Eventf(plan, corev1.EventTypeWarning, "FileTouchMismatch",
@@ -162,7 +161,7 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 		for _, m := range mismatches {
 			warnings = append(warnings,
 				fmt.Sprintf("file-touch mismatch on tasks %s/%s sharing path %q without declared dependsOn",
-					m.taskA, m.taskB, m.sharedPath))
+					m.TaskA, m.TaskB, m.SharedPath))
 		}
 	}
 
@@ -230,114 +229,4 @@ func resolveProjectForWebhook(ctx context.Context, c client.Client, plan *tidepr
 		return nil
 	}
 	return &p
-}
-
-// resolveFileTouchMode returns the active file-touch validation mode per D-E3 precedence:
-//  1. Plan annotation tideproject.k8s/file-touch-mode=strict|warn
-//  2. Plan annotation tideproject.k8s/file-touch-mode-resolved=strict|warn
-//  3. project.Spec.PlanAdmission.FileTouchMode (if project non-nil)
-//  4. clusterDefault (Helm value; "warn" if unset)
-func resolveFileTouchMode(plan *tideprojectv1alpha2.Plan, project *tideprojectv1alpha2.Project, clusterDefault string) string {
-	if plan != nil {
-		if v, ok := plan.Annotations["tideproject.k8s/file-touch-mode"]; ok {
-			if v == "strict" || v == "warn" {
-				return v
-			}
-		}
-		if v, ok := plan.Annotations["tideproject.k8s/file-touch-mode-resolved"]; ok {
-			if v == "strict" || v == "warn" {
-				return v
-			}
-		}
-	}
-	if project != nil && project.Spec.PlanAdmission.FileTouchMode != "" {
-		return project.Spec.PlanAdmission.FileTouchMode
-	}
-	if clusterDefault != "" {
-		return clusterDefault
-	}
-	return "warn"
-}
-
-// fileTouchMismatchPair records a pair of Tasks that share an EXACT file path
-// without a declared dependsOn edge between them.
-type fileTouchMismatchPair struct {
-	taskA      string
-	taskB      string
-	sharedPath string
-}
-
-// computeFileTouchMismatches returns pairs of Tasks where their filesTouched sets
-// overlap on EXACT path equality AND no declared within-plan dependsOn edge exists.
-//
-// Cross-scope deps are ignored for the mismatch check (only within-plan edge presence
-// clears the mismatch flag; a cross-scope dep on the same task is a separate concern
-// handled by the global assembler in Phase 24).
-//
-// Complexity: O(N² × P) — acceptable for v1 Plans bounded to ≤20 Tasks.
-func computeFileTouchMismatches(tasks []tideprojectv1alpha2.Task) []fileTouchMismatchPair {
-	dependsOnSet := make(map[string]map[string]struct{}, len(tasks))
-	for i := range tasks {
-		t := &tasks[i]
-		deps := make(map[string]struct{}, len(t.Spec.DependsOn))
-		for _, d := range t.Spec.DependsOn {
-			deps[d] = struct{}{}
-		}
-		dependsOnSet[t.Name] = deps
-	}
-
-	var mismatches []fileTouchMismatchPair
-
-	for i := range tasks {
-		for j := i + 1; j < len(tasks); j++ {
-			a := &tasks[i]
-			b := &tasks[j]
-
-			if a.Name > b.Name {
-				a, b = b, a
-			}
-
-			bFiles := make(map[string]struct{}, len(b.Spec.FilesTouched))
-			for _, f := range b.Spec.FilesTouched {
-				bFiles[f] = struct{}{}
-			}
-
-			var shared []string
-			for _, f := range a.Spec.FilesTouched {
-				if _, ok := bFiles[f]; ok {
-					shared = append(shared, f)
-				}
-			}
-
-			if len(shared) == 0 {
-				continue
-			}
-
-			if _, depAtoB := dependsOnSet[b.Name][a.Name]; depAtoB {
-				continue
-			}
-			if _, depBtoA := dependsOnSet[a.Name][b.Name]; depBtoA {
-				continue
-			}
-
-			for _, p := range shared {
-				mismatches = append(mismatches, fileTouchMismatchPair{
-					taskA:      a.Name,
-					taskB:      b.Name,
-					sharedPath: p,
-				})
-			}
-		}
-	}
-
-	return mismatches
-}
-
-// summariseMismatches returns a compact human-readable string of all mismatches.
-func summariseMismatches(mismatches []fileTouchMismatchPair) string {
-	parts := make([]string, 0, len(mismatches))
-	for _, m := range mismatches {
-		parts = append(parts, fmt.Sprintf("(%s,%s)@%q", m.taskA, m.taskB, m.sharedPath))
-	}
-	return strings.Join(parts, "; ")
 }

@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // WaveCustomValidator no-op behavior (Plan 07 Task 2 / revision Warning 9).
@@ -57,8 +57,8 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				Namespace: namespace,
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   "some-plan",
-				WaveIndex: 0,
+				ProjectRef: "some-plan",
+				WaveIndex:  0,
 			},
 		}
 		err := k8sClient.Create(ctx, wave)
@@ -76,8 +76,8 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				},
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   "some-plan",
-				WaveIndex: 0,
+				ProjectRef: "some-plan",
+				WaveIndex:  0,
 			},
 		}
 		Expect(k8sClient.Create(ctx, wave)).To(Succeed())
@@ -93,8 +93,8 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				},
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   "plan-a",
-				WaveIndex: 0,
+				ProjectRef: "plan-a",
+				WaveIndex:  0,
 			},
 		}
 		Expect(k8sClient.Create(ctx, wave)).To(Succeed())
@@ -120,8 +120,8 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				},
 			},
 			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   "some-plan",
-				WaveIndex: 0,
+				ProjectRef: "some-plan",
+				WaveIndex:  0,
 			},
 		}
 		Expect(k8sClient.Create(ctx, wave)).To(Succeed())
@@ -136,8 +136,8 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 		bad := &tideprojectv1alpha1.Wave{
 			ObjectMeta: metav1.ObjectMeta{Name: "bad-wave", Namespace: namespace},
 			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   "some-plan",
-				WaveIndex: -1,
+				ProjectRef: "some-plan",
+				WaveIndex:  -1,
 			},
 		}
 		err := k8sClient.Create(ctx, bad)

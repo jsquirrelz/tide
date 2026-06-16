@@ -46,7 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -97,7 +97,7 @@ func clearBillingHalt(ctx context.Context, projectName string) {
 func makeProjectForHalt(ctx context.Context, name string) {
 	p := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/tide.git",
 		},
 	}

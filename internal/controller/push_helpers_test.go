@@ -20,7 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // fixtureProject returns a hand-constructed Project for buildPushJob /
@@ -38,7 +38,7 @@ func fixtureProject() *tideprojectv1alpha1.Project {
 			Namespace: "test-ns",
 			Name:      "demo-project",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/demo.git",
 			Git: &tideprojectv1alpha1.GitConfig{
 				RepoURL:        "https://github.com/example/demo.git",

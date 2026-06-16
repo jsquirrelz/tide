@@ -37,7 +37,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // PlansHandler serves GET /api/v1/plans/{name}. Per D-D2 the Client is the
@@ -111,14 +111,16 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 		h.Log.Error(err, "list waves failed", "plan", name)
 	}
 
-	// Build taskName → waveIndex map from the Wave CRDs filtered to this Plan.
-	// Tasks not present in any wave's TaskRefs fall through to waveIndex=0.
+	// Build taskName → global waveIndex map from the Wave CRDs. In v1alpha2 Waves
+	// are global-scope (ProjectRef + global WaveIndex, no PlanRef); the Plan→Wave
+	// association is derived from Wave.Status.TaskRefs membership rather than a
+	// Spec.PlanRef field (T-23-14 / Phase 24 owns global derivation). Each Task's
+	// global wave position is read from the wave that lists it; tasks not present
+	// in any wave's TaskRefs fall through to waveIndex=0. Only this Plan's tasks
+	// are looked up below, so unrelated TaskRefs entries are harmless.
 	waveByTask := make(map[string]int, len(tasks.Items))
 	for i := range waves.Items {
 		wv := &waves.Items[i]
-		if wv.Spec.PlanRef != name {
-			continue
-		}
 		for _, tref := range wv.Status.TaskRefs {
 			waveByTask[tref] = wv.Spec.WaveIndex
 		}

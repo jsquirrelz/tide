@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newPlansHandler returns a PlansHandler with a fake controller-runtime
@@ -71,11 +71,13 @@ func newTaskCRD(name, namespace, planRef, phase string, dependsOn []string, atte
 	}
 }
 
-// newWaveCRD is a minimal Wave factory.
-func newWaveCRD(name, namespace, planRef string, waveIndex int, taskRefs []string) *tidev1alpha1.Wave {
+// newWaveCRD is a minimal Wave factory. v1alpha2 Waves are global-scope:
+// ProjectRef replaces the removed PlanRef. The Plan→Wave association is derived
+// by the plans handler from Wave.Status.TaskRefs membership, not from the spec.
+func newWaveCRD(name, namespace, projectRef string, waveIndex int, taskRefs []string) *tidev1alpha1.Wave {
 	return &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: planRef, WaveIndex: waveIndex},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: projectRef, WaveIndex: waveIndex},
 		Status:     tidev1alpha1.WaveStatus{TaskRefs: taskRefs},
 	}
 }

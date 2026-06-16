@@ -24,14 +24,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // makeProject is a Project fixture with optional AwaitingApproval condition.
 func makeProject(name string) *tidev1alpha1.Project {
 	return &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 		},
 		Status: tidev1alpha1.ProjectStatus{Phase: "Running"},

@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -69,7 +69,7 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 	makeProject := func(name string) *tideprojectv1alpha1.Project {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{

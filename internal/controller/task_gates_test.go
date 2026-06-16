@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -39,7 +39,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 	makeProjectWithGates := func(name string, g tideprojectv1alpha1.Gates) *tideprojectv1alpha1.Project {
 		p := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/tide.git",
 				Gates:      g,
 			},
@@ -217,7 +217,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			// Create project
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 				},
 			}
@@ -299,7 +299,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 		BeforeEach(func() {
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 				},
 			}

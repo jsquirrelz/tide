@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // PlanCustomValidator no-op behavior (Plan 07 Task 2 / revision Warning 9).
@@ -412,7 +412,7 @@ var _ = Describe("PlanCustomValidator (Phase 2 admission)", func() {
 
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: namespace},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/d08-test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{

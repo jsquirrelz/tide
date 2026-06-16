@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -97,7 +97,7 @@ func testProject(ns, name string, uid types.UID) *tidev1alpha1.Project {
 			Namespace: ns,
 			UID:       uid,
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret",
 		},

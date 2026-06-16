@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ensurePVC creates a bound PVC if it doesn't already exist.
@@ -76,7 +76,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	It("Test 1: branch-name init sets Status.Git.BranchName to tide/run-<name>-<unix>", func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
@@ -135,7 +135,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	It("Test 2: bypass annotation clears PushLeaseFailed and triggers retry", func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",

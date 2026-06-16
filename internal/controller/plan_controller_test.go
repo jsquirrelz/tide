@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // alphaThroughThetaFixture creates the α…θ Tasks matching pkg/dag/kahn_test.go:
@@ -96,11 +96,19 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 			_ = k8sClient.Delete(context.Background(), t)
 		}
 	}
-	// Delete Waves with our plan UID prefix.
+	// Delete Waves with our plan UID prefix. In v1alpha2 Waves are global-scope
+	// (no Spec.PlanRef); the per-plan stub names them tide-wave-<plan.UID>-<i>,
+	// so filter on that name prefix instead.
+	var planForUID tideprojectv1alpha1.Plan
+	wavePrefix := ""
+	if err := k8sClient.Get(context.Background(),
+		types.NamespacedName{Name: planName, Namespace: "default"}, &planForUID); err == nil {
+		wavePrefix = fmt.Sprintf("tide-wave-%s-", planForUID.UID)
+	}
 	var waveList tideprojectv1alpha1.WaveList
 	_ = k8sClient.List(context.Background(), &waveList, client.InNamespace("default"))
 	for _, w := range waveList.Items {
-		if w.Spec.PlanRef == planName {
+		if wavePrefix != "" && strings.HasPrefix(w.Name, wavePrefix) {
 			wv := w
 			r := &WaveReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 			_ = k8sClient.Delete(context.Background(), &wv)
@@ -224,12 +232,18 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			_, err := reconcilePlanN(r, planNS, 4)
 			Expect(err).NotTo(HaveOccurred())
 
+			// v1alpha2 Waves carry no Spec.PlanRef; assert that no Wave was
+			// materialized for THIS Plan by checking the per-plan stub name
+			// prefix tide-wave-<plan.UID>-.
+			var planObj tideprojectv1alpha1.Plan
+			Expect(k8sClient.Get(ctx, planNS, &planObj)).To(Succeed())
+			wavePrefix := fmt.Sprintf("tide-wave-%s-", planObj.UID)
 			var waveList tideprojectv1alpha1.WaveList
 			Expect(k8sClient.List(ctx, &waveList,
 				client.InNamespace("default"),
 			)).To(Succeed())
 			for _, w := range waveList.Items {
-				Expect(w.Spec.PlanRef).NotTo(Equal(planName),
+				Expect(strings.HasPrefix(w.Name, wavePrefix)).To(BeFalse(),
 					"expected no Waves for unvalidated Plan")
 			}
 		})
@@ -266,7 +280,12 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 				var wave tideprojectv1alpha1.Wave
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: waveName, Namespace: "default"}, &wave)).To(Succeed(),
 					"expected wave %s to exist", waveName)
-				Expect(wave.Spec.PlanRef).To(Equal(planName))
+				// v1alpha2 Waves are global-scope: ProjectRef replaces PlanRef.
+				// makePlan does not wire a Project chain so resolveProjectName
+				// falls back to the "unknown" sentinel (Metric Label Sentinel).
+				// TODO(phase-24): assert the real ProjectRef once the global
+				// assembler creates Waves from the project-wide DAG.
+				Expect(wave.Spec.ProjectRef).NotTo(BeEmpty())
 				Expect(wave.Spec.WaveIndex).To(Equal(i))
 			}
 		})
@@ -305,8 +324,11 @@ var _ = Describe("PlanReconciler Wave materialization", Label("envtest", "phase2
 			var waveList tideprojectv1alpha1.WaveList
 			Expect(k8sClient.List(ctx, &waveList, client.InNamespace("default"))).To(Succeed())
 			planWaves := 0
+			wavePrefix := fmt.Sprintf("tide-wave-%s-", planUID)
 			for _, w := range waveList.Items {
-				if w.Spec.PlanRef == planName {
+				// v1alpha2 Waves carry no PlanRef; identify this Plan's Waves
+				// by the per-plan stub name prefix tide-wave-<plan.UID>-.
+				if strings.HasPrefix(w.Name, wavePrefix) {
 					planWaves++
 				}
 			}
@@ -505,7 +527,7 @@ var _ = Describe("PlanReconciler — D-03 project-label backfill (CUTS-01)", Lab
 		// Create Project.
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 			},
@@ -608,7 +630,7 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 		// Create Project → Milestone → Phase → Plan chain so resolveProjectForPlan succeeds.
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 			},

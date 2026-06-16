@@ -61,7 +61,7 @@ import (
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"

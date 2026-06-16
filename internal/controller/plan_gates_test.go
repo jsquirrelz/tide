@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -24,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -40,7 +41,7 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 	makeProjectChain := func(projectName, msName, phaseName string, g tideprojectv1alpha1.Gates) {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{
@@ -438,11 +439,16 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 						"GATE-04: no executor Job for task-2 while Plan is parked")
 				}
 
-				// Zero Wave CRs created by the wave path while parked.
+				// Zero Wave CRs created by the wave path while parked. v1alpha2
+				// Waves carry no Spec.PlanRef; this Plan's Waves are identified by
+				// the per-plan stub name prefix tide-wave-<plan.UID>-.
+				var parkedPlan tideprojectv1alpha1.Plan
+				g.Expect(mgrClient.Get(ctx, planNN, &parkedPlan)).To(Succeed())
+				wavePrefix := fmt.Sprintf("tide-wave-%s-", parkedPlan.UID)
 				var waves tideprojectv1alpha1.WaveList
 				g.Expect(k8sClient.List(ctx, &waves, client.InNamespace("default"))).To(Succeed())
 				for _, w := range waves.Items {
-					g.Expect(w.Spec.PlanRef).NotTo(Equal(planName),
+					g.Expect(strings.HasPrefix(w.Name, wavePrefix)).To(BeFalse(),
 						"GATE-04: no Wave CRs must be created while Plan is parked")
 				}
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())

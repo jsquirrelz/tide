@@ -25,7 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // buildTestOptions constructs a minimal BuildOptions for executor Kind tests.
@@ -51,7 +51,7 @@ func buildTestOptions() BuildOptions {
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},
@@ -89,7 +89,7 @@ func buildPlannerTestOptions() BuildOptions {
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},

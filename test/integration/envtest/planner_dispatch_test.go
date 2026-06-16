@@ -44,7 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/pool"
@@ -58,7 +58,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 	BeforeEach(func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: pdProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/pd-test.git",
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-opus-4-7",

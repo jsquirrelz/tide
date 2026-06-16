@@ -17,7 +17,7 @@ limitations under the License.
 package podjob
 
 import (
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // JobKind discriminates planner from executor Jobs for caps-default purposes.

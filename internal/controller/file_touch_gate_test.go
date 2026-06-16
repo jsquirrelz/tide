@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // fileTouchGateReconciler constructs a PlanReconciler wired for the file-touch
@@ -63,7 +63,7 @@ func fileTouchGateReconciler() *PlanReconciler {
 func makeFileTouchProject(ctx context.Context, projectName, ftMode string) {
 	proj := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/ft-test.git",
 			Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 			PlanAdmission: tideprojectv1alpha1.PlanAdmissionConfig{

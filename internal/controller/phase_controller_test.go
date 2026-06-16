@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -39,7 +39,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 	BeforeEach(func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-sonnet-4-6",
@@ -99,7 +99,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 		const autoPhaseName = "test-phase-auto5"
 		autoProj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{
@@ -293,7 +293,7 @@ var _ = Describe("PhaseReconciler — DEBT-02 reject short-circuit before report
 					gates.AnnotationReject: "operator halt test",
 				},
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{
@@ -438,7 +438,7 @@ var _ = Describe("PhaseReconciler — D-03 project-label backfill (CUTS-01)", La
 		// Create Project.
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 			},

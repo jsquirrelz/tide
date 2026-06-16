@@ -25,7 +25,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---- IsCapExceeded ----
@@ -56,7 +56,7 @@ func TestIsCapExceeded(t *testing.T) {
 			}
 
 			p := &tidev1alpha1.Project{
-				Spec: tidev1alpha1.ProjectSpec{
+				Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					Budget: tidev1alpha1.BudgetConfig{AbsoluteCapCents: tc.cap},
 				},
 				Status: tidev1alpha1.ProjectStatus{
@@ -150,7 +150,7 @@ func TestIsCapExceeded_RollingCap(t *testing.T) {
 			}
 
 			p := &tidev1alpha1.Project{
-				Spec: tidev1alpha1.ProjectSpec{
+				Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					Budget: tidev1alpha1.BudgetConfig{
 						AbsoluteCapCents:      tc.absoluteCap,
 						RollingWindowCapCents: tc.rollingCap,

@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const indegreeNamespace = "default"
@@ -52,7 +52,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				Name:      indegreeTestProject,
 				Namespace: indegreeNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/indegree-test.git",
 			},
 		}
@@ -207,8 +207,8 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
-					PlanRef:   planName,
-					WaveIndex: 0,
+					ProjectRef: planName,
+					WaveIndex:  0,
 				},
 			}
 			Expect(k8sClient.Create(ctx, wave)).To(Succeed())
@@ -258,8 +258,8 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
-					PlanRef:   planName,
-					WaveIndex: 0,
+					ProjectRef: planName,
+					WaveIndex:  0,
 				},
 			}
 			Expect(k8sClient.Create(ctx, wave)).To(Succeed())

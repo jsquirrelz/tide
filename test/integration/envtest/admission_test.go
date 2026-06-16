@@ -33,7 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const admissionNamespace = "default"
@@ -403,7 +403,7 @@ var _ = Describe("Project CEL targetRepo admission", Label("envtest"), func() {
 				Name:      name,
 				Namespace: admissionNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo:        targetRepo,
 				ProviderSecretRef: "any-secret",
 				Budget: tideprojectv1alpha1.BudgetConfig{

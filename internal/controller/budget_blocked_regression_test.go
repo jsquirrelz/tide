@@ -40,7 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 )
@@ -69,7 +69,7 @@ func stampBudgetSpend(ctx context.Context, projectName string, spentCents int64)
 func makeBudgetProject(ctx context.Context, name string, capCents int64) *tideprojectv1alpha1.Project {
 	p := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/tide.git",
 			Budget: tideprojectv1alpha1.BudgetConfig{
 				AbsoluteCapCents: capCents,

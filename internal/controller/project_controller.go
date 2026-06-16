@@ -40,7 +40,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
@@ -51,8 +50,8 @@ import (
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
-	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	"github.com/jsquirrelz/tide/pkg/dag"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // pushResultEnvelope mirrors the JSON envelope emitted by cmd/tide-push
@@ -213,7 +212,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	logger := logf.FromContext(ctx)
 
 	// 1. Fetch.
-	var project tideprojectv1alpha1.Project
+	var project tidev1alpha2.Project
 	if err := r.Get(ctx, req.NamespacedName, &project); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -268,9 +267,9 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionReady,
+		Type:               tidev1alpha2.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonInitialized,
+		Reason:             tidev1alpha2.ReasonInitialized,
 		Message:            "Project scaffolded; awaiting dispatch logic (Phase 2)",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -286,7 +285,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // 2. Shared PVC bind check (Blocker #2/#3 single-PVC architecture).
 // 3. Init Job creation (idempotent, deterministic name tide-init-{UID}).
 // 4. Init Job completion watch — patches Project.Status.Phase.
-func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	now := time.Now()
 
@@ -296,7 +295,7 @@ func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project 
 		return ctrl.Result{}, err
 	}
 	// If the project is in BudgetExceeded and bypass did not clear it, halt dispatch.
-	if project.Status.Phase == tideprojectv1alpha1.PhaseBudgetExceeded {
+	if project.Status.Phase == tidev1alpha2.PhaseBudgetExceeded {
 		return result, nil
 	}
 
@@ -337,15 +336,15 @@ func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project 
 	}
 	// Step 5 (Phase 3): once Initialized, run the Phase 3 lifecycle
 	// (branch-name init, clone Job, push Job, bypass-annotation handling).
-	if project.Status.Phase == tideprojectv1alpha1.PhaseInitialized || project.Status.Phase == tideprojectv1alpha1.PhaseRunning ||
-		project.Status.Phase == tideprojectv1alpha1.PhasePushLeaseFailed || project.Status.Phase == tideprojectv1alpha1.PhaseComplete {
+	if project.Status.Phase == tidev1alpha2.PhaseInitialized || project.Status.Phase == tidev1alpha2.PhaseRunning ||
+		project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed || project.Status.Phase == tidev1alpha2.PhaseComplete {
 		return r.reconcilePhase3Lifecycle(ctx, project)
 	}
 	return result, nil
 }
 
 // ensureInitJob creates the one-shot init Job (idempotent — AlreadyExists is success).
-func (r *ProjectReconciler) ensureInitJob(ctx context.Context, project *tideprojectv1alpha1.Project, pvcName string) error {
+func (r *ProjectReconciler) ensureInitJob(ctx context.Context, project *tidev1alpha2.Project, pvcName string) error {
 	job := r.buildInitJob(project, pvcName)
 	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {
 		return fmt.Errorf("ensure owner ref on init job: %w", err)
@@ -361,7 +360,7 @@ func (r *ProjectReconciler) ensureInitJob(ctx context.Context, project *tideproj
 
 // handleInitJobCompletion inspects the init Job's terminal state and patches
 // Project.Status.Phase accordingly.
-func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, job *batchv1.Job) (ctrl.Result, error) {
+func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project *tidev1alpha2.Project, job *batchv1.Job) (ctrl.Result, error) {
 	if isJobSucceeded(job) {
 		// Cascade 13 idempotency guard: handleInitJobCompletion is called on
 		// every reconcile pass — the init Job remains Succeeded permanently
@@ -373,20 +372,20 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 		// observing Phase=Initialized instead of Phase=PushLeaseFailed.
 		// Reference: .planning/debug/push-lease-phase-revert.md.
 		switch project.Status.Phase {
-		case tideprojectv1alpha1.PhaseRunning,
-			tideprojectv1alpha1.PhaseComplete,
-			tideprojectv1alpha1.PhasePushLeaseFailed,
-			tideprojectv1alpha1.PhasePushLeakBlocked:
+		case tidev1alpha2.PhaseRunning,
+			tidev1alpha2.PhaseComplete,
+			tidev1alpha2.PhasePushLeaseFailed,
+			tidev1alpha2.PhasePushLeakBlocked:
 			// Phase has already advanced past Initialized — init-Job-completion
 			// was processed in a prior reconcile. Skip the re-patch.
 			return ctrl.Result{}, nil
 		}
 		patch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tideprojectv1alpha1.PhaseInitialized
+		project.Status.Phase = tidev1alpha2.PhaseInitialized
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionReady,
+			Type:               tidev1alpha2.ConditionReady,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha1.ReasonInitialized,
+			Reason:             tidev1alpha2.ReasonInitialized,
 			Message:            fmt.Sprintf("Init Job %s completed successfully", job.Name),
 			LastTransitionTime: metav1.Now(),
 		})
@@ -400,9 +399,9 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 
 	if isJobFailed(job) {
 		patch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tideprojectv1alpha1.PhaseInitFailed
+		project.Status.Phase = tidev1alpha2.PhaseInitFailed
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionFailed,
+			Type:               tidev1alpha2.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "InitJobFailed",
 			Message:            fmt.Sprintf("Init Job %s failed", job.Name),
@@ -447,7 +446,7 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 // proof-of-shape Phase 3 needs.
 //
 //nolint:gocyclo // reconcile lifecycle is a flat sequence of state-transition arms; splitting would obscure the contract
-func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// Step 0: Check if all owned Milestones have Succeeded → Complete.
@@ -464,7 +463,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if complete || project.Status.Phase == tideprojectv1alpha1.PhaseComplete {
+	if complete || project.Status.Phase == tidev1alpha2.PhaseComplete {
 		// The control-plane succession is done. Run ONLY the bounded
 		// boundary-push retry state machine (debug #13b) — no further planner
 		// dispatch, branch init, or clone on a Complete project.
@@ -490,7 +489,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	}
 
 	// Step 2: Bypass-annotation handling (D-B6 / D-D4 mirror).
-	if project.Status.Phase == tideprojectv1alpha1.PhasePushLeaseFailed {
+	if project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed {
 		if v, ok := project.Annotations[bypassPushLeaseAnnotation]; ok && v == "true" {
 			logger.Info("push-lease bypass annotation present; clearing PushLeaseFailed", "project", project.Name)
 			// Consume the annotation.
@@ -507,11 +506,11 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 			}
 			// Clear PushLeaseFailed phase.
 			statusPatch := client.MergeFrom(project.DeepCopy())
-			project.Status.Phase = tideprojectv1alpha1.PhaseRunning
+			project.Status.Phase = tidev1alpha2.PhaseRunning
 			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+				Type:               tidev1alpha2.ConditionPushLeaseFailed,
 				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha1.ReasonBypassApplied,
+				Reason:             tidev1alpha2.ReasonBypassApplied,
 				Message:            "Push-lease failure bypassed by operator annotation",
 				LastTransitionTime: metav1.Now(),
 			})
@@ -589,7 +588,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 // converges — a re-push of an already-present HEAD is a no-op fast-forward.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive arms; splitting obscures the contract
-func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// No git target → nothing to push; nothing to observe.
@@ -598,7 +597,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	}
 
 	// Already confirmed pushed — terminal success arm. Nothing further to do.
-	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed); c != nil &&
+	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionBoundaryPushed); c != nil &&
 		c.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
@@ -609,11 +608,11 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	// must NOT re-process them every reconcile — the Step-0 Complete fast-path
 	// re-asserts Phase=Complete on each pass, so without this guard the lease
 	// arm would re-increment LeaseFailureCount in a loop.
-	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionPushLeakBlocked); c != nil &&
+	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeakBlocked); c != nil &&
 		c.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
-	if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionPushLeaseFailed); c != nil &&
+	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeaseFailed); c != nil &&
 		c.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
@@ -622,16 +621,16 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	// controller restart (no in-memory counter). Only declare PushFailed once —
 	// guard on the existing condition reason so we don't re-emit the Event.
 	if project.Status.BoundaryPush.Attempts >= maxBoundaryPushAttempts {
-		if c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed); c == nil ||
-			c.Reason != tideprojectv1alpha1.ReasonPushFailed {
+		if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionBoundaryPushed); c == nil ||
+			c.Reason != tidev1alpha2.ReasonPushFailed {
 			if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
-				tideprojectv1alpha1.ReasonPushFailed,
+				tidev1alpha2.ReasonPushFailed,
 				fmt.Sprintf("Boundary push did not land after %d attempts; last error: %q",
 					project.Status.BoundaryPush.Attempts, project.Status.BoundaryPush.LastError)); err != nil {
 				return ctrl.Result{}, err
 			}
 			if r.Recorder != nil {
-				r.Recorder.Eventf(project, corev1.EventTypeWarning, tideprojectv1alpha1.ReasonPushFailed,
+				r.Recorder.Eventf(project, corev1.EventTypeWarning, tidev1alpha2.ReasonPushFailed,
 					"Boundary push exhausted %d/%d attempts; run branch %q not on remote (last error: %q)",
 					project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts,
 					project.Status.Git.BranchName, project.Status.BoundaryPush.LastError)
@@ -663,7 +662,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			return ctrl.Result{}, err
 		}
 		if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionTrue,
-			tideprojectv1alpha1.ReasonPushed,
+			tidev1alpha2.ReasonPushed,
 			fmt.Sprintf("Run branch %q pushed to remote (job %s)", project.Status.Git.BranchName, pushJobName)); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -686,9 +685,9 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			// Operator recovery path (Phase 4 W-1) — no auto-retry; a secret
 			// must be removed from the staged diff by hand.
 			patch := client.MergeFrom(project.DeepCopy())
-			project.Status.Phase = tideprojectv1alpha1.PhasePushLeakBlocked
+			project.Status.Phase = tidev1alpha2.PhasePushLeakBlocked
 			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionPushLeakBlocked,
+				Type:               tidev1alpha2.ConditionPushLeakBlocked,
 				Status:             metav1.ConditionTrue,
 				Reason:             "LeakDetected",
 				Message:            fmt.Sprintf("Push Job %s blocked by gitleaks: secret pattern detected in diff", pushJobName),
@@ -705,10 +704,10 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		case "lease-rejected":
 			// Operator bypass-annotation recovery path (Phase 3) — no auto-retry.
 			patch := client.MergeFrom(project.DeepCopy())
-			project.Status.Phase = tideprojectv1alpha1.PhasePushLeaseFailed
+			project.Status.Phase = tidev1alpha2.PhasePushLeaseFailed
 			project.Status.Git.LeaseFailureCount++
 			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionPushLeaseFailed,
+				Type:               tidev1alpha2.ConditionPushLeaseFailed,
 				Status:             metav1.ConditionTrue,
 				Reason:             "LeaseRejected",
 				Message:            fmt.Sprintf("Push Job %s rejected by --force-with-lease", pushJobName),
@@ -750,7 +749,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	// Push Job pending/running — single-in-flight guard. Do NOT create a second
 	// Job; surface the in-flight state and requeue on capped backoff.
 	if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
-		tideprojectv1alpha1.ReasonPushing,
+		tidev1alpha2.ReasonPushing,
 		fmt.Sprintf("Boundary push in flight (job %s, attempt %d/%d)",
 			pushJobName, project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts)); err != nil {
 		return ctrl.Result{}, err
@@ -763,7 +762,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 // requeues with capped exponential backoff. The Job pushes the already-
 // integrated run-branch HEAD (idempotent per #13), so a re-create after a
 // terminal failure converges.
-func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tideprojectv1alpha1.Project, pvcName, pushJobName, lastErr string) (ctrl.Result, error) {
+func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tidev1alpha2.Project, pvcName, pushJobName, lastErr string) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	msg, mErr := buildCommitMessage("project", "")
@@ -796,7 +795,7 @@ func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *t
 		return ctrl.Result{}, err
 	}
 	if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
-		tideprojectv1alpha1.ReasonPushing,
+		tidev1alpha2.ReasonPushing,
 		fmt.Sprintf("Boundary push dispatched (job %s, attempt %d/%d)",
 			pushJobName, project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts)); err != nil {
 		return ctrl.Result{}, err
@@ -830,14 +829,14 @@ func (r *ProjectReconciler) deleteFailedPushJob(ctx context.Context, job *batchv
 // setBoundaryPushedCondition patches the non-terminal BoundaryPushed condition.
 // It only writes when the (status, reason) actually changes so reconciles do not
 // churn LastTransitionTime.
-func (r *ProjectReconciler) setBoundaryPushedCondition(ctx context.Context, project *tideprojectv1alpha1.Project, status metav1.ConditionStatus, reason, message string) error {
-	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha1.ConditionBoundaryPushed)
+func (r *ProjectReconciler) setBoundaryPushedCondition(ctx context.Context, project *tidev1alpha2.Project, status metav1.ConditionStatus, reason, message string) error {
+	existing := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionBoundaryPushed)
 	if existing != nil && existing.Status == status && existing.Reason == reason && existing.Message == message {
 		return nil
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionBoundaryPushed,
+		Type:               tidev1alpha2.ConditionBoundaryPushed,
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
@@ -868,8 +867,8 @@ func boundaryPushRequeue(attempts int32) time.Duration {
 
 // countChildMilestones returns the number of Milestones owned by this Project (plan 09-08).
 // Used by the ChildCount-gated succession path in handleProjectJobCompletion.
-func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *tideprojectv1alpha1.Project) int {
-	var msList tideprojectv1alpha1.MilestoneList
+func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *tidev1alpha2.Project) int {
+	var msList tidev1alpha2.MilestoneList
 	if err := r.List(ctx, &msList, client.InNamespace(project.Namespace)); err != nil {
 		return 0
 	}
@@ -885,7 +884,7 @@ func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *t
 // checkProjectComplete returns true (and patches Status.Phase=Complete) when
 // BoundaryDetected reports all owned Milestones have reached Succeeded.
 // Returns false without patching when no Milestones exist yet (childless guard).
-func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *tideprojectv1alpha1.Project) (bool, error) {
+func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *tidev1alpha2.Project) (bool, error) {
 	detected, err := gates.BoundaryDetected(ctx, r.Client, project, "Milestone")
 	if err != nil {
 		return false, err
@@ -894,9 +893,9 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 		return false, nil
 	}
 	patch := client.MergeFrom(project.DeepCopy())
-	project.Status.Phase = tideprojectv1alpha1.PhaseComplete
+	project.Status.Phase = tidev1alpha2.PhaseComplete
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionSucceeded,
+		Type:               tidev1alpha2.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
 		Reason:             "MilestonesSucceeded",
 		Message:            "All owned Milestones reached Succeeded",
@@ -918,7 +917,7 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 // Gated on len(r.SigningKey) > 0 — when SigningKey is not wired (test mode
 // that doesn't configure dispatch), the function is a no-op so existing tests
 // that only exercise clone/push lifecycle are unaffected.
-func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tideprojectv1alpha1.Project) (ctrl.Result, error) {
+func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	// Guard: SigningKey is required to mint credproxy tokens — if not wired
 	// (e.g. unit tests that only test clone/push lifecycle), skip dispatch.
 	if len(r.SigningKey) == 0 {
@@ -927,8 +926,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 
 	// Step 1: Terminal short-circuit.
 	switch project.Status.Phase {
-	case tideprojectv1alpha1.PhaseComplete,
-		tideprojectv1alpha1.PhaseInitFailed:
+	case tidev1alpha2.PhaseComplete,
+		tidev1alpha2.PhaseInitFailed:
 		return ctrl.Result{}, nil
 	}
 
@@ -939,7 +938,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// This mirrors BoundaryDetected's ownership check without the all-Succeeded
 	// requirement — we just need to know children exist.
 	{
-		var existingMilestones tideprojectv1alpha1.MilestoneList
+		var existingMilestones tidev1alpha2.MilestoneList
 		if lErr := r.List(ctx, &existingMilestones, client.InNamespace(project.Namespace)); lErr != nil {
 			return ctrl.Result{}, fmt.Errorf("idempotency: list milestones: %w", lErr)
 		}
@@ -954,7 +953,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)
 
 	// Step 2: On Running — check Job terminal state.
-	if project.Status.Phase == tideprojectv1alpha1.PhaseRunning {
+	if project.Status.Phase == tidev1alpha2.PhaseRunning {
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &job); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -1062,9 +1061,9 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 
 	// Step 10: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
 	patch := client.MergeFrom(project.DeepCopy())
-	project.Status.Phase = tideprojectv1alpha1.PhaseRunning
+	project.Status.Phase = tidev1alpha2.PhaseRunning
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionAuthoringPlanner,
+		Type:               tidev1alpha2.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerDispatched",
 		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
@@ -1090,7 +1089,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 // as success, so a re-enqueue from the reporter Job's own completion does no harm.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
-func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tideprojectv1alpha1.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
+func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tidev1alpha2.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// Read tiny status from the dispatch Job's termination message for budget
@@ -1200,7 +1199,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 // After this call, project.Status.Phase reflects the current budget state.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleBudgetGate(...)` in the reconcile chain
-func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tideprojectv1alpha1.Project, now time.Time) (ctrl.Result, error) {
+func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidev1alpha2.Project, now time.Time) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// Phase 04.1 P4.1: reset rolling window if elapsed. Failures are logged
@@ -1213,7 +1212,7 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidep
 	bypassed := budget.IsBypassed(project, now)
 	capExceeded := budget.IsCapExceeded(project)
 
-	if project.Status.Phase == tideprojectv1alpha1.PhaseBudgetExceeded && bypassed {
+	if project.Status.Phase == tidev1alpha2.PhaseBudgetExceeded && bypassed {
 		// Bypass is active — clear BudgetExceeded and record Event.
 		logger.Info("budget bypass active; clearing BudgetExceeded", "project", project.Name)
 
@@ -1230,11 +1229,11 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidep
 
 		// Clear the phase.
 		statusPatch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tideprojectv1alpha1.PhasePending
+		project.Status.Phase = tidev1alpha2.PhasePending
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionBudgetExceeded,
+			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionFalse,
-			Reason:             tideprojectv1alpha1.ReasonBypassApplied,
+			Reason:             tidev1alpha2.ReasonBypassApplied,
 			Message:            "Budget exceeded bypass applied by operator",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1242,19 +1241,19 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidep
 			return ctrl.Result{}, err
 		}
 		if r.Recorder != nil {
-			r.Recorder.Event(project, corev1.EventTypeNormal, tideprojectv1alpha1.ReasonBypassApplied,
+			r.Recorder.Event(project, corev1.EventTypeNormal, tidev1alpha2.ReasonBypassApplied,
 				"Budget exceeded bypass applied by operator; dispatch resumed")
 		}
 		return ctrl.Result{}, nil
 	}
 
-	if project.Status.Phase != tideprojectv1alpha1.PhaseBudgetExceeded && capExceeded && !bypassed {
+	if project.Status.Phase != tidev1alpha2.PhaseBudgetExceeded && capExceeded && !bypassed {
 		// Cap hit — set BudgetExceeded and record Event.
 		logger.Info("budget cap exceeded; halting dispatch", "project", project.Name)
 		statusPatch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tideprojectv1alpha1.PhaseBudgetExceeded
+		project.Status.Phase = tidev1alpha2.PhaseBudgetExceeded
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionBudgetExceeded,
+			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionTrue,
 			Reason:             "AbsoluteCapReached",
 			Message:            fmt.Sprintf("Cost spent %d cents exceeds cap %d cents", project.Status.Budget.CostSpentCents, project.Spec.Budget.AbsoluteCapCents),
@@ -1279,7 +1278,7 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidep
 // The Job is deterministically named `tide-init-{project.UID}` — the
 // AlreadyExists dedup key. The subPath isolates this Project's slice of the
 // shared PVC from all other Projects.
-func (r *ProjectReconciler) buildInitJob(project *tideprojectv1alpha1.Project, pvcName string) *batchv1.Job {
+func (r *ProjectReconciler) buildInitJob(project *tidev1alpha2.Project, pvcName string) *batchv1.Job {
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	runAsUser := int64(1000)
@@ -1408,10 +1407,10 @@ func (r *ProjectReconciler) checkSchemaRevisionGuard(
 	// The SchemaRevision is absent or wrong — this object was authored under
 	// v1alpha1. Surface a permanent failure condition and halt reconciliation.
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             tidev1alpha2.ReasonRequiresReinstall,
-		Message:            "Project was created with v1alpha1 schema; reinstall required: " +
+		Type:   tidev1alpha2.ConditionReady,
+		Status: metav1.ConditionFalse,
+		Reason: tidev1alpha2.ReasonRequiresReinstall,
+		Message: "Project was created with v1alpha1 schema; reinstall required: " +
 			"kubectl delete project " + project.Name +
 			" && kubectl apply -f <project.yaml> (with schemaRevision: v1alpha2 set). " +
 			"See docs/migration/v1alpha1-to-v1alpha2.md.",
@@ -1444,7 +1443,7 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
 ) (nodes []dag.NodeID, edges []dag.Edge, err error) {
-	var taskList tideprojectv1alpha1.TaskList
+	var taskList tidev1alpha2.TaskList
 	if listErr := r.List(ctx, &taskList,
 		client.InNamespace(project.Namespace),
 		client.MatchingLabels{owner.LabelProject: project.Name},
@@ -1543,14 +1542,14 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Project{},
+		For(&tidev1alpha2.Project{},
 			builder.WithPredicates(predicate.Or(
 				predicate.GenerationChangedPredicate{},
 				predicate.AnnotationChangedPredicate{},
 			)),
 		).
 		Owns(&batchv1.Job{}).
-		Owns(&tideprojectv1alpha1.Milestone{}).
+		Owns(&tidev1alpha2.Milestone{}).
 		WithEventFilter(nsPred).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Named("project").

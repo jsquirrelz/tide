@@ -19,7 +19,7 @@ package podjob
 import (
 	"testing"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // TestDefaultCaps asserts the wall-clock floor application across nil, zero,

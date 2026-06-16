@@ -27,7 +27,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---------- ReservationStore pure-Go unit tests ----------
@@ -70,7 +70,7 @@ func TestReservationStore_Release(t *testing.T) {
 
 func makeProjectWithBudget(cap, spent int64) *tidev1alpha1.Project {
 	return &tidev1alpha1.Project{
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Budget: tidev1alpha1.BudgetConfig{AbsoluteCapCents: cap},
 		},
 		Status: tidev1alpha1.ProjectStatus{

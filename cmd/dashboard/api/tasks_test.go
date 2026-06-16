@@ -27,7 +27,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // newTasksHandler returns a TasksHandler with a fake controller-runtime
@@ -59,7 +59,7 @@ func newTasksHandler(t *testing.T, cs kubernetes.Interface, objs ...runtime.Obje
 func newFullChain() []runtime.Object {
 	prj := &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: 10000},
 		},
@@ -110,12 +110,12 @@ func newFullChain() []runtime.Object {
 	}
 	w0 := &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w0", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: "pl-1", WaveIndex: 0},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 0},
 		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-pre"}},
 	}
 	w1 := &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w1", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: "pl-1", WaveIndex: 1},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 1},
 		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-007"}},
 	}
 	return []runtime.Object{prj, ms, ph, pl, tk, w0, w1}

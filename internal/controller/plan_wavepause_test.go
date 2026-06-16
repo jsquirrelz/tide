@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -42,7 +42,7 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 	makeProjectWithPause := func(projectName, msName, phaseName, planName string, pause bool) string {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/tide.git",
 				Gates:      tideprojectv1alpha1.Gates{PauseBetweenWaves: pause},
 			},

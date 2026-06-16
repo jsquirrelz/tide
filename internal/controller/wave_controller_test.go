@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // makeWaveWithTasks creates a Wave and N Tasks for testing WaveReconciler.
@@ -48,8 +48,12 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 			},
 		},
 		Spec: tideprojectv1alpha1.WaveSpec{
-			PlanRef:   planRef,
-			WaveIndex: waveIndex,
+			// v1alpha2 Waves are global-scope: ProjectRef replaces the removed
+			// PlanRef. The planRef arg is reused as a non-empty ref identifier for
+			// these WaveReconciler tests (TODO(phase-24): plumb a real ProjectRef
+			// once the global assembler creates Waves).
+			ProjectRef: planRef,
+			WaveIndex:  waveIndex,
 		},
 	}
 	Expect(k8sClient.Create(context.Background(), wave)).To(Succeed())
@@ -167,7 +171,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-succ", "wave-task-b-succ", "wave-task-c-succ"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 90, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -196,7 +200,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-fail", "wave-task-b-fail", "wave-task-c-fail"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 91, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -227,7 +231,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-run", "wave-task-b-run"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 92, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -257,7 +261,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-nojob"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 93, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -291,7 +295,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-ref-a", "wave-task-ref-b"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 94, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -317,7 +321,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-trig-a"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 95, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)

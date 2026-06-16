@@ -35,7 +35,7 @@ limitations under the License.
 //   Phase     → .Spec.MilestoneRef → Milestone → .Spec.ProjectRef
 //   Plan      → .Spec.PhaseRef → Phase → ...
 //   Task      → .Spec.PlanRef → Plan → ...
-//   Wave      → .Spec.PlanRef → Plan → ...
+//   Wave      → .Spec.ProjectRef (global-scope in v1alpha2; resolves in one hop)
 //
 // Failures to resolve the parent project are logged at V(1) and the event
 // is silently dropped — the dashboard's correctness budget allows missed
@@ -55,7 +55,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -228,14 +228,10 @@ func resolveProjectKey(ctx context.Context, cli client.Reader, obj client.Object
 		return resolveProjectKey(ctx, cli, pl)
 
 	case *tidev1alpha1.Wave:
-		pl, err := getPlan(ctx, cli, v.GetNamespace(), v.Spec.PlanRef)
-		if err != nil {
-			return "", err
-		}
-		if pl == nil {
-			return "", nil
-		}
-		return resolveProjectKey(ctx, cli, pl)
+		// v1alpha2 Waves are global-scope and reference the owning Project
+		// directly via Spec.ProjectRef (no Plan indirection); resolve to the
+		// project key in one hop, like Milestone above.
+		return v.Spec.ProjectRef, nil
 
 	default:
 		return "", fmt.Errorf("unsupported kind %T for resolveProjectKey", obj)
@@ -325,7 +321,9 @@ func minimalProjection(obj client.Object) map[string]string {
 	case *tidev1alpha1.Wave:
 		p["kind"] = "Wave"
 		p["phase"] = v.Status.Phase
-		p["planRef"] = v.Spec.PlanRef
+		// v1alpha2 Waves are global-scope: surface ProjectRef (Wave→Plan
+		// association is Phase 24-derived, no longer a Spec field — T-23-14).
+		p["projectRef"] = v.Spec.ProjectRef
 	}
 	return p
 }

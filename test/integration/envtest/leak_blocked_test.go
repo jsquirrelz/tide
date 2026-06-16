@@ -30,7 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
@@ -223,7 +223,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/test.git",
 					Git: &tideprojectv1alpha1.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
@@ -294,7 +294,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/test.git",
 					Git: &tideprojectv1alpha1.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",

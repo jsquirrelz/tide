@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 const initNamespace = "default"
@@ -59,7 +59,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/init-test.git",
 				},
 			}
@@ -115,7 +115,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/idempotent.git",
 				},
 			}
@@ -188,7 +188,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/complete.git",
 				},
 			}

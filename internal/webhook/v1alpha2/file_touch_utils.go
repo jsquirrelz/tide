@@ -14,13 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	"fmt"
 	"strings"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // FileTouchMismatchPair records a pair of Tasks that share an EXACT file path
@@ -37,12 +37,16 @@ type FileTouchMismatchPair struct {
 }
 
 // ComputeFileTouchMismatches returns pairs of Tasks (a, b) where their
-// filesTouched sets overlap on EXACT path equality AND no declared dependsOn
-// edge exists in either direction.
+// filesTouched sets overlap on EXACT path equality AND no declared within-plan
+// dependsOn edge exists in either direction.
 //
 // Exported so the PlanReconciler dispatch gate (D-05) can call it after Tasks
 // materialize — the webhook remains the early-admission layer; the reconciler
 // is the authoritative seat that sees reporter-flow Tasks.
+//
+// Cross-scope deps are ignored for the mismatch check (only within-plan edge
+// presence clears the mismatch flag; a cross-scope dep on the same task is a
+// separate concern handled by the global assembler in Phase 24).
 //
 // Algorithm (EXACT-equality only — Pitfall G defense):
 //  1. Build a name → declared-dependsOn set for O(1) edge lookup.
@@ -55,7 +59,7 @@ type FileTouchMismatchPair struct {
 //
 // Complexity: O(N² × P) where N = task count, P = average filesTouched length.
 // Acceptable for v1 Plans bounded to ≤20 Tasks per RESEARCH.md.
-func ComputeFileTouchMismatches(tasks []tideprojectv1alpha1.Task) []FileTouchMismatchPair {
+func ComputeFileTouchMismatches(tasks []tideprojectv1alpha2.Task) []FileTouchMismatchPair {
 	// Build name → dependsOn set for fast lookup.
 	dependsOnSet := make(map[string]map[string]struct{}, len(tasks))
 	for i := range tasks {

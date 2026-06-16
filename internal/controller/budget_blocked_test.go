@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // ---------- checkBudgetBlocked ----------
@@ -80,7 +80,7 @@ func projectWithCap(name string, capCents, spentCents int64) *tideprojectv1alpha
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 			Budget:     tideprojectv1alpha1.BudgetConfig{AbsoluteCapCents: capCents},
 		},

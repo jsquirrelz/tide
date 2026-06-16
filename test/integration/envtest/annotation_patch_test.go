@@ -48,7 +48,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
@@ -146,7 +146,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 							"unrelated.example.com/keep":    "preserved-value",
 						},
 					},
-					Spec: tideprojectv1alpha1.ProjectSpec{
+					Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 						TargetRepo: "https://github.com/example/wr14.git",
 					},
 				}
