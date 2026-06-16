@@ -1,13 +1,15 @@
 ---
 phase: 22-dashboard-embed-freshness-fix
-verified: 2026-06-16T07:10:00Z
-status: human_needed
-score: 4/4 must-have truths verified (criterion 3 runtime render needs human confirmation)
+verified: 2026-06-16T11:10:00Z
+status: passed
+score: 6/6 must-have truths verified; criterion #3 runtime render confirmed via live deploy + screenshot (22-HUMAN-UAT.md, 22-telemetry-render-proof.png)
 overrides_applied: 0
 human_verification:
   - test: "Build the dashboard image from a clean checkout (docker build -f Dockerfile.dashboard -t tide-dashboard:verify .), run it against a live cluster, open the dashboard, and click the Telemetry tab."
     expected: "The Telemetry tab renders (cache-efficiency panel visible), proving the embedded bundle is the current post-telemetry SPA — not the frozen pre-telemetry bundle from commit 6d7a28f."
-    why_human: "ROADMAP success criterion #3 requires a freshly built image run against a cluster with visual confirmation of the rendered Telemetry tab. This is a runtime/visual outcome no static grep can prove. The code path that GUARANTEES it (Dockerfile rm -rf + COPY --from=spa-builder over committed dist before go build, plus the verified panel-cache-efficiency telemetry marker in the freshly built bundle) is verified statically and behaviorally; only the live-cluster render remains."
+    result: "PASSED (2026-06-16). Built tide-dashboard:verify from a clean checkout, kind-loaded into tide-dogfood, rolled out deployment/tide-dashboard in tide-system, port-forwarded, drove the browser: served bundle index-BEfeN1Kf.js carries the panel-cache-efficiency marker, the header shows a Telemetry tab (absent from the 6d7a28f bundle), and clicking it renders all panels (BUDGET, COST OVER TIME, DISPATCH COUNTS, FAILURE RATE, TOKEN BREAKDOWN, CACHE EFFICIENCY). Proof: 22-telemetry-render-proof.png. See 22-HUMAN-UAT.md."
+follow_up_hardening:
+  - "22-REVIEW.md WR-01 (dirty-tree-on-failure) and WR-02 (untracked-asset false-pass) closed by gap plan 22-03: verify-dashboard-freshness now uses diff -rq against a fresh build with no tracked-tree mutation; verified clean-tree pass + probe-file detection on merged main."
 ---
 
 # Phase 22: Dashboard Embed Freshness Fix Verification Report
