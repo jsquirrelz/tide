@@ -14,19 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// WaveSpec carries EXACTLY two fields per D-B1, D-B2. Anything else lives in Status.
+// WaveSpec carries the global-scope wave identity per D-07 (SCHEMA-01).
+// Wave ownership moves from Plan to Project in v1alpha2: one Wave CR per
+// global wave position across the entire Project's execution DAG.
 type WaveSpec struct {
-	// PlanRef is the name of the owning Plan (same namespace).
+	// ProjectRef is the name of the owning Project (same namespace).
 	// +kubebuilder:validation:MinLength=1
-	PlanRef string `json:"planRef"`
+	ProjectRef string `json:"projectRef"`
 
-	// WaveIndex is the 0-indexed layer position from pkg/dag.ComputeWaves.
+	// WaveIndex is the global monotonic 0-indexed wave position derived by
+	// pkg/dag.ComputeWaves over the entire Project's task DAG (all Tasks in
+	// all Milestones/Phases/Plans). Never cached in status (PERSIST-03 /
+	// verify-no-aggregates). The Phase 24 assembler writes this field when
+	// creating Wave CRs; Phase 23 defines the spec shape only.
 	// +kubebuilder:validation:Minimum=0
 	WaveIndex int `json:"waveIndex"`
 }
@@ -55,7 +61,7 @@ type WaveStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:unservedversion
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

@@ -14,26 +14,36 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// WaveSpec carries EXACTLY two fields per D-B1, D-B2. Anything else lives in Status.
-type WaveSpec struct {
-	// PlanRef is the name of the owning Plan (same namespace).
+// PhaseSpec defines the desired state of Phase.
+type PhaseSpec struct {
+	// MilestoneRef is the name of the owning Milestone (same namespace).
 	// +kubebuilder:validation:MinLength=1
-	PlanRef string `json:"planRef"`
+	MilestoneRef string `json:"milestoneRef"`
 
-	// WaveIndex is the 0-indexed layer position from pkg/dag.ComputeWaves.
-	// +kubebuilder:validation:Minimum=0
-	WaveIndex int `json:"waveIndex"`
+	// DependsOn lists any level node (Milestone/Phase/Plan/Task) in this Project
+	// that this Phase's execution depends on. Entries may target any node at any
+	// hierarchy level within the Project (any-level targets, D-02). Coarse scope
+	// refs are fan-out expanded by the Phase 24 assembler (D-06).
+	// +optional
+	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// SharedContext is the wave-scoped shared context string stamped by the
+	// orchestrator at object creation time (Phase 20 D-05). Byte-identical
+	// across all objects in the same wave. Read by BuildPlannerEnvelope when
+	// dispatching this object's planner Job (D-07 uniform path).
+	// +optional
+	SharedContext string `json:"sharedContext,omitempty"`
 }
 
-// WaveStatus defines the observed state of Wave.
-// Everything observed about this wave lives here, NOT in Spec.
-type WaveStatus struct {
+// PhaseStatus defines the observed state of Phase.
+// PERSIST-02 enforced: NO aggregate fields.
+type PhaseStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
@@ -41,52 +51,42 @@ type WaveStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// TaskRefs lists the Task names dispatched in this wave (observation only).
-	// +optional
-	TaskRefs []string `json:"taskRefs,omitempty"`
-
-	// +optional
-	DispatchedAt *metav1.Time `json:"dispatchedAt,omitempty"`
-
-	// +optional
-	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:unservedversion
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
-// Wave is the Schema for the waves API
-type Wave struct {
+// Phase is the Schema for the phases API
+type Phase struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of Wave
+	// spec defines the desired state of Phase
 	// +required
-	Spec WaveSpec `json:"spec"`
+	Spec PhaseSpec `json:"spec"`
 
-	// status defines the observed state of Wave
+	// status defines the observed state of Phase
 	// +optional
-	Status WaveStatus `json:"status,omitzero"`
+	Status PhaseStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// WaveList contains a list of Wave
-type WaveList struct {
+// PhaseList contains a list of Phase
+type PhaseList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []Wave `json:"items"`
+	Items           []Phase `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Wave{}, &WaveList{})
+	SchemeBuilder.Register(&Phase{}, &PhaseList{})
 }

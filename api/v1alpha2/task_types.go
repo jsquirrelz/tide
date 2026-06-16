@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,7 +22,7 @@ import (
 
 // Caps declares resource caps applied to the subagent pod executing a Task (Phase 2+).
 //
-// Design note: api/v1alpha1.Caps and pkg/dispatch.Caps are intentionally two
+// Design note: api/v1alpha2.Caps and pkg/dispatch.Caps are intentionally two
 // separate types that serve different layers — this struct is CEL-validated at
 // the CRD admission boundary, while pkg/dispatch.Caps is the Go-only public API
 // used by the dispatcher. Plan 09's TaskReconciler.buildEnvelopeIn translates
@@ -65,14 +65,25 @@ type TaskDev struct {
 	TestMode string `json:"testMode,omitempty"`
 }
 
-// TaskSpec carries the executor envelope per D-F1, D-F2.
+// TaskSpec carries the executor envelope per D-F1 (retired), D-F2.
+// In v1alpha2 the plan-local D-F1 restriction on DependsOn is retired; Tasks
+// may declare dependencies on any node (Task/Plan/Phase/Milestone) in the Project.
 type TaskSpec struct {
-	// PlanRef is the name of the owning Plan (same namespace).
+	// PlanRef is the name of the owning Plan (same namespace). Used for
+	// ownership and Task listing; NOT a dep constraint.
 	// +kubebuilder:validation:MinLength=1
 	PlanRef string `json:"planRef"`
 
-	// DependsOn lists sibling Task names in the same Plan (D-F1).
+	// DependsOn lists the names of Tasks (or Plan/Phase/Milestone scope nodes)
+	// in any Plan/Phase/Milestone of this Project that must complete before this
+	// Task may dispatch. D-F1 (plan-local restriction) is retired in v1alpha2 —
+	// entries may target Tasks in any Plan, any Phase, or any Milestone within
+	// this Project. Coarse scope refs (naming a Plan/Phase/Milestone rather than
+	// a Task) are fan-out expanded by the Phase 24 assembler (DEPS-02). Resolved
+	// in-memory at assembly time (D-05); authored coarse dependsOn is the only
+	// persisted truth.
 	// +optional
+	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// FilesTouched declares the workspace paths this Task intends to write (D-F2).
@@ -111,8 +122,8 @@ type TaskSpec struct {
 	// SharedContext is the wave-scoped shared context string stamped by the
 	// orchestrator at Task creation time (Phase 20 D-05). Populated from the
 	// parent planner's EnvelopeOut.SharedContext; byte-identical across all
-	// sibling Tasks in the same wave. The dispatcher reads this at Task
-	// dispatch time and places it in EnvelopeIn.SharedContext (D-07).
+	// Tasks in the same wave. The dispatcher reads this at Task dispatch time
+	// and places it in EnvelopeIn.SharedContext (D-07).
 	// Empty for Tasks authored before Phase 20 or where the parent planner
 	// emitted no SharedContext; omitempty keeps older CRD objects small.
 	// +optional
@@ -148,7 +159,7 @@ type TaskStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:unservedversion
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

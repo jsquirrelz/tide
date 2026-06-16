@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -298,6 +298,18 @@ type BoundaryPushStatus struct {
 // ProjectSpec defines the desired state of Project.
 // +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http://') || self.targetRepo.startsWith('https://') || self.targetRepo.startsWith('git@')",message="targetRepo must be an http(s) or SSH (git@) URL; file:// is not a supported production transport (go-git's file:// transport requires a system git binary absent from production images)"
 type ProjectSpec struct {
+	// SchemaRevision identifies the v1alpha2 schema shape. Required in v1alpha2;
+	// its absence on a reconciled object signals a v1alpha1-authored Project that
+	// slipped into etcd before the CRD upgrade. The Plan-03 Project reconciler
+	// head guard checks this field: if SchemaRevision != "v1alpha2" the reconciler
+	// fail-closes with RequiresReinstall condition + reconcile.TerminalError (no
+	// requeue). Reinstall: kubectl delete project <name> && kubectl apply -f
+	// <project.yaml> (with SchemaRevision: v1alpha2 set). This field is absent in
+	// v1alpha1 ProjectSpec, making it the clean discriminator for D-09.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=v1alpha2
+	SchemaRevision string `json:"schemaRevision"`
+
 	// TargetRepo is the URL of the repo this Project operates on. Supports
 	// http:// and https:// (pure-Go go-git transport, production default) and
 	// SSH (`git@host:owner/repo.git`, documented with host-key caveats).
@@ -425,7 +437,7 @@ type ProjectStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:unservedversion
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

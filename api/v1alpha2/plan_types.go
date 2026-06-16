@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +25,17 @@ type PlanSpec struct {
 	// PhaseRef is the name of the owning Phase (same namespace).
 	// +kubebuilder:validation:MinLength=1
 	PhaseRef string `json:"phaseRef"`
+
+	// DependsOn lists hierarchy nodes (Task/Plan/Phase/Milestone names) in this
+	// Project that this Plan's Tasks implicitly depend on (DEPS-02). Used at
+	// assembly time (Phase 24) for fan-out: a dep on a Plan means "all Tasks in
+	// that Plan must complete before any Task in this Plan may dispatch."
+	// Progressive refinement (D-03) may narrow this to a specific Task-level dep
+	// as planning descends: MB requires MA → MB requires MA-P3 → MB requires
+	// MA-P3-PB → MB requires MA-P3-PB-task-07. Resolved in-memory at assembly
+	// time (D-05); authored coarse dependsOn is the only persisted truth.
+	// +optional
+	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// SharedContext is the wave-scoped shared context string stamped by the
 	// orchestrator at object creation time (Phase 20 D-05). Byte-identical
@@ -68,8 +79,8 @@ type PlanStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
-// +kubebuilder:unservedversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

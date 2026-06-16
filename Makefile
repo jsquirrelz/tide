@@ -524,9 +524,9 @@ verify-import-firewall: demo-fixture ## Run providerfirewall analyzer via tide-l
 ##@ PERSIST gates (PERSIST-01, PERSIST-02 / Pitfall 4)
 
 .PHONY: verify-no-aggregates
-verify-no-aggregates: ## Assert api/v1alpha1 declares no aggregate schedule fields (PERSIST-02 / Pitfall 4).
-	@echo "verifying no aggregate schedule fields on api/v1alpha1 types (PERSIST-02)..."
-	@MATCHES=$$(grep -nE 'Schedule|Waves *\[\]|IndegreeMap|CachedDag|DerivedDag' api/v1alpha1/*_types.go || true); \
+verify-no-aggregates: ## Assert api/v1alpha1 and api/v1alpha2 declare no aggregate schedule fields (PERSIST-02 / Pitfall 4).
+	@echo "verifying no aggregate schedule fields on api/v1alpha1 and api/v1alpha2 types (PERSIST-02)..."
+	@MATCHES=$$(grep -nE 'Schedule|Waves *\[\]|IndegreeMap|CachedDag|DerivedDag' api/v1alpha1/*_types.go api/v1alpha2/*_types.go || true); \
 	if [ -n "$$MATCHES" ]; then \
 		echo "PERSIST-02 violation: aggregate schedule fields detected:"; \
 		echo "$$MATCHES"; \
