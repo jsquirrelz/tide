@@ -189,4 +189,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 5/5 | Complete    | 2026-06-16 |
-| 21. Cost & Cache Observability | v1.0.2 | 2/2 | Complete   | 2026-06-16 |
+| 21. Cost & Cache Observability | v1.0.2 | 2/2 | Needs Review | - |

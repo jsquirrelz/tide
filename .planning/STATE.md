@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Ebb Tide — Token & Cost Optimization
 status: verifying
-stopped_at: Phase 21 UI-SPEC approved
-last_updated: "2026-06-16T02:31:46.697Z"
+stopped_at: Phase 21 executed + automated-verified (8/8); awaiting human UAT (2 live-cluster checks)
+last_updated: "2026-06-16T02:41:53.134Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 4
@@ -105,6 +105,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-16T02:31:46.677Z
-Stopped at: Phase 21 UI-SPEC approved
-Resume file: None
+Last session: 2026-06-16T02:41:53.117Z
+Stopped at: Phase 21 executed + automated-verified (8/8); awaiting human UAT (2 live-cluster checks)
+Resume file: .planning/phases/21-cost-cache-observability/21-HUMAN-UAT.md
