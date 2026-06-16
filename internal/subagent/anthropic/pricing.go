@@ -116,6 +116,39 @@ var priceTable = map[string]modelPrice{
 // most expensive entry — NOT opus-4-7 (now corrected to $25/MTok).
 var conservativeTier = priceTable["claude-fable-5"]
 
+// cacheSavingsCents returns the realized savings in US cents from prompt-cache
+// reads for the given model and token usage (Phase 21 OBSV-02).
+//
+// Formula: savings = CacheReadTokens × (inputRate − cacheReadRate) / 1_000_000.
+// Division is truncation (not ceiling) — conservative for savings, never
+// over-reports what was saved (Pitfall 3 / plan 21-01 action).
+//
+// It reads a.prices (per-instance clone) per T-14-02. On a table miss it falls
+// back silently to conservativeTier — the conservative fallback bounds the
+// savings estimate without alarming the operator (savings mis-estimate is less
+// critical than cost mis-estimate; stderr noise is reserved for estimatedCostCents).
+//
+// Returns 0 immediately when CacheReadTokens == 0 (the common case where no
+// cache reads occurred — omitempty on Usage.CacheSavingsCents keeps JSON clean).
+func (a *Anthropic) cacheSavingsCents(model string, u pkgdispatch.Usage) int64 {
+	if u.CacheReadTokens == 0 {
+		return 0
+	}
+
+	price, ok := a.prices[model]
+	if !ok {
+		price = conservativeTier
+	}
+
+	// Net saving per million tokens: the gap between what was paid (cacheRead
+	// rate) vs what would have been paid (input rate).
+	savings := u.CacheReadTokens * (price.inputCentsPerMTok - price.cacheReadCentsPerMTok)
+
+	const million = int64(1_000_000)
+	// Truncation division: floor, not ceiling — conservative for savings.
+	return savings / million
+}
+
 // estimatedCostCents returns the estimated cost in US cents (rounded up to the
 // nearest whole cent) for the given model and token usage.
 //

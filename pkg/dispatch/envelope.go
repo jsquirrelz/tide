@@ -281,6 +281,13 @@ type Usage struct {
 	// rollup.
 	EstimatedCostCents int64 `json:"estimatedCostCents"`
 
+	// CacheSavingsCents is the realized savings in US cents from cache reads
+	// during this task's execution. Computed by the provider (provider firewall
+	// D-C1, Phase 21 OBSV-02): savings = CacheReadTokens × (inputRate −
+	// cacheReadRate) / 1_000_000 with truncation division. Zero when
+	// CacheReadTokens is zero — omitted from JSON in the common zero case.
+	CacheSavingsCents int64 `json:"cacheSavingsCents,omitempty"`
+
 	// Iterations is the actual number of agent loop iterations completed.
 	Iterations int `json:"iterations"`
 

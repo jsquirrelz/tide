@@ -343,6 +343,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	// D-02: a.estimatedCostCents reads a.prices (the per-instance merged clone),
 	// never the package-level priceTable — T-14-02 race safety.
 	usage.EstimatedCostCents = a.estimatedCostCents(in.Provider.Model, usage)
+	usage.CacheSavingsCents = a.cacheSavingsCents(in.Provider.Model, usage)
 
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,

@@ -251,3 +251,61 @@ func TestEstimatedCostCents(t *testing.T) {
 		}
 	})
 }
+
+// TestCacheSavingsCents covers the realized-savings helper (Phase 21 OBSV-02).
+// Formula: savings = CacheReadTokens × (inputRate − cacheReadRate) / 1_000_000,
+// truncation division (conservative for savings — Pitfall 3).
+// All calls go through New(Options{}) per T-14-02 (per-instance a.prices clone).
+func TestCacheSavingsCents(t *testing.T) {
+	a := New(Options{})
+
+	t.Run("haiku_1M_read_tokens", func(t *testing.T) {
+		// haiku: input=100 cents/MTok, cacheRead=10 cents/MTok
+		// savings = 1_000_000 × (100 − 10) / 1_000_000 = 90 cents
+		u := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
+		got := a.cacheSavingsCents("claude-haiku-4-5", u)
+		if got != 90 {
+			t.Errorf("haiku cacheRead=1M: want 90 cents, got %d", got)
+		}
+	})
+
+	t.Run("sonnet_1M_read_tokens", func(t *testing.T) {
+		// sonnet: input=300 cents/MTok, cacheRead=30 cents/MTok
+		// savings = 1_000_000 × (300 − 30) / 1_000_000 = 270 cents
+		u := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
+		got := a.cacheSavingsCents("claude-sonnet-4-6", u)
+		if got != 270 {
+			t.Errorf("sonnet cacheRead=1M: want 270 cents, got %d", got)
+		}
+	})
+
+	t.Run("zero_read_tokens", func(t *testing.T) {
+		// No cache reads → no savings; InputTokens present but irrelevant.
+		u := pkgdispatch.Usage{InputTokens: 1_000_000}
+		got := a.cacheSavingsCents("claude-haiku-4-5", u)
+		if got != 0 {
+			t.Errorf("zero CacheReadTokens: want 0 cents, got %d", got)
+		}
+	})
+
+	t.Run("truncation_not_ceiling", func(t *testing.T) {
+		// 100 cache-read tokens × 90 cents/MTok (haiku net) = 0.009 cents → truncates to 0.
+		// Confirms truncation (not ceiling) division for savings (Pitfall 3).
+		u := pkgdispatch.Usage{CacheReadTokens: 100}
+		got := a.cacheSavingsCents("claude-haiku-4-5", u)
+		if got != 0 {
+			t.Errorf("100 read tokens haiku: want 0 (truncation), got %d", got)
+		}
+	})
+
+	t.Run("unknown_model_uses_conservative", func(t *testing.T) {
+		// Unknown model falls back to conservativeTier (fable-5): input=1000, cacheRead=100.
+		// savings = 1_000_000 × (1000 − 100) / 1_000_000 = 900 cents.
+		// No stderr warning expected (silent fallback for savings helper — see action).
+		u := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
+		got := a.cacheSavingsCents("claude-unknown-model", u)
+		if got != 900 {
+			t.Errorf("unknown model cacheRead=1M: want 900 cents (conservative tier), got %d", got)
+		}
+	})
+}
