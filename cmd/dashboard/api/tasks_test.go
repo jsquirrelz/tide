@@ -110,12 +110,12 @@ func newFullChain() []runtime.Object {
 	}
 	w0 := &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w0", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: "pl-1", WaveIndex: 0},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 0},
 		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-pre"}},
 	}
 	w1 := &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "pl-1-w1", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: "pl-1", WaveIndex: 1},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "prj-1", WaveIndex: 1},
 		Status:     tidev1alpha1.WaveStatus{TaskRefs: []string{"task-007"}},
 	}
 	return []runtime.Object{prj, ms, ph, pl, tk, w0, w1}

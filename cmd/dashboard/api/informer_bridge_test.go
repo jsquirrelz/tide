@@ -147,25 +147,15 @@ func TestExtractProjectKeyForTask(t *testing.T) {
 	}
 }
 
-// TestExtractProjectKeyForWave — Wave → Plan → Phase → Milestone → Project.
+// TestExtractProjectKeyForWave — v1alpha2 Waves are global-scope and reference
+// the owning Project directly via Spec.ProjectRef (resolved in one hop, no Plan
+// walk).
 func TestExtractProjectKeyForWave(t *testing.T) {
-	m := &tidev1alpha1.Milestone{
-		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
-		Spec:       tidev1alpha1.MilestoneSpec{ProjectRef: "alpha"},
-	}
-	ph := &tidev1alpha1.Phase{
-		ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: "default"},
-		Spec:       tidev1alpha1.PhaseSpec{MilestoneRef: "m1"},
-	}
-	pl := &tidev1alpha1.Plan{
-		ObjectMeta: metav1.ObjectMeta{Name: "pl1", Namespace: "default"},
-		Spec:       tidev1alpha1.PlanSpec{PhaseRef: "p1"},
-	}
 	wv := &tidev1alpha1.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: "wv1", Namespace: "default"},
-		Spec:       tidev1alpha1.WaveSpec{PlanRef: "pl1", WaveIndex: 0},
+		Spec:       tidev1alpha1.WaveSpec{ProjectRef: "alpha", WaveIndex: 0},
 	}
-	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).WithObjects(m, ph, pl).Build()
+	c := ctrlfake.NewClientBuilder().WithScheme(testInformerScheme(t)).Build()
 	got, err := resolveProjectKey(context.Background(), c, wv)
 	if err != nil {
 		t.Fatalf("resolveProjectKey: %v", err)

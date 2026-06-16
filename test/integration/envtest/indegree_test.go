@@ -207,8 +207,8 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
-					PlanRef:   planName,
-					WaveIndex: 0,
+					ProjectRef: planName,
+					WaveIndex:  0,
 				},
 			}
 			Expect(k8sClient.Create(ctx, wave)).To(Succeed())
@@ -258,8 +258,8 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 					},
 				},
 				Spec: tideprojectv1alpha1.WaveSpec{
-					PlanRef:   planName,
-					WaveIndex: 0,
+					ProjectRef: planName,
+					WaveIndex:  0,
 				},
 			}
 			Expect(k8sClient.Create(ctx, wave)).To(Succeed())

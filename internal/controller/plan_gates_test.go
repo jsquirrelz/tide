@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -438,11 +439,16 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 						"GATE-04: no executor Job for task-2 while Plan is parked")
 				}
 
-				// Zero Wave CRs created by the wave path while parked.
+				// Zero Wave CRs created by the wave path while parked. v1alpha2
+				// Waves carry no Spec.PlanRef; this Plan's Waves are identified by
+				// the per-plan stub name prefix tide-wave-<plan.UID>-.
+				var parkedPlan tideprojectv1alpha1.Plan
+				g.Expect(mgrClient.Get(ctx, planNN, &parkedPlan)).To(Succeed())
+				wavePrefix := fmt.Sprintf("tide-wave-%s-", parkedPlan.UID)
 				var waves tideprojectv1alpha1.WaveList
 				g.Expect(k8sClient.List(ctx, &waves, client.InNamespace("default"))).To(Succeed())
 				for _, w := range waves.Items {
-					g.Expect(w.Spec.PlanRef).NotTo(Equal(planName),
+					g.Expect(strings.HasPrefix(w.Name, wavePrefix)).To(BeFalse(),
 						"GATE-04: no Wave CRs must be created while Plan is parked")
 				}
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())

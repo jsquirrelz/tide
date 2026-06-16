@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
@@ -50,7 +49,7 @@ import (
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
-	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
+	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
 	"github.com/jsquirrelz/tide/pkg/dag"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -129,7 +128,7 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger := logf.FromContext(ctx)
 
 	// 1. Fetch.
-	var plan tideprojectv1alpha1.Plan
+	var plan tideprojectv1alpha2.Plan
 	if err := r.Get(ctx, req.NamespacedName, &plan); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -156,7 +155,7 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// If the Phase is not found (e.g., Plan created before Phase, or Phase deleted),
 	// log and continue — owner ref is best-effort; wave materialization must still proceed.
 	if plan.Spec.PhaseRef != "" {
-		var parent tideprojectv1alpha1.Phase
+		var parent tideprojectv1alpha2.Phase
 		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parent); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return ctrl.Result{}, err
@@ -210,9 +209,9 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionReady,
+		Type:               tideprojectv1alpha2.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonInitialized,
+		Reason:             tideprojectv1alpha2.ReasonInitialized,
 		Message:            "Plan scaffolded; dispatcher not wired",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -240,7 +239,7 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // admission webhook stamps ValidationState="Validated" on the Plan.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
-func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, bool, error) {
+func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tideprojectv1alpha2.Plan) (ctrl.Result, bool, error) {
 	// Phase 12 CR-02 / CR-01 fix: AwaitingApproval early-return placed at the VERY
 	// TOP — BEFORE the tasks-exist List — because a parked Plan with
 	// reporter-materialized Tasks would otherwise take the tasks-exist exit to
@@ -261,9 +260,9 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 			statusPatch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.Phase = "Running"
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+				Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+				Reason:             tideprojectv1alpha2.ReasonApprovedByUser,
 				Message:            "Plan approved; Tasks will dispatch",
 				LastTransitionTime: metav1.Now(),
 			})
@@ -281,7 +280,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 
 	// If Tasks already exist for this Plan, skip planner dispatch — the
 	// Phase 2 Wave path runs.
-	var taskList tideprojectv1alpha1.TaskList
+	var taskList tideprojectv1alpha2.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(plan.Namespace),
 		client.MatchingFields{taskPlanRefIndexKey: plan.Name},
@@ -453,7 +452,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "Running"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionAuthoringPlanner,
+		Type:               tideprojectv1alpha2.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerDispatched",
 		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
@@ -480,7 +479,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 // handles that once the admission webhook stamps ValidationState=Validated.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
-func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha1.Plan, completedJob *batchv1.Job) (ctrl.Result, error) {
+func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *tideprojectv1alpha2.Plan, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := r.resolveProjectForPlan(ctx, plan)
 	projectUID := ""
@@ -611,9 +610,9 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			// the level — without this guard the consumed annotation re-parks on the
 			// next pass through this function.
 			alreadyApproved := false
-			if c := meta.FindStatusCondition(plan.Status.Conditions, tideprojectv1alpha1.ConditionWaveOrLevelPaused); c != nil {
+			if c := meta.FindStatusCondition(plan.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused); c != nil {
 				if c.Status == metav1.ConditionFalse &&
-					(c.Reason == tideprojectv1alpha1.ReasonApprovedByUser || c.Reason == tideprojectv1alpha1.ReasonResumedByUser) {
+					(c.Reason == tideprojectv1alpha2.ReasonApprovedByUser || c.Reason == tideprojectv1alpha2.ReasonResumedByUser) {
 					alreadyApproved = true
 				}
 			}
@@ -635,9 +634,9 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				statusPatch := client.MergeFrom(plan.DeepCopy())
 				plan.Status.Phase = "Running"
 				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+					Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha1.ReasonApprovedByUser,
+					Reason:             tideprojectv1alpha2.ReasonApprovedByUser,
 					Message:            "Plan approved; Tasks will dispatch",
 					LastTransitionTime: metav1.Now(),
 				})
@@ -705,9 +704,9 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = ""
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Reason:             tideprojectv1alpha2.ReasonResumedByUser,
 		Message:            "Plan resumed from gate boundary",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -721,11 +720,11 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 // ConditionSucceeded condition. Called from reconcileWaveMaterialization when
 // BoundaryDetected(plan, "Task") returns true (REQ-7b). Mirrors
 // milestone_controller.go's patchMilestoneSucceeded pattern.
-func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
+func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideprojectv1alpha2.Plan) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "Succeeded"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionSucceeded,
+		Type:               tideprojectv1alpha2.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
 		Reason:             "TasksCompleted",
 		Message:            "All owned Tasks reached Succeeded; Plan complete",
@@ -734,9 +733,9 @@ func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideproje
 	// Clear any prior WaveOrLevelPaused state so the transition is
 	// visible to operators tailing conditions (mirrors patchMilestoneSucceeded).
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+		Reason:             tideprojectv1alpha2.ReasonResumedByUser,
 		Message:            "Plan complete; all Tasks Succeeded",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -751,12 +750,12 @@ func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideproje
 // so clearing the reject annotation (tide resume) lets the level re-enter the
 // normal dispatch path on the next reconcile.
 // Returns RequeueAfter 5s so the park polls for the annotation clear.
-func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason string) (ctrl.Result, error) {
+func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojectv1alpha2.Plan, reason string) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonRejectedByUser,
+		Reason:             tideprojectv1alpha2.ReasonRejectedByUser,
 		Message:            fmt.Sprintf("Rejected: %s", reason),
 		LastTransitionTime: metav1.Now(),
 	})
@@ -773,12 +772,12 @@ func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojec
 // re-enters reconcile (matching how the reporter flow materializes Tasks async;
 // the false-negative window self-heals on the next Task event, per RESEARCH Pitfall 3).
 // No Status.Phase mutation (park-not-fail doctrine, D-05).
-func (r *PlanReconciler) patchPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha1.Plan, mismatches []webhookv1alpha1.FileTouchMismatchPair) (ctrl.Result, error) {
-	summary := webhookv1alpha1.SummariseMismatches(mismatches)
+func (r *PlanReconciler) patchPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha2.Plan, mismatches []webhookv1alpha2.FileTouchMismatchPair) (ctrl.Result, error) {
+	summary := webhookv1alpha2.SummariseMismatches(mismatches)
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.ValidationState = "FileTouchMismatch"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
 		Reason:             "FileTouchMismatch",
 		Message:            fmt.Sprintf("strict file-touch overlap detected — fix by adding a dependsOn edge or splitting file ownership: %s", summary),
@@ -793,11 +792,11 @@ func (r *PlanReconciler) patchPlanFileTouchMismatch(ctx context.Context, plan *t
 // liftPlanFileTouchMismatch clears a prior FileTouchMismatch park (D-06).
 // Resets ValidationState to "Validated" and flips the WaveOrLevelPaused
 // condition to Status=False so the reconcile proceeds to wave derivation.
-func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
+func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha2.Plan) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.ValidationState = "Validated"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
 		Reason:             "FileTouchValidationPassed",
 		Message:            "file-touch overlap resolved; proceeding to wave derivation",
@@ -814,11 +813,11 @@ func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *ti
 // Used by the Plan 04-05 gate-policy hook (genuine planner-Job failure classification).
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchPlanFailed(...)` in the reconcile chain
-func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha1.Plan, reason, message string) (ctrl.Result, error) {
+func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha2.Plan, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "Failed"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionFailed,
+		Type:               tideprojectv1alpha2.ConditionFailed,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
@@ -832,17 +831,17 @@ func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv
 
 // patchPlanAwaitingApproval parks the Plan at Status.Phase=AwaitingApproval
 // per Plan 04-05 gate seam (T-04-G4 mitigation — no requeue).
-func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *tideprojectv1alpha1.Plan, policy tideprojectv1alpha1.GatePolicy) (ctrl.Result, error) {
-	reason := tideprojectv1alpha1.ReasonAwaitingApproval
+func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *tideprojectv1alpha2.Plan, policy tideprojectv1alpha2.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha2.ReasonAwaitingApproval
 	message := "Plan awaiting operator approve annotation (tideproject.k8s/approve-plan=true)"
 	if policy == gates.PolicyPause {
-		reason = tideprojectv1alpha1.ReasonPausedAtBoundary
+		reason = tideprojectv1alpha2.ReasonPausedAtBoundary
 		message = "Plan paused at boundary; requires explicit resume"
 	}
 	patch := client.MergeFrom(plan.DeepCopy())
 	plan.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
@@ -856,8 +855,8 @@ func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *ti
 
 // countChildTasks returns the number of Tasks owned by this Plan (plan 09-08).
 // Used by the ChildCount-gated succession path to compare observed vs expected children.
-func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv1alpha1.Plan) int {
-	var taskList tideprojectv1alpha1.TaskList
+func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv1alpha2.Plan) int {
+	var taskList tideprojectv1alpha2.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(plan.Namespace)); err != nil {
 		return 0
 	}
@@ -873,12 +872,12 @@ func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv
 }
 
 // resolveProjectForPlan walks Plan → Phase → Milestone → Project.
-func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tideprojectv1alpha1.Plan) *tideprojectv1alpha1.Project {
+func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tideprojectv1alpha2.Plan) *tideprojectv1alpha2.Project {
 	// Fast path: if the Plan carries the tideproject.k8s/project label (stamped
 	// by stampTaskLabels), use it directly to avoid the Phase→Milestone→Project
 	// chain walk. This is the same label fast-path resolveProjectName uses.
 	if projectName, ok := plan.Labels["tideproject.k8s/project"]; ok && projectName != "" {
-		var p tideprojectv1alpha1.Project
+		var p tideprojectv1alpha2.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: projectName}, &p); err == nil {
 			return &p
 		}
@@ -887,21 +886,21 @@ func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tidepr
 	if plan.Spec.PhaseRef == "" {
 		return nil
 	}
-	var ph tideprojectv1alpha1.Phase
+	var ph tideprojectv1alpha2.Phase
 	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &ph); err != nil {
 		return nil
 	}
 	if ph.Spec.MilestoneRef == "" {
 		return nil
 	}
-	var ms tideprojectv1alpha1.Milestone
+	var ms tideprojectv1alpha2.Milestone
 	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
 		return nil
 	}
 	if ms.Spec.ProjectRef == "" {
 		return nil
 	}
-	var p tideprojectv1alpha1.Project
+	var p tideprojectv1alpha2.Project
 	if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
 		return nil
 	}
@@ -915,9 +914,9 @@ func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tidepr
 // means this boundary needs nothing right now — fall through to the next.
 func (r *PlanReconciler) reconcileWaveBoundary(
 	ctx context.Context,
-	plan *tideprojectv1alpha1.Plan,
-	project *tideprojectv1alpha1.Project,
-	taskByName map[string]*tideprojectv1alpha1.Task,
+	plan *tideprojectv1alpha2.Plan,
+	project *tideprojectv1alpha2.Project,
+	taskByName map[string]*tideprojectv1alpha2.Task,
 	layers [][]dag.NodeID,
 	k int,
 ) (ctrl.Result, bool, error) {
@@ -961,7 +960,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 		if integJob.Status.Failed > 0 {
 			// Permanently failed (BackoffLimit exhausted) → terminal Plan failure.
 			res, err := r.patchPlanFailed(ctx, plan,
-				tideprojectv1alpha1.ReasonWaveIntegrationFailed,
+				tideprojectv1alpha2.ReasonWaveIntegrationFailed,
 				fmt.Sprintf("wave %d integration job %s failed (BackoffLimit exhausted)", waveNum, integJobName))
 			return res, true, err
 		}
@@ -1012,7 +1011,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 //
 // Per PERSIST-03: pkg/dag.ComputeWaves is called on EVERY reconcile — the schedule
 // is re-derived from the current Task set, never cached in .status.
-func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan *tideprojectv1alpha1.Plan) (ctrl.Result, error) {
+func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan *tideprojectv1alpha2.Plan) (ctrl.Result, error) {
 	// Step 1: No-op until Plan is Validated by the admission webhook (Plan 11).
 	// FileTouchMismatch is the dormant parked state set by this reconciler; treat
 	// it as "Validated" so we re-enter the gate on every Task change and can lift
@@ -1022,7 +1021,7 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	}
 
 	// Step 2: List Tasks via field-indexer .spec.planRef = plan.Name.
-	var taskList tideprojectv1alpha1.TaskList
+	var taskList tideprojectv1alpha2.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(plan.Namespace),
 		client.MatchingFields{taskPlanRefIndexKey: plan.Name},
@@ -1039,8 +1038,8 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	// sees reporter-flow Tasks; this gate always runs after Tasks exist.
 	if len(taskList.Items) > 0 {
 		project := r.resolveProjectForPlan(ctx, plan)
-		mode := webhookv1alpha1.ResolveFileTouchMode(plan, project, r.DefaultFileTouchMode)
-		mismatches := webhookv1alpha1.ComputeFileTouchMismatches(taskList.Items)
+		mode := webhookv1alpha2.ResolveFileTouchMode(plan, project, r.DefaultFileTouchMode)
+		mismatches := webhookv1alpha2.ComputeFileTouchMismatches(taskList.Items)
 
 		if len(mismatches) > 0 && mode == "strict" {
 			// Park: ValidationState=FileTouchMismatch, no wave derivation, no dispatch.
@@ -1075,9 +1074,9 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 			plan.Status.ValidationState = "CycleDetected"
 			plan.Status.CycleEdges = cycleErr.InvolvedNodes
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha1.ConditionFailed,
+				Type:               tideprojectv1alpha2.ConditionFailed,
 				Status:             metav1.ConditionTrue,
-				Reason:             tideprojectv1alpha1.ReasonCycleDetected,
+				Reason:             tideprojectv1alpha2.ReasonCycleDetected,
 				Message:            fmt.Sprintf("DAG cycle detected: %v", cycleErr.InvolvedNodes),
 				LastTransitionTime: metav1.Now(),
 			})
@@ -1117,7 +1116,7 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	// Resolve project for wave integration jobs (need Project for push job spec).
 	project := r.resolveProjectForPlan(ctx, plan)
 
-	taskByName := make(map[string]*tideprojectv1alpha1.Task, len(taskList.Items))
+	taskByName := make(map[string]*tideprojectv1alpha2.Task, len(taskList.Items))
 	for i := range taskList.Items {
 		taskByName[taskList.Items[i].Name] = &taskList.Items[i]
 	}
@@ -1138,9 +1137,9 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 	if errors.Is(projectErr, ErrParentUnresolved) {
 		patch := client.MergeFrom(plan.DeepCopy())
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionParentUnresolved,
+			Type:               tideprojectv1alpha2.ConditionParentUnresolved,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha1.ReasonNoProjectLabel,
+			Reason:             tideprojectv1alpha2.ReasonNoProjectLabel,
 			Message:            "No Project found via label or owner-ref chain; awaiting owner-ref wiring by PhaseReconciler",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1207,14 +1206,14 @@ const planWaveApprovedLabelPrefix = "tideproject.k8s/wave-approved-"
 //     WaveOrLevelPaused True (Reason=PausedAtBoundary, Message referencing N).
 //
 // When PauseBetweenWaves is false the function is a no-op (today's behavior).
-func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tideprojectv1alpha1.Plan, tasks []tideprojectv1alpha1.Task, layers [][]dag.NodeID) (ctrl.Result, error) {
+func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tideprojectv1alpha2.Plan, tasks []tideprojectv1alpha2.Task, layers [][]dag.NodeID) (ctrl.Result, error) {
 	project := r.resolveProjectForPlan(ctx, plan)
 	if project == nil || !project.Spec.Gates.PauseBetweenWaves {
 		return ctrl.Result{}, nil
 	}
 
 	// Index tasks by name for status lookup.
-	taskByName := make(map[string]*tideprojectv1alpha1.Task, len(tasks))
+	taskByName := make(map[string]*tideprojectv1alpha2.Task, len(tasks))
 	for i := range tasks {
 		taskByName[tasks[i].Name] = &tasks[i]
 	}
@@ -1291,9 +1290,9 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 		// Flip Plan Condition to False (resumed).
 		statusPatch := client.MergeFrom(plan.DeepCopy())
 		meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+			Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 			Status:             metav1.ConditionFalse,
-			Reason:             tideprojectv1alpha1.ReasonResumedByUser,
+			Reason:             tideprojectv1alpha2.ReasonResumedByUser,
 			Message:            fmt.Sprintf("Wave %d approved; dispatch proceeding", pendingWave),
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1325,9 +1324,9 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 
 	statusPatch := client.MergeFrom(plan.DeepCopy())
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonPausedAtBoundary,
+		Reason:             tideprojectv1alpha2.ReasonPausedAtBoundary,
 		Message:            fmt.Sprintf("Awaiting approval for wave %d (annotate %s%d=true on this Plan)", pendingWave, gates.AnnotationApproveWavePrefix, pendingWave),
 		LastTransitionTime: metav1.Now(),
 	})
@@ -1345,7 +1344,7 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 // r.Create success path — not on AlreadyExists (watch-lag race) and not on the
 // Get-existing branch (reconcile replay). This mirrors D-12's exactly-once shape:
 // the reconcile whose Create succeeded already counted it; replays Get the Wave.
-func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideprojectv1alpha1.Plan, _ []tideprojectv1alpha1.Task, layers [][]dag.NodeID) error {
+func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideprojectv1alpha2.Plan, _ []tideprojectv1alpha2.Task, layers [][]dag.NodeID) error {
 	logger := logf.FromContext(ctx)
 
 	// Resolve metric label values once before the layer loop.
@@ -1419,7 +1418,7 @@ func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideproject
 //
 // These labels are the contract WaveReconciler and TaskReconciler depend on for
 // fast lookups (RESEARCH.md Open Question #8).
-func (r *PlanReconciler) stampTaskLabels(ctx context.Context, tasks []tideprojectv1alpha1.Task, layers [][]dag.NodeID, projectName string) error {
+func (r *PlanReconciler) stampTaskLabels(ctx context.Context, tasks []tideprojectv1alpha2.Task, layers [][]dag.NodeID, projectName string) error {
 	// Build a name → layer-index map.
 	taskLayer := make(map[string]int, len(tasks))
 	for i, layer := range layers {
@@ -1462,7 +1461,7 @@ func (r *PlanReconciler) stampTaskLabels(ctx context.Context, tasks []tideprojec
 //
 // Phase 04.1 P1.4 removed the prior `projectList.Items[0]` fallback which
 // silently mis-routed Plans in multi-Project namespaces.
-func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideprojectv1alpha1.Plan) (string, error) {
+func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideprojectv1alpha2.Plan) (string, error) {
 	// Fast path: label stamped on this Plan.
 	if name, ok := plan.Labels["tideproject.k8s/project"]; ok && name != "" {
 		return name, nil
@@ -1495,12 +1494,12 @@ func (r *PlanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Plan{}).
-		Owns(&tideprojectv1alpha1.Wave{}).
-		Owns(&tideprojectv1alpha1.Task{}).
+		For(&tideprojectv1alpha2.Plan{}).
+		Owns(&tideprojectv1alpha2.Wave{}).
+		Owns(&tideprojectv1alpha2.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(
-			&tideprojectv1alpha1.Plan{},
+			&tideprojectv1alpha2.Plan{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
 			}),

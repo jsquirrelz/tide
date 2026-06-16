@@ -48,8 +48,12 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 			},
 		},
 		Spec: tideprojectv1alpha1.WaveSpec{
-			PlanRef:   planRef,
-			WaveIndex: waveIndex,
+			// v1alpha2 Waves are global-scope: ProjectRef replaces the removed
+			// PlanRef. The planRef arg is reused as a non-empty ref identifier for
+			// these WaveReconciler tests (TODO(phase-24): plumb a real ProjectRef
+			// once the global assembler creates Waves).
+			ProjectRef: planRef,
+			WaveIndex:  waveIndex,
 		},
 	}
 	Expect(k8sClient.Create(context.Background(), wave)).To(Succeed())

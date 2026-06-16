@@ -228,11 +228,11 @@ func (h *TasksHandler) resolveWaveIndex(ctx context.Context, tk *tidev1alpha1.Ta
 		h.Log.V(1).Info("list waves for task failed", "task", tk.Name, "err", err)
 		return 0
 	}
+	// v1alpha2 Waves are global-scope (no Spec.PlanRef); a Wave is associated with
+	// this Task purely by TaskRefs membership, and WaveIndex is the global wave
+	// position (T-23-14 / Phase 24 owns global derivation).
 	for i := range waves.Items {
 		wv := &waves.Items[i]
-		if wv.Spec.PlanRef != tk.Spec.PlanRef {
-			continue
-		}
 		if slices.Contains(wv.Status.TaskRefs, tk.Name) {
 			return wv.Spec.WaveIndex
 		}
