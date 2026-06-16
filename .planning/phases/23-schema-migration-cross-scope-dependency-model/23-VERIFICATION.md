@@ -114,3 +114,16 @@ CLAUDE.md doctrine honored: no cached schedule (verify-no-aggregates green, gate
 
 _Verified: 2026-06-16_
 _Verifier: Claude (gsd-verifier)_
+
+---
+
+## Post-Verification: Code-Review Gap Closure (plan 23-05)
+
+After verification passed, the advisory code-review gate (`23-REVIEW.md`: 0 blockers, 4 warnings) was acted on in full per user decision. Plan 23-05 closed all four:
+
+- **WR-04** (real, vs locked D-01) — CEL now rejects empty-string + self-reference `dependsOn` on Task/Plan/Milestone/Phase; `Plan.DependsOn` gained the validation it lacked.
+- **WR-02** (real, vs DEPS-03) — `ProjectReconciler` watches `Task`, so a fixed cycle clears the `CycleDetected` condition (no longer sticky).
+- **WR-01** — Wave observational roll-up is now project-scoped (`owner.LabelProject == Wave.Spec.ProjectRef`); no cross-plan contamination.
+- **WR-03** — single accurate `api/v1alpha2` import alias across 125 files.
+
+Two test fixtures (`wave_controller_test.go`, `indegree_test.go`) were updated to stamp/align the project label the WR-01 scoping requires. Full bar re-confirmed green: `go build`/`go vet`=0, `make verify-no-aggregates`/`verify-dag-imports`=0, `make test`=0, `make test-int-fast`=0 (38/38 specs). Phase status remains **passed**.
