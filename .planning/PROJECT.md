@@ -8,21 +8,26 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Current Milestone: v1.0.2 Ebb Tide — Token & Cost Optimization
+## Current Milestone: v1.0.2 Spring Tide — Global Execution DAG (severe corrective patch)
 
-**Goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
+**Goal:** Re-architect execution so waves are derived from ONE global Execution DAG, assembled after planning completes — restoring the Topologically-Indexed paradigm that v1.0.0/v1.0.1 claimed but never implemented. Dispatch and resumption run off a single global indegree map + completed-task set.
+
+**Why this supersedes Ebb Tide:** The intended v1.0.2 (Ebb Tide — Token & Cost Optimization, phases 18–21) was completed but **will not be released**. Dogfood run #2 surfaced a foundational defect: there is no global Execution DAG. `Plan` has no dependency field, `Task.dependsOn` is plan-local (D-F1), waves are derived per-plan (`tide-wave-<plan.UID>-<i>` in `materializeWaves`), and there is no global indegree map. The "Topologically-Indexed" namesake — "given any task you know its wave; given any wave you know its tasks" (README:54) — holds only *within a plan*, not globally; the README execution graph (waves spanning plans/phases/milestones, cross-plan edges) was never implemented. v1.0.0 and v1.0.1 shipped on this invalid foundation. **v1.0.2 is the patch that makes the 1.0 line actually be what it claimed.** The Ebb Tide token/cost + observability work (phases 18–21) is preserved as superseded scope and folded forward where it still applies.
 
 **Target features:**
-- Token minimization across the compiled planner/executor prompt templates (trim static boilerplate; curate the interpolated context fed per dispatch) — provider-agnostic.
-- Cache-aware prompt structuring: order context stable-prefix-first so Claude Code's own caching (and OpenAI's automatic prefix caching) is maximized, and shared wave/plan context becomes a reusable prefix across wave-sibling dispatches.
-- A reusable quality + cost eval harness: measures a baseline DoD, regression-gates future prompt/template changes, and reports token/cost deltas (incl. cache-read vs cache-write accounting).
-- Cost/efficiency observability: surface the already-emitted cache + token metrics (cache-hit ratio, tokens-per-level) meaningfully on the dashboard.
+- Global task-DAG assembly across all plans/phases once planning completes.
+- Global wave derivation (layered Kahn) producing a single queryable wave index.
+- Cross-plan and cross-phase task dependencies expressible (retire plan-local D-F1; add Plan deps and/or qualified Task deps).
+- Dispatch + resumption off ONE global indegree map + completed-task set (spec §resumption).
+- Wave-boundary failure semantics preserved exactly, at global scope.
+- CRD schema migration + versioning (Wave re-owned Plan→Project/Milestone; `wave` label resemantics) — the breaking surface.
+- Dashboard `embed/dist` staleness fix (published images must ship the current SPA, not a pre-telemetry bundle).
 
 **Key constraints for this milestone:**
-- Stay CLI-based — no direct-SDK `cache_control` subagent backend.
-- Provider-agnostic by design, live-verified on the Claude path; no Anthropic-only assumptions.
-- Best-effort reduction, quality-gated — no hard numeric cost target; the eval harness guards that token cuts don't regress output.
-- Out of scope (→ next milestone): the OpenAI/Codex subagent backend and dogfood run #2 itself.
+- The spec (README execution-graph section) is the contract — implementation conforms to it; the spec is updated first only where a real pressure forces a paradigm change.
+- Preserve the wave-boundary failure contract exactly (spec §"Failure handling at wave boundaries").
+- Resumption state stays minimal: global indegree map + completed-task set — nothing more.
+- Breaking CRD changes ship with a migration path; no silent data loss for in-flight Projects.
 
 ## Current State (v1.0.1 — SHIPPED 2026-06-13)
 
@@ -169,4 +174,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-15 — v1.0.2 Ebb Tide (Token & Cost Optimization) milestone started.*
+*Last updated: 2026-06-16 — v1.0.2 redefined as Spring Tide (Global Execution DAG) — severe corrective patch superseding the unreleased Ebb Tide scope after dogfood run #2 surfaced the per-plan-waves architecture defect.*

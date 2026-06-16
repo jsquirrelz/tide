@@ -2,10 +2,11 @@
 
 ## Milestones
 
-- ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11)
-- ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13)
-- 🚧 **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (in progress)
-- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; phases TBD)
+- ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11) — ⚠ shipped on an invalid execution foundation (per-plan waves; see v1.0.2 Spring Tide)
+- ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13) — ⚠ same invalid foundation
+- ⊘ **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (completed; **SUPERSEDED — will not be released**, artifacts preserved). Superseded after dogfood run #2 surfaced the per-plan-waves defect.
+- 🚧 **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22+ (planning). Re-architect execution to ONE global Execution DAG — the patch that makes the Topologically-Indexed paradigm real. Supersedes Ebb Tide; preempts the OpenAI/dogfood milestone.
+- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.2 Spring Tide landing a correct execution layer)
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
 ## Phases
