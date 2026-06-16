@@ -44,7 +44,7 @@ stringData:
   # needed). Field present so Project.Spec.git.credsSecretRef resolves.
   GIT_PAT: "${GIT_PAT_OR_DUMMY}"
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: live-claude

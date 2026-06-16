@@ -59,7 +59,7 @@ var _ = Describe("Wall-clock cap enforcement (AC5 / HARN-02)", Label("kind"), fu
 		Expect(createProjectHierarchy(ctx, capsNS)).To(Succeed())
 
 		capPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Plan
 metadata:
   name: cap-plan
@@ -67,7 +67,7 @@ metadata:
 spec:
   phaseRef: cap-phase
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: hang-task

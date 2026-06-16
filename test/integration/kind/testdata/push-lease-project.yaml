@@ -50,7 +50,7 @@ type: Opaque
 stringData:
   GIT_PAT: dummy-pat-never-used-real-remote-is-example-invalid
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: push-lease

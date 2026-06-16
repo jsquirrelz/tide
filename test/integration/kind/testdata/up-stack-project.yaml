@@ -43,7 +43,7 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: up-stack-project
@@ -54,7 +54,7 @@ spec:
   budget:
     absoluteCapCents: 100000
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Milestone
 metadata:
   name: m1

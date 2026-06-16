@@ -850,7 +850,7 @@ data:
 // NOT call createNamespace themselves before calling applyHierarchy to avoid
 // double-create noise.
 //
-// API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule — never tide.io).
+// API group: tideproject.k8s/v1alpha2 (per CLAUDE.md TIDE domain rule — never tide.io).
 func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
 	// Step 1: Create Namespace + namespace-local Task Job dependencies.
 	createNamespace(ns)
@@ -872,7 +872,7 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: %s
@@ -883,7 +883,7 @@ spec:
   budget:
     absoluteCapCents: 100000
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Milestone
 metadata:
   name: %s
@@ -891,7 +891,7 @@ metadata:
 spec:
   projectRef: %s
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Phase
 metadata:
   name: %s
@@ -899,7 +899,7 @@ metadata:
 spec:
   milestoneRef: %s
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Plan
 metadata:
   name: %s
@@ -909,7 +909,7 @@ metadata:
 spec:
   phaseRef: %s
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: %s
@@ -969,7 +969,7 @@ spec:
 // first step; callers must NOT call createNamespace themselves before calling
 // createProjectHierarchy to avoid double-create noise.
 //
-// API group: tideproject.k8s/v1alpha1 (per CLAUDE.md TIDE domain rule —
+// API group: tideproject.k8s/v1alpha2 (per CLAUDE.md TIDE domain rule —
 // never tide.io).
 func createProjectHierarchy(ctx context.Context, ns string) error {
 	// Step 1: Create Namespace + namespace-local Task Job dependencies.
@@ -995,7 +995,7 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: %s
@@ -1006,7 +1006,7 @@ spec:
   budget:
     absoluteCapCents: 100000
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Milestone
 metadata:
   name: %s
@@ -1014,7 +1014,7 @@ metadata:
 spec:
   projectRef: %s
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Phase
 metadata:
   name: %s

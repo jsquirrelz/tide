@@ -54,7 +54,7 @@ data:
   # base64("test-api-key-stub-subagent-does-not-use-it")
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: chaos-resume-project
@@ -66,7 +66,7 @@ spec:
     absoluteCapCents: 100000  # $1000 — no budget cap during tests
   # Intentionally no `git` block: chaos-resume does NOT exercise push.
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Milestone
 metadata:
   name: chaos-resume-milestone
@@ -74,7 +74,7 @@ metadata:
 spec:
   projectRef: chaos-resume-project
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Phase
 metadata:
   name: chaos-resume-phase
@@ -82,7 +82,7 @@ metadata:
 spec:
   milestoneRef: chaos-resume-milestone
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Plan
 metadata:
   name: chaos-resume-plan
@@ -93,7 +93,7 @@ spec:
   phaseRef: chaos-resume-phase
 ---
 # T-α (alpha-chaos): wave 0, fast success — anchor for Pillar 3 (completed-set).
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: alpha-chaos
@@ -114,7 +114,7 @@ spec:
     wallClockSeconds: 60
 ---
 # T-β (beta-chaos): wave 0, wait-for-signal — anchor for Pillar 1 (Job UID).
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: beta-chaos
@@ -140,7 +140,7 @@ spec:
 ---
 # T-γ (gamma-chaos): wave 1, dependsOn=[alpha-chaos], wait-for-signal — second
 # in-flight anchor for Pillar 1 (Job UID) + post-release Pillar 4.
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: gamma-chaos
