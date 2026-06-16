@@ -58,7 +58,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Folded-in Fixes (FIX)
 
-- [ ] **FIX-01**: The dashboard image build embeds the current SPA (regenerate `cmd/dashboard/embed/dist` in the image/release path, or gate staleness in CI) so published images can never ship a bundle older than source — verified against the Telemetry tab rendering. (Root cause from dogfood run #2: v1.0.0/v1.0.1 dashboard images froze the embedded bundle at commit `6d7a28f`, pre-telemetry.)
+- [x] **FIX-01**: The dashboard image build embeds the current SPA (regenerate `cmd/dashboard/embed/dist` in the image/release path, or gate staleness in CI) so published images can never ship a bundle older than source — verified against the Telemetry tab rendering. (Root cause from dogfood run #2: v1.0.0/v1.0.1 dashboard images froze the embedded bundle at commit `6d7a28f`, pre-telemetry.)
 
 ## Future Requirements
 
@@ -77,7 +77,7 @@ Deferred to later milestones:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FIX-01 | Phase 22 | Pending |
+| FIX-01 | Phase 22 | Complete |
 | SCHEMA-01 | Phase 23 | Pending |
 | SCHEMA-02 | Phase 23 | Pending |
 | SCHEMA-03 | Phase 23 | Pending |

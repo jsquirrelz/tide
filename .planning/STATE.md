@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
-status: executing
-stopped_at: ROADMAP.md / REQUIREMENTS.md traceability / STATE.md written for v1.0.2 Spring Tide (Phases 22–26, 19/19 reqs mapped)
-last_updated: "2026-06-16T10:37:35.769Z"
+status: ready_to_plan
+stopped_at: Phase 22 complete (3/3) — ready to discuss Phase 23
+last_updated: 2026-06-16T12:17:28.619Z
 last_activity: 2026-06-16 -- Phase 22 execution started
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 2
-  completed_plans: 0
+  completed_plans: 17
   percent: 0
 ---
 
@@ -21,20 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 22 — dashboard-embed-freshness-fix
+**Current focus:** Phase 23 — schema migration + cross scope dependency model
 
 ## Current Position
 
-Phase: 22 (dashboard-embed-freshness-fix) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 22
-Last activity: 2026-06-16 -- Phase 22 execution started
+Phase: 23
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-16
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 46 (v1.0.1, Phases 12–17)
+- Total plans completed: 49 (v1.0.1, Phases 12–17)
 - Tasks: 46
 - Commits since v1.0.0: 330+
 
