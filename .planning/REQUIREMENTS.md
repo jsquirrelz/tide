@@ -26,9 +26,9 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Cross-Scope Dependencies (DEPS)
 
-- [ ] **DEPS-01**: A Task can declare dependencies on Tasks in other Plans, Phases, AND Milestones (retire plan-local D-F1) via qualified references resolved into the global DAG.
-- [ ] **DEPS-02**: Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the global task DAG (coarse interface edges resolve to / coexist with task-level edges).
-- [ ] **DEPS-03**: A cyclic global Execution DAG is rejected at validation time with involved nodes surfaced — across plan/phase/milestone boundaries; no runtime cycle recovery.
+- [x] **DEPS-01**: A Task can declare dependencies on Tasks in other Plans, Phases, AND Milestones (retire plan-local D-F1) via qualified references resolved into the global DAG.
+- [x] **DEPS-02**: Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the global task DAG (coarse interface edges resolve to / coexist with task-level edges).
+- [x] **DEPS-03**: A cyclic global Execution DAG is rejected at validation time with involved nodes surfaced — across plan/phase/milestone boundaries; no runtime cycle recovery.
 
 ### Global Dispatch & Failure Semantics (DISP)
 
@@ -48,9 +48,9 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### CRD Migration — the breaking surface (SCHEMA)
 
-- [ ] **SCHEMA-01**: Wave derivation/ownership moves from Plan to the global (Project) scope; the Wave CR (or its replacement derived status view) carries a global wave index.
-- [ ] **SCHEMA-02**: The `wave` telemetry label is resemanticized to the global wave; the locked metric label set `{project,phase,plan,wave}` is kept (the `task` label stays forbidden per the metriccardinality analyzer).
-- [ ] **SCHEMA-03**: Breaking CRD changes ship with a documented migration/conversion path and version bump; in-flight Projects are not silently corrupted.
+- [x] **SCHEMA-01**: Wave derivation/ownership moves from Plan to the global (Project) scope; the Wave CR (or its replacement derived status view) carries a global wave index.
+- [x] **SCHEMA-02**: The `wave` telemetry label is resemanticized to the global wave; the locked metric label set `{project,phase,plan,wave}` is kept (the `task` label stays forbidden per the metriccardinality analyzer).
+- [x] **SCHEMA-03**: Breaking CRD changes ship with a documented migration/conversion path and version bump; in-flight Projects are not silently corrupted.
 
 ### Spec Conformance (SPEC)
 
@@ -78,12 +78,12 @@ Deferred to later milestones:
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | FIX-01 | Phase 22 | Complete |
-| SCHEMA-01 | Phase 23 | Pending |
-| SCHEMA-02 | Phase 23 | Pending |
-| SCHEMA-03 | Phase 23 | Pending |
-| DEPS-01 | Phase 23 | Pending |
-| DEPS-02 | Phase 23 | Pending |
-| DEPS-03 | Phase 23 | Pending |
+| SCHEMA-01 | Phase 23 | Complete |
+| SCHEMA-02 | Phase 23 | Complete |
+| SCHEMA-03 | Phase 23 | Complete |
+| DEPS-01 | Phase 23 | Complete |
+| DEPS-02 | Phase 23 | Complete |
+| DEPS-03 | Phase 23 | Complete |
 | EXEC-01 | Phase 24 | Pending |
 | EXEC-02 | Phase 24 | Pending |
 | EXEC-03 | Phase 24 | Pending |
