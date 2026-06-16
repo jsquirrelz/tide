@@ -1,114 +1,78 @@
-# Requirements: TIDE v1.0.2 — Ebb Tide (Token & Cost Optimization)
+# Requirements: TIDE v1.0.2 — Spring Tide (Global Execution DAG)
 
-**Defined:** 2026-06-15
+**Defined:** 2026-06-16
 **Core Value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
 
-**Milestone goal:** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
+**Milestone goal:** Re-architect execution so waves are derived from ONE global Execution DAG spanning the entire Project (all milestones/phases/plans), assembled after planning completes — making the Topologically-Indexed paradigm real. This is a **severe corrective patch**: v1.0.0/v1.0.1 shipped a per-plan-waves execution layer that never implemented the spec's global Execution DAG (`Plan` has no deps, `Task.dependsOn` is plan-local per D-F1, waves are per-plan via `materializeWaves`, and there is no global indegree map). Supersedes the unreleased Ebb Tide scope (archived: `milestones/v1.0.2-ebb-REQUIREMENTS.md`).
 
 **Binding constraints (apply to every requirement below):**
-- Stay CLI-based — TIDE shells to `claude -p --bare`; it does NOT set `cache_control` (the CLI does). No direct-SDK backend this milestone.
-- Provider-agnostic by design; verified live on the Claude path. No Anthropic-only assumptions.
-- Best-effort reduction, **quality-gated** — no hard numeric cost target; the eval harness guards that token cuts don't regress output.
-- Do NOT rebuild cost accounting / pricing / metrics — they are already correct (`pricing.go`, `stream_parser.go`, `metrics/registry.go`).
+- The spec is the contract: README "two distinct DAGs" + the execution-graph worked example (waves spanning plans/phases/**milestones**, cross-cutting edges) is the literal target. Update the spec first only where a real implementation pressure forces a paradigm change.
+- Preserve the wave-boundary failure contract EXACTLY (spec §"Failure handling at wave boundaries") at global scope.
+- Resumption state stays minimal: ONE global indegree map + completed-task set — nothing more (no cached schedule; re-derive O(V+E)).
+- Cycles are bugs, not runtime conditions — reject a cyclic global DAG at validation, surface involved nodes; no recovery features.
+- Breaking CRD changes ship a migration/conversion path; no silent corruption of in-flight Projects.
+- Keep human-gate policy out of the controller — gates compose as *holds* over the global scheduler; approve-every-milestone, fully-autonomous, and fully-supervised all remain expressible.
 
 ## Milestone v1.0.2 Requirements
 
 Requirements for this milestone. Each maps to exactly one roadmap phase.
 
-### Eval Harness (EVAL)
+### Global Execution DAG (EXEC)
 
-The quality + cost gate. Must land before any prompt/template change.
+- [ ] **EXEC-01**: The orchestrator assembles ONE global Execution DAG of all Tasks across all Milestones/Phases/Plans in a Project, once project planning completes, before any execution dispatch.
+- [ ] **EXEC-02**: Waves are derived by layered Kahn over the GLOBAL task DAG; wave indices are global (a single monotonic schedule), not per-plan.
+- [ ] **EXEC-03**: The global wave index is queryable both directions — given any Task you resolve its global wave; given any wave you list its Tasks (restores the README:54 namesake invariant).
+- [ ] **EXEC-04**: Waves re-derive on every task add/complete in O(V+E) with no cached schedule (PERSIST-03), spanning the whole Project.
 
-- [x] **EVAL-01**: A maintainer can capture a frozen baseline (golden renders of all five templates + a recorded usage snapshot) from the current v1.0.1 templates, committed under `testdata/`, so later changes are measured against a stable reference.
-- [x] **EVAL-02**: The harness runs deterministic protocol-compliance checks as the primary quality gate — child-CRD parse success, declared-output-path presence, and DAG acyclicity — with no LLM judge required for the gate.
-- [x] **EVAL-03**: The harness golden-file snapshot-tests every rendered template (via `goldie/v2`, test-only), runs in `make test-unit` with zero network, and flags accidental prompt growth.
-- [x] **EVAL-04**: The harness computes cost deltas by delegating to the existing `estimatedCostCents` (asserting parity, no re-implementation), and reports REALIZED savings per wave (cache-write premium subtracted), not gross per-dispatch read discount.
-- [x] **EVAL-05**: A maintainer can run pre-flight token counting via the Anthropic `count_tokens` endpoint through the existing credproxy (stdlib `net/http`, no SDK) behind a `//go:build eval` tag, exposed as a `make eval` target.
-- [x] **EVAL-06**: The harness regression-gates prompt/template changes — a change that grows tokens beyond a tuned threshold or fails a protocol-compliance check is caught in CI.
+### Cross-Scope Dependencies (DEPS)
 
-### Prompt Structuring & Token Minimization (PROMPT)
+- [ ] **DEPS-01**: A Task can declare dependencies on Tasks in other Plans, Phases, AND Milestones (retire plan-local D-F1) via qualified references resolved into the global DAG.
+- [ ] **DEPS-02**: Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the global task DAG (coarse interface edges resolve to / coexist with task-level edges).
+- [ ] **DEPS-03**: A cyclic global Execution DAG is rejected at validation time with involved nodes surfaced — across plan/phase/milestone boundaries; no runtime cycle recovery.
 
-- [ ] **PROMPT-01**: All five prompt templates are reordered stable-prefix-first (role preamble → fixed instructions → shared context → volatile metadata → per-task prompt).
-- [ ] **PROMPT-02**: Volatile per-dispatch metadata (`TaskUID`, `Provider.*`, branch) is moved out of the stable prefix into the suffix so wave-sibling dispatches no longer diverge in the prefix.
-- [ ] **PROMPT-03**: Each template carries a "why-this-line" annotation produced before trimming, so no load-bearing instruction (proven necessary by a prior production cascade) is removed blindly.
-- [ ] **PROMPT-04**: Non-essential boilerplate is trimmed one section at a time, each commit gated green by the eval harness (protocol-compliance preserved).
-- [ ] **PROMPT-05**: Structured data interpolated into the stable prefix is serialized deterministically (stable key order) so identical inputs render identical bytes.
+### Global Dispatch & Failure Semantics (DISP)
 
-### Cache-Aware Shared Context (CACHE)
+- [ ] **DISP-01**: A Task dispatches only when ALL its global dependencies are complete (global indegree 0 vs the completed-task set), regardless of authoring Plan/Phase/Milestone.
+- [ ] **DISP-02**: Wave-boundary failure semantics hold EXACTLY at global scope — failed task → independent siblings in the same global wave continue; global dependents never dispatch; non-dependents dispatch in strict / halt in conservative.
+- [ ] **DISP-03**: Gates (milestone/phase/plan/task approve) compose with the global scheduler as *holds* — a gate withholds a globally-ready Task until approved; approval releases it without bypassing dependency readiness or human-gate-policy configurability.
 
-- [x] **CACHE-01**: A spike verifies whether stable-prefix-first ordering yields cross-pod prefix-cache hits across wave siblings under `claude -p --bare` (the working-directory-embedding question); its result gates CACHE-02/03 and is recorded as a decision.
-- [x] **CACHE-02**: `EnvelopeIn` gains an additive `SharedContext` field (omitempty; executor path ignores it) that the controller populates identically for all wave siblings.
-- [x] **CACHE-03**: Planner templates reference `SharedContext`, hoisting shared plan/phase context into the stable prefix and growing it toward the provider's cacheable minimum (≥1,024 tokens Sonnet/Opus; documented gap for Haiku 4,096).
-- [x] **CACHE-04**: Shared context is fed as curated summaries rather than verbatim PLAN.md / phase-brief dumps, cutting tokens without losing the load-bearing context.
-- [x] **CACHE-05**: The optimization carries no Anthropic-only assumptions — the design is verified provider-neutral and live-verified on the Claude path (OpenAI/Codex parity deferred to the run-#2 milestone).
+### Multiple Milestones (MS)
 
-### Cost & Cache Observability (OBSV)
+- [ ] **MS-01**: A Project drives MULTIPLE Milestones end-to-end via the Milestone DAG (`Milestone.dependsOn`, schema-present today, never exercised) — planning emits a milestone DAG and all milestones' Tasks join the single global Execution DAG.
+- [ ] **MS-02**: Cross-milestone global waves — a Task in one Milestone may share a global wave with a Task in another (the literal README execution example); cross-milestone task dependencies are expressible and honored.
+- [ ] **MS-03**: Milestone-level gate policy composes across the Milestone DAG (approve-every-milestone works for N milestones; full-auto and full-supervised remain expressible).
 
-- [x] **OBSV-01**: Per-level token accounting is queryable — the existing token counters are labeled so spend can be attributed per level (project/phase/plan/wave already present; extend as needed).
-- [x] **OBSV-02**: A cache-hit-rate metric is derived from dispatch usage (`cache_read` vs `cache_creation`) and emitted via the existing Prometheus surface.
-- [x] **OBSV-03**: The read-only dashboard surfaces a cache-efficiency panel (hit ratio, creation tokens, realized savings) reading the existing counters — no backend dispatch-path changes.
+### Minimal Resumption (RESUME)
+
+- [ ] **RESUME-01**: An orchestrator restart re-derives the entire Project execution schedule from the global indegree map + completed-task set alone — no other persisted execution state.
+
+### CRD Migration — the breaking surface (SCHEMA)
+
+- [ ] **SCHEMA-01**: Wave derivation/ownership moves from Plan to the global (Project) scope; the Wave CR (or its replacement derived status view) carries a global wave index.
+- [ ] **SCHEMA-02**: The `wave` telemetry label is resemanticized to the global wave; the locked metric label set `{project,phase,plan,wave}` is kept (the `task` label stays forbidden per the metriccardinality analyzer).
+- [ ] **SCHEMA-03**: Breaking CRD changes ship with a documented migration/conversion path and version bump; in-flight Projects are not silently corrupted.
+
+### Spec Conformance (SPEC)
+
+- [ ] **SPEC-01**: The README execution-DAG section and the implementation agree — the README cross-plan/cross-phase/cross-milestone worked example is encoded as an executable test producing the documented global wave schedule.
+
+### Folded-in Fixes (FIX)
+
+- [ ] **FIX-01**: The dashboard image build embeds the current SPA (regenerate `cmd/dashboard/embed/dist` in the image/release path, or gate staleness in CI) so published images can never ship a bundle older than source — verified against the Telemetry tab rendering. (Root cause from dogfood run #2: v1.0.0/v1.0.1 dashboard images froze the embedded bundle at commit `6d7a28f`, pre-telemetry.)
 
 ## Future Requirements
 
-Deferred to a later milestone. Tracked, not in this roadmap.
-
-### Cost (COST)
-
-- **COST-F1**: Per-level token budget profiles exposed as Helm values / CRD fields so operators can cap spend per level.
-- **COST-F2**: Wave-sibling warm-up dispatch (pre-warm the shared prefix cache before fanning out a wave).
-
-### Caching (CACHE)
-
-- **CACHE-F1**: A direct-SDK subagent backend that sets explicit `cache_control` breakpoints / TTL (provider-controlled caching, bigger lift than the CLI path). **Motivated by the Phase 20 CACHE-01 spike:** `claude -p --bare` front-loads a per-request `cch` nonce (and per-pod dynamic system-prompt sections) ahead of caller content, so caller-controlled content does NOT realize cross-pod cache benefit on the CLI path and no CLI flag recovers it — only a direct-SDK backend that owns the request body can place `cache_control` on the shared prefix. See `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md`.
-
-### Eval (EVAL)
-
-- **EVAL-F1**: A full LLM-as-judge semantic-quality scoring pipeline (beyond the deterministic protocol-compliance gate).
+Deferred to later milestones:
+- **OpenAI/Codex subagent backend + dogfood run #2** — gated on this milestone landing a correct execution layer (was the "vNext" milestone).
+- **Polyglot subagent runtimes (LangGraph)** — backlog, unchanged ([framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)).
 
 ## Out of Scope
 
-Explicitly excluded this milestone. Documented to prevent scope creep.
-
-| Feature | Reason |
-|---------|--------|
-| OpenAI/Codex subagent backend | Belongs to the dogfood-run-#2 milestone; v1.0.2 is provider-agnostic by design but live-verifies on the Claude path only. |
-| Dogfood run #2 execution | This is the *pre*-run cost-optimization milestone; the run itself is next. |
-| Rebuilding cost accounting / pricing / metrics | Already correct (`pricing.go`, `stream_parser.go`, `metrics/registry.go`); only surfacing/consuming is in scope. |
-| Anthropic Go SDK adoption | CLAUDE.md anti-pattern — stay CLI-based. `count_tokens` is reached via stdlib `net/http` through the credproxy. |
-| `cache_control` markers from TIDE | Not possible on the CLI dispatch path — the CLI owns breakpoint placement; the lever is prompt structuring. |
-| Forced shared worktree for KV-cache sharing | Violates the per-task pod isolation contract. |
+- Re-deriving cost/pricing/metrics correctness — already correct; only the `wave` label semantics change.
+- Cycle "recovery" features — cyclic DAGs are rejected, not repaired.
+- Caching the global schedule — re-derivation is intentional and cheap (O(V+E)).
+- Heterogeneous wave-internal sub-scheduling (CPM/HEFT) — out; layered Kahn stays.
 
 ## Traceability
 
-Which phases cover which requirements. Filled in during roadmap creation.
-
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| EVAL-01 | Phase 18 | Complete |
-| EVAL-02 | Phase 18 | Complete |
-| EVAL-03 | Phase 18 | Complete |
-| EVAL-04 | Phase 18 | Complete |
-| EVAL-05 | Phase 18 | Complete |
-| EVAL-06 | Phase 18 | Complete |
-| PROMPT-01 | Phase 19 | Pending |
-| PROMPT-02 | Phase 19 | Pending |
-| PROMPT-03 | Phase 19 | Pending |
-| PROMPT-04 | Phase 19 | Pending |
-| PROMPT-05 | Phase 19 | Pending |
-| CACHE-01 | Phase 20 | Complete |
-| CACHE-02 | Phase 20 | Complete |
-| CACHE-03 | Phase 20 | Complete |
-| CACHE-04 | Phase 20 | Complete |
-| CACHE-05 | Phase 20 | Complete |
-| OBSV-01 | Phase 21 | Complete |
-| OBSV-02 | Phase 21 | Complete |
-| OBSV-03 | Phase 21 | Complete |
-
-**Coverage:**
-- Milestone requirements: 19 total
-- Mapped to phases: 19
-- Unmapped: 0 ✓
-
----
-*Requirements defined: 2026-06-15*
-*Last updated: 2026-06-15 — traceability filled at roadmap creation*
+REQ-ID → Phase mapping is filled by the roadmap (phases 22+).
