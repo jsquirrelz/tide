@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
-status: ready_to_plan
-stopped_at: Phase 22 complete (3/3) — ready to discuss Phase 23
-last_updated: 2026-06-16T12:17:28.619Z
-last_activity: 2026-06-16 -- Phase 22 execution started
+status: planning
+stopped_at: Phase 23 context gathered
+last_updated: "2026-06-16T13:25:49.347Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 5
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 17
-  percent: 0
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 3
+  percent: 20
 ---
 
 # Project State
@@ -108,6 +108,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-16 — Spring Tide roadmap created
-Stopped at: ROADMAP.md / REQUIREMENTS.md traceability / STATE.md written for v1.0.2 Spring Tide (Phases 22–26, 19/19 reqs mapped)
-Resume file: .planning/ROADMAP.md (next: `/gsd:plan-phase 22`)
+Last session: 2026-06-16T13:25:49.331Z
+Stopped at: Phase 23 context gathered
+Resume file: .planning/phases/23-schema-migration-cross-scope-dependency-model/23-CONTEXT.md
