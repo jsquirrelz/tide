@@ -30,3 +30,16 @@
 # These are shell/nginx config files not matched by the Go/toml/tmpl patterns above.
 !images/tide-git-http-server/nginx.conf
 !images/tide-git-http-server/entrypoint.sh
+
+# Re-include dashboard/web source for the spa-builder node stage in Dockerfile.dashboard
+# (Phase 22 FIX-01: multi-stage build regenerates dist/ from source, never trusts committed dist/).
+# node_modules/ is intentionally excluded — npm ci runs inside the container and populates it there.
+!dashboard/web/src/**
+!dashboard/web/index.html
+!dashboard/web/package.json
+!dashboard/web/package-lock.json
+!dashboard/web/vite.config.ts
+!dashboard/web/tsconfig.json
+!dashboard/web/tsconfig.app.json
+!dashboard/web/tsconfig.node.json
+!dashboard/web/.nvmrc

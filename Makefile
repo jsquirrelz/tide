@@ -280,6 +280,23 @@ dashboard-frontend: ## Build the React SPA bundle, run frontend tests (incl. <50
 	rm -rf cmd/dashboard/embed/dist
 	cp -r dashboard/web/dist cmd/dashboard/embed/dist
 
+.PHONY: verify-dashboard-freshness
+verify-dashboard-freshness: ## Gate: rebuild the SPA and fail if cmd/dashboard/embed/dist/ diverges from committed or is missing the telemetry marker (FIX-01 staleness + telemetry gate, Phase 22).
+	$(MAKE) dashboard-frontend
+	@if ! git diff --quiet cmd/dashboard/embed/dist/; then \
+		echo "FAIL: cmd/dashboard/embed/dist/ is stale — run 'make dashboard-frontend' and commit the result before merging"; \
+		git diff --stat cmd/dashboard/embed/dist/; \
+		exit 1; \
+	fi
+	@echo "PASS: cmd/dashboard/embed/dist/ matches a fresh make dashboard-frontend"
+	@MARKER="panel-cache-efficiency"; \
+	if grep -qr "$$MARKER" cmd/dashboard/embed/dist/assets/*.js 2>/dev/null; then \
+		echo "PASS: embedded bundle contains telemetry marker ($$MARKER)"; \
+	else \
+		echo "FAIL: embedded bundle missing telemetry marker '$$MARKER' — stale pre-telemetry bundle?"; \
+		exit 1; \
+	fi
+
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
