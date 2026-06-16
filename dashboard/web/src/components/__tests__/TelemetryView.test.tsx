@@ -139,7 +139,7 @@ describe("TelemetryView — degradation: 200 unavailable sentinel (TELEM-02)", (
     );
     await flushInitialFetch();
     const notices = screen.getAllByTestId("telemetry-unavailable-notice");
-    expect(notices).toHaveLength(4);
+    expect(notices).toHaveLength(5);
   });
 });
 
@@ -153,7 +153,7 @@ describe("TelemetryView — degradation: 502 error response (TELEM-02)", () => {
     );
     await flushInitialFetch();
     const notices = screen.getAllByTestId("telemetry-unavailable-notice");
-    expect(notices).toHaveLength(4);
+    expect(notices).toHaveLength(5);
     notices.forEach((n) => {
       expect(n.textContent).toMatch(/unreachable/);
     });
@@ -565,5 +565,79 @@ describe("TelemetryView — all-projects per-project series (CR-01)", () => {
     expect(screen.queryAllByText("p1 (cost)")).toHaveLength(0);
     expect(screen.queryAllByText("p1 (failure rate)")).toHaveLength(0);
     expect(screen.queryAllByText("p1 (waves dispatched)")).toHaveLength(0);
+  });
+});
+
+// ─── 9. Cache-efficiency panel (OBSV-03) ──────────────────────────────────────
+
+describe("TelemetryView — cache-efficiency panel (OBSV-03)", () => {
+  it("renders panel-cache-efficiency in the panels grid", async () => {
+    stubFetchOK(SUCCESS_PAYLOAD);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+    expect(screen.getByTestId("panel-cache-efficiency")).toBeDefined();
+  });
+
+  it("renders TelemetryUnavailableNotice in cache-efficiency panel when unavailable", async () => {
+    stubFetchOK({ status: "unavailable" });
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+    const notices = screen.getAllByTestId("telemetry-unavailable-notice");
+    expect(notices).toHaveLength(5); // 4 existing ChartPanels + 1 cache-efficiency
+  });
+
+  it("queries include tide_cache_savings_cents_total", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "unavailable" }),
+    });
+    vi.stubGlobal("fetch", fetchFn as unknown as typeof fetch);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+    const calls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls as [string][];
+    const hasSavings = calls.some(([url]) => {
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      return (params.get("query") ?? "").includes("tide_cache_savings_cents_total");
+    });
+    expect(hasSavings).toBe(true);
+  });
+});
+
+// ─── 10. Per-level selector (D-06) ───────────────────────────────────────────
+
+describe("TelemetryView — per-level selector (D-06)", () => {
+  it("renders telemetry-level-selector control", () => {
+    stubFetchOK({ status: "unavailable" });
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    expect(screen.getByTestId("telemetry-level-selector")).toBeDefined();
+  });
+
+  it("clicking Phase fires queries with by(phase) aggregation", async () => {
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "unavailable" }),
+    });
+    vi.stubGlobal("fetch", fetchFn as unknown as typeof fetch);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+    fetchFn.mockClear();
+
+    const phaseBtn = screen.getByText("Phase");
+    await act(async () => {
+      fireEvent.click(phaseBtn);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const calls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls as [string][];
+    const hasByPhase = calls.some(([url]) => {
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      return (
+        (params.get("query") ?? "").includes("by(phase)") ||
+        (params.get("query") ?? "").includes("by (phase)")
+      );
+    });
+    expect(hasByPhase).toBe(true);
   });
 });
