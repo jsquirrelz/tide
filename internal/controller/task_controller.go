@@ -1070,6 +1070,7 @@ func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv
 	tidemetrics.TokensCacheReadTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheReadTokens))
 	tidemetrics.TokensCacheCreationTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheCreationTokens))
 	tidemetrics.CostCentsTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.EstimatedCostCents))
+	tidemetrics.CacheSavingsCentsTotal.WithLabelValues(projectName, phase, plan, wave).Add(float64(usage.CacheSavingsCents))
 
 	// WR-04: guard against negative durations from stale envelopes or manager↔pod
 	// clock skew. Compute a signed duration; only observe when d >= 0. On negative,

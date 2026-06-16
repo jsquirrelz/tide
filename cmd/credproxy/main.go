@@ -67,7 +67,10 @@ func main() {
 	flag.StringVar(&certDir, "cert-dir", "/etc/tide/proxy", "Directory for minted TLS cert and key")
 	flag.StringVar(&upstreamURL, "upstream-url", "https://api.anthropic.com", "Upstream URL to proxy requests to")
 	flag.DurationVar(&certValidity, "cert-validity", 24*time.Hour, "Validity duration for the self-signed cert")
-	flag.StringVar(&teeBodyDir, "tee-body-dir", "", "Optional: directory to write teed /v1/messages request bodies (CACHE-01 FAIL-path diff; disabled when empty). Caller must create the dir with 0700 perms.")
+	flag.StringVar(&teeBodyDir, "tee-body-dir", "",
+		"Optional: directory to write teed /v1/messages request bodies "+
+			"(CACHE-01 FAIL-path diff; disabled when empty). "+
+			"Caller must create the dir with 0700 perms.")
 	flag.Parse()
 
 	// Set up zap-behind-logr (same backend as cmd/manager/main.go; leaner setup

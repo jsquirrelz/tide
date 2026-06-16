@@ -68,6 +68,8 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 	tidemetrics.TokensCacheCreationTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
 	tidemetrics.CostCentsTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
 	tidemetrics.TaskDurationSeconds.WithLabelValues("__seed__", "ph", "pl", "w").Observe(0)
+	// Phase 21 OBSV-02: seed realized-savings counter.
+	tidemetrics.CacheSavingsCentsTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
 
 	families, err := crmetrics.Registry.Gather()
 	if err != nil {
@@ -92,6 +94,8 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 		"tide_tokens_cache_creation_total",
 		"tide_cost_cents_total",
 		"tide_task_duration_seconds",
+		// Phase 21 OBSV-02:
+		"tide_cache_savings_cents_total",
 	}
 	for _, name := range want {
 		if !seen[name] {
@@ -216,6 +220,19 @@ func TestRegistry_CostCentsLabelArity(t *testing.T) {
 	tidemetrics.CostCentsTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
 	if got := testutil.ToFloat64(tidemetrics.CostCentsTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
 		t.Errorf("CostCentsTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_CacheSavingsCentsLabelArity asserts arity {project, phase, plan, wave} = 4
+// for the Phase 21 OBSV-02 realized-savings counter.
+//
+// Also serves as the OBSV-01 audit guard: the savings counter carries the same
+// four-label set that makes per-level PromQL slicing work without extra
+// instrumentation.
+func TestRegistry_CacheSavingsCentsLabelArity(t *testing.T) {
+	tidemetrics.CacheSavingsCentsTotal.WithLabelValues("p", "ph", "pl", "w").Add(1)
+	if got := testutil.ToFloat64(tidemetrics.CacheSavingsCentsTotal.WithLabelValues("p", "ph", "pl", "w")); got < 1 {
+		t.Errorf("CacheSavingsCentsTotal counter = %v, want >= 1", got)
 	}
 }
 

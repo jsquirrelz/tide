@@ -110,6 +110,12 @@ var TokensCacheCreationTotal *prometheus.CounterVec
 // CostCentsTotal counts the estimated cost in US cents consumed by Tasks.
 var CostCentsTotal *prometheus.CounterVec
 
+// CacheSavingsCentsTotal counts the realized cache savings in US cents per Task
+// (Phase 21 OBSV-02). Savings = CacheReadTokens × (inputRate − cacheReadRate).
+// Label set {project, phase, plan, wave} is identical to the TELEM-03 counters
+// (D-10 / OBSV-01 audit guard — see TestRegistry_CacheSavingsCentsLabelArity).
+var CacheSavingsCentsTotal *prometheus.CounterVec
+
 // TaskDurationSeconds observes the wall-clock duration of Tasks from dispatch
 // to terminal state. Uses taskDurationBuckets (D-11).
 var TaskDurationSeconds *prometheus.HistogramVec
@@ -217,6 +223,13 @@ func init() {
 		},
 		[]string{"project", "phase", "plan", "wave"},
 	)
+	CacheSavingsCentsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_cache_savings_cents_total",
+			Help: "Realized cache savings in US cents (input price minus cache-read price) per Task (Phase 21 OBSV-02).",
+		},
+		[]string{"project", "phase", "plan", "wave"},
+	)
 	TaskDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "tide_task_duration_seconds",
@@ -240,6 +253,8 @@ func init() {
 		TokensCacheReadTotal,
 		TokensCacheCreationTotal,
 		CostCentsTotal,
+		// Phase 21 OBSV-02:
+		CacheSavingsCentsTotal,
 		TaskDurationSeconds,
 	)
 

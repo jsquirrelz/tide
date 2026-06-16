@@ -169,7 +169,6 @@ func TestNoMapInterpolation(t *testing.T) {
 	// templateStem derives the .tmpl filename stem from (level, role), mirroring
 	// the naming convention in LoadPromptTemplate: <level>_<role>.tmpl.
 	for _, tc := range templateCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			path := "../subagent/common/templates/" + tc.name + ".tmpl"
 			src, err := os.ReadFile(path)
