@@ -34,9 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
-	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 )
 
@@ -76,8 +76,8 @@ type WaveReconciler struct {
 func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	// 1. Fetch.
-	var wave tideprojectv1alpha1.Wave
+	// 1. Fetch v1alpha2.Wave (Spring Tide: Wave ownership moved Plan→Project, Plan 23-02).
+	var wave tideprojectv1alpha2.Wave
 	if err := r.Get(ctx, req.NamespacedName, &wave); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -100,26 +100,13 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	// 4. Ensure owner ref to parent Plan (CRD-02, Pitfall 23 prevention).
-	// If the Plan is not found (e.g., Wave created before Plan or Plan deleted),
-	// log and continue — owner ref is best-effort; observational roll-up must still proceed.
-	if wave.Spec.PlanRef != "" {
-		var parent tideprojectv1alpha1.Plan
-		if err := r.Get(ctx, client.ObjectKey{Namespace: wave.Namespace, Name: wave.Spec.PlanRef}, &parent); err != nil {
-			if client.IgnoreNotFound(err) != nil {
-				return ctrl.Result{}, err
-			}
-			// Plan not found: log and continue without owner ref.
-			logger.V(1).Info("parent Plan not found; skipping owner ref", "planRef", wave.Spec.PlanRef)
-		} else {
-			if err := owner.EnsureOwnerRef(&wave, &parent, r.Scheme); err != nil {
-				return ctrl.Result{}, err
-			}
-			if err := r.Update(ctx, &wave); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	}
+	// 4. Owner ref to parent (CRD-02, Pitfall 23 prevention).
+	// TODO(phase-24): in v1alpha2 Wave carries ProjectRef not PlanRef; the per-plan
+	// materializeWaves stub (Plan 23-02) sets the owner-ref at create time so the
+	// reconciler no longer needs to look up the parent here. Phase 24 will re-own
+	// Wave under Project; this step will then resolve ProjectRef → Project and set
+	// the owner ref. For now, skip the owner-ref walk — materializeWaves stamps it.
+	_ = wave.Spec.ProjectRef // referenced to avoid "declared but not used" on the field
 
 	// 5. Phase 2 observational roll-up body (D-B2, D-B4 — NO Job creation).
 	if r.Dispatcher != nil {
@@ -128,9 +115,9 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&wave.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha1.ConditionReady,
+		Type:               tideprojectv1alpha2.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha1.ReasonInitialized,
+		Reason:             tideprojectv1alpha2.ReasonInitialized,
 		Message:            "Wave scaffolded; dispatcher not wired",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -144,19 +131,30 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // reconcileObservational implements the Wave observational roll-up body inside
 // the Dispatcher seam (step 5 of the six-step pattern). Per D-B2 and D-B4,
 // this method is PURELY observational — it NEVER creates Jobs.
-func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha1.Wave) (ctrl.Result, error) {
-	// Step 1: List Tasks via field-indexer .spec.planRef = wave.Spec.PlanRef.
+func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha2.Wave) (ctrl.Result, error) {
+	// TODO(phase-24): re-wire Wave→Task association off the global wave index;
+	// ProjectRef-scoped listing lands with the global scheduler (Phase 24). The
+	// per-plan field indexer (taskPlanRefIndexKey) cannot be used because v1alpha2
+	// WaveSpec carries ProjectRef not PlanRef. Use the wave-index label approach
+	// instead: list all Tasks in the namespace and filter by wave-index label.
+	// This is a best-effort stub that preserves the Ready condition write path.
+
+	// Step 1: List Tasks by the tideproject.k8s/wave-index label stamped by PlanReconciler.
+	// In the per-plan stub (Phase 23), waves are still per-plan but the index label
+	// is still stamped by stampTaskLabels. Use label-based listing as the interim
+	// association mechanism since PlanRef no longer exists in WaveSpec.
+	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
 	var taskList tideprojectv1alpha1.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(wave.Namespace),
-		client.MatchingFields{taskPlanRefIndexKey: wave.Spec.PlanRef},
+		client.MatchingLabels{"tideproject.k8s/wave-index": waveIndexLabel},
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list tasks for wave %s: %w", wave.Name, err)
 	}
 
-	// Step 2: Filter by tideproject.k8s/wave-index = wave.Spec.WaveIndex label
-	// (PlanReconciler stamps this label on each Task).
-	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
+	// Step 2: Filter by tideproject.k8s/wave-index = wave.Spec.WaveIndex label.
+	// The label was already used to filter in the List call above; this pass
+	// provides a secondary filter in case the label index is not exact-match only.
 	var members []tideprojectv1alpha1.Task
 	for _, t := range taskList.Items {
 		if t.Labels["tideproject.k8s/wave-index"] == waveIndexLabel {
@@ -198,15 +196,15 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	patch := client.MergeFrom(wave.DeepCopy())
 	wave.Status.Phase = phase
 	wave.Status.TaskRefs = taskRefs
-	condType := tideprojectv1alpha1.ConditionReconciling
+	condType := tideprojectv1alpha2.ConditionReconciling
 	condStatus := metav1.ConditionTrue
 	reason := "Aggregating"
 	switch phase {
 	case "Succeeded":
-		condType = tideprojectv1alpha1.ConditionSucceeded
+		condType = tideprojectv1alpha2.ConditionSucceeded
 		reason = "AllTasksSucceeded"
 	case "Failed":
-		condType = tideprojectv1alpha1.ConditionFailed
+		condType = tideprojectv1alpha2.ConditionFailed
 		reason = "MemberTaskFailed"
 	}
 	meta.SetStatusCondition(&wave.Status.Conditions, metav1.Condition{
@@ -224,9 +222,14 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	return ctrl.Result{}, nil
 }
 
-// taskToWaveMapper returns reconcile requests for all Waves whose Spec.PlanRef
-// matches the changed Task's Spec.PlanRef. This drives WaveReconciler re-evaluation
-// when any member Task's status changes.
+// taskToWaveMapper returns reconcile requests for all v1alpha2 Waves in the same
+// namespace as the changed Task. This drives WaveReconciler re-evaluation when any
+// member Task's status changes.
+//
+// TODO(phase-24): re-wire the mapper off the global wave index; the Phase 24
+// assembler will provide a ProjectRef-scoped index so this can enumerate only the
+// Waves whose task set includes the changed task, not all Waves in the namespace.
+// For now, enqueue all Waves in the namespace so no status update is missed.
 func (r *WaveReconciler) taskToWaveMapper(ctx context.Context, obj client.Object) []reconcile.Request {
 	task, ok := obj.(*tideprojectv1alpha1.Task)
 	if !ok {
@@ -235,19 +238,19 @@ func (r *WaveReconciler) taskToWaveMapper(ctx context.Context, obj client.Object
 	if task.Spec.PlanRef == "" {
 		return nil
 	}
-	var waveList tideprojectv1alpha1.WaveList
+	// TODO(phase-24): associate Wave→Task via global wave index (ProjectRef-scoped).
+	// For now, list all v1alpha2 Waves in the same namespace and enqueue them all.
+	var waveList tideprojectv1alpha2.WaveList
 	if err := r.List(ctx, &waveList,
 		client.InNamespace(task.Namespace),
 	); err != nil {
 		return nil
 	}
-	reqs := make([]reconcile.Request, 0)
+	reqs := make([]reconcile.Request, 0, len(waveList.Items))
 	for _, w := range waveList.Items {
-		if w.Spec.PlanRef == task.Spec.PlanRef {
-			reqs = append(reqs, reconcile.Request{
-				NamespacedName: client.ObjectKey{Namespace: w.Namespace, Name: w.Name},
-			})
-		}
+		reqs = append(reqs, reconcile.Request{
+			NamespacedName: client.ObjectKey{Namespace: w.Namespace, Name: w.Name},
+		})
 	}
 	return reqs
 }
@@ -267,13 +270,13 @@ func (r *WaveReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha1.Wave{}).
+		For(&tideprojectv1alpha2.Wave{}).
 		Watches(
 			&tideprojectv1alpha1.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.taskToWaveMapper),
 		).
 		Watches(
-			&tideprojectv1alpha1.Wave{},
+			&tideprojectv1alpha2.Wave{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
 			}),

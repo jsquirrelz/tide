@@ -10,14 +10,14 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-tideproject-k8s-v1alpha1-plan
+      path: /validate-tideproject-k8s-v1alpha2-plan
   failurePolicy: Fail
-  name: vplan-v1alpha1.kb.io
+  name: vplan-v1alpha2.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha1
+    - v1alpha2
     operations:
     - CREATE
     - UPDATE
@@ -30,14 +30,14 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-tideproject-k8s-v1alpha1-project
+      path: /validate-tideproject-k8s-v1alpha2-project
   failurePolicy: Fail
-  name: vproject-v1alpha1.kb.io
+  name: vproject-v1alpha2.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha1
+    - v1alpha2
     operations:
     - CREATE
     - UPDATE
@@ -50,14 +50,14 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-tideproject-k8s-v1alpha1-wave
+      path: /validate-tideproject-k8s-v1alpha2-wave
   failurePolicy: Fail
-  name: vwave-v1alpha1.kb.io
+  name: vwave-v1alpha2.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha1
+    - v1alpha2
     operations:
     - CREATE
     - UPDATE
