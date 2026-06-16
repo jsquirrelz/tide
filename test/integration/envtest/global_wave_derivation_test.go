@@ -401,6 +401,58 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 		})
 	})
 
+	// PruneShrink (CR-01): regression test for the stale-Wave prune dead-code defect.
+	// Before FIX 1 (CR-01): Wave CRs were created with no Labels, so the prune List
+	// selector (MatchingLabels{LabelProject: project.Name}) always returned zero items
+	// and orphaned high-index Waves were never deleted after re-derivation produced
+	// fewer waves. This test must be RED on the pre-fix code and GREEN after the fix.
+	//
+	// Scenario: create two Tasks with a dependency (→ waves 0,1); then delete the
+	// dependent Task so re-derivation yields only wave 0. Assert tide-wave-<project>-1
+	// is deleted (pruned) within the eventual consistency window.
+	Describe("PruneShrink: prune deletes stale high-index Wave CRs after re-derivation shrinks (CR-01)", func() {
+		It("deletes tide-wave-<project>-1 after the dependent Task is removed", func() {
+			createSimplePlan(ctx, "ps-plan-a")
+			createSimplePlan(ctx, "ps-plan-b")
+
+			// Initial two-task fixture: ps-task-src (wave 0) → ps-task-dep (wave 1).
+			makeGlobalWaveTask(ctx, "ps-task-src", "ps-plan-a", nil, []string{"src.go"})
+			makeGlobalWaveTask(ctx, "ps-task-dep", "ps-plan-b", []string{"ps-task-src"}, []string{"dep.go"})
+
+			// Both Wave CRs must appear before we shrink the schedule.
+			assertWaveExists(ctx, globalWaveTestProject, 0)
+			assertWaveExists(ctx, globalWaveTestProject, 1)
+
+			// Shrink: delete ps-task-dep. Re-derivation now produces only wave-0.
+			depTask := &tideprojectv1alpha2.Task{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Name:      "ps-task-dep",
+				Namespace: globalWaveNamespace,
+			}, depTask)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, depTask)).To(Succeed())
+
+			// CR-01 assertion: tide-wave-<project>-1 must be pruned (NotFound) once the
+			// ProjectReconciler re-derives the schedule. Before FIX 1 this would timeout
+			// because the prune List always returned zero items (dead selector).
+			Eventually(func() error {
+				wave := &tideprojectv1alpha2.Wave{}
+				err := k8sClient.Get(ctx, client.ObjectKey{
+					Name:      fmt.Sprintf("tide-wave-%s-1", globalWaveTestProject),
+					Namespace: globalWaveNamespace,
+				}, wave)
+				if err == nil {
+					return fmt.Errorf("tide-wave-%s-1 still exists; prune has not fired", globalWaveTestProject)
+				}
+				// apierrors.IsNotFound is the success condition.
+				return client.IgnoreNotFound(err)
+			}, "30s", "500ms").Should(Succeed(),
+				"tide-wave-<project>-1 should be deleted after re-derivation shrinks to 1 wave (CR-01 prune fix)")
+
+			// wave-0 must remain (it still has ps-task-src as its sole member).
+			assertWaveExists(ctx, globalWaveTestProject, 0)
+		})
+	})
+
 	// Cross-phase / cross-milestone case using createSimplePhase / createSimpleMilestone
 	// plus Plan-level dependsOn (coarse ref) to exercise fan-out.
 	Context("cross-phase cross-milestone coarse-ref fan-out", func() {
