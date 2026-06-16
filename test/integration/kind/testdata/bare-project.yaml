@@ -33,12 +33,13 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: bare-project
   namespace: bare-project-test
 spec:
+  schemaRevision: v1alpha2
   # Sentinel: RFC 2606 .example TLD — non-routable by design. The stub-subagent
   # ignores targetRepo entirely and returns canned envelopes regardless of this
   # value. https:// scheme passes the Phase 8 CEL rule that rejects file:// URLs

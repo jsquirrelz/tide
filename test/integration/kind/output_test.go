@@ -58,7 +58,7 @@ var _ = Describe("Output path violation detection (AC5 / HARN-05)", Label("kind"
 		Expect(createProjectHierarchy(ctx, outputNS)).To(Succeed())
 
 		outputPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Plan
 metadata:
   name: output-plan
@@ -66,7 +66,7 @@ metadata:
 spec:
   phaseRef: output-phase
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: exceed-output-task

@@ -50,12 +50,13 @@ type: Opaque
 stringData:
   GIT_PAT: dummy-pat-never-used-real-remote-is-example-invalid
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: push-lease
   namespace: push-lease-test
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://example.invalid/owner/push-lease-repo.git"
   providerSecretRef: "tide-provider-secret"
   budget:

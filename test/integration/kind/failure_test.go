@@ -56,7 +56,7 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 		Expect(createProjectHierarchy(ctx, ns)).To(Succeed())
 
 		planYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Plan
 metadata:
   name: fail-plan
@@ -64,7 +64,7 @@ metadata:
 spec:
   phaseRef: fail-phase
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: alpha-fail
@@ -82,7 +82,7 @@ spec:
   dev:
     testMode: success
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: beta-fail
@@ -98,7 +98,7 @@ spec:
   dev:
     testMode: fail-exit-1
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Task
 metadata:
   name: gamma-fail

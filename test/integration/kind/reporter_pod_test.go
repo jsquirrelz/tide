@@ -83,12 +83,13 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: reporter-test-project
   namespace: %s
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://git.example.internal/stub/reporter-test.git"
   providerSecretRef: "tide-provider-secret"
   budget:
