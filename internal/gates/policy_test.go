@@ -16,7 +16,7 @@ package gates
 import (
 	"testing"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // Test 1-2 + 3-4-5: EvaluatePolicy covers default + explicit + unknown level.

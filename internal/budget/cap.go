@@ -21,7 +21,7 @@ import (
 	"maps"
 	"time"
 
-	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // IsCapExceeded returns true iff the Project's cumulative cost spend exceeds a

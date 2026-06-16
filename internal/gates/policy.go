@@ -18,7 +18,7 @@ limitations under the License.
 package gates
 
 import (
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
 // Exported policy constants — these are the only three values the CEL enum

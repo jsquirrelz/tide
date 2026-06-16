@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )

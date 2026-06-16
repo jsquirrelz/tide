@@ -30,7 +30,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	controller "github.com/jsquirrelz/tide/internal/controller"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )

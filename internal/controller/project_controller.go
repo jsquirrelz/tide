@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
@@ -51,8 +51,8 @@ import (
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
-	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	"github.com/jsquirrelz/tide/pkg/dag"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // pushResultEnvelope mirrors the JSON envelope emitted by cmd/tide-push
@@ -1408,10 +1408,10 @@ func (r *ProjectReconciler) checkSchemaRevisionGuard(
 	// The SchemaRevision is absent or wrong — this object was authored under
 	// v1alpha1. Surface a permanent failure condition and halt reconciliation.
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionReady,
-		Status:             metav1.ConditionFalse,
-		Reason:             tidev1alpha2.ReasonRequiresReinstall,
-		Message:            "Project was created with v1alpha1 schema; reinstall required: " +
+		Type:   tidev1alpha2.ConditionReady,
+		Status: metav1.ConditionFalse,
+		Reason: tidev1alpha2.ReasonRequiresReinstall,
+		Message: "Project was created with v1alpha1 schema; reinstall required: " +
 			"kubectl delete project " + project.Name +
 			" && kubectl apply -f <project.yaml> (with schemaRevision: v1alpha2 set). " +
 			"See docs/migration/v1alpha1-to-v1alpha2.md.",
