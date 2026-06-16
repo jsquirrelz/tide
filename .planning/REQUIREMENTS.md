@@ -40,7 +40,7 @@ The quality + cost gate. Must land before any prompt/template change.
 - [x] **CACHE-02**: `EnvelopeIn` gains an additive `SharedContext` field (omitempty; executor path ignores it) that the controller populates identically for all wave siblings.
 - [x] **CACHE-03**: Planner templates reference `SharedContext`, hoisting shared plan/phase context into the stable prefix and growing it toward the provider's cacheable minimum (≥1,024 tokens Sonnet/Opus; documented gap for Haiku 4,096).
 - [x] **CACHE-04**: Shared context is fed as curated summaries rather than verbatim PLAN.md / phase-brief dumps, cutting tokens without losing the load-bearing context.
-- [ ] **CACHE-05**: The optimization carries no Anthropic-only assumptions — the design is verified provider-neutral and live-verified on the Claude path (OpenAI/Codex parity deferred to the run-#2 milestone).
+- [x] **CACHE-05**: The optimization carries no Anthropic-only assumptions — the design is verified provider-neutral and live-verified on the Claude path (OpenAI/Codex parity deferred to the run-#2 milestone).
 
 ### Cost & Cache Observability (OBSV)
 
@@ -99,7 +99,7 @@ Which phases cover which requirements. Filled in during roadmap creation.
 | CACHE-02 | Phase 20 | Complete |
 | CACHE-03 | Phase 20 | Complete |
 | CACHE-04 | Phase 20 | Complete |
-| CACHE-05 | Phase 20 | Pending |
+| CACHE-05 | Phase 20 | Complete |
 | OBSV-01 | Phase 21 | Pending |
 | OBSV-02 | Phase 21 | Pending |
 | OBSV-03 | Phase 21 | Pending |
