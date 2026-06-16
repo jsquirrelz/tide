@@ -329,7 +329,7 @@ var _ = Describe("Plan Admission Webhook", Label("envtest"), func() {
 	// trip a naive raw substring match.
 	Describe("PLAN-03: cycle recovery feature absent", Label("PLAN-03"), func() {
 		It("verifies there is no cycle recovery code in the webhook implementation", func() {
-			webhookDir := filepath.Join("..", "..", "..", "internal", "webhook", "v1alpha1")
+			webhookDir := filepath.Join("..", "..", "..", "internal", "webhook", "v1alpha2")
 			forbidden := []string{"recoverCycle", "cycleRecover", "fixCycle", "skipCycle"}
 			var offenders []string
 
