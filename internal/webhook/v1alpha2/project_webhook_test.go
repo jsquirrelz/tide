@@ -14,25 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
 import (
 	"context"
 	"strings"
 	"testing"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 )
 
-// TestProjectWebhook is the top-level test group for ProjectCustomValidator.
+// TestProjectWebhook is the top-level test group for the v1alpha2 ProjectCustomValidator.
 
 func TestProjectWebhook_RejectsAdminPath(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	p := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
-			Providers: []tideprojectv1alpha1.ProviderConfig{
-				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha1.RouteSpec{
+			Providers: []tideprojectv1alpha2.ProviderConfig{
+				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha2.RouteSpec{
 					{Method: "POST", PathPrefix: "/v1/admin/users"},
 				}},
 			},
@@ -46,11 +46,11 @@ func TestProjectWebhook_RejectsAdminPath(t *testing.T) {
 
 func TestProjectWebhook_RejectsBillingPath(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	p := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
-			Providers: []tideprojectv1alpha1.ProviderConfig{
-				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha1.RouteSpec{
+			Providers: []tideprojectv1alpha2.ProviderConfig{
+				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha2.RouteSpec{
 					{Method: "GET", PathPrefix: "/v1/billing"},
 				}},
 			},
@@ -64,11 +64,11 @@ func TestProjectWebhook_RejectsBillingPath(t *testing.T) {
 
 func TestProjectWebhook_RejectsBillingSubpath(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	p := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
-			Providers: []tideprojectv1alpha1.ProviderConfig{
-				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha1.RouteSpec{
+			Providers: []tideprojectv1alpha2.ProviderConfig{
+				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha2.RouteSpec{
 					{Method: "POST", PathPrefix: "/v1/billing/invoices"},
 				}},
 			},
@@ -82,11 +82,11 @@ func TestProjectWebhook_RejectsBillingSubpath(t *testing.T) {
 
 func TestProjectWebhook_AcceptsValidRoute(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	p := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
-			Providers: []tideprojectv1alpha1.ProviderConfig{
-				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha1.RouteSpec{
+			Providers: []tideprojectv1alpha2.ProviderConfig{
+				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha2.RouteSpec{
 					{Method: "POST", PathPrefix: "/v1/files"},
 				}},
 			},
@@ -100,8 +100,8 @@ func TestProjectWebhook_AcceptsValidRoute(t *testing.T) {
 
 func TestProjectWebhook_AcceptsEmptyAllowedRoutes(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	p := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
 		},
 	}
@@ -113,16 +113,16 @@ func TestProjectWebhook_AcceptsEmptyAllowedRoutes(t *testing.T) {
 
 func TestProjectWebhook_ValidateUpdate_RejectsAdminPath(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	old := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	old := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
 		},
 	}
-	newObj := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+	newObj := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
 			TargetRepo: "https://github.com/example/repo",
-			Providers: []tideprojectv1alpha1.ProviderConfig{
-				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha1.RouteSpec{
+			Providers: []tideprojectv1alpha2.ProviderConfig{
+				{Name: "anthropic", AllowedRoutes: []tideprojectv1alpha2.RouteSpec{
 					{Method: "POST", PathPrefix: "/v1/admin"},
 				}},
 			},
@@ -136,7 +136,7 @@ func TestProjectWebhook_ValidateUpdate_RejectsAdminPath(t *testing.T) {
 
 func TestProjectWebhook_ValidateDelete_IsNoop(t *testing.T) {
 	v := &ProjectCustomValidator{}
-	p := &tideprojectv1alpha1.Project{}
+	p := &tideprojectv1alpha2.Project{}
 	_, err := v.ValidateDelete(context.Background(), p)
 	if err != nil {
 		t.Errorf("expected no error on delete; got %v", err)

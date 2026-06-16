@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	tidev1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
@@ -60,7 +61,10 @@ import (
 	// span processor before the binary exits.
 	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/pool"
-	webhookv1alpha1 "github.com/jsquirrelz/tide/internal/webhook/v1alpha1"
+	// All webhooks moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
+	// webhookv1alpha1 no longer needed here; only SetupProjectWebhookWithManager
+	// remains via suite_test.go which still needs the v1alpha1 package for strict_mode.
+	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -285,6 +289,10 @@ func main() {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(tidev1alpha1.AddToScheme(scheme))
+	// Register v1alpha2 as the served+storage version (Spring Tide breaking CRD change,
+	// Plan 23-02). v1alpha1 remains registered so the manager can decode any surviving
+	// v1alpha1 objects for the Plan-03 reinstall guard (RequiresReinstall path).
+	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	// 3. Construct the Manager (CTRL-01, CTRL-03).
@@ -550,15 +558,17 @@ func main() {
 	// The Helm-chart default is "warn" (safe for fresh installs); operators opt in to
 	// "strict" via --set planAdmission.fileTouchMode=strict which is passed through
 	// the controller Deployment args to this --default-file-touch-mode flag.
-	if err := webhookv1alpha1.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
+	// Plan webhook moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
+	if err := webhookv1alpha2.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Plan")
 		os.Exit(1)
 	}
-	if err := webhookv1alpha1.SetupWaveWebhookWithManager(mgr); err != nil {
+	// Wave webhook re-registered for v1alpha2 (D-B1 re-registration, Plan 23-02).
+	if err := webhookv1alpha2.SetupWaveWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Wave")
 		os.Exit(1)
 	}
-	if err := webhookv1alpha1.SetupProjectWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha2.SetupProjectWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Project")
 		os.Exit(1)
 	}

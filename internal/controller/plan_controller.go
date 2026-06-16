@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -1362,19 +1363,22 @@ func (r *PlanReconciler) materializeWaves(ctx context.Context, plan *tideproject
 
 	for i := range layers {
 		waveName := fmt.Sprintf("tide-wave-%s-%d", plan.UID, i)
-		wave := &tideprojectv1alpha1.Wave{
+		// TODO(phase-24): replace per-plan materializeWaves with global derivation;
+		// name becomes tide-wave-<project.UID>-<globalIndex> and ownership moves to Project.
+		// For now, Wave is owned by Plan and keyed on plan.UID (per-plan stub).
+		wave := &tideprojectv1alpha2.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      waveName,
 				Namespace: plan.Namespace,
 			},
-			Spec: tideprojectv1alpha1.WaveSpec{
-				PlanRef:   plan.Name,
-				WaveIndex: i,
+			Spec: tideprojectv1alpha2.WaveSpec{
+				ProjectRef: projectName,
+				WaveIndex:  i,
 			},
 		}
 
 		// Check if Wave already exists.
-		var existing tideprojectv1alpha1.Wave
+		var existing tideprojectv1alpha2.Wave
 		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: waveName}, &existing); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return fmt.Errorf("get wave %s: %w", waveName, err)
