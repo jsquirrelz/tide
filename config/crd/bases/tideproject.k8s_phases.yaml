@@ -184,8 +184,12 @@ spec:
                   hierarchy level within the Project (any-level targets, D-02). Coarse scope
                   refs are fan-out expanded by the Phase 24 assembler (D-06).
                 items:
+                  minLength: 1
                   type: string
                 type: array
+                x-kubernetes-validations:
+                - message: dependsOn entries must not be empty strings
+                  rule: '!self.exists(d, d == '''')'
               milestoneRef:
                 description: MilestoneRef is the name of the owning Milestone (same
                   namespace).
@@ -269,6 +273,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: a phase cannot depend on itself
+          rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
     served: true
     storage: true
     subresources:

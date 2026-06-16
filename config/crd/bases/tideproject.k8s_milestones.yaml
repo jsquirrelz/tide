@@ -187,8 +187,12 @@ spec:
                   Progressive refinement (D-03) enables coarse-to-fine dependency narrowing
                   as deeper structure materializes.
                 items:
+                  minLength: 1
                   type: string
                 type: array
+                x-kubernetes-validations:
+                - message: dependsOn entries must not be empty strings
+                  rule: '!self.exists(d, d == '''')'
               projectRef:
                 description: ProjectRef is the name of the owning Project (same namespace).
                 minLength: 1
@@ -273,6 +277,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: a milestone cannot depend on itself
+          rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
     served: true
     storage: true
     subresources:

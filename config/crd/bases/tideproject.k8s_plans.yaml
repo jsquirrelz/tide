@@ -206,8 +206,12 @@ spec:
                   MA-P3-PB → MB requires MA-P3-PB-task-07. Resolved in-memory at assembly
                   time (D-05); authored coarse dependsOn is the only persisted truth.
                 items:
+                  minLength: 1
                   type: string
                 type: array
+                x-kubernetes-validations:
+                - message: dependsOn entries must not be empty strings
+                  rule: '!self.exists(d, d == '''')'
               phaseRef:
                 description: PhaseRef is the name of the owning Phase (same namespace).
                 minLength: 1
@@ -315,6 +319,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: a plan cannot depend on itself
+          rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
     served: true
     storage: true
     subresources:

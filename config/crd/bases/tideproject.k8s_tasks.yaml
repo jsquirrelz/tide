@@ -323,6 +323,7 @@ spec:
                   in-memory at assembly time (D-05); authored coarse dependsOn is the only
                   persisted truth.
                 items:
+                  minLength: 1
                   type: string
                 type: array
                 x-kubernetes-validations:
@@ -475,6 +476,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: a task cannot depend on itself
+          rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
     served: true
     storage: true
     subresources:

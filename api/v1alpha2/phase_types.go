@@ -31,6 +31,8 @@ type PhaseSpec struct {
 	// hierarchy level within the Project (any-level targets, D-02). Coarse scope
 	// refs are fan-out expanded by the Phase 24 assembler (D-06).
 	// +optional
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// SharedContext is the wave-scoped shared context string stamped by the
@@ -60,6 +62,7 @@ type PhaseStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a phase cannot depend on itself"
 
 // Phase is the Schema for the phases API
 type Phase struct {
