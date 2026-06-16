@@ -46,7 +46,7 @@ The quality + cost gate. Must land before any prompt/template change.
 
 - [x] **OBSV-01**: Per-level token accounting is queryable — the existing token counters are labeled so spend can be attributed per level (project/phase/plan/wave already present; extend as needed).
 - [x] **OBSV-02**: A cache-hit-rate metric is derived from dispatch usage (`cache_read` vs `cache_creation`) and emitted via the existing Prometheus surface.
-- [ ] **OBSV-03**: The read-only dashboard surfaces a cache-efficiency panel (hit ratio, creation tokens, realized savings) reading the existing counters — no backend dispatch-path changes.
+- [x] **OBSV-03**: The read-only dashboard surfaces a cache-efficiency panel (hit ratio, creation tokens, realized savings) reading the existing counters — no backend dispatch-path changes.
 
 ## Future Requirements
 
@@ -102,7 +102,7 @@ Which phases cover which requirements. Filled in during roadmap creation.
 | CACHE-05 | Phase 20 | Complete |
 | OBSV-01 | Phase 21 | Complete |
 | OBSV-02 | Phase 21 | Complete |
-| OBSV-03 | Phase 21 | Pending |
+| OBSV-03 | Phase 21 | Complete |
 
 **Coverage:**
 - Milestone requirements: 19 total
