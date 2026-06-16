@@ -988,6 +988,13 @@ func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1
 // Returns "unknown" on miss — D-09 sentinel; never emits an empty label value
 // (Metric Label Sentinel, RESEARCH Pitfall 4). No API call needed — OwnerReferences
 // are part of the in-memory Task object.
+//
+// Phase 23 SCHEMA-02 / D-08 resemantics: after Plan 23-02's materializeWaves
+// re-ownership (WaveSpec.PlanRef → WaveSpec.ProjectRef; global wave index), the
+// Wave owner-ref name is now the global wave identifier across the entire Project's
+// Execution DAG — not a per-plan layer index. The metric `wave` label emitted by
+// emitTaskMetrics (via this function) now carries the global wave index, satisfying
+// the SCHEMA-02 lock: {project, phase, plan, wave} with `wave` = global wave name.
 func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha1.Task) string {
 	for _, ref := range task.GetOwnerReferences() {
 		if ref.Kind == "Wave" {
