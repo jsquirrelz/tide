@@ -70,6 +70,9 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 				Namespace: "default",
 				Labels: map[string]string{
 					"tideproject.k8s/wave-index": fmt.Sprintf("%d", waveIndex),
+					// WR-01: the observational roll-up now scopes member Tasks by
+					// project (owner.LabelProject == Wave.Spec.ProjectRef == planRef).
+					"tideproject.k8s/project": planRef,
 				},
 			},
 			Spec: tideprojectv1alpha2.TaskSpec{
