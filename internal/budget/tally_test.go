@@ -62,7 +62,7 @@ func makeProject(name string) *tidev1alpha1.Project {
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/repo",
 		},
 	}

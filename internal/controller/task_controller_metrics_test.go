@@ -125,7 +125,7 @@ func TestEmitTaskMetrics_EndToEnd(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-m1", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -188,7 +188,7 @@ func TestEmitTaskMetrics_PhaseMissSentinel(t *testing.T) {
 	// Seed no Plan — get will return NotFound.
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-miss", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 	task := &tideprojectv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -259,7 +259,7 @@ func TestEmitTaskMetrics_FailedReason(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-fr1", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -342,7 +342,7 @@ func TestEmitTaskMetrics_NegativeDuration_WR04(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-nd1", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).

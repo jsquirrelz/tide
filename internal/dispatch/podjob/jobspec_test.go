@@ -51,7 +51,7 @@ func buildTestOptions() BuildOptions {
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},
@@ -89,7 +89,7 @@ func buildPlannerTestOptions() BuildOptions {
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},

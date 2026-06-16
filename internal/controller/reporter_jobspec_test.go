@@ -257,7 +257,7 @@ func TestBuildReporterJob_NoGitCredsEnvFrom(t *testing.T) {
 			Namespace: "ns-f",
 			UID:       "project-uid-7",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Git: gitCfg,
 		},
 	}

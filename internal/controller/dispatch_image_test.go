@@ -230,7 +230,7 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 			// Create project with Spec.Subagent.Image pinned.
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Subagent: tideprojectv1alpha1.SubagentConfig{
 						Image: "ghcr.io/example/pinned-everywhere:test",

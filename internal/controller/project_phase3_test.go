@@ -76,7 +76,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	It("Test 1: branch-name init sets Status.Git.BranchName to tide/run-<name>-<unix>", func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
@@ -135,7 +135,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	It("Test 2: bypass annotation clears PushLeaseFailed and triggers retry", func() {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",

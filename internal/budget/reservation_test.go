@@ -70,7 +70,7 @@ func TestReservationStore_Release(t *testing.T) {
 
 func makeProjectWithBudget(cap, spent int64) *tidev1alpha1.Project {
 	return &tidev1alpha1.Project{
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Budget: tidev1alpha1.BudgetConfig{AbsoluteCapCents: cap},
 		},
 		Status: tidev1alpha1.ProjectStatus{

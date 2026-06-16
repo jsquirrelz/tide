@@ -97,7 +97,7 @@ func clearBillingHalt(ctx context.Context, projectName string) {
 func makeProjectForHalt(ctx context.Context, name string) {
 	p := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/tide.git",
 		},
 	}

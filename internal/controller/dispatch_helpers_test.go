@@ -26,7 +26,7 @@ import (
 // Test 1: per-level model override wins over Project default + Helm default.
 func TestResolveProviderPerLevelWins(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Model: "claude-sonnet-4-6",
 				Levels: tideprojectv1alpha1.LevelOverrides{
@@ -50,7 +50,7 @@ func TestResolveProviderPerLevelWins(t *testing.T) {
 // Test 2: Project default wins over Helm default when no per-level override.
 func TestResolveProviderProjectDefaultWinsOverHelm(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Model: "claude-sonnet-4-6",
 			},
@@ -76,7 +76,7 @@ func TestResolveProviderHelmDefaultFallback(t *testing.T) {
 // Test 3b: Params merge — level Params override Project-level Params on key conflict.
 func TestResolveProviderParamsMerge(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Levels: tideprojectv1alpha1.LevelOverrides{
 					Phase: &tideprojectv1alpha1.LevelConfig{
@@ -112,7 +112,7 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 			Name:      "test-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Model: "claude-opus-4-7",
 			},
@@ -172,7 +172,7 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 // TestResolveImage_LevelWins: level Image override beats project default and Helm default.
 func TestResolveImage_LevelWins(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Image: "ghcr.io/project-default",
 				Levels: tideprojectv1alpha1.LevelOverrides{
@@ -190,7 +190,7 @@ func TestResolveImage_LevelWins(t *testing.T) {
 // TestResolveImage_ProjectDefaultWinsOverHelm: project Image wins when no level override.
 func TestResolveImage_ProjectDefaultWinsOverHelm(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Image: "ghcr.io/project-image",
 			},
@@ -223,7 +223,7 @@ func TestResolveImage_NilProject_ReturnsHelmDefault(t *testing.T) {
 // (Image "") falls through to project Spec.Subagent.Image.
 func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Image: "ghcr.io/project-image",
 				Levels: tideprojectv1alpha1.LevelOverrides{
@@ -242,7 +242,7 @@ func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
 // Spec.Subagent.Image is returned directly.
 func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			Subagent: tideprojectv1alpha1.SubagentConfig{
 				Image: "ghcr.io/project-image",
 			},
@@ -263,7 +263,7 @@ func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
 func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			OutcomePrompt: "Add a /healthz endpoint returning 200 OK.",
 		},
 	}
@@ -309,7 +309,7 @@ func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 func TestBuildPlannerEnvelopeSharedContext(t *testing.T) {
 	proj := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			OutcomePrompt: "Build the auth service.",
 		},
 	}

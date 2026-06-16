@@ -91,7 +91,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-create-init-job",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -176,7 +176,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-init-idempotent",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -229,7 +229,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-init-success",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -302,7 +302,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-no-revert-from-complete",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -395,7 +395,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-init-fail",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -469,7 +469,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-budget-exceeded",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 					Budget: tideprojectv1alpha1.BudgetConfig{
 						AbsoluteCapCents: 100,
@@ -521,7 +521,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 					Budget: tideprojectv1alpha1.BudgetConfig{
 						AbsoluteCapCents: 100,
@@ -579,7 +579,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget-until": futureTime,
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 					Budget: tideprojectv1alpha1.BudgetConfig{
 						AbsoluteCapCents: 100,
@@ -646,7 +646,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					Name:      "test-no-pvc",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -691,7 +691,7 @@ var _ = Describe("Project Controller", func() {
 					Name:      "valid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -707,7 +707,7 @@ var _ = Describe("Project Controller", func() {
 					Name:      "invalid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "not-a-valid-url",
 				},
 			}
@@ -723,7 +723,7 @@ var _ = Describe("Project Controller", func() {
 					Name:      "finalizer-set",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -757,7 +757,7 @@ var _ = Describe("Project Controller", func() {
 					Name:      "finalizer-lifecycle",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}

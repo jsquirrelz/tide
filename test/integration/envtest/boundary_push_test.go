@@ -116,7 +116,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 	makeProjectBP := func(name string) *tideprojectv1alpha1.Project {
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/tide.git",
 				Git: &tideprojectv1alpha1.GitConfig{
 					RepoURL:        "https://github.com/example/tide.git",

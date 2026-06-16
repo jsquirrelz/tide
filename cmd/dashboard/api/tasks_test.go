@@ -59,7 +59,7 @@ func newTasksHandler(t *testing.T, cs kubernetes.Interface, objs ...runtime.Obje
 func newFullChain() []runtime.Object {
 	prj := &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: 10000},
 		},

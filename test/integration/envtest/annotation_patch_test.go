@@ -146,7 +146,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 							"unrelated.example.com/keep":    "preserved-value",
 						},
 					},
-					Spec: tideprojectv1alpha1.ProjectSpec{
+					Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 						TargetRepo: "https://github.com/example/wr14.git",
 					},
 				}

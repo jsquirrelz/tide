@@ -38,7 +38,7 @@ func fixtureProject() *tideprojectv1alpha1.Project {
 			Namespace: "test-ns",
 			Name:      "demo-project",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/demo.git",
 			Git: &tideprojectv1alpha1.GitConfig{
 				RepoURL:        "https://github.com/example/demo.git",

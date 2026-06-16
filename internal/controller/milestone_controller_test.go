@@ -103,7 +103,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		// Create the parent Project so resolveProject succeeds.
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent: tideprojectv1alpha1.SubagentConfig{
 					Model: "claude-opus-4-7",
@@ -214,7 +214,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		const budgetMilestoneName = "test-ms-budget5"
 		budgetProj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: budgetProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{
@@ -309,7 +309,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		const autoMilestoneName = "test-ms-auto9"
 		autoProj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{
@@ -445,7 +445,7 @@ var _ = Describe("MilestoneReconciler — D-03 project-label backfill (CUTS-01)"
 		// Create parent Project (no special labels needed — the project name is enough).
 		proj := &tideprojectv1alpha1.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 			},
@@ -528,7 +528,7 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 					gates.AnnotationReject: "operator halt ms test",
 				},
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/test.git",
 				Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 				Git: &tideprojectv1alpha1.GitConfig{

@@ -230,7 +230,7 @@ func TestAcquireDispatchSlots_RateLimitHit(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-rl", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{ProviderSecretRef: "test-secret-rl"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", ProviderSecretRef: "test-secret-rl"},
 	}
 	// Pre-create the secret in the fake client with the known UID so Budget can
 	// look it up.
@@ -286,7 +286,7 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-rel", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{ProviderSecretRef: "secret-rel"},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", ProviderSecretRef: "secret-rel"},
 	}
 	secretObj := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -341,7 +341,7 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-attempt", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{MaxAttemptsPerTask: 3},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", MaxAttemptsPerTask: 3},
 	}
 
 	s := fakeSchemeWithAll(t)
@@ -389,7 +389,7 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 	}
 	project := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-maxatt", Namespace: "default"},
-		Spec:       tideprojectv1alpha1.ProjectSpec{MaxAttemptsPerTask: 1},
+		Spec:       tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", MaxAttemptsPerTask: 1},
 	}
 
 	// Pre-create a Job labeled attempt=1 so nextAttempt returns 2 > MaxAttemptsPerTask=1.
@@ -552,7 +552,7 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 	}
 	projectObj := &tideprojectv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-cr03", Namespace: "default"},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			ProviderSecretRef: "secret-cr03",
 		},
 	}

@@ -124,7 +124,7 @@ var _ = Describe("Rate limit storm absorption (FAIL-03 / ROADMAP AC #4)", Label(
 					Name:      projectName,
 					Namespace: rateLimitNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/rate-limit.git",
 					ProviderSecretRef: secretName,
 				},

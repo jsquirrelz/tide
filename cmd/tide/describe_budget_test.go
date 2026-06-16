@@ -31,7 +31,7 @@ import (
 func projectFixture(name string, capCents, spendCents int64, tokens int64) *tidev1alpha1.Project {
 	return &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: capCents},
 		},

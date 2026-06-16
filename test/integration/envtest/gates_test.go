@@ -79,7 +79,7 @@ var _ = Describe("Plan 12-03 — GATE-04 descent hold envtest (run-1 finding-1 r
 			// 1. Create Project and Milestone.
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Subagent:   tideprojectv1alpha1.SubagentConfig{Model: "claude-opus-4-7"},
 					Git: &tideprojectv1alpha1.GitConfig{
@@ -263,7 +263,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// 1. Apply Project with Gates.Milestone=approve.
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Gates:      tideprojectv1alpha1.Gates{Milestone: gates.PolicyApprove},
 				},
@@ -359,7 +359,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 		It("Milestone is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed); post-resume flow completes", func() {
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Gates:      tideprojectv1alpha1.Gates{Milestone: gates.PolicyAuto},
 				},
@@ -473,7 +473,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// 1. Project + chain.
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Gates:      tideprojectv1alpha1.Gates{Plan: gates.PolicyAuto},
 				},
@@ -616,7 +616,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// 1. Project with PauseBetweenWaves=true.
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/tide.git",
 					Gates:      tideprojectv1alpha1.Gates{PauseBetweenWaves: true},
 				},
@@ -818,11 +818,18 @@ func cleanupGateFlowFixture(projectName, planName, msName, phaseName string) {
 				_ = k8sClient.Delete(c, &t)
 			}
 		}
+		// v1alpha2 Waves carry no Spec.PlanRef; this Plan's Waves are the
+		// per-plan stub names tide-wave-<plan.UID>-.
+		var planForUID tideprojectv1alpha1.Plan
+		wavePrefix := ""
+		if err := k8sClient.Get(c, types.NamespacedName{Name: planName, Namespace: "default"}, &planForUID); err == nil {
+			wavePrefix = fmt.Sprintf("tide-wave-%s-", planForUID.UID)
+		}
 		var waveList tideprojectv1alpha1.WaveList
 		_ = k8sClient.List(c, &waveList, client.InNamespace("default"))
 		for i := range waveList.Items {
 			w := waveList.Items[i]
-			if w.Spec.PlanRef == planName {
+			if wavePrefix != "" && strings.HasPrefix(w.Name, wavePrefix) {
 				w.Finalizers = nil
 				_ = k8sClient.Update(c, &w)
 				_ = k8sClient.Delete(c, &w)

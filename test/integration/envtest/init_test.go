@@ -59,7 +59,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/init-test.git",
 				},
 			}
@@ -115,7 +115,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/idempotent.git",
 				},
 			}
@@ -188,7 +188,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/complete.git",
 				},
 			}

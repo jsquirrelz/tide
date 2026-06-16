@@ -403,7 +403,7 @@ var _ = Describe("Project CEL targetRepo admission", Label("envtest"), func() {
 				Name:      name,
 				Namespace: admissionNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo:        targetRepo,
 				ProviderSecretRef: "any-secret",
 				Budget: tideprojectv1alpha1.BudgetConfig{

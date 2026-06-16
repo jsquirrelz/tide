@@ -166,7 +166,7 @@ func makeProjectForTask(name string) *tideprojectv1alpha1.Project {
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha1.ProjectSpec{
+		Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://github.com/example/tide.git",
 		},
 	}
@@ -379,7 +379,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// Create Project with ProviderSecretRef pointing to the secret.
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/ratelimit.git",
 					ProviderSecretRef: secretName,
 				},
@@ -462,7 +462,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:        "https://github.com/example/storm.git",
 					ProviderSecretRef: secretName,
 				},
@@ -637,7 +637,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/bypass.git",
 				},
 			}
@@ -728,7 +728,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 		BeforeEach(func() {
 			p := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo:         "https://github.com/example/maxatt.git",
 					MaxAttemptsPerTask: 1,
 				},

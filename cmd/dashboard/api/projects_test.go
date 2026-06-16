@@ -55,7 +55,7 @@ func newHandler(t *testing.T, objs ...runtime.Object) (*ProjectsHandler, http.Ha
 func newProject(name, namespace, phase string) *tidev1alpha1.Project {
 	return &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: tidev1alpha1.ProjectSpec{
+		Spec: tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 			TargetRepo: "https://example.com/repo.git",
 			Budget:     tidev1alpha1.BudgetConfig{AbsoluteCapCents: 10000},
 		},
@@ -333,7 +333,7 @@ func TestXSSViaProjectName(t *testing.T) {
 	// does the right thing.
 	_, router := newHandler(t, &tidev1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: xssName, Namespace: "default"},
-		Spec:       tidev1alpha1.ProjectSpec{TargetRepo: "https://example.com/r.git"},
+		Spec:       tidev1alpha1.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/r.git"},
 		Status:     tidev1alpha1.ProjectStatus{Phase: "<script>alert(1)</script>"},
 	})
 

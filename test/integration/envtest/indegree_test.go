@@ -52,7 +52,7 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				Name:      indegreeTestProject,
 				Namespace: indegreeNamespace,
 			},
-			Spec: tideprojectv1alpha1.ProjectSpec{
+			Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 				TargetRepo: "https://github.com/example/indegree-test.git",
 			},
 		}

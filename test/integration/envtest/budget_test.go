@@ -61,7 +61,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: budgetNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/budget-test.git",
 					Budget: tideprojectv1alpha1.BudgetConfig{
 						AbsoluteCapCents: 100, // $1.00 cap
@@ -127,7 +127,7 @@ var _ = Describe("Project budget cap enforcement", Label("envtest"), func() {
 					Name:      projectName,
 					Namespace: budgetNamespace,
 				},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: "https://github.com/example/bypass-test.git",
 					Budget: tideprojectv1alpha1.BudgetConfig{
 						AbsoluteCapCents: 50,

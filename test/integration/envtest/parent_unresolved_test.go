@@ -74,7 +74,7 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 		for _, name := range []string{projectA, projectB} {
 			proj := &tideprojectv1alpha1.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-				Spec: tideprojectv1alpha1.ProjectSpec{
+				Spec: tideprojectv1alpha1.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: fmt.Sprintf("https://github.com/example/%s.git", name),
 				},
 			}

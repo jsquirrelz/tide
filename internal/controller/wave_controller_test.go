@@ -171,7 +171,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-succ", "wave-task-b-succ", "wave-task-c-succ"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 90, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -200,7 +200,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-fail", "wave-task-b-fail", "wave-task-c-fail"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 91, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -231,7 +231,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-a-run", "wave-task-b-run"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 92, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -261,7 +261,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-nojob"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 93, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -295,7 +295,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-ref-a", "wave-task-ref-b"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 94, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
@@ -321,7 +321,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 		taskNames := []string{"wave-task-trig-a"}
 
 		BeforeEach(func() {
-			makeWaveWithTasks(planRef, wName, 0, taskNames)
+			makeWaveWithTasks(planRef, wName, 95, taskNames)
 		})
 		AfterEach(func() {
 			cleanupWave(wName, taskNames)
