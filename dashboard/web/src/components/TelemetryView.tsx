@@ -96,6 +96,7 @@ type SeriesPoint = Record<string, number>;
 
 type ScopeKind = "project" | "all";
 type RangeKey = "24h" | "7d" | "30d";
+type BreakdownKind = "none" | "phase" | "plan" | "wave";
 
 const RANGE_CONFIG: Record<
   RangeKey,
@@ -107,6 +108,11 @@ const RANGE_CONFIG: Record<
 };
 
 // ─── Panel definitions ───────────────────────────────────────────────────────
+//
+// Breakdown dimension support (D-06): when breakdown !== "none", all buildQuery
+// functions switch to `sum by(<dim>)(...)` aggregation. Valid dimensions:
+//   by(phase)  · by(plan)  · by(wave)
+// These are TypeScript literal strings, not user input (T-21-02-01).
 
 type SeriesDef = {
   /**
@@ -117,7 +123,7 @@ type SeriesDef = {
    * label when the panel has multiple SeriesDefs to prevent key collisions.
    */
   key?: string;
-  buildQuery: (scope: ScopeKind, project: string, window: string) => string;
+  buildQuery: (scope: ScopeKind, project: string, window: string, breakdown?: BreakdownKind) => string;
 };
 
 type PanelDef = {
@@ -139,10 +145,12 @@ const PANELS: PanelDef[] = [
     series: [
       {
         key: "cost",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_cost_cents_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_cost_cents_total[${window}])) by (project)`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_cost_cents_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_cost_cents_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_cost_cents_total[${window}])) by (project)`,
       },
     ],
   },
@@ -153,17 +161,21 @@ const PANELS: PanelDef[] = [
     series: [
       {
         key: "waves dispatched",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_waves_dispatched_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_waves_dispatched_total[${window}])) by (project)`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_waves_dispatched_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_waves_dispatched_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_waves_dispatched_total[${window}])) by (project)`,
       },
       {
         key: "tasks completed",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_tasks_completed_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_tasks_completed_total[${window}])) by (project)`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_tasks_completed_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_tasks_completed_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_tasks_completed_total[${window}])) by (project)`,
       },
     ],
   },
@@ -176,10 +188,12 @@ const PANELS: PanelDef[] = [
     series: [
       {
         key: "failure rate",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(rate(tide_tasks_failed_total{project="${project}"}[${window}])) / (sum(rate(tide_tasks_failed_total{project="${project}"}[${window}])) + sum(rate(tide_tasks_completed_total{project="${project}"}[${window}])))`
-            : `sum(rate(tide_tasks_failed_total[${window}])) by (project) / (sum(rate(tide_tasks_failed_total[${window}])) by (project) + sum(rate(tide_tasks_completed_total[${window}])) by (project))`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(rate(tide_tasks_failed_total{project="${project}"}[${window}])) / (sum by(${breakdown})(rate(tide_tasks_failed_total{project="${project}"}[${window}])) + sum by(${breakdown})(rate(tide_tasks_completed_total{project="${project}"}[${window}])))`
+            : scope === "project"
+              ? `sum(rate(tide_tasks_failed_total{project="${project}"}[${window}])) / (sum(rate(tide_tasks_failed_total{project="${project}"}[${window}])) + sum(rate(tide_tasks_completed_total{project="${project}"}[${window}])))`
+              : `sum(rate(tide_tasks_failed_total[${window}])) by (project) / (sum(rate(tide_tasks_failed_total[${window}])) by (project) + sum(rate(tide_tasks_completed_total[${window}])) by (project))`,
       },
     ],
   },
@@ -196,31 +210,39 @@ const PANELS: PanelDef[] = [
     series: [
       {
         key: "input",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_tokens_input_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_tokens_input_total[${window}]))`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_tokens_input_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_tokens_input_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_tokens_input_total[${window}]))`,
       },
       {
         key: "output",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_tokens_output_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_tokens_output_total[${window}]))`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_tokens_output_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_tokens_output_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_tokens_output_total[${window}]))`,
       },
       {
         key: "cache read",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_tokens_cache_read_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_tokens_cache_read_total[${window}]))`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_tokens_cache_read_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_tokens_cache_read_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_tokens_cache_read_total[${window}]))`,
       },
       {
         key: "cache creation",
-        buildQuery: (scope, project, window) =>
-          scope === "project"
-            ? `sum(increase(tide_tokens_cache_creation_total{project="${project}"}[${window}]))`
-            : `sum(increase(tide_tokens_cache_creation_total[${window}]))`,
+        buildQuery: (scope, project, window, breakdown = "none") =>
+          breakdown !== "none"
+            ? `sum by(${breakdown})(increase(tide_tokens_cache_creation_total{project="${project}"}[${window}]))`
+            : scope === "project"
+              ? `sum(increase(tide_tokens_cache_creation_total{project="${project}"}[${window}]))`
+              : `sum(increase(tide_tokens_cache_creation_total[${window}]))`,
       },
     ],
   },
@@ -305,13 +327,14 @@ async function fetchPanel(
   endSec: number,
   step: number,
   window: string,
+  breakdown: BreakdownKind = "none",
 ): Promise<PanelState> {
   const seriesDefs = panelDef.series;
 
   const results = await Promise.all(
     seriesDefs.map((sd) =>
       fetchQueryRange(
-        sd.buildQuery(scope, projectName, window),
+        sd.buildQuery(scope, projectName, window, breakdown),
         startSec,
         endSec,
         step,
@@ -328,7 +351,8 @@ async function fetchPanel(
   }
 
   // All data — merge series.
-  // Key derivation is scope-aware:
+  // Key derivation is scope/breakdown-aware:
+  //   breakdown active + metric.<dim> present → key by breakdown label
   //   all-projects + metric.project present → key by project label (suffixed
   //     with sd.key when the panel has multiple SeriesDefs to avoid collisions).
   //   project scope or no project label → use the fixed sd.key (fallback "value").
@@ -337,14 +361,21 @@ async function fetchPanel(
     if (r.kind !== "data") return;
     const sd = seriesDefs[i];
     r.result.forEach((matrix) => {
-      const projectLabel = matrix.metric["project"];
       let key: string;
-      if (scope === "all" && projectLabel) {
-        key = seriesDefs.length > 1
-          ? `${sd.key} (${projectLabel})`
-          : projectLabel;
+      if (breakdown !== "none") {
+        const dimLabel = matrix.metric[breakdown];
+        key = dimLabel ? (seriesDefs.length > 1 ? `${sd.key} (${dimLabel})` : dimLabel) : (sd.key ?? "value");
+      } else if (scope === "all") {
+        const projectLabel = matrix.metric["project"];
+        if (projectLabel) {
+          key = seriesDefs.length > 1
+            ? `${sd.key} (${projectLabel})`
+            : projectLabel;
+        } else {
+          key = sd.key ?? "value";
+        }
       } else {
-        key = sd.key ?? projectLabel ?? "value";
+        key = sd.key ?? matrix.metric["project"] ?? "value";
       }
       allSeries.push({ key, matrix });
     });
@@ -419,14 +450,15 @@ type TimeSeriesChartProps = {
   points: SeriesPoint[];
   panelDef: PanelDef;
   range: RangeKey;
+  height?: number;
 };
 
-function TimeSeriesChart({ points, panelDef, range }: TimeSeriesChartProps) {
+function TimeSeriesChart({ points, panelDef, range, height = 180 }: TimeSeriesChartProps) {
   if (points.length === 0) {
     return (
       <div
         style={{
-          height: "180px",
+          height: `${height}px`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -448,13 +480,13 @@ function TimeSeriesChart({ points, panelDef, range }: TimeSeriesChartProps) {
   const keys = getSeriesKeys(points);
   const hasMultipleSeries = keys.length > 1;
   // Failure panels: single series → failure red; multi-series (all-projects) → palette
-  const isSingleFailure = panelDef.failureColor && !hasMultipleSeries;
+  const isSingleFailure = (panelDef.failureColor === true) && !hasMultipleSeries;
 
   const tickFmt = tickFormatterFor(range);
 
   return (
     <div aria-label={`${panelDef.label} chart`}>
-      <ResponsiveContainer width="100%" height={180}>
+      <ResponsiveContainer width="100%" height={height}>
         <AreaChart data={points}>
           <CartesianGrid
             strokeDasharray="3 3"
@@ -485,8 +517,8 @@ function TimeSeriesChart({ points, panelDef, range }: TimeSeriesChartProps) {
             width={60}
           />
           <Tooltip
-            formatter={(value: number) => panelDef.yFormatter(value)}
-            labelFormatter={tickFmt}
+            formatter={(value) => panelDef.yFormatter(typeof value === "number" ? value : 0)}
+            labelFormatter={(label) => (typeof label === "number" ? tickFmt(label) : String(label))}
             contentStyle={{
               background: "var(--color-surface-overlay)",
               border: "1px solid var(--color-border-subtle)",
@@ -580,6 +612,301 @@ function ChartPanel({ def, state, range }: ChartPanelProps) {
 
       {state.kind === "unreachable" && (
         <TelemetryUnavailableNotice message={state.message} />
+      )}
+    </div>
+  );
+}
+
+// ─── Cache efficiency panel ───────────────────────────────────────────────────
+
+type CacheEfficiencyPanelProps = {
+  scope: ScopeKind;
+  project: string;
+  window: string;
+  step: number;
+  startSec: number;
+  endSec: number;
+  range: RangeKey;
+  breakdown: BreakdownKind;
+};
+
+/** Format a token count as abbreviated string matching Token Breakdown yFormatter. */
+function formatTokenCount(v: number): string {
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  return String(Math.round(v));
+}
+
+function CacheEfficiencyPanel({
+  scope,
+  project,
+  window: windowStr,
+  step,
+  startSec,
+  endSec,
+  range,
+  breakdown,
+}: CacheEfficiencyPanelProps) {
+  type CacheState =
+    | { kind: "loading" }
+    | { kind: "unavailable" }
+    | { kind: "unreachable"; message: string }
+    | { kind: "data"; hitRatio: number | null; creationTokens: number | null; savingsCents: number | null; sparkPoints: SeriesPoint[] };
+
+  const [cacheState, setCacheState] = useState<CacheState>({ kind: "loading" });
+
+  const scopeRef = useRef(scope);
+  const projectRef = useRef(project);
+  const windowRef = useRef(windowStr);
+  const stepRef = useRef(step);
+  const startSecRef = useRef(startSec);
+  const endSecRef = useRef(endSec);
+  const breakdownRef = useRef(breakdown);
+  useEffect(() => { scopeRef.current = scope; }, [scope]);
+  useEffect(() => { projectRef.current = project; }, [project]);
+  useEffect(() => { windowRef.current = windowStr; }, [windowStr]);
+  useEffect(() => { stepRef.current = step; }, [step]);
+  useEffect(() => { startSecRef.current = startSec; }, [startSec]);
+  useEffect(() => { endSecRef.current = endSec; }, [endSec]);
+  useEffect(() => { breakdownRef.current = breakdown; }, [breakdown]);
+
+  const fetchCache = () => {
+    const w = windowRef.current;
+    const p = projectRef.current;
+    const bd = breakdownRef.current;
+    const s = startSecRef.current;
+    const e = endSecRef.current;
+    const st = stepRef.current;
+
+    const hitRatioQuery =
+      bd !== "none"
+        ? `sum by(${bd})(increase(tide_tokens_cache_read_total{project="${p}"}[${w}])) / (sum by(${bd})(increase(tide_tokens_cache_read_total{project="${p}"}[${w}])) + sum by(${bd})(increase(tide_tokens_cache_creation_total{project="${p}"}[${w}])))`
+        : `sum(increase(tide_tokens_cache_read_total{project="${p}"}[${w}])) / (sum(increase(tide_tokens_cache_read_total{project="${p}"}[${w}])) + sum(increase(tide_tokens_cache_creation_total{project="${p}"}[${w}])))`;
+
+    const creationQuery =
+      bd !== "none"
+        ? `sum by(${bd})(increase(tide_tokens_cache_creation_total{project="${p}"}[${w}]))`
+        : `sum(increase(tide_tokens_cache_creation_total{project="${p}"}[${w}]))`;
+
+    const savingsQuery =
+      bd !== "none"
+        ? `sum by(${bd})(increase(tide_cache_savings_cents_total{project="${p}"}[${w}]))`
+        : `sum(increase(tide_cache_savings_cents_total{project="${p}"}[${w}]))`;
+
+    Promise.all([
+      fetchQueryRange(hitRatioQuery, s, e, st),
+      fetchQueryRange(creationQuery, s, e, st),
+      fetchQueryRange(savingsQuery, s, e, st),
+    ]).then(([hitRes, creationRes, savingsRes]) => {
+      // Any degradation wins.
+      for (const r of [hitRes, creationRes, savingsRes]) {
+        if (r.kind === "unreachable") {
+          setCacheState({ kind: "unreachable", message: r.message });
+          return;
+        }
+      }
+      for (const r of [hitRes, creationRes, savingsRes]) {
+        if (r.kind === "unavailable") {
+          setCacheState({ kind: "unavailable" });
+          return;
+        }
+      }
+      if (hitRes.kind !== "data" || creationRes.kind !== "data" || savingsRes.kind !== "data") {
+        setCacheState({ kind: "unavailable" });
+        return;
+      }
+
+      // Extract scalar values from the first series result (last data point).
+      const getScalar = (result: PromMatrix[]): number | null => {
+        if (result.length === 0) return null;
+        const vals = result[0].values;
+        if (vals.length === 0) return null;
+        return parseFloat(vals[vals.length - 1][1]);
+      };
+
+      const hitRatio = getScalar(hitRes.result);
+      const creationTokens = getScalar(creationRes.result);
+      const savingsCents = getScalar(savingsRes.result);
+
+      // Build sparkline points from hit-ratio series.
+      const sparkSeries: ResolvedSeries[] = hitRes.result.map((matrix) => ({
+        key: "hit-ratio",
+        matrix,
+      }));
+      const sparkPoints = matrixToPoints(sparkSeries);
+
+      setCacheState({ kind: "data", hitRatio, creationTokens, savingsCents, sparkPoints });
+    });
+  };
+
+  useEffect(() => {
+    fetchCache();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, project, windowStr, step, startSec, endSec, breakdown]);
+
+  // Hit-ratio display: NaN (0/0 in PromQL) renders as "—"
+  const hitRatioDisplay = (v: number | null): string => {
+    if (v === null) return "—";
+    if (!Number.isFinite(v) || isNaN(v)) return "—";
+    return `${(v * 100).toFixed(1)}%`;
+  };
+
+  // Minimal PanelDef for the sparkline (hit-ratio, no failure color, no stacking)
+  const sparklinePanelDef: PanelDef = {
+    id: "cache-efficiency-sparkline",
+    label: "Cache Efficiency",
+    yFormatter: (v: number) => `${(v * 100).toFixed(1)}%`,
+    series: [],
+  };
+
+  return (
+    <div
+      data-testid="panel-cache-efficiency"
+      className="flex flex-col gap-1 rounded border p-4"
+      style={{
+        borderColor: "var(--color-border-subtle)",
+        background: "var(--color-surface-raised)",
+      }}
+    >
+      <h3
+        style={{
+          fontSize: "12px",
+          fontWeight: 600,
+          fontFamily: "var(--font-mono)",
+          color: "var(--color-text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          margin: 0,
+        }}
+      >
+        Cache Efficiency
+      </h3>
+
+      {cacheState.kind === "loading" && (
+        <div
+          style={{
+            minHeight: "80px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--color-text-muted)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "12px",
+          }}
+        >
+          Loading…
+        </div>
+      )}
+
+      {cacheState.kind === "unavailable" && <TelemetryUnavailableNotice />}
+
+      {cacheState.kind === "unreachable" && (
+        <TelemetryUnavailableNotice message={cacheState.message} />
+      )}
+
+      {cacheState.kind === "data" && (
+        <>
+          {/* Trio: three stat figures */}
+          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+            {/* Hit ratio */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div
+                style={{
+                  fontSize: "20px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                {hitRatioDisplay(cacheState.hitRatio)}
+              </div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                hit
+              </div>
+            </div>
+            {/* Cache creation tokens */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div
+                style={{
+                  fontSize: "20px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                {cacheState.creationTokens !== null ? formatTokenCount(cacheState.creationTokens) : "—"}
+              </div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                creation
+              </div>
+            </div>
+            {/* Realized savings $ */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <div
+                style={{
+                  fontSize: "20px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                {cacheState.savingsCents !== null ? formatCents(Math.round(cacheState.savingsCents)) : "—"}
+              </div>
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                saved
+              </div>
+            </div>
+          </div>
+
+          {/* Sparkline: hit-ratio over time at 48px height */}
+          {cacheState.sparkPoints.length > 0 && (
+            <div>
+              <TimeSeriesChart
+                points={cacheState.sparkPoints}
+                panelDef={sparklinePanelDef}
+                range={range}
+                height={48}
+              />
+              <div
+                style={{
+                  fontSize: "12px",
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-muted)",
+                  marginTop: "4px",
+                }}
+              >
+                hit-rate over time
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -767,19 +1094,24 @@ export default function TelemetryView({
   // D-07: 24h/7d/30d range selector, default 24h.
   const [range, setRange] = useState<RangeKey>("24h");
 
+  // D-06: per-level breakdown selector, default "none" (= Project, no breakdown).
+  const [breakdown, setBreakdown] = useState<BreakdownKind>("none");
+
   // Panel states — never reset to loading on polling (update in place).
   const [panelStates, setPanelStates] = useState<PanelState[]>(
     PANELS.map(() => ({ kind: "loading" })),
   );
 
-  // Track the current scope/range/project in a ref so the polling callback
+  // Track the current scope/range/project/breakdown in a ref so the polling callback
   // always reads the latest value without needing to re-register the interval.
   const scopeRef = useRef(scope);
   const rangeRef = useRef(range);
   const projectRef = useRef(selectedProject);
+  const breakdownRef = useRef(breakdown);
   useEffect(() => { scopeRef.current = scope; }, [scope]);
   useEffect(() => { rangeRef.current = range; }, [range]);
   useEffect(() => { projectRef.current = selectedProject; }, [selectedProject]);
+  useEffect(() => { breakdownRef.current = breakdown; }, [breakdown]);
 
   // Fetch all panels using current refs.
   const fetchAllPanels = () => {
@@ -788,6 +1120,7 @@ export default function TelemetryView({
     const startSec = nowSec - cfg.durationSec;
     const currentScope = scopeRef.current;
     const currentProject = projectRef.current ?? "";
+    const currentBreakdown = breakdownRef.current;
 
     PANELS.forEach((panelDef, idx) => {
       void fetchPanel(
@@ -798,6 +1131,7 @@ export default function TelemetryView({
         nowSec,
         cfg.step,
         cfg.window,
+        currentBreakdown,
       ).then((state) => {
         setPanelStates((prev) => {
           const next = [...prev];
@@ -838,14 +1172,26 @@ export default function TelemetryView({
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, range]);
+  }, [scope, range, breakdown]);
 
   const selectedProjectData = projects.find((p) => p.name === selectedProject) ?? null;
+
+  // Compute time window for CacheEfficiencyPanel (mirrors fetchAllPanels logic).
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rangeCfg = RANGE_CONFIG[range];
+  const cacheStartSec = nowSec - rangeCfg.durationSec;
 
   const rangeOptions: Array<{ value: RangeKey; label: string }> = [
     { value: "24h", label: "24h" },
     { value: "7d", label: "7d" },
     { value: "30d", label: "30d" },
+  ];
+
+  const levelOptions: Array<{ value: BreakdownKind; label: string; mono?: boolean }> = [
+    { value: "none", label: "Project" },
+    { value: "phase", label: "Phase", mono: true },
+    { value: "plan", label: "Plan", mono: true },
+    { value: "wave", label: "Wave", mono: true },
   ];
 
   const scopeOptions: Array<{ value: ScopeKind; label: string; mono?: boolean }> = [];
@@ -860,41 +1206,51 @@ export default function TelemetryView({
       className="flex flex-col gap-4 p-4"
       style={{ height: "100%", overflow: "auto" }}
     >
-      {/* Toolbar: scope toggle (left) + range selector (right) — UI-SPEC C3 */}
+      {/* Toolbar: scope+level (left cluster) + range selector (right) — UI-SPEC C3, D-06 */}
       <div className="flex items-center justify-between">
-        {/* Scope toggle — C1 segmented control, aria-pressed (D-02/D-04) */}
-        <div
-          data-testid="telemetry-scope-toggle"
-          style={{
-            display: "inline-flex",
-            borderRadius: "4px",
-            border: "1px solid var(--color-border-subtle)",
-          }}
-        >
-          {scopeOptions.map((opt) => {
-            const isActive = opt.value === scope;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                aria-pressed={isActive}
-                onClick={() => setScope(opt.value)}
-                style={{
-                  padding: "4px 8px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  fontFamily: opt.mono ? "var(--font-mono)" : "var(--font-sans)",
-                  cursor: "pointer",
-                  border: "none",
-                  borderRadius: "3px",
-                  background: isActive ? "var(--color-surface-overlay)" : "transparent",
-                  color: isActive ? "var(--color-text-primary)" : "var(--color-text-muted)",
-                }}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
+        {/* Left cluster: scope toggle + level breakdown selector */}
+        <div className="flex gap-2">
+          {/* Scope toggle — C1 segmented control, aria-pressed (D-02/D-04) */}
+          <div
+            data-testid="telemetry-scope-toggle"
+            style={{
+              display: "inline-flex",
+              borderRadius: "4px",
+              border: "1px solid var(--color-border-subtle)",
+            }}
+          >
+            {scopeOptions.map((opt) => {
+              const isActive = opt.value === scope;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => setScope(opt.value)}
+                  style={{
+                    padding: "4px 8px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    fontFamily: opt.mono ? "var(--font-mono)" : "var(--font-sans)",
+                    cursor: "pointer",
+                    border: "none",
+                    borderRadius: "3px",
+                    background: isActive ? "var(--color-surface-overlay)" : "transparent",
+                    color: isActive ? "var(--color-text-primary)" : "var(--color-text-muted)",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Per-level breakdown selector (D-06) */}
+          <SegmentedControl
+            options={levelOptions}
+            value={breakdown}
+            onChange={setBreakdown}
+            testId="telemetry-level-selector"
+          />
         </div>
         {/* Range selector — C1 segmented control, aria-pressed (D-07) */}
         <div
@@ -988,6 +1344,17 @@ export default function TelemetryView({
         {PANELS.map((def, idx) => (
           <ChartPanel key={def.id} def={def} state={panelStates[idx]} range={range} />
         ))}
+        {/* Cache-efficiency panel (D-05, OBSV-03) — stat trio + sparkline */}
+        <CacheEfficiencyPanel
+          scope={scope}
+          project={selectedProject ?? ""}
+          window={rangeCfg.window}
+          step={rangeCfg.step}
+          startSec={cacheStartSec}
+          endSec={nowSec}
+          range={range}
+          breakdown={breakdown}
+        />
       </div>
     </div>
   );
