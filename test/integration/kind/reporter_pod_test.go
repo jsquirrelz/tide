@@ -89,6 +89,7 @@ metadata:
   name: reporter-test-project
   namespace: %s
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://git.example.internal/stub/reporter-test.git"
   providerSecretRef: "tide-provider-secret"
   budget:

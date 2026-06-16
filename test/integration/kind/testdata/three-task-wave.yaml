@@ -39,6 +39,7 @@ metadata:
   name: wave-test-project
   namespace: tide-int-test
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://github.com/example/three-task-wave.git"
   providerSecretRef: "tide-provider-secret"
   budget:

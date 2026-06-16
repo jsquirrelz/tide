@@ -49,6 +49,7 @@ metadata:
   name: up-stack-project
   namespace: up-stack-test
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://github.com/example/up-stack.git"
   providerSecretRef: "tide-provider-secret"
   budget:

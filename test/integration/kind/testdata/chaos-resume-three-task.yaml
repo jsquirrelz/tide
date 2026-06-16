@@ -60,6 +60,7 @@ metadata:
   name: chaos-resume-project
   namespace: chaos-resume-test
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://github.com/example/chaos-resume.git"
   providerSecretRef: "tide-provider-secret"
   budget:

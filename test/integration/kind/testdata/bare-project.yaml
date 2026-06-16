@@ -39,6 +39,7 @@ metadata:
   name: bare-project
   namespace: bare-project-test
 spec:
+  schemaRevision: v1alpha2
   # Sentinel: RFC 2606 .example TLD — non-routable by design. The stub-subagent
   # ignores targetRepo entirely and returns canned envelopes regardless of this
   # value. https:// scheme passes the Phase 8 CEL rule that rejects file:// URLs

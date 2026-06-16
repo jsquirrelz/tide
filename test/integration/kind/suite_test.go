@@ -878,6 +878,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://github.com/example/%s.git"
   providerSecretRef: "tide-provider-secret"
   budget:
@@ -1001,6 +1002,7 @@ metadata:
   name: %s
   namespace: %s
 spec:
+  schemaRevision: v1alpha2
   targetRepo: "https://github.com/example/%s.git"
   providerSecretRef: "tide-provider-secret"
   budget:
