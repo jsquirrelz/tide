@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Ebb Tide — Token & Cost Optimization
-status: ready_to_plan
-stopped_at: Phase 20 complete (5/5) — ready to discuss Phase 21
-last_updated: 2026-06-16T00:52:56.923Z
-last_activity: 2026-06-15
+status: planning
+stopped_at: Phase 21 context gathered
+last_updated: "2026-06-16T01:29:01.920Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
   completed_plans: 12
-  percent: 50
+  percent: 75
 ---
 
 # Project State
@@ -105,6 +105,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-15T23:53:42.201Z
-Stopped at: Completed 20-03 SharedContext injection + CACHE-02 carry path
-Resume file: None
+Last session: 2026-06-16T01:29:01.906Z
+Stopped at: Phase 21 context gathered
+Resume file: .planning/phases/21-cost-cache-observability/21-CONTEXT.md
