@@ -189,7 +189,11 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 	Describe("Wave roll-up: Succeeded when all Tasks Succeeded", Label("SUB-02"), func() {
 		It("sets Wave.Status.Phase=Succeeded when all member Tasks are Succeeded", func() {
 			planName := "wave-rollup-succ"
-			waveName := "wave-rollup-succ-wave"
+			// Phase 24 Plan 03: ProjectReconciler now creates Wave CRs automatically
+			// using the global naming convention tide-wave-<project>-<waveIndex>. The
+			// test no longer manually creates the Wave; it waits for ProjectReconciler
+			// to derive and create it, then patches Task statuses to drive rollup.
+			waveName := fmt.Sprintf("tide-wave-%s-0", indegreeTestProject)
 			taskNames := []string{"wave-rollup-a", "wave-rollup-b"}
 
 			createSimplePlan(ctx, planName)
@@ -197,24 +201,10 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				makeTaskWithWaveLabel(ctx, tn, planName, nil, []string{tn + ".go"}, 0)
 			}
 
-			// Create a Wave that owns the tasks.
-			wave := &tideprojectv1alpha2.Wave{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      waveName,
-					Namespace: indegreeNamespace,
-					OwnerReferences: []metav1.OwnerReference{
-						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
-					},
-				},
-				Spec: tideprojectv1alpha2.WaveSpec{
-					// WR-01: roll-up scopes members by project; member Tasks are
-					// stamped tideproject.k8s/project=indegreeTestProject by
-					// makeTaskWithWaveLabel, so the Wave must reference that project.
-					ProjectRef: indegreeTestProject,
-					WaveIndex:  0,
-				},
-			}
-			Expect(k8sClient.Create(ctx, wave)).To(Succeed())
+			// Wait for ProjectReconciler to derive and create the Wave CR.
+			Eventually(func() error {
+				return k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: indegreeNamespace}, &tideprojectv1alpha2.Wave{})
+			}, "30s", "500ms").Should(Succeed(), "ProjectReconciler should create %s", waveName)
 
 			// Patch all Tasks to Succeeded.
 			for _, tn := range taskNames {
@@ -244,7 +234,10 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 	Describe("FAIL-02: Wave roll-up: Failed when one Task fails", Label("FAIL-02"), func() {
 		It("sets Wave.Status.Phase=Failed when any member Task is Failed, others may succeed", func() {
 			planName := "wave-rollup-fail"
-			waveName := "wave-rollup-fail-wave"
+			// Phase 24 Plan 03: ProjectReconciler creates Wave CRs automatically using
+			// the global naming convention. Wait for the Wave to be created, then drive
+			// Task status patching to test the failure rollup path.
+			waveName := fmt.Sprintf("tide-wave-%s-0", indegreeTestProject)
 			taskNames := []string{"wave-fail-a", "wave-fail-b", "wave-fail-c"}
 
 			createSimplePlan(ctx, planName)
@@ -252,23 +245,10 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				makeTaskWithWaveLabel(ctx, tn, planName, nil, []string{tn + ".go"}, 0)
 			}
 
-			wave := &tideprojectv1alpha2.Wave{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      waveName,
-					Namespace: indegreeNamespace,
-					OwnerReferences: []metav1.OwnerReference{
-						{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planName, UID: "dummy-uid"},
-					},
-				},
-				Spec: tideprojectv1alpha2.WaveSpec{
-					// WR-01: roll-up scopes members by project; member Tasks are
-					// stamped tideproject.k8s/project=indegreeTestProject by
-					// makeTaskWithWaveLabel, so the Wave must reference that project.
-					ProjectRef: indegreeTestProject,
-					WaveIndex:  0,
-				},
-			}
-			Expect(k8sClient.Create(ctx, wave)).To(Succeed())
+			// Wait for ProjectReconciler to derive and create the Wave CR.
+			Eventually(func() error {
+				return k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: indegreeNamespace}, &tideprojectv1alpha2.Wave{})
+			}, "30s", "500ms").Should(Succeed(), "ProjectReconciler should create %s", waveName)
 
 			// First task Fails; others Succeed.
 			Eventually(func() error {
