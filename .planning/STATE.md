@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
-status: ready_to_plan
-stopped_at: Phase 24 complete (4/4) — ready to discuss Phase 25
-last_updated: 2026-06-16T22:41:17.443Z
-last_activity: 2026-06-16 -- Phase 24 execution started
+status: planning
+stopped_at: Phase 25 context gathered
+last_updated: "2026-06-16T23:52:28.245Z"
+last_activity: 2026-06-16
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 12
-  completed_plans: 26
-  percent: 40
+  completed_plans: 12
+  percent: 60
 ---
 
 # Project State
@@ -108,6 +108,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-16T18:29:34.762Z
-Stopped at: Phase 24 context gathered
-Resume file: .planning/phases/24-global-wave-derivation-engine/24-CONTEXT.md
+Last session: 2026-06-16T23:52:28.231Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-global-dispatch-failure-semantics-gates-resumption/25-CONTEXT.md
