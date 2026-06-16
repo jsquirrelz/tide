@@ -19,10 +19,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Global Execution DAG (EXEC)
 
-- [ ] **EXEC-01**: The orchestrator assembles ONE global Execution DAG of all Tasks across all Milestones/Phases/Plans in a Project, once project planning completes, before any execution dispatch.
-- [ ] **EXEC-02**: Waves are derived by layered Kahn over the GLOBAL task DAG; wave indices are global (a single monotonic schedule), not per-plan.
-- [ ] **EXEC-03**: The global wave index is queryable both directions — given any Task you resolve its global wave; given any wave you list its Tasks (restores the README:54 namesake invariant).
-- [ ] **EXEC-04**: Waves re-derive on every task add/complete in O(V+E) with no cached schedule (PERSIST-03), spanning the whole Project.
+- [x] **EXEC-01**: The orchestrator assembles ONE global Execution DAG of all Tasks across all Milestones/Phases/Plans in a Project, once project planning completes, before any execution dispatch.
+- [x] **EXEC-02**: Waves are derived by layered Kahn over the GLOBAL task DAG; wave indices are global (a single monotonic schedule), not per-plan.
+- [x] **EXEC-03**: The global wave index is queryable both directions — given any Task you resolve its global wave; given any wave you list its Tasks (restores the README:54 namesake invariant).
+- [x] **EXEC-04**: Waves re-derive on every task add/complete in O(V+E) with no cached schedule (PERSIST-03), spanning the whole Project.
 
 ### Cross-Scope Dependencies (DEPS)
 
@@ -84,10 +84,10 @@ Deferred to later milestones:
 | DEPS-01 | Phase 23 | Complete |
 | DEPS-02 | Phase 23 | Complete |
 | DEPS-03 | Phase 23 | Complete |
-| EXEC-01 | Phase 24 | Pending |
-| EXEC-02 | Phase 24 | Pending |
-| EXEC-03 | Phase 24 | Pending |
-| EXEC-04 | Phase 24 | Pending |
+| EXEC-01 | Phase 24 | Complete |
+| EXEC-02 | Phase 24 | Complete |
+| EXEC-03 | Phase 24 | Complete |
+| EXEC-04 | Phase 24 | Complete |
 | DISP-01 | Phase 25 | Pending |
 | DISP-02 | Phase 25 | Pending |
 | DISP-03 | Phase 25 | Pending |
