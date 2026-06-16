@@ -134,7 +134,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 20-05-PLAN.md — live spike run, PROJECT.md decision, provider-neutrality, D-08 contingency (CACHE-01/05)
+- [x] 20-05-PLAN.md — live spike run, PROJECT.md decision, provider-neutrality, D-08 contingency (CACHE-01/05)
 
 **UI hint**: no
 
@@ -181,5 +181,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 17. Tech Debt — Plan Label Backfill + Gate Hardening | v1.0.1 | 4/4 | Complete | 2026-06-13 |
 | 18. Eval Harness | v1.0.2 | 3/3 | Complete    | 2026-06-15 |
 | 19. Template Reorder + Token Minimization | v1.0.2 | 4/4 | Complete   | 2026-06-15 |
-| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 4/5 | In Progress|  |
+| 20. SharedContext Injection + Cache Verification Spike | v1.0.2 | 5/5 | Complete   | 2026-06-16 |
 | 21. Cost & Cache Observability | v1.0.2 | 0/TBD | Not started | - |

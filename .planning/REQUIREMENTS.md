@@ -59,7 +59,7 @@ Deferred to a later milestone. Tracked, not in this roadmap.
 
 ### Caching (CACHE)
 
-- **CACHE-F1**: A direct-SDK subagent backend that sets explicit `cache_control` breakpoints / TTL (provider-controlled caching, bigger lift than the CLI path).
+- **CACHE-F1**: A direct-SDK subagent backend that sets explicit `cache_control` breakpoints / TTL (provider-controlled caching, bigger lift than the CLI path). **Motivated by the Phase 20 CACHE-01 spike:** `claude -p --bare` front-loads a per-request `cch` nonce (and per-pod dynamic system-prompt sections) ahead of caller content, so caller-controlled content does NOT realize cross-pod cache benefit on the CLI path and no CLI flag recovers it — only a direct-SDK backend that owns the request body can place `cache_control` on the shared prefix. See `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md`.
 
 ### Eval (EVAL)
 

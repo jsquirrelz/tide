@@ -121,6 +121,35 @@ Everything below this line reflects v1 planning state, preserved for reference.
 | Image resolves via `Levels.<level>.Image` → `Spec.Subagent.Image` → helm default at every dispatch site | v1.0 hard-coded the stub image; the documented chain was only honored for Model, leaving `spec.subagent.image` dead config | ✓ Validated v1.0.1 Phase 13 |
 | Reserve/settle budget accounting bounds in-flight overshoot | run-1 overshot ~$40 past the $100 cap from already-dispatched sessions; a ReservationStore (rederivable on restart) bounds overshoot to one wave | ✓ Validated v1.0.1 Phase 14 |
 | `tide resume --retry-failed` is the one sanctioned recovery verb; approve never doubles as a spend-retry | run-1 needed a kubectl status-reset recipe to recover Failed levels; codifying it as a CLI verb keeps approval semantics clean (D-07) | ✓ Validated v1.0.1 Phase 12/17 |
+| **Cross-pod prompt caching does NOT realize on caller content via `claude -p --bare`; SharedContext ships as token-minimization, cache benefit deferred to a direct-SDK backend (CACHE-F1)** | Phase 20 CACHE-01 spike: cross-pod caching *fires* but only for the CLI's ~1.1–1.3k-token tool/system scaffold; the CLI front-loads a per-request `cch` billing nonce ahead of caller content and exposes no suppression lever — the documented `--exclude-dynamic-system-prompt-sections` flag does not recover it | ✓ Validated v1.0.2 Phase 20 — 3 live runs on kind-tide-dogfood + official Claude Code caching docs |
+
+### CACHE-01 decision record (Phase 20 — cross-pod cache verification spike)
+
+**Verdict: cross-pod prefix caching fires under `claude -p --bare`, but caller-controlled content does not realize a cross-pod cache benefit on the CLI path. The original blocker (per-pod `--add-dir`/CWD path busting the prefix) is REFUTED. SharedContext ships as token-minimization; the cache payoff is deferred to a direct-SDK backend (CACHE-F1).**
+
+**Empirical evidence (3 live runs on `kind-tide-dogfood`, real Anthropic API via credproxy, model `claude-sonnet-4-6`):**
+- Two sequential `claude -p --bare` dispatches with a byte-identical ≥1,024-token prefix and *distinct* `--add-dir` paths: dispatch A `cache_creation=12296`, dispatch B `cache_read=1307` / `cache_creation=10989` (`1307 + 10989 = 12296`). Reproducible across two runs.
+- The teed credproxy request bodies are **byte-identical across pods A and B** except a per-request-random `cch=<hex>` token in an `x-anthropic-billing-header` system block — the `--add-dir` path is **not present in the request body** at all. This refutes the CACHE-01 premise that the per-pod path makes each pod's prefix unique.
+- The realized cross-pod read (~1,307 tokens) is the CLI's **tool/system scaffold** only; the caller's user-message content (a CLI-injected ~25.5k-char block + our probe ≈ 10,989 tokens) is **re-created every dispatch** and never cross-pod cache-reads.
+- The Claude Code caching docs confirm the mechanism: the cache is "scoped to one machine and directory" — the system prompt embeds working directory, platform, shell, OS, git branch, and recent commits ahead of caller content, and a change anywhere in the prefix recomputes everything after it.
+- The documented fix for fleets, `--exclude-dynamic-system-prompt-sections` (moves the dynamic CWD/git sections out of the system prompt), was tested live and **did not recover** caller-content caching: B still `read=1061` / `create=12372`. The residual cap is the per-request `cch` nonce, which has **no CLI suppression lever** (`DISABLE_PROMPT_CACHING*` only disables caching entirely).
+
+**Floor question (CACHE-03 `make eval`):** moot for cache benefit on the CLI path given the above — even a SharedContext-grown prefix that clears the floor will not cross-pod cache-read while the `cch` nonce sits ahead of it. Wave-scoped SharedContext content (~300–700 tok per 20-CONTEXT D-04) on top of today's ~200–500-tok templates approaches but does not reliably clear 1,024 on its own; a precise per-template live measurement folds into the CACHE-F1 follow-up.
+
+**Per-provider cache floor table (known input; D-06 — NEVER hardcode 1,024, always "the active model's documented floor"):**
+
+| Provider | Min cacheable prefix |
+|----------|----------------------|
+| OpenAI | 1,024 (+128-tok increments) |
+| Anthropic | 1,024 Sonnet/Opus · 4,096 Haiku |
+| Google Gemini | 1,024 Flash · 2,048 Pro |
+| AWS Bedrock | 1,024 or 4,096 (model-dependent) |
+| DeepSeek | none (64-tok chunks) |
+| Mistral | 64 |
+
+**Provider-neutrality (CACHE-05):** the SharedContext path carries no vendor markers/branches (grep-verified clean across `envelope.go`, `childcrd.go`, `dispatch_helpers.go`, and the four planner templates). OpenAI/Codex live parity is **deferred to the run-#2 milestone** — SharedContext is a plain stable-prefix string on the provider-agnostic `EnvelopeIn`.
+
+**D-08 contingency resolution:** **scoped follow-up — no contained in-phase fix exists.** The plan's `normalize-in-phase` candidate (alias the `--add-dir` path) is refuted as the divergence; the `--exclude-dynamic-system-prompt-sections` flag does not recover caching; the `cch` nonce is CLI-internal with no suppression knob. No `subagent.go` change, no chart change. **Follow-up:** realize cross-pod cache benefit via a direct-SDK subagent backend (CACHE-F1) that sets the system prompt explicitly (no per-request nonce, no dynamic sections) and places `cache_control` breakpoints on the shared prefix.
 
 ## Evolution
 
