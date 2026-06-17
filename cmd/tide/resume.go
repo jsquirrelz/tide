@@ -128,6 +128,26 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		return nil
 	}
 
+	// Phase 25 D-04: clear FailureHalt when --retry-failed (conservative halt recovery).
+	// Re-fetch to get fresh resourceVersion after the BillingHalt status patch above.
+	// FailureHalt is task-execution-failure-specific; it is only meaningful to clear it
+	// together with the --retry-failed Task phase resets that follow. (Contrast with
+	// BillingHalt, which is cleared on bare resume regardless of --retry-failed.)
+	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+		return fmt.Errorf("re-get project for FailureHalt clear: %w", err)
+	}
+	fhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+	if fhCond != nil && fhCond.Status == metav1.ConditionTrue {
+		patch3 := client.MergeFrom(proj.DeepCopy())
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+		if err := c.Status().Patch(ctx, &proj, patch3); err != nil {
+			return fmt.Errorf("patch status (clear FailureHalt): %w", err)
+		}
+		if out != nil {
+			fmt.Fprintln(out, "tide: cleared FailureHalt; re-dispatch will resume after retry-failed reset")
+		}
+	}
+
 	return retryFailedLevels(ctx, c, ns, projectName, out)
 }
 

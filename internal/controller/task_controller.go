@@ -385,6 +385,17 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
 	}
 
+	// Phase 25 DISP-02 / D-02b: fifth dispatch-entry hold — conservative failure halt.
+	// Fires only when Project.Spec.FailureProfile==conservative AND a task execution
+	// failure has stamped ConditionFailureHalt=True. Park (never fail); cleared by
+	// `tide resume --retry-failed`. No per-Task condition stamp (operator signal is the
+	// single Project FailureHalt condition — same pattern as BillingHalt).
+	if checkFailureHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
+			"task", task.Name, "project", project.Name)
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 30 * time.Second}}, nil
+	}
+
 	// Phase 14 BUDGET-02 / D-04: fourth dispatch-entry hold — BudgetBlocked condition.
 	// Cap detection happens here (not in ProjectReconciler) because Status patches from
 	// RollUpUsage do NOT increment metadata.generation and thus do NOT re-enqueue the

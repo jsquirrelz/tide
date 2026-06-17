@@ -344,6 +344,14 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 				"plan", plan.Name)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
 		}
+		// Phase 25 DISP-02 / D-02b: conservative failure halt hold.
+		// Execution-only (not planner) — gates plan dispatch when ConditionFailureHalt=True.
+		// Park (never fail); cleared by `tide resume --retry-failed`.
+		if checkFailureHalt(earlyProject) {
+			logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
+				"plan", plan.Name)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
+		}
 		// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
 		// BillingHalt (provider billing); both may be true simultaneously.
 		// No per-Plan condition written (operator signal is the single Project BudgetBlocked condition).

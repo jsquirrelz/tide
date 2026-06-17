@@ -1632,6 +1632,15 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 	for i := range allWaves.Items {
 		w := &allWaves.Items[i]
 		if w.Spec.ProjectRef == project.Name && w.Spec.WaveIndex >= len(globalWaves) {
+			// Phase 25 DISP-04 (OQ-3): skip pruning an in-flight Wave. A Wave whose
+			// WaveIndex is beyond the re-derived count may have been invalidated by a
+			// DAG edit, but if it is still Running its Jobs must drain naturally.
+			// Only prune once the Wave has Succeeded (all members finished).
+			if w.Status.Phase != "Succeeded" {
+				logger.V(1).Info("skipping prune of in-flight stale wave",
+					"wave", w.Name, "waveIndex", w.Spec.WaveIndex, "wavePhase", w.Status.Phase)
+				continue
+			}
 			if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
 				return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
 			}
