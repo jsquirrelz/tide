@@ -1502,7 +1502,15 @@ func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.
 	}
 	projectName := task.Labels[owner.LabelProject]
 	if projectName == "" {
-		return nil
+		// WR-01: an unlabeled predecessor (label not yet stamped / informer lag)
+		// still has direct-name dependents that must re-enqueue on its completion —
+		// otherwise they stall until the next periodic resync (~10h). We cannot
+		// resolve this task's ancestor scope names without the labeled project set,
+		// but direct-name deps are always resolvable from a namespace-wide list.
+		logf.FromContext(ctx).V(1).Info(
+			"globalDependentsMapper: changed task has no project label; falling back to namespace-wide direct-name dependents",
+			"task", task.Name, "namespace", task.Namespace)
+		return r.directNameDependents(ctx, task)
 	}
 
 	// List all tasks in the project for label query.
@@ -1555,6 +1563,36 @@ func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.
 		}
 		for _, dep := range t.Spec.DependsOn {
 			if _, ok := matchable[dep]; ok {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: client.ObjectKey{Namespace: t.Namespace, Name: t.Name},
+				})
+				break
+			}
+		}
+	}
+	return reqs
+}
+
+// directNameDependents re-enqueues every Task in the changed task's namespace
+// whose DependsOn names the changed task directly. Used by globalDependentsMapper
+// as the WR-01 fallback when the changed (predecessor) task carries no project
+// label: coarse-ref (plan/phase/milestone) resolution needs the labeled set, but
+// direct-name edges are always resolvable from a namespace-wide list, so an
+// unlabeled predecessor's direct dependents do not stall until the periodic
+// resync. Self-skip by UID (Pitfall 1).
+func (r *TaskReconciler) directNameDependents(ctx context.Context, task *tideprojectv1alpha2.Task) []reconcile.Request {
+	var all tideprojectv1alpha2.TaskList
+	if err := r.List(ctx, &all, client.InNamespace(task.Namespace)); err != nil {
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0)
+	for i := range all.Items {
+		t := &all.Items[i]
+		if t.UID == task.UID {
+			continue
+		}
+		for _, dep := range t.Spec.DependsOn {
+			if dep == task.Name {
 				reqs = append(reqs, reconcile.Request{
 					NamespacedName: client.ObjectKey{Namespace: t.Namespace, Name: t.Name},
 				})

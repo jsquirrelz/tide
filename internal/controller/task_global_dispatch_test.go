@@ -230,9 +230,9 @@ func TestGlobalDependentsMapper_SelfSkip(t *testing.T) {
 	}
 }
 
-func TestGlobalDependentsMapper_EmptyProjectLabel_ReturnsNil(t *testing.T) {
+func TestGlobalDependentsMapper_EmptyProjectLabel_NoDependents_ReturnsEmpty(t *testing.T) {
 	const ns = "default"
-	// task without owner.LabelProject set.
+	// task without owner.LabelProject set and no dependents anywhere.
 	taskNoLabel := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-no-label", Namespace: ns, UID: types.UID("uid-no-label")},
 	}
@@ -242,8 +242,36 @@ func TestGlobalDependentsMapper_EmptyProjectLabel_ReturnsNil(t *testing.T) {
 	r := &TaskReconciler{Client: c, Scheme: s}
 
 	reqs := r.globalDependentsMapper(context.Background(), taskNoLabel)
-	if reqs != nil {
-		t.Errorf("globalDependentsMapper must return nil for empty project label; got %v", reqs)
+	if len(reqs) != 0 {
+		t.Errorf("globalDependentsMapper must enqueue nothing for an unlabeled task with no dependents; got %v", reqs)
+	}
+}
+
+// WR-01: an unlabeled predecessor (label not yet stamped / informer lag) must
+// still re-enqueue its DIRECT-name dependents — they would otherwise stall until
+// the ~10h periodic resync. Coarse-ref resolution still requires the label, but
+// direct-name liveness must not be silently dropped.
+func TestGlobalDependentsMapper_EmptyProjectLabel_ReenqueuesDirectDependents(t *testing.T) {
+	const ns = "default"
+	// Predecessor has no project label; a labeled dependent names it directly.
+	taskNoLabel := &tideprojectv1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "pred-no-label", Namespace: ns, UID: types.UID("uid-pred")},
+	}
+	dependent := makeProjectTask("dependent", ns, "test-proj", "plan-1", []string{"pred-no-label"}, "")
+
+	s := fakeSchemeWithAll(t)
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(taskNoLabel, dependent).Build()
+	r := &TaskReconciler{Client: c, Scheme: s}
+
+	reqs := r.globalDependentsMapper(context.Background(), taskNoLabel)
+	found := false
+	for _, req := range reqs {
+		if req.Name == "dependent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("globalDependentsMapper WR-01: unlabeled predecessor must re-enqueue direct-name dependent; got %v", reqs)
 	}
 }
 
