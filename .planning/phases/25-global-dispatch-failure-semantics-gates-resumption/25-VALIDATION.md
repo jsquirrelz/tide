@@ -3,7 +3,7 @@ phase: 25
 slug: global-dispatch-failure-semantics-gates-resumption
 status: draft
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-06-16
 ---
 
