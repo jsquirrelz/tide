@@ -26,6 +26,20 @@ findings:
   info: 4
   total: 11
 status: issues_found
+fix_status: partial
+resolved:
+  - CR-01
+  - CR-02
+  - WR-01
+  - WR-03
+  - WR-04
+open:
+  - WR-02
+  - WR-05
+  - IN-01
+  - IN-02
+  - IN-03
+  - IN-04
 ---
 
 # Phase 25: Code Review Report
@@ -67,6 +81,8 @@ and several maintainability issues in the resolver's name-collision handling.
 ## Critical Issues
 
 ### CR-01: `tide resume --retry-failed` clears FailureHalt before resetting Failed tasks — re-stamp race re-freezes the project
+
+**RESOLVED** (commit eb9713c): resumeRun now resets Failed levels FIRST, then clears FailureHalt LAST and stamps AnnotationFailureResumedAt. Paired with the CR-02 reconciler fence. Regression-tested by WR-03 (RED on pre-fix code, GREEN after).
 
 **File:** `cmd/tide/resume.go:131-152`
 **Issue:**
@@ -124,6 +140,8 @@ mirroring `setBillingHaltIfNeeded`.
 
 ### CR-02: `setFailureHaltIfNeeded` has no resume time-fence — a stale Failed task re-halts after recovery
 
+**RESOLVED** (commit 5968325): setFailureHaltIfNeeded now takes the failing task's completion time and refuses to re-stamp when it predates AnnotationFailureResumedAt, mirroring setBillingHaltIfNeeded. Both task_controller.go call sites pass the task/envelope CompletedAt. Unit tests cover the pre-resume-straggler skip and the fresh-post-resume stamp.
+
 **File:** `internal/controller/failure_halt.go:64-96`
 **Issue:**
 `setFailureHaltIfNeeded` stamps `FailureHalt=True` whenever the profile is
@@ -172,6 +190,8 @@ call sites in task_controller.go.
 
 ### WR-01: globalDependentsMapper cannot re-enqueue coarse-ref dependents of a resolved-but-unlabeled predecessor — liveness gap until resync
 
+**RESOLVED** (commit 6d33b28): added directNameDependents namespace-wide fallback so an unlabeled predecessor still re-enqueues its direct-name dependents (no stall until resync), plus a V(1) log when projectName is empty. Coarse-ref resolution for an unlabeled predecessor still requires the label (documented limitation), but direct-name liveness is no longer silently dropped.
+
 **File:** `internal/controller/task_controller.go:1488-1556`
 **Issue:**
 The mapper lists only project-labeled tasks (`MatchingLabels{owner.LabelProject:
@@ -203,6 +223,8 @@ observable.
 
 ### WR-02: globalDependentsMapper Watches has no event predicate — fires full 4-List re-derive on every Task event incl. no-op metadata updates
 
+**OPEN** (deferred — tracked follow-up): performance-only (correctness preserved; mapper is idempotent and raw O(n) cost is out of v1 scope). Not addressed in this fix pass.
+
 **File:** `internal/controller/task_controller.go:1684-1687`
 **Issue:**
 The `globalDependentsMapper` is wired as a bare `Watches(&Task{}, ...)` with no
@@ -224,6 +246,8 @@ no-op churn while keeping completion/failure/hold transitions live.
 
 ### WR-03: Conservative failure-halt permanently strands dependents and never reaches Complete without operator action — verify intended
 
+**RESOLVED** (commit 70de72b): added the conservative-halt recovery regression test (cmd/tide TestResumeRetryFailedRecoversConservativeHalt) proving halt set → resume --retry-failed → halt cleared + frozen task reset + resume fence stamped. Verified RED on pre-CR-01 resume.go and GREEN after. The interaction is confirmed intended (cleared only by the sanctioned verb), now with the CR-01/CR-02 recovery path proven correct.
+
 **File:** `internal/controller/failure_halt.go:51-62`, `internal/controller/task_controller.go:393-397`
 **Issue:**
 Under conservative profile, the first task failure stamps `FailureHalt=True` and
@@ -243,6 +267,8 @@ resume clears it and dispatch resumes).
 reaches Running. That spec would have caught CR-01.
 
 ### WR-04: resolveScope name-collision precedence can silently drop edges across scope levels
+
+**RESOLVED** (commit fc5e8f2): resolveScope now unions the members of every matching Kind level instead of returning on the first match, so a cross-Kind name collision can no longer drop a true edge (conservative over-connect, fail-closed). Collisions are recorded on the resolver and surfaced at V(1) by both computeGlobalIndegree (dispatch) and assembleProjectDepGraph (wave derivation), keeping the two consistent (D-01).
 
 **File:** `internal/controller/depgraph.go:95-126`
 **Issue:**
