@@ -1,28 +1,39 @@
 # examples/projects/dogfood/02-codex-runtime-project.yaml
 #
-# Run 2 of 3 in the TIDE-on-TIDE dogfood sequence.
-# Apply ONLY after 01-analytics-project reaches `status.phase: Complete`.
-# Do NOT apply 03-project-editor-project.yaml until this Project reaches
-# `status.phase: Complete` — the Project CRD has no ordering mechanism;
-# sequencing is operator discipline.
+# Run 2 of 3 in the TIDE-on-TIDE dogfood sequence (a.k.a. "dogfood run #2").
+#
+# CONVERTED to tideproject.k8s/v1alpha2 (2026-06-17). The cluster serves ONLY
+# v1alpha2 after the Spring Tide migration (Phase 23); a v1alpha1 Project is
+# rejected, and a v1alpha2 Project MUST carry `schemaRevision: v1alpha2` or the
+# Project reconciler fail-closes with RequiresReinstall.
 #
 # Purpose: add a second Subagent implementation (Codex / OpenAI) to TIDE and
 # demonstrate real heterogeneous dispatch — actually running mixed-provider
-# waves, not just proving the interface compiles.
+# waves, not just proving the interface compiles. This is STILL the deliverable:
+# `internal/subagent/codex/` does not exist yet, and the resolved provider vendor
+# is still pinned to "anthropic" (internal/controller/dispatch_helpers.go:179,
+# ResolveProvider — now takes a *v1alpha2.Project; per-level provider switch is
+# unbuilt). The halted first attempt at this run (~$29.72) pushed NO code branch
+# (it halted on the foundational global-DAG defect before authoring); there is
+# nothing to salvage from it. Run #1 (analytics) did push
+# `origin/tide/run-dogfood-analytics-1781156464`.
 #
-# After this run completes: the run's token spend, dispatch behavior, and
-# failure characteristics are visible on the analytics dashboard built by run 1.
-# Run 3 (Project editor) can then be authored and applied through the dashboard
-# surface run 3 itself will build.
+# Sequencing: run #1 (analytics) is NO LONGER a hard prerequisite — the
+# observability surfaces it was meant to build (cost/token telemetry, the
+# cache-efficiency panel, and the global execution-DAG dashboard view) already
+# landed in main via Phases 16, 18-21, and 26. Run #2's spend is watchable on
+# the deployed dashboard today.
 #
-# Prerequisites (see README.md for full recipe):
-#   - 01-analytics-project must have reached status.phase: Complete
-#   - kind cluster + TIDE charts installed (see docs/INSTALL.md)
-#   - tide-secrets Secret created in namespace tide-dogfood-codex
-#     (ANTHROPIC_API_KEY + GIT_PAT — same as analytics namespace)
-#   - openai-secrets Secret created in namespace tide-dogfood-codex
-#     (OPENAI_API_KEY or CODEX_API_KEY — see README.md)
-#   - per-namespace-resources applied per README.md
+# Prerequisites (see README.md for the recipe):
+#   - kind cluster updated to Spring Tide dev-head (v1alpha2 CRDs + Phase-26
+#     manager/dashboard). `kind-tide-dogfood` is currently in this state.
+#   - per-namespace resources in tide-dogfood-codex:
+#     kubectl apply -f examples/projects/medium/per-namespace-resources.yaml -n tide-dogfood-codex
+#   - tide-secrets Secret in tide-dogfood-codex (ANTHROPIC_API_KEY from
+#     ~/.tide/anthropic.key + GIT_PAT with push to a non-main branch)
+#   - openai-secrets Secret in tide-dogfood-codex (OPENAI_API_KEY) — only needed
+#     if/when a task is actually dispatched to Codex; authoring the codex package
+#     on the Claude backend does not require it.
 ---
 apiVersion: v1
 kind: Namespace
@@ -33,7 +44,7 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-codex
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: dogfood-codex-runtime
@@ -43,6 +54,9 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-codex
 spec:
+  # Required in v1alpha2 — the reconciler fail-closes without it.
+  schemaRevision: v1alpha2
+
   # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
   targetRepo: https://github.com/jsquirrelz/tide.git
 
@@ -55,6 +69,30 @@ spec:
     configure a Project where the planner pool runs Claude and the executor pool
     runs Codex, and TIDE dispatches a multi-phase run to completion with correct
     wave-boundary failure semantics across both providers.
+
+    ## Current foundation — ALREADY IN MAIN, build ON it, do NOT rebuild
+
+    Much of what early drafts of this run assumed it would build now ships in
+    main (milestone v1.0.2 "Spring Tide" + late v1.0.1). Treat all of this as
+    given infrastructure; the ONLY new product surface this run delivers is the
+    Codex subagent package + the per-level provider switch.
+
+    - **v1alpha2 schema + global Execution DAG (Phases 23-26).** `Plan`/`Phase`/
+      `Milestone`/`Task` all carry `dependsOn` at any level; the assembler builds
+      ONE global Execution DAG and derives Project-scoped waves
+      (`tide-wave-<project>-<N>`) across plan/phase/milestone boundaries via
+      layered Kahn. The project planner emits N Milestones up-front with
+      `Milestone.dependsOn` (planning-DAG edge only — zero execution edges).
+      Child CRDs authored by the planner are v1alpha2.
+    - **Global dispatch / failure / gates / resumption (Phase 25).** Readiness is
+      re-derived from the global indegree map + completed-set each reconcile
+      (nothing cached). `failureProfile` and the gate-as-hold model below are live.
+    - **Cost / budget / telemetry / cache (Phases 16, 18-21).** `pkg/dispatch.Usage`,
+      `tide_cost_cents_total`, budget enforcement, and the dashboard Telemetry tab
+      + cache-efficiency panel all exist. The locked metric label set is
+      {project,phase,plan,wave}; the `task` label is FORBIDDEN (cardinality analyzer).
+    - **Dashboard (Phase 26).** A global execution-DAG view renders the whole-Project
+      wave DAG (dagre LR); run #2's waves/spend are watchable live.
 
     ## Architecture — locked decisions (do NOT reinvent these)
 
@@ -78,8 +116,14 @@ spec:
     - Per-project selection: no mixing within a run (defeats heterogeneity goal).
 
     The SubagentConfig field already has Levels.{Milestone,Phase,Plan,Task}
-    per-level LevelConfig overrides (api/v1alpha1/project_types.go). Wire the
-    Codex image at the levels the operator wants to run Codex.
+    per-level LevelConfig overrides (api/v1alpha2/project_types.go via
+    SubagentConfig). Wire the Codex image at the levels the operator wants Codex.
+    NOTE: today `resolveImage` honors a per-level image, but `ResolveProvider`
+    (internal/controller/dispatch_helpers.go) still returns Vendor:"anthropic"
+    unconditionally — so a non-Anthropic image at a level is selected but then
+    rejected at runtime (the image's vendor sentinel expects an anthropic
+    envelope). Adding the per-level vendor/provider switch IS part of this run's
+    deliverable.
 
     **Credential path.**
     OPENAI_API_KEY or CODEX_API_KEY via a K8s Secret — the established
@@ -94,15 +138,14 @@ spec:
       independent).
     - Dependents in later waves: never dispatch.
     - Non-dependents in later waves: dispatch in strict profile.
-    This contract must not change when tasks run on different providers.
+    This contract must not change when tasks run on different providers. It is now
+    enforced by the global indegree model (Phase 25); do not add a parallel path.
 
-    **Usage accounting + cost — REQUIRED for budget + observability (NEW since
-    this manifest was drafted; landed in milestone v1.0.2, Phases 18-21).**
-    The cost/budget/telemetry surfaces now depend on every Subagent populating
-    pkg/dispatch.Usage. The Codex Run() MUST normalize the OpenAI/Codex usage
-    block into that struct, or budget enforcement, tide_cost_cents_total, AND the
-    new Phase-21 cache-efficiency dashboard panel will all read $0 / blank for
-    Codex dispatches:
+    **Usage accounting + cost — REQUIRED for budget + observability.**
+    The cost/budget/telemetry surfaces (Phases 16, 18-21) depend on every Subagent
+    populating pkg/dispatch.Usage. The Codex Run() MUST normalize the OpenAI/Codex
+    usage block into that struct, or budget enforcement, tide_cost_cents_total, AND
+    the cache-efficiency dashboard panel will all read $0 / blank for Codex:
     - InputTokens        <- usage.prompt_tokens
     - OutputTokens       <- usage.completion_tokens
     - CacheReadTokens    <- usage.prompt_tokens_details.cached_tokens
@@ -139,7 +182,7 @@ spec:
     **Container image.**
     internal/subagent/codex/Dockerfile must build clean. The final image
     bundles the Codex CLI binary. Image reference convention mirrors
-    ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0 (replace "claude" with
+    ghcr.io/jsquirrelz/tide-claude-subagent (replace "claude" with
     "codex" in the image name; exact tag/registry are authoring decisions).
 
     ## Constraints
@@ -151,14 +194,13 @@ spec:
     - Secret material never inlined in manifests or chart values — reference
       by Secret name only.
     - Follow all CLAUDE.md conventions: Apache 2.0 headers, logr/zap logging,
-      controller-runtime patterns.
+      controller-runtime patterns; keep make verify-* guards green.
     - Do NOT break existing tests. Confirm make test is green before
       authoring any plan as delivered.
     - Do NOT add a real OpenAI API call in tests without an explicit test-env
       guard (OPENAI_API_KEY env set) — tests must pass offline.
 
-  # Phase 2 D-C1..C4: credproxy reads ANTHROPIC_API_KEY from this Secret.
-  # For the planner pool (Claude side of the heterogeneous run).
+  # credproxy reads ANTHROPIC_API_KEY from this Secret (planner pool / Claude side).
   # The Codex executor pool's OPENAI_API_KEY lives in a separate Secret —
   # see README.md for the openai-secrets creation step.
   providerSecretRef: tide-secrets
@@ -166,39 +208,34 @@ spec:
   # Hard cap for this dogfood run: $10 (1000 cents). Deliberately tight — this
   # run is a bounded probe of heterogeneous dispatch, not a full milestone build.
   # Expect the run to HALT on budget mid-phase; that is the intended safety net.
-  # Watch tide_cost_cents_total + the Phase-21 cache-efficiency panel as it spends.
+  # Watch tide_cost_cents_total + the cache-efficiency panel as it spends.
   budget:
     absoluteCapCents: 1000
     rollingWindowCapCents: 1000
     rollingWindowDuration: 24h
 
-  # Default image + model for the planner pool (Claude).
-  # Codex executor pool is wired via subagent.levels.task.image override
-  # once the codex subagent image is built by this run.
-  # Default planner model is Sonnet (claude-sonnet-4-6); pricier: claude-opus-4-8.
+  # strict (default): a failed task only blocks its own dependents; non-dependent
+  # later-wave work keeps dispatching (enforced by the global indegree model).
+  # Switch to conservative to halt ALL new dispatch project-wide on first failure
+  # (recover with `tide resume --retry-failed`) — tighter for a cost probe, but
+  # the $10 budget cap is already the primary safety net.
+  failureProfile: strict
+
+  # Planner pool runs Claude. subagent.image is intentionally OMITTED so it falls
+  # back to the chart default (subagent.defaults.image). On a release install that
+  # is the chart appVersion tag; on the current kind-tide-dogfood dev cluster the
+  # chart default was deployed as ghcr.io/jsquirrelz/tide-claude-subagent:dev-spring
+  # (the loaded dev-head image). Pin it here only if you need a specific tag.
+  # The Codex executor pool is wired via subagent.levels.task.image once the codex
+  # subagent image is built by THIS run.
   #
-  # Per-level model selection (Phase 3 D-C2). Resolution per level is
-  # subagent.levels.<level>.model -> subagent.model -> Helm default.
-  #   - milestone: claude-opus-4-8 — the highest-leverage plan; the 1M-context
-  #     Opus tier ($5/$25 per 1M input/output tokens) for the milestone planner.
-  #   - task:      claude-haiku-4-5 — high-volume executor pool; the cheapest tier
-  #     (200K context, $1/$5 per 1M input/output tokens) keeps task spend down.
-  #   - phase/plan inherit subagent.model (claude-sonnet-4-6) below — the
-  #     speed/intelligence balance tier (1M context, $3/$15 per 1M tokens).
-  #
-  # ON PROVIDER/VENDOR (read before expecting heterogeneous dispatch here):
-  # In v1.0 the resolved provider VENDOR is pinned to "anthropic"
-  # (internal/controller/dispatch_helpers.go ResolveProvider). So the `levels`
-  # block below selects MODELS within the Anthropic vendor — it does NOT yet
-  # switch providers per level. The Claude-planner / Codex-executor split this
-  # run exists to build (via subagent.levels.task.image pointing at a Codex
-  # image, plus internal/subagent/codex/) is the DELIVERABLE of this run, not a
-  # shipped feature: until that lands, a non-Anthropic image at levels.task
-  # would be selected by resolveImage but rejected at runtime (the image's
-  # vendor sentinel expects an "anthropic" envelope). Treat per-level model
-  # overrides as live today; per-level provider overrides as forthcoming.
+  # Per-level MODEL selection is live today; per-level PROVIDER selection is the
+  # deliverable (see the locked-decisions note on ResolveProvider above). Until it
+  # lands, every level resolves to the Anthropic vendor regardless of image.
+  #   - milestone: claude-opus-4-8 — highest-leverage plan; 1M-context Opus tier.
+  #   - task:      claude-haiku-4-5 — high-volume executor pool; cheapest tier.
+  #   - phase/plan inherit subagent.model (claude-sonnet-4-6).
   subagent:
-    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.0
     model: claude-sonnet-4-6
     levels:
       milestone:
@@ -206,13 +243,13 @@ spec:
       task:
         model: claude-haiku-4-5
 
-  # Phase 3 D-B6: per-project git target + creds.
+  # per-project git target + creds.
   git:
     repoURL: https://github.com/jsquirrelz/tide.git
     credsSecretRef: tide-secrets
 
-  # Human oversight at milestone and phase level; plan and task auto.
-  # Fully-autonomous: change milestone and phase to auto.
+  # Human oversight at milestone and phase level (planning-DAG holds at descent,
+  # Phase 25 D-05); plan and task auto. Fully-autonomous: set milestone+phase auto.
   gates:
     milestone: approve
     phase: approve
