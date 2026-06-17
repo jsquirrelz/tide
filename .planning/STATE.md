@@ -4,13 +4,13 @@ milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
 status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-06-17T00:35:17.192Z"
-last_activity: 2026-06-17 -- Phase 25 execution started
+last_updated: "2026-06-17T03:45:35.785Z"
+last_activity: 2026-06-17
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 15
-  completed_plans: 12
+  completed_plans: 14
   percent: 60
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 25 (global-dispatch-failure-semantics-gates-resumption) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 25
-Last activity: 2026-06-17 -- Phase 25 execution started
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-17
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Last activity: 2026-06-17 -- Phase 25 execution started
 | Phase 20 P01 | 15m | 2 tasks | 11 files |
 | Phase 20 P04 | 35 | 2 tasks | 5 files |
 | Phase 20-sharedcontext-injection-cache-verification-spike P03 | 25 | 2 tasks | 9 files |
+| Phase 25 P02 | 5h45m | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,9 @@ Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); 
 
 - [Phase 20]: Project level passes empty string for BuildPlannerEnvelope sharedContext (ProjectSpec has no SharedContext field; project is the DAG root with no parent)
 - [Phase 20]: maxSharedContextBytes = 64 KiB etcd DoS guard in MaterializeChildCRDs (fail-closed pre-flight check before any child CRD Create, T-20-03-01)
+- [Phase ?]: scopeResolver lives in controller not pkg/dag to satisfy verify-dag-imports guard
+- [Phase ?]: Both ProjectReconciler and TaskReconciler call the same buildScopeResolver/resolveScope, eliminating any possibility of indegree/wave disagreement
+- [Phase ?]: computeGlobalIndegree treats unresolved DependsOn refs as unsatisfied to prevent ghost dispatches
 
 ### Pending Todos
 
@@ -108,6 +112,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-16T23:52:28.231Z
+Last session: 2026-06-17T03:45:35.771Z
 Stopped at: Phase 25 context gathered
-Resume file: .planning/phases/25-global-dispatch-failure-semantics-gates-resumption/25-CONTEXT.md
+Resume file: None

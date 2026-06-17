@@ -32,9 +32,9 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Global Dispatch & Failure Semantics (DISP)
 
-- [ ] **DISP-01**: A Task dispatches only when ALL its global dependencies are complete (global indegree 0 vs the completed-task set), regardless of authoring Plan/Phase/Milestone.
+- [x] **DISP-01**: A Task dispatches only when ALL its global dependencies are complete (global indegree 0 vs the completed-task set), regardless of authoring Plan/Phase/Milestone.
 - [ ] **DISP-02**: Wave-boundary failure semantics hold EXACTLY at global scope — failed task → independent siblings in the same global wave continue; global dependents never dispatch; non-dependents dispatch in strict / halt in conservative.
-- [ ] **DISP-03**: Gates (milestone/phase/plan/task approve) compose with the global scheduler as *holds* — a gate withholds a globally-ready Task until approved; approval releases it without bypassing dependency readiness or human-gate-policy configurability.
+- [x] **DISP-03**: Gates (milestone/phase/plan/task approve) compose with the global scheduler as *holds* — a gate withholds a globally-ready Task until approved; approval releases it without bypassing dependency readiness or human-gate-policy configurability.
 
 ### Multiple Milestones (MS)
 
@@ -44,7 +44,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Minimal Resumption (RESUME)
 
-- [ ] **RESUME-01**: An orchestrator restart re-derives the entire Project execution schedule from the global indegree map + completed-task set alone — no other persisted execution state.
+- [x] **RESUME-01**: An orchestrator restart re-derives the entire Project execution schedule from the global indegree map + completed-task set alone — no other persisted execution state.
 
 ### CRD Migration — the breaking surface (SCHEMA)
 
@@ -88,10 +88,10 @@ Deferred to later milestones:
 | EXEC-02 | Phase 24 | Complete |
 | EXEC-03 | Phase 24 | Complete |
 | EXEC-04 | Phase 24 | Complete |
-| DISP-01 | Phase 25 | Pending |
+| DISP-01 | Phase 25 | Complete |
 | DISP-02 | Phase 25 | Pending |
-| DISP-03 | Phase 25 | Pending |
-| RESUME-01 | Phase 25 | Pending |
+| DISP-03 | Phase 25 | Complete |
+| RESUME-01 | Phase 25 | Complete |
 | MS-01 | Phase 26 | Pending |
 | MS-02 | Phase 26 | Pending |
 | MS-03 | Phase 26 | Pending |
