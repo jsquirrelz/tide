@@ -1632,16 +1632,13 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 	for i := range allWaves.Items {
 		w := &allWaves.Items[i]
 		if w.Spec.ProjectRef == project.Name && w.Spec.WaveIndex >= len(globalWaves) {
-			// Phase 25 DISP-04 (OQ-3): skip pruning an actively in-flight Wave.
-			// A Wave whose WaveIndex is beyond the re-derived count may have been
-			// invalidated by a DAG edit, but if it is still Running its Jobs must
-			// drain naturally before deletion. Waves with Phase=="" (pending/initial)
-			// or Phase=="Succeeded" are safe to prune.
-			if w.Status.Phase == "Running" {
-				logger.V(1).Info("skipping prune of in-flight stale wave",
-					"wave", w.Name, "waveIndex", w.Spec.WaveIndex, "wavePhase", w.Status.Phase)
-				continue
-			}
+			// NOTE (Phase 25 OQ-3 deferred): an in-flight guard here would protect
+			// Waves with running Jobs from premature deletion. Deferred: the wave
+			// aggregator sets Phase="Running" even for 0-member waves (when all tasks
+			// are deleted), so a Phase-based guard would block pruning of legitimately
+			// stale empty waves (CR-01 regression). A correct guard requires the
+			// WaveController to distinguish "no tasks assigned" from "tasks in-flight";
+			// that wave-controller refactor is out of scope for Phase 25.
 			if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
 				return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
 			}
