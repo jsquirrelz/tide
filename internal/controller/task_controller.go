@@ -476,7 +476,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 		return taskGateResult{}, fmt.Errorf("list milestones for global indegree: %w", err)
 	}
 
-	indegree := r.computeGlobalIndegree(*task, allProjectTasks, planList.Items, phaseList.Items, msList.Items)
+	indegree := r.computeGlobalIndegree(ctx, *task, allProjectTasks, planList.Items, phaseList.Items, msList.Items)
 	if indegree > 0 {
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Pending"
@@ -1274,6 +1274,7 @@ func (r *TaskReconciler) listProjectTasks(ctx context.Context, task *tideproject
 // routes through the same buildScopeResolver as assembleProjectDepGraph so
 // the dispatch indegree and wave map can never disagree (D-01 invariant).
 func (r *TaskReconciler) computeGlobalIndegree(
+	ctx context.Context,
 	task tideprojectv1alpha2.Task,
 	allProjectTasks []tideprojectv1alpha2.Task,
 	plans []tideprojectv1alpha2.Plan,
@@ -1308,6 +1309,17 @@ func (r *TaskReconciler) computeGlobalIndegree(
 			}
 		}
 	}
+
+	// WR-04: surface any cross-Kind scope-name collision encountered during
+	// resolution. The union behavior in resolveScope keeps dispatch fail-closed
+	// (no dropped edge), but an ambiguous DependsOn name is a configuration smell
+	// worth logging for diagnosis.
+	if names := resolver.collisionNames(); len(names) > 0 {
+		logf.FromContext(ctx).V(1).Info(
+			"computeGlobalIndegree: DependsOn scope name matched multiple Kind levels (Task/Plan/Phase/Milestone); unioning members to avoid dropping edges",
+			"task", task.Name, "collidingNames", names)
+	}
+
 	return indegree
 }
 

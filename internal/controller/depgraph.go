@@ -47,6 +47,12 @@ type scopeResolver struct {
 	planToPhase map[string]string
 	// phaseToMS maps phase.Name → milestone.Name.
 	phaseToMS map[string]string
+	// collisions records scope names that matched at more than one Kind level
+	// (e.g. a Task and a Plan sharing a name). WR-04: resolveScope unions all
+	// matching levels rather than silently dropping the lower-precedence ones;
+	// this set lets callers surface the ambiguity (a namespace-wide name
+	// collision across Task/Plan/Phase/Milestone) at V(1) for diagnosis.
+	collisions map[string]struct{}
 }
 
 // buildScopeResolver constructs a scopeResolver from the four list slices.
@@ -64,6 +70,7 @@ func buildScopeResolver(
 		tasksByPlan: make(map[string][]string),
 		planToPhase: make(map[string]string),
 		phaseToMS:   make(map[string]string),
+		collisions:  make(map[string]struct{}),
 	}
 	for i := range tasks {
 		t := &tasks[i]
@@ -83,46 +90,79 @@ func buildScopeResolver(
 	return r
 }
 
-// resolveScope expands scopeName to the set of member Task names.
-// Resolution order mirrors assembleProjectDepGraph sections 4a–4d:
-//  1. Direct Task name match.
-//  2. Plan name match → all tasks in that plan.
-//  3. Phase name match → union of tasks in all plans in that phase.
-//  4. Milestone name match → transitive union of tasks across phases/plans.
+// resolveScope expands scopeName to the set of member Task names across EVERY
+// Kind level the name matches (Task, Plan, Phase, Milestone).
 //
-// Returns empty when scopeName is unresolved (conservative — never invents
-// an edge, D-06).
+// WR-04: previously this returned on the FIRST matching level (task → plan →
+// phase → milestone), so a name shared across Kinds (K8s permits a Task and a
+// Plan with the same name in one namespace) silently dropped the lower-precedence
+// scope's members — a fail-open dispatch (a dependent could run before a true
+// predecessor). It now unions the members of all matching levels so no true edge
+// is ever dropped (conservative: a name collision over-connects rather than
+// under-connects), and records the collision in r.collisions so callers can
+// surface the ambiguity. Edges are still de-duplicated by buildGlobalEdges.
+//
+// Returns empty when scopeName matches no level (unresolved — never invents an
+// edge, D-06).
 func (r *scopeResolver) resolveScope(scopeName string) []string {
+	var result []string
+	matchedLevels := 0
+
 	// 1. Direct task name.
 	if _, isTask := r.taskNames[scopeName]; isTask {
-		return []string{scopeName}
+		result = append(result, scopeName)
+		matchedLevels++
 	}
 	// 2. Plan name.
 	if tasks, ok := r.tasksByPlan[scopeName]; ok {
-		return tasks
+		result = append(result, tasks...)
+		matchedLevels++
 	}
 	// 3. Phase name.
-	var phaseResult []string
+	var phaseMatched bool
 	for planName, phaseName := range r.planToPhase {
 		if phaseName == scopeName {
-			phaseResult = append(phaseResult, r.tasksByPlan[planName]...)
+			result = append(result, r.tasksByPlan[planName]...)
+			phaseMatched = true
 		}
 	}
-	if len(phaseResult) > 0 {
-		return phaseResult
+	if phaseMatched {
+		matchedLevels++
 	}
 	// 4. Milestone name (transitive: phase → plan → tasks).
-	var msResult []string
+	var msMatched bool
 	for phaseName, msName := range r.phaseToMS {
 		if msName == scopeName {
 			for planName, ph2 := range r.planToPhase {
 				if ph2 == phaseName {
-					msResult = append(msResult, r.tasksByPlan[planName]...)
+					result = append(result, r.tasksByPlan[planName]...)
 				}
 			}
+			msMatched = true
 		}
 	}
-	return msResult // empty if unresolved — skip (conservative)
+	if msMatched {
+		matchedLevels++
+	}
+
+	if matchedLevels > 1 {
+		r.collisions[scopeName] = struct{}{}
+	}
+	return result // empty if unresolved — skip (conservative)
+}
+
+// collisionNames returns the scope names that matched at more than one Kind
+// level during resolveScope calls (WR-04 observability). Callers log these at
+// V(1) so a cross-Kind name collision is diagnosable rather than silent.
+func (r *scopeResolver) collisionNames() []string {
+	if len(r.collisions) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(r.collisions))
+	for n := range r.collisions {
+		names = append(names, n)
+	}
+	return names
 }
 
 // ancestorScopeNames returns all scope identifiers that contain task as a

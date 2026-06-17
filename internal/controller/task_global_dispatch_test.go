@@ -102,7 +102,7 @@ func TestComputeGlobalIndegree_NoDeps_ReturnsZero(t *testing.T) {
 	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(tasks[0], tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), tasks[0], tasks, plans, nil, nil)
 	if indegree != 0 {
 		t.Errorf("computeGlobalIndegree = %d; want 0 for no deps", indegree)
 	}
@@ -115,7 +115,7 @@ func TestComputeGlobalIndegree_DirectDepSucceeded_ReturnsZero(t *testing.T) {
 	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(*taskB, tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
 	if indegree != 0 {
 		t.Errorf("computeGlobalIndegree = %d; want 0 (predecessor Succeeded)", indegree)
 	}
@@ -128,7 +128,7 @@ func TestComputeGlobalIndegree_DirectDepNotSucceeded_ReturnsOne(t *testing.T) {
 	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(*taskB, tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
 	if indegree != 1 {
 		t.Errorf("computeGlobalIndegree = %d; want 1 (predecessor Running)", indegree)
 	}
@@ -145,7 +145,7 @@ func TestComputeGlobalIndegree_CrossPlanDepNotSucceeded_ReturnsOne(t *testing.T)
 	}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(*taskB, tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
 	if indegree != 1 {
 		t.Errorf("computeGlobalIndegree cross-plan = %d; want 1 (cross-plan dep Running)", indegree)
 	}
@@ -162,7 +162,7 @@ func TestComputeGlobalIndegree_CoarsePlanRef_AllMembersSucceeded_ReturnsZero(t *
 	}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(*taskB, tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
 	if indegree != 0 {
 		t.Errorf("computeGlobalIndegree coarse plan ref (all succeeded) = %d; want 0", indegree)
 	}
@@ -181,7 +181,7 @@ func TestComputeGlobalIndegree_CoarsePlanRef_OneMemberNotSucceeded_ReturnsPositi
 	}
 
 	r := &TaskReconciler{}
-	indegree := r.computeGlobalIndegree(*taskB, tasks, plans, nil, nil)
+	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
 	if indegree <= 0 {
 		t.Errorf("computeGlobalIndegree coarse plan ref (one not succeeded) = %d; want > 0", indegree)
 	}

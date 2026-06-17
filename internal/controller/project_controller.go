@@ -1535,6 +1535,16 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 	// to depgraph.buildGlobalEdges — output is byte-identical, pure extraction).
 	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items, msList.Items)
 
+	// WR-04: surface any cross-Kind scope-name collision. resolveScope now unions
+	// all matching levels (so wave derivation never drops a true edge — staying
+	// consistent with computeGlobalIndegree, D-01), but an ambiguous DependsOn
+	// name is a configuration smell worth logging for diagnosis.
+	if names := resolver.collisionNames(); len(names) > 0 {
+		logf.FromContext(ctx).V(1).Info(
+			"assembleProjectDepGraph: DependsOn scope name matched multiple Kind levels (Task/Plan/Phase/Milestone); unioning members to avoid dropping edges",
+			"project", project.Name, "collidingNames", names)
+	}
+
 	return nodes, edges, taskList.Items, nil
 }
 

@@ -189,6 +189,38 @@ func TestResolveScope_UnresolvedRef_ReturnsEmpty(t *testing.T) {
 	}
 }
 
+// WR-04: a name shared across Kinds (here a Task and a Plan both named "shared")
+// must resolve to the UNION of both levels' members — never silently drop the
+// lower-precedence scope (the old first-match-wins fail-open edge drop) — and
+// must be recorded as a collision for observability.
+func TestResolveScope_CrossKindNameCollision_UnionsAndRecords(t *testing.T) {
+	// A Task named "shared" AND a Plan named "shared" containing task-x.
+	tasks := []tideprojectv1alpha2.Task{
+		makeTestTask("shared", "plan-1"),
+		makeTestTask("task-x", "shared"), // task-x's PlanRef is the plan "shared"
+	}
+	plans := []tideprojectv1alpha2.Plan{
+		makeTestPlan("plan-1", "phase-1"),
+		makeTestPlan("shared", "phase-1"),
+	}
+	resolver := buildScopeResolver(tasks, plans, nil, nil)
+
+	got := sortedStrings(resolver.resolveScope("shared"))
+	want := []string{"shared", "task-x"} // Task "shared" + Plan "shared"'s member task-x
+	if len(got) != len(want) {
+		t.Fatalf("resolveScope(shared) = %v; want union %v (must not drop either Kind)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("resolveScope(shared)[%d] = %q; want %q", i, got[i], want[i])
+		}
+	}
+
+	if names := resolver.collisionNames(); len(names) != 1 || names[0] != "shared" {
+		t.Errorf("expected collisionNames=[shared]; got %v", names)
+	}
+}
+
 // ---------- buildGlobalEdges tests ----------
 
 func TestBuildGlobalEdges_DirectTaskDependsOn(t *testing.T) {
