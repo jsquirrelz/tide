@@ -680,22 +680,17 @@ Both will be replaced with committed image references. The image files need to b
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **MilestoneSpec.DependsOn patching in the SPEC-01 fixture**
+1. **MilestoneSpec.DependsOn patching in the SPEC-01 fixture** — **RESOLVED (adopted in Plan 26-03):** add a `createSimpleMilestoneWithDeps(ctx, name, projectRef, deps)` helper following the existing `createSimpleMilestone` pattern; cleaner and reusable for the MS-03 gate-composition test.
    - What we know: `createSimpleMilestone` (global_wave_derivation_test.go:56) creates a Milestone with only `ProjectRef`. It does NOT accept a `dependsOn` parameter.
-   - What's unclear: Should a new `createSimpleMilestoneWithDeps(ctx, name, projectRef, deps)` helper be added, or should the SPEC-01 test Patch the Milestone after creation to set DependsOn?
-   - Recommendation: Add a `createSimpleMilestoneWithDeps` helper following the existing pattern; it's cleaner and reusable for MS-03.
+   - Resolution: the new helper is authored in the SPEC-01 conformance test plan (26-03), not a post-create Patch.
 
-2. **Screenshot tooling for D-07**
-   - What we know: The kind-tide-dogfood cluster exists; the dashboard is deployed.
-   - What's unclear: How are screenshots captured for CI reproducibility? Manual capture with browser dev tools is fine for the initial commit, but not automatable.
-   - Recommendation: Screenshots are committed static assets (as accepted in D-07). The plan step is: apply fixture → open browser → capture → commit. A comment in the README near the images notes "generated with TIDE v1.0.2 on kind-tide-dogfood."
+2. **Screenshot tooling for D-07** — **RESOLVED (adopted in Plan 26-04, Task 3):** screenshots are committed static assets (per D-07 accepted staleness tradeoff). The step is: apply the SPEC-01 fixture → open the global execution-DAG view → capture → commit, on the durable `kind-tide-dogfood` cluster. Manual capture is intended; the live-cluster task is marked `autonomous: false`.
+   - Resolution: a README note near the images records "generated with TIDE v1.0.2 on kind-tide-dogfood."
 
-3. **Whether MS-03 gate test needs a full planner job or can use fixture-injected Milestones**
-   - What we know: The existing `gates_test.go` in `test/integration/envtest/` likely tests gate flow by applying fixtures directly without dispatching a planner Job.
-   - What's unclear: Does MS-03 need the planner to emit 2 milestones, or can the test create 2 Milestones manually (matching what the planner would produce)?
-   - Recommendation: Create the Milestones manually (using `createSimpleMilestoneWithDeps`) — this is what all existing gate tests do. The planner emission (D-01) is tested separately by the golden/ratchet eval.
+3. **Whether the MS-03 gate test needs a full planner job or can use fixture-injected Milestones** — **RESOLVED (adopted in Plan 26-03):** create the Milestones manually via `createSimpleMilestoneWithDeps` — matching every existing gate test. The planner's N-milestone emission (D-01) is verified separately by the golden/ratchet eval in Plan 26-01.
+   - Resolution: fixture-injected Milestones; no planner Job in the conformance test.
 
 ---
 
