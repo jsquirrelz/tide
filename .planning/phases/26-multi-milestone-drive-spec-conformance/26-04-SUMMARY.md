@@ -5,8 +5,8 @@ subsystem: dashboard
 tags: [dashboard, api, react, global-dag, spec-conformance]
 dependency_graph:
   requires: ["26-03"]
-  provides: ["SPEC-01 visual conformance endpoint + component (T1+T2)", "T3 pending human verify"]
-  affects: ["cmd/dashboard", "dashboard/web/src"]
+  provides: ["SPEC-01 visual conformance endpoint + component (T1+T2)", "README mermaid replaced with live dashboard screenshots (T3)", "planning DAG LR horizontal-handle fix"]
+  affects: ["cmd/dashboard", "dashboard/web/src", "README.md", "docs/screenshots"]
 tech_stack:
   added: []
   patterns: ["ExecutionDAGView project-scope variant", "project-label MatchingLabels filter"]
@@ -26,15 +26,15 @@ decisions:
 metrics:
   duration: "~35m"
   completed_date: "2026-06-17"
-  tasks_completed: 2
+  tasks_completed: 3
   tasks_total: 3
-  files_modified: 6
-status: checkpoint-pending
+  files_modified: 12
+status: complete
 ---
 
 # Phase 26 Plan 04: Global Execution DAG Dashboard View — Summary
 
-One-liner: GET /api/v1/projects/{name}/execution-dag handler + GlobalExecutionDAGView (dagre LR, project-scoped) added; embed regenerated; T3 screenshot capture awaits human verify.
+One-liner: GET /api/v1/projects/{name}/execution-dag handler + GlobalExecutionDAGView (dagre LR, project-scoped) added; embed regenerated; both README mermaid diagrams replaced with live dashboard screenshots of the SPEC-01 fixture (T3 completed by orchestrator-driven live capture on a throwaway kind cluster).
 
 ## Tasks Completed
 
@@ -42,7 +42,15 @@ One-liner: GET /api/v1/projects/{name}/execution-dag handler + GlobalExecutionDA
 |------|------|--------|--------|
 | T1 | Add GET /api/v1/projects/{name}/execution-dag handler + router wiring | 1f606f9 | Done |
 | T2 | Add GlobalExecutionDAGView + EmptyState variants + App.tsx wiring; regenerate embed | 0bebcc5 | Done |
-| T3 | Capture SPEC-01 screenshots + replace README mermaid | (pending) | Awaiting human verify |
+| T3 | Capture SPEC-01 screenshots + replace README mermaid | c966a51, 0b06c58 | Done |
+
+## T3: SPEC-01 live screenshots + README mermaid replacement (orchestrator-completed)
+
+Captured on a throwaway kind cluster (`tide-spec-shot`, pinned `kindest/node:v1.33.7`) — chosen over the durable `kind-tide-dogfood` cluster, whose CRDs are still `v1alpha1`-only (pre-Spring-Tide) and whose stored `dogfood-codex-runtime` Project would be orphaned by a no-conversion CRD upgrade. Installed v1alpha2 CRDs (`make install`), applied the README α…θ 2-milestone fixture as real CRDs (manager scaled out of the path so no dispatch fired), patched Wave `status.taskRefs` to the envtest-proven schedule, ran the Phase-26 dashboard binary against it, and screenshotted PlanningDAGView + GlobalExecutionDAGView. Cluster deleted after capture; dogfood restored untouched.
+
+**Edge-rendering fix (commit c966a51):** capture surfaced that PlanningDAGView's four node shells (Project/Milestone/Phase/Plan) hardcoded `handleAxis="vertical"`, so edges attached top↔bottom while dagre laid the graph out LR. Switched them to `handleAxis="horizontal"` (matching TaskNode), so planning edges now attach right→left. Embedded SPA regenerated; `verify-dashboard-freshness` green.
+
+**README (commit 0b06c58):** both "Abstract visualization" mermaid blocks replaced with `docs/screenshots/planning-dag.png` + `docs/screenshots/execution-dag.png` and captions; caption notes the dashboard's 0-indexed wave labels map to the worked example's 1-indexed waves (identical schedule). No mermaid block remains in the section.
 
 ## T1: GET /api/v1/projects/{name}/execution-dag
 

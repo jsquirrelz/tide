@@ -176,7 +176,7 @@ Plans:
 
 **Wave 3** *(blocked on 26-03)*
 
-- [ ] 26-04-PLAN.md — D-07 GlobalExecutionDAGView + GET /api/v1/projects/{name}/execution-dag + EmptyState variants + App wiring (embed regenerated); live-cluster screenshots of the SPEC-01 fixture replace both README mermaid diagrams (SPEC-01)
+- [x] 26-04-PLAN.md — D-07 GlobalExecutionDAGView + GET /api/v1/projects/{name}/execution-dag + EmptyState variants + App wiring (embed regenerated); live-cluster screenshots of the SPEC-01 fixture replace both README mermaid diagrams (SPEC-01)
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
@@ -213,4 +213,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-17 |
-| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 3/4 | In Progress|  |
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete   | 2026-06-17 |
