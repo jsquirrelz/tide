@@ -205,20 +205,21 @@ spec:
   # see README.md for the openai-secrets creation step.
   providerSecretRef: tide-secrets
 
-  # Hard cap for this dogfood run: $10 (1000 cents). Deliberately tight — this
-  # run is a bounded probe of heterogeneous dispatch, not a full milestone build.
+  # Hard cap for this dogfood run: $20 (2000 cents). A bounded probe of
+  # heterogeneous dispatch, not a full milestone build — raised from the initial
+  # $10 to clear more of a phase before halting (run #1 reached ~$29.72).
   # Expect the run to HALT on budget mid-phase; that is the intended safety net.
   # Watch tide_cost_cents_total + the cache-efficiency panel as it spends.
   budget:
-    absoluteCapCents: 1000
-    rollingWindowCapCents: 1000
+    absoluteCapCents: 2000
+    rollingWindowCapCents: 2000
     rollingWindowDuration: 24h
 
   # strict (default): a failed task only blocks its own dependents; non-dependent
   # later-wave work keeps dispatching (enforced by the global indegree model).
   # Switch to conservative to halt ALL new dispatch project-wide on first failure
   # (recover with `tide resume --retry-failed`) — tighter for a cost probe, but
-  # the $10 budget cap is already the primary safety net.
+  # the $20 budget cap is already the primary safety net.
   failureProfile: strict
 
   # Planner pool runs Claude. subagent.image is intentionally OMITTED so it falls
