@@ -5,37 +5,47 @@ TIDE is a Kubernetes-native hierarchical agentic work orchestrator. Read the pro
 Your job:
   - Read the project outcome (the original prompt below). It states a single
     user-visible business outcome the whole effort must deliver.
-  - Author MILESTONE.md describing the first milestone that advances that
-    outcome. A milestone is the largest unit a human reviews as a gate; scope
-    it to one coherent, demonstrable slice of the outcome — not the entire
-    project at once. Keep the doc tight and declarative; match the spec's
-    voice (em-dash-heavy, no hedged corporate prose).
+  - Decompose the outcome into one or more milestones. Each milestone is the
+    largest unit a human reviews as a gate; scope each to one coherent,
+    demonstrable slice of the outcome. Keep docs tight and declarative; match
+    the spec's voice (em-dash-heavy, no hedged corporate prose).
+  - Emit one Milestone child-CRD per milestone in the DAG, each with its
+    dependsOn wired to its predecessors (empty array for the first/root
+    milestone; list of predecessor milestone names for later milestones).
   - Do NOT decompose into Phases here — that is the milestone planner's job,
-    dispatched downstream once this Milestone exists. The project planner's
-    sole structural output is exactly one Milestone child-CRD.
+    dispatched downstream once each Milestone exists.
 
-HOW TO EMIT THE CHILD CRD (REQUIRED — this is how the orchestrator picks it up):
-Use your Write tool to create exactly ONE file under your children/ directory.
+HOW TO EMIT MILESTONE CHILD CRDs (REQUIRED — this is how the orchestrator picks them up):
+Use your Write tool to create ONE file per milestone under your children/ directory.
 
-The file MUST be a single JSON object with this exact shape:
+Each file MUST be a single JSON object with this exact shape:
 
   {
     "kind": "Milestone",
     "name": "milestone-01-<slug>",
-    "spec": { "projectRef": "<this project's name>" }
+    "spec": {
+      "projectRef": "<this project's name>",
+      "dependsOn": []
+    }
   }
 
-- "kind" MUST be the string "Milestone".
+- "kind" MUST be the string "Milestone" for EVERY file.
 - "name" is the metadata.name the orchestrator assigns; keep it unique and
   DNS-safe (lowercase, hyphenated).
 - "spec" is the Milestone CRD spec. projectRef wires the Milestone back to
-  this Project. Do NOT emit Phase, Plan, or Task CRDs — those are authored
-  downstream as the rising tide fans out.
+  this Project. dependsOn lists predecessor milestone names (empty array for
+  the first/root milestone). Do NOT emit Phase, Plan, or Task CRDs — those
+  are authored downstream as the rising tide fans out.
+
+A project with two milestones produces two files, for example:
+  children/milestone-01-foundation.json   (dependsOn: [])
+  children/milestone-02-surface.json      (dependsOn: ["milestone-01-foundation"])
 
 Write ONLY into the children/ directory shown above; files written elsewhere
 are ignored. The orchestrator reads every *.json there into typed child CRDs.
-Markdown (MILESTONE.md) is the human-review surface; the JSON file is the
-machine contract — both must be produced.
+Produce one MILESTONE.md per milestone (or a combined MILESTONES.md) as the
+human-review surface; the JSON files are the machine contract — both must be
+produced.
 
 Wave context (curated by parent planner):
 Goal: Ship the v1.0.2 SharedContext injection so stable-prefix bytes grow toward the provider cache floor.
