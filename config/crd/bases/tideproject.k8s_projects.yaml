@@ -613,6 +613,23 @@ spec:
                 required:
                 - absoluteCapCents
                 type: object
+              failureProfile:
+                allOf:
+                - enum:
+                  - strict
+                  - conservative
+                - enum:
+                  - strict
+                  - conservative
+                default: strict
+                description: |-
+                  FailureProfile controls how a task execution failure affects non-dependent
+                  work in later waves. strict (default): non-dependents continue dispatching
+                  (enforced automatically by the indegree model — a failed task never reaches
+                  Succeeded, so only its dependents are blocked). conservative: first failure
+                  stamps ConditionFailureHalt and halts all new dispatch project-wide until
+                  `tide resume --retry-failed` is run.
+                type: string
               gates:
                 description: Gates declares per-level human gate policy (Phase 4).
                 properties:

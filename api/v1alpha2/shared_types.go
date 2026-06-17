@@ -234,6 +234,41 @@ const (
 	ReasonBudgetCapCleared = "BudgetCapCleared"
 )
 
+// Phase 25 condition + reason vocabulary — task failure halt (DISP-02 conservative).
+const (
+	// ConditionFailureHalt — a task failed under conservative FailureProfile;
+	// new dispatch is halted project-wide until the operator runs
+	// `tide resume --retry-failed`. Set by TaskReconciler.handleJobCompletion;
+	// read by all four execution dispatch gates; cleared by tide resume. Phase 25 DISP-02.
+	ConditionFailureHalt = "FailureHalt"
+
+	// ReasonTaskFailedHalt — a member task failed and the Project's
+	// FailureProfile is conservative; halt is set project-wide.
+	ReasonTaskFailedHalt = "TaskFailedHalt"
+
+	// AnnotationFailureResumedAt — RFC3339 timestamp stamped by
+	// `tide resume --retry-failed` when clearing the FailureHalt condition.
+	// Mirrors AnnotationBillingResumedAt. Optional: only needed if the
+	// reconciler gates re-stamping FailureHalt against this timestamp.
+	AnnotationFailureResumedAt = "tideproject.k8s/failure-resumed-at"
+)
+
+// FailureProfileType is the failure-propagation policy for this Project.
+// +kubebuilder:validation:Enum=strict;conservative
+type FailureProfileType string
+
+const (
+	// FailureProfileStrict (default): non-dependent tasks in later waves
+	// continue dispatching when an earlier task fails. The indegree model
+	// enforces this automatically — only dependents are blocked.
+	FailureProfileStrict FailureProfileType = "strict"
+
+	// FailureProfileConservative: first task execution failure halts all
+	// new dispatch project-wide (ConditionFailureHalt) until the operator
+	// runs `tide resume --retry-failed`. In-flight Jobs complete naturally.
+	FailureProfileConservative FailureProfileType = "conservative"
+)
+
 // Phase 23 condition + reason vocabulary — v1alpha2 schema migration (SCHEMA-03).
 // ReasonRequiresReinstall is consumed by the Plan-03 project reconciler old-object
 // guard: any Project whose Spec.SchemaRevision != "v1alpha2" (i.e. it was authored

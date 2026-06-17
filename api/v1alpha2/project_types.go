@@ -374,6 +374,17 @@ type ProjectSpec struct {
 	// RepoURL pattern validation on existing Phase 2 test fixtures.
 	// +optional
 	Git *GitConfig `json:"git,omitempty"`
+
+	// FailureProfile controls how a task execution failure affects non-dependent
+	// work in later waves. strict (default): non-dependents continue dispatching
+	// (enforced automatically by the indegree model — a failed task never reaches
+	// Succeeded, so only its dependents are blocked). conservative: first failure
+	// stamps ConditionFailureHalt and halts all new dispatch project-wide until
+	// `tide resume --retry-failed` is run.
+	// +kubebuilder:validation:Enum=strict;conservative
+	// +kubebuilder:default=strict
+	// +optional
+	FailureProfile FailureProfileType `json:"failureProfile,omitempty"`
 }
 
 // Project Phase constants for Project.Status.Phase (Plan 10 — init Job + budget gate).
