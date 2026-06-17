@@ -8,6 +8,9 @@ import ConnectionStatusIndicator, {
 import { ToastProvider } from "./components/ToastContainer";
 import PlanningDAGView from "./components/PlanningDAGView";
 import ExecutionDAGView from "./components/ExecutionDAGView";
+import GlobalExecutionDAGView, {
+  type ProjectExecutionDAGData,
+} from "./components/GlobalExecutionDAGView";
 import TaskDetailDrawer from "./components/TaskDetailDrawer";
 import PodLogStreamer from "./components/PodLogStreamer";
 import ProjectPicker from "./components/ProjectPicker";
@@ -19,6 +22,7 @@ import ErrorState from "./components/ErrorState";
 import { useProjects } from "./lib/projects";
 import { useTaskDetail, useTasks } from "./lib/tasks";
 import type { SSEState } from "./lib/sse";
+import { STATUS_TABLE, type StatusValue } from "./components/StatusBadge";
 
 /**
  * Top-level dashboard component (plan 04-13 + plan 04-17 wiring).
@@ -178,6 +182,11 @@ export default function App() {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [streamingTask, setStreamingTask] = useState<string | null>(null);
+  // Plan 26-04 (D-07): global execution DAG pane state.
+  const [showGlobalDAG, setShowGlobalDAG] = useState(false);
+  const [globalExecutionDAG, setGlobalExecutionDAG] =
+    useState<ProjectExecutionDAGData | null>(null);
+  const [globalDAGError, setGlobalDAGError] = useState(false);
   // Plan 16-05 (D-01): transient view switcher — DAGs | Telemetry. Default
   // is DAGs; never persisted to localStorage (UI-SPEC §C2).
   const [activeView, setActiveView] = useState<ActiveView>("dags");
@@ -212,6 +221,64 @@ export default function App() {
     selectedNamespace,
     selectedTask,
   );
+
+  // Plan 26-04 (D-07): fetch the project-scoped global execution DAG when
+  // showGlobalDAG is active. Mirrors the fetchPlan hook pattern in lib/tasks.ts.
+  // The API shape {projectName, tasks[]{name,phase,waveIndex,attempt,dependsOn}}
+  // maps identically to ProjectExecutionDAGData (phase → status coercion).
+  useEffect(() => {
+    if (!showGlobalDAG || !selectedProject) return;
+    let cancelled = false;
+    const knownStatuses = new Set<StatusValue>(
+      Object.keys(STATUS_TABLE) as StatusValue[],
+    );
+    const coerce = (phase: string): StatusValue =>
+      knownStatuses.has(phase as StatusValue)
+        ? (phase as StatusValue)
+        : "Pending";
+    const ns = selectedNamespace ?? "default";
+    fetch(
+      `/api/v1/projects/${encodeURIComponent(selectedProject)}/execution-dag?namespace=${encodeURIComponent(ns)}`,
+    )
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setGlobalDAGError(true);
+          setGlobalExecutionDAG({ projectName: selectedProject, tasks: [] });
+          return;
+        }
+        const body = (await res.json()) as {
+          projectName: string;
+          tasks: {
+            name: string;
+            phase: string;
+            waveIndex: number;
+            attempt: number;
+            dependsOn: string[];
+          }[];
+        };
+        if (cancelled) return;
+        setGlobalDAGError(false);
+        setGlobalExecutionDAG({
+          projectName: body.projectName,
+          tasks: body.tasks.map((t) => ({
+            name: t.name,
+            status: coerce(t.phase),
+            waveIndex: t.waveIndex,
+            attempt: t.attempt,
+            dependsOn: t.dependsOn ?? [],
+          })),
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setGlobalDAGError(true);
+        setGlobalExecutionDAG({ projectName: selectedProject ?? "", tasks: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showGlobalDAG, selectedProject, selectedNamespace]);
 
   // Default selectedProject to the first project once useProjects resolves.
   // Operators with a single-project cluster never see the picker; multi-
@@ -314,9 +381,11 @@ export default function App() {
         <div className="flex flex-col overflow-hidden rounded border border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)]">
           {/* UI-SPEC C4 (15-07-PLAN.md): EXECUTION PaneHeader gains an "All waves"
               return button when a plan is selected — clears selectedPlan + URL hash
-              so the right pane returns to the RunningWavesView aggregate (D-13). */}
+              so the right pane returns to the RunningWavesView aggregate (D-13).
+              Plan 26-04 (D-07): adds a "Global DAG" button that sets showGlobalDAG;
+              the pane label changes to "GLOBAL EXECUTION DAG" when active. */}
           <PaneHeader
-            label="EXECUTION"
+            label={showGlobalDAG ? "GLOBAL EXECUTION DAG" : "EXECUTION"}
             action={
               selectedPlan ? (
                 <button
@@ -348,17 +417,84 @@ export default function App() {
                 >
                   All waves
                 </button>
-              ) : undefined
+              ) : showGlobalDAG ? (
+                <button
+                  data-testid="execution-pane-all-waves"
+                  aria-label="Show all running waves"
+                  onClick={() => setShowGlobalDAG(false)}
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-primary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-muted)";
+                  }}
+                >
+                  All waves
+                </button>
+              ) : (
+                <button
+                  data-testid="execution-pane-global-dag"
+                  aria-label="Show global execution DAG"
+                  onClick={() => {
+                    setSelectedPlan(null);
+                    setGlobalExecutionDAG(null);
+                    setGlobalDAGError(false);
+                    setShowGlobalDAG(true);
+                  }}
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--color-text-muted)",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-primary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color =
+                      "var(--color-text-muted)";
+                  }}
+                >
+                  Global DAG
+                </button>
+              )
             }
           />
           <div className="min-h-0 flex-1">
             {/* UI-SPEC C4 / D-13 (15-07-PLAN.md): replace the "Select a plan" empty
                 state with RunningWavesView as the right-pane default. The
-                selectedPlan !== null branch (ExecutionDAGView) is unchanged. */}
+                selectedPlan !== null branch (ExecutionDAGView) is unchanged.
+                Plan 26-04 (D-07): three-way conditional: selectedPlan →
+                ExecutionDAGView; showGlobalDAG → GlobalExecutionDAGView;
+                else → RunningWavesView. */}
             {selectedPlan ? (
               <ExecutionDAGView
                 planName={selectedPlan}
                 plan={executionPlan}
+                onTaskClick={onTaskClick}
+              />
+            ) : showGlobalDAG ? (
+              <GlobalExecutionDAGView
+                projectName={selectedProject ?? ""}
+                project={globalExecutionDAG}
+                fetchError={globalDAGError}
                 onTaskClick={onTaskClick}
               />
             ) : (
