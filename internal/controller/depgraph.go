@@ -182,14 +182,20 @@ func (r *scopeResolver) ancestorScopeNames(taskPlanRef string) (planName, phaseN
 }
 
 // buildGlobalEdges constructs the full task-level edge set by iterating the
-// four DependsOn carriers (Task / Plan / Phase / Milestone) and resolving
-// each entry through the shared resolver. De-duplicates via an in-process
-// edgeSet (key = "from\x00to") to prevent double-indegree counting when a
-// task's DependsOn mixes a direct name and a coarse ref that resolves to the
-// same predecessor.
+// three DependsOn carriers (Task / Plan / Phase) and resolving each entry
+// through the shared resolver. De-duplicates via an in-process edgeSet
+// (key = "from\x00to") to prevent double-indegree counting when a task's
+// DependsOn mixes a direct name and a coarse ref that resolves to the same
+// predecessor.
+//
+// Milestone.DependsOn is a PLANNING-DAG edge — it governs planning order and
+// gate-descent but contributes zero execution edges. Cross-milestone execution
+// coupling is expressed only via task-level (or plan/phase-level) DependsOn
+// that crosses milestone boundaries. §6d (Milestone fan-out) was removed in
+// Phase 26; §6a–6c (task / plan / phase fan-out) are preserved unchanged.
 //
 // This is a pure extraction of the edge-building logic from
-// assembleProjectDepGraph sections 6a–6d. The output is byte-identical to
+// assembleProjectDepGraph sections 6a–6c. The output is byte-identical to
 // the original — the only change is that the resolution now goes through the
 // shared scopeResolver rather than the inline tasksForScope closure.
 func buildGlobalEdges(
@@ -245,31 +251,6 @@ func buildGlobalEdges(
 			for planName, phaseName := range resolver.planToPhase {
 				if phaseName == ph.Name {
 					toTasks = append(toTasks, resolver.tasksByPlan[planName]...)
-				}
-			}
-			for _, from := range fromTasks {
-				for _, to := range toTasks {
-					addEdge(from, to)
-				}
-			}
-		}
-	}
-
-	// 6d. Milestone-level DependsOn fan-out: all tasks in THIS milestone depend
-	// on all tasks in the referenced scope.
-	for i := range ms {
-		m := &ms[i]
-		for _, dep := range m.Spec.DependsOn {
-			fromTasks := resolver.resolveScope(dep)
-			// Collect all tasks in this milestone (transitively via phases/plans).
-			var toTasks []string
-			for phaseName, msName := range resolver.phaseToMS {
-				if msName == m.Name {
-					for planName, ph2 := range resolver.planToPhase {
-						if ph2 == phaseName {
-							toTasks = append(toTasks, resolver.tasksByPlan[planName]...)
-						}
-					}
 				}
 			}
 			for _, from := range fromTasks {
