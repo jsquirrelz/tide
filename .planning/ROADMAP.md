@@ -159,11 +159,24 @@ Plans:
   3. Milestone-level gate policy composes across the Milestone DAG — approve-every-milestone works for N milestones, and full-auto and full-supervised remain expressible.
   4. The README execution-DAG worked example (tasks α…θ, cross-plan/phase/milestone edges) is encoded as an executable test that produces the documented global wave schedule `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`, and the README and implementation agree.
 
-**Carried-in debt from Phase 25** (deferred, non-blocking — fold into P26 planning):
+**Carried-in debt from Phase 25** (deferred, non-blocking — folded into P26 planning, covered by Plan 26-02):
   - **Wave-prune in-flight guard (OQ-3, inherited Phase-24 debt):** re-deriving waves can prune a wave that still has in-flight (`Running`) tasks. The naive guard (`skip if Wave.Status.Phase != "Succeeded"`) conflicts with the wave aggregator marking *zero-member* waves `Running`, which broke the pre-existing CR-01 `PruneShrink` regression test (Phase 25 commits `2a97a7a`→`e7c14f7` reverted it). The proper fix distinguishes "zero-member wave" from "wave with real Running tasks" and touches the wave aggregator — Phase 26 territory. Wave CRs are display artifacts (`computeGlobalIndegree` reads Task `.status` only), so this does not affect the dispatch contract.
   - **WR-02 (perf, from Phase 25 code review):** `globalDependentsMapper`'s Task watch has no event predicate, so it full-re-derives global dependents on every Task event. Add a predicate to fire only on status-phase / dependsOn changes.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [ ] 26-01-PLAN.md — D-01 N-milestone project_planner template (+ golden/ratchet, idempotency guard on Job existence) + D-03 §6d milestone fan-out removal + README planning-DAG-edge note + DEPS-02 reinterpretation (MS-01, MS-02)
+
+**Wave 2** *(blocked on 26-01)*
+
+- [ ] 26-02-PLAN.md — Carried-in debt: D-08 OQ-3 wave-aggregator ZeroMembers phase + in-flight-safe prune guard (CR-01 PruneShrink stays green) + D-09 WR-02 globalDependentsMapper watch predicate + unit test (MS-02, SPEC-01)
+- [ ] 26-03-PLAN.md — D-06 SPEC-01 + MS-03 conformance envtest: 2-milestone α…θ fixture (cross-milestone γ→η), assert `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`; N milestone planning-hold composition; cross-linked to README (SPEC-01, MS-01, MS-02, MS-03)
+
+**Wave 3** *(blocked on 26-03)*
+
+- [ ] 26-04-PLAN.md — D-07 GlobalExecutionDAGView + GET /api/v1/projects/{name}/execution-dag + EmptyState variants + App wiring (embed regenerated); live-cluster screenshots of the SPEC-01 fixture replace both README mermaid diagrams (SPEC-01)
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
@@ -200,6 +213,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-17 |
-| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
-</content>
-</invoke>
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/4 | Not started | - |
