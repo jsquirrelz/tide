@@ -302,7 +302,22 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 // Running-branch and gate-policy checks that logically belong to the gate layer).
 func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alpha2.Task) (taskGateResult, error) {
 	// Step 1: Terminal short-circuit.
-	if task.Status.Phase == "Succeeded" || task.Status.Phase == "Failed" {
+	if task.Status.Phase == "Succeeded" {
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+	}
+	if task.Status.Phase == "Failed" {
+		// Phase 25 D-02b: conservative failure halt check at terminal short-circuit.
+		// A Failed task re-triggers the reconciler on every status change; this
+		// hook stamps ConditionFailureHalt on the Project when
+		// FailureProfile==conservative. Idempotent: setFailureHaltIfNeeded is a no-op
+		// if the condition is already True. Project resolution is best-effort here;
+		// if the project is unresolvable (transient), the halt fires when the task
+		// is next reconciled. Non-fatal: dispatch for this task has already halted.
+		if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
+			if hErr := setFailureHaltIfNeeded(ctx, r.Client, project); hErr != nil {
+				logf.FromContext(ctx).Error(hErr, "setFailureHaltIfNeeded at terminal short-circuit failed (non-fatal)", "task", task.Name)
+			}
+		}
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
 
@@ -421,12 +436,29 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 //
 // Phase 04.1 P3.1 — extracted from gateChecks (steps 5+) to keep gateChecks ≤ 80 lines.
 func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project) (taskGateResult, error) {
-	// Indegree compute (D-B3). Re-computed every reconcile; never cached.
-	siblings, err := r.listSiblingTasks(ctx, task)
+	// DISP-01: list ALL project tasks (global scope) so computeGlobalIndegree
+	// resolves DependsOn edges across plan/phase/milestone boundaries. project.Name
+	// is guaranteed non-empty (resolveProject returned it without error above).
+	allProjectTasks, err := r.listProjectTasks(ctx, task, project.Name)
 	if err != nil {
 		return taskGateResult{}, err
 	}
-	indegree := r.computeIndegree(task, siblings)
+
+	// List Plans, Phases, Milestones for coarse-ref fan-out (same as assembleProjectDepGraph).
+	var planList tideprojectv1alpha2.PlanList
+	if err := r.List(ctx, &planList, client.InNamespace(task.Namespace)); err != nil {
+		return taskGateResult{}, fmt.Errorf("list plans for global indegree: %w", err)
+	}
+	var phaseList tideprojectv1alpha2.PhaseList
+	if err := r.List(ctx, &phaseList, client.InNamespace(task.Namespace)); err != nil {
+		return taskGateResult{}, fmt.Errorf("list phases for global indegree: %w", err)
+	}
+	var msList tideprojectv1alpha2.MilestoneList
+	if err := r.List(ctx, &msList, client.InNamespace(task.Namespace)); err != nil {
+		return taskGateResult{}, fmt.Errorf("list milestones for global indegree: %w", err)
+	}
+
+	indegree := r.computeGlobalIndegree(*task, allProjectTasks, planList.Items, phaseList.Items, msList.Items)
 	if indegree > 0 {
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Pending"
@@ -452,12 +484,19 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
 
-	// Plan 04-05 gate-policy hook (level=task). The Task gate fires here —
-	// AFTER indegree compute (only ready-to-dispatch Tasks pause) and BEFORE
-	// rate-limit + token mint + Job dispatch. D-G1 default for Task is "auto"
-	// (no-op); explicit "approve"/"pause" parks the Task at AwaitingApproval
-	// until an annotation arrives (T-04-G4 — no polling).
-	policy := gates.EvaluatePolicy(project.Spec.Gates, "task")
+	// Phase 25 DISP-03: Task gate composes with global indegree. The effective
+	// policy is the task-level Spec.Gates.Task when set (non-empty), falling
+	// back to the project-level Project.Spec.Gates.Task. Task-level takes
+	// precedence: a fully-supervised run sets Gates.Task="approve" on individual
+	// tasks without requiring a project-wide approval gate.
+	taskLevelGates := task.Spec.Gates
+	var effectiveGates tideprojectv1alpha2.Gates
+	if taskLevelGates.Task != "" {
+		effectiveGates = taskLevelGates
+	} else {
+		effectiveGates = project.Spec.Gates
+	}
+	policy := gates.EvaluatePolicy(effectiveGates, "task")
 	if policy == gates.PolicyApprove || policy == gates.PolicyPause {
 		if !gates.CheckApprove(task, "task") {
 			result, err := r.patchTaskAwaitingApproval(ctx, task, policy)
@@ -914,6 +953,14 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		if hErr := setBillingHaltIfNeeded(ctx, r.Client, project, out.Reason, jobStart); hErr != nil {
 			logger.Error(hErr, "setBillingHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
+		// Phase 25 D-02b: conservative failure halt on task execution failure.
+		// When Project.Spec.FailureProfile==conservative, stamp ConditionFailureHalt=True
+		// so all four EXECUTION dispatch gates park new dispatch until the operator
+		// runs `tide resume --retry-failed`. Non-fatal: the task's own terminal patch
+		// proceeds regardless (mirrors setBillingHaltIfNeeded pattern above).
+		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project); hErr != nil {
+			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
+		}
 	} else {
 		task.Status.Phase = "Succeeded"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
@@ -1179,34 +1226,65 @@ func (r *TaskReconciler) fetchTaskOwnerParent(ctx context.Context, ns string, re
 	return nil, nil
 }
 
-// listSiblingTasks returns all Tasks in the same Plan as task (same namespace, same PlanRef).
-func (r *TaskReconciler) listSiblingTasks(ctx context.Context, task *tideprojectv1alpha2.Task) ([]tideprojectv1alpha2.Task, error) {
+// listProjectTasks returns all Tasks in the same Project as task, identified
+// by the owner.LabelProject label. This is the global sibling set consumed by
+// computeGlobalIndegree to resolve DependsOn across plan/phase/milestone
+// boundaries (DISP-01 D-01). projectName must be non-empty (Pitfall 2 guard).
+func (r *TaskReconciler) listProjectTasks(ctx context.Context, task *tideprojectv1alpha2.Task, projectName string) ([]tideprojectv1alpha2.Task, error) {
+	if projectName == "" {
+		return nil, fmt.Errorf("listProjectTasks: projectName must be non-empty")
+	}
 	var taskList tideprojectv1alpha2.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(task.Namespace),
-		client.MatchingFields{taskPlanRefIndexKey: task.Spec.PlanRef},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
-		return nil, fmt.Errorf("list sibling tasks: %w", err)
+		return nil, fmt.Errorf("list project tasks: %w", err)
 	}
 	return taskList.Items, nil
 }
 
-// computeIndegree returns the number of predecessors in task.Spec.DependsOn
-// that have NOT yet Succeeded. Returns 0 when all dependencies are satisfied.
-// Implements FAIL-01: a failed predecessor keeps indegree > 0 for its dependents,
-// so dependents in later waves never dispatch (structural enforcement).
-func (r *TaskReconciler) computeIndegree(task *tideprojectv1alpha2.Task, siblings []tideprojectv1alpha2.Task) int {
+// computeGlobalIndegree returns the number of unsatisfied global predecessors
+// for task. It builds the shared coarse-ref resolver from the four lists and
+// expands each DependsOn entry to its member task set. A coarse ref (e.g. a
+// Plan name) is satisfied only when EVERY member task has Phase==Succeeded.
+//
+// This replaces the old Name-only computeIndegree (D-F1 retirement) and
+// routes through the same buildScopeResolver as assembleProjectDepGraph so
+// the dispatch indegree and wave map can never disagree (D-01 invariant).
+func (r *TaskReconciler) computeGlobalIndegree(
+	task tideprojectv1alpha2.Task,
+	allProjectTasks []tideprojectv1alpha2.Task,
+	plans []tideprojectv1alpha2.Plan,
+	phases []tideprojectv1alpha2.Phase,
+	ms []tideprojectv1alpha2.Milestone,
+) int {
 	if len(task.Spec.DependsOn) == 0 {
 		return 0
 	}
-	statusByName := make(map[string]string, len(siblings))
-	for _, s := range siblings {
-		statusByName[s.Name] = s.Status.Phase
+	resolver := buildScopeResolver(allProjectTasks, plans, phases, ms)
+
+	// Build a status-by-name map for O(1) Phase lookup.
+	statusByName := make(map[string]string, len(allProjectTasks))
+	for _, t := range allProjectTasks {
+		statusByName[t.Name] = t.Status.Phase
 	}
+
 	indegree := 0
 	for _, dep := range task.Spec.DependsOn {
-		if statusByName[dep] != "Succeeded" {
+		memberTasks := resolver.resolveScope(dep)
+		if len(memberTasks) == 0 {
+			// Unresolved ref: conservative — count as unsatisfied (never invents
+			// a satisfied dependency on an unresolvable scope name).
 			indegree++
+			continue
+		}
+		// A coarse ref is satisfied only when ALL member tasks have Succeeded.
+		for _, member := range memberTasks {
+			if statusByName[member] != "Succeeded" {
+				indegree++
+				break // one unsatisfied member in this dep is enough
+			}
 		}
 	}
 	return indegree
@@ -1383,32 +1461,85 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 	return envIn, data, nil
 }
 
-// siblingsToTaskMapper returns reconcile requests for all sibling Tasks sharing
-// the same PlanRef as the changed Task. This drives FAIL-02: when a predecessor's
-// status changes, dependents are requeued so their indegree is re-evaluated.
-func (r *TaskReconciler) siblingsToTaskMapper(ctx context.Context, obj client.Object) []reconcile.Request {
+// globalDependentsMapper re-enqueues all Tasks in the same project whose
+// DependsOn contains the name of the changed Task OR any ancestor scope name
+// (plan, phase, milestone) of the changed Task. This drives DISP-01: when a
+// global predecessor completes, fails, or becomes AwaitingApproval, both direct-
+// name and coarse-ref dependents re-evaluate readiness immediately — not waiting
+// for the next periodic resync (the D-01 "never disagree" clause).
+//
+// Uses owner.LabelProject label (same as assembleProjectDepGraph) so cross-plan/
+// phase/milestone dependents are covered. Resolves ancestor scope names through
+// the shared buildScopeResolver so the mapper and computeGlobalIndegree agree
+// on what constitutes a dependency edge.
+//
+// Guards: UID self-skip (Pitfall 1), empty projectName nil-return (Pitfall 2).
+func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.Object) []reconcile.Request {
 	task, ok := obj.(*tideprojectv1alpha2.Task)
 	if !ok {
 		return nil
 	}
-	if task.Spec.PlanRef == "" {
+	projectName := task.Labels[owner.LabelProject]
+	if projectName == "" {
 		return nil
 	}
-	var siblingList tideprojectv1alpha2.TaskList
-	if err := r.List(ctx, &siblingList,
+
+	// List all tasks in the project for label query.
+	var all tideprojectv1alpha2.TaskList
+	if err := r.List(ctx, &all,
 		client.InNamespace(task.Namespace),
-		client.MatchingFields{taskPlanRefIndexKey: task.Spec.PlanRef},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return nil
 	}
-	reqs := make([]reconcile.Request, 0, len(siblingList.Items))
-	for _, s := range siblingList.Items {
-		if s.UID == task.UID {
+
+	// Build the shared resolver to determine the changed task's ancestor scope
+	// names (plan, phase, milestone) — these are additional identifiers that a
+	// coarse-ref dependent's DependsOn might name.
+	var planList tideprojectv1alpha2.PlanList
+	if err := r.List(ctx, &planList, client.InNamespace(task.Namespace)); err != nil {
+		return nil
+	}
+	var phaseList tideprojectv1alpha2.PhaseList
+	if err := r.List(ctx, &phaseList, client.InNamespace(task.Namespace)); err != nil {
+		return nil
+	}
+	var msList tideprojectv1alpha2.MilestoneList
+	if err := r.List(ctx, &msList, client.InNamespace(task.Namespace)); err != nil {
+		return nil
+	}
+
+	resolver := buildScopeResolver(all.Items, planList.Items, phaseList.Items, msList.Items)
+	planName, phaseName, msName := resolver.ancestorScopeNames(task.Spec.PlanRef)
+
+	// Build the set of scope identifiers this task belongs to:
+	//   - the task's own Name (direct-name deps)
+	//   - its plan, phase, milestone names (coarse-ref deps)
+	matchable := make(map[string]struct{}, 4)
+	matchable[task.Name] = struct{}{}
+	if planName != "" {
+		matchable[planName] = struct{}{}
+	}
+	if phaseName != "" {
+		matchable[phaseName] = struct{}{}
+	}
+	if msName != "" {
+		matchable[msName] = struct{}{}
+	}
+
+	reqs := make([]reconcile.Request, 0)
+	for _, t := range all.Items {
+		if t.UID == task.UID { // skip self-enqueue (Pitfall 1)
 			continue
 		}
-		reqs = append(reqs, reconcile.Request{
-			NamespacedName: client.ObjectKey{Namespace: s.Namespace, Name: s.Name},
-		})
+		for _, dep := range t.Spec.DependsOn {
+			if _, ok := matchable[dep]; ok {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: client.ObjectKey{Namespace: t.Namespace, Name: t.Name},
+				})
+				break
+			}
+		}
 	}
 	return reqs
 }
@@ -1503,9 +1634,12 @@ func isJobTerminal(job *batchv1.Job) bool {
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02, a
 // namespace-filter predicate per AUTH-02, the .spec.planRef field indexer
-// (RESEARCH.md Open Question #8), and sibling Task watches for FAIL-02.
+// (RESEARCH.md Open Question #8; still needed by checkParentApproval), and a
+// global Task watch (globalDependentsMapper) for DISP-01 cross-plan readiness
+// re-enqueue (Phase 25 replaces the plan-local siblingsToTaskMapper).
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Register .spec.planRef field indexer so listSiblingTasks can use MatchingFields.
+	// Register .spec.planRef field indexer so checkParentApproval can use MatchingFields.
+	// (listProjectTasks uses label matching; the field indexer is kept for checkParentApproval.)
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
 		&tideprojectv1alpha2.Task{},
 		taskPlanRefIndexKey,
@@ -1538,7 +1672,7 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Watches(
 			&tideprojectv1alpha2.Task{},
-			handler.EnqueueRequestsFromMapFunc(r.siblingsToTaskMapper),
+			handler.EnqueueRequestsFromMapFunc(r.globalDependentsMapper),
 		).
 		Watches(
 			&tideprojectv1alpha2.Task{},

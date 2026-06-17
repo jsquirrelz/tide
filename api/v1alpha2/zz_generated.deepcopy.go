@@ -823,6 +823,7 @@ func (in *TaskSpec) DeepCopyInto(out *TaskSpec) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	out.Gates = in.Gates
 	if in.Caps != nil {
 		in, out := &in.Caps, &out.Caps
 		*out = new(Caps)

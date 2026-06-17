@@ -110,6 +110,16 @@ type TaskSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	DeclaredOutputPaths []string `json:"declaredOutputPaths"`
 
+	// Gates declares per-level gate policy for this Task (Phase 25 DISP-03).
+	// When Gates.Task == "approve", the task controller parks this Task at
+	// AwaitingApproval after its global indegree reaches 0 — implementing the
+	// task-level approve gate that composes with global dispatch readiness.
+	// Default (zero-value) is "auto" (no hold). Mirrors the Gates pattern on
+	// ProjectSpec; the Task-level field takes precedence over the Project-level
+	// Project.Spec.Gates.Task when evaluating task gate policy.
+	// +optional
+	Gates Gates `json:"gates,omitempty"`
+
 	// Caps optionally restricts subagent resource usage (Phase 2+).
 	// +optional
 	Caps *Caps `json:"caps,omitempty"`

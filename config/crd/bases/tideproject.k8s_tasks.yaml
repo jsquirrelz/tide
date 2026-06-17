@@ -357,6 +357,55 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+              gates:
+                description: |-
+                  Gates declares per-level gate policy for this Task (Phase 25 DISP-03).
+                  When Gates.Task == "approve", the task controller parks this Task at
+                  AwaitingApproval after its global indegree reaches 0 — implementing the
+                  task-level approve gate that composes with global dispatch readiness.
+                  Default (zero-value) is "auto" (no hold). Mirrors the Gates pattern on
+                  ProjectSpec; the Task-level field takes precedence over the Project-level
+                  Project.Spec.Gates.Task when evaluating task gate policy.
+                properties:
+                  milestone:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  pauseBetweenWaves:
+                    type: boolean
+                  phase:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  plan:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                  task:
+                    description: |-
+                      GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
+                      Phase 1 ships the field shape; Phase 4 consumes.
+                    enum:
+                    - auto
+                    - approve
+                    - pause
+                    type: string
+                type: object
               planRef:
                 description: |-
                   PlanRef is the name of the owning Plan (same namespace). Used for
