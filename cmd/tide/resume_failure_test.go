@@ -107,3 +107,68 @@ func TestResumeWithoutRetryFailedLeavesFailureHalt(t *testing.T) {
 		t.Errorf("expected ConditionFailureHalt=True still present after bare resume (no --retry-failed); got %v", fhCond)
 	}
 }
+
+// TestResumeRetryFailedRecoversConservativeHalt is the WR-03 regression test for
+// CR-01/CR-02. It proves the full conservative-halt recovery path: a project with
+// ConditionFailureHalt=True and a Failed Task is recovered by
+// `tide resume --retry-failed` such that (a) the halt is cleared, (b) the
+// previously-frozen Failed task is reset to "" for re-dispatch, and (c) the
+// AnnotationFailureResumedAt fence is stamped so a straggler reconcile cannot
+// re-freeze the project.
+//
+// This test would be RED on the pre-CR-01 code: that path cleared the halt
+// BEFORE resetting the Failed task and never stamped AnnotationFailureResumedAt,
+// so assertion (c) fails — the exact gap that let a reconcile re-stamp the halt
+// after a "successful" resume.
+func TestResumeRetryFailedRecoversConservativeHalt(t *testing.T) {
+	p := makeProject("conservative-proj")
+	p.Spec.FailureProfile = tidev1alpha2.FailureProfileConservative
+	p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionFailureHalt,
+		Status:             metav1.ConditionTrue,
+		Reason:             tidev1alpha2.ReasonTaskFailedHalt,
+		LastTransitionTime: metav1.Now(),
+	})
+
+	// A previously-frozen task: ready (no deps) but stamped Failed under the halt.
+	failed := makeTask("frozen-task", "conservative-proj", "0", "Failed", 1, 1)
+	failed.Spec.PlanRef = "conservative-plan"
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(p, failed).
+		WithStatusSubresource(&tidev1alpha2.Project{}, &tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		Build()
+
+	var buf bytes.Buffer
+	if err := resumeRun(context.Background(), c, "default", "conservative-proj", true, &buf); err != nil {
+		t.Fatalf("resumeRun(retryFailed=true): %v", err)
+	}
+
+	// (a) FailureHalt cleared.
+	var gotProj tidev1alpha2.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "conservative-proj"}, &gotProj); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if cond := meta.FindStatusCondition(gotProj.Status.Conditions, tidev1alpha2.ConditionFailureHalt); cond != nil && cond.Status == metav1.ConditionTrue {
+		t.Errorf("expected ConditionFailureHalt cleared; still True")
+	}
+
+	// (b) The previously-frozen task is reset for re-dispatch.
+	var gotTask tidev1alpha2.Task
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "frozen-task"}, &gotTask); err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if gotTask.Status.Phase != "" {
+		t.Errorf("expected frozen task phase reset to \"\"; got %q", gotTask.Status.Phase)
+	}
+	if cond := meta.FindStatusCondition(gotTask.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused); cond == nil || cond.Reason != tidev1alpha2.ReasonResumedByUser {
+		t.Errorf("expected ResumedByUser condition on reset task; got %v", cond)
+	}
+
+	// (c) Resume fence stamped so setFailureHaltIfNeeded refuses to re-freeze on a
+	//     pre-resume straggler reconcile. RED on pre-CR-01 code (never stamped).
+	if _, ok := gotProj.Annotations[tidev1alpha2.AnnotationFailureResumedAt]; !ok {
+		t.Errorf("expected AnnotationFailureResumedAt stamped on FailureHalt clear; annotations=%v", gotProj.Annotations)
+	}
+}
