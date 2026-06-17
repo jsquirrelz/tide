@@ -171,8 +171,8 @@ Plans:
 
 **Wave 2** *(blocked on 26-01)*
 
-- [ ] 26-02-PLAN.md — Carried-in debt: D-08 OQ-3 wave-aggregator ZeroMembers phase + in-flight-safe prune guard (CR-01 PruneShrink stays green) + D-09 WR-02 globalDependentsMapper watch predicate + unit test (MS-02, SPEC-01)
-- [ ] 26-03-PLAN.md — D-06 SPEC-01 + MS-03 conformance envtest: 2-milestone α…θ fixture (cross-milestone γ→η), assert `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`; N milestone planning-hold composition; cross-linked to README (SPEC-01, MS-01, MS-02, MS-03)
+- [x] 26-02-PLAN.md — Carried-in debt: D-08 OQ-3 wave-aggregator ZeroMembers phase + in-flight-safe prune guard (CR-01 PruneShrink stays green) + D-09 WR-02 globalDependentsMapper watch predicate + unit test (MS-02, SPEC-01)
+- [x] 26-03-PLAN.md — D-06 SPEC-01 + MS-03 conformance envtest: 2-milestone α…θ fixture (cross-milestone γ→η), assert `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`; N milestone planning-hold composition; cross-linked to README (SPEC-01, MS-01, MS-02, MS-03)
 
 **Wave 3** *(blocked on 26-03)*
 
@@ -213,4 +213,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-17 |
-| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 1/4 | In Progress|  |
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 3/4 | In Progress|  |
