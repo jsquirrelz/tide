@@ -27,7 +27,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Cross-Scope Dependencies (DEPS)
 
 - [x] **DEPS-01**: A Task can declare dependencies on Tasks in other Plans, Phases, AND Milestones (retire plan-local D-F1) via qualified references resolved into the global DAG.
-- [x] **DEPS-02**: Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the global task DAG (coarse interface edges resolve to / coexist with task-level edges).
+- [x] **DEPS-02**: Plan-, Phase-, and Milestone-level interface dependency declarations are reconciled into the global task DAG (coarse interface edges resolve to / coexist with task-level edges). **Phase 26 D-03 reinterpretation:** coarse fan-out for Plan (§6b) and Phase (§6c) scope is retained; Milestone-level all-to-all fan-out (§6d) was removed as too coarse a coupling unit — `Milestone.dependsOn` is a planning-DAG edge only (zero execution edges). DEPS-02 remains Complete (Phase 23); the fan-out scope is now §6b/§6c rather than §6b/§6c/§6d.
 - [x] **DEPS-03**: A cyclic global Execution DAG is rejected at validation time with involved nodes surfaced — across plan/phase/milestone boundaries; no runtime cycle recovery.
 
 ### Global Dispatch & Failure Semantics (DISP)
