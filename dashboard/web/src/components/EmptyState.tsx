@@ -18,7 +18,10 @@ export type EmptyStateVariant =
   | "awaiting-first-milestone"
   | "plan-accepted-no-tasks"
   // UI-SPEC C3 (15-07-PLAN.md): rendered by RunningWavesView when waves: [].
-  | "no-running-waves";
+  | "no-running-waves"
+  // Plan 26-04 (D-07): rendered by GlobalExecutionDAGView pre-data and on error.
+  | "global-dag-no-tasks"
+  | "global-dag-fetch-error";
 
 export type EmptyStateProps = {
   variant: EmptyStateVariant;
@@ -167,6 +170,59 @@ export default function EmptyState({ variant }: EmptyStateProps) {
           >
             Wave cards appear here while task Jobs run — select a plan to view
             its execution DAG.
+          </p>
+        </CenteredCard>
+      );
+
+    // Plan 26-04 (D-07) §Copywriting Contract: GlobalExecutionDAGView empty states.
+    case "global-dag-no-tasks":
+      return (
+        <CenteredCard>
+          <h2
+            style={{
+              marginTop: "48px",
+              fontSize: "18px",
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            No tasks in global DAG
+          </h2>
+          <p
+            style={{
+              marginTop: "16px",
+              fontSize: "14px",
+              color: "var(--color-text-muted)",
+              maxWidth: "440px",
+            }}
+          >
+            Wave derivation has not run yet — planning may still be in progress.
+          </p>
+        </CenteredCard>
+      );
+
+    case "global-dag-fetch-error":
+      return (
+        <CenteredCard>
+          <h2
+            style={{
+              marginTop: "48px",
+              fontSize: "18px",
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Could not load global DAG
+          </h2>
+          <p
+            style={{
+              marginTop: "16px",
+              fontSize: "14px",
+              color: "var(--color-text-muted)",
+              maxWidth: "440px",
+            }}
+          >
+            The execution-dag endpoint returned an error. Check the dashboard API logs.
           </p>
         </CenteredCard>
       );

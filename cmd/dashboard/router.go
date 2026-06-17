@@ -85,13 +85,14 @@ type Dependencies struct {
 // the resulting route tree at test time and fails the build on any
 // non-GET method.
 //
-// Route table (Wave 5 + phase-02 PromQL proxy inventory):
+// Route table (Wave 5 + phase-02 PromQL proxy inventory + plan 26-04):
 //
 //	GET /healthz                              — process liveness
 //	GET /readyz                               — process readiness
 //	GET /api/v1/projects                      — list
 //	GET /api/v1/projects/{name}               — single
 //	GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
+//	GET /api/v1/projects/{name}/execution-dag — global execution DAG (plan 26-04, D-07)
 //	GET /api/v1/plans/{name}                  — single plan + task cards (plan 04-17)
 //	GET /api/v1/tasks/{name}                  — rich task detail (plan 04-17)
 //	GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
@@ -135,6 +136,10 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		Client: deps.Client,
 		Log:    deps.Log,
 	}
+	execDagHandler := &dashboardapi.ExecutionDAGHandler{
+		Client: deps.Client,
+		Log:    deps.Log,
+	}
 	tasksHandler := &dashboardapi.TasksHandler{
 		Client:    deps.Client,
 		Clientset: deps.Clientset, // MAY be nil — TasksHandler tolerates.
@@ -166,6 +171,7 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
+		r.Get("/projects/{name}/execution-dag", execDagHandler.Get)
 		r.Get("/plans/{name}", plansHandler.Get)
 		r.Get("/tasks/{name}", tasksHandler.Get)
 		if eh != nil {
