@@ -145,7 +145,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 25-03-PLAN.md — Failure semantics: failure_halt.go + checkFailureHalt at four execution dispatch sites + tide resume --retry-failed clear + wave-prune guard (DISP-02)
+- [x] 25-03-PLAN.md — Failure semantics: failure_halt.go + checkFailureHalt at four execution dispatch sites + tide resume --retry-failed clear + wave-prune guard (DISP-02)
 
 ### Phase 26: Multi-Milestone Drive + Spec Conformance
 
@@ -195,7 +195,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
-| 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 2/3 | In Progress|  |
+| 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete   | 2026-06-17 |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/0 | Not started | - |
 </content>
 </invoke>

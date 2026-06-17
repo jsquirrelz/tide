@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
 status: executing
-stopped_at: Phase 25 context gathered
-last_updated: "2026-06-17T03:45:35.785Z"
+stopped_at: Completed Phase 25 Plan 03 — DISP-02 conservative halt, 51/51 envtest GREEN
+last_updated: "2026-06-17T04:39:36.795Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 15
-  completed_plans: 14
-  percent: 60
+  completed_plans: 15
+  percent: 80
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 25 (global-dispatch-failure-semantics-gates-resumption) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-17
 
@@ -52,6 +52,7 @@ Last activity: 2026-06-17
 | Phase 20 P04 | 35 | 2 tasks | 5 files |
 | Phase 20-sharedcontext-injection-cache-verification-spike P03 | 25 | 2 tasks | 9 files |
 | Phase 25 P02 | 5h45m | 2 tasks | 9 files |
+| Phase 25 P03 | 35 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,7 @@ Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); 
 - [Phase ?]: scopeResolver lives in controller not pkg/dag to satisfy verify-dag-imports guard
 - [Phase ?]: Both ProjectReconciler and TaskReconciler call the same buildScopeResolver/resolveScope, eliminating any possibility of indegree/wave disagreement
 - [Phase ?]: computeGlobalIndegree treats unresolved DependsOn refs as unsatisfied to prevent ghost dispatches
+- [Phase ?]: Wave prune OQ-3 deferred: zero-member waves show Phase=Running; guard deferred to Phase 26 to avoid CR-01 regression
 
 ### Pending Todos
 
@@ -112,6 +114,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-17T03:45:35.771Z
-Stopped at: Phase 25 context gathered
+Last session: 2026-06-17T04:39:36.780Z
+Stopped at: Completed Phase 25 Plan 03 — DISP-02 conservative halt, 51/51 envtest GREEN
 Resume file: None
