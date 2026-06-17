@@ -90,75 +90,15 @@ project.tideproject.k8s/small-project condition met
 
   Planning graph — nested containment of Milestones → Phases → Plans → Tasks, with DAG edges where dependencies exist:
 
-  ```mermaid
-  flowchart TB
-      subgraph MA["Milestone A"]
-          direction TB
-          subgraph PA1["Phase A.1"]
-              direction LR
-              subgraph PA1L1["Plan A.1.1"]
-                  TA1((α))
-                  TA2((β))
-              end
-              subgraph PA1L2["Plan A.1.2"]
-                  TA3((γ))
-              end
-          end
-          subgraph PA2["Phase A.2"]
-              subgraph PA2L1["Plan A.2.1"]
-                  TA4((δ))
-                  TA5((ε))
-              end
-          end
-          PA1 --> PA2
-      end
+  ![TIDE planning DAG — nested Milestone → Phase → Plan containment for the SPEC-01 conformance fixture, rendered left-to-right by the dashboard PlanningDAGView](docs/screenshots/planning-dag.png)
 
-      subgraph MB["Milestone B"]
-          direction TB
-          subgraph PB1["Phase B.1"]
-              direction LR
-              subgraph PB1L1["Plan B.1.1"]
-                  TB1((ζ))
-              end
-              subgraph PB1L2["Plan B.1.2"]
-                  TB2((η))
-                  TB3((θ))
-              end
-          end
-      end
-
-      MA --> MB
-  ```
+  *A real dashboard render (`PlanningDAGView`) of the SPEC-01 conformance fixture — Project `spec-conformance-project` → Milestones `ms-spec-a` / `ms-spec-b` → Phases → Plans. `ms-spec-b` declares `dependsOn: [ms-spec-a]` (a planning-DAG edge only). Generated with TIDE v1.0.2 from the executable fixture in `test/integration/envtest/spec_conformance_test.go`, so this picture and the implementation cannot drift.*
 
   Execution graph — task waves derived from the task DAG. Tasks within a wave run in parallel; waves run sequentially:
 
-  ```mermaid
-  flowchart LR
-      subgraph W1["Wave 1 — parallel"]
-          direction TB
-          T1((α))
-          T2((β))
-          T3((γ))
-          T4((ζ))
-      end
-      subgraph W2["Wave 2 — parallel"]
-          direction TB
-          T5((δ))
-          T6((η))
-      end
-      subgraph W3["Wave 3 — parallel"]
-          direction TB
-          T7((ε))
-          T8((θ))
-      end
+  ![TIDE execution DAG — global wave schedule {α,β,γ,ζ} → {δ,η} → {ε,θ} with the cross-milestone γ→η edge, rendered left-to-right by the dashboard GlobalExecutionDAGView](docs/screenshots/execution-dag.png)
 
-      T1 --> T5
-      T2 --> T5
-      T3 --> T6
-      T4 --> T6
-      T5 --> T7
-      T6 --> T8
-  ```
+  *A real dashboard render (`GlobalExecutionDAGView`) of the same SPEC-01 fixture, derived by the global wave engine across milestone boundaries. The dashboard labels waves 0-indexed, so its `WAVE 0 / 1 / 2` correspond to `Wave 1 / 2 / 3` in the walkthrough below; the schedule `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]` is identical. ζ (Milestone B) is free in the first wave — `Milestone.dependsOn` adds no execution edge — and the cross-milestone edge γ→η is honored (η waits for γ). Generated with TIDE v1.0.2 from `test/integration/envtest/spec_conformance_test.go`.*
 
   Cross-reference between the two graphs: Plan A.1.1 (tasks α, β) runs fully in Wave 1 — its tasks are independent, so the plan parallelizes. Plan A.2.1 (tasks δ, ε) and Plan B.1.2 (tasks η, θ) each have tasks split across waves — those plans serialize internally because their task DAGs declare ordering. Same paradigm, different per-plan parallelism, all expressed by the task DAG rather than the plan boundary.
 
