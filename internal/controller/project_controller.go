@@ -954,23 +954,12 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 
 	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)
 
-	// Step 1b: Idempotency guard — skip dispatch when the planner Job already
-	// exists. Gating on Job existence (rather than owned-Milestone count) is safe
-	// for N>1 milestones: the N child Milestone CRDs materialize incrementally
-	// after the planner runs, so a count-based guard would fire mid-stream and
-	// abort the remaining N-1 Milestones. Job presence is the single stable signal
-	// that the planner was already dispatched — if it exists, we are done here.
-	{
-		var existingJob batchv1.Job
-		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &existingJob); err == nil {
-			// Planner Job already exists — planner already dispatched.
-			return ctrl.Result{}, nil
-		} else if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, fmt.Errorf("idempotency: get planner job: %w", err)
-		}
-	}
-
-	// Step 2: On Running — check Job terminal state.
+	// Step 2: On Running — check Job terminal state BEFORE the idempotency guard.
+	// Mirrors milestone_controller.go:reconcilePlannerDispatch Step 2 (~286-301)
+	// which runs BEFORE Step 2b (~304-326). The Step 1b idempotency guard in the
+	// pre-fix code fired unconditionally when the Job existed, making the terminal
+	// branch unreachable while the Job was still present — causing a ~10-min stall
+	// (TTL/GC fallback at line 983) before handleProjectJobCompletion fired (QQH-01).
 	if project.Status.Phase == tidev1alpha2.PhaseRunning {
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &job); err != nil {
@@ -985,7 +974,25 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		if isJobTerminal(&job) {
 			return r.handleProjectJobCompletion(ctx, project, &job)
 		}
+		// Job is present and non-terminal (in-flight); do nothing.
 		return ctrl.Result{}, nil
+	}
+
+	// Step 2b: Idempotency guard — skip dispatch when the planner Job already
+	// exists (non-Running path only; the Running branch above handles both
+	// terminal and in-flight cases). Gating on Job existence (rather than
+	// owned-Milestone count) is safe for N>1 milestones: the N child Milestone
+	// CRDs materialize incrementally after the planner runs, so a count-based
+	// guard would fire mid-stream and abort the remaining N-1 Milestones. Job
+	// presence is the single stable signal that the planner was already dispatched.
+	{
+		var existingJob batchv1.Job
+		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &existingJob); err == nil {
+			// Planner Job already exists — planner already dispatched.
+			return ctrl.Result{}, nil
+		} else if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("idempotency: get planner job: %w", err)
+		}
 	}
 
 	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +

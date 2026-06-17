@@ -54,7 +54,7 @@ func qqhBuildReconciler(envReader *mapEnvReader) *ProjectReconciler {
 		Dispatcher:     &stubDispatcher{},
 		PlannerPool:    newPlannerPoolForTest(),
 		EnvReader:      envReader,
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		ReporterImage:  qqhReporterImg,
 		SharedPVCName:  qqhPVCName,
@@ -158,6 +158,17 @@ var _ = Describe("ProjectReconciler — planner Job completion while Job still e
 
 			// makeFakeJobTerminal patches the Job to Complete state WITHOUT deleting it.
 			Expect(makeFakeJobTerminal(ctx, mgrClient, plannerJobName, "default", true)).To(Succeed())
+
+			// Wait for the cache to reflect the terminal Job status before reconciling.
+			// The reconciler reads the Job through the cache-backed mgrClient; if the
+			// cache hasn't caught up, isJobTerminal returns false and the fix won't fire.
+			Eventually(func() bool {
+				var j batchv1.Job
+				if err := mgrClient.Get(ctx, types.NamespacedName{Name: plannerJobName, Namespace: "default"}, &j); err != nil {
+					return false
+				}
+				return isJobTerminal(&j)
+			}, "5s", "100ms").Should(BeTrue(), "cache must reflect terminal Job status before second reconcile")
 
 			// Phase 3 — reconcile again with Phase=Running and Job present+terminal.
 			// On current (buggy) code: Step 1b fires → return nil → no reporter, no budget.
