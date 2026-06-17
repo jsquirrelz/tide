@@ -159,6 +159,10 @@ Plans:
   3. Milestone-level gate policy composes across the Milestone DAG — approve-every-milestone works for N milestones, and full-auto and full-supervised remain expressible.
   4. The README execution-DAG worked example (tasks α…θ, cross-plan/phase/milestone edges) is encoded as an executable test that produces the documented global wave schedule `[{α,β,γ,ζ}, {δ,η}, {ε,θ}]`, and the README and implementation agree.
 
+**Carried-in debt from Phase 25** (deferred, non-blocking — fold into P26 planning):
+  - **Wave-prune in-flight guard (OQ-3, inherited Phase-24 debt):** re-deriving waves can prune a wave that still has in-flight (`Running`) tasks. The naive guard (`skip if Wave.Status.Phase != "Succeeded"`) conflicts with the wave aggregator marking *zero-member* waves `Running`, which broke the pre-existing CR-01 `PruneShrink` regression test (Phase 25 commits `2a97a7a`→`e7c14f7` reverted it). The proper fix distinguishes "zero-member wave" from "wave with real Running tasks" and touches the wave aggregator — Phase 26 territory. Wave CRs are display artifacts (`computeGlobalIndegree` reads Task `.status` only), so this does not affect the dispatch contract.
+  - **WR-02 (perf, from Phase 25 code review):** `globalDependentsMapper`'s Task watch has no event predicate, so it full-re-derives global dependents on every Task event. Add a predicate to fire only on status-phase / dependsOn changes.
+
 **Plans**: TBD
 
 <details>
