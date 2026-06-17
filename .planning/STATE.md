@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 Phase: 26 — COMPLETE
 Plan: 1 of 4
 Status: Phase 26 complete
-Last activity: 2026-06-17 -- Phase 26 marked complete
+Last activity: 2026-06-17 -- Completed quick task 260617-qqh: fix project-controller planner-completion ordering
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ None.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260615-gos | Explore CLI-as-strategy + second SDK/LangGraph strategy — semi-scoped backlog milestone | 2026-06-15 | d43f402 | [260615-gos-explore-abstracting-cli-to-be-a-single-s](./quick/260615-gos-explore-abstracting-cli-to-be-a-single-s/) |
+| 260617-qqh | Fix project-controller planner-completion ordering so reporter spawns + planner cost rolls up (dogfood run #2 root cause) | 2026-06-17 | 2a5e0dc | [260617-qqh-fix-project-controller-planner-completio](./quick/260617-qqh-fix-project-controller-planner-completio/) |
 
 ## Deferred Items
 
