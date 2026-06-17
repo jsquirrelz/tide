@@ -22,6 +22,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -76,7 +77,7 @@ func TestSetFailureHaltIfNeeded_StrictProfile_NoOp(t *testing.T) {
 		WithStatusSubresource(project).
 		Build()
 
-	if err := setFailureHaltIfNeeded(context.Background(), c, project); err != nil {
+	if err := setFailureHaltIfNeeded(context.Background(), c, project, time.Time{}); err != nil {
 		t.Fatalf("setFailureHaltIfNeeded: %v", err)
 	}
 
@@ -105,7 +106,7 @@ func TestSetFailureHaltIfNeeded_ConservativeStampsHalt(t *testing.T) {
 		WithStatusSubresource(project).
 		Build()
 
-	if err := setFailureHaltIfNeeded(context.Background(), c, project); err != nil {
+	if err := setFailureHaltIfNeeded(context.Background(), c, project, time.Time{}); err != nil {
 		t.Fatalf("setFailureHaltIfNeeded: %v", err)
 	}
 
@@ -138,7 +139,7 @@ func TestSetFailureHaltIfNeeded_IdempotentSecondCall(t *testing.T) {
 		Build()
 
 	// First call stamps the condition.
-	if err := setFailureHaltIfNeeded(context.Background(), c, project); err != nil {
+	if err := setFailureHaltIfNeeded(context.Background(), c, project, time.Time{}); err != nil {
 		t.Fatalf("first setFailureHaltIfNeeded: %v", err)
 	}
 
@@ -149,7 +150,7 @@ func TestSetFailureHaltIfNeeded_IdempotentSecondCall(t *testing.T) {
 	}
 
 	// Second call must be a no-op (no patch churn).
-	if err := setFailureHaltIfNeeded(context.Background(), c, &refreshed); err != nil {
+	if err := setFailureHaltIfNeeded(context.Background(), c, &refreshed, time.Time{}); err != nil {
 		t.Fatalf("second setFailureHaltIfNeeded: %v", err)
 	}
 
@@ -167,7 +168,85 @@ func TestSetFailureHaltIfNeeded_NilProject_NoOp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	// Must not panic and must return nil.
-	if err := setFailureHaltIfNeeded(context.Background(), c, nil); err != nil {
+	if err := setFailureHaltIfNeeded(context.Background(), c, nil, time.Time{}); err != nil {
 		t.Fatalf("expected nil error for nil project; got %v", err)
+	}
+}
+
+// CR-02 resume time-fence: a failure that predates AnnotationFailureResumedAt is
+// a pre-resume straggler and must NOT re-stamp the halt.
+func TestSetFailureHaltIfNeeded_StaleFailureBeforeResume_NoOp(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	resumedAt := time.Now()
+	project := &tideprojectv1alpha2.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "fenced-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha2.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
+			},
+		},
+		Spec: tideprojectv1alpha2.ProjectSpec{
+			SchemaRevision: "v1alpha2",
+			TargetRepo:     "https://example.com/repo.git",
+			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	// Failure completed an hour before the resume fence → no re-stamp.
+	stale := resumedAt.Add(-time.Hour)
+	if err := setFailureHaltIfNeeded(context.Background(), c, project, stale); err != nil {
+		t.Fatalf("setFailureHaltIfNeeded (stale): %v", err)
+	}
+
+	var got tideprojectv1alpha2.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "fenced-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	if cond != nil && cond.Status == metav1.ConditionTrue {
+		t.Errorf("expected NO FailureHalt for pre-resume straggler; got %+v", cond)
+	}
+}
+
+// CR-02: a fresh failure AFTER the resume fence must still stamp the halt.
+func TestSetFailureHaltIfNeeded_FreshFailureAfterResume_Stamps(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	resumedAt := time.Now()
+	project := &tideprojectv1alpha2.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "fresh-project",
+			Namespace: "default",
+			Annotations: map[string]string{
+				tideprojectv1alpha2.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
+			},
+		},
+		Spec: tideprojectv1alpha2.ProjectSpec{
+			SchemaRevision: "v1alpha2",
+			TargetRepo:     "https://example.com/repo.git",
+			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithObjects(project).
+		WithStatusSubresource(project).
+		Build()
+
+	fresh := resumedAt.Add(time.Hour)
+	if err := setFailureHaltIfNeeded(context.Background(), c, project, fresh); err != nil {
+		t.Fatalf("setFailureHaltIfNeeded (fresh): %v", err)
+	}
+
+	var got tideprojectv1alpha2.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "fresh-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	if cond == nil || cond.Status != metav1.ConditionTrue {
+		t.Errorf("expected FailureHalt=True for fresh post-resume failure; got %v", cond)
 	}
 }

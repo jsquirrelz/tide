@@ -314,7 +314,14 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		// if the project is unresolvable (transient), the halt fires when the task
 		// is next reconciled. Non-fatal: dispatch for this task has already halted.
 		if project, pErr := r.resolveProject(ctx, task); pErr == nil && project != nil {
-			if hErr := setFailureHaltIfNeeded(ctx, r.Client, project); hErr != nil {
+			// CR-02 resume time-fence: pass the task's CompletedAt so a pre-resume
+			// straggler reconciling after `tide resume --retry-failed` does not
+			// re-stamp the halt. Zero when CompletedAt is unset (fail-closed: stamp).
+			var taskCompletedAt time.Time
+			if task.Status.CompletedAt != nil {
+				taskCompletedAt = task.Status.CompletedAt.Time
+			}
+			if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, taskCompletedAt); hErr != nil {
 				logf.FromContext(ctx).Error(hErr, "setFailureHaltIfNeeded at terminal short-circuit failed (non-fatal)", "task", task.Name)
 			}
 		}
@@ -969,7 +976,10 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// so all four EXECUTION dispatch gates park new dispatch until the operator
 		// runs `tide resume --retry-failed`. Non-fatal: the task's own terminal patch
 		// proceeds regardless (mirrors setBillingHaltIfNeeded pattern above).
-		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project); hErr != nil {
+		// CR-02 resume time-fence: pass the envelope's CompletedAt (the same value
+		// stamped into task.Status.CompletedAt below) so a failure predating
+		// `tide resume --retry-failed` does not re-stamp the halt.
+		if hErr := setFailureHaltIfNeeded(ctx, r.Client, project, out.CompletedAt); hErr != nil {
 			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
 	} else {

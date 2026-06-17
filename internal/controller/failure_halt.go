@@ -22,9 +22,13 @@ limitations under the License.
 // checkFailureHalt before dispatching; if halted they park with a 30s requeue.
 //
 // Conservative halt is cleared by `tide resume --retry-failed` (same verb that
-// resets Failed Task phases). Unlike BillingHalt, no time-fence is needed: the
-// --retry-failed resets also wipe the Failed Tasks, so re-halt after resume is
-// from a genuine fresh failure — not a pre-resume straggler.
+// resets Failed Task phases). CR-02 (Phase 25 review): the clear is NOT
+// self-fencing — a Failed Task can reconcile between the clear and its own phase
+// reset (or an unrelated straggler reconciles after the clear) and re-stamp the
+// halt, re-freezing the project. setFailureHaltIfNeeded therefore mirrors
+// setBillingHaltIfNeeded's resume time-fence: `tide resume --retry-failed`
+// stamps AnnotationFailureResumedAt when it clears the halt, and this helper
+// refuses to re-stamp for a task whose completion timestamp predates that fence.
 //
 // NOTE: checkFailureHalt is added to the four EXECUTION dispatch sites
 // (task/plan/phase/milestone controllers). It is NOT added to the
@@ -35,6 +39,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -66,10 +71,18 @@ func checkFailureHalt(project *tideprojectv1alpha2.Project) bool {
 // a second call when halt is already True is a no-op (avoids patch churn on
 // concurrent wave failures).
 //
+// taskCompletedAt is the failing Task's Status.CompletedAt (passed by each call
+// site; zero when not yet set). CR-02 resume time-fence: when the project carries
+// AnnotationFailureResumedAt and taskCompletedAt is non-zero and predates that
+// resume timestamp, the failure is a pre-resume straggler and the halt is NOT
+// re-stamped — mirroring setBillingHaltIfNeeded's jobStart<resumedAt guard.
+// A zero taskCompletedAt or unparseable annotation falls through to stamping
+// (fail-closed toward halting, matching the billing path's conservatism).
+//
 // Called from TaskReconciler.handleJobCompletion on task execution failure only
 // (not on planning Job failures — FailureHalt is an execution-layer signal).
 // Nil project is a safe no-op.
-func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project) error {
+func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project, taskCompletedAt time.Time) error {
 	if project == nil {
 		return nil
 	}
@@ -81,6 +94,20 @@ func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 		if cond.Type == tideprojectv1alpha2.ConditionFailureHalt &&
 			cond.Status == metav1.ConditionTrue {
 			return nil
+		}
+	}
+	// CR-02 resume time-fence: refuse to re-stamp a halt for a failure that
+	// predates the operator's `tide resume --retry-failed`. Mirrors
+	// setBillingHaltIfNeeded (billing_halt.go). Fail-closed on zero timestamp or
+	// unparseable annotation → fall through and stamp.
+	if !taskCompletedAt.IsZero() {
+		if resumeVal, ok := project.Annotations[tideprojectv1alpha2.AnnotationFailureResumedAt]; ok {
+			if resumedAt, err := time.Parse(time.RFC3339, resumeVal); err == nil {
+				if taskCompletedAt.Before(resumedAt) {
+					return nil // stale pre-resume straggler; no-op
+				}
+			}
+			// unparseable annotation → fall through (fail-closed: stamp halt)
 		}
 	}
 	patch := client.MergeFrom(project.DeepCopy())
