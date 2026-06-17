@@ -167,7 +167,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 26-01-PLAN.md — D-01 N-milestone project_planner template (+ golden/ratchet, idempotency guard on Job existence) + D-03 §6d milestone fan-out removal + README planning-DAG-edge note + DEPS-02 reinterpretation (MS-01, MS-02)
+- [x] 26-01-PLAN.md — D-01 N-milestone project_planner template (+ golden/ratchet, idempotency guard on Job existence) + D-03 §6d milestone fan-out removal + README planning-DAG-edge note + DEPS-02 reinterpretation (MS-01, MS-02)
 
 **Wave 2** *(blocked on 26-01)*
 
@@ -213,4 +213,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-17 |
-| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 0/4 | Not started | - |
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 1/4 | In Progress|  |
