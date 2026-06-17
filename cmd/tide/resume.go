@@ -128,11 +128,23 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		return nil
 	}
 
-	// Phase 25 D-04: clear FailureHalt when --retry-failed (conservative halt recovery).
-	// Re-fetch to get fresh resourceVersion after the BillingHalt status patch above.
-	// FailureHalt is task-execution-failure-specific; it is only meaningful to clear it
-	// together with the --retry-failed Task phase resets that follow. (Contrast with
-	// BillingHalt, which is cleared on bare resume regardless of --retry-failed.)
+	// Phase 25 CR-01: reset the Failed levels FIRST, then clear FailureHalt LAST.
+	// Ordering matters: while any Task still has Status.Phase=="Failed", the
+	// TaskReconciler terminal short-circuit (task_controller.go gateChecks) and
+	// handleJobCompletion re-stamp ConditionFailureHalt via setFailureHaltIfNeeded.
+	// Clearing the halt before resetting the tasks opened a re-stamp race that
+	// re-froze the project after a "successful" resume (the run-1 failure mode this
+	// verb replaces). Resetting first means no task can re-stamp once it leaves
+	// "Failed"; clearing last + the AnnotationFailureResumedAt fence (read by
+	// setFailureHaltIfNeeded) closes the residual informer-lag window.
+	if err := retryFailedLevels(ctx, c, ns, projectName, out); err != nil {
+		return err
+	}
+
+	// Phase 25 D-04 / CR-02: clear FailureHalt (conservative halt recovery) and stamp
+	// AnnotationFailureResumedAt so the reconciler backstop refuses to re-stamp a halt
+	// for any pre-resume straggler failure (mirrors the BillingHalt resume fence above).
+	// Re-fetch for a fresh resourceVersion after the Task phase-reset status patches.
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		return fmt.Errorf("re-get project for FailureHalt clear: %w", err)
 	}
@@ -143,12 +155,30 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		if err := c.Status().Patch(ctx, &proj, patch3); err != nil {
 			return fmt.Errorf("patch status (clear FailureHalt): %w", err)
 		}
+
+		// CR-02 fence stamp: AnnotationFailureResumedAt is metadata (not status) —
+		// separate metadata patch from the condition removal above. Re-fetch first
+		// for a fresh resourceVersion after the status patch.
+		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
+			return fmt.Errorf("re-get project for failure-resumed-at stamp: %w", err)
+		}
+		metaPatch := client.MergeFrom(proj.DeepCopy())
+		ann := proj.GetAnnotations()
+		if ann == nil {
+			ann = make(map[string]string)
+		}
+		ann[tidev1alpha2.AnnotationFailureResumedAt] = time.Now().UTC().Format(time.RFC3339)
+		proj.SetAnnotations(ann)
+		if err := c.Patch(ctx, &proj, metaPatch); err != nil {
+			return fmt.Errorf("patch metadata (failure-resumed-at stamp): %w", err)
+		}
+
 		if out != nil {
-			fmt.Fprintln(out, "tide: cleared FailureHalt; re-dispatch will resume after retry-failed reset")
+			fmt.Fprintln(out, "tide: cleared FailureHalt; pre-resume Failed-task stragglers can no longer re-trip the halt")
 		}
 	}
 
-	return retryFailedLevels(ctx, c, ns, projectName, out)
+	return nil
 }
 
 // retryFailedLevels walks all four level kinds (Milestone → Phase → Plan →
