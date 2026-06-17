@@ -952,26 +952,23 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		return ctrl.Result{}, nil
 	}
 
-	// Step 1b: Idempotency guard — skip dispatch when the Project already owns
-	// >=1 Milestone. Once the label fix makes the envelope round-trip succeed,
-	// Projects that already have a pre-applied Milestone (push-lease, chaos-resume,
-	// wave-test fixtures) would otherwise author a spurious extra Milestone.
-	// This mirrors BoundaryDetected's ownership check without the all-Succeeded
-	// requirement — we just need to know children exist.
+	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)
+
+	// Step 1b: Idempotency guard — skip dispatch when the planner Job already
+	// exists. Gating on Job existence (rather than owned-Milestone count) is safe
+	// for N>1 milestones: the N child Milestone CRDs materialize incrementally
+	// after the planner runs, so a count-based guard would fire mid-stream and
+	// abort the remaining N-1 Milestones. Job presence is the single stable signal
+	// that the planner was already dispatched — if it exists, we are done here.
 	{
-		var existingMilestones tidev1alpha2.MilestoneList
-		if lErr := r.List(ctx, &existingMilestones, client.InNamespace(project.Namespace)); lErr != nil {
-			return ctrl.Result{}, fmt.Errorf("idempotency: list milestones: %w", lErr)
-		}
-		for i := range existingMilestones.Items {
-			if metav1.IsControlledBy(&existingMilestones.Items[i], project) {
-				// Project already has at least one owned Milestone — planner already ran.
-				return ctrl.Result{}, nil
-			}
+		var existingJob batchv1.Job
+		if err := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &existingJob); err == nil {
+			// Planner Job already exists — planner already dispatched.
+			return ctrl.Result{}, nil
+		} else if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("idempotency: get planner job: %w", err)
 		}
 	}
-
-	jobName := fmt.Sprintf("tide-project-%s-1", project.UID)
 
 	// Step 2: On Running — check Job terminal state.
 	if project.Status.Phase == tidev1alpha2.PhaseRunning {
@@ -1531,9 +1528,10 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		}
 	}
 
-	// 5. Build de-duplicated edges via the shared resolver (sections 6a–6d moved
-	// to depgraph.buildGlobalEdges — output is byte-identical, pure extraction).
-	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items, msList.Items)
+	// 5. Build de-duplicated edges via the shared resolver (sections 6a–6c moved
+	// to depgraph.buildGlobalEdges — §6d Milestone fan-out removed in Phase 26;
+	// Milestone.dependsOn is a planning-DAG edge contributing zero execution edges).
+	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items)
 
 	// WR-04: surface any cross-Kind scope-name collision. resolveScope now unions
 	// all matching levels (so wave derivation never drops a true edge — staying

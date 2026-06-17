@@ -84,6 +84,8 @@ project.tideproject.k8s/small-project condition met
 
   The wave model only matters for the execution DAG. Planning is almost always fan-out-able to the breadth of subagent capacity.
 
+  A critical boundary: `Milestone.dependsOn` is a **planning-DAG edge only** — it governs planning order and gate-descent, and contributes zero execution edges. Cross-milestone execution coupling is expressed exclusively via task-level (or plan/phase-level) `dependsOn` that crosses milestone boundaries. This is why ζ (in Milestone B) is free in execution Wave 1 even when Milestone B's planning depends on Milestone A — no execution edge is implied by the Milestone-level dependency.
+
   Abstract visualization
 
   Planning graph — nested containment of Milestones → Phases → Plans → Tasks, with DAG edges where dependencies exist:
@@ -233,8 +235,8 @@ project.tideproject.k8s/small-project condition met
 
   TIDE runs the same algorithm twice in a project's lifecycle:
 
-  - Planning DAG: nodes are *artifacts to be authored* (MILESTONE.md, phase briefs, PLAN.md files). Edges are "this artifact's authoring requires another artifact's interface to be locked." Usually shallow; most phases plan in parallel once the architecture spec exists. Output: schedule for dispatching planner subagents.
-  - Execution DAG: nodes are *code mutations to be made* (tasks). Edges are "this code change requires another to be merged first." Usually deeper; reflects real interface dependencies. Output: schedule for dispatching executor subagents.
+  - Planning DAG: nodes are *artifacts to be authored* (MILESTONE.md, phase briefs, PLAN.md files). Edges are "this artifact's authoring requires another artifact's interface to be locked." Usually shallow; most phases plan in parallel once the architecture spec exists. Output: schedule for dispatching planner subagents. Milestone.dependsOn entries are planning-DAG edges — they sequence artifact authoring and gate-descent, not code execution.
+  - Execution DAG: nodes are *code mutations to be made* (tasks). Edges are "this code change requires another to be merged first." Usually deeper; reflects real interface dependencies. Output: schedule for dispatching executor subagents. Only task-level (or plan/phase-level) DependsOn contributes execution edges — Milestone-level DependsOn contributes zero execution edges.
 
   Same algorithm, same properties, different inputs. The orchestrator's wave-walking logic is identical for both phases of the project.
 
