@@ -1640,17 +1640,27 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 	for i := range allWaves.Items {
 		w := &allWaves.Items[i]
 		if w.Spec.ProjectRef == project.Name && w.Spec.WaveIndex >= len(globalWaves) {
-			// NOTE (Phase 25 OQ-3 deferred): an in-flight guard here would protect
-			// Waves with running Jobs from premature deletion. Deferred: the wave
-			// aggregator sets Phase="Running" even for 0-member waves (when all tasks
-			// are deleted), so a Phase-based guard would block pruning of legitimately
-			// stale empty waves (CR-01 regression). A correct guard requires the
-			// WaveController to distinguish "no tasks assigned" from "tasks in-flight";
-			// that wave-controller refactor is out of scope for Phase 25.
-			if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
-				return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
+			// OQ-3 fix: only prune if zero members OR already Succeeded.
+			// Zero-member: TaskRefs is empty (aggregator found no matching tasks after
+			// re-derivation deleted them). A freshly-created wave may show empty TaskRefs
+			// before the WaveReconciler stamps them — apply a CreationTimestamp fence to
+			// avoid a narrow race where a new wave is deleted before the aggregator runs.
+			// Succeeded: all member tasks completed — safe to remove.
+			recentlyCreated := time.Since(w.CreationTimestamp.Time) < 5*time.Second
+			if recentlyCreated && len(w.Status.TaskRefs) == 0 {
+				logger.V(1).Info("skipping prune of in-flight wave", "wave", w.Name,
+					"phase", w.Status.Phase, "memberCount", len(w.Status.TaskRefs))
+				continue
 			}
-			logger.Info("pruned stale global wave", "wave", w.Name, "waveIndex", w.Spec.WaveIndex, "currentWaveCount", len(globalWaves))
+			if len(w.Status.TaskRefs) == 0 || w.Status.Phase == "Succeeded" {
+				if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
+					return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
+				}
+				logger.Info("pruned stale global wave", "wave", w.Name, "waveIndex", w.Spec.WaveIndex, "currentWaveCount", len(globalWaves))
+			} else {
+				logger.V(1).Info("skipping prune of in-flight wave", "wave", w.Name,
+					"phase", w.Status.Phase, "memberCount", len(w.Status.TaskRefs))
+			}
 		}
 	}
 

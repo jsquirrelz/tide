@@ -173,7 +173,10 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 
 	var phase, message string
 	switch {
-	case allSucceeded && len(members) > 0:
+	case len(members) == 0:
+		phase = "ZeroMembers"
+		message = "No tasks assigned to this wave"
+	case allSucceeded:
 		phase = "Succeeded"
 		message = fmt.Sprintf("All %d member task(s) succeeded", len(members))
 	case failedTask != "":
