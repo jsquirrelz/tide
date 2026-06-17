@@ -203,7 +203,6 @@ func buildGlobalEdges(
 	tasks []tideprojectv1alpha2.Task,
 	plans []tideprojectv1alpha2.Plan,
 	phases []tideprojectv1alpha2.Phase,
-	ms []tideprojectv1alpha2.Milestone,
 ) []dag.Edge {
 	var edges []dag.Edge
 	edgeSet := make(map[string]struct{})

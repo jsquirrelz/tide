@@ -237,7 +237,7 @@ func TestBuildGlobalEdges_DirectTaskDependsOn(t *testing.T) {
 	}
 	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
 	resolver := buildScopeResolver(tasks, plans, nil, nil)
-	edges := buildGlobalEdges(resolver, tasks, plans, nil, nil)
+	edges := buildGlobalEdges(resolver, tasks, plans, nil)
 
 	es := edgeSetFrom(edges)
 	if _, ok := es[edgeKey{"task-a", "task-b"}]; !ok {
@@ -268,7 +268,7 @@ func TestBuildGlobalEdges_CoarsePlanDependsOn_FansOut(t *testing.T) {
 		makeTestPlan("plan-beta", "phase-1"),
 	}
 	resolver := buildScopeResolver(tasks, plans, nil, nil)
-	edges := buildGlobalEdges(resolver, tasks, plans, nil, nil)
+	edges := buildGlobalEdges(resolver, tasks, plans, nil)
 
 	es := edgeSetFrom(edges)
 	if _, ok := es[edgeKey{"task-a", "task-c"}]; !ok {
@@ -296,7 +296,7 @@ func TestBuildGlobalEdges_PlanLevelDependsOn_FansOut(t *testing.T) {
 		},
 	}
 	resolver := buildScopeResolver(tasks, plans, nil, nil)
-	edges := buildGlobalEdges(resolver, tasks, plans, nil, nil)
+	edges := buildGlobalEdges(resolver, tasks, plans, nil)
 
 	es := edgeSetFrom(edges)
 	if _, ok := es[edgeKey{"task-a", "task-b"}]; !ok {
@@ -322,7 +322,7 @@ func TestBuildGlobalEdges_EdgeDeDup_SameEdgeFromDirectAndPlanRef(t *testing.T) {
 		makeTestPlan("plan-beta", "phase-1"),
 	}
 	resolver := buildScopeResolver(tasks, plans, nil, nil)
-	edges := buildGlobalEdges(resolver, tasks, plans, nil, nil)
+	edges := buildGlobalEdges(resolver, tasks, plans, nil)
 
 	// Count how many times task-a → task-b appears.
 	count := 0

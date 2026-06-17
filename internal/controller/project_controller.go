@@ -1528,9 +1528,10 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		}
 	}
 
-	// 5. Build de-duplicated edges via the shared resolver (sections 6a–6d moved
-	// to depgraph.buildGlobalEdges — output is byte-identical, pure extraction).
-	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items, msList.Items)
+	// 5. Build de-duplicated edges via the shared resolver (sections 6a–6c moved
+	// to depgraph.buildGlobalEdges — §6d Milestone fan-out removed in Phase 26;
+	// Milestone.dependsOn is a planning-DAG edge contributing zero execution edges).
+	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items)
 
 	// WR-04: surface any cross-Kind scope-name collision. resolveScope now unions
 	// all matching levels (so wave derivation never drops a true edge — staying
