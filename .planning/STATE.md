@@ -4,8 +4,8 @@ milestone: v1.0.2
 milestone_name: Spring Tide — Global Execution DAG
 status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-06-17T00:33:30.147Z"
-last_activity: 2026-06-17 -- Phase 25 planning complete
+last_updated: "2026-06-17T00:35:17.192Z"
+last_activity: 2026-06-17 -- Phase 25 execution started
 progress:
   total_phases: 5
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 25 — global dispatch, failure semantics, gates & resumption
+**Current focus:** Phase 25 — global-dispatch-failure-semantics-gates-resumption
 
 ## Current Position
 
-Phase: 25
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-17 -- Phase 25 planning complete
+Phase: 25 (global-dispatch-failure-semantics-gates-resumption) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 25
+Last activity: 2026-06-17 -- Phase 25 execution started
 
 ## Performance Metrics
 
