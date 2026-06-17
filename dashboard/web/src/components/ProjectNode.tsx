@@ -39,7 +39,7 @@ export default function ProjectNode({ data, selected }: NodeProps<ProjectNodeTyp
       selected={selected}
       width={360}
       minHeight={92}
-      handleAxis="vertical"
+      handleAxis="horizontal"
       /* CR-04 fix: Project nodes in the Planning DAG are not clickable —
        * clicking would call setSelectedPlan(projectName) which has no
        * matching Plan and pollutes the right pane. */

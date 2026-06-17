@@ -34,7 +34,7 @@ export default function MilestoneNode({ data, selected }: NodeProps<MilestoneNod
       selected={selected}
       width={340}
       minHeight={84}
-      handleAxis="vertical"
+      handleAxis="horizontal"
       /* CR-04 fix: Milestone nodes in Planning DAG are not clickable. */
       clickable={false}
     />

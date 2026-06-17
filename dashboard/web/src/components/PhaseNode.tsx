@@ -33,7 +33,7 @@ export default function PhaseNode({ data, selected }: NodeProps<PhaseNodeType>) 
       selected={selected}
       width={320}
       minHeight={76}
-      handleAxis="vertical"
+      handleAxis="horizontal"
       /* CR-04 fix: Phase nodes in Planning DAG are not clickable. */
       clickable={false}
     />

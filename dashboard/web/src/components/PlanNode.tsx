@@ -40,7 +40,7 @@ export default function PlanNode({ data, selected }: NodeProps<PlanNodeType>) {
       selected={selected}
       width={300}
       minHeight={72}
-      handleAxis="vertical"
+      handleAxis="horizontal"
     />
   );
 }
