@@ -117,7 +117,11 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   2. When a task fails, its independent siblings in the same global wave continue, its global dependents are never dispatched (their global indegree never reaches zero), and non-dependents dispatch in strict / halt in conservative — exactly the spec §"Failure handling at wave boundaries" contract, now at global scope.
   3. A gate (milestone/phase/plan/task approve) withholds a globally-ready Task until approved and releases it on approval without bypassing dependency readiness; human-gate-policy stays configurable per Project (controller reads policy, does not bake it in).
   4. An orchestrator restart re-derives the entire Project execution schedule from the global indegree map + completed-task set alone, with no other persisted execution state and no cached schedule.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 25-01-PLAN.md — API vocabulary (FailureProfile enum + FailureHalt condition) + Nyquist Wave 0 RED test scaffolds (DISP-01/02/03, RESUME-01) + A1 coarse-ref grep
+- [ ] 25-02-PLAN.md — Global dispatch: shared coarse-ref fan-out resolver (depgraph.go) + global computeIndegree/listProjectTasks + globalDependentsMapper watch (DISP-01, DISP-03, RESUME-01)
+- [ ] 25-03-PLAN.md — Failure semantics: failure_halt.go + checkFailureHalt at four execution dispatch sites + tide resume --retry-failed clear + wave-prune guard (DISP-02)
 
 ### Phase 26: Multi-Milestone Drive + Spec Conformance
 **Goal**: A single Project drives multiple Milestones end-to-end via the Milestone DAG, with Tasks from different Milestones sharing global waves and per-milestone gate policy composing across the DAG — and the README cross-plan/cross-phase/cross-milestone worked example is pinned as an executable conformance test.
