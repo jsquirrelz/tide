@@ -574,22 +574,19 @@ Step 2.6: SKIPPED — no new external dependencies.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Coarse-ref resolution in `computeIndegree`**
-   - What we know: `assembleProjectDepGraph` resolves coarse refs via `tasksForScope` closure; `computeIndegree` treats every `dep` string as a Task name.
-   - What's unclear: Whether any current test fixtures or authored `DependsOn` entries use Plan/Phase/Milestone names (vs Task names). If not, the bug is latent but untriggered.
-   - Recommendation: Planner should add a task in Wave 0 to grep all Task.Spec.DependsOn across the test fixtures and confirm whether coarse refs are present. If present, factor `tasksForScope` into `depgraph.go` in the same wave. If absent, add a TODO comment in `computeIndegree` and schedule as a follow-on task.
+1. **Coarse-ref resolution in `computeIndegree` — RESOLVED**
+   - What we knew: `assembleProjectDepGraph` resolves coarse refs via the `tasksForScope` closure; `computeIndegree` treated every `dep` string as a Task name.
+   - **Resolution:** the coarse-ref fan-out is extracted into a shared `depgraph.go` resolver (`buildScopeResolver`/`resolveScope`, 25-02 Task 1) and is built UNCONDITIONALLY — `assembleProjectDepGraph` (wave derivation) AND `computeGlobalIndegree` (dispatch) both resolve edges through it, so they can never disagree (the D-01 "never disagree" clause). The `globalDependentsMapper` watch (25-02 Task 2) reuses the SAME resolver so a coarse-ref dependent (e.g. `DependsOn=["plan-alpha"]`) IS re-enqueued when any member task of `plan-alpha` completes/fails/holds — closing the liveness gap where a coarse-ref dependent would otherwise stall until the next periodic resync. The Wave 0 grep (25-01 Task 2) is purely diagnostic (records A1: whether current fixtures already exercise coarse refs); it does NOT gate whether the resolver is built. No TODO / follow-on fallback.
 
-2. **Wave prune guard (inherited from Phase 24 OQ-3)**
-   - What we know: `deriveGlobalWaves` prunes Waves with `WaveIndex >= len(globalWaves)` unconditionally (line 1751, `project_controller.go`). A task failure that reduces the DAG could delete a still-Running Wave.
-   - What's unclear: Whether a task failure actually causes re-derivation to produce fewer waves (it doesn't change the authored DAG, only Status.Phase — so the indegree model doesn't change the wave count). The prune may be safe in practice.
-   - Recommendation: Planner should add the `Wave.Status.Phase != "Succeeded"` guard to the prune block as a defensive measure; this is a ~3-line change noted in Phase 24 commentary.
+2. **Wave prune guard (inherited from Phase 24 OQ-3) — RESOLVED**
+   - What we knew: `deriveGlobalWaves` prunes Waves with `WaveIndex >= len(globalWaves)` unconditionally (line ~1751, `project_controller.go`); a re-derivation that produces fewer waves could delete a still-Running Wave.
+   - **Resolution:** add the `Wave.Status.Phase != "Succeeded"` (not-in-flight) guard to the prune block — implemented in 25-03 Task 2. A Wave beyond the re-derived count that is still Running is spared; only Succeeded/genuinely-stale Waves are pruned.
 
-3. **`ProjectReconciler` dispatch site check for `FailureHalt`**
-   - What we know: `checkBillingHalt` is called in `ProjectReconciler` (line ~1000) before dispatching project-level planner Jobs. `FailureHalt` should also be checked there.
-   - What's unclear: Whether a conservative halt should block *planning* (authoring milestones/phases/plans) or only *execution* (task dispatch). The spec says "non-dependents dispatch in strict / halt in conservative" — this refers to execution. Planning dispatch (ProjectReconciler dispatching the milestone planner) is a different DAG.
-   - Recommendation: Conservative halt should gate *task* dispatch only. The ProjectReconciler's planner-dispatch site should NOT check `FailureHalt`. This keeps conservative halt scoped to the execution layer, matching the spec's description of "non-dependents dispatch/halt" (planning is not a wave-boundary concept).
+3. **`ProjectReconciler` dispatch site check for `FailureHalt` — RESOLVED**
+   - What we knew: `checkBillingHalt` is called in `ProjectReconciler` (line ~1000) before dispatching project-level PLANNER Jobs.
+   - **Resolution (locked D-03):** the `project_controller.go` ~1000 site dispatches the project-level PLANNER Job, NOT a task execution Job — `checkFailureHalt` is NOT added there. Conservative failure halt is EXECUTION-ONLY; it gates only the four execution dispatch sites (task/plan/phase/milestone). Gating planning would wrongly freeze authoring of already-approved scopes. The negative grep assertion in 25-03 Task 2 confirms the planner site stays ungated.
 
 ---
 
