@@ -1641,13 +1641,16 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 		w := &allWaves.Items[i]
 		if w.Spec.ProjectRef == project.Name && w.Spec.WaveIndex >= len(globalWaves) {
 			// OQ-3 fix: only prune if zero members OR already Succeeded.
-			// Zero-member: TaskRefs is empty (aggregator found no matching tasks after
-			// re-derivation deleted them). A freshly-created wave may show empty TaskRefs
-			// before the WaveReconciler stamps them — apply a CreationTimestamp fence to
-			// avoid a narrow race where a new wave is deleted before the aggregator runs.
+			// Zero-member: TaskRefs is empty (aggregator set Phase="ZeroMembers").
 			// Succeeded: all member tasks completed — safe to remove.
-			recentlyCreated := time.Since(w.CreationTimestamp.Time) < 5*time.Second
-			if recentlyCreated && len(w.Status.TaskRefs) == 0 {
+			//
+			// CreationTimestamp fence: if the wave was just created (Phase still "")
+			// and TaskRefs is empty, the WaveReconciler may not have run yet —
+			// skip this prune pass to avoid deleting a wave before its members are
+			// stamped. The fence applies ONLY when Phase is unset (pre-aggregation);
+			// once the aggregator has run (Phase != ""), TaskRefs is authoritative.
+			if w.Status.Phase == "" && len(w.Status.TaskRefs) == 0 &&
+				time.Since(w.CreationTimestamp.Time) < 5*time.Second {
 				logger.V(1).Info("skipping prune of in-flight wave", "wave", w.Name,
 					"phase", w.Status.Phase, "memberCount", len(w.Status.TaskRefs))
 				continue

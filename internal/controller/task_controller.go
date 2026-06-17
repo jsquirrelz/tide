@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -1603,13 +1605,10 @@ func (r *TaskReconciler) directNameDependents(ctx context.Context, task *tidepro
 		if t.UID == task.UID {
 			continue
 		}
-		for _, dep := range t.Spec.DependsOn {
-			if dep == task.Name {
-				reqs = append(reqs, reconcile.Request{
-					NamespacedName: client.ObjectKey{Namespace: t.Namespace, Name: t.Name},
-				})
-				break
-			}
+		if slices.Contains(t.Spec.DependsOn, task.Name) {
+			reqs = append(reqs, reconcile.Request{
+				NamespacedName: client.ObjectKey{Namespace: t.Namespace, Name: t.Name},
+			})
 		}
 	}
 	return reqs
@@ -1704,6 +1703,37 @@ func isJobTerminal(job *batchv1.Job) bool {
 }
 
 // SetupWithManager wires the watch with Owns(&batchv1.Job{}) per CTRL-02, a
+// newStatusPhaseOrDepsChangedPredicate returns a predicate.Predicate that fires
+// only on Task UpdateEvents where the Status.Phase or Spec.DependsOn changed.
+// This is the WR-02 guard on globalDependentsMapper's Task watch: no-op
+// resourceVersion-only bumps are excluded so global re-derivation is not
+// triggered spuriously on every controller-manager heartbeat or label patch.
+//
+// Conservative contract: if either object fails the *Task type assertion, the
+// predicate returns true so the event is never silently dropped.
+// CreateFunc and DeleteFunc always return true (new/removed tasks must be
+// reflected in the global indegree map). GenericFunc returns false.
+//
+// Exported as newStatusPhaseOrDepsChangedPredicate (lowercase package-internal
+// constructor) so the unit test in task_controller_predicate_test.go can
+// exercise the firing matrix without going through SetupWithManager.
+func newStatusPhaseOrDepsChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldT, ok1 := e.ObjectOld.(*tideprojectv1alpha2.Task)
+			newT, ok2 := e.ObjectNew.(*tideprojectv1alpha2.Task)
+			if !ok1 || !ok2 {
+				return true // conservative: let untyped events through
+			}
+			return oldT.Status.Phase != newT.Status.Phase ||
+				!slices.Equal(oldT.Spec.DependsOn, newT.Spec.DependsOn)
+		},
+		CreateFunc:  func(event.CreateEvent) bool { return true },
+		DeleteFunc:  func(event.DeleteEvent) bool { return true },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
 // namespace-filter predicate per AUTH-02, the .spec.planRef field indexer
 // (RESEARCH.md Open Question #8; still needed by checkParentApproval), and a
 // global Task watch (globalDependentsMapper) for DISP-01 cross-plan readiness
@@ -1738,12 +1768,14 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Task on annotation changes without filtering Spec/finalizer/owner-ref
 	// updates from the default For() event stream.
 	annotationOnly := predicate.AnnotationChangedPredicate{}
+	statusPhaseOrDepsChanged := newStatusPhaseOrDepsChangedPredicate() // WR-02
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&tideprojectv1alpha2.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(
 			&tideprojectv1alpha2.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.globalDependentsMapper),
+			builder.WithPredicates(statusPhaseOrDepsChanged), // WR-02
 		).
 		Watches(
 			&tideprojectv1alpha2.Task{},
