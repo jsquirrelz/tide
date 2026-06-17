@@ -1494,63 +1494,13 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		return nil, nil, nil, fmt.Errorf("list milestones for project %s: %w", project.Name, listErr)
 	}
 
-	// 3. Build in-memory resolution maps (OQ-2).
-	taskNames := make(map[string]struct{}, len(taskList.Items))
-	tasksByPlan := make(map[string][]string) // plan.Name → []taskName
-	planToPhase := make(map[string]string)   // plan.Name → phase.Name
-	phaseToMS := make(map[string]string)     // phase.Name → milestone.Name
+	// 3. Build the shared coarse-ref fan-out resolver (Phase 25 D-01).
+	// Extracted to depgraph.go so TaskReconciler dispatch indegree and
+	// ProjectReconciler wave derivation share one resolver — they can never
+	// disagree about what an edge means.
+	resolver := buildScopeResolver(taskList.Items, planList.Items, phaseList.Items, msList.Items)
 
-	for i := range taskList.Items {
-		t := &taskList.Items[i]
-		taskNames[t.Name] = struct{}{}
-		tasksByPlan[t.Spec.PlanRef] = append(tasksByPlan[t.Spec.PlanRef], t.Name)
-	}
-	for i := range planList.Items {
-		p := &planList.Items[i]
-		planToPhase[p.Name] = p.Spec.PhaseRef
-	}
-	for i := range phaseList.Items {
-		ph := &phaseList.Items[i]
-		phaseToMS[ph.Name] = ph.Spec.MilestoneRef
-	}
-
-	// 4. tasksForScope resolves a scope ref to its member task names (in-memory,
-	// never persisted). Returns an empty slice for unresolved refs (conservative;
-	// never invents an edge — D-06).
-	tasksForScope := func(scopeName string) []string {
-		// Direct task match.
-		if _, isTask := taskNames[scopeName]; isTask {
-			return []string{scopeName}
-		}
-		// Plan match: all tasks with spec.planRef == scopeName.
-		if tasks, ok := tasksByPlan[scopeName]; ok {
-			return tasks
-		}
-		// Phase match: union of tasks in all plans whose planToPhase == scopeName.
-		var phaseResult []string
-		for planName, phaseName := range planToPhase {
-			if phaseName == scopeName {
-				phaseResult = append(phaseResult, tasksByPlan[planName]...)
-			}
-		}
-		if len(phaseResult) > 0 {
-			return phaseResult
-		}
-		// Milestone match: all tasks transitively under phases in this milestone.
-		var msResult []string
-		for phaseName, msName := range phaseToMS {
-			if msName == scopeName {
-				for planName, phaseName2 := range planToPhase {
-					if phaseName2 == phaseName {
-						msResult = append(msResult, tasksByPlan[planName]...)
-					}
-				}
-			}
-		}
-		return msResult // empty if unresolved — skip (conservative)
-	}
-
-	// 5. Build nodes (all Task names).
+	// 4. Build nodes (all Task names).
 	nodes = make([]dag.NodeID, 0, len(taskList.Items))
 	for i := range taskList.Items {
 		nodes = append(nodes, taskList.Items[i].Name)
@@ -1581,87 +1531,9 @@ func (r *ProjectReconciler) assembleProjectDepGraph(
 		}
 	}
 
-	// 6. Build de-duplicated edges (Pitfall 2 — edgeSet prevents double-indegree).
-	edgeSet := make(map[string]struct{})
-	addEdge := func(from, to string) {
-		key := from + "\x00" + to
-		if _, dup := edgeSet[key]; !dup {
-			edgeSet[key] = struct{}{}
-			edges = append(edges, dag.Edge{From: from, To: to})
-		}
-	}
-
-	// 6a. Task-level DependsOn fan-out: for each Task.DependsOn entry, expand
-	// the ref to its task set and add an edge from each source to this task.
-	for i := range taskList.Items {
-		t := &taskList.Items[i]
-		for _, dep := range t.Spec.DependsOn {
-			for _, from := range tasksForScope(dep) {
-				addEdge(from, t.Name)
-			}
-		}
-	}
-
-	// 6b. Plan-level DependsOn fan-out: Plan.DependsOn = ["scope"] means every
-	// Task in THIS plan depends on every Task in the referenced scope.
-	for i := range planList.Items {
-		p := &planList.Items[i]
-		for _, dep := range p.Spec.DependsOn {
-			fromTasks := tasksForScope(dep)
-			toTasks := tasksByPlan[p.Name]
-			for _, from := range fromTasks {
-				for _, to := range toTasks {
-					addEdge(from, to)
-				}
-			}
-		}
-	}
-
-	// 6c. Phase-level DependsOn fan-out: Phase.DependsOn = ["scope"] means every
-	// Task in THIS phase depends on every Task in the referenced scope.
-	for i := range phaseList.Items {
-		ph := &phaseList.Items[i]
-		for _, dep := range ph.Spec.DependsOn {
-			fromTasks := tasksForScope(dep)
-			// Collect all tasks in this phase (union of tasks in plans belonging here).
-			var toTasks []string
-			for planName, phaseName := range planToPhase {
-				if phaseName == ph.Name {
-					toTasks = append(toTasks, tasksByPlan[planName]...)
-				}
-			}
-			for _, from := range fromTasks {
-				for _, to := range toTasks {
-					addEdge(from, to)
-				}
-			}
-		}
-	}
-
-	// 6d. Milestone-level DependsOn fan-out: Milestone.DependsOn = ["scope"] means
-	// every Task in THIS milestone depends on every Task in the referenced scope.
-	for i := range msList.Items {
-		ms := &msList.Items[i]
-		for _, dep := range ms.Spec.DependsOn {
-			fromTasks := tasksForScope(dep)
-			// Collect all tasks in this milestone (transitively via phases/plans).
-			var toTasks []string
-			for phaseName, msName := range phaseToMS {
-				if msName == ms.Name {
-					for planName, phaseName2 := range planToPhase {
-						if phaseName2 == phaseName {
-							toTasks = append(toTasks, tasksByPlan[planName]...)
-						}
-					}
-				}
-			}
-			for _, from := range fromTasks {
-				for _, to := range toTasks {
-					addEdge(from, to)
-				}
-			}
-		}
-	}
+	// 5. Build de-duplicated edges via the shared resolver (sections 6a–6d moved
+	// to depgraph.buildGlobalEdges — output is byte-identical, pure extraction).
+	edges = buildGlobalEdges(resolver, taskList.Items, planList.Items, phaseList.Items, msList.Items)
 
 	return nodes, edges, taskList.Items, nil
 }
