@@ -363,6 +363,16 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 				"phase", ph.Name)
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
+		// Phase 28 IMPORT-01: park planner dispatch until import completes.
+		// Position: BEFORE pool acquire (Pitfall 2 — parking after acquire leaks a slot).
+		if earlyProject != nil && earlyProject.Spec.ImportSource != nil {
+			c := meta.FindStatusCondition(earlyProject.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+			if c == nil || c.Status != metav1.ConditionTrue {
+				logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch",
+					"phase", ph.Name)
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+		}
 	}
 
 	// Acquire plannerPool before creating Job (D-A4).

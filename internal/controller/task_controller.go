@@ -383,6 +383,18 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
 	}
 
+	// Phase 28 IMPORT-01: park task dispatch until import completes.
+	// Position: AFTER resolveProject (project is non-nil here — Pitfall 1) and BEFORE
+	// billing/budget/dispatch holds (Pitfall 2 — parking after pool acquire leaks a slot).
+	if project.Spec.ImportSource != nil {
+		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+		if c == nil || c.Status != metav1.ConditionTrue {
+			logf.FromContext(ctx).V(1).Info("import pending; holding task dispatch",
+				"task", task.Name, "project", project.Name)
+			return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 5 * time.Second}}, nil
+		}
+	}
+
 	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
 	// parent-approval); park, never fail; cleared by tide resume.
 	// Position: BEFORE pool/slot acquisition and BEFORE Job creation (Pitfall 2).

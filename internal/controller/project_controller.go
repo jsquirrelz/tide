@@ -1068,6 +1068,17 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Phase 28 IMPORT-01: park planner dispatch until import completes.
+	// Position: after terminal short-circuit and all earlier holds (Step 1),
+	// BEFORE pool acquire (Pitfall 2 — parking after acquire leaks a slot).
+	if project.Spec.ImportSource != nil {
+		c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionImportComplete)
+		if c == nil || c.Status != metav1.ConditionTrue {
+			logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch", "project", project.Name)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+	}
+
 	// Step 3: Acquire PlannerPool (POOL-01) before creating the Job (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
@@ -1237,7 +1248,11 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// fmt.Sprintf("tide-project-%s-1", ...), not from external input — the
 	// tide-project-<uid>-1 shape is a construction-site invariant.
 	plannerJobName := fmt.Sprintf("tide-project-%s-1", project.UID)
-	if isFirstCompletion && envReadOK {
+	// D-11/R-13: budget rollup is suppressed unconditionally for imported envelopes —
+	// the prior run already counted the planning cost; rolling up here would double-count.
+	if project.Spec.ImportSource != nil {
+		logger.V(1).Info("skipping budget rollup: project has importSource (D-11)", "project", project.Name)
+	} else if isFirstCompletion && envReadOK {
 		if project.Status.Budget.PlannerRolledUpUID != plannerJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
