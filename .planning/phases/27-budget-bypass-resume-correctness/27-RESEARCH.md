@@ -527,9 +527,14 @@ Step 2.6: SKIPPED (no external dependencies — code/schema-only changes).
 | A3 | Clone success is detectable in reconcilePhase3Lifecycle or a named handler near line 550-579 | BYPASS-02 investigation | If wrong, finding clone success detection requires another grep pass |
 | A4 | `PlannerRolledUpUID` set to job name (not job UID) is the right marker key | Code Examples | If wrong, the deterministic job name `tide-project-<uid>-1` collision risk is zero, so either key works |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Where is clone Job success currently detected?**
+> Both questions are implementation-detail and are resolved within the Phase 27 plans:
+> Q1 → 27-02 Task 2 (executor checks `existingClone.Status.Succeeded > 0` in the found-Job
+> branch after line 571 and sets `CloneComplete=true`). Q2 → 27-03 Task 2 (new `Describe`
+> block added to the existing `project_planner_completion_test.go`).
+
+1. **Where is clone Job success currently detected?** [RESOLVED — 27-02 Task 2]
    - What we know: clone Job is dispatched at `project_controller.go:549-571`; successful result patches `BranchName` at line 502 (set before clone dispatch, not after)
    - What's unclear: there is no explicit "clone succeeded" handler visible in `reconcilePhase3Lifecycle:470-579`. Clone success may be detected by checking `existingClone.Status.Succeeded > 0` on subsequent reconciles — needs targeted grep of `existingClone.Status` usage after the clone dispatch block
    - Recommendation: Add a targeted grep of `existingClone` after line 571 in the first plan-implementation task; or read `reconcilePhase3Lifecycle` fully (lines 470-579 were read only partially)

@@ -1,9 +1,9 @@
 ---
 phase: 27
 slug: budget-bypass-resume-correctness
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-18
 ---
 
