@@ -200,7 +200,23 @@ Plans:
   4. Raising the absolute budget cap alone clears a budget halt without the rolling-window cap immediately re-halting dispatch (both cap values are evaluated together before halting resumes).
   5. An envtest asserts that when the planner Job completes, the reporter Job spawns AND the planner cost rolls up while the planner Job still exists — locking in the `2a5e0dc` ordering fix against regression.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [ ] 27-01-PLAN.md — Add durable status fields (CloneComplete, PlannerRolledUpUID, BypassBaselineCents) + make manifests/generate; confirm QQH-01 ordering test GREEN baseline (D-06, BYPASS-05 verify-green)
+
+**Wave 2** *(blocked on 27-01)*
+
+- [ ] 27-02-PLAN.md — BYPASS-01 bypass targets PhaseRunning on initialized projects + init-Job BranchName guard; BYPASS-02 durable CloneComplete clone-dispatch guard + set-on-success + idempotency envtest
+
+**Wave 3** *(blocked on 27-02; shares project_controller.go)*
+
+- [ ] 27-03-PLAN.md — BYPASS-03 PlannerRolledUpUID rollup-once guard in handleProjectJobCompletion; BYPASS-05 TTL-GC double-count companion envtest
+
+**Wave 4** *(blocked on 27-02; shares project_controller.go)*
+
+- [ ] 27-04-PLAN.md — BYPASS-04 acknowledged-spend baseline + which-cap observability in handleBudgetGate (D-04, overrides RESEARCH Pattern 4); IsCapExceeded unchanged + call-site audit + unit/envtest coverage
 
 ### Phase 28: Plan-Import Core
 
