@@ -193,6 +193,13 @@ images:
     repository: ghcr.io/jsquirrelz/tide-reporter
     tag: ""
     pullPolicy: IfNotPresent
+  # Phase 28 (IMPORT-01): in-namespace UID-rewrite import Job image.
+  # Wired to ImportController via TIDE_IMPORT_IMAGE env var on the manager Deployment.
+  # When empty, ImportController skips Job creation (mirrors tideReporter empty-skip).
+  tideImport:
+    repository: ghcr.io/jsquirrelz/tide-import
+    tag: ""
+    pullPolicy: IfNotPresent
 
 # Phase 3 plan 03-09 (D-C4): per-level subagent defaults. Resolution chain at
 # dispatch time (in MilestoneReconciler / PhaseReconciler / PlanReconciler before
