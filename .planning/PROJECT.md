@@ -8,26 +8,24 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Current Milestone: v1.0.2 Spring Tide — Global Execution DAG (severe corrective patch)
+## Current Milestone: v1.0.3 — Planning Resumption & Cost Resilience
 
-**Goal:** Re-architect execution so waves are derived from ONE global Execution DAG, assembled after planning completes — restoring the Topologically-Indexed paradigm that v1.0.0/v1.0.1 claimed but never implemented. Dispatch and resumption run off a single global indegree map + completed-task set.
+**Goal:** Make interrupted or budget-halted TIDE runs cheaply resumable — a halt (budget, crash, bug) must never cost the already-authored plan. Extend the spec's re-derive resumption philosophy (indegree map + completed-set) to planning artifacts (planner envelopes).
 
-**Why this supersedes Ebb Tide:** The intended v1.0.2 (Ebb Tide — Token & Cost Optimization, phases 18–21) was completed but **will not be released**. Dogfood run #2 surfaced a foundational defect: there is no global Execution DAG. `Plan` has no dependency field, `Task.dependsOn` is plan-local (D-F1), waves are derived per-plan (`tide-wave-<plan.UID>-<i>` in `materializeWaves`), and there is no global indegree map. The "Topologically-Indexed" namesake — "given any task you know its wave; given any wave you know its tasks" (README:54) — holds only *within a plan*, not globally; the README execution graph (waves spanning plans/phases/milestones, cross-plan edges) was never implemented. v1.0.0 and v1.0.1 shipped on this invalid foundation. **v1.0.2 is the patch that makes the 1.0 line actually be what it claimed.** The Ebb Tide token/cost + observability work (phases 18–21) is preserved as superseded scope and folded forward where it still applies.
+**Why now:** TIDE-on-TIDE dogfood run #2 (2026-06-17/18), run on the freshly-correct Spring Tide foundation, budget-halted *during planning* (~$90 of LLM calls; 3 milestones / 15 phases / 42 plans; ZERO execution) and could not resume without re-paying all planning — the planner always re-authors from the outcome prompt. The full plan tree survived on the PVC and was salvaged to `examples/projects/dogfood/salvage-20260618/`, giving the first real plan-import fixture.
 
 **Target features:**
-- Global task-DAG assembly across all plans/phases once planning completes.
-- Global wave derivation (layered Kahn) producing a single queryable wave index.
-- Cross-plan and cross-phase task dependencies expressible (retire plan-local D-F1; add Plan deps and/or qualified Task deps).
-- Dispatch + resumption off ONE global indegree map + completed-task set (spec §resumption).
-- Wave-boundary failure semantics preserved exactly, at global scope.
-- CRD schema migration + versioning (Wave re-owned Plan→Project/Milestone; `wave` label resemantics) — the breaking surface.
-- Dashboard `embed/dist` staleness fix (published images must ship the current SPA, not a pre-telemetry bundle).
+- **Plan-import / envelope-resumption (headline):** a fresh run adopts pre-authored planner envelopes and SKIPS the planner when a valid envelope already exists, going straight to materialize → execution. Design crux: envelopes are UID-keyed (`envelopes/<objUID>/out.json`) and a fresh run assigns new UIDs, so import needs name-based / stable-key envelope lookup or a UID-rewrite import step (not a drop-in restore).
+- **Budget-bypass resume correctness:** bypass-clear must resume at `Running`, not `Pending` (`project_controller.go:1257`), and re-init must not fire when children already exist; safer cap-raise ergonomics (raising one of absolute/rolling cap should not leave the other re-halting instantly).
+- **Regression coverage** for the project-controller planner-completion ordering fix already landed (`2a5e0dc`, quick task 260617-qqh): the Running-branch terminal-completion check precedes the idempotency early-return at the project→milestone dispatch site.
 
 **Key constraints for this milestone:**
-- The spec (README execution-graph section) is the contract — implementation conforms to it; the spec is updated first only where a real pressure forces a paradigm change.
-- Preserve the wave-boundary failure contract exactly (spec §"Failure handling at wave boundaries").
-- Resumption state stays minimal: global indegree map + completed-task set — nothing more.
-- Breaking CRD changes ship with a migration path; no silent data loss for in-flight Projects.
+- Persistence stays CRD-`.status`-only — no external DB; resumption state stays minimal and re-derivable (spec §resumption).
+- The planner-skip path must not weaken cycle detection or the wave-boundary failure contract.
+- Plan-import must be safe across CRD UID churn — no silent adoption of a stale or mismatched envelope (validate before skipping a planner).
+- This milestone de-risks the still-deferred OpenAI-backend + dogfood-run-#2-completion milestone; it does not itself add a provider.
+
+**Predecessor:** v1.0.2 Spring Tide — Global Execution DAG (phases 22–26) is COMPLETE — the global Execution DAG is real end-to-end; this milestone builds on it.
 
 ## Current State (v1.0.1 — SHIPPED 2026-06-13)
 
@@ -36,7 +34,7 @@ Two milestones shipped:
 - **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 - **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Current focus:** Executing milestone **v1.0.2 Spring Tide — Global Execution DAG** (see the Current Milestone section above). Phase 22 (dashboard-embed-freshness FIX-01) and Phase 23 (v1alpha2 schema + cross-scope dependency model) are complete; **Phase 24 (Global Wave Derivation Engine, EXEC-01..04) is complete** — `ProjectReconciler` now assembles ONE global Execution DAG and derives global `tide-wave-<project>-<N>` waves via layered Kahn, the per-plan wave path is removed (single Wave writer), and re-derivation is O(V+E) with no cached schedule. Next is Phase 25 (global dispatch, failure semantics, gates & resumption). Dogfood run #2 + the OpenAI/Codex backend remain deferred behind Spring Tide; the headline beyond that remains full TIDE-on-TIDE.
+**Current focus:** Starting milestone **v1.0.3 — Planning Resumption & Cost Resilience** (see the Current Milestone section above). v1.0.2 Spring Tide (phases 22–26, the global Execution DAG) is complete; dogfood run #2 then ran on it and budget-halted in planning (~$90, zero execution) with no way to resume — motivating this milestone (plan-import/envelope-resumption, budget-bypass resume correctness, and regression coverage for the project-controller ordering fix already landed in `2a5e0dc`). The OpenAI/Codex backend + dogfood-run-#2 completion remain deferred behind this; the headline beyond that remains full TIDE-on-TIDE.
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -174,4 +172,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-16 — Phase 24 (Global Wave Derivation Engine, EXEC-01..04) complete: global Execution DAG + global wave derivation landed in ProjectReconciler, per-plan wave path removed (single Wave writer), CR-01 prune-leak blocker fixed with regression coverage. Next: Phase 25 (global dispatch/failure/gates/resumption). v1.0.2 = Spring Tide (Global Execution DAG), the corrective patch superseding the unreleased Ebb Tide scope.*
+*Last updated: 2026-06-18 — Started milestone v1.0.3 (Planning Resumption & Cost Resilience). v1.0.2 Spring Tide (phases 22–26, global Execution DAG) complete; dogfood run #2 budget-halted in planning (~$90, zero execution) and could not resume, motivating plan-import/envelope-resumption + budget-bypass resume correctness + regression coverage for the project-controller ordering fix (`2a5e0dc`).*

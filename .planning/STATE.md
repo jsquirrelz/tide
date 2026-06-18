@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.2
-milestone_name: "— Spring Tide: Global Execution DAG"
-status: completed
-stopped_at: "Phase 26 — 26-04 T3 checkpoint: capture SPEC-01 dashboard screenshots, replace README mermaid (human-verify)"
-last_updated: "2026-06-17T19:08:43.266Z"
-last_activity: 2026-06-17 -- Phase 26 marked complete
+milestone: v1.0.3
+milestone_name: Planning Resumption & Cost Resilience
+status: planning
+last_updated: "2026-06-18T12:56:08.621Z"
+last_activity: 2026-06-18
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 19
-  completed_plans: 19
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 
 ## Current Position
 
-Phase: 26 — COMPLETE
-Plan: 1 of 4
-Status: Phase 26 complete
-Last activity: 2026-06-17 -- Completed quick task 260617-qqh: fix project-controller planner-completion ordering
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-18 — Milestone v1.0.3 started
 
 ## Performance Metrics
 
