@@ -15,6 +15,7 @@ Dockerfile.cross
 /tide-demo-init
 /tide-push
 /tide-reporter
+/tide-import
 /stub-subagent
 /claude-subagent
 
