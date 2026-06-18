@@ -595,6 +595,34 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		}
 	}
 
+	// WR-03 (Phase 27): terminal-failed clone arm. When the clone Job exhausts
+	// its BackoffLimit it goes terminal-Failed (Failed>0, Succeeded==0). The
+	// dispatch guard above is gated on IsNotFound(cloneErr), and set-on-success
+	// is gated on Succeeded>0 — so a failed clone Job that still exists (not yet
+	// TTL-GC'd) stalls the project for up to the clone Job TTL (300s) with no
+	// progress signal: CloneComplete is never set and IsNotFound never fires.
+	// Delete the failed Job so the next reconcile re-dispatches a fresh clone,
+	// and surface a CloneFailed condition so an operator sees the stall+recovery.
+	if cloneErr == nil && existingClone.Status.Failed > 0 && existingClone.Status.Succeeded == 0 && !project.Status.Git.CloneComplete {
+		logger.Info("clone Job terminal-failed; deleting to re-dispatch", "job", cloneJobName, "failed", existingClone.Status.Failed)
+		if dErr := r.Delete(ctx, &existingClone, client.PropagationPolicy(metav1.DeletePropagationBackground)); dErr != nil && !apierrors.IsNotFound(dErr) {
+			return ctrl.Result{}, fmt.Errorf("delete failed clone job: %w", dErr)
+		}
+		condPatch := client.MergeFrom(project.DeepCopy())
+		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+			Type:               tidev1alpha2.ConditionCloneFailed,
+			Status:             metav1.ConditionTrue,
+			Reason:             "CloneJobFailed",
+			Message:            fmt.Sprintf("Clone Job %s reached terminal-Failed (failed=%d); deleted to re-dispatch", cloneJobName, existingClone.Status.Failed),
+			LastTransitionTime: metav1.Now(),
+		})
+		if pErr := r.Status().Patch(ctx, project, condPatch); pErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch CloneFailed condition: %w", pErr)
+		}
+		// Requeue so the next reconcile re-dispatches now that the failed Job is gone.
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// Step 4 (boundary push): handled by reconcileBoundaryPush via the
 	// Step-0 Complete fast-path above. A non-Complete project that reaches
 	// here has no run branch to push yet, so there is nothing to do.

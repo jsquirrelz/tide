@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -202,6 +203,133 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 				g.Expect(got.Status.Git.CloneComplete).To(BeTrue(),
 					"Status.Git.CloneComplete must be true after clone Job reports Succeeded>0")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// WR-03 (Phase 27): a terminally-failed clone Job (Failed>0, Succeeded==0)
+	// must be deleted so the next reconcile re-dispatches a fresh clone, instead
+	// of stalling for the clone Job's 300s TTL (CloneComplete never set,
+	// IsNotFound never true). A CloneFailed condition surfaces the recovery.
+	Describe("Spec 3: terminal-failed clone Job is deleted to re-dispatch (WR-03)", func() {
+		const projectName = "test-clone-idempotency-failed-redispatch"
+
+		AfterEach(func() {
+			p := &tideprojectv1alpha2.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+		})
+
+		It("deletes a Failed clone Job and re-dispatches, setting CloneFailed", func() {
+			proj := &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
+				Spec: tideprojectv1alpha2.ProjectSpec{
+					SchemaRevision: "v1alpha2",
+					TargetRepo:     "https://github.com/example/test.git",
+					Git: &tideprojectv1alpha2.GitConfig{
+						RepoURL:        "https://github.com/example/test.git",
+						CredsSecretRef: "test-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+
+			r := &ProjectReconciler{
+				Client:                  k8sClient,
+				Scheme:                  k8sClient.Scheme(),
+				Dispatcher:              &stubDispatcher{},
+				MaxConcurrentReconciles: 1,
+				SharedPVCName:           pvcName,
+				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
+			}
+
+			// Advance to the clone-dispatch point: drive reconciles + succeed the
+			// init Job so reconcilePhase3Lifecycle dispatches the clone Job.
+			var p tideprojectv1alpha2.Project
+			for range 10 {
+				_, err := r.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
+				})
+				if err != nil && !isConflict(err) {
+					Expect(err).NotTo(HaveOccurred())
+				}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err == nil {
+					initJobName := fmt.Sprintf("tide-init-%s", p.UID)
+					var j batchv1.Job
+					if err := k8sClient.Get(ctx, types.NamespacedName{Name: initJobName, Namespace: "default"}, &j); err == nil {
+						if !isJobSucceeded(&j) {
+							_ = makeFakeJobTerminal(ctx, k8sClient, initJobName, "default", true)
+						}
+					}
+				}
+			}
+
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
+			cloneJobName := fmt.Sprintf("tide-clone-%s", p.UID)
+
+			// Patch the clone Job to terminal-FAILED (Failed>0, Succeeded==0). The
+			// apiserver Job validation requires a FailureTarget=True condition before
+			// Failed=True and rejects a completionTime on a failed Job, so set the
+			// conditions explicitly rather than via makeFakeJobTerminal.
+			Eventually(func() error {
+				var j batchv1.Job
+				if gErr := k8sClient.Get(ctx, types.NamespacedName{Name: cloneJobName, Namespace: "default"}, &j); gErr != nil {
+					return gErr
+				}
+				now := metav1.Now()
+				j.Status.StartTime = &now
+				j.Status.Failed = 1
+				j.Status.Conditions = []batchv1.JobCondition{
+					{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "BackoffLimitExceeded"},
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "BackoffLimitExceeded"},
+				}
+				return k8sClient.Status().Update(ctx, &j)
+			}, 5*time.Second, 200*time.Millisecond).Should(Succeed(),
+				"clone Job should exist and be patchable to failed")
+
+			// Capture the failed Job's UID so we can prove it was actually deleted
+			// (a re-dispatched Job has a new UID).
+			var failedJob batchv1.Job
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: cloneJobName, Namespace: "default"}, &failedJob)).To(Succeed())
+			failedUID := failedJob.UID
+
+			// Drive reconciles: the WR-03 arm deletes the failed Job; the next
+			// reconcile re-dispatches a fresh clone Job (new UID).
+			for range 5 {
+				_, err := r.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
+				})
+				if err != nil && !isConflict(err) {
+					Expect(err).NotTo(HaveOccurred())
+				}
+			}
+
+			// The failed Job must be gone (deleted), and CloneFailed condition set.
+			Eventually(func(g Gomega) {
+				var got tideprojectv1alpha2.Project
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
+				cond := false
+				for i := range got.Status.Conditions {
+					if got.Status.Conditions[i].Type == tideprojectv1alpha2.ConditionCloneFailed &&
+						got.Status.Conditions[i].Status == metav1.ConditionTrue {
+						cond = true
+					}
+				}
+				g.Expect(cond).To(BeTrue(),
+					"ConditionCloneFailed=True must be set when the clone Job terminal-fails")
+
+				// Either the failed Job was deleted (NotFound) or a fresh one with a
+				// new UID was re-dispatched — both prove the stall was broken.
+				var cur batchv1.Job
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: cloneJobName, Namespace: "default"}, &cur)
+				if err == nil {
+					g.Expect(cur.UID).NotTo(Equal(failedUID),
+						"a re-dispatched clone Job must have a new UID (the failed one was deleted)")
+				}
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})

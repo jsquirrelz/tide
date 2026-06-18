@@ -99,6 +99,13 @@ const (
 	// re-running the boundary). Set by the ProjectReconciler push-result
 	// envelope handler (plan 04-06 task 1).
 	ConditionPushLeakBlocked = "PushLeakBlocked"
+
+	// ConditionCloneFailed — the clone Job reached terminal-Failed (Failed>0,
+	// Succeeded==0) after exhausting its BackoffLimit (Phase 27 WR-03). The
+	// ProjectReconciler deletes the failed Job to fast-path a re-dispatch
+	// instead of stalling on the clone Job's 300s TTL; this condition surfaces
+	// the failure+recovery so an operator can see the clone stall window.
+	ConditionCloneFailed = "CloneFailed"
 )
 
 // Debug defect #13b — boundary-push observability + bounded auto-retry.
