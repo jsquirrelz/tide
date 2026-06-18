@@ -216,7 +216,7 @@ Plans:
 
 **Wave 4** *(blocked on 27-02; shares project_controller.go)*
 
-- [ ] 27-04-PLAN.md — BYPASS-04 acknowledged-spend baseline + which-cap observability in handleBudgetGate (D-04, overrides RESEARCH Pattern 4); IsCapExceeded unchanged + call-site audit + unit/envtest coverage
+- [x] 27-04-PLAN.md — BYPASS-04 acknowledged-spend baseline + which-cap observability in handleBudgetGate (D-04, overrides RESEARCH Pattern 4); IsCapExceeded unchanged + call-site audit + unit/envtest coverage
 
 ### Phase 28: Plan-Import Core
 
@@ -284,6 +284,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-17 |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
-| 27. Budget-Bypass Resume Correctness | v1.0.3 | 3/4 | In Progress|  |
+| 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 0/TBD | Not started | - |
 | 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
