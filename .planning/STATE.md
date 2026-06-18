@@ -4,13 +4,13 @@ milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
 status: executing
 stopped_at: Phase 28 context gathered
-last_updated: "2026-06-18T18:15:04.270Z"
-last_activity: 2026-06-18 -- Phase 28 planning complete
+last_updated: "2026-06-18T18:20:59.282Z"
+last_activity: 2026-06-18
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
   percent: 75
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 28 — Plan-Import Core (design checkpoint required before implementation)
+**Current focus:** Phase 28 — plan-import-core
 
 ## Current Position
 
-Phase: 27 (budget-bypass-resume-correctness) — COMPLETE (gate APPROVED 5/5)
-Plan: 4 of 4 complete
+Phase: 28 (plan-import-core) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-06-18 -- Phase 28 planning complete
+Last activity: 2026-06-18
 
 ```
 v1.0.3 Progress: [x] 27  [ ] 28  [ ] 29
@@ -58,6 +58,7 @@ v1.0.3 Progress: [x] 27  [ ] 28  [ ] 29
 | Phase 20-sharedcontext-injection-cache-verification-spike P03 | 25 | 2 tasks | 9 files |
 | Phase 25 P02 | 5h45m | 2 tasks | 9 files |
 | Phase 25 P03 | 35 | 2 tasks | 6 files |
+| Phase 28-plan-import-core P01 | 5m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -124,6 +125,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-18T17:23:46.802Z
+Last session: 2026-06-18T18:20:59.267Z
 Stopped at: Phase 28 context gathered
-Resume file: .planning/phases/28-plan-import-core/28-CONTEXT.md
+Resume file: None
