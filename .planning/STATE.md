@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
 status: planning
-last_updated: "2026-06-18T12:56:08.621Z"
+last_updated: "2026-06-18T00:00:00.000Z"
 last_activity: 2026-06-18
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,22 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-16)
+See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 26 — multi-milestone-drive-spec-conformance
+**Current focus:** Phase 27 — Budget-Bypass Resume Correctness
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 27 — Budget-Bypass Resume Correctness
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-18 — Milestone v1.0.3 started
+Status: Roadmap defined; ready for plan-phase
+Last activity: 2026-06-18 — Roadmap created for v1.0.3 (phases 27–29, 12/12 requirements mapped)
+
+```
+v1.0.3 Progress: [ ] 27  [ ] 28  [ ] 29
+                  0 / 3 phases complete
+```
 
 ## Performance Metrics
 
@@ -71,6 +76,9 @@ Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); 
 - [Phase ?]: Both ProjectReconciler and TaskReconciler call the same buildScopeResolver/resolveScope, eliminating any possibility of indegree/wave disagreement
 - [Phase ?]: computeGlobalIndegree treats unresolved DependsOn refs as unsatisfied to prevent ghost dispatches
 - [Phase ?]: Wave prune OQ-3 deferred: zero-member waves show Phase=Running; guard deferred to Phase 26 to avoid CR-01 regression
+- [v1.0.3 roadmap]: Phase 28 (Plan-Import Core) has a mandatory design checkpoint: Approach A (name-based / stable-key paths) vs Approach B (UID-rewrite ImportController + tide-import Job). The salvage fixture contains only UID-keyed paths — narrowing the practical gap. No implementation plans may be written until the operator resolves this via /gsd:discuss-phase or /gsd:spec-phase.
+- [v1.0.3 roadmap]: Wave CRs are NEVER imported (PERSIST-03 / D-10 binding). Import materializes Milestone/Phase/Plan/Task CRs only; Wave CRs always re-derived by deriveGlobalWaves after import.
+- [v1.0.3 roadmap]: client.Create bypasses the validating webhook; any import path must call dag.ComputeWaves explicitly before materializing children (cycle detection is not automatic on import).
 
 ### Pending Todos
 
@@ -78,6 +86,7 @@ None.
 
 ### Blockers/Concerns
 
+- Phase 28 (Plan-Import Core): Approach A vs B is an unresolved one-way door. Must be resolved at plan-phase before any implementation begins. Both are fully documented in research/ARCHITECTURE.md, research/STACK.md, and research/FEATURES.md.
 - SCHEMA-03 is the breaking surface: Wave re-ownership (Plan → Project) and `wave`-label resemantics change the CRD contract. The migration/conversion path must carry in-flight Projects without silent corruption — this is the highest-risk plan in Phase 23 and gates everything downstream.
 - Phase 21 (Ebb Tide) is still in Needs Review with 2 live-cluster human-UAT checks outstanding. Ebb Tide is superseded and will not be released, so this is administrative; resolve or formally defer at the Spring Tide close.
 
@@ -114,6 +123,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-17T15:43:42.342Z
-Stopped at: Phase 26 — 26-04 T3 checkpoint: capture SPEC-01 dashboard screenshots, replace README mermaid (human-verify)
-Resume file: .planning/phases/26-multi-milestone-drive-spec-conformance/26-04-PLAN.md
+Last session: 2026-06-18T00:00:00.000Z
+Stopped at: Roadmap created for v1.0.3 — phases 27–29 defined, ready for /gsd:plan-phase 27
+Resume file: .planning/ROADMAP.md

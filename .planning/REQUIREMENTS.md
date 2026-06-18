@@ -56,4 +56,15 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| _(filled by roadmap)_ | | |
+| BYPASS-01 | Phase 27 | Pending |
+| BYPASS-02 | Phase 27 | Pending |
+| BYPASS-03 | Phase 27 | Pending |
+| BYPASS-04 | Phase 27 | Pending |
+| BYPASS-05 | Phase 27 | Pending |
+| IMPORT-01 | Phase 28 | Pending |
+| IMPORT-02 | Phase 28 | Pending |
+| IMPORT-03 | Phase 28 | Pending |
+| IMPORT-04 | Phase 28 | Pending |
+| IMPORT-05 | Phase 28 | Pending |
+| TOOL-01 | Phase 29 | Pending |
+| TOOL-02 | Phase 29 | Pending |

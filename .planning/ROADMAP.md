@@ -6,7 +6,8 @@
 - ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13) — ⚠ same invalid foundation
 - ⊘ **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (completed; **SUPERSEDED — will not be released**, artifacts preserved). Superseded after dogfood run #2 surfaced the per-plan-waves defect.
 - 🚧 **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22–26 (planning). Re-architect execution to ONE global Execution DAG spanning the entire Project — the patch that makes the Topologically-Indexed paradigm real. Supersedes Ebb Tide; preempts the OpenAI/dogfood milestone.
-- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.2 Spring Tide landing a correct execution layer)
+- 🚧 **v1.0.3 — Planning Resumption & Cost Resilience** — Phases 27–29 (in progress). Make interrupted or budget-halted TIDE runs cheaply resumable — a halt must never cost the already-authored plan.
+- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.3 landing plan-import/envelope-resumption)
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
 ## Phases
@@ -60,7 +61,15 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 - [ ] **Phase 23: Schema Migration + Cross-Scope Dependency Model** — Breaking CRD changes (Wave re-owned to Project scope, global `wave` label) with a migration path, plus cross-plan/phase/milestone task deps reconciled into one global DAG with cyclic rejection
 - [ ] **Phase 24: Global Wave Derivation Engine** — Assemble ONE global Execution DAG after planning and derive global waves via layered Kahn; the bidirectional global wave index, re-derived O(V+E) with no cached schedule
 - [ ] **Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption** — Dispatch off the global indegree map vs the completed-task set; wave-boundary failure contract preserved exactly at global scope; gates compose as holds; restart re-derives the whole schedule
-- [ ] **Phase 26: Multi-Milestone Drive + Spec Conformance** — A Project drives multiple Milestones via the Milestone DAG with cross-milestone global waves and per-milestone gate policy; the README worked example is an executable conformance test
+- [ ] **Phase 26: Multi-Milestone Drive + Spec Conformance** — A Project drives multiple Milestones via the Milestone DAG with cross-milestone global waves and per-milestone gate policy composing across the DAG; the README worked example is an executable conformance test
+
+### 🚧 v1.0.3 — Planning Resumption & Cost Resilience (In Progress)
+
+**Milestone Goal:** Make interrupted or budget-halted TIDE runs cheaply resumable — a halt (budget, crash, bug) must never cost the already-authored plan. Motivated by dogfood run #2 budget-halting during planning (~$90, zero execution) with no resume path. Builds on Spring Tide's correct execution foundation.
+
+- [ ] **Phase 27: Budget-Bypass Resume Correctness** — Fix the three identified bypass-path bugs and add regression coverage for the `2a5e0dc` ordering fix; ships independently of import work
+- [ ] **Phase 28: Plan-Import Core** — Resolve the Approach A vs B design checkpoint FIRST, then implement envelope-import that bridges UID-churn, validates before adoption, runs cycle detection, converts v1alpha1 schema, and never imports Wave CRs
+- [ ] **Phase 29: Operator Tooling + E2E** — `tide` CLI import/export commands and the kind integration test proving end-to-end resumption against the `salvage-20260618` fixture
 
 ## Phase Details
 
@@ -178,10 +187,55 @@ Plans:
 
 - [x] 26-04-PLAN.md — D-07 GlobalExecutionDAGView + GET /api/v1/projects/{name}/execution-dag + EmptyState variants + App wiring (embed regenerated); live-cluster screenshots of the SPEC-01 fixture replace both README mermaid diagrams (SPEC-01)
 
+### Phase 27: Budget-Bypass Resume Correctness
+
+**Goal**: A budget-halted Project resumes at `Running` without re-initializing the workspace or double-counting planning cost, cap-raise ergonomics no longer require raising both caps in lockstep, and the `2a5e0dc` planner-completion ordering fix has regression coverage — all without touching the import path.
+**Depends on**: Phase 26 (v1.0.2 Spring Tide complete; correctness baseline established)
+**Requirements**: BYPASS-01, BYPASS-02, BYPASS-03, BYPASS-04, BYPASS-05
+**Success Criteria** (what must be TRUE):
+
+  1. Clearing a budget halt (`tideproject.k8s/bypass-budget`) resumes the project at `Running`, not `Pending` — no workspace re-init or re-clone Job fires when `Status.Git.BranchName` is already set.
+  2. A resume never re-dispatches the clone Job when the workspace is already initialized — the guard is a durable `CloneComplete` status flag, not reporter-Job existence (TTL-GC-safe).
+  3. Planning cost is rolled up exactly once across a halt-resume cycle — a durable `PlannerRolledUpUID` marker prevents double-count when the reporter Job has been garbage-collected during a halt.
+  4. Raising the absolute budget cap alone clears a budget halt without the rolling-window cap immediately re-halting dispatch (both cap values are evaluated together before halting resumes).
+  5. An envtest asserts that when the planner Job completes, the reporter Job spawns AND the planner cost rolls up while the planner Job still exists — locking in the `2a5e0dc` ordering fix against regression.
+
+**Plans**: TBD
+
+### Phase 28: Plan-Import Core
+
+**Goal**: A fresh Project run adopts pre-authored planner envelopes and skips the planner for every level whose valid envelope already exists — resolving the UID-churn problem via a stable identity scheme, validating every envelope before adoption, running cycle detection before materializing any child CRDs, converting v1alpha1 schema, and never importing Wave CRs.
+**Depends on**: Phase 27 (correct bypass path; import layered on a working resume mechanism)
+**Requirements**: IMPORT-01, IMPORT-02, IMPORT-03, IMPORT-04, IMPORT-05
+**Notes**: **DESIGN CHECKPOINT REQUIRED BEFORE IMPLEMENTATION.** The first deliverable of Phase 28's plan-phase is resolving the Approach A (name-based / stable-key envelope directory, favored by STACK+FEATURES research) vs Approach B (UID-rewrite import step via a one-shot `ImportController` + `tide-import` Job, favored by ARCHITECTURE research) design decision. The salvage fixture (`salvage-20260618/pvc-envelopes.tgz`) contains only UID-keyed `envelopes/<oldUID>/` paths — no stable-key paths were ever written — which narrows the practical gap between the two approaches. No implementation plan may be written until this choice is resolved via `/gsd:discuss-phase` or `/gsd:spec-phase`.
+**Success Criteria** (what must be TRUE):
+
+  1. A fresh `kubectl apply` of an already-planned Project adopts pre-authored envelopes and proceeds straight to materialize-then-execute, with no planner Jobs dispatched for levels whose valid envelope exists — confirmed by zero planner Pod appearances in the run log.
+  2. An envelope is only adopted after passing a completeness-and-schema check (`len(ChildCRDs) == ChildCount`, correct `APIVersionV1Alpha1`, no partial-write): any incomplete, wrong-schema, or mismatched envelope causes the planner to run normally, and a valid-looking stale envelope is never silently adopted.
+  3. Envelopes authored under prior CRD UIDs are matched to the new run's CRs by stable identity (object name + parent chain), with no cross-object or cross-project aliasing — UID churn does not produce incorrect envelope adoption.
+  4. Before any child CRDs are created from an imported envelope, `dag.ComputeWaves` runs explicitly on the full task set; a cyclic or unresolved imported graph produces an `ImportFailed / CyclicPlanDetected` condition, no partial CRs are created, and Wave CRs are always re-derived by `deriveGlobalWaves` (never imported).
+  5. Import is operator-gated and verifies envelope origin against the per-namespace PVC before materializing into the CRD API channel — no unverified third-party envelope reaches `client.Create`.
+
+**Plans**: TBD
+
+### Phase 29: Operator Tooling + E2E
+
+**Goal**: Operators can export a Project's planner envelopes to a portable bundle and import a bundle into a new run via the `tide` CLI, with a dry-run mode that reports what would be adopted vs re-planned — and a kind integration test proves end-to-end resumption against the real salvage fixture.
+**Depends on**: Phase 28 (import mechanism correct and validated)
+**Requirements**: TOOL-01, TOOL-02
+**Success Criteria** (what must be TRUE):
+
+  1. `tide export-envelopes` writes a portable bundle (tgz or directory) of a Project's planner envelopes from the per-namespace PVC that can be transported across cluster teardowns.
+  2. `tide import-envelopes --dry-run` reports which envelopes would be adopted and which would be re-planned (schema mismatch, completeness failure, cycle) without writing anything — giving the operator a preview before committing to import.
+  3. `tide import-envelopes` (live mode) seeds a new run with the exported bundle so the reconciler adopts valid envelopes on next reconcile, confirmed by the operator seeing zero planner Jobs for adopted levels.
+  4. A kind integration test imports the `examples/projects/dogfood/salvage-20260618` fixture into a fresh cluster, lets the reconciler run, asserts all Milestones reach `Succeeded` with no planner Jobs dispatched for already-imported levels, and confirms no planning cost was re-paid.
+
+**Plans**: TBD
+
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
 
-Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Gated on v1.0.2 Spring Tide landing a correct execution layer.
+Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Gated on v1.0.3 making the run cheaply resumable if it halts mid-planning again.
 
 </details>
 
@@ -209,8 +263,11 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 19. Template Reorder + Token Minimization | v1.0.2 (Ebb, superseded) | 4/4 | Complete | 2026-06-15 |
 | 20. SharedContext Injection + Cache Verification Spike | v1.0.2 (Ebb, superseded) | 5/5 | Complete | 2026-06-16 |
 | 21. Cost & Cache Observability | v1.0.2 (Ebb, superseded) | 2/2 | Needs Review | - |
-| 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-16 |
-| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete    | 2026-06-16 |
-| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete    | 2026-06-16 |
-| 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete    | 2026-06-17 |
-| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete   | 2026-06-17 |
+| 22. Dashboard Embed Freshness Fix | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-16 |
+| 23. Schema Migration + Cross-Scope Dependency Model | v1.0.2 (Spring Tide) | 5/5 | Complete | 2026-06-16 |
+| 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-16 |
+| 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-17 |
+| 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
+| 27. Budget-Bypass Resume Correctness | v1.0.3 | 0/TBD | Not started | - |
+| 28. Plan-Import Core | v1.0.3 | 0/TBD | Not started | - |
+| 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
