@@ -29,6 +29,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -137,13 +138,37 @@ var _ = Describe("ProjectReconciler — BYPASS-03 / BYPASS-05 rollup-once across
 			})
 
 			// First call: simulates halt+GC resume path (planner Job already GC'd).
+			// This creates the reporter Job and stamps the PlannerRolledUpUID marker.
 			_, err := r.handleProjectJobCompletion(ctx, proj, nil)
 			Expect(err).NotTo(HaveOccurred())
+
+			// WR-01 (Phase 27): delete the reporter Job between the two calls to
+			// simulate its 300s TTL-GC during a halt. Without this, the second call
+			// finds the reporter Job present → isFirstCompletion=false → it returns
+			// before ever reaching the PlannerRolledUpUID marker check, so the test
+			// would pass on the pre-existing reporter-existence guard rather than the
+			// new durable marker. Deleting it flips isFirstCompletion back to true so
+			// the marker is the ONLY thing preventing the second rollup — which is the
+			// real BYPASS-03 scenario.
+			reporterJobName := fmt.Sprintf("tide-reporter-%s", proj.UID)
+			Eventually(func() error {
+				return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"reporter Job must exist after first completion before we GC it")
+			Expect(k8sClient.Delete(ctx, &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: reporterJobName, Namespace: "default"},
+			}, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
+			Eventually(func() bool {
+				err := mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+				return apierrors.IsNotFound(err)
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue(),
+				"reporter Job must be GC'd (gone from cache) before the second completion call")
 
 			// Reload proj so the in-memory object reflects the patched PlannerRolledUpUID.
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass03ProjName, Namespace: "default"}, proj)).To(Succeed())
 
-			// Second call: simulates a spurious re-reconcile (e.g., requeue after resume).
+			// Second call: reporter Job is gone so isFirstCompletion flips back to true;
+			// the PlannerRolledUpUID marker is now the SOLE guard against a double-count.
 			_, err = r.handleProjectJobCompletion(ctx, proj, nil)
 			Expect(err).NotTo(HaveOccurred())
 
