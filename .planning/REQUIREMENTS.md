@@ -29,7 +29,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 - [x] **IMPORT-01**: A fresh Project run can adopt pre-authored planner envelopes and SKIP the planner for any level whose valid envelope already exists, proceeding straight to materialize → execution (no re-paid planning).
 - [ ] **IMPORT-02**: An envelope is validated before adoption — correct schema version (v1alpha2), complete (declared `childCount` present), and not a partial write — and any stale, mismatched, or partial envelope is rejected so the planner runs normally; an invalid envelope is never silently adopted.
-- [ ] **IMPORT-03**: Import resolves the UID-churn problem — envelopes authored under prior CR UIDs are matched to the new run's CRs by a stable identity (object name + parent chain), with no cross-object or cross-project aliasing. (resolves the Approach-A name-based-lookup vs Approach-B UID-rewrite design checkpoint)
+- [x] **IMPORT-03**: Import resolves the UID-churn problem — envelopes authored under prior CR UIDs are matched to the new run's CRs by a stable identity (object name + parent chain), with no cross-object or cross-project aliasing. (resolves the Approach-A name-based-lookup vs Approach-B UID-rewrite design checkpoint)
 - [ ] **IMPORT-04**: Import re-derives the global Execution DAG and runs cycle detection explicitly before materializing any child CRDs; cyclic or unresolved imported graphs are rejected, and Wave CRs are never imported (always re-derived).
 - [ ] **IMPORT-05**: Imported-envelope provenance is trust-bounded — import is operator-gated and verifies envelope origin before reading from the shared per-namespace PVC (no unverified third-party envelope is materialized into the CRD API channel).
 
@@ -63,7 +63,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 | BYPASS-05 | Phase 27 | Pending |
 | IMPORT-01 | Phase 28 | Complete |
 | IMPORT-02 | Phase 28 | Pending |
-| IMPORT-03 | Phase 28 | Pending |
+| IMPORT-03 | Phase 28 | Complete |
 | IMPORT-04 | Phase 28 | Pending |
 | IMPORT-05 | Phase 28 | Pending |
 | TOOL-01 | Phase 29 | Pending |
