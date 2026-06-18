@@ -336,6 +336,15 @@ func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project 
 	}
 
 	// Step 3: Init Job creation (idempotent).
+	// Belt-and-suspenders guard (D-01 / BYPASS-01): skip init-Job dispatch when
+	// the workspace is already initialized. BranchName is stamped by
+	// reconcilePhase3Lifecycle Step 1 after a successful init, so a non-empty
+	// BranchName is a durable "workspace exists" sentinel. This prevents the
+	// TTL-GC'd init Job (IsNotFound after 300s) from triggering a destructive
+	// workspace re-init on resume.
+	if project.Status.Git.BranchName != "" {
+		return r.reconcilePhase3Lifecycle(ctx, project)
+	}
 	initJobName := fmt.Sprintf("tide-init-%s", project.UID)
 	var existingJob batchv1.Job
 	err = r.Get(ctx, types.NamespacedName{Namespace: project.Namespace, Name: initJobName}, &existingJob)
@@ -552,7 +561,10 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	if cloneErr != nil && !apierrors.IsNotFound(cloneErr) {
 		return ctrl.Result{}, cloneErr
 	}
-	if apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
+	// D-02 / BYPASS-02: gate clone dispatch on the durable CloneComplete flag.
+	// IsNotFound alone is TTL-unreliable (clone Job TTL=300s; the Job may be GC'd
+	// before a resume, causing a destructive re-clone into an existing workspace).
+	if !project.Status.Git.CloneComplete && apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
 		cloneOpts := CloneOptions{TidePushImage: r.TidePushImage}
 		// B6: wire the run branch name so tide-push calls EnsureRunBranch + provisions
 		// the run worktree during clone (B5). project.Status.Git.BranchName is set by
@@ -569,6 +581,18 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 			// AlreadyExists: idempotent success.
 		}
 		logger.Info("created clone Job", "job", cloneJobName)
+	}
+
+	// D-02 / BYPASS-02: set-on-success — flip CloneComplete when the clone Job
+	// reports terminal success. CloneComplete is NEVER set at dispatch time; a
+	// failed clone leaves it false so dispatch is retried. Mirror the BranchName
+	// patch idiom (client.MergeFrom + r.Status().Patch).
+	if cloneErr == nil && existingClone.Status.Succeeded > 0 && !project.Status.Git.CloneComplete {
+		patch := client.MergeFrom(project.DeepCopy())
+		project.Status.Git.CloneComplete = true
+		if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch CloneComplete: %w", pErr)
+		}
 	}
 
 	// Step 4 (boundary push): handled by reconcileBoundaryPush via the
@@ -1252,9 +1276,15 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidev
 			}
 		}
 
-		// Clear the phase.
+		// Clear the phase. D-01: if the workspace is already initialized (BranchName
+		// is set), resume at Running — not Pending — to avoid re-entering the init-Job
+		// dispatch path (BYPASS-01 fix).
 		statusPatch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tidev1alpha2.PhasePending
+		if project.Status.Git.BranchName != "" {
+			project.Status.Phase = tidev1alpha2.PhaseRunning
+		} else {
+			project.Status.Phase = tidev1alpha2.PhasePending
+		}
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionFalse,

@@ -541,6 +541,13 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			statusPatch.Status.Budget.CostSpentCents = 200
 			Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
 
+			// BYPASS-01: Simulate initialized project — set BranchName so bypass
+			// targets PhaseRunning (not PhasePending).
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			branchPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Git.BranchName = "tide/run-test-bypass-oneshot-1000000000"
+			Expect(k8sClient.Status().Patch(ctx, fetched, branchPatch)).To(Succeed())
+
 			reconciler := newTestProjectReconciler()
 			reconciler.SharedPVCName = pvcName
 
@@ -554,6 +561,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Status.Phase).NotTo(Equal("BudgetExceeded"),
 				"Phase should be cleared from BudgetExceeded when one-shot bypass annotation is present")
+			// BYPASS-01: bypass of an initialized project must target PhaseRunning, not PhasePending.
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+				"Phase must be Running (not Pending) after bypass clears BudgetExceeded on an initialized project")
 			// One-shot bypass annotation should be consumed.
 			Expect(fetched.Annotations).NotTo(HaveKey("tideproject.k8s/bypass-budget"),
 				"one-shot bypass annotation should be consumed after bypass")
