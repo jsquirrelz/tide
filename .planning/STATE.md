@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
 status: executing
-stopped_at: Phase 28 context gathered
-last_updated: "2026-06-18T18:55:31.247Z"
+stopped_at: Completed 28-04-PLAN.md — ImportController + envtest
+last_updated: "2026-06-18T19:09:46.692Z"
 last_activity: 2026-06-18
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 28
-  completed_plans: 26
+  completed_plans: 27
   percent: 75
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 ## Current Position
 
 Phase: 28 (plan-import-core) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-06-18
 
@@ -60,6 +60,7 @@ v1.0.3 Progress: [x] 27  [ ] 28  [ ] 29
 | Phase 25 P03 | 35 | 2 tasks | 6 files |
 | Phase 28-plan-import-core P01 | 5m | 2 tasks | 2 files |
 | Phase 28-plan-import-core P03 | 513 | 2 tasks | 3 files |
+| Phase 28 P04 | 10m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); 
 - [v1.0.3 roadmap]: Phase 28 (Plan-Import Core) has a mandatory design checkpoint: Approach A (name-based / stable-key paths) vs Approach B (UID-rewrite ImportController + tide-import Job). The salvage fixture contains only UID-keyed paths — narrowing the practical gap. No implementation plans may be written until the operator resolves this via /gsd:discuss-phase or /gsd:spec-phase.
 - [v1.0.3 roadmap]: Wave CRs are NEVER imported (PERSIST-03 / D-10 binding). Import materializes Milestone/Phase/Plan/Task CRs only; Wave CRs always re-derived by deriveGlobalWaves after import.
 - [v1.0.3 roadmap]: client.Create bypasses the validating webhook; any import path must call dag.ComputeWaves explicitly before materializing children (cycle detection is not automatic on import).
+- [Phase ?]: [Phase 28 P04]: Seed-derived planning DAG (Milestone/Phase/Plan nodes + DependsOn edges) used for ImportController cycle detection before any client.Create — NOT buildGlobalEdges which is edgeless under Task-less D-04 seed
 
 ### Pending Todos
 
@@ -126,6 +128,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-18T18:55:31.231Z
-Stopped at: Phase 28 context gathered
+Last session: 2026-06-18T19:09:46.674Z
+Stopped at: Completed 28-04-PLAN.md — ImportController + envtest
 Resume file: None
