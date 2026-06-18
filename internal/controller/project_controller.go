@@ -1198,10 +1198,30 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		}
 	}
 
-	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
+	// Plan 09-08 Defect C / BYPASS-03: roll up planner-level Usage exactly once per
+	// planner Job, gated by the durable PlannerRolledUpUID marker. The old
+	// isFirstCompletion signal (reporter-Job-IsNotFound) flips true again after the
+	// reporter Job's 300s TTL expires, causing double-count on halt→resume. The
+	// PlannerRolledUpUID marker survives halt (it lives in CRD .status) and is never
+	// cleared on bypass, so it remains the authoritative idempotency guard.
+	//
+	// T-27-03-01 mitigation: jobName is constructed from project.UID via
+	// fmt.Sprintf("tide-project-%s-1", ...), not from external input — the
+	// tide-project-<uid>-1 shape is a construction-site invariant.
+	plannerJobName := fmt.Sprintf("tide-project-%s-1", project.UID)
 	if isFirstCompletion && envReadOK {
-		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
-			logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
+		if project.Status.Budget.PlannerRolledUpUID != plannerJobName {
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
+			} else {
+				// Record the durable marker only after a successful rollup (Pitfall 2:
+				// leaving the marker unset on error lets the next reconcile retry).
+				markerPatch := client.MergeFrom(project.DeepCopy())
+				project.Status.Budget.PlannerRolledUpUID = plannerJobName
+				if pErr := r.Status().Patch(ctx, project, markerPatch); pErr != nil {
+					logger.Error(pErr, "patch PlannerRolledUpUID failed (non-fatal)", "project", project.Name)
+				}
+			}
 		}
 	}
 
