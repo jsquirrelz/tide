@@ -721,8 +721,14 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Use Consistently to prove no re-halt across multiple reconciles.
+			// WR-02 (Phase 27): drive a fresh Reconcile inside the polled function so
+			// each sample reflects a real reconcile pass — not a static re-read of
+			// Reconcile-3's outcome. In envtest there is no running manager, so without
+			// re-driving Reconcile a re-halt that only fires on a *subsequent* reconcile
+			// (e.g. CR-01's stale-baseline path) would slip past this assertion.
 			Consistently(func(g Gomega) {
+				_, rErr := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+				g.Expect(rErr).NotTo(HaveOccurred())
 				var refreshed tideprojectv1alpha2.Project
 				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
 				g.Expect(refreshed.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
