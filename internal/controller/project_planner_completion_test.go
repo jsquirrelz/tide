@@ -94,6 +94,136 @@ func qqhCleanupProject(ctx context.Context, name string) {
 	}
 }
 
+var _ = Describe("ProjectReconciler — BYPASS-03 / BYPASS-05 rollup-once across halt+GC", Label("envtest"), func() {
+	ctx := context.Background()
+
+	// BYPASS-03: double-count spec — calling handleProjectJobCompletion twice with
+	// the GC'd-planner path (nil Job) must roll up cost exactly once.
+	Describe("BYPASS-03: PlannerRolledUpUID prevents double-count on repeated nil-Job completion calls", func() {
+		const bypass03ProjName = "bypass03-proj-double-count"
+
+		BeforeEach(func() {
+			ensurePVC(ctx, qqhPVCName, "default")
+		})
+
+		AfterEach(func() {
+			qqhCleanupProject(ctx, bypass03ProjName)
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := &jobs.Items[i]
+				if len(j.Name) > 13 && (j.Name[:13] == "tide-project-" || j.Name[:13] == "tide-reporter") {
+					_ = k8sClient.Delete(ctx, j, client.PropagationPolicy(metav1.DeletePropagationBackground))
+				}
+			}
+		})
+
+		It("CostSpentCents == plannerCostCents (not 2x) after two nil-Job completion calls", func() {
+			proj := qqhCreateProject(ctx, bypass03ProjName)
+
+			envReader := newMapEnvReader()
+			r := qqhBuildReconciler(envReader)
+
+			const plannerCostCents = int64(42)
+			envReader.SetOut(string(proj.UID), pkgdispatch.EnvelopeOut{
+				TaskUID:    string(proj.UID),
+				ExitCode:   0,
+				ChildCount: 0,
+				Usage: pkgdispatch.Usage{
+					InputTokens:        1200,
+					OutputTokens:       300,
+					EstimatedCostCents: plannerCostCents,
+				},
+			})
+
+			// First call: simulates halt+GC resume path (planner Job already GC'd).
+			_, err := r.handleProjectJobCompletion(ctx, proj, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Reload proj so the in-memory object reflects the patched PlannerRolledUpUID.
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass03ProjName, Namespace: "default"}, proj)).To(Succeed())
+
+			// Second call: simulates a spurious re-reconcile (e.g., requeue after resume).
+			_, err = r.handleProjectJobCompletion(ctx, proj, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Assert: cost rolled up exactly once (not 2×) and marker is set.
+			Eventually(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass03ProjName, Namespace: "default"}, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Budget.CostSpentCents).To(
+					BeNumerically("==", plannerCostCents),
+					"CostSpentCents must NOT double-count after second completion call")
+				g.Expect(refreshed.Status.Budget.PlannerRolledUpUID).To(
+					Equal(fmt.Sprintf("tide-project-%s-1", proj.UID)),
+					"PlannerRolledUpUID must be set to the planner Job name after first rollup")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// BYPASS-05: TTL-GC companion — planner Job absent (nil) still rolls up cost and
+	// spawns reporter, proving the ordering fix holds on the absent-Job path.
+	Describe("BYPASS-05: TTL-GC companion — nil-Job path rolls up cost and spawns reporter", func() {
+		const bypass05ProjName = "bypass05-proj-ttlgc"
+
+		BeforeEach(func() {
+			ensurePVC(ctx, qqhPVCName, "default")
+		})
+
+		AfterEach(func() {
+			qqhCleanupProject(ctx, bypass05ProjName)
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := &jobs.Items[i]
+				if len(j.Name) > 13 && (j.Name[:13] == "tide-project-" || j.Name[:13] == "tide-reporter") {
+					_ = k8sClient.Delete(ctx, j, client.PropagationPolicy(metav1.DeletePropagationBackground))
+				}
+			}
+		})
+
+		It("reporter Job spawns and CostSpentCents reflects planner spend on nil-Job path", func() {
+			proj := qqhCreateProject(ctx, bypass05ProjName)
+
+			envReader := newMapEnvReader()
+			r := qqhBuildReconciler(envReader)
+
+			const plannerCostCents = int64(55)
+			envReader.SetOut(string(proj.UID), pkgdispatch.EnvelopeOut{
+				TaskUID:    string(proj.UID),
+				ExitCode:   0,
+				ChildCount: 0,
+				Usage: pkgdispatch.Usage{
+					InputTokens:        800,
+					OutputTokens:       150,
+					EstimatedCostCents: plannerCostCents,
+				},
+			})
+
+			// Single nil-Job call: simulates TTL-GC'd planner Job fallthrough path.
+			_, err := r.handleProjectJobCompletion(ctx, proj, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			reporterJobName := fmt.Sprintf("tide-reporter-%s", proj.UID)
+
+			// (a) Reporter Job must be spawned on nil-Job path.
+			Eventually(func() error {
+				return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"tide-reporter-<uid> Job must be created on nil-Job (TTL-GC'd) path")
+
+			// (b) CostSpentCents must reflect planner spend.
+			Eventually(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass05ProjName, Namespace: "default"}, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Budget.CostSpentCents).To(
+					BeNumerically(">=", plannerCostCents),
+					"CostSpentCents must reflect planner spend on nil-Job (TTL-GC) path")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+})
+
 var _ = Describe("ProjectReconciler — planner Job completion while Job still exists (QQH-01)", Label("envtest"), func() {
 	ctx := context.Background()
 
