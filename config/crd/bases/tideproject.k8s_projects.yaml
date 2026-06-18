@@ -706,6 +706,29 @@ spec:
                 - credsSecretRef
                 - repoURL
                 type: object
+              importSource:
+                description: |-
+                  ImportSource declares envelope salvage source for this Project.
+                  When non-nil, ImportController runs the one-shot UID-rewrite import
+                  state machine and all five planner-dispatch sites park until
+                  ImportComplete=True (Phase 28 D-01/D-02).
+                properties:
+                  salvagedPVCSubPath:
+                    description: |-
+                      SalvagedPVCSubPath is the sub-path within the shared tide-projects PVC
+                      where the salvaged envelopes reside, e.g. "<oldProjectUID>/workspace".
+                    minLength: 1
+                    type: string
+                  seedManifestConfigMap:
+                    description: |-
+                      SeedManifestConfigMap names a ConfigMap in the project namespace
+                      carrying the seed manifest JSON (FQ-name → oldUID + initial status).
+                    minLength: 1
+                    type: string
+                required:
+                - salvagedPVCSubPath
+                - seedManifestConfigMap
+                type: object
               maxAttemptsPerTask:
                 description: |-
                   MaxAttemptsPerTask caps the number of dispatch attempts per Task before
