@@ -204,7 +204,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 27-01-PLAN.md — Add durable status fields (CloneComplete, PlannerRolledUpUID, BypassBaselineCents) + make manifests/generate; confirm QQH-01 ordering test GREEN baseline (D-06, BYPASS-05 verify-green)
+- [x] 27-01-PLAN.md — Add durable status fields (CloneComplete, PlannerRolledUpUID, BypassBaselineCents) + make manifests/generate; confirm QQH-01 ordering test GREEN baseline (D-06, BYPASS-05 verify-green)
 
 **Wave 2** *(blocked on 27-01)*
 
@@ -284,6 +284,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-17 |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
-| 27. Budget-Bypass Resume Correctness | v1.0.3 | 0/TBD | Not started | - |
+| 27. Budget-Bypass Resume Correctness | v1.0.3 | 1/4 | In Progress|  |
 | 28. Plan-Import Core | v1.0.3 | 0/TBD | Not started | - |
 | 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
