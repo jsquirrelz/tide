@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
 status: executing
-stopped_at: "Roadmap created for v1.0.3 — phases 27–29 defined, ready for /gsd:plan-phase 27"
-last_updated: "2026-06-18T15:19:29.475Z"
-last_activity: 2026-06-18 -- Phase 27 execution started
+stopped_at: "Phase 27 complete (gate APPROVED 5/5) — ready for /gsd:plan-phase 28 (design checkpoint first)"
+last_updated: "2026-06-18T17:00:00.000Z"
+last_activity: 2026-06-18 -- Phase 27 complete — budget-bypass resume correctness, gate APPROVED 5/5
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 23
-  completed_plans: 19
-  percent: 63
+  completed_plans: 23
+  percent: 75
 ---
 
 # Project State
@@ -21,18 +21,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 27 — budget-bypass-resume-correctness
+**Current focus:** Phase 28 — Plan-Import Core (design checkpoint required before implementation)
 
 ## Current Position
 
-Phase: 27 (budget-bypass-resume-correctness) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 27
-Last activity: 2026-06-18 -- Phase 27 execution started
+Phase: 27 (budget-bypass-resume-correctness) — COMPLETE (gate APPROVED 5/5)
+Plan: 4 of 4 complete
+Status: Phase 27 done; next is Phase 28 (resolve Approach A vs B design checkpoint first)
+Last activity: 2026-06-18 -- Phase 27 complete — budget-bypass resume correctness, gate APPROVED 5/5
 
 ```
-v1.0.3 Progress: [ ] 27  [ ] 28  [ ] 29
-                  0 / 3 phases complete
+v1.0.3 Progress: [x] 27  [ ] 28  [ ] 29
+                  1 / 3 phases complete
 ```
 
 ## Performance Metrics
