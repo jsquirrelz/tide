@@ -336,6 +336,15 @@ func (r *ProjectReconciler) reconcileProjectPhase2(ctx context.Context, project 
 	}
 
 	// Step 3: Init Job creation (idempotent).
+	// Belt-and-suspenders guard (D-01 / BYPASS-01): skip init-Job dispatch when
+	// the workspace is already initialized. BranchName is stamped by
+	// reconcilePhase3Lifecycle Step 1 after a successful init, so a non-empty
+	// BranchName is a durable "workspace exists" sentinel. This prevents the
+	// TTL-GC'd init Job (IsNotFound after 300s) from triggering a destructive
+	// workspace re-init on resume.
+	if project.Status.Git.BranchName != "" {
+		return r.reconcilePhase3Lifecycle(ctx, project)
+	}
 	initJobName := fmt.Sprintf("tide-init-%s", project.UID)
 	var existingJob batchv1.Job
 	err = r.Get(ctx, types.NamespacedName{Namespace: project.Namespace, Name: initJobName}, &existingJob)
@@ -1252,9 +1261,15 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidev
 			}
 		}
 
-		// Clear the phase.
+		// Clear the phase. D-01: if the workspace is already initialized (BranchName
+		// is set), resume at Running — not Pending — to avoid re-entering the init-Job
+		// dispatch path (BYPASS-01 fix).
 		statusPatch := client.MergeFrom(project.DeepCopy())
-		project.Status.Phase = tidev1alpha2.PhasePending
+		if project.Status.Git.BranchName != "" {
+			project.Status.Phase = tidev1alpha2.PhaseRunning
+		} else {
+			project.Status.Phase = tidev1alpha2.PhasePending
+		}
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionFalse,
