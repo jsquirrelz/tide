@@ -232,7 +232,12 @@ Plans:
   4. Before any child CRDs are created from an imported envelope, `dag.ComputeWaves` runs explicitly on the full task set; a cyclic or unresolved imported graph produces an `ImportFailed / CyclicPlanDetected` condition, no partial CRs are created, and Wave CRs are always re-derived by `deriveGlobalWaves` (never imported).
   5. Import is operator-gated and verifies envelope origin against the per-namespace PVC before materializing into the CRD API channel — no unverified third-party envelope reaches `client.Create`.
 
-**Plans**: TBD
+**Plans**: 5 plans (3 waves)
+- [ ] 28-01-PLAN.md — Chart FIXED contract: images.tideImport block + TIDE_IMPORT_IMAGE env (wave 1)
+- [ ] 28-02-PLAN.md — api/v1alpha2 schema: ImportSourceRef field + ImportComplete condition vocab + regen CRD/deepcopy (wave 1)
+- [ ] 28-03-PLAN.md — cmd/tide-import binary + Dockerfile: copy/rekey/atomic-rewrite + schema-convert + completeness/Kind/traversal validation (wave 2)
+- [ ] 28-04-PLAN.md — ImportController state machine: seed→materialize→rekey, cycle-detect-before-create, containment-scoped import Job (wave 2)
+- [ ] 28-05-PLAN.md — 5-site ImportComplete park guard + budget-rollup suppression + manager registration (wave 3)
 
 ### Phase 29: Operator Tooling + E2E
 
