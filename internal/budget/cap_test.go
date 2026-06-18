@@ -169,6 +169,84 @@ func TestIsCapExceeded_RollingCap(t *testing.T) {
 	}
 }
 
+// TestIsCapExceeded_NoBaselineAwareness documents that IsCapExceeded has NO
+// knowledge of BypassBaselineCents — it evaluates both caps unconditionally
+// against the current CostSpentCents. The acknowledged-spend baseline logic
+// for BYPASS-04 lives in handleBudgetGate, not here (D-04 / Pitfall 4).
+func TestIsCapExceeded_NoBaselineAwareness(t *testing.T) {
+	t.Run("true when only rolling-window cap is exceeded (no absolute cap set)", func(t *testing.T) {
+		p := &tidev1alpha2.Project{
+			Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Budget: tidev1alpha2.BudgetConfig{
+					AbsoluteCapCents:      0,
+					RollingWindowCapCents: 100,
+				},
+			},
+			Status: tidev1alpha2.ProjectStatus{
+				Budget: tidev1alpha2.BudgetStatus{CostSpentCents: 150},
+			},
+		}
+		if !IsCapExceeded(p) {
+			t.Error("IsCapExceeded should return true when only rolling-window cap is exceeded")
+		}
+	})
+	t.Run("true when only absolute cap is exceeded (no rolling cap set)", func(t *testing.T) {
+		p := &tidev1alpha2.Project{
+			Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Budget: tidev1alpha2.BudgetConfig{
+					AbsoluteCapCents:      100,
+					RollingWindowCapCents: 0,
+				},
+			},
+			Status: tidev1alpha2.ProjectStatus{
+				Budget: tidev1alpha2.BudgetStatus{CostSpentCents: 150},
+			},
+		}
+		if !IsCapExceeded(p) {
+			t.Error("IsCapExceeded should return true when only absolute cap is exceeded")
+		}
+	})
+	t.Run("false when neither cap is exceeded", func(t *testing.T) {
+		p := &tidev1alpha2.Project{
+			Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Budget: tidev1alpha2.BudgetConfig{
+					AbsoluteCapCents:      200,
+					RollingWindowCapCents: 300,
+				},
+			},
+			Status: tidev1alpha2.ProjectStatus{
+				Budget: tidev1alpha2.BudgetStatus{CostSpentCents: 100},
+			},
+		}
+		if IsCapExceeded(p) {
+			t.Error("IsCapExceeded should return false when neither cap is exceeded")
+		}
+	})
+	t.Run("IsCapExceeded ignores BypassBaselineCents (no baseline-awareness in predicate)", func(t *testing.T) {
+		// Even when BypassBaselineCents == CostSpentCents (post-bypass snapshot),
+		// IsCapExceeded still returns true if the cap is exceeded — the baseline
+		// comparison is in handleBudgetGate, not in this predicate.
+		p := &tidev1alpha2.Project{
+			Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Budget: tidev1alpha2.BudgetConfig{
+					AbsoluteCapCents:      100,
+					RollingWindowCapCents: 100,
+				},
+			},
+			Status: tidev1alpha2.ProjectStatus{
+				Budget: tidev1alpha2.BudgetStatus{
+					CostSpentCents:      150,
+					BypassBaselineCents: 150, // same as current spend — baseline set at bypass
+				},
+			},
+		}
+		// IsCapExceeded still returns true; handleBudgetGate is responsible for the baseline guard.
+		if !IsCapExceeded(p) {
+			t.Error("IsCapExceeded must return true regardless of BypassBaselineCents (no baseline awareness in predicate)")
+		}
+	})
+}
+
 // ---- IsBypassed ----
 
 func TestIsBypassed(t *testing.T) {

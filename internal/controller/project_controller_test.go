@@ -631,9 +631,11 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(k8sClient.Update(ctx, metaPatch)).To(Succeed())
 
 			// Reset status so reconciler can re-set BudgetExceeded.
+			// D-04: spend must be > BypassBaselineCents (200) so the newSpendSinceBypass
+			// guard fires. The TTL bypass set baseline=200; use 201 to simulate new spend.
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			resetPatch := fetched.DeepCopy()
-			resetPatch.Status.Budget.CostSpentCents = 200
+			resetPatch.Status.Budget.CostSpentCents = 201 // > baseline 200 → re-halt fires
 			resetPatch.Status.Phase = "Pending"
 			Expect(k8sClient.Status().Update(ctx, resetPatch)).To(Succeed())
 
@@ -643,6 +645,175 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Status.Phase).To(Equal("BudgetExceeded"),
 				"expired TTL bypass should not prevent BudgetExceeded phase from being re-set")
+		})
+
+		// BYPASS-04: raise-absolute-cap-alone resume sticks (D-04 acknowledged-spend baseline).
+		// After a bypass, raising only the absolute cap (leaving rolling-window numerically
+		// exceeded by already-incurred spend) should NOT immediately re-halt on the next reconcile.
+		It("BYPASS-04: raise-absolute-cap-alone resume stays Running (no re-halt on old spend)", Label("envtest"), func() {
+			ns := "default"
+			pvcName := "tide-projects-bypass04-raise-abs"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			// Project: absoluteCap=100, rollingCap=100; spend=200 exceeds both.
+			project := &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bypass04-raise-abs",
+					Namespace: ns,
+					Annotations: map[string]string{
+						"tideproject.k8s/bypass-budget": "true",
+					},
+				},
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha2.BudgetConfig{
+						AbsoluteCapCents:      100,
+						RollingWindowCapCents: 100,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha2.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Set status: BudgetExceeded phase, spend=200, initialized project.
+			statusPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Budget.CostSpentCents = 200
+			fetched.Status.Git.BranchName = "tide/run-test-bypass04-raise-abs-1000000000"
+			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Reconcile 2: bypass clears BudgetExceeded; D-04 sets BypassBaselineCents=200.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+				"Phase should be Running after bypass")
+			// Verify baseline was recorded.
+			Expect(fetched.Status.Budget.BypassBaselineCents).To(BeNumerically("==", 200),
+				"BypassBaselineCents must be set to CostSpentCents at bypass time")
+
+			// Now raise ONLY the absolute cap to 300 (rolling=100 still below spend=200).
+			// No new spend added. This simulates "operator raises absolute cap alone".
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			specPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Spec.Budget.AbsoluteCapCents = 300
+			Expect(k8sClient.Patch(ctx, fetched, specPatch)).To(Succeed())
+
+			// Reconcile 3: with baseline guard, re-halt must NOT fire (spend==baseline, no new spend).
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Use Consistently to prove no re-halt across multiple reconciles.
+			Consistently(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+					"Phase must NOT re-halt to BudgetExceeded when only absolute cap was raised and no new spend occurred")
+			}, 2*time.Second, 200*time.Millisecond).Should(Succeed())
+		})
+
+		// BYPASS-04: re-halt fires on genuine new spend crossing rolling-window cap,
+		// with Reason=RollingWindowCapReached (D-04 which-cap observability).
+		It("BYPASS-04: re-halt on new rolling-window spend carries RollingWindowCapReached reason", Label("envtest"), func() {
+			ns := "default"
+			pvcName := "tide-projects-bypass04-rolling"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			// Project: absoluteCap=500 (high, won't be hit), rollingCap=100.
+			project := &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bypass04-rolling",
+					Namespace: ns,
+					Annotations: map[string]string{
+						"tideproject.k8s/bypass-budget": "true",
+					},
+				},
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha2.BudgetConfig{
+						AbsoluteCapCents:      500,
+						RollingWindowCapCents: 100,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha2.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Set status: BudgetExceeded, spend=150 (only rolling cap exceeded), initialized.
+			statusPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Budget.CostSpentCents = 150
+			fetched.Status.Git.BranchName = "tide/run-test-bypass04-rolling-1000000000"
+			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Reconcile 2: bypass clears BudgetExceeded; D-04 sets BypassBaselineCents=150.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+				"Phase should be Running after bypass")
+
+			// Stamp NEW spend past baseline and rolling cap: 151 > baseline 150 AND > rolling 100.
+			// AbsoluteCapCents=500, spend=151 → absolute NOT exceeded; rolling IS exceeded by new spend.
+			stampBudgetSpend(ctx, project.Name, 151)
+
+			// Reconcile 3: re-halt fires with RollingWindowCapReached reason.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+					"Phase must be BudgetExceeded after new spend crosses rolling-window cap")
+				// Assert which-cap reason is RollingWindowCapReached.
+				var cond *metav1.Condition
+				for i := range refreshed.Status.Conditions {
+					if refreshed.Status.Conditions[i].Type == tideprojectv1alpha2.ConditionBudgetExceeded {
+						cond = &refreshed.Status.Conditions[i]
+						break
+					}
+				}
+				g.Expect(cond).NotTo(BeNil(), "ConditionBudgetExceeded must be set")
+				g.Expect(cond.Reason).To(Equal("RollingWindowCapReached"),
+					"Reason must be RollingWindowCapReached when rolling cap fires (not AbsoluteCapReached)")
+			}, 5*time.Second, 200*time.Millisecond).Should(Succeed())
 		})
 	})
 

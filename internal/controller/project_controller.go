@@ -1299,12 +1299,15 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidev
 		// Clear the phase. D-01: if the workspace is already initialized (BranchName
 		// is set), resume at Running — not Pending — to avoid re-entering the init-Job
 		// dispatch path (BYPASS-01 fix).
+		// D-04: record the acknowledged-spend baseline so re-halt fires only on NEW
+		// post-bypass spend, not on the already-incurred amount.
 		statusPatch := client.MergeFrom(project.DeepCopy())
 		if project.Status.Git.BranchName != "" {
 			project.Status.Phase = tidev1alpha2.PhaseRunning
 		} else {
 			project.Status.Phase = tidev1alpha2.PhasePending
 		}
+		project.Status.Budget.BypassBaselineCents = project.Status.Budget.CostSpentCents
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionFalse,
@@ -1322,24 +1325,41 @@ func (r *ProjectReconciler) handleBudgetGate(ctx context.Context, project *tidev
 		return ctrl.Result{}, nil
 	}
 
-	if project.Status.Phase != tidev1alpha2.PhaseBudgetExceeded && capExceeded && !bypassed {
+	// D-04: re-halt fires only when new spend has occurred since the bypass
+	// acknowledged the prior spend. A fresh bypass sets BypassBaselineCents ==
+	// CostSpentCents, so re-halt is suppressed until dispatch spends more.
+	// Without this guard, raising the absolute cap alone (or just resuming)
+	// would immediately re-halt because the rolling-window cap is still
+	// numerically exceeded by the already-incurred amount.
+	newSpendSinceBypass := project.Status.Budget.CostSpentCents > project.Status.Budget.BypassBaselineCents
+	if project.Status.Phase != tidev1alpha2.PhaseBudgetExceeded && capExceeded && !bypassed && newSpendSinceBypass {
+		// Determine which cap triggered the halt (absolute takes priority when both are exceeded).
+		reason := "AbsoluteCapReached"
+		if project.Spec.Budget.AbsoluteCapCents <= 0 ||
+			project.Status.Budget.CostSpentCents <= project.Spec.Budget.AbsoluteCapCents {
+			reason = "RollingWindowCapReached"
+		}
+		message := fmt.Sprintf("Cost spent %d cents exceeds cap (absolute %d cents, rolling-window %d cents)",
+			project.Status.Budget.CostSpentCents,
+			project.Spec.Budget.AbsoluteCapCents,
+			project.Spec.Budget.RollingWindowCapCents)
+
 		// Cap hit — set BudgetExceeded and record Event.
-		logger.Info("budget cap exceeded; halting dispatch", "project", project.Name)
+		logger.Info("budget cap exceeded; halting dispatch", "project", project.Name, "reason", reason)
 		statusPatch := client.MergeFrom(project.DeepCopy())
 		project.Status.Phase = tidev1alpha2.PhaseBudgetExceeded
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 			Type:               tidev1alpha2.ConditionBudgetExceeded,
 			Status:             metav1.ConditionTrue,
-			Reason:             "AbsoluteCapReached",
-			Message:            fmt.Sprintf("Cost spent %d cents exceeds cap %d cents", project.Status.Budget.CostSpentCents, project.Spec.Budget.AbsoluteCapCents),
+			Reason:             reason,
+			Message:            message,
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Patch(ctx, project, statusPatch); err != nil {
 			return ctrl.Result{}, err
 		}
 		if r.Recorder != nil {
-			r.Recorder.Event(project, corev1.EventTypeWarning, "AbsoluteCapReached",
-				fmt.Sprintf("Project budget cap reached: %d cents spent of %d cents allowed", project.Status.Budget.CostSpentCents, project.Spec.Budget.AbsoluteCapCents))
+			r.Recorder.Event(project, corev1.EventTypeWarning, reason, message)
 		}
 		return ctrl.Result{}, nil
 	}

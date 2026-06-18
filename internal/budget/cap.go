@@ -41,6 +41,11 @@ import (
 // dispatch and refuses to create a Job if it returns true. Per D-D2.
 //
 // Phase 04.1 P4.1: RollingWindowCapCents check added (previously doc-only WR-02).
+//
+// Bypass/baseline behavior: this predicate has NO knowledge of
+// Status.Budget.BypassBaselineCents. The acknowledged-spend baseline logic
+// (BYPASS-04 / D-04) lives in ProjectReconciler.handleBudgetGate, scoped to the
+// bypass/resume path, so the TaskReconciler dispatch gate is unaffected.
 func IsCapExceeded(project *tidev1alpha2.Project) bool {
 	if project == nil {
 		return false
