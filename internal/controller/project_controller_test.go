@@ -631,9 +631,11 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(k8sClient.Update(ctx, metaPatch)).To(Succeed())
 
 			// Reset status so reconciler can re-set BudgetExceeded.
+			// D-04: spend must be > BypassBaselineCents (200) so the newSpendSinceBypass
+			// guard fires. The TTL bypass set baseline=200; use 201 to simulate new spend.
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			resetPatch := fetched.DeepCopy()
-			resetPatch.Status.Budget.CostSpentCents = 200
+			resetPatch.Status.Budget.CostSpentCents = 201 // > baseline 200 → re-halt fires
 			resetPatch.Status.Phase = "Pending"
 			Expect(k8sClient.Status().Update(ctx, resetPatch)).To(Succeed())
 
