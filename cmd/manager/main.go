@@ -202,6 +202,12 @@ func main() {
 	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override via Helm.
 	reporterImage := envOrDefault("TIDE_REPORTER_IMAGE", "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev")
 
+	// TIDE_IMPORT_IMAGE → ImportController's ImportImage field (Phase 28 IMPORT-01).
+	// The tide-import Job re-keys salvaged envelope trees from old-UID to new-UID paths.
+	// When empty, ImportController skips Job creation (mirrors TIDE_REPORTER_IMAGE skip).
+	// Injected by the chart (Phase 28 plan 01 tideImport block). PROD_OVERRIDE_REQUIRED.
+	importImage := envOrDefault("TIDE_IMPORT_IMAGE", "ghcr.io/jsquirrelz/tide-import:v0.1.0-dev")
+
 	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override
 	// via Helm values.claudeSubagentImage (which sets CLAUDE_SUBAGENT_IMAGE on the
 	// controller env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
@@ -549,6 +555,21 @@ func main() {
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
+		os.Exit(1)
+	}
+	// Phase 28 IMPORT-01: ImportReconciler drives the one-shot UID-rewrite import
+	// state machine for Projects carrying spec.importSource. No pool, dispatcher, or
+	// signing key — the import Job reads the PVC directly via the tide-import binary.
+	// SharedPVCName defaults to "tide-projects" (mirrors sharedPVCNameForImport default).
+	if err := (&controller.ImportReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project, // reuse Project concurrency
+		WatchNamespace:          watchNamespace,
+		ImportImage:             importImage,
+		SharedPVCName:           "tide-projects",
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Import")
 		os.Exit(1)
 	}
 
