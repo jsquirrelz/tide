@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
-status: executing
-stopped_at: "Phase 27 complete (gate APPROVED 5/5) — ready for /gsd:plan-phase 28 (design checkpoint first)"
-last_updated: "2026-06-18T17:00:00.000Z"
+status: completed
+stopped_at: Phase 28 context gathered
+last_updated: "2026-06-18T17:23:46.824Z"
 last_activity: 2026-06-18 -- Phase 27 complete — budget-bypass resume correctness, gate APPROVED 5/5
 progress:
   total_phases: 8
@@ -124,6 +124,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-18T00:00:00.000Z
-Stopped at: Roadmap created for v1.0.3 — phases 27–29 defined, ready for /gsd:plan-phase 27
-Resume file: .planning/ROADMAP.md
+Last session: 2026-06-18T17:23:46.802Z
+Stopped at: Phase 28 context gathered
+Resume file: .planning/phases/28-plan-import-core/28-CONTEXT.md
