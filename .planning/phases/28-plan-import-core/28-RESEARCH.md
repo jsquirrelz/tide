@@ -604,17 +604,17 @@ func copyFileNoClobber(dst, src string) error {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Rekey table storage (planner's discretion per D-03)**
    - What we know: ImportController needs to pass (oldUID, newUID) pairs to the tide-import Job.
    - What's unclear: ConfigMap vs Project.Status vs Job env. ConfigMap is simplest for Job consumption (volume mount). Status is preferred per CRD-status-only persistence constraint.
-   - Recommendation: Use a named ConfigMap `tide-import-rekey-<projectUID>` mounted as a volume in the tide-import Job. After import completes, delete the ConfigMap (or let Job ownerRef cascade-delete it). This keeps Project.Status free of transient import data.
+   - **RESOLVED:** Use a named ConfigMap `tide-import-rekey-<projectUID>` mounted as a volume in the tide-import Job. After import completes, delete the ConfigMap (or let Job ownerRef cascade-delete it). This keeps Project.Status free of transient import data.
 
 2. **Budget rollup suppression implementation**
    - What we know: `handleProjectJobCompletion` calls `budget.RollUpUsage` at line ~1178. Import drives a code path that calls this for the project-level envelope.
    - What's unclear: Whether the import path actually triggers this code path or bypasses it entirely (e.g., if the ImportController patches the project to Succeeded directly, skipping the completion handler).
-   - Recommendation: The ImportController drives the project to `Running` status (matching the salvage state) and lets the ProjectReconciler discover the existing project-level envelope. The guard at the start of `handleProjectJobCompletion` should check `project.Spec.ImportSource != nil` before calling RollUpUsage, or the tide-import Job zeroes out `out.Usage` in the copied envelope.
+   - **RESOLVED:** The ImportController drives the project to `Running` status (matching the salvage state) and lets the ProjectReconciler discover the existing project-level envelope. The guard at the start of `handleProjectJobCompletion` should check `project.Spec.ImportSource != nil` before calling RollUpUsage, or the tide-import Job zeroes out `out.Usage` in the copied envelope.
 
 ---
 
