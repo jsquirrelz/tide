@@ -247,6 +247,12 @@ type GitStatus struct {
 	// count exceeds the configured retry budget.
 	// +optional
 	LeaseFailureCount int32 `json:"leaseFailureCount,omitempty"`
+
+	// CloneComplete is true when the clone Job completed successfully.
+	// This durable flag gates clone Job re-dispatch on resume, replacing the
+	// TTL-unreliable Job-existence check (BYPASS-02 / Phase 27).
+	// +optional
+	CloneComplete bool `json:"cloneComplete,omitempty"`
 }
 
 // BudgetStatus records running spend tallies for the Project (Phase 2+).
@@ -266,6 +272,18 @@ type BudgetStatus struct {
 	// WindowStart marks the beginning of the current rolling budget window.
 	// +optional
 	WindowStart *metav1.Time `json:"windowStart,omitempty"`
+
+	// PlannerRolledUpUID is the name of the most recent planner Job whose Usage
+	// was successfully rolled up into CostSpentCents. Prevents double-counting
+	// when the reporter Job has TTL-GC'd during a halt→resume cycle (BYPASS-03 / Phase 27).
+	// +optional
+	PlannerRolledUpUID string `json:"plannerRolledUpUID,omitempty"`
+
+	// BypassBaselineCents is the CostSpentCents value at the time the most recent
+	// budget-exceeded bypass was applied. Re-halt fires only when spend exceeds this
+	// acknowledged baseline, preventing instant re-halt on cap-raise (BYPASS-04 / Phase 27).
+	// +optional
+	BypassBaselineCents int64 `json:"bypassBaselineCents,omitempty"`
 }
 
 // BoundaryPushStatus records the bounded auto-retry state of the project-level

@@ -1003,11 +1003,24 @@ spec:
                   Budget records running spend tallies (Phase 2+).
                   PERSIST-02 / Pitfall 4: BudgetStatus is a tally object, not an aggregate schedule.
                 properties:
+                  bypassBaselineCents:
+                    description: |-
+                      BypassBaselineCents is the CostSpentCents value at the time the most recent
+                      budget-exceeded bypass was applied. Re-halt fires only when spend exceeds this
+                      acknowledged baseline, preventing instant re-halt on cap-raise (BYPASS-04 / Phase 27).
+                    format: int64
+                    type: integer
                   costSpentCents:
                     description: CostSpentCents is the cumulative cost in USD cents
                       since WindowStart.
                     format: int64
                     type: integer
+                  plannerRolledUpUID:
+                    description: |-
+                      PlannerRolledUpUID is the name of the most recent planner Job whose Usage
+                      was successfully rolled up into CostSpentCents. Prevents double-counting
+                      when the reporter Job has TTL-GC'd during a halt→resume cycle (BYPASS-03 / Phase 27).
+                    type: string
                   tokensSpent:
                     description: TokensSpent is the cumulative token count spent since
                       WindowStart.
@@ -1090,6 +1103,12 @@ spec:
                       BranchName is the lifetime branch fixed at Project creation.
                       Format: "tide/run-<project>-<unix-epoch>".
                     type: string
+                  cloneComplete:
+                    description: |-
+                      CloneComplete is true when the clone Job completed successfully.
+                      This durable flag gates clone Job re-dispatch on resume, replacing the
+                      TTL-unreliable Job-existence check (BYPASS-02 / Phase 27).
+                    type: boolean
                   lastPushedSHA:
                     description: |-
                       LastPushedSHA is the head SHA recorded on the most recent successful push.
