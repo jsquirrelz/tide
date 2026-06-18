@@ -260,6 +260,34 @@ const (
 	AnnotationFailureResumedAt = "tideproject.k8s/failure-resumed-at"
 )
 
+// Phase 28 condition + reason vocabulary — envelope import (IMPORT-01..05).
+const (
+	// ConditionImportComplete — the one-shot UID-rewrite import Job has
+	// completed successfully; planner-dispatch holds clear at all 5 sites.
+	// Set by ImportController on Project.Status.Conditions.
+	ConditionImportComplete = "ImportComplete"
+
+	// ReasonImportSucceeded — tide-import Job exited 0; all envelopes copied
+	// and schema-converted to new-UID paths.
+	ReasonImportSucceeded = "ImportSucceeded"
+
+	// ReasonImportFailed — tide-import Job exited non-zero, or envelope
+	// validation failed (ChildCount mismatch, Kind not allowlisted).
+	// Operator must investigate and optionally apply AnnotationRetryImport.
+	ReasonImportFailed = "ImportFailed"
+
+	// ReasonCyclicPlanDetected — dag.ComputeWaves found a cycle in the
+	// imported seed's dependency graph (Plan/Phase/Milestone dependsOn, run
+	// BEFORE any client.Create). Distinct reason so the operator can tell a
+	// cyclic plan apart from a generic import failure. Set by ImportController.
+	ReasonCyclicPlanDetected = "CyclicPlanDetected"
+
+	// AnnotationRetryImport — applied by operator to trigger an import retry
+	// after ImportFailed; consumed by ImportController to reset import state.
+	// Mirrors AnnotationBillingResumedAt pattern.
+	AnnotationRetryImport = "tideproject.k8s/retry-import"
+)
+
 // FailureProfileType is the failure-propagation policy for this Project.
 // +kubebuilder:validation:Enum=strict;conservative
 type FailureProfileType string

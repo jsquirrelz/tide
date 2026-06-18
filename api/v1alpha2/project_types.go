@@ -403,6 +403,13 @@ type ProjectSpec struct {
 	// +kubebuilder:default=strict
 	// +optional
 	FailureProfile FailureProfileType `json:"failureProfile,omitempty"`
+
+	// ImportSource declares envelope salvage source for this Project.
+	// When non-nil, ImportController runs the one-shot UID-rewrite import
+	// state machine and all five planner-dispatch sites park until
+	// ImportComplete=True (Phase 28 D-01/D-02).
+	// +optional
+	ImportSource *ImportSourceRef `json:"importSource,omitempty"`
 }
 
 // Project Phase constants for Project.Status.Phase (Plan 10 — init Job + budget gate).
