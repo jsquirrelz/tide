@@ -208,7 +208,7 @@ Plans:
 
 **Wave 2** *(blocked on 27-01)*
 
-- [ ] 27-02-PLAN.md — BYPASS-01 bypass targets PhaseRunning on initialized projects + init-Job BranchName guard; BYPASS-02 durable CloneComplete clone-dispatch guard + set-on-success + idempotency envtest
+- [x] 27-02-PLAN.md — BYPASS-01 bypass targets PhaseRunning on initialized projects + init-Job BranchName guard; BYPASS-02 durable CloneComplete clone-dispatch guard + set-on-success + idempotency envtest
 
 **Wave 3** *(blocked on 27-02; shares project_controller.go)*
 
@@ -284,6 +284,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 24. Global Wave Derivation Engine | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-16 |
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-17 |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
-| 27. Budget-Bypass Resume Correctness | v1.0.3 | 1/4 | In Progress|  |
+| 27. Budget-Bypass Resume Correctness | v1.0.3 | 2/4 | In Progress|  |
 | 28. Plan-Import Core | v1.0.3 | 0/TBD | Not started | - |
 | 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
