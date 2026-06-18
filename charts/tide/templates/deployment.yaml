@@ -98,6 +98,9 @@ spec:
         - name: TIDE_REPORTER_IMAGE
           value: "{{ .Values.images.tideReporter.repository }}:{{ .Values.images.tideReporter.tag | default .Chart.AppVersion }}"
         # phase9-reporter-env-injected
+        - name: TIDE_IMPORT_IMAGE
+          value: "{{ .Values.images.tideImport.repository }}:{{ .Values.images.tideImport.tag | default .Chart.AppVersion }}"
+        # phase28-import-env-injected
 
         envFrom:
         - secretRef:
