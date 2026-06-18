@@ -4,8 +4,8 @@ milestone: v1.0.3
 milestone_name: Planning Resumption & Cost Resilience
 status: executing
 stopped_at: "Roadmap created for v1.0.3 — phases 27–29 defined, ready for /gsd:plan-phase 27"
-last_updated: "2026-06-18T14:45:29.477Z"
-last_activity: 2026-06-18 -- Phase 27 planning complete
+last_updated: "2026-06-18T15:19:29.475Z"
+last_activity: 2026-06-18 -- Phase 27 execution started
 progress:
   total_phases: 8
   completed_phases: 5
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 27 — Budget-Bypass Resume Correctness
+**Current focus:** Phase 27 — budget-bypass-resume-correctness
 
 ## Current Position
 
-Phase: 27 — Budget-Bypass Resume Correctness
-Plan: —
-Status: Ready to execute
-Last activity: 2026-06-18 -- Phase 27 planning complete
+Phase: 27 (budget-bypass-resume-correctness) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 27
+Last activity: 2026-06-18 -- Phase 27 execution started
 
 ```
 v1.0.3 Progress: [ ] 27  [ ] 28  [ ] 29
