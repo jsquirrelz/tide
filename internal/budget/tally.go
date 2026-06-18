@@ -130,6 +130,14 @@ func MaybeResetWindow(ctx context.Context, c client.Client, project *tidev1alpha
 	patch := client.MergeFrom(project.DeepCopy())
 	project.Status.Budget.CostSpentCents = 0
 	project.Status.Budget.TokensSpent = 0
+	// CR-01 (Phase 27): the acknowledged-spend baseline (BYPASS-04 / D-04) is
+	// scoped to the window that incurred the spend. Once that window resets to
+	// zero, a stale high baseline would suppress a legitimate halt in the new
+	// window (newSpendSinceBypass = newSpend > staleBaseline stays false until
+	// new spend climbs past the old baseline). A never-bypassed project has
+	// baseline == 0 already, so this is a no-op for it; only post-bypass
+	// projects carry a non-zero baseline that must not survive the reset.
+	project.Status.Budget.BypassBaselineCents = 0
 	nowMeta := metav1.NewTime(now)
 	project.Status.Budget.WindowStart = &nowMeta
 	if err := c.Status().Patch(ctx, project, patch); err != nil {

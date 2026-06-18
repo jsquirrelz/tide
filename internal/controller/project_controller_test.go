@@ -815,6 +815,116 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 					"Reason must be RollingWindowCapReached when rolling cap fires (not AbsoluteCapReached)")
 			}, 5*time.Second, 200*time.Millisecond).Should(Succeed())
 		})
+
+		// CR-01 (Phase 27): a rolling-window reset after a bypass must clear the
+		// acknowledged-spend baseline (BypassBaselineCents). Otherwise the stale
+		// high baseline silently suppresses a legitimate halt in the new window:
+		// newSpendSinceBypass = newSpend > staleBaseline stays false until new
+		// spend climbs past the OLD baseline, letting the project overspend up to
+		// the prior baseline in a fresh window before halting.
+		It("CR-01: window reset clears the bypass baseline so a new-window overspend re-halts", Label("envtest"), func() {
+			ns := "default"
+			pvcName := "tide-projects-cr01-window-reset"
+			makeTestBoundPVC(ctx, pvcName, ns)
+			DeferCleanup(func() {
+				pvc := &corev1.PersistentVolumeClaim{}
+				pvc.Name = pvcName
+				pvc.Namespace = ns
+				_ = k8sClient.Delete(ctx, pvc)
+			})
+
+			// Rolling cap=100; absolute high (won't be hit). Short rolling window so
+			// we can force a reset by stamping WindowStart in the past.
+			oneHour := metav1.Duration{Duration: time.Hour}
+			project := &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cr01-window-reset",
+					Namespace: ns,
+					Annotations: map[string]string{
+						"tideproject.k8s/bypass-budget": "true",
+					},
+				},
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					TargetRepo: "https://github.com/example/repo.git",
+					Budget: tideprojectv1alpha2.BudgetConfig{
+						AbsoluteCapCents:      5000,
+						RollingWindowCapCents: 100,
+						RollingWindowDuration: &oneHour,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, project)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
+
+			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
+			fetched := &tideprojectv1alpha2.Project{}
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+
+			// Bypass at spend=200 (> rolling cap 100), initialized project, window open.
+			windowStart := metav1.NewTime(time.Now())
+			statusPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Budget.CostSpentCents = 200
+			fetched.Status.Budget.WindowStart = &windowStart
+			fetched.Status.Git.BranchName = "tide/run-test-cr01-window-reset-1000000000"
+			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
+
+			reconciler := newTestProjectReconciler()
+			reconciler.SharedPVCName = pvcName
+
+			// Reconcile 1: add finalizer.
+			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Reconcile 2: bypass clears BudgetExceeded; D-04 sets BypassBaselineCents=200.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+				"Phase should be Running after bypass")
+			Expect(fetched.Status.Budget.BypassBaselineCents).To(BeNumerically("==", 200),
+				"baseline must be recorded at bypass time")
+
+			// Force a rolling-window reset: push WindowStart far enough into the past
+			// that (now - WindowStart) >= RollingWindowDuration (1h). MaybeResetWindow
+			// will zero CostSpentCents AND (post-fix) BypassBaselineCents.
+			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
+			pastStart := metav1.NewTime(time.Now().Add(-2 * time.Hour))
+			resetPatch := client.MergeFrom(fetched.DeepCopy())
+			fetched.Status.Budget.WindowStart = &pastStart
+			Expect(k8sClient.Status().Patch(ctx, fetched, resetPatch)).To(Succeed())
+
+			// Reconcile 3: triggers MaybeResetWindow → CostSpentCents=0, baseline=0,
+			// WindowStart advanced. No new spend yet → no halt.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Budget.CostSpentCents).To(BeNumerically("==", 0),
+					"window reset must zero CostSpentCents")
+				g.Expect(refreshed.Status.Budget.BypassBaselineCents).To(BeNumerically("==", 0),
+					"CR-01: window reset must ALSO zero the stale BypassBaselineCents")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// Stamp NEW-window spend > rolling cap (100) but < the OLD baseline (200).
+			// Pre-fix (stale baseline 200): newSpendSinceBypass = 150 > 200 = false →
+			// re-halt suppressed. Post-fix (baseline 0): 150 > 0 = true → re-halt fires.
+			stampBudgetSpend(ctx, project.Name, 150)
+
+			// Reconcile 4: re-halt must fire on the new-window overspend.
+			_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				var refreshed tideprojectv1alpha2.Project
+				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+					"CR-01: new-window spend over the rolling cap must re-halt despite the old baseline")
+			}, 5*time.Second, 200*time.Millisecond).Should(Succeed())
+		})
 	})
 
 	Describe("Shared PVC guard", func() {
