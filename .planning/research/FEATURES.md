@@ -1,260 +1,383 @@
-# Feature Research — TIDE v1.0.2 Ebb Tide: Token & Cost Optimization
+# Feature Research — TIDE v1.0.3 Planning Resumption & Cost Resilience
 
-**Domain:** Cost optimization features for a CLI-based agentic LLM orchestrator (TIDE)
-**Researched:** 2026-06-15
-**Confidence:** HIGH for provider caching mechanics (official docs verified); HIGH for prompt
-structuring techniques (multiple cross-verified sources); MEDIUM for eval harness patterns
-(WebSearch + practical synthesis, no single authoritative spec); HIGH for TIDE-specific
-dependency mapping (direct inspection of codebase).
+**Domain:** Resumption and idempotent re-entry for an expensive multi-stage agentic orchestrator
+**Researched:** 2026-06-18
+**Confidence:** HIGH for Argo/Temporal/Prefect/Dagster patterns (official docs + verified secondary sources);
+MEDIUM for LLM-agent-specific budget-halt patterns (emerging space, multiple sources agree directionally);
+HIGH for TIDE invariant analysis (direct spec + codebase inspection).
 
 ---
 
 ## Research Context
 
-TIDE dispatches LLM subagents by shelling out to the Claude Code CLI (`claude -p --bare`,
-prompt via stdin). The CLI manages its own prompt caching — TIDE does NOT set
-`cache_control` directly. The levers available to TIDE are:
+TIDE v1.0.3 addresses a concrete failure mode: dogfood run #2 spent ~$90 authoring 3 milestones /
+15 phases / 42 plans in the Planning DAG, then budget-halted with zero execution. All planning artifacts
+survived on the PVC. Re-running the Project from scratch re-pays the full planning cost — there is no
+resume mechanism. This research surveys how mature workflow orchestrators handle exactly this problem,
+then maps each pattern to TIDE's invariants.
 
-1. **Prompt structuring** — ordering template content stable-first so Claude Code's
-   automatic prefix caching (and OpenAI/Codex's automatic prefix caching) maximizes cache
-   hits across wave-sibling dispatches.
-2. **Token minimization** — trimming static boilerplate, curating interpolated context,
-   deduplicating shared context across wave-sibling dispatches.
-3. **Quality + cost eval harness** — a reusable harness to regression-gate prompt/template
-   changes and report token/cost deltas (including cache-read vs cache-write accounting).
-4. **Observability surface** — surfacing already-emitted cache + token metrics meaningfully
-   on the dashboard.
+**TIDE invariants that constrain every feature in this document:**
+
+1. Waves are derived, never declared — the schedule is the output of layered Kahn on the task DAG,
+   rederived from the completed-task set. Caching the schedule itself violates this invariant.
+2. Persistence is CRD-`.status` only — no external DB, no SQLite. Resumption state =
+   indegree map + completed-task set, rederivable in O(V+E).
+3. Cycles are bugs, not runtime conditions — cycle detection happens at plan-validation time;
+   the planner-skip path must not allow a stale or structurally-invalid envelope to bypass
+   cycle detection.
+4. UID churn on fresh runs — K8s assigns new UIDs to each CRD object on every fresh apply.
+   Envelopes are currently keyed by UID (`envelopes/<objUID>/out.json`). Plan-import must not
+   silently adopt a stale envelope via a UID collision or skip validation.
+5. Budget bypass must resume at `Running`, not `Pending` — a cleared halt that re-enters
+   `Pending` resets the initialized state and re-fires the planner.
 
 ---
 
-## Provider Caching Mechanics Reference
+## Prior Art Survey
 
-Understanding these mechanics directly shapes which prompt-structuring techniques matter
-and which are irrelevant from TIDE's CLI-based vantage point.
+### Argo Workflows — Resubmit + Memoization
 
-### Anthropic (Claude Code CLI path — the live v1 path)
+**Mechanism:** Argo distinguishes two resume verbs: `retry` (re-runs only failed/errored nodes in
+place, same workflow object) and `resubmit --memoized` (creates a new workflow object but skips
+nodes whose cache key matches a ConfigMap entry from the previous run).
 
-**How Claude Code handles caching automatically (HIGH confidence — official docs):**
+**Cache key:** Template-level, declared in the YAML spec. Can be static strings or
+`{{inputs.parameters.x}}`. Cached outputs stored in K8s ConfigMaps (1 MB limit per ConfigMap;
+maxAge configurable in seconds or hours). ConfigMaps are directly inspectable via kubectl.
 
-Claude Code adds `cache_control` breakpoints automatically, structured in three layers:
+**Skip behavior:** When the cache key matches and the entry is not expired, Argo marks the node
+`Succeeded` immediately without dispatching the Pod. Downstream DAG edges are honored as if the
+node ran — the result is forwarded through the DAG without re-execution.
 
-| Layer | Content | Invalidated when |
-|-------|---------|-----------------|
-| System prompt | Core instructions, tool definitions, output style | Tool set changes, Claude Code upgrade |
-| Project context | CLAUDE.md, auto-memory, unscoped rules | Session start, after `/clear` or `/compact` |
-| Conversation | Messages, responses, tool results | Every turn (append-only) |
+**Known limitations (HIGH confidence — GitHub issues #12936, #10906):**
+- `resubmit --memoized` on a workflow with failed nodes has a documented bug (issue #12936): DAG
+  dependency ordering is not always respected after skipping memoized nodes — all unblocked
+  successors can dispatch simultaneously instead of in wave order. This is a real correctness
+  hazard that TIDE must avoid.
+- The difference between `retry` and `resubmit` was not clearly documented until recently
+  (issue #10906); prior to v3.5, only nodes with outputs could be memoized.
 
-When TIDE dispatches `claude -p --bare`, each invocation is a fresh one-turn session:
-- Layer 1 (system + tool definitions) is cached after the first dispatch.
-- Layer 2 (project context — the CLAUDE.md in the worktree) is cached after the first
-  dispatch for that worktree.
-- Layer 3 (the conversation) is always the volatile `{{.Prompt}}` suffix — this is the
-  only part that changes per-task.
+**TIDE mapping:** Argo's "resubmit with memoization" is the closest prior-art analog to TIDE's
+plan-import requirement. The lesson: key on stable, input-derived identifiers (not UIDs); validate
+before skipping; maintain DAG ordering through the skip operation.
 
-Key cache mechanics:
-- **Minimum 1,024 tokens** before caching activates (Sonnet/Opus); 4,096 for Haiku 4.5
-  and Opus 4.5/4.6. TIDE's current templates (project_planner + task_executor) are well
-  below 1,024 tokens each — caching does NOT currently activate for TIDE's own prompts
-  without growth.
-- **TTL:** 5 minutes on API key (default); 1 hour on Claude subscription
-  (`ENABLE_PROMPT_CACHING_1H=1`). Wave siblings dispatched in parallel within a 5-minute
-  window share the cache.
-- **Cache prefix ordering is fixed:** tools → system → project context → conversation.
-  Any change earlier in the chain busts everything after it.
-- **Subagent sessions (which is what TIDE creates) use 5-minute TTL** even on a
-  subscription. The Claude Code doc explicitly states: "Subagents use the five-minute TTL
-  even on a subscription."
-- **Cache is scoped per working directory.** TIDE's per-task worktrees each have a
-  distinct path — the system prompt embeds the working directory. Wave siblings each in a
-  different worktree do NOT share the cache prefix, even if their templates are identical.
+**Confidence:** MEDIUM-HIGH (official docs + GitHub issues cross-verified)
 
-**Implication for TIDE:** The system prompt + tool definitions layer is the stable
-prefix. The `{{.Prompt}}` is the volatile suffix. The structural gain from putting
-stable boilerplate first is already correct in the templates — but the templates are
-currently too short to cross the 1,024-token caching threshold. The path to caching is:
-grow the stable prefix to ≥1,024 tokens with shared context (wave/plan context as a
-reusable prefix), then keep `{{.Prompt}}` as the last volatile block.
+---
 
-### OpenAI / Codex (next milestone — provider-agnostic design now)
+### Temporal — Event History Replay + Determinism Requirement
 
-**Mechanics (HIGH confidence — official docs):**
-- **Automatic, no opt-in.** No `cache_control` field; the API detects prefix matches
-  automatically on ≥1,024-token prompts (128-token increment granularity).
-- **TTL:** 5–10 minutes inactivity (up to 1 hour maximum; 24 hours on gpt-5.x).
-- **Prompt cache key** parameter available to improve routing stickiness for parallel
-  dispatches — wave-sibling calls sharing the same prefix should use the same key.
-- **What breaks cache:** any character difference in the prefix (including JSON key order,
-  whitespace, timestamps, UUIDs).
-- **Stable prefix ordering:** identical to Anthropic — role/persona first, instructions,
-  tool definitions, conversation history, current query last.
+**Mechanism:** Temporal persists every state transition as an immutable Event in a workflow's Event
+History. On resume (worker restart, crash, new deployment), the worker *replays* the workflow
+function from the beginning of the event history. Completed Activity calls are *not* re-executed —
+the worker reads the recorded result from history and returns it immediately. From the caller's
+perspective, resumption is transparent.
 
-**Implication for TIDE:** The same template-structuring discipline that maximizes Claude
-Code cache hits also maximizes OpenAI prefix cache hits. Provider-agnostic by design is
-achievable by following the stable-prefix-first rule universally.
+**Determinism requirement:** Workflow code must be deterministic — given the same event history, it
+must emit the same commands. Non-deterministic code paths produce a non-determinism error on replay.
+This is the mechanism that makes replay safe: the same function path + the same recorded results =
+the same output without any work being repeated.
 
-### Other providers (Bedrock, Vertex, LLM gateways)
+**Continue-as-New:** For workflows that would accumulate unbounded event history (e.g., a workflow
+running thousands of steps over days), Temporal provides `ContinueAsNew`, which atomically completes
+the current execution and starts a new one with the same workflow ID but a fresh history, passing
+current state as input. This prevents event history from growing beyond the size limit.
 
-- **Bedrock:** Anthropic-style explicit cache_control required; support varies by model
-  and region; minimum prefix length requirements differ per model.
-- **Vertex AI:** Separate context caching API with explicit TTL; different from Anthropic's
-  breakpoint model.
-- **LLM gateways (LiteLLM, OpenRouter):** Forwarding varies; cache behavior depends on
-  the target provider. TIDE should not assume gateway-level caching works.
+**Budget-halt pattern:** Temporal has no native budget-halt concept, but the durable execution model
+means any externally-injected halt (via Signal) is recorded as an event. Resume after clearing the
+halt replays up to the Signal event and then continues forward — no work is repeated.
 
-For v1.0.2, model these as "design for Anthropic + OpenAI; verify gateway behavior
-per-provider at integration time."
+**TIDE mapping:** TIDE cannot adopt Temporal's replay model directly (it uses K8s CRD `.status` not
+an event log), but the principle is clear: completed planner calls should have their results recorded
+as CRD status, so a resumed run reads the recorded result instead of re-dispatching the planner.
+This is exactly the plan-import/envelope-resumption requirement.
+
+**Confidence:** HIGH (official Temporal docs + Zylos AI checkpointing research + Augment Code guide)
+
+---
+
+### Prefect — Task Caching with Cache Policy + Result Persistence
+
+**Mechanism:** Prefect task caching allows a task to return a predetermined value without executing
+its body. Caching is opt-in via `cache_policy` parameter on the `@task` decorator. Two primary
+policies:
+
+- `INPUTS`: cache key is the hash of the task's input arguments. Same inputs = cache hit.
+- `TASK_SOURCE`: cache key includes the task's source code hash. Code change = cache miss.
+
+Cache storage requires explicit result persistence (off by default). Results are stored in a
+configured result backend (local filesystem, S3, etc.).
+
+**Skip behavior:** On cache hit, the task enters `Completed` state immediately with the cached
+value. Downstream tasks receive the cached result as if the task had run. Cache misses execute
+normally and store the result.
+
+**Key constraint:** Caching requires result persistence to be enabled explicitly. This is a
+footgun — the caching *policy* can be configured but if result persistence is off, nothing is
+actually stored and every run is a cache miss.
+
+**TIDE mapping:** Prefect's "task with cache policy" is the clean abstraction. TIDE's equivalent is
+a planner invocation that checks for an existing valid envelope before dispatching — cache key is
+the stable identity of the artifact being planned (name + parent chain), not the K8s UID.
+
+**Confidence:** HIGH (official Prefect docs)
+
+---
+
+### Dagster — Asset Versioning and Staleness Model
+
+**Mechanism:** Dagster tracks two versioning dimensions per asset:
+
+- `code_version`: a string the developer declares on the `@asset` decorator, representing the
+  computational logic version.
+- `data_version`: a hash of the asset's output value, computed automatically or overridable.
+
+An asset is "unsynced" (stale) when its code version or input data has changed since last
+materialization. Dagster can skip materialization of an up-to-date asset and return the cached value.
+
+**Staleness is not transitive by default:** downstream assets only become stale if their last
+materialization used an outdated upstream version — not merely because an upstream ran again.
+
+**TIDE mapping:** Dagster's staleness model maps to TIDE's envelope validation. An envelope is
+"valid" (skip the planner) when: (a) the envelope exists, (b) the envelope's content hash matches
+the expected input fingerprint (parent artifact chain + project outcome). An envelope is "stale"
+when the input has changed — requiring a re-plan. The staleness check is the validation gate that
+makes plan-import safe.
+
+**Confidence:** HIGH (official Dagster docs)
+
+---
+
+### Apache Airflow — Backfill Reprocessing Modes
+
+**Mechanism:** Airflow 3 backfills support three reprocessing modes:
+
+- `Missing Runs`: creates and runs only DAG runs that do not already exist (idempotent forward fill).
+- `Missing and Errored Runs`: re-runs failed DAG runs; skips succeeded ones.
+- `All Runs`: clears and re-runs everything.
+
+The `--rerun-failed-tasks` flag selectively re-runs only failed task instances within a backfill
+date range.
+
+**Idempotency requirement:** Airflow tasks are expected to be idempotent — running the same task
+twice with the same inputs should produce the same result. This is a design requirement on the task
+author, not enforced by the framework.
+
+**Known issue:** If a task was previously marked `skipped`, backfill can hang indefinitely (issue
+#570). This documents the classic pitfall of confusing "skipped" (not-executed by branching) with
+"succeeded" — TIDE must distinguish these states clearly.
+
+**TIDE mapping:** Airflow's "skip succeeded, re-run failed" mode is exactly the planning resumption
+contract. A succeeded planner envelope → skip. A failed or missing envelope → re-plan.
+
+**Confidence:** MEDIUM (official docs + Astronomer docs + GitHub issues)
+
+---
+
+### Bazel / Nix — Content-Addressed Action Cache
+
+**Mechanism:** Bazel breaks a build into discrete *actions*. Each action has:
+
+- An *action key* (aka action digest): a deterministic hash of the command, arguments,
+  environment variables, and a Merkle tree digest of all input files.
+- A *content-addressable store (CAS)*: where output artifacts are stored by their content hash.
+- An *action cache (AC)*: maps action key → output artifact hashes. If the action key hits the
+  AC, the output CAS entries are fetched without executing the action.
+
+This is input-addressed memoization: any change to any input changes the action key and busts
+the cache. The key is stable as long as inputs are identical.
+
+**TIDE mapping:** The Bazel action cache is the purest prior-art model for TIDE envelope
+memoization. The envelope cache key should be a deterministic hash of:
+- The stable identifier of the object being planned (name + level + parent chain)
+- The project outcome prompt (or a stable hash of it)
+- The TIDE planner template version
+
+If any of these inputs change, the envelope is stale and must be re-planned. This directly
+addresses the UID-churn problem: the key is content-derived, not UID-derived.
+
+**Confidence:** HIGH (official Bazel docs + ACM Queue article)
+
+---
+
+### CI Systems — Skip-on-Cache-Hit
+
+**Mechanism (GitHub Actions, CircleCI):** CI systems use explicit cache keys. On `cache-hit: true`,
+subsequent steps can be gated with `if: steps.cache.outputs.cache-hit != 'true'`. This is the
+step-level "skip if cached" pattern. The cache key is typically a hash of dependency manifest files
+(e.g., `hashFiles('**/package-lock.json')`).
+
+**Key insight:** CI cache keys are always content-addressed and input-derived. Stable input files
+= stable cache key = cache hit = skip. The cache key is never the job's own output ID (that would
+be circular); it's always derived from the inputs that determine whether the output is still valid.
+
+**TIDE mapping:** The same discipline applies. The plan-import cache key must be derived from inputs
+(outcome + parent chain + planner version), not from the previously-generated output's UID.
+
+**Confidence:** HIGH (official GitHub Actions docs)
+
+---
+
+### Long-Running LLM Agent Systems (Anthropic, LangGraph, Augment)
+
+**Budget exhaustion patterns observed in the field:**
+
+1. **Structured handoff file (Anthropic internal pattern):** For runs that exceed a single context
+   window, the harness tears the session down and rebuilds it from a structured handoff file —
+   equivalent to onboarding a new team member from documentation. State is external, artifacts
+   survive the session boundary.
+
+2. **Per-step snapshots (LangGraph):** Serialize complete graph state after each node execution.
+   Resume from the exact failure point. Requires a persistent state backend.
+
+3. **Budget backstop with forced generation:** When budget is exhausted, emit a forced terminal
+   action ("wrap up now") rather than a hard kill. Avoids leaving partial state that is neither
+   complete nor clearly failed.
+
+4. **User expectation — "no double billing":** The implicit contract documented across multiple
+   sources is that resumption from a checkpoint is *free work*. Users who resume after a budget
+   halt expect to pay only for genuinely new execution from the failure point forward. Re-paying
+   the planning cost on every restart is experienced as a bug, not a feature.
+
+**Budget-bypass specific patterns:**
+- Soft limits with human-in-the-loop escalation: halt is observable, user can raise cap and
+  explicitly resume. This is TIDE's current model (BillingHalt condition + `tide resume`).
+- Cap raise ergonomics: raising one of (absolute cap, rolling cap) should not immediately re-halt
+  on the other. This is a known TIDE bug identified in PROJECT.md.
+
+**Confidence:** MEDIUM (multiple sources agree; no single authoritative spec)
 
 ---
 
 ## Feature Landscape
 
-### Table Stakes (Users Expect These — v1.0.2 Must Have)
+### Table Stakes (Users Expect These — v1.0.3 Must Have)
 
-| # | Feature | Why Expected | Complexity | TIDE Dependency |
-|---|---------|--------------|------------|-----------------|
-| TS-C1 | **Stable-prefix-first prompt template ordering** — system role + static boilerplate first, `{{.Prompt}}` last in all five templates | Cache hit requires exact prefix match; the volatile task prompt is the only thing that should change across wave siblings. Any static content appearing after `{{.Prompt}}` is a cache buster. Current templates already put `{{.Prompt}}` last but the stable prefix is ~200 tokens (far below the 1,024 minimum). | LOW | `internal/subagent/common/templates/*.tmpl` — modify template ordering |
-| TS-C2 | **No volatile data in the stable prefix** — strip timestamps, UUIDs, request IDs, and per-dispatch metadata from the fixed portion of templates | Even one UUID injected into the boilerplate before `{{.Prompt}}` invalidates the entire prefix. Current templates include `{{.TaskUID}}` and `{{.Provider.Vendor}}` inline in the stable boilerplate — these are per-dispatch volatile data that break the prefix. | LOW | `internal/subagent/common/templates/*.tmpl` + `pkg/dispatch/EnvelopeIn` |
-| TS-C3 | **Shared wave/plan context block as reusable stable prefix across wave-sibling dispatches** — wave siblings share the same plan-level context (phase brief, plan objective, milestone outcome); injecting this as a stable block before `{{.Prompt}}` lets siblings share a ≥1,024-token cached prefix | Wave siblings in the same plan all need the same plan context. If each subagent re-reads it cold, zero cache reuse. If it's the shared stable prefix (injected identically into all siblings), they all hit the same cache entry after the first dispatch warms it. | MEDIUM | Requires the dispatch layer to inject a `SharedContext` block from the owning Plan/Phase CRD into the template execution context |
-| TS-C4 | **Deterministic context serialization** — any structured data (task lists, dependency lists, file sets) injected into the stable prefix must be serialized in sorted, deterministic order | JSON key ordering is part of the cache key. Non-deterministic serialization (e.g. Go map iteration, unordered JSON) produces different token sequences across dispatches → cache miss every time. | LOW | `pkg/dispatch/` + template data preparation code |
-| TS-C5 | **Boilerplate audit and trim** — measure current token count per template; identify and remove redundant verbosity; target ≥1,024-token stable prefix, ≤30% overhead vs task-specific content | The TIDE-specific preamble ("TIDE (Topologically-Indexed Dependency Execution) runs hierarchical agentic coding work as a Milestone → Phase → Plan → Task → Wave DAG…") is repeated verbatim in all five templates. It counts as stable boilerplate — good for caching once padded — but should also be audited for density. Over-trimming degrades quality; under-trimming wastes tokens. The target is a stable prefix that is: (a) sufficient to hit the 1,024-token threshold, (b) semantically correct and complete for the level, (c) not padded with filler. | MEDIUM | All five templates + a token-counting utility |
-| TS-C6 | **Token budget enforcement at template render time** — check rendered token count for the stable prefix portion before dispatch; log a warning if the stable prefix falls below 1,024 tokens (cache inactive) or if the total prompt exceeds a configurable per-level ceiling | Prevents silently spending full input-token rates when the template is too short to cache. Also prevents runaway context growth from verbose `SharedContext` injection. | LOW | `pkg/dispatch/` + `internal/subagent/common/prompt_templates.go` |
-| TS-C7 | **Cache hit rate metric** — track `cache_read_input_tokens` and `cache_creation_input_tokens` from the `events.jsonl` envelope already written by the harness; compute cache hit rate = `cache_read / (cache_read + cache_creation + input)` per dispatch; expose as a Prometheus gauge | TIDE already emits `events.jsonl` with provider-emitted raw events. Cache token fields are already present in the usage data. Surfacing the hit rate as a metric closes the feedback loop — without measurement, there's no way to know if restructuring worked. | LOW | `internal/reporter/` + `events.jsonl` parsing already in place |
-| TS-C8 | **Per-level token and cost accounting in the existing metrics** — `cache_read_tokens`, `cache_write_tokens`, `input_tokens`, `output_tokens` broken out by level (project/milestone/phase/plan/task) as Prometheus labels | v1.0.1 already ships raw token + cost metrics. The gap is per-level breakout: which level is spending the most? Planner levels tend to be smaller; executor levels accumulate tool-call context. Per-level labeling makes the expensive levels visible. | LOW | Extends existing Prometheus metrics in `internal/reporter/` |
+Features that users of any mature workflow orchestrator take for granted. Missing these means
+the budget-halt experience remains broken.
 
-### Differentiators (Competitive Advantage — Meaningful for v1.0.2)
+| # | Feature | Prior Art Basis | Why Expected | Complexity | TIDE Invariant Impact |
+|---|---------|----------------|--------------|------------|----------------------|
+| TS-R1 | **Envelope-based planner skip** — before dispatching a planner Job, check whether a valid envelope already exists for this object's stable identity; if yes, skip dispatch and materialize directly from the envelope | Argo memoization; Prefect task caching; Bazel action cache | Any workflow system that re-runs expensive computations unconditionally is broken by definition. Users expect "already done" to mean "don't do again." | MEDIUM — requires name-based / content-keyed envelope lookup instead of UID-keyed lookup; touches all planner dispatch sites in `project_controller.go` | Does NOT cache the wave schedule — envelopes are inputs to Kahn, not outputs; invariant preserved |
+| TS-R2 | **Stable envelope cache key** — the lookup key is a deterministic hash of (stable object name + parent chain + project outcome hash + planner template version), NOT the K8s UID | Bazel action key; GitHub Actions `hashFiles`; CI cache key discipline | UID churn is guaranteed on every fresh Project apply. Any UID-keyed scheme is a no-op on resume. Content-addressed keys are the only correct design. | MEDIUM — requires a keying function in the dispatcher; PVC path changes from `envelopes/<UID>/` to `envelopes/<stableKey>/` | No invariant conflict — keys are content-derived, not schedule-derived |
+| TS-R3 | **Envelope staleness validation before skip** — before skipping a planner, verify the stored envelope: (a) parses as valid JSON, (b) passes the same cycle-detection and schema validation that a freshly-authored envelope would, (c) fingerprint matches the stable key | Dagster staleness check; Temporal determinism requirement | Silently adopting a corrupt or stale envelope violates the spec's cycle-detection contract. Argo's memoization bug (#12936) was a DAG-ordering failure caused by skipping without maintaining dependency semantics. | MEDIUM — reuse the existing envelope validation path; add fingerprint comparison | CRITICAL — preserves cycle-detection invariant; prevents invalid envelopes from bypassing plan-validation |
+| TS-R4 | **Budget-bypass resume at `Running`, not `Pending`** — when a BillingHalt is cleared, the project controller must resume at `Running` phase; if it re-enters `Pending`, the planner re-init fires and all pre-existing child CRDs are orphaned or duplicated | Temporal signal-and-resume; Airflow "skip succeeded" | The current code bug (PROJECT.md: `project_controller.go:1257`) means clearing a halt re-enters `Pending` and re-dispatches planners. Any resumed run re-pays planning cost. This is the most damaging immediate fix. | LOW — targeted controller fix at one branch; regression-test required | No invariant conflict — fixing a state machine bug |
+| TS-R5 | **Idempotent child-CRD re-init guard** — the planner dispatch site must check whether child CRDs already exist before creating new ones; if children exist, skip planner dispatch even if the controller is in `Running` state | Prefect caching requires result persistence; Temporal skip-on-history | A resumed run that re-enters `Running` must not re-create child CRDs that already exist. Without this guard, resume creates duplicate Milestone/Phase/Plan CRDs, breaking the hierarchy. | LOW — check `.status.children` or list existing CRDs before dispatch; the idempotency check is simpler than the full envelope-skip | Complements TS-R4; both are needed to make budget-bypass safe |
+| TS-R6 | **Cap-raise ergonomics: raising one cap does not immediately re-halt on the other** — when the user raises the absolute spend cap but the rolling window is also near-exhausted (or vice versa), the system should not immediately re-halt | LLM agent budget patterns; soft-limit-with-escalation | Users raising the absolute cap expect the run to continue. Being immediately re-halted by the rolling cap (or absolute cap that was just raised) is UX failure. Needs coordinated re-check before resuming dispatch. | LOW-MEDIUM — BillingHalt condition logic and resume path; test both caps simultaneously | No invariant conflict |
+| TS-R7 | **Regression coverage for the project-controller ordering fix (`2a5e0dc`)** — the Running-branch terminal-completion check must precede the idempotency early-return at the project→milestone dispatch site | Standard regression testing discipline | The fix already landed but has no automated regression test. Without a test, the bug can be silently re-introduced by any future controller refactor. | LOW — envtest covering the specific ordering: dispatch runs to terminal completion before idempotency guard fires | No invariant conflict |
 
-| # | Feature | Value Proposition | Complexity | TIDE Dependency |
-|---|---------|-------------------|------------|-----------------|
-| D-C1 | **Wave-sibling prefix warm-up dispatch** — before dispatching wave N, emit a single no-content "warm-up" call (or use the first dispatch) that seeds the shared stable prefix into the provider's cache; subsequent siblings in the same wave are cache hits | Wave siblings are dispatched in parallel. With a cold cache, the first sibling to land warms it; all others race against the cache-write settling time. An explicit warm-up (or carefully sequenced first dispatch) seeds the cache before siblings arrive. For Anthropic, this could be a `max_tokens=0` probe if the CLI supports it; more practically, just ensure the first dispatch in each wave uses the identical stable prefix as all siblings. | HIGH | Requires orchestrator-level wave dispatch sequencing; the dispatcher would send one "seed" job first, then fan out siblings. Significant change to the wave dispatch loop. |
-| D-C2 | **Context curation for plan-level shared context** — select and inject only task-relevant context into `SharedContext` (phase objective + plan DAG summary + sibling task summaries) rather than dumping the full `PLAN.md`; prefer summaries over verbatim content | Full `PLAN.md` dumps into the subagent context are a common anti-pattern in multi-agent systems. Token overhead is paid on every dispatch; most tasks only need a 3–5 sentence oriented summary. Curated context = lower token spend + tighter stable prefix = better cache hit rate + less distraction for the subagent. Research shows content quality matters more than presence — LLM-generated context additions produce only marginal gains (4%) at 20% token overhead. | MEDIUM | Requires a `SharedContext` builder in the dispatcher that summarizes rather than verbatim-includes |
-| D-C3 | **Per-template token budget profiles configurable per level** — Helm values / Project CRD fields for `maxStablePrefix` and `maxTaskPrompt` per level | Milestone planners produce richer prompts than task executors. Allowing per-level token budgets prevents over-constraining executors (which need tool-call context to grow) while capping planner verbosity. | LOW | Helm values + CRD field + dispatch-time enforcement |
-| D-C4 | **Cost + quality dashboard panel** — surface cache hit rate, tokens-per-level, cost-per-run, and cost-per-task-type as a dashboard panel; compare current run vs baseline | v1.0.1 ships token + budget metrics but they're not surfaced visually. A cost panel answers "did this template change reduce cost?" at a glance. Pairs with the eval harness (D-C5) for the feedback loop. | MEDIUM | Dashboard component; reads existing Prometheus metrics |
-| D-C5 | **Quality + cost eval harness** — a reusable Go test package (`internal/eval/`) that: (a) runs a fixed set of canonical dispatch scenarios against the real CLI, (b) records output quality scores (LLM-as-judge rubric on structured JSON output), (c) records token/cost/cache metrics, (d) compares against a stored baseline, (e) fails CI if quality degrades beyond a threshold | This is the regression gate for all future prompt/template changes. Without it, every template edit is a manual quality check. With it, `make eval` catches regressions before they ship. The harness is the thing that makes "trim boilerplate" safe — you can verify quality is preserved. | HIGH | New `internal/eval/` package; depends on `events.jsonl` parsing + a golden-set fixture directory |
-| D-C6 | **LLM-as-judge rubric for agentic coding task quality** — a structured JSON rubric applied by a judge LLM (separate from the task executor) scoring: completeness (did it produce all required files?), correctness (do produced artifacts satisfy the acceptance criterion?), instruction-following (did it follow the declared-output-paths contract?), and plan coherence (for planners: does the child-CRD set make sense?) | Research consensus: boolean scoring per dimension is more reliable than 1–10 scales; require evidence before score; target ≥0.80 Spearman correlation with human expert judgment for production deployment. The four dimensions map directly to TIDE's output contract (files, acceptance criteria, envelope contract, plan shape). | MEDIUM | Requires a judge LLM call in the eval harness; judge prompt should be a separate template with its own golden set |
+---
 
-### Anti-Features (Deliberately NOT in v1.0.2)
+### Differentiators (Competitive Advantage — Meaningful for v1.0.3)
 
-| # | Anti-Feature | Why Requested | Why Rejected | Alternative |
-|---|--------------|---------------|--------------|-------------|
-| AF-C1 | **Direct Anthropic SDK backend with explicit `cache_control`** | Would let TIDE set cache breakpoints at exactly the right location, giving full control over TTL and breakpoint placement without depending on CLI behavior | PROJECT.md v1.0.2 constraint: "Stay CLI-based — no direct-SDK `cache_control` subagent backend." The CLI path is the v1 contract; adding a direct SDK path this milestone expands scope significantly without proving the prompt-structuring approach first. | Stay CLI-based; verify that proper template structuring achieves ≥70% cache hit rate via metrics; SDK path is a future milestone if the gap proves unbridgeable. |
-| AF-C2 | **Aggressive boilerplate removal that degrades output quality** | Shorter prompts = lower token cost per dispatch. | Quality is the constraint, not token count. Research on context trimming shows "implicit-contract loss" when instructions are trimmed below task-completion threshold. Eval harness (D-C5) must gate all trimming. "Best-effort reduction, quality-gated" is the milestone constraint. | Trim incrementally; run eval harness after each reduction; stop trimming when quality score drops. |
-| AF-C3 | **Per-task prompt compression / summarization using a secondary LLM** | Prompt compression (e.g., LLMLingua-style) can reduce long task prompts by 5–10×. | Adds latency (a compression LLM call before every dispatch), cost (another LLM call), and a quality risk (compressed prompts lose precision). TIDE's task prompts are authored by the plan planner — they're already designed to be concise. Compression adds complexity for marginal gain. | Ensure plan-planner templates instruct the planner to write concise task prompts; the plan_planner.tmpl already says "Write it as if briefing an engineer." Enforce this at the prompt level, not with a runtime compressor. |
-| AF-C4 | **KV-cache sharing across worktrees** (forcing all wave siblings to use the same working directory to share the Claude Code cache) | Claude Code's cache is scoped per working directory. If all siblings shared one directory, they'd share the cache prefix. | Violates the per-task worktree isolation model (TS-8 in v1 FEATURES.md). Worktrees are the isolation unit; sharing them for cache savings trades correctness for cost. | The correct solution is provider-level shared prefix caching (the prefix match is by content, not path — restructure the stable prefix to not include the path, or investigate the `prompt_cache_key` parameter for OpenAI path once that backend ships). |
-| AF-C5 | **Per-task `events.jsonl` real-time streaming parsing for live cache hit feedback** | Would allow live dashboard updates showing cache hit/miss per turn within a running task. | TIDE's executor-level dispatch is single-turn for planner levels; multi-turn only for task executor sessions. The `events.jsonl` is already written; parsing it post-completion is sufficient for metrics. Real-time streaming adds significant complexity to the reporter pipeline for marginal dashboard value at this milestone. | Parse `events.jsonl` post-completion as today; surface aggregated metrics per dispatch and per-run. |
-| AF-C6 | **OpenAI/Codex subagent backend** | Natural partner to the prompt-structuring work; would allow verifying provider-agnostic cache behavior. | Explicitly out of scope for v1.0.2 per PROJECT.md: "Out of scope (→ next milestone): the OpenAI/Codex subagent backend and dogfood run #2 itself." | Design prompt structuring to be provider-agnostic (it is, by the stable-prefix-first rule); verify on the OpenAI path in the next milestone. |
-| AF-C7 | **Eval harness with human annotation pipeline** | LLM-as-judge calibrated against human expert annotations is more reliable. | Human annotation pipeline is infra-heavy (annotation UI, annotator pool, disagreement resolution) and out of scope for v1.0.2. The eval harness is a CI tool, not a research platform. | Ship with LLM-as-judge (D-C6); calibrate judge against a small hand-labeled golden set (10–20 canonical scenarios); defer annotation pipeline to post-v1.0.2. |
-| AF-C8 | **Cache pre-warming service** (a persistent sidecar that re-issues warm-up calls before cache TTL expires) | Would keep the 5-minute cache warm indefinitely, effectively making all dispatches cache hits. | Adds a persistent process, requires tracking TTL per provider per model, and is Anthropic-path-specific (OpenAI cache TTL is not directly controllable). At TIDE's dispatch frequency, wave siblings arrive within 30–60 seconds — the cache stays warm naturally during an active run. | Rely on natural cache warming during active runs; accept cold-start cost on the first dispatch per wave. |
+Features beyond table stakes that make TIDE's resumption model distinctive.
+
+| # | Feature | Prior Art Basis | Value Proposition | Complexity | TIDE Invariant Impact |
+|---|---------|----------------|-------------------|------------|----------------------|
+| D-R1 | **`tide resume --from-envelope <path>` import command** — a CLI verb that reads a saved envelope tree from a local directory (e.g., `examples/projects/dogfood/salvage-20260618/`), validates each envelope's schema + cycle-detection, computes stable keys, and writes to the PVC at the expected key path; the subsequent Project apply then hits the envelope cache and skips all planning | Argo `--memoized` resubmit; Airflow backfill `Missing Runs` mode | Enables adopting the salvaged dogfood artifacts without any manual PVC manipulation. Closes the immediate TIDE-on-TIDE cost recovery gap. | HIGH — requires the stable-key computation, the import command, envelope path mapping, and the PVC write; CLI subcommand + validation + key rewrite | Reuses TS-R3 validation; preserves cycle-detection; the import writes to the expected key path so the normal planner-skip path fires naturally |
+| D-R2 | **Plan-import dry-run mode** — `tide resume --from-envelope <path> --dry-run` reports which envelopes would be accepted vs rejected (with rejection reason) without writing to the PVC | Dagster staleness UI; Argo workflow dry-run | Lets operators validate an import before committing, avoiding partial-state failures where some envelopes import and others fail mid-import | MEDIUM — dry-run flag on the import command; print acceptance/rejection report | No invariant conflict |
+| D-R3 | **Per-level resume status on dashboard** — show each Milestone/Phase/Plan node with a "Resumed from envelope" badge distinct from "Freshly planned"; surface which nodes were skipped vs re-planned in a given run | Temporal event history visualization; LangGraph checkpoint browser | Operators need to know which work was actually redone after a resume. Without this, there's no way to audit that the resume was correct. Closes the observability gap. | MEDIUM — new node-level status field on Milestone/Phase/Plan CRD + dashboard rendering | No invariant conflict; CRD `.status` is the correct persistence point |
+| D-R4 | **Envelope export command** — `tide export-envelopes <project> <namespace> --output-dir <path>` reads all existing planner envelopes from the PVC and writes them to a local directory in the stable-key naming convention; makes the salvage workflow portable | Airflow DAG export; Bazel CAS export | Enables the dogfood salvage pattern as a first-class operation: run halts → export envelopes → fix the issue → import on fresh run. Preserves planning artifacts across cluster teardowns. | MEDIUM — reads from PVC via a Job or `kubectl cp`; writes to a deterministic directory structure | No invariant conflict |
+
+---
+
+### Anti-Features (Deliberately NOT in v1.0.3)
+
+| # | Anti-Feature | Why Requested | Why Rejected / TIDE Invariant Violation | Alternative |
+|---|--------------|---------------|----------------------------------------|-------------|
+| AF-R1 | **Cache the wave schedule in `.status`** | "Just save the wave list so we don't re-derive it on every reconcile" | DIRECT INVARIANT VIOLATION: waves are derived, never declared (spec §"Wave computation"). The wave schedule must be re-derived from the task DAG + completed-task set on every reconcile. Caching a stale schedule can silently skip tasks whose predecessors failed. Argo's memoization bug (#12936) is the prior-art failure mode for exactly this pattern. | Re-derive waves in O(V+E) on every reconcile — it's cheap, it's correct, it's what the spec says. |
+| AF-R2 | **Accept a UID-keyed envelope directly on fresh Project apply** | "The envelopes are already on the PVC from the previous run; just use them" | UID churn is guaranteed — a fresh Project apply assigns new UIDs to all child CRDs. Adopting envelopes keyed by old UIDs silently re-uses stale planning artifacts from a different object identity. This is the adoption-without-validation failure mode. | Use content-addressed stable keys (TS-R2). |
+| AF-R3 | **Skip cycle detection on import to save time** | "These envelopes already passed validation when they were first authored" | DIRECT INVARIANT VIOLATION: cycle detection happens at plan-validation time and cannot be bypassed. An envelope is only safe to adopt if it currently passes validation — it may have been authored against an older schema or template version. Argo's memoization skipped DAG ordering and caused a correctness bug. | Run the same validation path on import as on fresh authoring (TS-R3). Validation is O(V+E) and fast. |
+| AF-R4 | **Partial import (skip validation for "obviously good" envelopes)** | "Most envelopes are fine; only validate the top-level ones" | One invalid envelope in the middle of the tree can propagate invalid assumptions downstream. Dagster's staleness model and Bazel's action cache both validate every node. Partial validation introduces a correctness hazard that is not worth the time saved. | Validate all envelopes atomically (TS-R3). Reject the import if any envelope fails. |
+| AF-R5 | **Envelope TTL / cache expiry** | "Envelopes older than N days should be considered stale and re-planned" | Time is not a valid staleness signal for planning artifacts. A 30-day-old envelope for an unchanged project outcome + template is still correct. A 5-minute-old envelope for a changed outcome is stale. The staleness signal is input-fingerprint mismatch, not age. Argo's `maxAge` for memoization is appropriate for data-processing workflows where freshness has inherent value; TIDE's planning artifacts are deterministic given stable inputs. | Use content-hash staleness (TS-R2 + TS-R3), not time-based expiry. |
+| AF-R6 | **Automatic resume on any halt (including non-budget halts)** | "Just resume automatically after any recoverable error" | Temporal's pattern: the developer explicitly decides what is resumable. A budget halt is resumable after cap-raise. A cycle-detection failure is not resumable without a plan fix. An invalid envelope is not resumable without a re-plan. Auto-resume without discriminating halt type would silently re-run broken plans. | Discriminate halt types in `tide resume`: budget-halt → resume at Running; cycle-error → require fix; validation-error → require re-plan or import. |
+| AF-R7 | **In-memory envelope cache across reconciles** | "Cache the envelope lookup in the controller's memory to avoid PVC reads" | Violates CRD-`.status`-only persistence. An in-memory cache is lost on controller restart and creates divergence between the controller's view and the actual PVC state. Temporal's durable execution model explicitly avoids this pattern. | Read from PVC (the source of truth) at each planner dispatch site. PVC reads are fast; the envelope JSON is small. |
+| AF-R8 | **Collapse `retry` and `resume` into one verb** | "Simplify the CLI: just have one recovery command" | Argo's documentation failure (issue #2320 — "retry vs resubmit not documented") shows this causes user confusion when the verbs have different semantics. TIDE already has `tide resume --retry-failed` (retry failed execution tasks) and needs `tide resume --from-envelope` (skip planning). These must remain distinct with explicit flags — semantics are different and conflation breaks the mental model. | Keep `--retry-failed` (execution recovery) and `--from-envelope` (planning import) as distinct modes of `tide resume`. |
 
 ---
 
 ## Feature Dependencies
 
 ```
-TS-C4 (deterministic serialization)
-    └──requires──> TS-C3 (SharedContext injection)
-                       └──requires──> TS-C1 (stable-prefix ordering)
-                                          └──requires──> TS-C2 (no volatile data in prefix)
+TS-R2 (stable envelope cache key)
+    └──required-by──> TS-R1 (envelope-based planner skip)
+                          └──required-by──> D-R1 (tide resume --from-envelope)
+                                                └──required-by──> D-R4 (envelope export)
+                                                └──enhanced-by──> D-R2 (dry-run mode)
 
-TS-C6 (token budget enforcement)
-    └──requires──> TS-C5 (boilerplate audit)
-                       └──requires──> TS-C1 (stable-prefix ordering)
+TS-R3 (envelope staleness validation)
+    └──required-by──> TS-R1 (planner skip — must validate before skipping)
+    └──required-by──> D-R1 (import — must validate before writing)
 
-TS-C7 (cache hit rate metric)
-    ├──requires──> existing events.jsonl parsing (already in internal/reporter/)
-    └──enhances──> D-C4 (cost+quality dashboard panel)
+TS-R4 (budget-bypass resume at Running)
+    └──required-by──> TS-R5 (idempotent child-CRD re-init guard)
+                          (TS-R4 is useless without TS-R5: resumes at Running but re-creates children)
 
-TS-C8 (per-level token accounting)
-    └──enhances──> D-C4 (cost+quality dashboard panel)
+TS-R6 (cap-raise ergonomics)
+    └──requires──> TS-R4 (cap-raise only matters once resume path is correct)
 
-D-C5 (eval harness)
-    ├──requires──> TS-C7 (cache hit rate metric) — harness reports cache deltas
-    ├──requires──> TS-C8 (per-level token accounting) — harness reports cost deltas
-    └──requires──> D-C6 (LLM-as-judge rubric) — harness needs a quality scorer
+TS-R7 (regression test for 2a5e0dc ordering fix)
+    └──independent (can ship with TS-R4/TS-R5 or standalone)
 
-D-C6 (LLM-as-judge)
-    └──requires──> D-C5 (eval harness) — judge runs within the harness
+D-R3 (per-level resume status on dashboard)
+    └──requires──> TS-R1 (envelope skip must record that a skip happened in .status)
 
-D-C1 (warm-up dispatch)
-    └──requires──> TS-C3 (SharedContext injection) — warm-up only makes sense if siblings share a stable prefix
-
-D-C2 (context curation)
-    └──enhances──> TS-C3 (SharedContext injection) — curation determines what goes in SharedContext
-
-TS-C1, TS-C2, TS-C5 (template restructuring)
-    └──gated-by──> D-C5 (eval harness) — don't ship template changes without regression gate
+D-R4 (envelope export)
+    └──enhances──> D-R1 (export creates the import-ready directory; import consumes it)
+    └──requires──> TS-R2 (export writes using stable-key naming so import can ingest)
 ```
 
-### Dependency notes
+### Dependency Notes
 
-- **TS-C1 + TS-C2 are the foundation.** Every caching benefit depends on the stable
-  prefix being truly stable (no volatile data). These are template edits — low complexity,
-  but they must be done first.
-- **TS-C3 (SharedContext) is the highest-leverage structural change.** Without it, wave
-  siblings each start with a cold cache for the plan/phase context. With it, after the
-  first sibling, all subsequent siblings in the same wave hit the cache for the largest
-  portion of their input. This is where the token spend actually drops.
-- **D-C5 (eval harness) must gate all template changes.** The correct sequence is:
-  implement harness → establish baseline → restructure templates → verify quality preserved →
-  ship. Doing template changes before the harness exists is unsafe.
-- **D-C1 (warm-up dispatch) is HIGH complexity and depends on D-C5.** Do not build it
-  without first verifying that the simpler TS-C1/C2/C3 changes don't already achieve
-  sufficient cache hit rate.
+- **TS-R2 is the foundation.** Stable keys are required by everything else. This is a schema and
+  naming change (PVC path layout) that must be decided before any other work starts.
+- **TS-R3 validation must gate TS-R1.** The planner skip is only safe if the envelope passes
+  validation. Never skip without validating — this is the lesson from Argo memoization bug #12936.
+- **TS-R4 + TS-R5 are a unit.** Fixing the `Pending` re-entry without adding the child-CRD
+  idempotency guard is incomplete: the controller resumes at `Running` but then creates duplicate
+  children. Both must ship together.
+- **D-R1 (import command) is the headline feature** but depends on TS-R1/R2/R3 being correct
+  first. Do not build the import CLI before the underlying planner-skip path is correct and tested.
+- **D-R3 (dashboard badges) is independent** of the core controller work and can ship in a
+  later plan within the milestone.
 
 ---
 
 ## MVP Definition
 
-### Launch With (v1.0.2 — "Ebb Tide")
+### Launch With (v1.0.3)
 
-Minimum viable cost optimization — sufficient to reduce token spend measurably while
-proving quality is preserved.
+Minimum viable resumption — sufficient to make a budget-halted planning run resumable without
+re-paying the planning cost.
 
-- [ ] **TS-C1** — Stable-prefix-first ordering in all five templates — *why essential:
-  zero cache benefit is achievable without this; it's the structural prerequisite for
-  everything else*
-- [ ] **TS-C2** — Remove `{{.TaskUID}}`, `{{.Provider.Vendor}}`, `{{.Provider.Model}}`
-  from the stable boilerplate section of templates — *why essential: current templates
-  include volatile dispatch metadata in the prefix, busting cache on every unique TaskUID*
-- [ ] **TS-C5** — Boilerplate audit: measure token count per template; grow stable prefix
-  to ≥1,024 tokens with the SharedContext block; document the template token budget — *why
-  essential: caching simply does not activate below 1,024 tokens — TIDE's current ~200-token
-  templates get zero cache benefit*
-- [ ] **TS-C4** — Deterministic serialization for any structured data in the stable prefix
-  — *why essential: non-deterministic Go map serialization produces different token sequences,
-  busting cache silently*
-- [ ] **TS-C7** — Cache hit rate metric from events.jsonl — *why essential: without
-  measurement, there's no signal that restructuring worked*
-- [ ] **TS-C8** — Per-level token accounting as Prometheus labels — *why essential:
-  identifies which level to optimize first*
-- [ ] **D-C5** — Eval harness (`internal/eval/`) with golden-set fixtures and baseline
-  storage — *why essential: the quality gate that makes all template changes safe to ship*
-- [ ] **D-C6** — LLM-as-judge rubric (four dimensions: completeness, correctness,
-  instruction-following, plan coherence) — *why essential: harness is useless without a
-  quality scorer*
-- [ ] **TS-C3** — SharedContext injection block — plan objective + phase brief summary
-  injected identically into all wave-sibling dispatches — *why essential: this is where
-  the actual per-wave cache savings come from*
+- [ ] **TS-R4** — Budget-bypass resume at `Running` (fix `project_controller.go:1257`) — *why
+  essential: the most damaging immediate bug; without this, clearing a halt always re-pays planning*
+- [ ] **TS-R5** — Idempotent child-CRD re-init guard — *why essential: companion to TS-R4; without
+  the guard, `Running` re-entry still re-creates children*
+- [ ] **TS-R2** — Stable envelope cache key (content-addressed, not UID-keyed) — *why essential:
+  UID churn makes any UID-keyed scheme a no-op on fresh Project apply*
+- [ ] **TS-R1** — Envelope-based planner skip at all planner dispatch sites — *why essential: this
+  is the mechanism that converts the stable key into actual cost savings*
+- [ ] **TS-R3** — Envelope staleness validation before skip — *why essential: must preserve cycle-
+  detection invariant; prevents stale envelopes from bypassing validation*
+- [ ] **TS-R6** — Cap-raise ergonomics (coordinated re-check) — *why essential: without this, cap
+  raise is frustrating UX and users may overshoot trying to find a cap that doesn't immediately re-halt*
+- [ ] **TS-R7** — Regression test for ordering fix (`2a5e0dc`) — *why essential: a shipped fix
+  without a regression test is not verifiably fixed*
 
-### Add After Validation (v1.0.2 extension)
+### Add After Core is Working (v1.0.3 extension)
 
-Add these once the baseline is established and the eval harness is green.
+- [ ] **D-R1** — `tide resume --from-envelope <path>` import command — *trigger: TS-R1/R2/R3
+  correct and tested; import command is the user-facing closure of the dogfood salvage gap*
+- [ ] **D-R2** — Import dry-run mode — *trigger: D-R1 exists; dry-run adds safety, especially
+  for large envelope trees*
+- [ ] **D-R4** — `tide export-envelopes` command — *trigger: D-R1 exists; export makes the
+  import pattern reusable without manual PVC access*
 
-- [ ] **D-C4** — Cost + quality dashboard panel — *trigger: TS-C7 + TS-C8 metrics exist;
-  add visualization once the data is there*
-- [ ] **D-C2** — Context curation (summaries over verbatim content in SharedContext) —
-  *trigger: SharedContext (TS-C3) is working; tune what goes in it based on eval harness
-  quality scores*
-- [ ] **D-C3** — Per-level token budget profiles (Helm/CRD config) — *trigger: enough
-  runs to know which levels need different budgets*
+### Future Consideration (v1.0.4+)
 
-### Future Consideration (v1.0.3+)
-
-- [ ] **D-C1** — Wave-sibling warm-up dispatch — *why defer: high complexity; only
-  worthwhile if natural cache warming doesn't suffice at TIDE's dispatch cadence*
-- [ ] **AF-C1 reversed** — Direct SDK backend with explicit `cache_control` — *why defer:
-  proves CLI path first; SDK path unlocks explicit TTL control and 1-hour cache if needed*
-- [ ] **AF-C6 reversed** — OpenAI/Codex backend + provider-agnostic cache verification
-  — *scope-constrained to next milestone explicitly*
+- [ ] **D-R3** — Per-level "Resumed from envelope" dashboard badge — *why defer: non-blocking;
+  the functional correctness of resume matters more than the observability at v1.0.3*
 
 ---
 
@@ -262,153 +385,86 @@ Add these once the baseline is established and the eval harness is green.
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| TS-C1 (stable-prefix ordering) | HIGH — prerequisite for all caching | LOW — template edits | P1 |
-| TS-C2 (no volatile data in prefix) | HIGH — currently breaks all caching | LOW — template edits | P1 |
-| TS-C5 (boilerplate audit, grow to 1,024 tokens) | HIGH — caching inactive below threshold | MEDIUM — requires token counting | P1 |
-| D-C5 (eval harness) | HIGH — quality gate for all changes | HIGH — new package + golden sets | P1 |
-| D-C6 (LLM-as-judge rubric) | HIGH — makes eval harness useful | MEDIUM — judge prompt + fixture labels | P1 |
-| TS-C3 (SharedContext injection) | HIGH — the main per-wave savings source | MEDIUM — dispatcher changes | P1 |
-| TS-C4 (deterministic serialization) | MEDIUM — silent cache buster | LOW — sort keys everywhere | P1 |
-| TS-C7 (cache hit rate metric) | HIGH — measurement proves the work | LOW — parse existing events.jsonl | P1 |
-| TS-C8 (per-level token accounting) | MEDIUM — identifies hot levels | LOW — extend existing metrics | P1 |
-| D-C4 (cost+quality dashboard panel) | MEDIUM — visibility | MEDIUM — dashboard component | P2 |
-| D-C2 (context curation) | MEDIUM — marginal savings over SharedContext | MEDIUM — curation logic | P2 |
-| D-C3 (per-level token budget profiles) | LOW — tuning knob | LOW — Helm values + enforcement | P2 |
-| D-C1 (wave warm-up dispatch) | MEDIUM — cache-hit guarantee for wave siblings | HIGH — dispatch loop change | P3 |
+| TS-R4 (budget-bypass resume at Running) | HIGH — immediate re-cost-avoidance | LOW — targeted controller fix | P1 |
+| TS-R5 (idempotent child-CRD guard) | HIGH — companion to TS-R4 | LOW — existence check at dispatch site | P1 |
+| TS-R2 (stable envelope cache key) | HIGH — prerequisite for all envelope-skip | MEDIUM — PVC path layout change + keying function | P1 |
+| TS-R1 (envelope-based planner skip) | HIGH — core cost-avoidance mechanism | MEDIUM — touches all planner dispatch sites | P1 |
+| TS-R3 (envelope staleness validation) | HIGH — safety gate preserving cycle-detection invariant | MEDIUM — reuse validation path + add fingerprint check | P1 |
+| TS-R6 (cap-raise ergonomics) | MEDIUM — UX fix | LOW — billing halt condition logic | P1 |
+| TS-R7 (regression test for 2a5e0dc) | MEDIUM — correctness assurance | LOW — envtest addition | P1 |
+| D-R1 (tide resume --from-envelope) | HIGH — closes dogfood salvage gap | HIGH — CLI command + key rewrite + validation | P2 |
+| D-R2 (import dry-run) | MEDIUM — safety for operators | LOW — flag on D-R1 | P2 |
+| D-R4 (envelope export command) | MEDIUM — makes import portable | MEDIUM — Job or kubectl cp wrapper | P2 |
+| D-R3 (dashboard resume badge) | LOW — observability | MEDIUM — CRD field + dashboard component | P3 |
 
 **Priority key:**
-- P1: Required for v1.0.2 — directly delivers the milestone goal
-- P2: Add after baseline established, within milestone
+- P1: Required for v1.0.3 core — directly delivers resumption correctness
+- P2: Add within milestone once P1 is working
 - P3: Future milestone
 
 ---
 
-## Implementation Notes by Category
+## TIDE Invariant Compliance Summary
 
-### Template Restructuring (TS-C1, TS-C2, TS-C5)
-
-Current templates (`internal/subagent/common/templates/*.tmpl`) structure:
-
-```
-[TIDE preamble paragraph — ~200 tokens, stable]
-[Dispatch metadata block with {{.TaskUID}}, {{.Provider.Vendor}}, {{.Provider.Model}} — volatile]
-[Role-specific instructions — stable]
-[HOW TO EMIT child CRDs block — stable]
-Original prompt:
-{{.Prompt}}
-```
-
-Target structure:
-
-```
-[Role declaration — stable, ~50 tokens]
-[TIDE system context paragraph — stable, ~200 tokens]
-[SharedContext block — stable for all siblings in the same wave, ~500-800 tokens]
-  - Milestone outcome (1-2 sentences)
-  - Phase objective (1-2 sentences)
-  - Plan scope summary (3-5 sentences for plan/task levels; absent for project/milestone)
-  - Sibling task list (for task executor: what other tasks exist in this wave, declared-output-paths)
-[Role-specific instructions — stable for each level, ~200 tokens]
-[Output contract / child-CRD format — stable for each level, ~200 tokens]
-[Filesystem layout (task executor only) — stable, ~100 tokens]
-Original prompt:
-{{.Prompt}}
-```
-
-Target total stable prefix: ≥1,024 tokens across all five templates.
-Target `{{.Prompt}}` suffix: the minimum per-task instruction, no shared context repeated.
-
-The key changes:
-1. Move `{{.TaskUID}}` out of the stable body — it can appear in a metadata header that's
-   explicitly NOT part of the cached prefix (i.e., after `{{.Prompt}}`), or be removed
-   entirely if the executor already reads it from `in.json`.
-2. Move `{{.Provider.Vendor}}` and `{{.Provider.Model}}` to the volatile suffix or remove
-   them (the subagent already knows its model; stating it in the prompt is redundant).
-3. Add a `{{.SharedContext}}` template variable populated by the dispatcher from the
-   owning Plan/Phase/Milestone CRD. This is the same across all siblings.
-
-### Eval Harness Design (D-C5, D-C6)
-
-The harness is a Go test package at `internal/eval/` with:
-
-- **Golden scenarios directory** (`internal/eval/testdata/scenarios/`) — each scenario is:
-  - `input.json` — an `EnvelopeIn` struct for one dispatch
-  - `expected_output_schema.json` — the JSON schema the output must satisfy
-  - `quality_criteria.json` — the four rubric dimensions with pass/fail thresholds
-  - `baseline.json` — recorded token counts, cache metrics, quality scores from the
-    approved baseline run
-
-- **Harness runner** — dispatches each scenario through the real template rendering
-  pipeline (not a mock); records actual output + token usage
-
-- **LLM-as-judge scorer** — submits `(scenario_input, actual_output, quality_criteria)`
-  to a judge LLM (separate Claude call, not the same dispatch); receives structured JSON
-  with per-dimension boolean scores + evidence
-
-- **Comparison and gate** — compares quality scores + token metrics against `baseline.json`;
-  fails if any quality dimension regresses; reports token/cost delta vs baseline
-
-- **CI integration** — `make eval` runs the harness; required green before merging any
-  template or dispatcher change
-
-Judge LLM rubric (four dimensions, boolean each):
-
-| Dimension | Pass Criterion |
-|-----------|---------------|
-| Completeness | All declared-output-paths files were produced |
-| Correctness | Produced artifacts satisfy the task acceptance criterion |
-| Instruction-following | Output conforms to the envelope contract (JSON only in children/, no prose) |
-| Plan coherence (planners) | Child CRDs form a valid, non-cyclic dependency graph |
-
-### SharedContext Construction (TS-C3)
-
-The dispatcher must build a `SharedContext` string that is:
-1. **Identical** for all tasks in the same wave of the same plan (determinism required)
-2. **Stable** across dispatch calls (no timestamps, no run IDs)
-3. **Concise** — 500–800 tokens, not a verbatim PLAN.md dump
-
-Content of SharedContext per level:
-
-| Template level | SharedContext content |
-|---------------|----------------------|
-| `project_planner` | Project outcome statement only (already in `{{.Prompt}}`; SharedContext may be empty at this level) |
-| `milestone_planner` | Milestone scope from Project outcome + project constraints summary |
-| `phase_planner` | Milestone outcome + sibling phase names + declared dependency edges |
-| `plan_planner` | Phase objective + plan scope + sibling plan names + file-touch constraints |
-| `task_executor` | Plan objective + wave number + sibling task names + their declared-output-paths |
+| Feature | Waves derived not declared | CRD-status-only persistence | Cycles are bugs (no bypass) | UID-churn safe | Notes |
+|---------|--------------------------|----------------------------|---------------------------|----------------|-------|
+| TS-R1 (planner skip) | SAFE — envelopes are planner inputs, not wave schedule | SAFE — skip decision is in-process, result in .status | SAFE — only if TS-R3 gates it | SAFE — only if TS-R2 used | Requires TS-R2 + TS-R3 to be safe |
+| TS-R2 (stable key) | N/A | N/A | N/A | SAFE — content-addressed, not UID-keyed | Foundation of all other safety |
+| TS-R3 (validation before skip) | N/A | N/A | REQUIRED — preserves cycle-detection | N/A | The invariant enforcement gate |
+| TS-R4 (resume at Running) | N/A | N/A | N/A | N/A | State machine fix; no invariant conflict |
+| TS-R5 (idempotent child-CRD) | N/A | N/A | N/A | N/A | Existence check; no invariant conflict |
+| AF-R1 (cache wave schedule) | VIOLATION | VIOLATION | VIOLATION | N/A | Do not build |
+| AF-R3 (skip cycle detection on import) | N/A | N/A | VIOLATION | N/A | Do not build |
+| AF-R7 (in-memory envelope cache) | N/A | VIOLATION | N/A | N/A | Do not build |
 
 ---
 
 ## Sources
 
-### Provider caching mechanics (HIGH confidence — official docs)
+### Argo Workflows (HIGH confidence — official docs + GitHub issues)
 
-- [Claude Code prompt caching official docs](https://code.claude.com/docs/en/prompt-caching) — the authoritative source on how Claude Code's three-layer cache structure works, subagent TTL behavior, what invalidates the cache, working directory scoping
-- [Anthropic API prompt caching docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) — cache_control breakpoints, minimum token thresholds per model (verified: 1,024 for Sonnet/Opus, 4,096 for Haiku 4.5 and Opus 4.5/4.6), TTL options (5 min default, 1 hr opt-in), pricing multipliers
-- [OpenAI API prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching) — automatic prefix caching mechanics, 1,024-token minimum, 128-token increment granularity, prompt_cache_key parameter
+- [Argo Workflows Step Level Memoization](https://argo-workflows.readthedocs.io/en/latest/memoization/) — cache key construction, ConfigMap storage, maxAge, skip behavior
+- [Argo Workflows Retries documentation](https://argo-workflows.readthedocs.io/en/latest/retries/) — retry policy, backoff, conditional retry
+- [Argo issue #12936 — memoized resubmit DAG ordering bug](https://github.com/argoproj/argo-workflows/issues/12936) — correctness hazard when skipping memoized nodes in a DAG
+- [Argo issue #2320 — retry vs resubmit undocumented difference](https://github.com/argoproj/argo-workflows/issues/2320) — motivation for keeping resume verbs distinct
 
-### Prompt structuring for cache maximization (HIGH confidence — cross-verified)
+### Temporal (HIGH confidence — official docs + verified secondary)
 
-- [KV-Cache aware prompt engineering](https://ankitbko.github.io/blog/2025/08/prompt-engineering-kv-cache/) — stable prefix / volatile suffix pattern, what content belongs where, concrete examples of cache-busting content (timestamps, UUIDs, dynamic personalization)
-- [Prompt cache hit rate engineering 2026](https://agentmarketcap.ai/blog/2026/04/11/prompt-cache-hit-rate-engineering-2026) — measuring cache hit rate formula, what breaks cache hits, token layout playbook, case study (7% → 74% hit rate from prefix optimization)
-- [OpenAI Prompt Caching 201 cookbook](https://developers.openai.com/cookbook/examples/prompt_caching_201) — multi-agent / parallel dispatch structuring, prompt_cache_key for routing stickiness, ~15 RPM per prefix limit
+- [Temporal Workflow Execution overview](https://docs.temporal.io/workflow-execution) — event history, replay, continue-as-new
+- [Replay Testing to Avoid Non-Determinism in Temporal Workflows (Bitovi)](https://www.bitovi.com/blog/replay-testing-to-avoid-non-determinism-in-temporal-workflows) — determinism requirement, what breaks replay
+- [Zylos AI — AI Agent Workflow Checkpointing and Resumability](https://zylos.ai/research/2026-03-04-ai-agent-workflow-checkpointing-resumability/) — Temporal event-history pattern + user expectation of "no double billing"
 
-### Token minimization and context curation (MEDIUM confidence — WebSearch, multiple sources)
+### Prefect (HIGH confidence — official docs)
 
-- [AI Agent Loop Token Costs: Context Constraints (Augment Code)](https://www.augmentcode.com/guides/ai-agent-loop-token-cost-context-constraints) — sliding-window context trimming, implicit-contract loss from over-trimming, must pair trimming with pinned state
-- [Escaping the Context Bottleneck (arxiv 2604.11462)](https://arxiv.org/html/2604.11462v1) — active context curation with RL; human-curated context: 4% gain at 20% token overhead; quality matters more than presence
-- [Contextual Memory Virtualisation (arxiv 2602.22402)](https://arxiv.org/pdf/2602.22402) — structurally lossless trimming: mechanical overhead (file dumps, base64, metadata) consumes most context tokens; streaming algorithm strips overhead while preserving message content
-- [Stop Wasting Your Tokens (arxiv 2510.26585)](https://arxiv.org/html/2510.26585v2) — sub-agent returns 1,000–1,500 token condensed findings; orchestrator works with summaries, not full reasoning chains
+- [Configure task caching — Prefect](https://docs.prefect.io/v3/develop/task-caching) — INPUTS cache policy, result persistence requirement, cache hit skip behavior
 
-### Eval harness patterns (MEDIUM confidence — WebSearch synthesis)
+### Dagster (HIGH confidence — official docs)
 
-- [Building an Evaluation Harness for Production AI Agents (Towards Data Science)](https://towardsdatascience.com/building-an-evaluation-harness-for-production-ai-agents-a-12-metric-framework-from-100-deployments/) — 12-metric framework from 100+ deployments; self-improving loop: online eval flags failures → offline golden set grows
-- [LLM-as-a-Judge: A Practical Guide (Towards Data Science)](https://towardsdatascience.com/llm-as-a-judge-a-practical-guide/) — boolean scoring more reliable than 1–10; require evidence before score; target ≥0.80 Spearman correlation with human expert for production
-- [Rubric-Based Evaluations & LLM-as-a-Judge (Medium, Adnan Masood)](https://medium.com/@adnanmasood/rubric-based-evals-llm-as-a-judge-methodologies-and-empirical-validation-in-domain-context-71936b989e80) — structured JSON output with evidence citations, calibrated against human annotation, concrete rubric design for domain-specific contexts
-- [Agent Evaluation Framework (Galileo)](https://galileo.ai/blog/agent-evaluation-framework-metrics-rubrics-benchmarks) — assesses task completion quality, tool selection rationale, planning effectiveness as distinct rubric axes
+- [Asset versioning and caching — Dagster](https://docs.dagster.io/guides/build/assets/asset-versioning-and-caching) — code_version + data_version staleness model, skip-if-unsynced behavior
+
+### Apache Airflow (MEDIUM confidence — official docs + Astronomer)
+
+- [Rerun Airflow DAGs and tasks — Astronomer](https://www.astronomer.io/docs/learn/rerunning-dags/) — three reprocessing modes, --rerun-failed-tasks
+- [DAG Run Status — Apache Airflow](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html) — task state semantics
+- [Airflow issue #570 — skipped tasks hang backfill](https://github.com/apache/airflow/issues/570) — pitfall: Skipped ≠ Succeeded
+
+### Bazel / Content-Addressed Caches (HIGH confidence — official docs + ACM Queue)
+
+- [Remote Caching — Bazel](https://bazel.build/remote/caching) — action key construction, CAS + AC separation
+- [Using Remote Cache Service for Bazel — ACM Queue](https://queue.acm.org/detail.cfm?id=3287302) — action fingerprint details, input-addressed memoization
+
+### GitHub Actions (HIGH confidence — official docs)
+
+- [Dependency caching reference — GitHub Docs](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching) — cache-hit output, skip-step-on-cache-hit pattern
+
+### LLM agent patterns (MEDIUM confidence — multiple sources)
+
+- [Async AI Agent Workflows Survive Failures — Augment Code](https://www.augmentcode.com/guides/async-ai-agent-workflows) — per-step snapshots, event-history replay for LLM agent workflows
+- [Long-Running Agents — Addy Osmani](https://addyosmani.com/blog/long-running-agents/) — structured handoff files, artifact-based session continuity, budget circuit breakers
+- [Budget exceeded: response playbook — Opsmeter](https://opsmeter.io/blog/budget-exceeded-response-playbook-for-llm-teams) — soft limits with human-in-the-loop escalation
 
 ---
 
-*Feature research for: TIDE v1.0.2 Ebb Tide — Token & Cost Optimization*
-*Researched: 2026-06-15*
-*Scope: NEW cost-optimization + eval features only; v1 features are in the prior FEATURES.md version (2026-05-12)*
+*Feature research for: TIDE v1.0.3 — Planning Resumption & Cost Resilience*
+*Researched: 2026-06-18*
+*Scope: NEW resumption/import features only; v1.0.2 features are in the prior FEATURES.md version (2026-06-15)*

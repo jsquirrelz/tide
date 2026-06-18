@@ -1,1608 +1,356 @@
-# Pitfalls Research — TIDE
+# Domain Pitfalls — v1.0.3 Planning Resumption & Cost Resilience
 
-**Domain:** Kubernetes-native LLM-agent orchestrator (CRDs + controller + subagent Jobs)
-**Researched:** 2026-05-12
-**Confidence:** HIGH (cross-verified against `README.md` spec, `PROJECT.md` locked decisions, controller-runtime/Kubernetes official docs, and 2026 industry reporting on agentic and operator failure modes)
+**Domain:** Resume/import layer on a Kubernetes CRD reconciler that dispatches LLM Jobs with UID-keyed PVC artifacts
+**Researched:** 2026-06-18
+**Milestone context:** v1.0.3 — observed bug class: `bypass-budget=true` annotation sets `Status.Phase = Pending` → re-init fires → re-clone fires → looping reporters against already-authored children
+**Confidence:** HIGH — derived from direct codebase inspection (`project_controller.go`, `backend.go`, `dispatch_helpers.go`, `depgraph.go`, `pkg/dispatch/envelope.go`) and cross-referenced against `.planning/PROJECT.md` constraints and `README.md` spec invariants
 
-> Scope reminder. These are TIDE-class pitfalls, not generic K8s or generic agent advice. Each one lands at the intersection of: (a) the five-level paradigm in `README.md`, (b) the locked v1 decisions in `.planning/PROJECT.md` (CRD-`status`-only persistence, namespace-per-project, pod-per-task Jobs, strict-by-default failure profile, self-hosting MVP as the v1 bar), and (c) the OSS posture goal of running unmodified in arbitrary clusters.
+> **Scope.** These pitfalls cover adding (1) artifact-import / stage-skip resumption and (2) safe halt-resume to the existing TIDE controller. Each pitfall is at the intersection of: (a) the five-level paradigm with UID-keyed PVC envelopes, (b) controller-runtime's at-least-once reconcile model, and (c) the CRD-status-only persistence constraint. Prior milestone pitfalls (Pitfalls 1-24) remain valid and are not repeated here.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: Long-running work inside the reconcile loop
+### Pitfall R-01: Budget-bypass clears to `Pending` instead of `Running`, triggering re-init
 
-**Severity:** Catastrophic
-
-**What goes wrong:**
-A reconciler for `Wave` or `Task` blocks on subagent completion — waiting for a Job to finish, polling LLM provider status, or sleeping until a downstream artifact appears. The reconciler holds a worker slot for minutes-to-hours. The controller's work queue backs up; status updates lag; events on the same object cannot interrupt the running reconciliation; `kubectl describe` and the dashboard show stale state for the duration.
-
-**Why it happens:**
-Wave-walking reads naturally as "dispatch tasks → wait for them to finish → dispatch next wave." That reads as a single function. Controller-runtime's reconciler signature (`Reconcile(ctx) (Result, error)`) hides the fact that the *correct* model is to return early and let watches re-trigger the reconcile when child Jobs change status. The spec's worked example walks Kahn iteration-by-iteration in pseudocode, which subtly invites a synchronous mental model that does not match how K8s controllers should be written.
-
-**How to avoid:**
-- Reconcile must be event-driven, not procedural. Each invocation answers "what should the world look like *now*, given current cluster state?" and returns. The next invocation is triggered by watches on child Jobs.
-- Set `Owns(&batchv1.Job{})` and `Owns(&tidev1.Task{})` on the controller builders so Job/Task status transitions re-enqueue the owning Wave/Plan.
-- Use `RequeueAfter` only for genuinely time-based polling (e.g. external git remote freshness), never as a substitute for watch-driven re-entry.
-- The wave-dispatch logic is: "for each Task with indegree 0 that isn't already running and isn't already completed, create a Job; return." Never wait inside Reconcile.
-
-**Warning signs:**
-- Reconcile p99 latency >1s in metrics
-- `workqueue_depth` for any TIDE controller growing under load
-- Subagent dispatch latency tracks subagent execution time (sign that you're serializing)
-- Tests hang or time out when a subagent Job is slow
-
-**Phase to address:**
-Phase 1 (controller scaffold). Bakes in the wrong way if not enforced from the first reconciler. Lint rule or contributor-guide entry: "no `time.Sleep`, no blocking channel reads, no `client.Get` in a loop inside Reconcile."
-
----
-
-### Pitfall 2: Re-deriving waves is treated as a smell, so the schedule gets cached
-
-**Severity:** Catastrophic (architectural)
+**Severity:** Critical (observed, root-cause identified)
 
 **What goes wrong:**
-A well-meaning contributor notices that the controller computes wave layers on every Reconcile and "optimizes" by storing the computed waves on the `Plan.status` (or a sibling `Wave` CRD) so the controller can "just look up wave 2 instead of re-running Kahn." A plan edit lands a new task; the cached schedule is stale; the orchestrator dispatches against the wrong layout; debugging is a nightmare because the visible state (CRDs) disagrees with what the controller dispatched against (an in-memory cache or a stale `.status`).
+`handleBudgetGate` at `project_controller.go:1257` patches `Status.Phase = PhasePending` on bypass-clear. `reconcileProjectPhase2` then sees a non-Running, non-Initialized project and falls through to the init-Job check. The init-Job name is `tide-init-<project.UID>` (deterministic, `project_controller.go:339`), but its TTL is 300s (`buildInitJob:1321`). When a budget halt happens during a long planning wave, the init-Job has long since been TTL-GC'd. The init-Job lookup returns NotFound; `ensureInitJob` creates a new one; the workspace re-initializes (overwriting the `workspace/` subPath on the PVC); the clone Job (`tide-clone-<UID>`, also TTL-GC'd) re-dispatches; and the project loops. Reporter Jobs that already materialized Milestone children read from a workspace that has been wiped underneath them.
 
 **Why it happens:**
-"Why recompute every time?" reads as the obvious optimization. The spec explicitly calls this out (`README.md` §"Properties of the algorithm" point 1: "Cheap enough to recompute after every plan edit. There is no reason to cache a stale schedule") and `CLAUDE.md` reiterates it, but the temptation recurs every time someone profiles the controller and sees Kahn in a flame graph.
+The push-lease bypass at `reconcilePhase3Lifecycle:530` correctly resets to `PhaseRunning`. The budget bypass path at line 1257 diverged and was never brought into alignment with that pattern. `PhasePending` is the pre-init phase; resetting to it is semantically "restart from scratch."
 
-**How to avoid:**
-- Treat wave membership as a *derived view*, not stored state. The Task CRDs are the source of truth; the wave layer a Task belongs to is computed from `depends_on` + completed-task set at Reconcile time.
-- If wave info needs to surface (dashboard, CLI), expose it through a virtual aggregation in the orchestrator API, not as a persisted field.
-- Resumption state is exactly two things: the indegree map (derivable from the DAG) and the completed-task set (derivable from `Task.status.phase == Completed`). Anything else stored about waves is a smell.
-- Code review rule: any PR adding `Status.Waves`, `Status.CurrentWave`, `Status.Schedule`, etc. requires explicit `README.md` spec amendment first.
+**Code locations:**
+- `project_controller.go:1257` — wrong target phase on bypass-clear
+- `project_controller.go:339` — init-Job check runs on every reconcile for non-Running/non-Initialized projects
+- `project_controller.go:1321` — init-Job TTL = 300s
+- `project_controller.go:500-510` — `Status.Git.BranchName` is the reliable "already-initialized" sentinel (set after init, never cleared)
+
+**Prevention:**
+- Fix line 1257: set `Status.Phase = tidev1alpha2.PhaseRunning`. Guard this with a check that confirms the project has already advanced past init — the most reliable signal is `project.Status.Git.BranchName != ""` (set at `reconcilePhase3Lifecycle:504`, never cleared).
+- Also gate init-Job dispatch on `project.Status.Git.BranchName == ""` so a second init-Job is structurally impossible once the project has cloned.
+- Test: envtest scenario where init-Job has been TTL-GC'd, bypass fires, verify no new init-Job is created and `Status.Phase` lands at `Running`.
 
 **Warning signs:**
-- New CRD field with "schedule," "wave," or "plan" in its name on Plan or Phase status
-- Cache invalidation logic appearing in the wave-derivation code path
-- "Stale wave" bugs reported (the cache will eventually disagree with the DAG)
+- `tide-init-<UID>` Job appearing in a namespace that already has Milestone children
+- `Status.Phase` oscillating between `Pending` and `Running` in project Events
+- Reporter Jobs re-running after a bypass annotation is consumed
 
-**Phase to address:**
-Phase 2 (Kahn implementation + Plan/Task CRDs). Encode it in the controller's type signature: the wave-derivation function takes `(tasks, edges, completed)` and returns `[]Wave`. It takes no orchestrator state pointer. It is pure. Add it to the CONTRIBUTING.md rationale section.
+**Phase to address:** Phase 1 of v1.0.3 — this is the directly observed bug; must be fixed before any import work.
 
 ---
 
-### Pitfall 3: Planning DAG and Execution DAG collapse into one generic "DAG" abstraction
+### Pitfall R-02: UID-churn aliasing — importing the wrong level's envelope
 
-**Severity:** Serious (architectural, hard to unwind once it spreads through types)
+**Severity:** Critical (silent planning corruption)
 
 **What goes wrong:**
-A clever refactor unifies `PlanningEdge` and `ExecutionEdge` into a generic `Edge` type, parameterized by node kind. The runtime then has one wave-walker that operates on `Graph[Node]`. This compiles, runs, and looks tidier — until the planner-pool and executor-pool budgets need to be sized independently, or the artifact-vs-code-mutation distinction needs to surface in subagent dispatch, or a planning failure needs different semantics than an execution failure. The unification has erased the type-level signal that separates them; failure semantics drift, log messages confuse "this task" with "this artifact," and the spec's two-budget rule is now an `if`-statement somewhere instead of a structural property.
+Envelopes are keyed by UID: `{projectUID}/workspace/envelopes/{taskUID}/out.json` (per `backend.go:95`). When a project is re-applied after a budget halt, all CRD objects get new UIDs from the API server. The salvaged envelopes on the PVC still carry the old UIDs. An import step that resolves old-UID envelopes onto new-UID objects must use a stable secondary key (object name). If the name-based lookup collides — two Milestones with similar names, or a name collision across levels — the envelope for Milestone B's planner gets injected as if it were Milestone A's planner output. The ChildCRDs in that envelope contain Phase names scoped to Milestone B, materialized under Milestone A. The planning DAG is silently corrupted; the global Execution DAG built on it has wrong edges.
 
 **Why it happens:**
-The Kahn algorithm is genuinely the same on both DAGs. Generic programming makes the unification look like clean DRY. The spec is clear ("Same algorithm, same properties, different inputs") but the *cost* of unification — losing typed dispatch, losing distinct budget config, losing failure-semantics specialization — is invisible from inside the refactor.
+The PVC path is UID-keyed for runtime (correct — UIDs are unique per object-lifetime). Import must bridge from UID-keyed storage to name-keyed lookup. This bridging logic is new code with no existing pattern in the codebase. Without explicit content-identity validation, a name collision causes silent mis-routing.
 
-**How to avoid:**
-- Keep `PlanningTask` and `ExecutionTask` (and their edge types) as distinct Go types. Yes, they have similar fields. That is fine.
-- The Kahn implementation itself can be generic over node identifier types (`func Wave[T comparable](nodes []T, edges []Edge[T], completed set[T]) [][]T`) — that is the right place for generics. Wrap it in two distinct callers (`planningWaves`, `executionWaves`), each with its own context.
-- Two separate `Controller`s in main.go: PlanningController watches Plan/Phase CRDs and dispatches planner Jobs; ExecutionController watches Task CRDs and dispatches executor Jobs. Two `--planner-concurrency` and `--executor-concurrency` flags, sized independently.
-- CRDs: planner artifacts (`Milestone`, `Phase`, `Plan`) have a different group/kind from executor artifacts (`Task`, `Wave` if it exists). Even if the underlying schema is similar.
+**Code locations:**
+- `backend.go:95` — `filepath.Join(r.WorkspaceRoot, projectUID, "workspace", "envelopes", taskUID, "out.json")`
+- `pkg/dispatch/envelope.go:49` — `EnvelopeIn.TaskUID` is the only identifier carried forward in the envelope
+- `project_controller.go:1131` — `ReadOut(ctx, string(project.UID), string(project.UID))` — both segments are the *current* project's UID
+
+**Prevention:**
+- The import layer must treat salvaged envelopes as untrusted foreign data (same threat model as the T-308 ChildCRDSpec allowlist). Before injecting a salvaged envelope:
+  1. Parse it and read `EnvelopeOut.ChildCRDs[*].Name`. Verify each Name matches an expected child of the *current* object at this level, not just any object.
+  2. Reject envelopes whose `apiVersion` does not match `APIVersionV1Alpha1` via the existing `ValidateAPIVersionKind` (`envelope.go:407`).
+  3. Record an `importSourcePath` alongside the accepted envelope in a new `Status.Import` section for operator-visible provenance.
+- Design the stable-key for import as `{project.Name}/{level}/{objectName}`, not the raw PVC path.
 
 **Warning signs:**
-- A single `Graph` or `DAG` type in the codebase used in both planning and execution code paths
-- A single `--concurrency` flag instead of two
-- Failure-semantic code that branches on a `Kind` field rather than living in distinct controllers
-- The dashboard shows one DAG view that has to be told what mode it's in
+- Phase CRDs appearing under the wrong Milestone parent after import
+- Global indegree mismatches: tasks from wrong plans counted as predecessors
+- `Status.Conditions` showing `ConditionAuthoringPlanner=True` but ChildCRDs pointing to wrong-level children
 
-**Phase to address:**
-Phase 1 (CRD schema). Set the precedent in the API types before the controller code lands. Once the type split exists, refactor pressure to unify is naturally resisted.
+**Phase to address:** Phase 2 of v1.0.3 (envelope-import design specification, before any import code is written).
 
 ---
 
-### Pitfall 4: Treating CRD `.status` as truth instead of as cache
+### Pitfall R-03: Stale or partial-write envelope accepted as valid — planner skipped incorrectly
 
-**Severity:** Catastrophic for the self-hosting bar
+**Severity:** Critical (silent planning corruption)
 
 **What goes wrong:**
-A resumption bug surfaces. The controller crashed mid-wave; on restart, the indegree-map cache it was holding in memory is gone. The "obvious" fix is to persist the indegree map to `Plan.status.indegreeMap`. Now the controller writes a 50-task DAG's indegree map every time a task completes. Two updates collide; one wins; the indegree map drifts from the artifact reality (the actual `depends_on` declarations in `PLAN.md` on the PVC and in git). A resume operation reads the cached `.status` and dispatches against a layout that doesn't match the artifacts. The bug is silent until a wave dispatches a task whose dependencies haven't actually merged yet.
+A planner Job was in-flight when the budget halt fired. The Job was killed mid-write. The result is a partial `out.json`. If the planner used write-then-rename (write to a temp, then `mv` to `out.json`) and the crash happened after the rename, the file is structurally complete JSON but only contains the children emitted up to that point. `FilesystemEnvelopeReader.ReadOut` (`backend.go:94`) does a single `os.ReadFile` + `json.Unmarshal` — no completeness check. `ValidateAPIVersionKind` (`envelope.go:407`) checks `apiVersion` and `kind` only. The import layer accepts the envelope as valid, skips the planner, and materializes a partial child set. Downstream levels that depend on missing children are never dispatched; the global indegree map is wrong.
 
-**Why it happens:**
-Resumption looks expensive when re-derived from artifacts (PVC reads, git checkout, parsing `PLAN.md`). Stuffing the derived state into `.status` looks like a clean fix. The spec explicitly warns ("`CLAUDE.md`: If the persistence layer starts wanting to store the full schedule, that's a smell — re-derive instead") but the warning lands as a stylistic preference unless the failure mode is concrete.
+**Code locations:**
+- `backend.go:94-105` — `ReadOut` has no completeness check beyond valid JSON parse
+- `pkg/dispatch/envelope.go:400-409` — `ValidateAPIVersionKind` checks only `apiVersion` and `kind`
+- `project_controller.go:1204` — `out.ChildCount` exists and is already used as a succession guard; the same field must gate import validation
 
-**How to avoid:**
-- `.status` stores *observation* (what is the current phase of this Task?), not *plan* (what should the wave layout be?). Observation is cheap to update and not load-bearing for correctness — if it's wrong, the next reconcile fixes it.
-- Resumption protocol: on controller restart, list all Task CRDs in the project's namespace, mark completed those whose `.status.phase == Completed`, re-parse `PLAN.md` from the PVC (or git if PVC is gone) to rebuild the DAG, recompute waves, dispatch.
-- Acceptance test: kill the orchestrator pod mid-wave; bring it back; verify it picks up at the right wave without any persisted schedule.
-- If etcd loses a Task CRD entirely (object deleted), the artifact (`PLAN.md` task entry, prior diff in git) is authoritative. The orchestrator can rebuild the CRD from artifacts.
+**Prevention:**
+- Before import, validate `len(ChildCRDs) == ChildCount`. A mismatch means a partial write; reject the envelope and re-plan.
+- Optionally, require the planner harness to write `"complete": true` as the final field in `out.json` (written only after the full JSON is formed). The reader rejects envelopes without this sentinel.
+- Log the envelope source path, `ChildCount`, and `len(ChildCRDs)` as structured fields before committing any planner-skip decision.
 
 **Warning signs:**
-- CRD `.status` fields whose names sound like internal-state-not-observation (`indegreeMap`, `schedule`, `cachedWaves`, `derivedDag`)
-- Resume code reads `.status` to know what to dispatch
-- Backups/snapshots of etcd start being treated as authoritative against artifacts
-- Tests pass with PVC wiped but fail if `.status` is reset
+- Fewer Milestone/Phase/Plan/Task children than expected after a resume
+- `checkProjectComplete` firing on a project that has not finished planning
+- Global indegree map showing 0 for tasks that should have predecessors from unimported plans
 
-**Phase to address:**
-Phase 1 (CRD schema design). Lock the principle: status fields must be observation, not derivation. Add a CRD-schema review checklist item.
+**Phase to address:** Phase 2 of v1.0.3 (import completeness validation).
 
 ---
 
-### Pitfall 5: Cycle "recovery" creeps in instead of refusing cyclic plans
+### Pitfall R-04: TTL-GC race — reporter Job GC'd before completion handler fires, causing budget double-count
 
-**Severity:** Serious (paradigm violation, debugging-hostile)
+**Severity:** Critical (financial correctness + this is the observed class of bug)
 
 **What goes wrong:**
-A user submits a plan with a cycle (probably accidentally — `A depends_on B`, `B depends_on A` after a rename refactor). The orchestrator dutifully refuses to run. The user files an issue. A maintainer adds a "cycle-breaking heuristic" — break the lowest-weight edge, log a warning, run anyway. Now plans with cycles silently produce wrong execution orders; the warning gets filtered to debug logs; and the cycle that should have been a 5-minute fix in the plan becomes a 3-day debug session because the orchestrator masked it.
+The planner Job succeeds. Its TTL is 600s (`jobspec.go:73`). The reporter Job that materializes children also has a TTL (`reporter_jobspec.go:175`). If the project is in BudgetExceeded long enough for both Jobs to TTL-GC, then on bypass-clear the reconcile path sees no reporter Job and sets `isFirstCompletion = true` (`project_controller.go:1156-1175`). The `isFirstCompletion && envReadOK` guard fires `budget.RollUpUsage` (`project_controller.go:1178-1182`) a second time for the same planner envelope. `Status.Budget.CostSpentCents` increases by the planner's cost again — which may immediately re-trigger the budget cap that was just bypassed.
 
 **Why it happens:**
-Refusing-to-run feels user-hostile in the moment. Heuristics feel "smart." Every operator team eventually has someone propose this. The spec is explicit (`README.md` §"Why this specific algorithm" point 4: "TIDE refuses to start a run on a cyclic DAG — cycles are bugs in the declared plan, not runtime conditions to recover from"; `PROJECT.md` Out of Scope: "Wave or cycle 'recovery' features").
+The `isFirstCompletion` guard uses reporter-Job *existence* as its signal. The reporter Job is an ephemeral K8s resource with a TTL. A long-lived halt makes reporter-Job-existence an unreliable indicator of whether rollup has already been performed.
 
-**How to avoid:**
-- Cycle detection runs at plan-validation time, before any Task CRD is admitted (validating webhook on Plan and Task CRDs).
-- The error returned to the user must point to the offending edges concretely: "Cycle: A → B → C → A. Edges: A.depends_on=[B] at PLAN.md:42, B.depends_on=[C] at PLAN.md:51, C.depends_on=[A] at PLAN.md:60. Fix one of these and re-apply."
-- No `--allow-cycles`, `--break-cycles`, `--cycle-policy` flag. Don't add the lever.
-- Test case in admission webhook tests: a cyclic plan is rejected with a useful error; no `Wave` resources are ever produced.
+**Code locations:**
+- `project_controller.go:1156-1162` — reporter Job existence check drives `isFirstCompletion`
+- `project_controller.go:1178-1182` — `if isFirstCompletion && envReadOK { budget.RollUpUsage(...) }`
+- `jobspec.go:73` — planner Job TTL = 600s
+- `reporter_jobspec.go:175` — reporter Job TTL
+
+**Prevention:**
+- Replace the `isFirstCompletion` guard with a durable status field: `Status.Budget.PlannerRolledUpUID` (or a per-level map). After rollup fires for a given planner job name, record that job name. On subsequent reconciles, skip rollup if `PlannerRolledUpUID == currentPlannerJobName`.
+- For the import path specifically: when injecting a salvaged envelope, set `skipBudgetRollup = true` unconditionally — the prior run's cost was already recorded in `Status.Budget.CostSpentCents` and must not be re-counted.
 
 **Warning signs:**
-- PRs adding "cycle heuristic," "cycle breaker," or "cycle policy" code
-- Issue-tracker pressure to "just warn and run anyway"
-- Cycle detection moving from validation-time to dispatch-time (suggests prep for runtime recovery)
+- `Status.Budget.CostSpentCents` increasing by the same amount twice in Events
+- Budget cap re-triggering immediately after bypass annotation is consumed
+- `ConditionBudgetExceeded` flipping back to True within seconds of bypass
 
-**Phase to address:**
-Phase 2 (Kahn implementation + admission webhook). Bake the validating webhook in at the same time as the Kahn implementation; the webhook is the enforcement surface.
+**Phase to address:** Phase 1 of v1.0.3 — prerequisite to all import work; this is a standalone correctness bug on the existing bypass path.
 
 ---
 
-### Pitfall 6: Unified planner + executor worker pool
+### Pitfall R-05: Partial-plan import corrupts the global Execution DAG
 
-**Severity:** Serious (paradigm violation, performance regression)
+**Severity:** Critical (silent correctness, possibly undetectable without explicit validation)
 
 **What goes wrong:**
-For "simplicity," one worker pool sized at `--concurrency=20`. A heavy planning wave (most phases plan in parallel from the architecture spec — Planning DAG fans out wide) consumes all 20 slots writing `PLAN.md` files. Meanwhile, an execution wave of just 4 file-touching tasks (Execution DAG fans out narrow) is starved waiting for planners to finish. Or the inverse: long-running task executions starve a planning wave that could have completed in seconds.
-
-The spec is loud about this ("`README.md` §"Why this is advantageous" point 3: 'tons of parallel planners, fewer parallel executors'") and `CLAUDE.md` reiterates ("Don't unify them into one worker pool"). Unification destroys the structural advantage.
+Import succeeds for all Milestones and Phases but only partially for Plans — e.g., the planner for Milestone B Phase 2 was in-flight at halt time and its envelope is absent. Tasks from the imported plans exist as CRD objects; their `DependsOn` references task names from the missing plans. The `computeGlobalIndegree` function at `task_controller.go:481` re-derives the indegree map from all current Tasks. For a task reference that does not resolve to any existing Task CRD, the `depgraph.go` resolver returns empty (`depgraph.go:28: "An unresolved ref returns empty (conservative — never invents an edge, D-06)"`). Tasks that should have waited for missing-plan tasks now have indegree 0 and dispatch immediately. The global wave schedule is wrong with no error surfaced.
 
 **Why it happens:**
-One pool is fewer flags, fewer code paths, less config surface. The spec's argument for two budgets is *empirical* (planning fans wide, execution fans narrow); it doesn't show up in a unit test.
+The depgraph resolver's conservative design (unresolved ref = no edge) is correct for the normal case (a typo should not block indefinitely). For import, "no such task" means "task not yet materialized," not "wrong reference." The resolver cannot distinguish these cases.
 
-**How to avoid:**
-- Two separate sigs.k8s.io/controller-runtime `Manager`s, or two Controllers with their own `MaxConcurrentReconciles` settings.
-- Two Kubernetes ResourceQuotas (or a custom dispatch-quota tracked in controller state) — one bounding the count of in-flight planner Jobs in the project's namespace, one bounding executor Jobs.
-- `tide` CLI config: `--planner-concurrency` and `--executor-concurrency`, never `--concurrency`.
-- Default ratio in the Helm chart: planner concurrency 4× executor concurrency, with comments explaining why.
-- Metrics: `tide_planner_inflight` and `tide_executor_inflight` as separate gauges, never aggregated.
+**Code locations:**
+- `depgraph.go:28` — conservative empty-return on unresolved scope
+- `task_controller.go:470-482` — `computeGlobalIndegree` lists all Tasks; missing tasks silently produce zero indegree contribution
+
+**Prevention:**
+- Import atomicity must be per-Milestone: either all Plans for a Milestone are imported (every plan envelope valid + complete), or none are and the Milestone re-plans. Partial Milestone import is rejected.
+- Before committing any import, verify the full task set is self-consistent: every `Task.Spec.DependsOn` entry must resolve to an existing Task CRD. Unresolved refs at import time are an import failure, not a silent skip.
+- Surface a `Status.Condition` of type `ImportIncomplete` that blocks execution dispatch (TaskReconciler checks it before indegree computation). Clear it only when the full consistency check passes.
 
 **Warning signs:**
-- A single `WorkerPool` or `Dispatcher` type used for both kinds of work
-- A single `--concurrency` flag
-- Issues filed about "planning is slow when execution is busy" (sign that the budgets are coupled)
+- Tasks dispatching before their declared predecessors complete on a resumed run
+- Plans completing faster than expected on resume (sign of missing wait edges)
+- `computeGlobalIndegree` returning 0 for tasks with non-empty `DependsOn`
 
-**Phase to address:**
-Phase 1 (controller scaffold). Two controllers from day one; flags wired separately.
+**Phase to address:** Phase 2 of v1.0.3 (import atomicity contract and import-consistency pre-check).
 
 ---
 
-### Pitfall 7: Subagent context bleed via shared PVC
+### Pitfall R-06: Schema mismatch — salvaged v1alpha1 envelope ChildCRDSpec decoded into v1alpha2 typed structs
 
-**Severity:** Catastrophic (security + correctness)
+**Severity:** Serious (import silently drops v1alpha2-required fields)
 
 **What goes wrong:**
-Two parallel subagents in the same wave share a PVC for artifacts. Subagent A is told to read `phase-1-brief.md` and write `plan-1.md`. Subagent B is told to read `phase-2-brief.md` and write `plan-2.md`. But A and B both have read access to the *entire* PVC and the executor harness's system prompt does not scope what they can read. Subagent A "helpfully" reads `phase-2-brief.md` (because it's there) and starts coordinating with phase 2, producing a `plan-1.md` that's actually entangled with phase 2's interface decisions — violating the dependency declaration. Worse: subagent B is later compromised by a prompt injection in an upstream artifact, and writes a malicious file to the PVC that A then reads.
+The dogfood run #2 salvage artifacts were authored by the v1alpha1 planner. The v1.0.2 CRD schema is v1alpha2. The envelope contract version check (`ValidateAPIVersionKind`, `envelope.go:407`) correctly accepts envelopes with `apiVersion = "tideproject.k8s/v1alpha1"`. But the `ChildCRDSpec.Spec.Raw` bytes inside those envelopes were produced against the v1alpha1 typed spec. Phase 23 added `Wave.Spec.ProjectRef` replacing `Wave.Spec.PlanRef`. When `MaterializeChildCRDs` decodes `Spec.Raw` into the v1alpha2 Wave struct, `ProjectRef` is zero-valued. A Wave with empty `ProjectRef` cannot be traced back to its Project by the global wave derivation engine; it becomes an orphan Wave that never dispatches.
 
-This compounds with the prompt-injection threat surface. Google researchers report a 32% YoY increase in malicious prompt-injection payloads in web content (Nov 2025 → Feb 2026), and multi-agent pipelines specifically allow hijacked agents to "propagate the attack downstream — instructing subsequent agents, poisoning shared memory, or manipulating orchestrator decisions" ([arxiv: From Prompt Injections to Protocol Exploits](https://arxiv.org/html/2506.23260v1)).
+**Code locations:**
+- `dispatch_helpers.go:32-36` — `MaterializeChildCRDs` decodes `Spec.Raw` into typed v1alpha2 structs without schema-version awareness
+- `pkg/dispatch/envelope.go:407-409` — version check is at the envelope level, not at the per-child-spec level
+- Phase 23 schema migration — introduced `Wave.Spec.ProjectRef`
 
-**Why it happens:**
-A shared PVC for "the run's artifacts" is the obvious implementation. Per-subagent volume scoping is more work. The spec's locked decision in `PROJECT.md` is "shared PVC during a run" — which is right for *persistence* but is silent on read scoping.
-
-**How to avoid:**
-- The shared PVC is the *write* target. *Reads* into a subagent container should be scoped: mount a per-Job subdirectory read-write, and mount only the explicitly-declared upstream artifacts read-only.
-- The subagent dispatcher computes the read-set from declared `depends_on` (artifacts produced by upstream tasks/plans) and writes a manifest the harness uses to assemble the container's view.
-- Artifacts written by subagents are treated as *untrusted input* when read by a downstream subagent. The orchestrator does not template upstream-subagent output directly into a downstream-subagent's system prompt — it goes in as a `<file>` reference the downstream agent can read but is wrapped in clear "this is data, not instructions" framing.
-- Never let a subagent write to anything outside its task's declared output paths. Enforce at the harness layer: post-Job, validate that the diff produced touches only declared files. Reject the result if it doesn't.
+**Prevention:**
+- The import path must run a v1alpha1→v1alpha2 conversion on each `ChildCRDSpec.Spec.Raw` before materialization. The conversion function is already scaffolded in the API package (the conversion webhook infrastructure from Phase 23).
+- For the v1.0.3 dogfood import: the salvage directory must be pre-processed through a one-shot migration tool (`tide import --upgrade-schema`) that rewrites `Spec.Raw` bytes before the controller sees them.
+- Acceptance test: import a v1alpha1 salvage fixture, verify all Wave CRDs have non-empty `Spec.ProjectRef`.
 
 **Warning signs:**
-- Subagent system prompts include "you may read any file in `/workspace/`"
-- No declared `outputs` field on Task CRD (so anything goes)
-- Plans completing "faster than expected" or with surprising cross-phase coupling
-- A subagent's diff touches files the task didn't declare
+- Wave CRDs with empty `Spec.ProjectRef` after import
+- `computeGlobalIndegree` returning wrong counts because Waves cannot be traced to their Project
+- Import appearing to succeed but execution never dispatching
 
-**Phase to address:**
-Phase 2 (Subagent interface + harness). Designing the harness without read-scoping bakes in the vulnerability. The Subagent interface contract should require declaring `inputs` and `outputs`.
+**Phase to address:** Phase 2 of v1.0.3 (schema-version-aware materializer and one-shot migration tool for the dogfood salvage).
 
 ---
 
-### Pitfall 8: Runaway agent loops drain budget
+## Moderate Pitfalls
 
-**Severity:** Catastrophic (financial)
+### Pitfall R-07: Clone Job re-dispatches on resume because TTL-GC'd Job is the only guard
 
 **What goes wrong:**
-A subagent hits an unexpected error, retries, hits a different error, replans, retries. Each iteration burns tokens. Industry reports document "$25-per-conversation" and "four-figure spend in 90 seconds" runaway cases ([RelayPlane: Agent Runaway Costs](https://relayplane.com/blog/agent-runaway-costs-2026), [LangWatch 2026 monitoring tools](https://langwatch.ai/blog/4-best-tools-for-monitoring-llm-agentapplications-in-2026)). A single buggy plan can produce a wave where five parallel subagents each burn $500 before someone notices.
+After R-01 is fixed (bypass targets `Running`), the clone-Job dispatch at `reconcilePhase3Lifecycle:549` still checks only for Job existence: `cloneErr = apierrors.IsNotFound`. The clone Job TTL is 300s (`push_helpers.go:212`). On resume after a long halt, the clone Job is gone. A new clone Job is dispatched into an already-initialized workspace. `git clone` fails with "destination path already exists"; the project stalls at `InitFailed`.
 
-**Why it happens:**
-The default subagent harness ships a model that runs until it decides it's done. Without per-Job iteration caps and per-Job token-spend caps, a buggy plan or a flaky tool turns into a budget event. The strict-by-default failure profile (`PROJECT.md`) does not protect against this — it protects *dependents* from running, not the failing task itself from spending.
+**Code locations:**
+- `project_controller.go:549-571` — clone Job creation gated only on `apierrors.IsNotFound(cloneErr)`
+- `push_helpers.go:212` — clone Job TTL = 300s
 
-**How to avoke:**
-- Per-Task budget: max wall-clock, max iterations, max input tokens, max output tokens. Set on the Task CRD spec, defaults in the Project CRD, hard cap in the orchestrator config that no Project can exceed.
-- The subagent harness enforces all four — refuses to start if not set, kills the inner agent loop when any cap hits, returns a structured "budget-exceeded" failure to the orchestrator.
-- Per-Project rolling-window spend gate. If the project burns >3× its trailing-7-day spend rate in the current 15-minute window, the controller pauses new dispatches and surfaces a Slack-tide review checkpoint.
-- Per-Project absolute cost cap (configurable). Project paused when hit. Resumes require explicit human approval (CLI command).
-- Metrics: per-Task, per-wave, per-project token spend; export to Prometheus with project/phase/plan/task labels (bounded cardinality — see Pitfall 17).
+**Prevention:**
+- Add `Status.Git.CloneComplete: bool` (set to `true` when the clone Job succeeds, never cleared). Gate the clone-Job dispatch on `!project.Status.Git.CloneComplete`. This is the durable idempotency guard that Job-existence-based logic cannot provide across a TTL gap.
 
 **Warning signs:**
-- Subagent Jobs with no `activeDeadlineSeconds`
-- A Task taking >10× expected duration
-- The same task failing and being retried automatically without an iteration cap
-- Spend metrics not exported by the orchestrator at all
+- Second `tide-clone-<UID>` Job appearing in project Events after a resume
+- Clone Job failing with "destination path already exists"
+- `Status.Phase = InitFailed` on a project that had previously been Running
 
-**Phase to address:**
-Phase 2 (Subagent harness). Budget enforcement is a *harness* property, not an orchestrator afterthought. Must land with the first concrete subagent impl.
+**Phase to address:** Phase 1 of v1.0.3 (alongside R-01 fix).
 
 ---
 
-### Pitfall 9: LLM API rate-limit handling across parallel subagent Jobs
-
-**Severity:** Serious
+### Pitfall R-08: Cap-raise ergonomics — raising `AbsoluteCapCents` leaves `RollingCapCents` re-halting
 
 **What goes wrong:**
-A wave dispatches 20 parallel subagent Jobs. Each makes calls to Anthropic. The provider's per-org request-per-minute or token-per-minute limit trips. Pods get 429s. The harness retries with naive backoff; all 20 retry at roughly the same time; thundering herd; more 429s; some Jobs eventually fail their `backoffLimit`; tasks marked failed; dependents never dispatch; downstream waves never run; the run is bricked despite the per-task work being correct.
+A project hits `AbsoluteCapCents`. The operator raises `AbsoluteCapCents` in the Project spec. The rolling-window cap (`RollingCapCents`) was not raised; the trailing spend is above the rolling cap. The spec change triggers a reconcile; `handleBudgetGate` checks `IsCapExceeded` which evaluates the rolling cap; the project re-halts immediately. The operator raised the cap but the project still halts — confusing without a clear error distinguishing which cap fired.
 
-**Why it happens:**
-The orchestrator dispatches at the wave level without provider-aware concurrency. Each subagent pod retries in isolation, blind to its siblings. The K8s Job controller's `backoffLimit` (default 6, with exponential backoff) was not designed for cross-job rate-limit coordination.
+**Code locations:**
+- `budget/cap.go:64` — two cap forms: absolute and TTL-bypass
+- `handleBudgetGate:1227` — checks both caps without surfacing which one triggered
 
-**How to avoid:**
-- Token-bucket rate limiter shared across the project (or namespace, or whole installation — depending on whether keys are per-project), implemented in the controller layer. Subagent dispatches that would exceed the bucket are *not Job-created* — they wait in the controller's work queue.
-- Provider-specific rate-limit budgets surfaced as Project CRD config (`spec.providers.anthropic.requestsPerMinute`, `spec.providers.anthropic.tokensPerMinute`). Defaults populated from documented tier limits, overridable.
-- 429 responses inside the subagent harness *exit the Job non-zero with a typed retryable error*. The controller treats this as "wave-internal soft failure, retry with backoff at the dispatch layer," not as a hard task failure.
-- Wave dispatch is *not* "create all N Jobs simultaneously." It's "create up to min(wave_size, executor_budget, rate_budget) Jobs; create more as earlier ones complete or as the rate bucket refills."
-- Telemetry: `tide_provider_rate_limit_hits_total` counter per provider, per project.
+**Prevention:**
+- `tide resume` CLI verb must display *both* cap values and current spend before proceeding, and indicate which cap is currently exceeded.
+- Promote the TTL-bypass form (`bypass-budget-until=<RFC3339>`, already documented at `budget/cap.go:64`) as the default ergonomic for cap-raise-and-resume so the project does not immediately re-halt while the operator adjusts both caps.
+- Consider a combined `CapExceededReason` field in the `BudgetExceeded` condition that names which cap triggered.
 
 **Warning signs:**
-- Subagent Job logs show 429 errors
-- `Job.spec.backoffLimit` is the only retry mechanism for rate limits
-- Concurrent Job count in a namespace matches wave size exactly (sign of no rate-aware throttling)
-- Failed runs that succeed if you re-apply the same Project later (overload was transient)
+- `ConditionBudgetExceeded` cycling between True and False within a single reconcile window
+- Operator annotation consumed but project re-halts before any dispatch fires
+- Confusing event sequence with back-to-back cap-exceeded events citing different cap types
 
-**Phase to address:**
-Phase 2 (Subagent harness + dispatch). Build the rate-aware dispatch loop before the first multi-task wave can run.
+**Phase to address:** Phase 1 of v1.0.3.
 
 ---
 
-### Pitfall 10: Indegree updates on partial wave failures
-
-**Severity:** Serious (correctness)
+### Pitfall R-09: At-least-once reconcile causes double-import on informer lag
 
 **What goes wrong:**
-Wave 2 dispatches three tasks: A, B, C. A and B succeed; C fails. The orchestrator updates indegree for *all* downstream tasks (assuming all of wave 2 completed), so a task in wave 3 that depended only on C has its indegree decremented to zero — and gets dispatched, even though C never produced its output. The downstream task either fails or, worse, succeeds against a missing-or-stale input and produces garbage.
+The import step runs during reconcile; creates child CRDs; the status patch setting `ImportComplete = true` fails with a ResourceVersion conflict; the reconcile errors and retries. On the second reconcile, the import step runs again. `MaterializeChildCRDs` hits `AlreadyExists` for all children (idempotent at the K8s API level). But side effects that fire during import — recording `importSourceUID` annotations, triggering budget-rollup suppression, writing provenance fields — are not idempotent if they append to a list or patch over a field with a non-idempotent operation.
 
-**Why it happens:**
-The cleanest implementation of "wave complete → decrement successors" assumes wave atomicity. The spec's failure handling section is specific (`README.md` §"Failure handling at wave boundaries": "Tasks in wave k+1 that depend on the failed task → never dispatched. Their indegree never reaches zero"), but a naive controller implements wave-completion as a single transition rather than per-task completion.
-
-**How to avoid:**
-- Indegree decrements are *per-task-completion*, not per-wave. When Task X completes successfully, decrement indegree for each task that lists X in its `depends_on`. When Task X *fails*, do nothing to indegrees — by construction, dependents of X have a non-zero indegree contribution from X that will never decrement.
-- The "wave" abstraction is a *view* (layer-k tasks that are currently dispatchable), not a synchronization point that triggers downstream dispatch.
-- Test case: a wave of three tasks, one fails. Verify dependents of the failed task have indegree > 0 forever (never dispatched). Verify dependents of the *successful* siblings dispatch normally.
-- Test case: a "wave 3" task depends on (succeeded A, failed C). Verify it never dispatches, regardless of how the orchestrator counts wave completions.
+**Prevention:**
+- Check a `Status.Condition` of type `ImportComplete` as the *first step* of the import block. If already True, skip the entire import block unconditionally. This is the correct controller-runtime idiom for once-only bootstrap actions.
+- All import side effects must be idempotent patch operations (use `meta.SetStatusCondition`, `MergeFrom` patches, never append-to-slice operations within the reconcile critical section).
 
 **Warning signs:**
-- A `Wave` CRD or in-memory wave object with a "wave completed" event that triggers downstream dispatch
-- Successor dispatch logic looks at `wave.status` rather than per-task `Task.status`
-- Indegree decrements happen in batch at end-of-wave
+- `Annotations["importSourceUID"]` values appearing duplicated or with malformed multi-value formats
+- Import-related Events appearing twice in `kubectl describe project`
+- Budget rollup recording two entries for the same salvaged planner UID
 
-**Phase to address:**
-Phase 2 (Kahn implementation). Encode in the algorithm signature: `OnTaskCompleted(taskID)` is the only entry point that mutates indegree. There is no `OnWaveCompleted`.
+**Phase to address:** Phase 2 of v1.0.3 (import idempotency design).
 
 ---
 
-### Pitfall 11: Watch-lag duplicate dispatch
-
-**Severity:** Serious (correctness)
+### Pitfall R-10: Attacker-supplied envelopes injected via PVC
 
 **What goes wrong:**
-The controller's informer cache reports a Task's status as `Pending`. The controller creates a Job for it. The Job starts. The controller crashes (or reconciler enqueues twice, or leader election flaps). The new reconcile run reads from a stale informer cache, sees the Task as still `Pending` (the controller's status update hadn't propagated), creates a *second* Job for the same Task. Two subagents now race to write the same artifact; git push collisions; cost doubled; non-deterministic output depending on which finishes first.
+The import step reads `out.json` from the PVC. The PVC is a shared namespace resource. If another pod in the same namespace writes to `{projectUID}/workspace/envelopes/{levelUID}/out.json`, it can inject arbitrary `ChildCRDSpec.Spec.Raw` bytes. The Kind allowlist (`dispatch_helpers.go:33`, T-308 mitigation) prevents creating arbitrary CRDs. But within the allowed Kinds, `Spec.Raw` is decoded and applied. A crafted spec can set `Task.Spec.Prompt` to a prompt-injection payload that is then sent to the next subagent.
 
-K8s' own community has been wrestling with this — watch cache lag is "100-500ms typical, 5-30 seconds possible on a busy cluster" ([Shan Valleru: Eventual Consistency and Stale Caches](https://svalle.ru/posts/kubernetes/stale-cache-controllers/)).
-
-**Why it happens:**
-Watches are eventually consistent. The informer cache is a *snapshot*. Two reconciles for the same object can both observe a pre-mutation state. The naive create-if-not-exists check uses the informer, not a fresh API read.
-
-**How to avoid:**
-- Make Job creation idempotent. Use a deterministic Job name derived from Task UID + attempt number (`tide-task-{task-uid}-{attempt}`). Two reconciles trying to create the same Job → the second hits `AlreadyExists` and treats that as success, not as a new dispatch.
-- Owner references: every Job created for a Task has `ownerReferences=[{kind: Task, uid: <task-uid>}]`. K8s garbage-collects on Task deletion.
-- Status guards: before creating a Job, check `Task.status.activeJobName != ""`. If set, the orchestrator already dispatched (or thinks it did). Verify by reading the Job; resync if it exists; clear and re-dispatch if it doesn't.
-- For the rare case where a fresh API read is needed (to defeat informer staleness), use `client.New(...)` with `CacheReader: false` for that specific check, or `apireader.Get`.
-- Acceptance test: kill the controller during dispatch; restart; verify only one Job exists per Task.
+**Prevention:**
+- Import paths must apply the same `ValidateAPIVersionKind` call as the runtime materializer, plus a content-origin check. The recommended approach: require that `out.json` on the PVC was written by a subagent pod running as UID 1000 (enforce via PVC POSIX ownership), or HMAC-sign `out.json` using the project's signing key (the same key used for credproxy tokens at `project_controller.go:1045`). The signing key differs between runs, so for salvage import, rely on operator-gated invocation (`tide import`) as the trust boundary.
+- Apply the same path-traversal defense as `FilesystemEnvelopeReader.ReadPrompt` (`backend.go:116-127`) to all import path lookups.
 
 **Warning signs:**
-- `Job` names are randomized (sign that they're not idempotent)
-- Two Jobs found for the same Task UID in a debug session
-- Doubled token spend on a single run
-- `kubectl get jobs -l tideproject.k8s/task=<uid>` returns >1 active job
+- `out.json` files on the PVC with POSIX owner other than UID 1000
+- Unexpected CRD objects appearing after import with unusual `Spec.Prompt` fields
+- Subagents executing prompts that reference content from unrelated projects
 
-**Phase to address:**
-Phase 2 (subagent dispatch). Idempotent dispatch is the first thing to get right; retrofitting it later is much harder.
+**Phase to address:** Phase 2 of v1.0.3 (import security model — define trust boundary before writing import code).
 
 ---
 
-### Pitfall 12: Bootstrap deadlock — can't build the next milestone because the orchestrator can't run yet
-
-**Severity:** Catastrophic for v1 (blocks the self-hosting bar from being reached)
+### Pitfall R-11: Resume re-dispatches already-Succeeded execution Tasks
 
 **What goes wrong:**
-The v1 bar is "TIDE drives its own next milestone" (`PROJECT.md` Core Value). Reaching that bar requires TIDE to be deployable and reasonably working *before* TIDE can drive the milestones that finish making it deployable and reasonably working. Without explicit thought, this becomes a circular dependency:
-- Milestone N requires CRDs, controller, dispatch loop, harness
-- TIDE-orchestrated authoring of Milestone N requires CRDs, controller, dispatch loop, harness
-- Therefore Milestone N must be authored manually
-- But every subsequent milestone might *also* require manual work until "good enough" is reached
-- The "good enough" threshold is fuzzy; it slips; v1 ships without self-hosting actually happening
+On resume with import, the `TaskReconciler` re-derives readiness from `computeGlobalIndegree` on every reconcile. If any code path in the resume sequence clears `Status.Phase` on a Succeeded Task (an over-eager `tide resume --retry-failed` is the documented class of this bug, caught in Phase 25 code review), those Tasks re-dispatch — potentially overwriting already-merged commits on the run branch.
 
-This is the classic compiler bootstrap problem ([Wikipedia: Bootstrapping (compilers)](https://en.wikipedia.org/wiki/Bootstrapping_(compilers))). Two-stage and three-stage bootstraps are standard mitigation in that domain; TIDE needs an explicit analog.
+**Code locations:**
+- Phase 25 time-fence fix (referenced in MEMORY.md): the correct fix requires both (a) only clearing Tasks in `Failed` phase and (b) a time-fence guard to prevent clearing a Task that succeeded after the resume command was issued.
 
-**Why it happens:**
-"Dogfooding" is treated as the *end goal*, not as a *milestone in the plan*. Without explicit stages, the bar slides indefinitely.
-
-**How to avoid:**
-- Designate an explicit *bootstrap milestone* (call it M0 — "TIDE-on-host-runs-TIDE-on-self"). This is the *minimum* set of TIDE features required for TIDE-the-orchestrator-on-the-host to author a real `MILESTONE.md` / phase brief / `PLAN.md` for the *next* TIDE milestone in this repo. It is hand-authored using GSD, but its scope is bounded to "just enough to dogfood."
-- Designate a *self-hosting milestone* (call it M_self — "TIDE-in-cluster-runs-TIDE-on-self"). M_self consumes the artifacts of M0; in M_self, a fresh TIDE installation in a kind cluster takes the M0 outputs and *re-derives* the same artifacts (or improves them), proving the orchestrator can do what the human did with GSD.
-- Two-version skew tolerance: the running TIDE (bootstrap version) authors artifacts that the next-version TIDE consumes. CRD schema must not be breaking-changed between bootstrap-TIDE and self-hosted-TIDE *within v1*. (After v1, conversion webhooks handle this — but v1 keeps schema stable.)
-- Acceptance criterion for v1 shipping: a fresh kind cluster + Helm install + `tide` CLI authoring this repo's next milestone, producing artifacts a human would have written.
+**Prevention:**
+- The import path must never touch `Status.Phase` on Tasks with `Status.Phase = Succeeded`. Write a pre-import invariant check: enumerate all Tasks, assert none transition from Succeeded to any other phase during import.
+- Acceptance test: import a salvage fixture that includes completed Tasks; verify none are re-dispatched; verify the run branch gains no new commits from re-executed Tasks.
 
 **Warning signs:**
-- "We'll dogfood eventually" without an explicit milestone for it
-- M_self keeps getting pushed back because of last-minute scope
-- Bootstrap milestone keeps growing as people add "while we're at it" features
-- Active CRD schema changes within v1 between milestones (sign that version skew will be unmanageable when self-hosting kicks in)
+- Tasks with `Status.Phase = Succeeded` appearing in the `ConditionAuthoringPlanner` active set
+- Duplicate commits on the run branch (same diff applied twice)
+- `computeGlobalIndegree` returning 0 for tasks that should be blocked by Succeeded predecessors
 
-**Phase to address:**
-Phase 0 (roadmap construction). The roadmap itself must name and order M0 and M_self explicitly, before any code is written.
+**Phase to address:** Phase 2 of v1.0.3 (import must not touch execution-layer Tasks).
 
 ---
 
-### Pitfall 13: TIDE-orchestrated artifacts overwrite manual work mid-self-hosting
-
-**Severity:** Serious (loses self-debuggability)
+### Pitfall R-12: Cycle detection bypassed for imported plan trees
 
 **What goes wrong:**
-During the self-hosting transition, a human is iterating on TIDE's controller code on the host. TIDE-in-cluster, driving its own next milestone, decides the right `PLAN.md` for a refactor and commits it to a feature branch. Meanwhile the human committed a divergent set of changes to the same files. Merge conflicts; or worse, the orchestrator's commits silently overwrite the human's mid-air work because the orchestrator pushes faster. The human loses the ability to debug TIDE by editing TIDE's source — because TIDE keeps rewriting it.
+The Plan admission webhook runs `ComputeWaves` with `CycleError` detection at apply time. CRD objects created via `client.Create` from within the controller bypass the admission webhook. A salvaged plan tree that contained a cycle (authored by a hallucinating planner) is imported without validation. The global Execution DAG contains a cycle; `computeGlobalIndegree` never reaches 0 for the cyclic tasks; those tasks never dispatch; the project stalls silently with no error surfaced.
 
-**Why it happens:**
-Once dogfooding starts, both the human and the orchestrator can author commits. Git's last-writer-wins push semantics combined with parallel branches turns this into a coordination problem ([git push race conditions](https://git.vger.kernel.narkive.com/9Rkrrepp/push-race-condition)).
-
-**How to avoid:**
-- TIDE-driven runs always work on a branch named after the run (`tide/run-<project>-<timestamp>`). Never on `main`, never on a human's working branch.
-- Each level boundary pushes to the run's branch with `--force-with-lease` (refuses to clobber unexpected upstream changes).
-- The human merges TIDE's branch into `main` after review. The merge is the slack-tide gate.
-- `git push` from the orchestrator never targets `main` directly. Configure the git push credentials so this is enforced at the remote, not just at the orchestrator (use a deploy key scoped to `tide/*` refs).
-- During active TIDE development, the human and TIDE work on different branches. The roadmap explicitly schedules "supervised mode" milestones during the transition to autonomy, where every level boundary requires human approval before the next dispatches.
+**Prevention:**
+- The import step must explicitly call `dag.ComputeWaves` on the full imported task set *before* creating any child CRDs. If `CycleError` is returned, the import fails with an operator-visible condition: `ImportFailed / CyclicPlanDetected`. The spec invariant is explicit (`README.md`: "Cycles are bugs, not runtime conditions"). The import path is not an exception.
 
 **Warning signs:**
-- The orchestrator's git push targets `main`
-- The orchestrator does not use `--force-with-lease`
-- Human edits to a file are reverted by a TIDE commit and no one notices
-- The human cannot work on TIDE source while TIDE runs
+- Tasks with indegree > 0 that never reach 0 after import completes
+- Project stalled indefinitely at `Running` with no active dispatch
+- `dag.ComputeWaves` not called anywhere in the import code path
 
-**Phase to address:**
-Phase 3 (git integration). The branching discipline must be encoded before TIDE pushes to a repo it might also be a contributor to.
+**Phase to address:** Phase 2 of v1.0.3.
 
 ---
 
-### Pitfall 14: Hard-coded provider/host assumptions slip into "agnostic" code
+## Minor Pitfalls
 
-**Severity:** Serious (OSS posture)
+### Pitfall R-13: Budget double-count from salvage import re-triggering cost rollup for already-counted planners
 
 **What goes wrong:**
-`PROJECT.md` is explicit: "Pluggable Subagent interface from day one." "No hard-coded git host." "No hard-coded LLM provider." But under deadline pressure, an Anthropic-specific retry-after header parser lands in the orchestrator (not the harness); a GitHub-style `Pull-Request-Number` field appears on Status (not the git remote driver); the dashboard's diff renderer hardcodes GitHub's URL pattern. Each is small; cumulatively they make TIDE un-installable in clusters using GitLab + a non-Anthropic provider.
+Salvaged planner envelopes carry `out.Usage` (token counts, cost). If the import step triggers `budget.RollUpUsage` for each imported envelope, and the original run already rolled those costs before the halt, `Status.Budget.CostSpentCents` is inflated by the prior run's planning cost. This may cause an instant budget halt on the resumed run and obscures the true cost of the resume work.
 
-**Why it happens:**
-Day-one abstraction is hard to police. The concrete impl (Anthropic + GitHub) makes for legible code; abstraction adds layers that look like overengineering until the second impl arrives. By then, leaks have spread through types.
+**Prevention:**
+- Import-path envelope injection must suppress budget rollup. Either zero out `out.Usage` in the salvaged envelope before it enters the completion handler, or add a `salvageImport: true` flag that the completion handler checks before calling `budget.RollUpUsage`.
+- Expose the prior run's cost as a separate `Status.Budget.SalvagedPlanningCostCents` field so operators can see what was inherited vs. newly spent.
 
-**How to avoid:**
-- The `subagent` and `gitremote` package boundaries are *firewalls*: the orchestrator depends on the interfaces; concrete implementations live behind build tags or as separate packages. The orchestrator's go.mod has no direct dependency on the Anthropic SDK or GitHub-specific libraries.
-- Lint rule (custom go-analyzer): the `pkg/orchestrator/` tree may not import any package matching `*/anthropic/*` or `*/github/*`. CI fails the build.
-- Second-impl test: ship a `stub-subagent` and `stub-gitremote` that record dispatches without actually calling anything. Run all integration tests against both the real and stub impls. Drift between them surfaces immediately.
-- CRD field names are provider-agnostic: `spec.modelProfile` not `spec.claudeModel`; `spec.gitRemote.url` not `spec.github.repo`.
-
-**Warning signs:**
-- Imports of provider-specific SDKs in non-harness packages
-- CRD field names containing provider proper nouns
-- Provider-specific config keys at the orchestrator level (vs. inside provider-specific Secret payloads)
-- "We'll add another provider later" justifying a leak now
-
-**Phase to address:**
-Phase 2 (Subagent interface). Once the interface lands, the lint rule is the cheap enforcer.
+**Phase to address:** Phase 2 of v1.0.3.
 
 ---
 
-### Pitfall 15: K8s RBAC scope creep
-
-**Severity:** Serious (security, OSS adoption blocker)
+### Pitfall R-14: Envelope `apiVersion` constant not bumped if v1.0.3 changes the envelope schema
 
 **What goes wrong:**
-The controller needs to manage CRDs in the project's namespace. Initially the RBAC binds tightly. Then a feature needs to read a ConfigMap in another namespace; the rolebinding becomes a clusterrolebinding "for now." Then someone needs `secrets` access cluster-wide. Then `verbs=*`. Now TIDE installs require cluster-admin during installation, security teams reject it, OSS adoption stalls. Industry reporting documents this exact pattern as the #1 cause of operator-adoption friction in security-conscious environments ([Kubernetes RBAC good practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/), [Portainer: Kubernetes RBAC 2026](https://www.portainer.io/blog/kubernetes-rbac)).
+`APIVersionV1Alpha1 = "tideproject.k8s/v1alpha1"` is a constant in `pkg/dispatch/envelope.go:24`. If v1.0.3 adds a field to `EnvelopeOut` that is required for the import path, old envelopes from the salvage will silently read the zero value for that field. `ValidateAPIVersionKind` does not guard against missing fields within a version.
 
-**Why it happens:**
-RBAC files are tedious. Wildcards are easy. The first time something doesn't work, "give it cluster-admin and verify the rest works" is the fast debug path that often becomes the permanent fix.
+**Prevention:**
+- v1.0.3 must not add required fields to `EnvelopeOut` or `EnvelopeIn` without bumping the constant to `v1alpha2`. Optional fields with `omitempty` are safe.
+- The salvage import path should use a new wrapper type (`SalvageImportManifest`) that wraps `EnvelopeOut` rather than extending the envelope contract, keeping the existing contract stable.
 
-**How to avoid:**
-- Use kubebuilder RBAC markers per controller (`+kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;update;patch`). Never wildcards.
-- Strictly enumerate verbs and resources. `verbs=*` and `resources=*` rejected at PR review.
-- Project-namespace-scoped: most permissions are Role + RoleBinding in the project's namespace, not ClusterRole. The only ClusterRole TIDE needs is for cluster-scoped resources it watches (and ideally there are none).
-- The Helm chart installs the minimum RBAC needed for the feature flags enabled. Optional features (e.g. cluster-wide dashboards) require *opting in* to additional permissions.
-- Test: install in a cluster as a non-admin user with only the documented install permissions. If the install fails, the docs lie; fix the docs *or* reduce the RBAC.
-- Document the exact permissions and *why*, in `docs/RBAC.md`. Security review teams read this first.
-
-**Warning signs:**
-- A `*` in any verbs or resources field of an RBAC manifest
-- Cluster-scoped role grants that aren't justified in a code comment
-- "Just give it cluster-admin to test" appearing in install instructions
-- Issues filed about install failures in restricted-RBAC environments
-
-**Phase to address:**
-Phase 1 (controller scaffold). Kubebuilder markers on every controller from the first PR.
+**Phase to address:** Phase 2 of v1.0.3 (schema design review before any new fields are added).
 
 ---
 
-### Pitfall 16: Breaking CRD schema changes after release
-
-**Severity:** Catastrophic (post-v1; planning matters now)
-
-**What goes wrong:**
-v1.0 ships with CRD `tasks.tideproject.k8s/v1`. v1.1 adds a required field; existing Task resources in clusters that upgraded fail validation; clusters refuse to upgrade; users must `kubectl delete` Tasks before upgrading, losing run state. Or: a field is renamed without a conversion webhook; old objects in etcd cannot be deserialized; the controller crashloops on startup; only a full wipe and reinstall recovers.
-
-Helm makes this worse: "CRDs are never installed on upgrade or rollback" by default — Helm v3 doesn't update CRDs to prevent accidental data loss, which causes version skew ([Helm CRD installation upgrades guide 2026](https://oneuptime.com/blog/post/2026-01-17-helm-crd-installation-upgrades/view)).
-
-**Why it happens:**
-The first CRD schema is rarely right. The temptation to "fix" it in a minor version is enormous. K8s' CRD versioning + conversion webhook story is non-trivial ([CRD versioning](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/)) and skipping it looks reasonable until it bites.
-
-**How to avoid:**
-- CRD schemas are conservative for v1: every new field is optional with sensible defaults; nothing in `spec` is `required` unless absolutely necessary; `status` schema is permissive.
-- Adopt "v1alpha1 → v1beta1 → v1" naming for pre-stable schemas. Bump alpha freely; bump beta when something stable-looking is reached; bump v1 only when the API is committed.
-- Conversion webhook scaffold from day one — even if v1alpha1 is the only version, the *infrastructure* for serving conversions is in place. Adding v1alpha2 later is then a schema PR, not a infrastructure PR.
-- Helm chart includes a dedicated CRD subchart so upgrades update CRDs explicitly. Document the upgrade path.
-- Run `kubectl-convert`-style migration tests in CI: take v1alpha1 fixtures, convert to v1alpha2, ensure roundtrip equality where required.
-- Never remove a field within the same version. Mark it deprecated; remove only when bumping the version (and provide the conversion).
-
-**Warning signs:**
-- New required fields in a CRD without a version bump
-- Helm chart doesn't include CRD upgrades
-- Conversion webhook missing or untested
-- Issues filed about upgrade failures
-- No `kubectl-convert` test fixtures
-
-**Phase to address:**
-Phase 1 (CRD schema). Set the version-bump discipline before users exist. Conversion webhook scaffolding before any second-version pressure.
-
----
-
-### Pitfall 17: Observability data volume explodes
-
-**Severity:** Serious
-
-**What goes wrong:**
-The spec calls for OpenTelemetry tracing with OpenInference conventions on every Milestone → Phase → Plan → Task subagent chain. Each LLM call becomes a span. Each span carries the prompt and completion as attributes (because OpenInference says so). For a 200-task run, that's ~1000 spans with multi-kilobyte attributes each. Industry reporting: "adding AI workload monitoring increased observability bills by 40-200%" ([OneUptime: AI Workload Observability Cost Crisis](https://oneuptime.com/blog/post/2026-04-01-ai-workload-observability-cost-crisis/view), [Uptrace: OpenTelemetry for AI Systems 2026](https://uptrace.dev/blog/opentelemetry-ai-systems)). High-cardinality labels (per-task UID metric labels) explode Prometheus storage.
-
-**Why it happens:**
-Tracing every LLM call feels right. The cost shows up later, on a bill, not in code.
-
-**How to avoid:**
-- Tail-based sampling: complete the trace, then decide. Head-based sampling does not work for AI workloads ([Uptrace 2026](https://uptrace.dev/blog/opentelemetry-ai-systems)). Sample 100% of failed traces; sample a fraction of succeeded ones; sample expensive ones unconditionally.
-- Prompt/completion payloads are large: store them as artifact references (PVC + URL), not as span attributes. Spans carry the *reference*, not the content.
-- Prometheus label cardinality discipline: per-task UID labels are *forbidden* on metrics. Aggregate by project, phase, plan, level — not task. If per-task observability is needed, that's tracing, not metrics.
-- Document the expected observability cost per run-of-N-tasks in the OSS docs so operators can budget.
-- The Helm chart's default OTel exporter ships with conservative sampling and aggregate-only metrics. "Full fidelity" is opt-in.
-
-**Warning signs:**
-- Prometheus cardinality explosion alerts
-- LLM-payload bytes in span attributes
-- OTel-collector OOM kills under load
-- Users filing issues about observability cost
-
-**Phase to address:**
-Phase 4 (Observability). Cardinality discipline must be baked into the instrumentation; retrofitting is expensive.
-
----
-
-### Pitfall 18: Secret leakage in artifacts and logs
-
-**Severity:** Catastrophic (security)
-
-**What goes wrong:**
-A subagent is given a task that involves "set up the OAuth callback." The harness passes API keys via env vars (correct). But the subagent, given access to those env vars, helpfully writes them into a `PLAN.md` comment: "I've configured the callback with key=sk-ant-xxx". The PLAN.md is pushed to the git remote. Now an API key is in a git repo. Or: the subagent writes "the credentials are configured" to stdout; the orchestrator captures stdout into logs; logs go to Loki; logs are indexed and searchable. GitGuardian reports 28.6M secrets exposed in public GitHub commits in 2025 — a 34% YoY increase — with one provider (OpenRouter) seeing leaks grow >48x year-over-year ([Help Net Security 2026](https://www.helpnetsecurity.com/2026/04/14/gitguardian-ai-agents-credentials-leak/), [Doppler: Advanced LLM security](https://www.doppler.com/blog/advanced-llm-security)).
-
-Research consensus from 2026: "If an agent can see it, it can leak it. The safest approach is preventing secrets from entering the agent's context at all."
-
-**Why it happens:**
-Subagents have agency; verbose output is the default; "redact at log-write" is hard to make complete.
-
-**How to avoid:**
-- Subagents do not get raw API keys in env vars or in their context. The harness mediates: it provides a *signed token* the subagent uses to make API calls via a local proxy in the same pod. The proxy injects the real key. The token is meaningless if leaked.
-- For credentials that genuinely must be in the subagent context (e.g. a git remote PAT for the case where the harness can't proxy the git push): use scoped, short-lived credentials minted per-Job from a base credential held by the orchestrator. The subagent's leak is bounded in scope and time.
-- Log scrubbing: the harness wraps subagent stdout/stderr with a regex-based redactor (`sk-ant-*`, `sk-*`, `gh[ps]_*`, `xox[abp]-*`, etc.). Tested against known token formats. Logged after redaction. Never logged before.
-- Artifact scanning: at every git-push level boundary, run a secrets-scanner (gitleaks or equivalent) over the diff. If a secret pattern is detected, the push fails, the task is marked failed-with-leak, the leak event is surfaced to the operator immediately.
-- Never put credentials in CRD spec. Always reference K8s Secrets by name (already locked in `PROJECT.md`).
-- Subagent system prompts explicitly instruct: "never reference credentials, API keys, or tokens in any output."
-
-**Warning signs:**
-- Logs contain strings matching API key formats
-- Subagent context includes env vars whose names match `*_KEY`, `*_TOKEN`, `*_SECRET`
-- No secrets-scanner in the git-push pipeline
-- Audit shows credentials accessed by tasks that shouldn't need them
-
-**Phase to address:**
-Phase 2 (Subagent harness) and Phase 3 (git integration). Both the harness-side proxy and the push-side scanner are required; neither alone is sufficient.
-
----
-
-### Pitfall 19: Hallucinated `depends_on` edges that pass validation
-
-**Severity:** Serious
-
-**What goes wrong:**
-A planner subagent writes a `PLAN.md` that declares `task-7 depends_on [task-3, task-5]`. task-3 and task-5 exist, so admission validation passes. But the *real* dependency is on task-4 — the planner missed it because the file-touch sets are similar. Task-7 dispatches in an earlier wave than it should, against incomplete state. The diff it produces is wrong; tests fail; or worse, tests pass against the wrong baseline and the failure surfaces three plans later.
-
-**Why it happens:**
-DAG validation checks *consistency* (no cycles, all referenced tasks exist), not *correctness* (the declared dependencies match the real ones). LLMs hallucinate plausible-looking edges.
-
-**How to avoid:**
-- Derive expected edges from declared file-touch sets, not from prose. A `PLAN.md` task entry declares `outputs: [path/to/file.go]` and `inputs: [path/to/other.go]`. The orchestrator computes "if task A's output is in task B's inputs, B depends on A." This *generated* DAG is reconciled against the LLM-declared DAG; mismatches surface as warnings (strict mode: rejections).
-- Plan-review subagent: a separate subagent reviews the declared DAG against the architecture spec before admission. This is itself a Slack-tide gate.
-- The plan author writes natural-language *reasons* for each edge; a reviewer subagent (or human) sanity-checks the reasons. Reasons that are obvious tautologies (`task-7 depends_on task-3 because task-3 is upstream`) are rejected.
-- Acceptance tests at the plan level: every dispatched task that fails because of a missing input is automatically tagged as "missing-dependency" in its failure mode, and the surfaced report says exactly which file was missing and which task produced it.
-- Over time, the orchestrator can use historical "missing-dependency" failures to *suggest* edges the planner missed.
-
-**Warning signs:**
-- Tasks failing with "file not found" errors that *would* have been produced by a later task
-- Plans that produce surprisingly few waves (sign that dependencies aren't being declared)
-- Plans that produce surprisingly many waves (sign of over-declared deps, the safer error)
-- File-touch consistency check disabled or skipped
-
-**Phase to address:**
-Phase 2 (Plan CRD + admission). File-touch derived edges must be in the admission flow from day one.
-
----
-
-### Pitfall 20: Tests requiring real LLM API credits
-
-**Severity:** Annoying (but corrosive — slows iteration)
-
-**What goes wrong:**
-Integration tests hit real Anthropic to verify end-to-end. The test suite costs $5/run. Contributors don't run it locally; CI burns the budget; flaky LLM responses cause flaky tests; the team adds retries; the test suite becomes slow and untrustworthy. Or worse: the LLM impl is mocked in a way that doesn't catch real failure modes (always-returns-success mock makes the executor look correct when it can't actually handle a 429 or a malformed completion).
-
-Research from 2026: "Mock tool functions while using actual LLM tool calling mechanisms. This is the most common mocking pattern for modern agents" ([LangWatch 2026 testing guide](https://langwatch.ai/scenario/testing-guides/mocks/)).
-
-**Why it happens:**
-End-to-end faith requires real LLM calls; cost requires mocks; the team picks one and lives with the consequences.
-
-**How to avoid:**
-- Three test tiers, run in CI in this order:
-  1. **Unit (no LLM):** Kahn algorithm, indegree updates, validation logic, controller reconcile-without-external-effects. Runs in <30s. Required for every PR.
-  2. **Integration with stub-subagent:** envtest + a `stub-subagent` impl that returns canned responses (success/failure/rate-limit/malformed) on demand. Runs in <5min. Required for every PR. Catches dispatch logic, wave walking, status transitions, RBAC, finalizers.
-  3. **Live E2E with real LLM:** Real provider, real kind cluster, small fixture project. Runs nightly, not per-PR. Costs bounded ($N/run cap enforced by the harness's budget caps from Pitfall 8).
-- The `stub-subagent` impl is part of v1 (locked in `PROJECT.md` already implies pluggability — make stub explicit).
-- The stub can be programmed to return specific failure modes per-test, so failure-handling logic gets test coverage that real LLMs make non-deterministic.
-- envtest gaps: envtest doesn't run a Kubelet, so Job pods aren't actually scheduled. Pair envtest with a fake-Pod controller that simulates Job lifecycle (success/failure/timeout) on a configurable delay. This catches dispatch-loop bugs without a real cluster.
-
-**Warning signs:**
-- Test cost monthly > $50 for the project
-- CI tests skipped because "they're flaky"
-- Failure-mode coverage relies on observing real LLM flakes rather than deterministic stubs
-- No `stub-subagent` impl
-
-**Phase to address:**
-Phase 2 (Subagent interface). The stub impl ships with the interface, before the concrete impl.
-
----
-
-### Pitfall 21: Finalizer leaks
-
-**Severity:** Serious
-
-**What goes wrong:**
-Project CRDs have finalizers (`tideproject.k8s/cleanup-jobs`). The controller crashes during a `Project` deletion; the finalizer is not removed. The Project is stuck in `Terminating` forever; its namespace is stuck in `Terminating` forever; users can't redeploy; the only fix is `kubectl patch ... --type=merge -p '{"metadata":{"finalizers":null}}'`. This is a documented K8s pain point ([Kubernetes Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/), [Jorijn: namespace stuck in Terminating](https://jorijn.com/en/knowledge-base/kubernetes/troubleshooting/kubernetes-namespace-stuck-terminating/)).
-
-**Why it happens:**
-Finalizers are the right tool for cleanup; their failure modes are easy to underestimate. A finalizer that depends on an external system (git remote, LLM provider) inherits that system's downtime as deletion downtime.
-
-**How to avoid:**
-- Finalizer logic must be *bounded in time*. Set a deadline (5 minutes). After deadline, log loudly, remove the finalizer anyway, surface a `FinalizerTimedOut` event.
-- Finalizer logic must be *idempotent*. Deleting Jobs that don't exist is a noop, not an error.
-- Document the manual unstick command in the runbook (`kubectl patch ... --type=merge -p '{"metadata":{"finalizers":null}}'`). Make sure operators can recover when the controller is genuinely down.
-- The cleanup logic the finalizer runs is "delete child Jobs," not "git push the final state" — the latter is a level-boundary operation, not a deletion operation. Don't conflate.
-- Test: kill the controller mid-deletion; verify the manual unstick works and is documented.
-
-**Warning signs:**
-- Projects stuck in `Terminating`
-- Finalizer logic that calls external services
-- Finalizer code without timeouts
-- Issues filed about "can't delete my Project"
-
-**Phase to address:**
-Phase 1 (CRD lifecycle). Bake the deadline + idempotence rules into the first finalizer that ships.
-
----
-
-### Pitfall 22: Dashboard observability leaks (websockets, logs, costs)
-
-**Severity:** Annoying-to-Serious
-
-**What goes wrong:**
-The read-only dashboard streams `kubectl logs` from running task pods via websocket. A user opens the dashboard, walks away, closes the laptop. The websocket leaks; the orchestrator keeps the connection open and keeps streaming. Multiplied by N users and M tabs, the orchestrator OOMs. Or: dashboard streams *every* log line by default; long-running agentic chatter floods Loki / cluster logging at gigabytes per run.
-
-**Why it happens:**
-Real-time streaming is a great DX feature. Resource hygiene is an afterthought.
-
-**How to avoid:**
-- Websockets have idle-timeout + max-duration. Dashboard reconnects on demand; orchestrator drops idle streams.
-- Log streaming is opt-in *per task*, not default-on-all-tasks. Default view shows status; click a task to start streaming its logs.
-- Stream-rate-limit: cap bytes/second per connection. If a chatty agent exceeds the cap, the dashboard shows "log volume too high; download full log instead."
-- Subagent harness applies its own per-Job log size cap. Anything over the cap is truncated; full log is on the PVC; the K8s-side log is bounded.
-- Acceptance test: open N dashboard sessions, leave them idle 1 hour, verify orchestrator memory is bounded.
-
-**Warning signs:**
-- Orchestrator memory grows with active dashboard sessions, not with active runs
-- Loki bills scale with run count linearly
-- Connection leak metrics (`tide_dashboard_active_connections` not draining after users disconnect)
-
-**Phase to address:**
-Phase 4 (Dashboard). Resource discipline is part of the dashboard spec, not a post-launch fix.
-
----
-
-### Pitfall 23: Missing or wrong owner references
-
-**Severity:** Serious
-
-**What goes wrong:**
-A Wave creates Task CRDs. Tasks create Jobs. If owner references aren't set right:
-- Deleting a Plan should garbage-collect its Tasks and their Jobs. Without owner refs: orphans linger forever, holding PVCs and consuming etcd.
-- An owner-ref pointing to the wrong UID (because of recreate-after-delete) means the GC kicks in unexpectedly. Tasks vanish mid-run.
-- Cross-namespace owner refs (a Plan in namespace A owning Tasks in namespace B) are *silently ignored* by K8s — owner refs must be in the same namespace. A bug here looks like "the GC doesn't work" but is actually "the owner ref is meaningless."
-
-**Why it happens:**
-Owner references are a small detail with large consequences. The K8s docs are clear but easy to misread.
-
-**How to avoid:**
-- Every CRD-creates-CRD operation goes through a `setOwnerReference(child, parent)` helper. The helper enforces same-namespace, blocks cross-namespace, panics on invalid input.
-- The helper sets `BlockOwnerDeletion: true` for parents the orchestrator cares about (so cascade-delete is well-ordered).
-- Test: create a Project, advance through a wave, delete the Project, verify all child resources (Phases, Plans, Tasks, Jobs, ConfigMaps) are GC'd.
-- Test: delete a Plan mid-run; verify Tasks and Jobs underneath are GC'd; verify orphaned Pods don't linger.
-
-**Warning signs:**
-- Resources lingering after their parent is deleted
-- "I deleted the Project but the Jobs are still running"
-- Cross-namespace ownership relationships in CRD design
-- Manual cleanup runbooks beyond the unstick-finalizer one
-
-**Phase to address:**
-Phase 1 (CRD scaffold). Helper exists before the first child resource is created.
-
----
-
-### Pitfall 24: OSS adoption death by missing docs
-
-**Severity:** Catastrophic (post-v1; the OSS bar)
-
-**What goes wrong:**
-v1 ships. Apache 2.0 license attached. Helm chart works. Three external users try it. Two give up because docs don't cover "how do I use my own LLM provider" or "how do I configure for GitLab" or "what happens if a wave fails halfway." The third files an issue that languishes because no one's reading it. The OSS-readiness check from `PROJECT.md` ("Apache 2.0 LICENSE, README/docs sufficient for an external operator to install + run a project end-to-end") was checked because *installation* works — but *operation* needs more.
-
-**Why it happens:**
-Code is fun; docs are work. The team that built TIDE knows everything; the docs assume that knowledge. The gap between "works on the dev's host" and "an external operator can install and run" is exactly documentation.
-
-**How to avoid:**
-- v1 docs minimum: install (Helm + kubectl + kind dev loop), Project authoring (CRD examples), provider configuration (Anthropic, with notes on adding others), git remote configuration (GitHub, GitLab, Gitea examples), failure recovery (manual finalizer unstick, run resume, wave retry), RBAC reference, troubleshooting.
-- Acceptance test for the "external operator" bar: a contributor unfamiliar with the codebase follows the docs and runs a project end-to-end. Time them. If it takes >30 minutes from clone to first run, the docs need work.
-- Examples directory with full Project CRD samples for at least three common scenarios.
-- Don't ship undocumented flags or undocumented Project spec fields. Discover by `grep -r "spec\." docs/ | wc -l` matches `grep -r "spec\." apis/ | wc -l`.
-
-**Warning signs:**
-- The team's onboarding doc is more detailed than the public docs
-- "How do I X" questions on issues that should have been one-line docs links
-- Examples directory empty or stale
-- The maintainers can't reproduce a user's reported issue because they don't know the user's setup
-
-**Phase to address:**
-Phase 5 (OSS readiness). Continuous, not a final-week sprint.
-
----
-
-## Technical Debt Patterns
-
-Shortcuts that look reasonable but degrade the design.
-
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Cache wave schedule in `Status.Waves` | Faster Reconcile, fewer DAG re-computes | Stale schedules; bugs where stored state disagrees with artifacts; resumption uses cache instead of artifacts | Never |
-| Single worker pool for planner+executor | One config flag, simpler code | Loses two-budget structural advantage from spec; planning starves execution or vice versa | Never |
-| Sync-wait inside Reconcile for Job completion | Code reads top-to-bottom | Work queue blocks; status drift; controller can't interrupt long ops | Never |
-| Anthropic SDK imports in orchestrator package | Concrete impl is legible | OSS posture broken; second-provider impl requires major refactor | Never (move to harness package) |
-| `verbs=*` in RBAC for "now" | Unblocks a feature in 5 minutes | Security review rejects install; OSS adoption blocked | Never |
-| Store full subagent stdout in CRD status | Easy debugging from `kubectl describe` | etcd object size limit (~1MB per object) breached; controller crashes parsing huge statuses | Never (use artifact PVC + log streaming) |
-| `kubectl-style` ad-hoc CRD updates in scripts | Fast iteration during dev | Production users break on schema changes; conversion webhooks missing | Until first external user |
-| One CRD version forever | No conversion webhook complexity | First breaking change forces wipe-and-reinstall | Until v1 ships; require version-bump discipline from v1.1 |
-| Mock the LLM by always returning success | Tests run fast and pass | Failure-handling code paths get no coverage; production breaks on first real failure | Never; use programmable stub |
-| Skip secret scanning on git push | One less integration | First credential leak in a public repo | Never |
-| Read all artifacts into subagent context | Subagent has "full information" | Context bleed (Pitfall 7); cost explosion; prompt injection surface multiplies | Never (declared inputs only) |
-
----
-
-## Integration Gotchas
-
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Anthropic API | Treating 429 as a hard failure (Job exits, Task fails) | Typed retryable-error exit code; controller re-dispatches with backoff against the rate-bucket |
-| Anthropic API | Polling for completion with naive client backoff | Use SDK's built-in retry with respect for `Retry-After` headers; ensure base concurrency is rate-aware |
-| GitHub / GitLab / Gitea | Hard-coding GitHub PR URL patterns in dashboard or CRD status | Abstract via `gitremote.Driver` interface; URLs are opaque strings from the driver |
-| GitHub / GitLab / Gitea | Using a single long-lived PAT for all pushes | Short-lived per-Job tokens minted from a base credential; deploy key scoped to `tide/*` branches; never push to `main` |
-| Git remote | `git push --force` from the orchestrator | Always `--force-with-lease`; never plain `--force` |
-| K8s API server | Reading from informer cache when freshness matters | `apireader.Get(ctx, key, obj)` to bypass cache for critical pre-dispatch checks |
-| K8s API server | Updating `.spec` and `.status` in the same call | Use the status subresource; spec updates and status updates are separate API calls |
-| K8s API server | `client.Update` after a `client.Get` from cache | Server-side apply (SSA) with `FieldManager`; avoids stale-write conflicts |
-| K8s Job | Relying on `backoffLimit` for LLM-rate-limit retries | Exit code → orchestrator dispatch retry; Job backoff is for genuinely fatal failures |
-| K8s Job | Default `activeDeadlineSeconds` (none) | Always set; subagent harness honors a configurable timeout, Job enforces a hard cap |
-| K8s Pod | Capturing all stdout/stderr into the K8s log stream | Harness applies size cap + redaction; full log on PVC; K8s log is bounded summary |
-| K8s Secret | Mounting the Anthropic key as an env var in subagent pods | Mount in the harness sidecar/proxy; subagent receives a per-Job short-lived signed token |
-| K8s PVC | Assuming `ReadWriteMany` is available everywhere | Document the requirement; OSS Helm chart asks for storage class with RWX; fall back to RWO with shared-volume topology if not |
-| K8s CRD | Removing or renaming a field within a version | Never. Mark deprecated; remove only when bumping version; provide conversion |
-| Helm | Assuming `helm upgrade` updates CRDs | Use a dedicated CRD subchart that explicitly handles updates; document upgrade order |
-| OpenTelemetry | Tagging spans with task UIDs as a label | Use UIDs as resource attributes (high-cardinality OK on attributes); metrics labels stay low-cardinality |
-| Prometheus | Per-task `task_id` label on counters | Aggregate by project/phase/plan; per-task is tracing territory |
-
----
-
-## Performance Traps
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Reconcile reads full PVC contents on every Reconcile | Reconcile latency grows with run age | Read artifacts on demand from artifact metadata in CRD status (paths only) | Run with >20 artifacts |
-| CRD `.status` accumulates per-iteration log lines | etcd object size approaches 1MB | Log lines go to harness log → Loki/PVC; status carries terminal state only | Single Task with >100 iterations |
-| Watch event flood when wave size is large | Controller CPU spikes; reconcile queue grows | `MaxConcurrentReconciles` tuned per controller; informer resync period not aggressive | Wave size >50 |
-| Subagent Jobs created simultaneously hit Job-controller throttle | Some Jobs start slowly; metrics show staggered start times | Dispatch in bounded batches; honor controller-runtime's rate limit on parallel creates | Wave size > the K8s Job-controller burst limit (typically 20-50) |
-| Full DAG re-Kahn on every status update | Reconcile CPU dominated by Kahn re-runs | Kahn is O(V+E) and fast; don't cache, but *do* memoize within a single Reconcile invocation | DAG with >1000 tasks |
-| Trace span attribute size for prompts/completions | OTel-collector OOMs; traces dropped | Store payloads as artifact refs; spans carry references | Per-task LLM exchange >100KB |
-| Prometheus cardinality from per-task labels | Prometheus storage explodes; queries time out | Label discipline: project/phase/plan only on metrics; tasks are span attributes | >1000 tasks across all runs |
-| etcd compaction lag from frequent CRD updates | Cluster API server latency rises | Update CRDs at level boundaries (Slack tides), not on every subagent iteration | Long-running phases with frequent status updates |
-
----
-
-## Security Mistakes
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| API keys in env vars of subagent pods | Subagent leaks key into artifact / log / git | Harness proxy + per-Job short-lived signed tokens |
-| Unfiltered subagent output in K8s logs | Credentials leak into Loki / Splunk / Datadog | Redaction wrapper on subagent stdout/stderr; tested against known token patterns |
-| Plain text credentials in CRD spec | Anyone with `get` on Project sees keys | `secretRef` only; never plain text |
-| `cluster-admin` for the controller | Compromise of controller compromises cluster | RBAC kubebuilder markers; enumerated verbs and resources |
-| Cross-namespace owner refs | Silent failures; weakened isolation | Helper enforces same-namespace |
-| Subagent has read access to entire PVC | Context bleed; prompt injection propagation | Per-Job mounts of declared inputs only |
-| No secret scanning on artifacts at git-push time | Credential leak into a public repo | gitleaks (or equivalent) at every push level boundary; push fails if pattern matches |
-| Subagent has unrestricted egress | Subagent calls arbitrary external services | NetworkPolicy in the project namespace; egress allowed only to configured providers + the git remote |
-| LLM provider key used directly by subagent | Single leaked key compromises the whole project | Per-Project keys; rotate on detected leak |
-| Conversion webhook with TLS cert from manual config | Cert expiry breaks all API calls | cert-manager or equivalent automation; HA-deploy the webhook |
-| Job uses default service account | Subagent pod can do whatever the default SA can | Explicit per-Job service account with minimal permissions (just artifact PVC access) |
-
----
-
-## Self-Hosting / Dogfooding Pitfalls
-
-| Pitfall | Risk | Prevention |
-|---------|------|------------|
-| Bootstrap milestone scope creep | M0 keeps growing; self-hosting bar slips | Explicit, narrowly-scoped M0 in the roadmap (Pitfall 12) |
-| CRD schema drift between bootstrap-TIDE and self-hosted-TIDE | TIDE-in-cluster can't read artifacts authored by TIDE-on-host | Single v1alpha1 schema for the entire bootstrap-through-self-hosting window |
-| Bootstrap-TIDE and self-hosted-TIDE diverge in dispatch logic | Self-hosted run produces different artifacts than the human did with GSD | Bootstrap-TIDE is just early-version TIDE-the-binary, not a separate codebase |
-| Self-hosting milestone marked complete before a fresh kind+helm install actually drives a milestone | "Self-hosting works" but only on the dev's machine | Acceptance test: kind cluster from scratch + `helm install` + `kubectl apply -f project.yaml` + observe the run produce the expected artifacts |
-| Concurrent TIDE-and-human commits on the same files | Lost human work; can't debug TIDE while TIDE runs | Per-run branches; `--force-with-lease`; never push to `main` (Pitfall 13) |
-| Manual fixes to TIDE-authored artifacts get overwritten | Human review can't apply | Per-level slack-tide gate; orchestrator pauses on manual edit detection |
-
----
-
-## "Looks Done But Isn't" Checklist
-
-Things that pass a casual demo but are missing critical pieces.
-
-- [ ] **Wave dispatch:** verify failed task → dependents *never* dispatched (not "eventually dispatched on retry"). Test with a 3-task wave where one fails.
-- [ ] **Resumption:** kill the controller pod mid-wave; verify resume picks up at the right wave with no extra work.
-- [ ] **CRD upgrade:** verify a v1alpha1 Task still works after the orchestrator binary is bumped (until a real v2 lands).
-- [ ] **RBAC:** verify install in a non-cluster-admin namespace by a user with only the documented permissions.
-- [ ] **Helm chart:** verify `helm upgrade` actually updates CRDs (or document the explicit upgrade path).
-- [ ] **Cycle rejection:** submit a cyclic plan; verify rejection with a useful error pointing to the offending edges.
-- [ ] **Provider swap:** verify `stub-subagent` impl runs the full test suite without an Anthropic key.
-- [ ] **Git remote swap:** verify with GitLab and Gitea, not just GitHub.
-- [ ] **Cost cap:** trigger a runaway loop in a Job; verify per-Task budget kills it; verify per-Project rolling-window gate fires.
-- [ ] **Secret scanning:** plant a fake API key in an artifact; verify git-push level boundary fails the wave.
-- [ ] **Owner refs:** delete a Project; verify all child Jobs, ConfigMaps, PVCs are GC'd within reasonable time.
-- [ ] **Finalizer timeout:** simulate an external system being down during Project deletion; verify the finalizer eventually times out and unsticks.
-- [ ] **Idempotent dispatch:** kill the controller during dispatch; verify only one Job exists per Task on restart.
-- [ ] **Strict-by-default failure semantics:** a wave with one failure → siblings continue, dependents stop, non-dependents in next wave run. Verify all three.
-- [ ] **Two-budget enforcement:** simulate a heavy planning wave; verify executor dispatches still happen on the executor pool, unblocked.
-- [ ] **OSS install:** unfamiliar user follows the README; runs a project end-to-end in <30min.
-
----
-
-## Recovery Strategies
-
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Long-running reconcile blocks queue | LOW | Drain queue; refactor reconcile to be event-driven; restart |
-| Cached wave schedule got stale | LOW (data) / HIGH (codebase) | Drop the cache field; redeploy; re-derive on next reconcile. Removing the field from the CRD requires a version bump |
-| DAG/Execution unified | HIGH | Major refactor; split types; split controllers; redeploy CRDs |
-| Status-as-truth resumption bug | MEDIUM | Restart controller; re-derive from artifacts; verify outputs against last-known-good git state |
-| Cycle "recovery" feature shipped | MEDIUM | Revert; restore validation-time rejection; reach out to affected users to fix their cyclic plans |
-| Unified worker pool | LOW (config) / MEDIUM (code) | Split flags; add two controllers; cap each |
-| Subagent context bleed | MEDIUM | Add per-Job mount scoping; reject artifacts that violate declared inputs; replay affected runs |
-| Runaway cost event | HIGH (financial) | Pause all projects via global flag; investigate which Project; add per-Project absolute cap; resume |
-| Rate-limit cascade failure | LOW | Wait for backoff; restart paused tasks; tune rate-bucket config |
-| Indegree update bug on partial failure | HIGH | Roll back to last-known-good controller version; verify in-flight runs; resume |
-| Watch-lag duplicate dispatch | MEDIUM | Make dispatch idempotent (deterministic Job names); ride out the duplicate; reconcile fixes itself |
-| Bootstrap deadlock (M0 slipping) | HIGH | Re-scope M0 down; freeze CRD schema; commit to hand-authoring M0 |
-| TIDE overwrote human commits | HIGH | `git reflog` recovery; introduce per-run branches; never re-enable orchestrator pushes to `main` |
-| Provider/host leak | MEDIUM | Identify leak via lint rule; refactor to interface; ship in next minor |
-| RBAC scope creep installed in prod | LOW (technically) / HIGH (politically) | Tighter RBAC in next chart version; document the change as breaking |
-| Breaking CRD change shipped | HIGH | Conversion webhook + emergency patch release; in worst case, document manual migration |
-| Observability data volume spike | LOW | Tighten sampling; drop high-cardinality metric labels; redeploy |
-| Secret leaked to git | CATASTROPHIC | Rotate the leaked credential immediately; force-rewrite git history (operator decision); add scanner to push pipeline |
-| Hallucinated `depends_on` shipped | MEDIUM | Enable file-touch derived edge check in admission; reject offending plans |
-| Test relying on real LLM credits | LOW | Ship `stub-subagent`; retag tests; gate live E2E to nightly |
-| Finalizer leak | MEDIUM | Manual `kubectl patch ... finalizers:null`; add deadline to finalizer code |
-| Dashboard websocket leak | LOW | Add idle timeout; redeploy; drain stuck connections |
-| Wrong owner refs | MEDIUM | Manually clean up orphans; ship helper; re-verify GC |
-| OSS docs failure | MEDIUM | Onboarding sprint; external-operator dry-run; iterate |
-
----
-
-## Pitfall-to-Phase Mapping
-
-How roadmap phases should address these. Phase numbers are illustrative — the roadmap derives the actual ordering.
-
-| Pitfall | Severity | Prevention Phase | Verification |
-|---------|----------|------------------|--------------|
-| 1. Long-running reconcile | Catastrophic | Phase 1 (controller scaffold) | Reconcile p99 latency metric; lint rule for sleep/blocking in Reconcile |
-| 2. Cached wave schedule | Catastrophic | Phase 2 (Kahn) | Wave-derivation function is pure; no schedule fields in CRDs |
-| 3. DAG unification | Serious | Phase 1 (CRD schema) | Distinct planner/executor types in API package |
-| 4. Status-as-truth | Catastrophic | Phase 1 (CRD schema) | Resumption test from cold start without `.status` |
-| 5. Cycle recovery | Serious | Phase 2 (admission webhook) | Webhook test: cyclic plan rejected with edge list |
-| 6. Unified worker pool | Serious | Phase 1 (controller scaffold) | Two `MaxConcurrentReconciles` flags wired separately |
-| 7. Subagent context bleed | Catastrophic | Phase 2 (Subagent interface) | Harness rejects diff touching undeclared files |
-| 8. Runaway cost | Catastrophic | Phase 2 (Subagent harness) | Per-Task budget caps; per-Project rolling-window gate |
-| 9. Rate-limit handling | Serious | Phase 2 (Subagent harness + dispatch) | Token bucket exists; 429 → controller retry, not Job failure |
-| 10. Indegree on partial failure | Serious | Phase 2 (Kahn) | Test: one-of-three wave fails; correct downstream dispatch |
-| 11. Watch-lag duplicate dispatch | Serious | Phase 2 (subagent dispatch) | Deterministic Job names; AlreadyExists test |
-| 12. Bootstrap deadlock | Catastrophic | Phase 0 (roadmap construction) | M0 and M_self named with bounded scope |
-| 13. TIDE overwrites human commits | Serious | Phase 3 (git integration) | Per-run branch; --force-with-lease; never push main |
-| 14. Provider/host leaks | Serious | Phase 2 (Subagent interface) | Custom lint rule; stub impl runs full tests |
-| 15. RBAC scope creep | Serious | Phase 1 (controller scaffold) | Kubebuilder markers; no wildcards in generated manifests |
-| 16. CRD breaking change | Catastrophic | Phase 1 (CRD schema) | Conversion webhook scaffold; alpha/beta/v1 naming |
-| 17. Observability volume | Serious | Phase 4 (Observability) | Tail-sampling; bounded-cardinality labels |
-| 18. Secret leakage | Catastrophic | Phase 2 + Phase 3 | Harness proxy; gitleaks at push; redaction tests |
-| 19. Hallucinated deps | Serious | Phase 2 (Plan CRD admission) | File-touch derived edges reconciled vs declared |
-| 20. Test cost / mock coverage | Annoying | Phase 2 (Subagent interface) | `stub-subagent` ships with interface; three test tiers in CI |
-| 21. Finalizer leaks | Serious | Phase 1 (CRD lifecycle) | Finalizer-timeout test; idempotence verified |
-| 22. Dashboard leaks | Annoying-Serious | Phase 4 (Dashboard) | Idle-session test; stream-rate cap |
-| 23. Wrong owner refs | Serious | Phase 1 (CRD scaffold) | Helper enforces same-namespace; cascade-delete test |
-| 24. OSS docs death | Catastrophic | Phase 5 (OSS readiness) | External-operator dry-run; <30min install-to-first-run |
+## Phase-Specific Warnings
+
+| Phase / Topic | Likely Pitfall | Mitigation |
+|---------------|---------------|------------|
+| Phase 1 — Budget-bypass correctness | R-01 (Pending re-init), R-04 (reporter TTL-GC double rollup), R-07 (clone re-dispatch) | Fix bypass to target `Running`; add durable `UsageRolledUp` guard; add `Status.Git.CloneComplete` flag |
+| Phase 1 — Budget-bypass ergonomics | R-08 (cap-raise leaves rolling cap re-halting) | Surface both cap values in `tide resume`; promote TTL-bypass form as default |
+| Phase 2 — Import design | R-02 (UID aliasing), R-03 (partial-write acceptance), R-05 (partial-plan DAG corruption), R-06 (v1alpha1 schema mismatch), R-10 (PVC injection), R-11 (Succeeded task re-dispatch), R-12 (cycle bypass) | Full import spec before code: stable-key lookup, ChildCount completeness check, Milestone-level atomicity, schema conversion, trust boundary, `ImportComplete` condition guard, cycle pre-check |
+| Phase 2 — Import financial correctness | R-09 (at-least-once double-import), R-13 (budget double-count from salvage) | `ImportComplete` condition as first-step guard; suppress rollup on salvaged envelopes |
+| Any phase touching `EnvelopeOut` schema | R-14 (version constant not bumped) | Only add `omitempty` optional fields; use `SalvageImportManifest` wrapper for import-specific fields |
 
 ---
 
 ## Sources
 
-Verified against (HIGH = official docs / spec, MEDIUM = 2026 industry reporting):
-
-- HIGH: [`README.md`](../../README.md) — TIDE spec (especially "Failure handling at wave boundaries", "Properties of the algorithm", "Alternatives considered and rejected")
-- HIGH: [`PROJECT.md`](../PROJECT.md) — Locked v1 decisions and out-of-scope items
-- HIGH: [`CLAUDE.md`](../../CLAUDE.md) — Implementation guidance, things explicitly NOT to do
-- HIGH: [Kubernetes Finalizers](https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/)
-- HIGH: [Kubernetes CRD Versioning](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/)
-- HIGH: [Kubernetes Jobs](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
-- HIGH: [Kubernetes RBAC Good Practices](https://kubernetes.io/docs/concepts/security/rbac-good-practices/)
-- HIGH: [Kubebuilder Book — Good Practices](https://book.kubebuilder.io/reference/good-practices)
-- HIGH: [Kubebuilder Book — Using Finalizers](https://book.kubebuilder.io/reference/using-finalizers.html)
-- HIGH: [controller-runtime FAQ](https://github.com/kubernetes-sigs/controller-runtime/blob/main/FAQ.md)
-- HIGH: [Bootstrapping (compilers) — Wikipedia](https://en.wikipedia.org/wiki/Bootstrapping_(compilers))
-- MEDIUM: [Shan Valleru: Eventual Consistency and Stale Caches in Kubernetes Controllers](https://svalle.ru/posts/kubernetes/stale-cache-controllers/)
-- MEDIUM: [Shan Valleru: Leader Election in Kubernetes Controllers](https://svalle.ru/posts/kubernetes/leader-election/)
-- MEDIUM: [OneUptime: How to Handle CRD Version Upgrades with Conversion Webhooks (2026)](https://oneuptime.com/blog/post/2026-02-09-crd-version-upgrades-conversion/view)
-- MEDIUM: [OneUptime: How to Upgrade Kubernetes Operators and CRDs Safely (2026)](https://oneuptime.com/blog/post/2026-02-09-upgrade-operators-crds-safely/view)
-- MEDIUM: [OneUptime: Operator Status Subresource (2026)](https://oneuptime.com/blog/post/2026-02-09-operator-status-subresource/view)
-- MEDIUM: [OneUptime: AI Workload Observability Cost Crisis (2026)](https://oneuptime.com/blog/post/2026-04-01-ai-workload-observability-cost-crisis/view)
-- MEDIUM: [OneUptime: Helm CRD Installation and Upgrades (2026)](https://oneuptime.com/blog/post/2026-01-17-helm-crd-installation-upgrades/view)
-- MEDIUM: [Uptrace: OpenTelemetry for AI Systems — LLM and Agent Observability (2026)](https://uptrace.dev/blog/opentelemetry-ai-systems)
-- MEDIUM: [RelayPlane: Agent Runaway Costs and LLM Budget Limits (2026)](https://relayplane.com/blog/agent-runaway-costs-2026)
-- MEDIUM: [LangWatch: 4 best tools for monitoring LLM & agent applications (2026)](https://langwatch.ai/blog/4-best-tools-for-monitoring-llm-agentapplications-in-2026)
-- MEDIUM: [LangWatch: Mocking External APIs in Agent Tests](https://langwatch.ai/scenario/testing-guides/mocks/)
-- MEDIUM: [TrueFoundry: AI Cost Observability for LLM and Agent Workloads](https://www.truefoundry.com/blog/ai-cost-observability)
-- MEDIUM: [TrueFoundry: Agentic Token Explosion — LLM Cost Attribution in CI/CD](https://www.truefoundry.com/blog/llm-cost-attribution-agentic-cicd)
-- MEDIUM: [Doppler: Advanced LLM security — Preventing secret leakage across agents and prompts](https://www.doppler.com/blog/advanced-llm-security)
-- MEDIUM: [GitGuardian via Help Net Security: 29 million leaked secrets in 2025 (2026)](https://www.helpnetsecurity.com/2026/04/14/gitguardian-ai-agents-credentials-leak/)
-- MEDIUM: [Microsoft Security Blog: When prompts become shells — RCE in AI agent frameworks (May 2026)](https://www.microsoft.com/en-us/security/blog/2026/05/07/prompts-become-shells-rce-vulnerabilities-ai-agent-frameworks/)
-- MEDIUM: [Penligent: AI Agents Hacking in 2026](https://www.penligent.ai/hackinglabs/ai-agents-hacking-in-2026-defending-the-new-execution-boundary/)
-- MEDIUM: [arxiv: From Prompt Injections to Protocol Exploits — Threats in LLM-Powered AI Agent Workflows](https://arxiv.org/html/2506.23260v1)
-- MEDIUM: [arxiv: ARGUS — Defending LLM Agents Against Context-Aware Prompt Injection](https://arxiv.org/abs/2605.03378v1)
-- MEDIUM: [Markaicode: How to Scale LLM APIs on Kubernetes (2026)](https://markaicode.com/scaling-llm-api-kubernetes-guide/)
-- MEDIUM: [Portainer: Kubernetes RBAC — Roles, Permissions & Best Practices (2026)](https://www.portainer.io/blog/kubernetes-rbac)
-- MEDIUM: [Jorijn: Kubernetes namespace stuck in Terminating — finalizer holding it](https://jorijn.com/en/knowledge-base/kubernetes/troubleshooting/kubernetes-namespace-stuck-terminating/)
-- MEDIUM: [LearnKube: Why etcd breaks at scale in Kubernetes](https://learnkube.com/etcd-breaks-at-scale)
-- MEDIUM: [MachineLearningMastery: Handling Race Conditions in Multi-Agent Orchestration](https://machinelearningmastery.com/handling-race-conditions-in-multi-agent-orchestration/)
-- MEDIUM: [git push race conditions discussion (git mailing list)](https://git.vger.kernel.narkive.com/9Rkrrepp/push-race-condition)
-
----
-*Pitfalls research for: TIDE — Kubernetes-native hierarchical agentic coding orchestrator*
-*Researched: 2026-05-12*
-
-
----
-
-## v1.0.2 Ebb Tide — Token/Cost Optimization & Eval Harness Pitfalls
-
-> Scope. The following pitfalls are specific to **adding** token/cost optimization
-> and a quality-gated eval harness to TIDE v1.0.2. They are distinct from the v1
-> build pitfalls above. TIDE's dispatch path shells out to `claude -p --bare` (the
-> Claude Code CLI); it does NOT call the Anthropic Messages API directly and cannot
-> set `cache_control` on individual request blocks. Every caching pitfall must be
-> understood in that CLI-mediated context.
->
-> Source confidence: HIGH where verified against the official Claude Code caching
-> docs (code.claude.com) and the official Anthropic API pricing docs. MEDIUM where
-> supported by multiple 2026 industry sources. LOW where extrapolated from TIDE's
-> specific dispatch architecture.
-
----
-
-### Pitfall 25: Over-trimming prompts removes load-bearing instructions
-
-**Severity:** Catastrophic (quality regression; not caught until a real run)
-
-**What goes wrong:**
-A prompt-trimming pass targets visible boilerplate: the repeated five-level
-paradigm description, wave-derivation rules, the file-touch section, the child-CRD
-JSON format specification. The tokens drop measurably. The next eval run looks
-cheaper. But a subset of those instructions are the structural contract the LLM
-uses to produce valid child-CRD JSON, to declare DAG edges rather than implicit
-prose dependencies, and to stay inside `DeclaredOutputPaths`. Removing them silently
-regresses the model's compliance rate. The eval harness may not detect this if it
-judges on outcome quality (did the code compile?) rather than on protocol compliance
-(did the child CRD round-trip through the K8s admission webhook?).
-
-**Why it happens:**
-Token count is a visible, easy metric. Instruction quality is invisible until it
-fails. Trimming "repetitive" instructions from templates feels safe because the
-developer already knows the protocol implicitly. The model does not.
-
-Looking at the actual templates: `task_executor.tmpl` starts with role context and
-dispatch metadata (`{{.Level}}`, `{{.TaskUID}}`, etc.) — the Kubernetes path
-constants like `/workspace/envelopes/{{.TaskUID}}/in.json` are not decoration; the
-harness enforces those exact paths. Removing the path section causes the subagent
-to write to the wrong location. The `plan_planner.tmpl` has a multi-paragraph
-child-CRD spec section with explicit JSON shape and two IMPORTANT blocks about
-raw-linebreak escaping and machine-only JSON — every clause exists because a
-production failure occurred without it (the Phase 10 cascade on JSON control
-characters).
-
-**How to avoid:**
-- Categorize every sentence in each template as: (a) structural contract the
-  harness or downstream parser enforces, (b) guard against observed production
-  failure modes, or (c) context/framing that is truly optional. Remove only (c).
-- Maintain a "why-this-line" annotation file alongside each template that records
-  the production cascade or spec reference that caused each clause to exist. If a
-  clause has no entry, it is a candidate for removal. If it has an entry, it is not.
-- The eval harness MUST include protocol-compliance checks (child-CRD parses as
-  valid JSON, passes Kind allowlist, produces non-empty Name and SourcePath) in
-  addition to code-quality checks. A cheaper token count with a 30% child-CRD
-  parse failure rate is a regression, not an improvement.
-- Trim only one template section at a time, run the eval harness, gate.
-- Regression signal: `readChildCRDs` parse error rate rises after a template edit.
-
-**Warning signs:**
-- Child-CRD parse errors increase in integration tests after a prompt edit.
-- `sanitizeJSONStringControls` calls fire more frequently post-trimming (sign the
-  model is reverting to unescaped literals without the IMPORTANT block).
-- Plans arrive with `filesTouched: []` or `declaredOutputPaths: []` (the guard
-  language was removed).
-- Subagents write output to wrong paths (path constants trimmed).
-
-**Phase to address:**
-Phase 1 of v1.0.2 (prompt audit and template-structure map). Annotate before
-trimming. The annotation is the gating artifact.
-
----
-
-### Pitfall 26: Volatile content in the prefix silently busts the prefix cache every dispatch
-
-**Severity:** Serious (negates all cache benefit; spend is worse than no caching)
-
-**What goes wrong:**
-The template renders `{{.TaskUID}}` in the first few lines of the prompt (the
-dispatch metadata block). TaskUID is a Kubernetes UID — a unique UUID per dispatch.
-The Claude Code CLI caches by strict prefix match: if the first kilobyte of the
-prompt differs by a single character between two wave-sibling dispatches, neither
-hits the other's cache. Because the dispatch metadata block (Level, Role, TaskUID,
-Provider.Model) appears at the top of every template, every dispatch produces a
-unique prefix from line 9 onward. The stable system context (role definition,
-paradigm description, file-path contract) always follows the volatile UID, so the
-cache anchor point is *below* the volatile content — exactly backwards.
-
-This is confirmed by the official Claude Code caching docs: "The match is exact, so
-a change anywhere in the prefix recomputes everything after it. There is no per-file
-or per-segment caching." Any content change before the breakpoint invalidates
-everything after it.
-
-Looking at the actual template layout (`task_executor.tmpl` lines 1-20): the very
-first interpolated field is `{{.Level}}` on line 9, `{{.TaskUID}}` on line 10.
-Wave-sibling dispatches share the same Level (e.g. "task") but have different
-TaskUIDs — so the prefix diverges at line 10. All 40 stable lines below line 10
-are in a different cache entry per dispatch.
-
-**Why it happens:**
-Dispatch metadata at the top is natural for human readers (who are the target
-audience for "what is this run?"). Cache ordering puts stable content first and
-volatile content last — the opposite of natural narrative order. The tension is not
-obvious unless you know the cache is prefix-based.
-
-**How to avoid:**
-- Restructure each template so all stable content (role definition, paradigm
-  description, paradigm rules, file-path contract, output-format spec) precedes any
-  interpolated field. The stable section becomes the shared prefix that benefits
-  from cache reuse across wave-sibling dispatches that use the same template.
-- Volatile dispatch metadata (TaskUID, Provider.Model, Prompt) moves to the end
-  of the template, explicitly labeled as "dispatch-specific context" so it is clear
-  to future editors why it lives at the bottom.
-- Provider.Model is also volatile across multi-model waves (e.g. Haiku for tasks,
-  Sonnet for planners). Group dispatches by model within a wave when possible to
-  maximize sibling cache reuse.
-- Do NOT put a `{{.TaskUID}}` or per-dispatch run ID in any stable block, even as
-  a comment or reference. One character difference busts the prefix.
-- Accept that cross-dispatch cache reuse across different sessions (cold starts)
-  requires even tighter prefix discipline: the stable prefix must be identical
-  between a Haiku-4-5 planner run this week and the same template run next week
-  — no date stamps, no version strings in the stable section.
-
-**Warning signs:**
-- `CacheCreationTokens` reported in `Usage` is consistently equal to (or near)
-  `InputTokens` for every dispatch — meaning no cache hit, every dispatch pays
-  the full write premium.
-- Cache hit rate stays near 0% across wave-sibling dispatches that use the same
-  template and model.
-- The ratio `CacheReadTokens / (CacheReadTokens + CacheCreationTokens)` does not
-  improve as a wave progresses (earlier siblings should warm the cache for later
-  ones).
-- Template diff shows a new field moved into the stable prefix section.
-
-**Phase to address:**
-Phase 1 of v1.0.2 (prompt-structure reorder). This is the single highest-ROI
-structural change and must land before any other cache-related work.
-
----
-
-### Pitfall 27: Assuming cache hits are observable or controllable via the CLI path
-
-**Severity:** Serious (eval harness may report false metrics; optimization may target the wrong layer)
-
-**What goes wrong:**
-TIDE shells out to `claude -p --bare` — the Claude Code CLI. It does NOT call the
-Anthropic Messages API directly and therefore does NOT and CANNOT set
-`cache_control: { type: "ephemeral" }` on individual prompt blocks. The CLI manages
-caching internally. The subagent's `stream_parser.go` already extracts
-`cache_read_input_tokens` and `cache_creation_input_tokens` from the CLI's
-`stream-json` output — these fields ARE present and ARE reliable (confirmed by the
-Claude Code docs: the `current_usage` object carries these counters per turn). So
-cache hit data IS available from the stream. What TIDE cannot do is:
-(a) force a cache breakpoint at a specific position in the prompt,
-(b) choose between the 5-minute and 1-hour TTL on API-key auth (the CLI picks),
-(c) observe which content block was cached vs. freshly processed.
-
-The practical implication: the only caching lever available to TIDE is prompt
-ordering (stable content first) and model+tool-set stability (same model across
-sibling dispatches). Anything requiring explicit `cache_control` placement is not
-achievable without moving to a direct SDK integration — which is explicitly out of
-scope for v1.0.2.
-
-A second gap: the CLI uses a 5-minute TTL by default on API-key auth. Two sibling
-task dispatches that run more than 5 minutes apart will not share a warm cache even
-if the prefix is identical. Long waves with many tasks spread over many minutes
-will see diminishing cache returns for later tasks in the wave.
-
-**Why it happens:**
-The natural mental model for "prompt caching" comes from the Anthropic SDK's
-`cache_control` API. The CLI exposes no equivalent flag. Operators reading the
-Anthropic docs expect to be able to mark breakpoints; TIDE's CLI path offers no
-such control surface.
-
-**How to avoid:**
-- Explicitly document in the eval harness that cache hit rate is an _outcome_ metric
-  derived from prompt ordering, NOT a configurable parameter. The harness measures;
-  it does not control.
-- The eval harness reports `CacheReadTokens`, `CacheCreationTokens`, and the
-  derived hit ratio using the existing `Usage` struct fields already populated by
-  `ParseStream` → `estimatedCostCents`. No new parsing is needed.
-- Do not promise a specific cache-hit rate in v1.0.2 requirements. The target is
-  "ordering improves the ratio" — verified by before/after comparison.
-- If cache observability beyond what the CLI stream provides is needed for the eval
-  harness (e.g. per-block cache attribution), that requires moving to the
-  Anthropic Go SDK and becomes a future milestone.
-- Evaluate the 5-minute TTL risk for long waves: if a wave's dispatch-to-dispatch
-  interval regularly exceeds 5 minutes (due to rate-limiting backoff or executor
-  pool limits), cache reuse between siblings will be partial. Model this in the
-  eval so unexpectedly low hit rates don't look like a bug.
-
-**Warning signs:**
-- Eval harness code tries to set `cache_control` by injecting it into the prompt
-  string or via a CLI flag — neither path exists.
-- The harness reports a 0% cache hit rate and concludes "caching is not working"
-  when the true cause is volatile-prefix ordering (Pitfall 26).
-- Requirements docs promise explicit cache breakpoint placement without switching
-  to a direct SDK backend.
-
-**Phase to address:**
-Phase 1 of v1.0.2 (eval harness design). Document the CLI-vs-SDK gap in the
-harness architecture before building the measurement layer.
-
----
-
-### Pitfall 28: Provider-specific caching assumptions leak into provider-agnostic design
-
-**Severity:** Serious (OSS posture violation; next milestone blocker)
-
-**What goes wrong:**
-The v1.0.2 prompt-restructuring work is done with Anthropic's explicit-breakpoint
-model in mind (stable prefix → volatile suffix). When the OpenAI subagent backend
-lands in the next milestone, it uses automatic prefix caching with a different
-minimum threshold (1,024 tokens for most models) and a different pricing structure
-(50% discount on cached reads, zero write premium — unlike Anthropic's 90%
-discount with a 25% write premium). If the v1.0.2 work bakes in Anthropic-specific
-assumptions — e.g. "the first 1,024 tokens are always cached" or "cache writes cost
-1.25× input" — the eval harness will misreport cost for OpenAI and the optimization
-strategy will be wrong for models with different thresholds.
-
-Concrete differences between providers (verified 2026):
-- Anthropic: requires stable prefix ≥ 1,024 tokens for claude-haiku-4-5 (the
-  minimum threshold is 4,096 tokens for Haiku per current docs), ≥ 1,024 for
-  other models; charges write premium at 1.25× input; provides 90% read discount.
-  TTL is 5 min (API key) or 1 hr (subscription).
-- OpenAI: fully automatic — no explicit cache_control needed; caches prefixes ≥
-  1,024 tokens; 50% read discount; no write premium.
-- Bedrock: prompt caching support and minimum-token thresholds vary per model and
-  region; the one-hour TTL may not be available for all models.
-
-The TIDE pricing table in `pricing.go` already correctly puts cache accounting
-behind the provider firewall (D-C1 confirmed). The risk is the eval harness
-treating Anthropic cache semantics as universal.
-
-**Why it happens:**
-The v1.0.2 work is verified live on the Claude path. It is easy to treat the Claude
-path as the model and not test whether the harness's cost reporting logic works
-correctly when `CacheCreationTokens` is always 0 (OpenAI: no write premium) or when
-the minimum cacheable size is different.
-
-**How to avoid:**
-- The eval harness reports cache metrics using the provider-agnostic `Usage` struct
-  fields (`CacheReadTokens`, `CacheCreationTokens`) and does NOT assume a 1.25×
-  write premium or a 10% read cost in its provider-agnostic display layer. Those
-  constants belong only in `internal/subagent/anthropic/pricing.go`.
-- The harness's cost accounting delegates entirely to `estimatedCostCents` (which
-  already uses per-model, per-instance price tables from `pricing.go`). Never
-  hard-code `cacheWriteMultiplier = 1.25` in the harness.
-- Add a provider-agnostic test fixture that sets `CacheCreationTokens = 0` and
-  `CacheReadTokens > 0` (simulating OpenAI automatic caching) and verifies the
-  harness does not report negative savings or divide by zero.
-- Document the minimum-cacheable-token threshold per provider in the eval harness
-  output. For prompts below 1,024 tokens total, no provider will cache — report
-  this explicitly rather than letting the harness show 0% hit rate as a mystery.
-
-**Warning signs:**
-- The eval harness imports `internal/subagent/anthropic/` — this violates the D-C1
-  provider firewall and means provider-specific constants have leaked into harness code.
-- Harness cost displays show "cache write cost: 1.25×" on a page that claims to be
-  provider-agnostic.
-- A test fixture with an OpenAI-shaped Usage (no CacheCreationTokens) causes the
-  harness to panic or report an impossible hit ratio.
-
-**Phase to address:**
-Phase 1 of v1.0.2 (eval harness design). The provider-agnostic abstraction must
-be verified in the harness before any optimization numbers are published.
-
----
-
-### Pitfall 29: The cache-write premium makes caching net-negative for short single-dispatch runs
-
-**Severity:** Moderate (misleading cost metrics; can make "optimization" look worse)
-
-**What goes wrong:**
-For Anthropic's explicit caching model, the first call that populates a cache entry
-costs 1.25× the base input price (the write premium). The 90% read discount only
-pays for itself if the same prefix is re-read within the TTL window. For TIDE task
-dispatches that are truly one-shot (a single task that runs once and never re-runs
-within 5 minutes with the same prefix), caching is net-negative: the write premium
-is always paid, the read discount is never collected.
-
-Concrete numbers using `claude-haiku-4-5` ($1/M input, $0.1/M cache read, $1.25/M
-cache write): a 5,000-token stable prefix paid as a cache write costs 5,000 × $1.25/M
-= $0.00625. The same prefix paid as uncached input costs $0.005. Break-even requires
-at least three reads within the TTL window to recover the write premium. A wave of
-10 Haiku-4-5 tasks with the same 5,000-token prefix that all dispatch within 5
-minutes: the first task pays the write premium, the next 9 read at 0.1× — net
-savings is substantial. A single task dispatched once: slight net negative.
-
-The eval harness must compute savings accounting for the write premium correctly,
-or it will report false positives.
-
-**Why it happens:**
-The write premium is not obvious from the cached-read discount. "Cache = savings"
-is the mental model. The full model is "cache = savings if and only if enough reads
-happen within the TTL."
-
-**How to avoid:**
-- The eval harness computes realized savings as:
-  `(input_tokens × input_rate) - (cache_creation_tokens × write_rate + cache_read_tokens × read_rate)`
-  where all rates are per-model from `pricing.go`. This is what `estimatedCostCents`
-  already computes correctly via the four-field `Usage` struct. The harness should
-  display this realized savings number, not a theoretical "if we had cached X tokens
-  we'd save Y."
-- Report cache ROI per wave (multiple dispatches) rather than per dispatch (single
-  call). ROI is only meaningful when measured across all siblings that share a prefix.
-- Flag waves where the stable prefix is below the minimum-cacheable threshold
-  (< 1,024 tokens for most models, < 4,096 tokens for claude-haiku-4-5 per current
-  docs) as "cache-ineligible" rather than "0% cache hit" — the expected hit rate is
-  0 by design, not a bug.
-- For a project-level cost report, disaggregate into: (a) uncached tokens, (b)
-  cache-write tokens, (c) cache-read tokens, and display the blended effective rate.
-  The blended rate declining over a run (as writes amortize across reads) is the
-  correct success signal.
-
-**Warning signs:**
-- Eval harness shows "caching saved $X" without accounting for write premium — the
-  actual savings may be smaller or negative for infrequent dispatches.
-- Per-dispatch savings reported on waves of one (no siblings to share the cache).
-- "Cache hit rate 100%" reported on a wave where the first dispatch always pays the
-  write premium (100% hit rate is impossible by definition — the first call must
-  write, not read).
-
-**Phase to address:**
-Phase 2 of v1.0.2 (eval harness cost accounting). The savings formula must be
-correct before any optimization decisions are made from it.
-
----
-
-### Pitfall 30: Model or tool-set change mid-wave silently busts cache for all subsequent dispatches
-
-**Severity:** Moderate (unexpected cost spike; hard to trace)
-
-**What goes wrong:**
-Claude Code's cache is keyed on (model, tool-set, prefix content). Changing the
-model mid-wave — e.g. because a per-Task `Levels.task.Model` override is set
-differently from the default, or because the Helm chart defaults changed in a
-redeployment, or because the credproxy routes to a different model alias — means
-each task hits a different cache namespace. Two sibling tasks using `claude-haiku-4-5`
-and `claude-sonnet-4-6` respectively will never share a cache entry, even if they
-have identical prompt prefixes.
-
-The official Claude Code docs confirm: "Each model has its own cache. Switching
-models recomputes the entire request even when the content is identical."
-
-For TIDE specifically, the `Provider.Model` field is already stamped into
-`EnvelopeIn` at dispatch time from `Levels.<level>.Model → Spec.Subagent.Model →
-helm default` chain. If this chain resolves differently for different tasks in the
-same wave (a realistic scenario when per-level model overrides exist), cache reuse
-between siblings is zero.
-
-**Why it happens:**
-Model selection feels orthogonal to caching. The connection between "same model"
-and "shared cache" is not documented in most operator guides; it surfaces only in
-the Claude Code caching docs.
-
-**How to avoid:**
-- Before restructuring prompts for cache reuse, audit the model-resolution chain
-  per task type. Wave siblings that should share a cache must resolve to the same
-  model string.
-- Log the resolved model at dispatch time (already available in `in.Provider.Model`)
-  and surface it in the eval harness's per-task report. Anomalous model diversity
-  within a wave is immediately visible.
-- The eval harness groups cache statistics by (template, model) tuple, not just by
-  template. A "0% hit rate" on a task group is only informative if all tasks in the
-  group share the same model.
-- MCP server connect/disconnect events also bust the cache (confirmed by Claude Code
-  docs). Since TIDE's CLI invocation uses `--bare` (which suppresses auto-discovery
-  of `.mcp.json`), MCP tools are not loaded from the host, and this risk is
-  mitigated by the `--bare` flag. However, if the CLI version changes between
-  dispatches (a TIDE upgrade mid-wave), the system prompt changes and the cache is
-  re-warmed. Pin the Claude Code CLI version tightly in the subagent image.
-
-**Warning signs:**
-- Cache hit rate breaks down by model reveals that one model has high hit rate and
-  another has 0% hit rate for the same template.
-- `Provider.Model` values in `events.jsonl` vary within the same wave.
-- A cache warmup from task 1 is never reused by tasks 2-N in the same wave.
-
-**Phase to address:**
-Phase 1 of v1.0.2 (prompt audit). Model consistency within a wave is a prerequisite
-for cache reuse. Audit before any restructuring.
-
----
-
-### Pitfall 31: LLM-as-judge evals are flaky, biased, and easy to game
-
-**Severity:** Serious (an unreliable quality gate is worse than no quality gate)
-
-**What goes wrong:**
-The eval harness uses an LLM judge to score "was this planner output quality good?"
-The judge is called once per eval run. Because LLM outputs are non-deterministic,
-the same run scores 7/10 on Monday and 5/10 on Wednesday with no code change. The
-team debugs prompt changes chasing noise. Worse: the judge model is the same model
-being optimized — it has verbosity bias (longer outputs score higher), self-enhancement
-bias (it prefers responses that match its own style), and position bias (it scores
-the first-presented option higher). An optimizer that trims prompts to be shorter
-sees the judge penalize it for brevity even if the shorter output is functionally
-equivalent. Over time, prompt changes are optimized for judge approval rather than
-actual TIDE run quality.
-
-Research: judge models score identically formatted outputs inconsistently; position
-bias can flip a winner/loser comparison by reordering. Studies show multi-judge
-consensus with Cohen's Kappa ~0.95 requires aggregating many independent evaluations.
-
-**Why it happens:**
-"Ask an LLM to grade the LLM" is the fastest path to a quality harness. The biases
-are subtle and invisible until the harness produces counterintuitive results.
-
-**How to avoid:**
-- Use deterministic, protocol-compliance checks as the primary quality gate:
-  - Child-CRD round-trip (parse → admission → serialize → re-parse produces
-    identical structure).
-  - All declared `filesTouched` paths were actually written.
-  - DAG declared by the planner is acyclic (Kahn succeeds).
-  - Output paths stay within `DeclaredOutputPaths`.
-  - Prompt contains no raw control characters that would fail `sanitizeJSONStringControls`.
-  These pass/fail deterministically with no LLM judge involved.
-- If LLM judging is used for semantic quality (e.g. "is this PLAN.md coherent?"),
-  use a different, ideally stronger model than the one being evaluated; aggregate
-  at least 5 independent judge calls per sample and report median + IQR; use rubrics
-  with binary criteria (yes/no per criterion) rather than holistic scores.
-- Establish a frozen baseline sample set of known-good outputs from v1.0.1. Judge
-  those outputs and record the distribution. Use that distribution as the null
-  hypothesis for "no regression." A change is a regression only if it moves the
-  distribution significantly (p < 0.05 with adequate n).
-- Never run a single-sample eval to gate a merge. Minimum n for statistical signal
-  depends on variance; for LLM-as-judge with typical variance, n ≥ 20 samples per
-  condition is a lower bound.
-- Lock the judge model version. A judge model update can shift all scores regardless
-  of the actual quality change.
-
-**Warning signs:**
-- Eval scores vary by more than 1 point (on a 10-point scale) between consecutive
-  runs of the same unchanged prompt.
-- Prompt changes that reduce token count by 20% show reduced judge scores even though
-  no functional regression is detected.
-- The team debates whether a low eval score reflects a quality regression or judge
-  flakiness — this ambiguity signals the harness is not trustworthy.
-- Judge and protocol-compliance metrics diverge (judge says quality improved; child-CRD
-  parse failure rate rose).
-
-**Phase to address:**
-Phase 2 of v1.0.2 (eval harness quality measurement). Protocol-compliance checks
-ship first and are the primary gate. LLM judging is supplementary and governed by
-the statistical guard rails above.
-
----
-
-### Pitfall 32: No stable baseline means every eval measures against a moving target
-
-**Severity:** Serious (renders all delta-measurement meaningless)
-
-**What goes wrong:**
-The eval harness runs before and after a prompt change and reports "cost dropped 15%,
-quality unchanged." But "before" and "after" share the same live prompt templates —
-if another PR landed between the two runs, or if a model update deployed to the
-provider between runs, the before/after delta is not attributable to the change
-being tested. After 10 prompt changes, the team cannot say which ones helped and
-which ones hurt.
-
-**Why it happens:**
-Establishing a frozen baseline feels like extra work up front. In practice it is the
-only thing that makes optimization measurements valid.
-
-**How to avoid:**
-- Freeze a baseline at the start of v1.0.2: a snapshot of all five templates as they
-  exist in the v1.0.1 tag, run against a fixed fixture project (the existing
-  `examples/projects/medium/` fixture), with a specific pinned model. Record:
-  `InputTokens`, `OutputTokens`, `CacheReadTokens`, `CacheCreationTokens`,
-  `EstimatedCostCents`, and all protocol-compliance checks. Store this as a checked-in
-  `eval/baseline.json` artifact.
-- Every subsequent eval run compares against `eval/baseline.json`, not against the
-  previous run. A regression is a deviation from baseline beyond a configurable
-  tolerance, not just a delta from the last run.
-- If the baseline needs to be updated (e.g. a model version change that shifts all
-  costs uniformly), do so explicitly with a PR that explains why, not as a side
-  effect of a prompt change.
-- CI: eval runs on every PR that touches a `*.tmpl` file; the eval produces a
-  `eval/results.json`; the PR fails if any protocol-compliance check regresses from
-  baseline; cost delta is informational only (no hard cost target).
-
-**Warning signs:**
-- Two engineers report different eval results for the same prompt change run on
-  different days.
-- The eval harness does not have a checked-in `baseline.json` artifact.
-- Eval results are reported as absolute numbers ("cost was $0.12") rather than
-  as deltas from baseline ("cost decreased 18% from baseline").
-- The model version used for eval changes between runs without a documented baseline
-  refresh.
-
-**Phase to address:**
-Phase 2 of v1.0.2 (eval harness baseline). Baseline must be frozen before any
-prompt edits land.
-
----
-
-### Pitfall 33: Optimizing the eval metric instead of actual run quality (Goodhart's Law)
-
-**Severity:** Serious (produces a system that looks cheaper but isn't actually better)
-
-**What goes wrong:**
-The eval harness measures token count and a compliance score. The team optimizes
-prompts to minimize both. A prompt that says "author a plan with exactly 3 tasks,
-all depending on each other except task-1" will produce a low token count and high
-compliance score — the plan is structurally valid — but it is a useless plan for
-any real project. The optimizer has learned to satisfy the metric without satisfying
-the underlying goal (high-quality artifacts that advance the TIDE project).
-
-More concretely: removing the "author MILESTONE.md describing the milestone's
-outcome scope" instruction from `milestone_planner.tmpl` reduces token count by ~200
-tokens per dispatch. The eval harness measures whether the child-CRD was emitted
-(yes) and whether the model cost less (yes). It does not measure whether the
-MILESTONE.md was coherent, appropriately scoped, or matched the spec's voice.
-
-**Why it happens:**
-Measurable metrics are optimized; unmeasurable outcomes are not. Cost and
-protocol-compliance are measurable. Document quality, planning coherence, and
-self-hosting readiness are not.
-
-**How to avoid:**
-- The eval harness measures two orthogonal dimensions and does not trade between them:
-  (1) Protocol compliance (deterministic, automated — primary gate).
-  (2) Token cost (measured, informational — not a gating criterion by itself).
-  A change that reduces cost by trading protocol compliance is always rejected.
-  A change that increases cost but improves compliance is worth analyzing.
-- Include at least one "live run" eval per milestone: run the optimized prompts on a
-  real (small) project in the dogfood cluster and review the artifacts by hand.
-  The reviewer verifies: does the MILESTONE.md look like something a senior engineer
-  would write? Does the PLAN.md decompose work at the right granularity? Metric-only
-  optimization cannot substitute for this.
-- Treat any prompt change that removes instructions for human-readable artifact
-  quality (markdown structure, spec voice, level-appropriate scope) as suspect even
-  if compliance metrics pass. These are the "looks done but isn't" cases.
-- Log the actual authored artifacts (PLAN.md, MILESTONE.md) for each eval run and
-  diff them against baseline. A mechanically-valid but stylistically-wrong plan is a
-  regression.
-
-**Warning signs:**
-- Eval scores improve but the authored plans decompose work into suspiciously few
-  or trivially simple tasks.
-- The team debates whether a particular protocol-compliance metric is the right proxy
-  for quality — this signals the metric may already be gamed.
-- "The eval says it's fine" used to close a review without examining the actual
-  artifact.
-
-**Phase to address:**
-Phase 2 of v1.0.2 (eval harness quality measurement). Encode the two-dimension
-independence constraint in the harness design before running any optimization loops.
-
----
-
-### Pitfall 34: Attributing cost wrong — double-counting tokens and misreading cache-write vs cache-read contributions
-
-**Severity:** Moderate (produces wrong optimization decisions)
-
-**What goes wrong:**
-The `Usage` struct has four fields: `InputTokens`, `OutputTokens`, `CacheReadTokens`,
-`CacheCreationTokens`. The common mistake is treating `InputTokens` as the total
-input cost, ignoring the cache breakdown. In fact:
-- `InputTokens` from the CLI stream already EXCLUDES tokens served from cache.
-  Uncached input cost = `InputTokens × input_rate`.
-- `CacheCreationTokens` is additional input that was freshly processed AND written
-  to cache at the write premium. Cache-write cost = `CacheCreationTokens × write_rate`.
-- `CacheReadTokens` is input served from cache at the read discount.
-  Cache-read cost = `CacheReadTokens × read_rate`.
-- Output cost is always at the output rate: `OutputTokens × output_rate`.
-
-The `estimatedCostCents` in `pricing.go` computes this correctly with four separate
-multiplications. A naive eval that just reports `InputTokens + CacheCreationTokens`
-and applies the input rate uniformly double-counts the cache-creation tokens
-(they are already a subset of what would have been input tokens if there were no
-caching) AND underpays the write premium AND ignores the read discount.
-
-Looking at the actual code: `numerator = u.InputTokens × input_rate + u.OutputTokens × output_rate + u.CacheReadTokens × cacheRead_rate + u.CacheCreationTokens × cacheWrite_rate`. This is correct. A harness that re-implements cost calculation instead of using this function will almost certainly be wrong.
-
-**Why it happens:**
-The four-field split is non-obvious. The Anthropic API docs present them as additive,
-but their relationship to the "billed input" concept differs from the raw stream
-counters.
-
-**How to avoid:**
-- The eval harness MUST NOT re-implement cost calculation. It MUST call
-  `estimatedCostCents` from `pricing.go` or consume the `EstimatedCostCents` field
-  already populated in `EnvelopeOut.Usage` by the subagent. Every cost number in
-  the eval report traces to that function.
-- When displaying cost breakdowns, use the four-field breakdown: show uncached input,
-  cache-write, cache-read, and output as separate line items. Do not aggregate input
-  + cache-creation into one "input" number.
-- Write a test: given a known Usage struct with specific cache breakdown, assert the
-  harness-computed cost matches `estimatedCostCents` within 1 cent. This test will
-  catch any re-implementation drift.
-- For wave-level cost rollup, sum the four fields independently across all tasks in
-  the wave, then apply rates once. Do not apply rates per-task and sum cents — integer
-  ceiling arithmetic compounds error.
-
-**Warning signs:**
-- Eval harness imports pricing rates as local constants rather than calling
-  `estimatedCostCents`.
-- Cost report shows "total input tokens" as `InputTokens + CacheCreationTokens`
-  rather than showing them separately.
-- Wave-level cost does not match the sum of per-task `EstimatedCostCents` values
-  from `EnvelopeOut.Usage`.
-- "Cache saved X tokens" reported without also reporting the write-premium cost of
-  establishing those cached tokens.
-
-**Phase to address:**
-Phase 2 of v1.0.2 (eval harness cost accounting). The cost formula is correct in
-`pricing.go`; the harness must use it, not duplicate it.
-
----
-
-## v1.0.2 Technical Debt Patterns
-
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Trim templates without annotation file | Faster token reduction | Regression when load-bearing instructions are rediscovered mid-run | Never |
-| Put volatile TaskUID at top of prompt "for readability" | Human-friendly template order | Cache prefix diverges at line 9; siblings never share cache | Never |
-| Use `cache_control` from Anthropic SDK instead of CLI | Fine-grained cache control | Breaks the CLI-based dispatch path; requires SDK backend | Next milestone only |
-| Judge quality with same model being optimized | No extra API cost for judge | Self-enhancement and verbosity bias; judge can be gamed | Never as sole gate |
-| Single-run eval for a prompt change | Fast feedback loop | Too much variance to be meaningful; wrong decisions | Never for gating changes |
-| Re-implement cost math in eval harness | Local control of formula | Diverges from `estimatedCostCents`; will be wrong | Never; call the existing function |
-| Skip provider-agnostic harness abstraction | Simpler v1.0.2 impl | Next milestone's OpenAI backend breaks the harness | Never; keep D-C1 firewall intact |
-
----
-
-## v1.0.2 Integration Gotchas
-
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Claude Code CLI caching | Assuming `cache_control` can be set from outside the CLI | Accept that the CLI manages cache internally; optimize by ordering, not by marking |
-| Claude Code CLI caching | Treating 5-minute TTL as permanent for long waves | Measure actual hit rates; model the TTL risk for waves with > 5-min dispatch spread |
-| Anthropic pricing | Assuming cache saves always reduce cost | Compute realized savings = uncached_cost - (write_premium + read_discount); can be negative for one-shot dispatches |
-| claude-haiku-4-5 | Assuming 1,024-token minimum cacheable threshold | Haiku's minimum is 4,096 tokens per current docs; verify the stable prefix meets this threshold or caching will never fire |
-| LLM-as-judge | Calling the judge once and treating the score as ground truth | Aggregate ≥ 5 independent calls; report median + IQR; use binary rubric criteria |
-| stream-json usage fields | Treating `InputTokens` as total billed input | `InputTokens` is uncached input only; total billed = `InputTokens + CacheCreationTokens + CacheReadTokens` |
-
----
-
-## v1.0.2 "Looks Done But Isn't" Checklist
-
-- [ ] **Prompt reorder:** verify `CacheReadTokens > 0` appears in at least one task's Usage for a wave with identical-template siblings — if still 0%, the stable prefix is not actually stable.
-- [ ] **Token minimization:** verify child-CRD parse success rate is unchanged or improved after every template edit. Rising parse errors = load-bearing instruction removed.
-- [ ] **Eval baseline:** verify `eval/baseline.json` is checked in and the harness compares against it, not against the previous run.
-- [ ] **Cost formula:** verify eval harness cost total matches sum of `EnvelopeOut.Usage.EstimatedCostCents` per dispatch, within 1 cent per task.
-- [ ] **Provider firewall:** verify eval harness code does not import `internal/subagent/anthropic/`. Cost computation must go through `pkg/dispatch.Usage` only.
-- [ ] **Judge reproducibility:** run the same eval twice with no code change; verify judge scores are within the documented variance envelope (IQR ≤ 2 on a 10-point scale).
-- [ ] **Minimum-cacheable check:** verify the restructured stable prefix for claude-haiku-4-5 dispatches exceeds 4,096 tokens. Below that threshold, Haiku will never cache.
-- [ ] **Write-premium accounting:** verify eval output distinguishes "realized savings after write premium" from "gross read discount" — they are not the same number.
-
----
-
-## v1.0.2 Pitfall-to-Phase Mapping
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| 25. Over-trimming load-bearing instructions | Phase 1: prompt audit + annotation file | Child-CRD parse success rate ≥ v1.0.1 baseline |
-| 26. Volatile prefix busts cache | Phase 1: template reorder (stable-first) | `CacheReadTokens > 0` for ≥ 1 sibling in each wave |
-| 27. CLI-vs-SDK observability gap | Phase 1: harness architecture doc | Harness correctly sources cache counters from `Usage` struct only |
-| 28. Provider-specific assumptions in harness | Phase 1: harness design | Harness imports only `pkg/dispatch`; provider firewall lint passes |
-| 29. Cache-write premium net-negative on one-shots | Phase 2: cost accounting | Realized savings formula accounts for write premium; shown as separate line item |
-| 30. Model change mid-wave busts cache | Phase 1: prompt audit | Model consistency verified per wave in eval report |
-| 31. Flaky LLM-as-judge | Phase 2: eval quality measurement | Judge variance envelope documented; deterministic checks are primary gate |
-| 32. No stable baseline | Phase 2: baseline freezing | `eval/baseline.json` checked in before first prompt edit |
-| 33. Optimizing the metric | Phase 2: harness design | Two-dimension independence: cost is informational; compliance is the gate |
-| 34. Wrong cost attribution | Phase 2: cost accounting | Harness delegates to `estimatedCostCents`; test asserts parity |
-
----
-
-## v1.0.2 Sources
-
-- HIGH: [How Claude Code uses prompt caching — official Claude Code docs](https://code.claude.com/docs/en/prompt-caching) (verified 2026-06-15; confirms TTL, prefix-match invariant, model-keyed cache, tool-set invalidation, observable counters)
-- HIGH: [Prompt caching — Anthropic API docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) (cache_control placement, minimum token thresholds, pricing 1.25×/0.10×)
-- HIGH: TIDE `internal/subagent/anthropic/stream_parser.go` — confirms `cache_read_input_tokens` and `cache_creation_input_tokens` are extracted from the CLI's `stream-json` output and mapped to `Usage.CacheReadTokens` / `Usage.CacheCreationTokens`
-- HIGH: TIDE `internal/subagent/anthropic/pricing.go` — confirms correct four-field cost formula and conservative-tier fallback
-- HIGH: TIDE `internal/subagent/common/templates/*.tmpl` — confirms current volatile-first template ordering (TaskUID at line 10 of every template)
-- MEDIUM: [Anthropic Prompt Caching Saves 90% — the write-premium caveat — DEV Community](https://dev.to/gabrielanhaia/anthropic-prompt-caching-saves-90-heres-the-one-caveat-nobody-mentions-258k) (confirms net-negative for one-shot dispatches)
-- MEDIUM: [Prompt Caching for Anthropic and OpenAI — DigitalOcean Blog](https://www.digitalocean.com/blog/prompt-caching-with-digital-ocean) (provider comparison: OpenAI automatic vs Anthropic explicit; zero write premium for OpenAI)
-- MEDIUM: [PromptHub: Prompt Caching with OpenAI, Anthropic, and Google](https://www.prompthub.us/blog/prompt-caching-with-openai-anthropic-and-google-models) (minimum token thresholds per provider)
-- MEDIUM: [Judge Reliability Harness — arxiv 2603.05399](https://arxiv.org/pdf/2603.05399) (LLM judge non-determinism, bias taxonomy)
-- MEDIUM: [Evaluating Scoring Bias in LLM-as-a-Judge — ResearchGate](https://www.researchgate.net/publication/393148710_Evaluating_Scoring_Bias_in_LLM-as-a-Judge) (position bias, verbosity bias quantification)
-- MEDIUM: [Claude prompt caching miss troubleshooting — apiyi.com](https://help.apiyi.com/en/claude-prompt-caching-not-hit-minimum-token-troubleshooting-en.html) (Haiku 4,096-token minimum threshold)
-- MEDIUM: [Cache TTL regression from 1h to 5m — claude-code GitHub issue #46829](https://github.com/anthropics/claude-code/issues/46829) (TTL behavior on API key vs subscription auth)
-
----
-*v1.0.2 Ebb Tide pitfalls appended: 2026-06-15*
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/project_controller.go` (lines 339, 969-972, 1156-1182, 1257, 1300-1321)
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/dispatch/podjob/backend.go` (lines 92-141)
+- Direct inspection: `/Users/justinsearles/Projects/tide/pkg/dispatch/envelope.go` (lines 21-24, 400-409)
+- Direct inspection: `/Users/justinsearles/Projects/tide/pkg/dispatch/childcrd.go` (T-308 threat comment)
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/depgraph.go` (lines 17-30)
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/dispatch_helpers.go` (lines 17-36)
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/dispatch/podjob/jobspec.go` (lines 72-73: `DefaultTTLSecondsAfterFinished = 600`)
+- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/reporter_jobspec.go` (line 175: reporter Job TTL)
+- `.planning/PROJECT.md` — milestone v1.0.3 scope, constraints, and key decisions
+- `README.md` spec — resumption invariants (§"Failure handling at wave boundaries"), cycle detection, CRD-status-only persistence
+- MEMORY.md — Phase 25 code review finding: `resume --retry-failed` clearing FailureHalt before resetting Failed tasks; time-fence fix pattern
