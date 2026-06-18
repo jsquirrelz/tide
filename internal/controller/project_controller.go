@@ -561,7 +561,10 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	if cloneErr != nil && !apierrors.IsNotFound(cloneErr) {
 		return ctrl.Result{}, cloneErr
 	}
-	if apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
+	// D-02 / BYPASS-02: gate clone dispatch on the durable CloneComplete flag.
+	// IsNotFound alone is TTL-unreliable (clone Job TTL=300s; the Job may be GC'd
+	// before a resume, causing a destructive re-clone into an existing workspace).
+	if !project.Status.Git.CloneComplete && apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
 		cloneOpts := CloneOptions{TidePushImage: r.TidePushImage}
 		// B6: wire the run branch name so tide-push calls EnsureRunBranch + provisions
 		// the run worktree during clone (B5). project.Status.Git.BranchName is set by
@@ -578,6 +581,18 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 			// AlreadyExists: idempotent success.
 		}
 		logger.Info("created clone Job", "job", cloneJobName)
+	}
+
+	// D-02 / BYPASS-02: set-on-success — flip CloneComplete when the clone Job
+	// reports terminal success. CloneComplete is NEVER set at dispatch time; a
+	// failed clone leaves it false so dispatch is retried. Mirror the BranchName
+	// patch idiom (client.MergeFrom + r.Status().Patch).
+	if cloneErr == nil && existingClone.Status.Succeeded > 0 && !project.Status.Git.CloneComplete {
+		patch := client.MergeFrom(project.DeepCopy())
+		project.Status.Git.CloneComplete = true
+		if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch CloneComplete: %w", pErr)
+		}
 	}
 
 	// Step 4 (boundary push): handled by reconcileBoundaryPush via the
