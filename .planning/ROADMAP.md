@@ -237,7 +237,7 @@ Plans:
 - [x] 28-02-PLAN.md — api/v1alpha2 schema: ImportSourceRef field + ImportComplete condition vocab + regen CRD/deepcopy (wave 1)
 - [x] 28-03-PLAN.md — cmd/tide-import binary + Dockerfile: copy/rekey/atomic-rewrite + schema-convert + completeness/Kind/traversal validation (wave 2)
 - [x] 28-04-PLAN.md — ImportController state machine: seed→materialize→rekey, cycle-detect-before-create, containment-scoped import Job (wave 2)
-- [ ] 28-05-PLAN.md — 5-site ImportComplete park guard + budget-rollup suppression + manager registration (wave 3)
+- [x] 28-05-PLAN.md — 5-site ImportComplete park guard + budget-rollup suppression + manager registration (wave 3)
 
 ### Phase 29: Operator Tooling + E2E
 
@@ -290,5 +290,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 25. Global Dispatch, Failure Semantics, Gates & Resumption | v1.0.2 (Spring Tide) | 3/3 | Complete | 2026-06-17 |
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
-| 28. Plan-Import Core | v1.0.3 | 4/5 | In Progress|  |
+| 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
 | 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
