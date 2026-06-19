@@ -74,10 +74,10 @@ import (
 type importStatePhase string
 
 const (
-	importStateCreatingCRs       importStatePhase = "CreatingCRs"
-	importStateCopyingEnvelopes  importStatePhase = "CopyingEnvelopes"
-	importStateComplete          importStatePhase = "Complete"
-	importStateFailed            importStatePhase = "Failed"
+	importStateCreatingCRs      importStatePhase = "CreatingCRs"
+	importStateCopyingEnvelopes importStatePhase = "CopyingEnvelopes"
+	importStateComplete         importStatePhase = "Complete"
+	importStateFailed           importStatePhase = "Failed"
 )
 
 // importSAName is the dedicated least-privilege SA for the import Job pod.
