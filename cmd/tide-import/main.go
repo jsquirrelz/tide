@@ -382,47 +382,6 @@ func copyDirNoClobberExcluding(srcDir, dstDir, excludeName string) (int, int, er
 	return copied, skipped, nil
 }
 
-// copyDirNoClobber recursively copies all files from srcDir to dstDir using
-// cp -n semantics: if the destination file already exists, skip it. Creates
-// destination subdirectories as needed. Returns (copied, skipped, error).
-func copyDirNoClobber(srcDir, dstDir string) (int, int, error) {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		// Source directory may not exist (envelope was never written).
-		return 0, 0, fmt.Errorf("ReadDir %q: %w", srcDir, err)
-	}
-
-	if err := os.MkdirAll(dstDir, 0o755); err != nil {
-		return 0, 0, fmt.Errorf("MkdirAll %q: %w", dstDir, err)
-	}
-
-	copied, skipped := 0, 0
-	for _, e := range entries {
-		src := filepath.Join(srcDir, e.Name())
-		dst := filepath.Join(dstDir, e.Name())
-
-		if e.IsDir() {
-			c, s, err := copyDirNoClobber(src, dst)
-			if err != nil {
-				return copied, skipped, err
-			}
-			copied += c
-			skipped += s
-			continue
-		}
-
-		n, err := copyFileNoClobber(dst, src)
-		if err != nil {
-			return copied, skipped, err
-		}
-		copied += n
-		if n == 0 {
-			skipped++
-		}
-	}
-	return copied, skipped, nil
-}
-
 // copyFileNoClobber copies src to dst using cp -n semantics. If dst already
 // exists, the function is a no-op and returns (0, nil). On success it returns
 // (1, nil). The write is atomic: data is written to dst.tmp then os.Rename'd
@@ -455,32 +414,4 @@ func atomicWriteJSON(path string, data []byte) error {
 		return fmt.Errorf("write tmp %q: %w", tmp, err)
 	}
 	return os.Rename(tmp, path)
-}
-
-// rewriteTaskUID reads the out.json at outPath, updates TaskUID to newUID if
-// it differs, and atomically writes the result back. No-op if already correct.
-// Kept as a standalone function for unit-test clarity; the main run() path now
-// uses atomicWriteJSON on the fully-converted envelope instead.
-func rewriteTaskUID(outPath, newUID string) error {
-	data, err := os.ReadFile(outPath)
-	if err != nil {
-		return err
-	}
-	var out pkgdispatch.EnvelopeOut
-	if err := json.Unmarshal(data, &out); err != nil {
-		return err
-	}
-	if out.TaskUID == newUID {
-		return nil // already correct; no-op
-	}
-	out.TaskUID = newUID
-	newData, err := json.Marshal(out)
-	if err != nil {
-		return err
-	}
-	tmp := outPath + ".tmp"
-	if err := os.WriteFile(tmp, newData, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, outPath) // atomic on Linux ext4/tmpfs
 }
