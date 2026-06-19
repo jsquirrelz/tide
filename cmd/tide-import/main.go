@@ -290,13 +290,17 @@ func containedJoin(base, elem string) (string, error) {
 
 // isEnvelopeComplete returns true iff the envelope has exitCode==0 and
 // len(ChildCRDs) == ChildCount (completeness guard per IMPORT-02 / D-12).
+//
+// The equality is strict: a legitimate executor-level envelope has
+// ChildCount==0 and no ChildCRDs (0==0, passes). A planner envelope that
+// authored children but whose ChildCount was not stamped — ChildCount==0 with
+// a populated ChildCRDs slice — is MALFORMED for import and is rejected (the
+// count is the validation invariant the guard exists to enforce, WR-02).
 func isEnvelopeComplete(env pkgdispatch.EnvelopeOut) bool {
 	if env.ExitCode != 0 {
 		return false
 	}
-	// ChildCount == 0 is valid for leaf planners (Task-level or leaf Plan-level).
-	// Mismatch is only flagged when ChildCount > 0 and the slice is shorter.
-	if env.ChildCount > 0 && len(env.ChildCRDs) != env.ChildCount {
+	if len(env.ChildCRDs) != env.ChildCount {
 		return false
 	}
 	return true
