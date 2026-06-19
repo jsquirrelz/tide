@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -528,14 +529,12 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			var proj2 tideprojectv1alpha2.Project
 			Expect(k8sClient.Get(ctx, projKey, &proj2)).To(Succeed())
 			jobName := fmt.Sprintf("tide-import-%s", proj2.UID)
-			// With ImportImage="" no Job is created. Verify this.
-			var jobList corev1.ConfigMapList // dummy; real check via Job list below:
-			_ = jobList
-			// Use the standard k8sClient to list Jobs (not mgrClient — less likely to have stale data).
-			var jobs corev1.PodList
+			// List actual Jobs and assert the deterministic import-Job name is absent.
+			var jobs batchv1.JobList
 			Expect(k8sClient.List(ctx, &jobs, client.InNamespace(ns))).To(Succeed())
-			// The deterministic job name should not appear.
-			_ = jobName // used in the log; not creating Jobs with empty ImportImage
+			for _, j := range jobs.Items {
+				Expect(j.Name).NotTo(Equal(jobName), "no import Job should be created on idempotent re-run")
+			}
 		})
 	})
 })
