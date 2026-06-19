@@ -238,6 +238,14 @@ func (r *ImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // currentImportState reads the current import phase from Project.Status.Conditions
 // and Job existence. The state machine is tracked via the ConditionImportComplete
 // condition status + reason, supplemented by a phase annotation.
+//
+// TODO(IN-01): in-progress states are distinguished by string-matching the
+// human-facing cond.Message ("CreatingCRs"/"CopyingEnvelopes"), which is
+// fragile — a message copyedit would silently break transitions. Track the
+// import phase in a machine-owned field (a per-phase Reason constant or a
+// Status.Import.Phase enum) instead. Deferred from the Phase 28 fix pass to
+// avoid destabilizing the state machine; the reason-checks below are also
+// partly unreachable.
 func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha2.Project) importStatePhase {
 	cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
 	if cond == nil {
