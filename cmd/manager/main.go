@@ -208,6 +208,15 @@ func main() {
 	// Injected by the chart (Phase 28 plan 01 tideImport block). PROD_OVERRIDE_REQUIRED.
 	importImage := envOrDefault("TIDE_IMPORT_IMAGE", "ghcr.io/jsquirrelz/tide-import:v0.1.0-dev")
 
+	// Single source for the cluster-wide workspace PVC name, read by both the
+	// ProjectReconciler and the ImportReconciler so they cannot skew. The chart
+	// exposes this as workspaces.pvc.name; the import Job mounts this PVC, so a
+	// rename that reaches only one reconciler would leave the Job mounting a
+	// non-existent claim and the pod stuck Pending (WR-03).
+	// TODO: wire TIDE_WORKSPACES_PVC_NAME through the chart from
+	// workspaces.pvc.name so an operator override propagates to both reconcilers.
+	sharedPVCName := envOrDefault("TIDE_WORKSPACES_PVC_NAME", "tide-projects")
+
 	// PROD_OVERRIDE_REQUIRED: dev default; production deployments must override
 	// via Helm values.claudeSubagentImage (which sets CLAUDE_SUBAGENT_IMAGE on the
 	// controller env). The :v0.1.0-dev tag tracks main and is NOT a release-stable placeholder.
@@ -393,7 +402,7 @@ func main() {
 		CredproxyImage:       credproxyImage,
 		SigningKey:           signingKey,
 		EnvReader:            envReader,
-		PVCName:              "tide-projects",
+		PVCName:              sharedPVCName,
 		PricingOverridesJSON: pricingOverridesJSON,
 	}
 
@@ -560,14 +569,15 @@ func main() {
 	// Phase 28 IMPORT-01: ImportReconciler drives the one-shot UID-rewrite import
 	// state machine for Projects carrying spec.importSource. No pool, dispatcher, or
 	// signing key — the import Job reads the PVC directly via the tide-import binary.
-	// SharedPVCName defaults to "tide-projects" (mirrors sharedPVCNameForImport default).
+	// SharedPVCName reads the same sharedPVCName source as ProjectReconciler.PVCName
+	// so the import Job mounts the PVC the rest of the controller writes to (WR-03).
 	if err := (&controller.ImportReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project, // reuse Project concurrency
 		WatchNamespace:          watchNamespace,
 		ImportImage:             importImage,
-		SharedPVCName:           "tide-projects",
+		SharedPVCName:           sharedPVCName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Import")
 		os.Exit(1)
