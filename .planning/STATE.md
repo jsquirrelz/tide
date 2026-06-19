@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.3
-milestone_name: Planning Resumption & Cost Resilience
-status: verifying
-stopped_at: Completed 28-05-PLAN.md — import dispatch guard + manager registration
-last_updated: "2026-06-18T19:20:49.560Z"
-last_activity: 2026-06-18
+milestone_name: — Planning Resumption & Cost Resilience
+status: completed
+stopped_at: Phase 29 context gathered
+last_updated: "2026-06-19T16:31:03.727Z"
+last_activity: 2026-06-18 -- Phase 28 marked complete
 progress:
   total_phases: 8
   completed_phases: 7
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 
 ## Current Position
 
-Phase: 28 (plan-import-core) — COMPLETE (all 5 plans executed)
+Phase: 28 — COMPLETE
 Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-06-18
+Status: Phase 28 complete
+Last activity: 2026-06-18 -- Phase 28 marked complete
 
 ```
 v1.0.3 Progress: [x] 27  [x] 28  [ ] 29
@@ -129,6 +129,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-18T19:20:49.542Z
-Stopped at: Completed 28-04-PLAN.md — ImportController + envtest
-Resume file: None
+Last session: 2026-06-19T16:31:03.685Z
+Stopped at: Phase 29 context gathered
+Resume file: .planning/phases/29-operator-tooling-e2e/29-CONTEXT.md
