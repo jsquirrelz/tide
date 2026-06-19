@@ -223,15 +223,21 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			rekeyCMName := fmt.Sprintf("tide-import-rekey-%s", proj.UID)
 			var rekeyCM corev1.ConfigMap
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rekeyCMName, Namespace: ns}, &rekeyCM)).To(Succeed())
-			Expect(rekeyCM.Data).To(HaveKey("rekey"))
+			Expect(rekeyCM.Data).To(HaveKey("rekey.json"))
 
-			// Assert the rekey table contains the Milestone entry with old→new UID mapping.
-			var rekeyMap map[string]rekeyEntry
-			Expect(json.Unmarshal([]byte(rekeyCM.Data["rekey"]), &rekeyMap)).To(Succeed())
-			entry, ok := rekeyMap[msMigName]
-			Expect(ok).To(BeTrue(), "rekey table should contain Milestone FQ-name")
-			Expect(entry.OldUID).To(Equal("old-ms-uid-adopt"))
-			Expect(entry.NewUID).To(Equal(string(ms.UID)))
+			// Assert the rekey table is a JSON ARRAY (the shape tide-import decodes)
+			// and contains the Milestone row with old→new UID mapping.
+			var rekeyRows []rekeyRow
+			Expect(json.Unmarshal([]byte(rekeyCM.Data["rekey.json"]), &rekeyRows)).To(Succeed())
+			var found bool
+			for _, row := range rekeyRows {
+				if row.FQName == msMigName {
+					found = true
+					Expect(row.OldUID).To(Equal("old-ms-uid-adopt"))
+					Expect(row.NewUID).To(Equal(string(ms.UID)))
+				}
+			}
+			Expect(found).To(BeTrue(), "rekey table should contain Milestone FQ-name row")
 		})
 	})
 

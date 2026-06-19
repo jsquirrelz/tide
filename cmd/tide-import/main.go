@@ -16,7 +16,9 @@ limitations under the License.
 
 // Command tide-import is the in-namespace envelope-rekey Job binary (Phase 28).
 //
-// Reads a rekey table (fqName→oldUID, fqName→newUID pairs) from stdin as JSON.
+// Reads a rekey table (fqName→oldUID, fqName→newUID pairs) as a JSON array,
+// either from the file named by --rekey-file or, when that flag is empty,
+// from stdin (the test seam).
 // For each pair: validates the envelope is complete (exitCode==0 and
 // len(ChildCRDs)==ChildCount); copies envelope files from
 // /old-workspace/envelopes/<oldUID>/ to /new-workspace/envelopes/<newUID>/
@@ -35,6 +37,7 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -51,8 +54,8 @@ import (
 )
 
 const (
-	exitSuccess  = 0
-	exitGeneric  = 1
+	exitSuccess   = 0
+	exitGeneric   = 1
 	exitInvariant = 2
 )
 
@@ -71,9 +74,17 @@ var childKindAllowlist = map[string]bool{
 type importConfig struct {
 	OldWorkspace string // default "/old-workspace"
 	NewWorkspace string // default "/new-workspace"
+
+	// RekeyFile is the path to the rekey-table JSON file (mounted from the
+	// rekey ConfigMap, e.g. "/rekey/rekey.json"). When empty, run() reads the
+	// table from stdin instead — preserving the test seam. The distroless base
+	// image has no shell, so the production Job passes --rekey-file and the
+	// binary os.ReadFile's it directly (no `cat … | tide-import` pipe).
+	RekeyFile string
 }
 
-// rekeyEntry is one row of the stdin rekey table.
+// rekeyEntry is one row of the rekey table (a JSON array). The controller emits
+// this exact shape into the rekey ConfigMap (internal/controller rekeyRow).
 // FQName is the fully-qualified object name (object name + full parent chain,
 // e.g. "milestone-02/phase-03/plan-01-foo") that guarantees 1:1 mapping even
 // where sibling subtrees reuse short names (D-07, T-28-03-04).
@@ -97,6 +108,8 @@ func main() {
 		"mount point for salvaged PVC subPath (read-only)")
 	newWorkspace := fs.String("new-workspace", "/new-workspace",
 		"mount point for new project PVC subPath (read-write)")
+	rekeyFile := fs.String("rekey-file", "",
+		"path to the rekey-table JSON file; when empty, the table is read from stdin")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-import: flag parse: %v\n", err)
@@ -106,6 +119,7 @@ func main() {
 	cfg := importConfig{
 		OldWorkspace: *oldWorkspace,
 		NewWorkspace: *newWorkspace,
+		RekeyFile:    *rekeyFile,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -114,12 +128,26 @@ func main() {
 	os.Exit(run(ctx, cfg, os.Stdin, os.Stdout, os.Stderr))
 }
 
-// run is the testable entry point. stdin carries the rekey table JSON;
+// run is the testable entry point. When cfg.RekeyFile is set the rekey table
+// JSON is read from that file; otherwise it is read from stdin (the test seam).
 // stdout receives the completion report JSON; stderr carries log lines.
 func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr io.Writer) int {
-	// Decode the rekey table from stdin.
+	// Source the rekey table from the mounted file (production: distroless base
+	// has no shell, so the Job passes --rekey-file instead of `cat … | tide-import`)
+	// or fall back to stdin (test seam).
+	var tableReader io.Reader = stdin
+	if cfg.RekeyFile != "" {
+		data, err := os.ReadFile(cfg.RekeyFile)
+		if err != nil {
+			fmt.Fprintf(stderr, "tide-import: read rekey file %q: %v\n", cfg.RekeyFile, err)
+			return exitInvariant
+		}
+		tableReader = bytes.NewReader(data)
+	}
+
+	// Decode the rekey table (a JSON array of rekeyEntry rows).
 	var table []rekeyEntry
-	if err := json.NewDecoder(stdin).Decode(&table); err != nil {
+	if err := json.NewDecoder(tableReader).Decode(&table); err != nil {
 		fmt.Fprintf(stderr, "tide-import: decode rekey table: %v\n", err)
 		return exitInvariant
 	}

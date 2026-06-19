@@ -129,8 +129,13 @@ type seedManifest struct {
 	Plans      []seedEntry `json:"plans"`
 }
 
-// rekeyEntry records the old→new UID mapping for a single CR (D-03/D-07).
-type rekeyEntry struct {
+// rekeyRow is one row of the rekey table written to the rekey ConfigMap. It is
+// the exact wire shape the tide-import binary decodes from /rekey/rekey.json
+// (a JSON ARRAY of these rows — see cmd/tide-import/main.go rekeyEntry). The
+// binary keys the source/dest directories off OldUID/NewUID, so every row must
+// carry both UIDs and the fully-qualified name (D-03/D-07).
+type rekeyRow struct {
+	FQName string `json:"fqName"`
 	OldUID string `json:"oldUID"`
 	NewUID string `json:"newUID"`
 }
@@ -367,7 +372,9 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 
 	// Cycle detection passed. Now materialize the CR tree in parent-first order.
 	// Collect oldUID → newUID mappings for the rekey ConfigMap (D-03/D-07).
-	rekeyTable := make(map[string]rekeyEntry) // keyed by FQ-name
+	// The table is a JSON ARRAY of rekeyRow — the exact shape the tide-import
+	// binary decodes (CR-02: a map would fail to unmarshal into []rekeyEntry).
+	var rekeyTable []rekeyRow
 
 	// Materialize Milestones first (they have no parent other than Project).
 	for _, msSeed := range seed.Milestones {
@@ -401,7 +408,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		if fqName == "" {
 			fqName = msSeed.Name
 		}
-		rekeyTable[fqName] = rekeyEntry{OldUID: msSeed.OldUID, NewUID: string(ms.UID)}
+		rekeyTable = append(rekeyTable, rekeyRow{FQName: fqName, OldUID: msSeed.OldUID, NewUID: string(ms.UID)})
 
 		// Patch initial Status.Phase from seed (Anti-Pattern 4: not blanket Succeeded).
 		if msSeed.Status != "" {
@@ -449,7 +456,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		if fqName == "" {
 			fqName = phSeed.Name
 		}
-		rekeyTable[fqName] = rekeyEntry{OldUID: phSeed.OldUID, NewUID: string(ph.UID)}
+		rekeyTable = append(rekeyTable, rekeyRow{FQName: fqName, OldUID: phSeed.OldUID, NewUID: string(ph.UID)})
 
 		if phSeed.Status != "" {
 			statusPatch := client.MergeFrom(ph.DeepCopy())
@@ -496,7 +503,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		if fqName == "" {
 			fqName = plSeed.Name
 		}
-		rekeyTable[fqName] = rekeyEntry{OldUID: plSeed.OldUID, NewUID: string(pl.UID)}
+		rekeyTable = append(rekeyTable, rekeyRow{FQName: fqName, OldUID: plSeed.OldUID, NewUID: string(pl.UID)})
 
 		if plSeed.Status != "" {
 			statusPatch := client.MergeFrom(pl.DeepCopy())
@@ -519,7 +526,9 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 			Namespace: project.Namespace,
 		},
 		Data: map[string]string{
-			"rekey": string(rekeyJSON),
+			// Key == on-disk filename: the whole-CM mount at /rekey produces
+			// /rekey/rekey.json, which the Job's --rekey-file flag references (CR-03).
+			"rekey.json": string(rekeyJSON),
 		},
 	}
 	if cmOwnerErr := owner.EnsureOwnerRef(rekeyCM, project, r.Scheme); cmOwnerErr != nil {

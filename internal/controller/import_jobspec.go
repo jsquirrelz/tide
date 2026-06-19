@@ -26,8 +26,9 @@ limitations under the License.
 //  1. TWO PVC VolumeMounts instead of one: old subPath (ReadOnly) + new subPath (read-write).
 //     Neither mount covers the PVC root — this enforces the IMPORT-05 namespace-scoped
 //     containment invariant (no cross-project reads, no path-traversal escape).
-//  2. Rekey ConfigMap mounted as a volume and passed via stdin (the binary reads the
-//     rekey table JSON from stdin per plan 03).
+//  2. Rekey ConfigMap mounted as a volume at /rekey; the binary reads the rekey
+//     table directly from /rekey/rekey.json via its --rekey-file flag (the
+//     distroless base has no shell, so there is no `cat … | tide-import` pipe).
 //  3. No ServiceAccount token needed (no K8s API calls from the binary — pure filesystem I/O).
 //  4. SA is "tide-import" (least-privilege; no K8s API calls required from the binary).
 package controller
@@ -74,8 +75,8 @@ type ImportJobOptions struct {
 	NewSubPath string
 
 	// RekeyCMName is the name of the ConfigMap carrying the rekey table JSON.
-	// Mounted as a file at /rekey/rekey.json; the binary reads it from stdin via
-	// `cat /rekey/rekey.json | tide-import`.
+	// The ConfigMap key "rekey.json" mounts as the file /rekey/rekey.json; the
+	// binary reads it directly via --rekey-file=/rekey/rekey.json.
 	RekeyCMName string
 }
 
@@ -91,10 +92,11 @@ type ImportJobOptions struct {
 // Pod spec:
 //   - ServiceAccountName: "tide-import" (least-privilege; no K8s API calls).
 //   - PVC mounts: two subPaths, both from the cluster-wide PVC:
-//       /old-workspace subPath=OldSubPath  ReadOnly=true
-//       /new-workspace subPath=NewSubPath  ReadOnly=false
+//     /old-workspace subPath=OldSubPath  ReadOnly=true
+//     /new-workspace subPath=NewSubPath  ReadOnly=false
 //     Never mounts the PVC root — IMPORT-05 / Pitfall 7 containment invariant.
-//   - Rekey ConfigMap: mounted as /rekey/rekey.json; binary reads via cat+stdin.
+//   - Rekey ConfigMap: mounted at /rekey (key rekey.json → /rekey/rekey.json);
+//     binary reads it via --rekey-file=/rekey/rekey.json (no shell, no stdin pipe).
 //   - SecurityContext: RunAsNonRoot + drop ALL capabilities (mirrors reporter_jobspec.go:156-162).
 //
 // Note: D-09 / Wave CRs: this Job operates purely on the filesystem (envelope copy + UID
@@ -112,6 +114,11 @@ func BuildImportJob(
 
 	backoffLimit := int32(2)
 	ttl := int32(300)
+	// ActiveDeadlineSeconds force-terminates a hung copy (e.g. stuck NFS mount,
+	// enormous envelope tree) so it cannot pin the RW PVC mount indefinitely
+	// and stall the reconcile poll loop (WR-04). 600s is sized to the largest
+	// expected salvage; expiry surfaces as JobFailed → ReasonImportFailed.
+	activeDeadline := int64(600)
 
 	// Hardened security context — mirrors reporter_jobspec.go:156-162.
 	runAsNonRoot := true
@@ -126,11 +133,13 @@ func BuildImportJob(
 		"tideproject.k8s/role": importJobRoleLabel,
 	}
 
-	// The binary reads the rekey table from stdin via the entrypoint:
-	//   sh -c "cat /rekey/rekey.json | tide-import --old-workspace=/old-workspace --new-workspace=/new-workspace"
-	command := []string{
-		"sh", "-c",
-		"cat /rekey/rekey.json | tide-import --old-workspace=/old-workspace --new-workspace=/new-workspace",
+	// Args against the image ENTRYPOINT (mirrors reporter_jobspec.go) — the
+	// distroless base has no shell, so there is no sh/cat pipe. The binary reads
+	// the rekey table directly from the mounted file via --rekey-file.
+	args := []string{
+		"--old-workspace=/old-workspace",
+		"--new-workspace=/new-workspace",
+		"--rekey-file=/rekey/rekey.json",
 	}
 
 	job := &batchv1.Job{
@@ -143,6 +152,7 @@ func BuildImportJob(
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            &backoffLimit,
 			TTLSecondsAfterFinished: &ttl,
+			ActiveDeadlineSeconds:   &activeDeadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: roleLabels,
@@ -175,9 +185,10 @@ func BuildImportJob(
 					},
 					Containers: []corev1.Container{
 						{
-							Name:    importContainerName,
-							Image:   opts.ImportImage,
-							Command: command,
+							Name:  importContainerName,
+							Image: opts.ImportImage,
+							// Command nil → use the image ENTRYPOINT (tide-import binary).
+							Args: args,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									// Old-workspace: salvaged envelopes (ReadOnly — no writes
@@ -195,7 +206,9 @@ func BuildImportJob(
 									// ReadOnly: false (default)
 								},
 								{
-									// Rekey ConfigMap: mounted at /rekey/rekey.json.
+									// Rekey ConfigMap mounted at /rekey; the CM key
+									// rekey.json becomes /rekey/rekey.json, which the
+									// binary's --rekey-file flag references.
 									Name:      importRekeyCMVolume,
 									MountPath: "/rekey",
 									ReadOnly:  true,
