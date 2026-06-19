@@ -553,3 +553,86 @@ func TestCompletenessRejectChildCountMismatch(t *testing.T) {
 		t.Errorf("report.incomplete = 0, want > 0 (ChildCount mismatch)")
 	}
 }
+
+// controllerRekeyRow mirrors internal/controller.rekeyRow byte-for-byte (same
+// JSON tags). The controller emits a JSON ARRAY of these into the rekey
+// ConfigMap; the binary decodes into []rekeyEntry. This local copy lets the
+// test prove the two shapes agree without crossing the package boundary.
+type controllerRekeyRow struct {
+	FQName string `json:"fqName"`
+	OldUID string `json:"oldUID"`
+	NewUID string `json:"newUID"`
+}
+
+// TestRekeyTableRoundTrip proves CR-02 cannot regress: the JSON ARRAY shape the
+// controller marshals decodes cleanly into the binary's []rekeyEntry, with all
+// three fields preserved. The pre-fix controller emitted a map[string]…, which
+// would fail to unmarshal into a slice with
+// "cannot unmarshal object into Go value of type []rekeyEntry".
+func TestRekeyTableRoundTrip(t *testing.T) {
+	controllerSide := []controllerRekeyRow{
+		{FQName: "ms-02", OldUID: "old-ms", NewUID: "new-ms"},
+		{FQName: "ms-02/ph-03", OldUID: "old-ph", NewUID: "new-ph"},
+		{FQName: "ms-02/ph-03/plan-01", OldUID: "old-pl", NewUID: "new-pl"},
+	}
+	wire, err := json.Marshal(controllerSide)
+	if err != nil {
+		t.Fatalf("marshal controller-side rekey array: %v", err)
+	}
+
+	var binarySide []rekeyEntry
+	if err := json.Unmarshal(wire, &binarySide); err != nil {
+		t.Fatalf("binary failed to decode controller rekey array: %v", err)
+	}
+	if len(binarySide) != len(controllerSide) {
+		t.Fatalf("decoded %d rows, want %d", len(binarySide), len(controllerSide))
+	}
+	for i, row := range binarySide {
+		if row.FQName != controllerSide[i].FQName ||
+			row.OldUID != controllerSide[i].OldUID ||
+			row.NewUID != controllerSide[i].NewUID {
+			t.Errorf("row %d = %+v, want %+v", i, row, controllerSide[i])
+		}
+	}
+}
+
+// TestRunReadsRekeyFile proves the CR-01 flag path: when cfg.RekeyFile is set,
+// run() reads the table from that file (not stdin), mirroring the production Job
+// which passes --rekey-file=/rekey/rekey.json because the distroless base has no
+// shell to pipe stdin.
+func TestRunReadsRekeyFile(t *testing.T) {
+	oldWS := t.TempDir()
+	newWS := t.TempDir()
+	oldUID := "uid-old-rekeyfile"
+	newUID := "uid-new-rekeyfile"
+
+	env := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    oldUID,
+		ExitCode:   0,
+		ChildCount: 0,
+	}
+	writeEnvelopeOut(t, oldWS, oldUID, env)
+
+	table := makeRekeyTable(t, []rekeyEntry{{FQName: "ms/plan-rekeyfile", OldUID: oldUID, NewUID: newUID}})
+	rekeyPath := filepath.Join(t.TempDir(), "rekey.json")
+	if err := os.WriteFile(rekeyPath, table, 0o644); err != nil {
+		t.Fatalf("write rekey file: %v", err)
+	}
+
+	cfg := importConfig{OldWorkspace: oldWS, NewWorkspace: newWS, RekeyFile: rekeyPath}
+	// stdin is deliberately empty: if run() read stdin instead of the file it
+	// would fail to decode and return exitInvariant.
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), cfg, bytes.NewReader(nil), &stdout, &stderr)
+	if code != exitSuccess {
+		t.Fatalf("run with --rekey-file exit=%d, stderr=%q", code, stderr.String())
+	}
+
+	// The new-UID envelope dir (with the rewritten out.json) must now exist.
+	newOut := filepath.Join(newWS, "envelopes", newUID, "out.json")
+	if _, err := os.Stat(newOut); err != nil {
+		t.Errorf("expected rewritten out.json at %q: %v", newOut, err)
+	}
+}
