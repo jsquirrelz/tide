@@ -491,6 +491,12 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		"--set", "images.credProxy.pullPolicy=IfNotPresent",
 		"--set", "images.tideReporter.tag=test",
 		"--set", "images.tideReporter.pullPolicy=IfNotPresent",
+		// Phase 28/29: point the manager's TIDE_IMPORT_IMAGE at the kind-loaded
+		// tide-import:test so the ImportController's import Job pod runs (the chart
+		// default tag is Chart.AppVersion, which is never built/loaded in kind ->
+		// ImagePullBackoff -> imported envelopes never staged at new-UID paths).
+		"--set", "images.tideImport.tag=test",
+		"--set", "images.tideImport.pullPolicy=IfNotPresent",
 		"--set-string", "controllerManager.manager.podAnnotations.tideproject\\.k8s/restart-nonce=" + rolloutNonce,
 		// Override the chart's default accessModes [ReadWriteMany] to [ReadWriteOnce]
 		// because kind's default rancher.io/local-path provisioner only supports

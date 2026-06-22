@@ -152,7 +152,7 @@ test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integrati
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
 
-test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter Docker images and load them into the tide-test kind cluster. Also builds bin/tide for the kind E2E (D-10, 29-04).
+test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter + tide-import Docker images and load them into the tide-test kind cluster. Also builds bin/tide for the kind E2E (D-10, 29-04).
 	# Phase 29 plan 29-04 (D-10): build the tide CLI binary so the kind E2E can
 	# exec it via TIDE_BINARY or PATH. The binary is a stateless host binary;
 	# no image loading is needed.
@@ -162,6 +162,10 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-push:test -f images/tide-push/Dockerfile .
 	# Phase 9 plan 09-05: build tide-reporter (Option-C in-namespace reader Job image).
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-reporter:test -f images/tide-reporter/Dockerfile .
+	# Phase 28 (IMPORT-01) / Phase 29 (29-05 Tier a): build tide-import — the in-namespace
+	# UID-rewrite import Job image the ImportController dispatches. Without this the import
+	# Job pod ImagePullBackoffs and the imported run never stages envelopes at new-UID paths.
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-import:test -f images/tide-import/Dockerfile .
 	$(CONTAINER_TOOL) build -t controller:test -f Dockerfile .
 	@if ! $(KIND) get clusters 2>/dev/null | grep -q "^tide-test$$"; then \
 		$(KIND) create cluster --name tide-test --config test/integration/kind/cluster.yaml; \
@@ -174,6 +178,9 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-push:test --name tide-test
 	# Phase 9 plan 09-05: preload tide-reporter so reporter Job specs resolve without ImagePullBackoff.
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-reporter:test --name tide-test
+	# Phase 28/29: preload tide-import so the ImportController's import Job pod runs
+	# (helm sets TIDE_IMPORT_IMAGE=...tide-import:test via images.tideImport.tag override).
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-import:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
 
 ##@ Live nightly E2E (TEST-03 — Phase 3 plan 03-11)
