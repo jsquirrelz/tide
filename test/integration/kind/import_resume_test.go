@@ -432,13 +432,13 @@ func assertD02BundleShape(tgzPath string) {
 	tr := tar.NewReader(gr)
 
 	required := map[string]bool{
-		"projects.yaml":       false,
-		"milestones.yaml":     false,
-		"phases.yaml":         false,
-		"plans.yaml":          false,
-		"seed-manifest.json":  false,
-		"SEED-OUTLINE.md":     false,
-		"pvc-envelopes.tgz":   false,
+		"projects.yaml":      false,
+		"milestones.yaml":    false,
+		"phases.yaml":        false,
+		"plans.yaml":         false,
+		"seed-manifest.json": false,
+		"SEED-OUTLINE.md":    false,
+		"pvc-envelopes.tgz":  false,
 	}
 
 	for {
@@ -500,4 +500,3 @@ func assertNoPlannerJobsForLevelConsistently(ns, level string, duration, interva
 		g.Expect(jobs.Items).To(BeEmpty(), msg)
 	}, duration, interval).Should(Succeed())
 }
-

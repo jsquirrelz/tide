@@ -63,8 +63,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	dag "github.com/jsquirrelz/tide/pkg/dag"
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
+	dag "github.com/jsquirrelz/tide/pkg/dag"
 )
 
 // loaderPodRunner creates the loader pod, waits for Running, streams the
@@ -136,10 +136,10 @@ func renderDryRunTable(result *pkgbundle.ValidationResult, out io.Writer) error 
 
 // dryRunJSONReport is the JSON-serializable form of a ValidationResult.
 type dryRunJSONReport struct {
-	CycleRejected bool              `json:"cycleRejected"`
-	AdoptCount    int               `json:"adoptCount"`
-	RePlanCount   int               `json:"rePlanCount"`
-	Rows          []dryRunJSONRow   `json:"rows"`
+	CycleRejected bool            `json:"cycleRejected"`
+	AdoptCount    int             `json:"adoptCount"`
+	RePlanCount   int             `json:"rePlanCount"`
+	Rows          []dryRunJSONRow `json:"rows"`
 }
 
 type dryRunJSONRow struct {

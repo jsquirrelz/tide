@@ -17,12 +17,13 @@ limitations under the License.
 // Plan 28-05 Task 2 — Guard tests for the Phase 28 IMPORT-01 park guard.
 //
 // Three contracts proved here:
-//  (1) park-on-pending: a Project with spec.importSource and no ConditionImportComplete=True
-//      → the reconciler parks (requeues) and dispatches NO planner Job.
-//  (2) clear-on-complete: same Project with ConditionImportComplete=True → the guard does
-//      not fire (normal dispatch path proceeds).
-//  (3) no-importSource: a Project without spec.importSource → guard never fires (regression
-//      guard, import path must not affect normal Projects).
+//
+//	(1) park-on-pending: a Project with spec.importSource and no ConditionImportComplete=True
+//	    → the reconciler parks (requeues) and dispatches NO planner Job.
+//	(2) clear-on-complete: same Project with ConditionImportComplete=True → the guard does
+//	    not fire (normal dispatch path proceeds).
+//	(3) no-importSource: a Project without spec.importSource → guard never fires (regression
+//	    guard, import path must not affect normal Projects).
 //
 // Tests use the standard Go testing package + fake client (no envtest cold-start needed —
 // the guard is a pure condition-check before pool acquire, testable without a live API server).
