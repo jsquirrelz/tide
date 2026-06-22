@@ -255,7 +255,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 29-01-PLAN.md — pkg/bundle/ foundation: BundleEntry/BundleManifest (seed superset + sha256), zip-slip-safe tgz codec, childCount-stamp (D-16a), offline dry-run validator (schema + completeness + sha256 + ComputeWaves cycle) (TOOL-01)
+- [x] 29-01-PLAN.md — pkg/bundle/ foundation: BundleEntry/BundleManifest (seed superset + sha256), zip-slip-safe tgz codec, childCount-stamp (D-16a), offline dry-run validator (schema + completeness + sha256 + ComputeWaves cycle) (TOOL-01)
 
 **Wave 2**
 
@@ -309,4 +309,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
-| 29. Operator Tooling + E2E | v1.0.3 | 0/TBD | Not started | - |
+| 29. Operator Tooling + E2E | v1.0.3 | 1/5 | In Progress|  |
