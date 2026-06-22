@@ -90,10 +90,34 @@ that Phase 28's machinery *consumes*; it does not change that machinery.
   (`testing.Short()` skip + long-test tag) so the full-fixture and drain-to-Succeeded
   assertions don't bloat the default `make test-int` wall-clock.
 
+### Legacy-envelope completeness repair (resolved fork — research COLLISION #1)
+- **D-16:** The salvage envelopes **predate the `childCount` field** (added in plan 09-08).
+  All 18 successful planner envelopes in `salvage-20260618` lack `childCount` (`omitempty` ⇒
+  decodes to `0`), so Phase 28's `isEnvelopeComplete()` (`cmd/tide-import/main.go:299`,
+  requires `len(ChildCRDs)==ChildCount`) would **reject every one of them**. Fix shape
+  (user-chosen "Both"): **(a)** `tide export-envelopes` **stamps `childCount = len(childCRDs)`
+  forward** into each `out.json` it bundles whenever the field is absent/0 but children exist;
+  **(b)** the committed `salvage-20260618` fixture's `out.json` files get a **one-time
+  in-repo patch** to carry `childCount`, so the fixture imports as-is in the E2E test. Phase 28's
+  `tide-import` guard stays **untouched** (the guard is correct; the legacy bytes are the gap).
+  Rejected: import-side legacy-compat relaxation (touches frozen Phase 28 code for a data defect
+  that export can heal at the source).
+
+### Partial-salvage reality (research COLLISION #2 — reshapes the E2E assertion)
+- **D-17:** The salvage is a **partial tree**: project 1/1, milestone 3/3, phase 14/15 succeeded,
+  but **plan-level planners are 0/38** (all budget-halted mid-run). Import therefore adopts the
+  **18 project/milestone/phase levels**; all 42 plan planners **legitimately re-plan fresh**
+  (incomplete envelopes must re-plan — correct behavior, not a regression). The TOOL-02 headline
+  is precisely: *import saves the milestone+phase planning the ~$90 actually bought; plan
+  planning re-runs.* The full-salvage E2E assertion (D-11 tier b) is scoped to the **`{project,
+  milestone, phase}` levels**: `JobList` filtered to `role=planner, level in {milestone,phase}`
+  → **0 Jobs**, and the `$0 re-paid` budget assertion is sampled **before any plan-level planner
+  dispatches**. It does **not** require the 42 plan planners to succeed.
+
 ### Invariants carried forward (locked — do not re-litigate)
 - **D-13:** Wave CRs are **never** exported or imported — always re-derived (Phase 28 D-09).
 - **D-14:** Budget rollup stays **suppressed for imported envelopes** (Phase 28 D-11) — the
-  prior run already paid the planning cost; the E2E test asserts $0 re-paid as the headline.
+  prior run already paid the planning cost; the E2E test asserts $0 re-paid for adopted levels.
 - **D-15:** Seed covers **down to Plan only** (Phase 28 D-04); Tasks materialize from
   plan-level envelope children via the unchanged reporter/materializer path.
 
