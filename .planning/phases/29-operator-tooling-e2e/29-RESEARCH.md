@@ -677,22 +677,31 @@ Phase 29 is an operator CLI tool (not a server-side surface). Security considera
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Loader pod write-direction streaming API**
    - What we know: `remotecommand.NewSPDYExecutor` is the standard pattern for pod exec streaming. `StreamOptions.Stdin` accepts any `io.Reader`.
    - What's unclear: The exact URL construction for the exec subresource when the container command takes stdin input (not a long-running shell). The busybox `tar` command reads from stdin and exits — verify whether `podRunning` wait is still needed before the exec call, or whether exec can fire as soon as the pod is created.
    - Recommendation: Prototype the loader pod with a small spike binary; test against a real kind cluster before authoring the plan.
+   - **RESOLVED:** This is the standard `kubectl cp`-style SPDY-exec idiom — well-established, not novel. Stream the tgz into the loader pod via the `pods/exec` subresource:
+     - Build the exec URL: `cs.CoreV1().RESTClient().Post().Resource("pods").Name(pod).Namespace(ns).SubResource("exec").VersionedParams(&corev1.PodExecOptions{Container:"loader", Command:[]string{"tar","xzf","-","-C","/workspace"}, Stdin:true, Stdout:true, Stderr:true}, runtime.NewParameterCodec(scheme)).URL()`. Equivalently `VersionedParams` sets `Param("stdin","true")` + the `command` query params on the exec URL.
+     - Execute: `exec, _ := remotecommand.NewSPDYExecutor(restCfg, "POST", url)` then `exec.StreamWithContext(ctx, remotecommand.StreamOptions{Stdin: tgzReader, Stdout: errOut, Stderr: errOut})`.
+     - **RBAC verb (resolves A1):** `pods/exec: create` — the standard verb for stdin streaming to a pod (same verb `kubectl exec` / `kubectl cp` require). Add it to the loader pod's RBAC alongside the inspector's `pods: create/get/delete`.
+     - **API (resolves A2):** `k8s.io/client-go/tools/remotecommand.NewSPDYExecutor` is the correct API and is a transitive dependency already in `go.sum` (no `go.mod` change).
+     - **Readiness:** keep `waitForPodRunning` before the exec call — `tar xzf -` blocks on stdin so the container stays Running until the stream closes; firing exec before Running races container start (mirrors the inspector path).
+     - **Live-gate ownership:** 29-03 Task 2 carries the *live smoke* that exercises this exec path against a real kind cluster (busybox tgz round-trip) so a wrong URL/verb fails fast in 29-03's own verification — no longer deferred to 29-05's final drain. 29-05 then exercises the same path end-to-end with the real bundles.
 
 2. **Makefile target for tide binary in E2E path**
    - What we know: `make test-int-kind-prep` exists for image loading. The tide binary is currently not built as part of it.
    - What's unclear: Whether there's a `make build-cli` target or whether it's `go build ./cmd/tide/`.
    - Recommendation: Add `go build -o bin/tide ./cmd/tide/` to `test-int-kind-prep`, or export `TIDE_BINARY=$(pwd)/bin/tide` before running kind tests.
+   - **RESOLVED:** Build the CLI into `bin/tide` as part of `test-int-kind-prep` (`go build -o bin/tide ./cmd/tide/`); the E2E resolves it via `os.Getenv("TIDE_BINARY")` falling back to `exec.LookPath("tide")`, Skip-with-hint if absent. Delivered as a Wave-0 prep item by 29-04/29-05; the test never depends on a globally-installed `tide`.
 
 3. **Export-side childCount repair vs import-side guard relaxation**
    - What we know: Collision #1 — all 18 salvage planner envelopes lack `childCount`. Both solutions work.
    - What's unclear: User preference on which layer owns the repair.
    - Recommendation: Export-side repair is cleanest — export is the Phase 29 surface, Phase 28 code stays untouched. The planner should default to this unless the user objects.
+   - **RESOLVED:** User chose "Both" (D-16): (a) `tide export-envelopes` stamps `childCount = len(childCRDs)` forward when absent/0 but children exist; (b) a one-time in-repo patch stamps `childCount` into the committed `salvage-20260618` `out.json` files so the fixture imports as-is. Phase 28's `tide-import` completeness guard stays untouched.
 
 ---
 
@@ -720,7 +729,7 @@ Phase 29 is an operator CLI tool (not a server-side surface). Security considera
 - `.planning/research/PITFALLS.md` — R-06 (Wave schema), R-13 (budget double-count)
 
 ### Tertiary (LOW confidence)
-- [ASSUMED] `pods/exec: create` is the required RBAC verb for loader pod stdin streaming — verify against Kubernetes RBAC reference
+- [RESOLVED] `pods/exec: create` is the required RBAC verb for loader pod stdin streaming — confirmed standard (same verb `kubectl exec`/`kubectl cp` use); see Open Questions Q1
 - [ASSUMED] `pkg/bundle/` as shared package for bundle reader/writer — verify Go import conventions don't conflict with `internal/` visibility
 
 ---
@@ -729,8 +738,8 @@ Phase 29 is an operator CLI tool (not a server-side surface). Security considera
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | `pods/exec: create` is the correct RBAC verb for the loader pod | Loader Pod section | Wrong verb → pod exec permission denied at runtime |
-| A2 | `k8s.io/client-go/tools/remotecommand.NewSPDYExecutor` is the correct API for stdin streaming to a running pod | Loader Pod section | Wrong API → cannot write tgz into pod stdin |
+| A1 | `pods/exec: create` is the correct RBAC verb for the loader pod (RESOLVED — see Q1; live-gated in 29-03 Task 2) | Loader Pod section | Wrong verb → pod exec permission denied at runtime |
+| A2 | `k8s.io/client-go/tools/remotecommand.NewSPDYExecutor` is the correct API for stdin streaming to a running pod (RESOLVED — see Q1; live-gated in 29-03 Task 2) | Loader Pod section | Wrong API → cannot write tgz into pod stdin |
 | A3 | `make test-int-kind-prep` is the correct place to add the `tide` binary build step | Validation Architecture section | Wrong target → binary not built before kind tests run |
 | A4 | Re-declaring `seedEntry`-equivalent in `pkg/bundle/` avoids `internal/controller` import conflicts | Architecture Patterns section | Import conflict → build failure |
 
@@ -745,7 +754,7 @@ Phase 29 is an operator CLI tool (not a server-side surface). Security considera
 - childCount absence in salvage: HIGH — verified by Python analysis of all 59 envelopes
 - Plan envelope completeness profile: HIGH — Python enumerated all exit codes by level
 - Dry-run offline capability: HIGH — import chain verified, stdlib-only deps confirmed
-- Loader pod write-direction API: MEDIUM — remotecommand package is correct mechanism but exact call sequence not prototyped
+- Loader pod write-direction API: HIGH (was MEDIUM) — standard kubectl-cp SPDY-exec idiom; URL/verb/readiness resolved in Q1; live-gated in 29-03 Task 2
 - E2E test binary availability: MEDIUM — exec.LookPath pattern confirmed; build step location assumed
 
 **Research date:** 2026-06-19

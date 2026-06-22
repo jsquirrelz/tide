@@ -1,9 +1,9 @@
 ---
 phase: 29
 slug: operator-tooling-e2e
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-22
 ---
 
@@ -52,17 +52,17 @@ created: 2026-06-22
 | E2E small fixture → all-Milestones-Succeeded via real CLI (D-10/D-11a) | TOOL-02 | integration (kind) | `make test-int` (long-test gated) | `exec.Command` the built `tide` binary for export+import round-trip |
 | E2E salvage adoption: 0 planner Jobs `{milestone,phase}` + $0 re-paid (D-11b/D-17) | TOOL-02 | integration (kind) | `make test-int` (long-test gated) | JobList `role=planner,level in {milestone,phase}`→0; budget sampled before plan dispatch |
 
-*Status: ⬜ pending until plans authored*
+*Status: ✅ plans authored (29-01..29-05); every task carries an automated `<verify>`*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] Small purpose-built E2E fixture (down-to-Plan seed + minimal complete envelope tree) that
-      drains to all-Milestones-`Succeeded` with stub subagents (D-11a) — new `testdata/` tree.
-- [ ] One-time childCount patch applied to committed `salvage-20260618` `out.json` files (D-16b).
-- [ ] Test helper to `exec.Command` the built `tide` binary (or in-process cobra invocation) for
-      the CLI round-trip (D-10).
+- [x] Small purpose-built E2E fixture (down-to-Plan seed + minimal complete envelope tree) that
+      drains to all-Milestones-`Succeeded` with stub subagents (D-11a) — new `testdata/` tree. **Delivered by 29-04 Task 2.**
+- [x] One-time childCount patch applied to committed `salvage-20260618` `out.json` files (D-16b). **Delivered by 29-04 Task 1.**
+- [x] Test helper to `exec.Command` the built `tide` binary for the CLI round-trip (D-10) —
+      `make test-int-kind-prep` builds `bin/tide`; 29-05 resolves it via `TIDE_BINARY`/`LookPath`. **Delivered by 29-04 Task 2 (build) + 29-05 (resolution).**
 
 *Existing kind harness (`suite_test.go`, `cluster.yaml`, stub-subagent image load) otherwise covers infrastructure.*
 
@@ -80,11 +80,11 @@ created: 2026-06-22
 
 ## Validation Sign-Off
 
-- [ ] All tasks have automated verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers small fixture + fixture patch + CLI-exec helper
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s (unit loop)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have automated verify or Wave 0 dependencies — every `<task>` across 29-01..29-05 carries an `<automated>` verify
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers small fixture (29-04 T2) + fixture patch (29-04 T1) + CLI-exec helper (29-04 T2 build / 29-05 resolution)
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s (unit loop)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved
