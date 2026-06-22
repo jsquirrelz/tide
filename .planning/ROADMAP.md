@@ -259,7 +259,7 @@ Plans:
 
 **Wave 2**
 
-- [ ] 29-02-PLAN.md — `tide export-envelopes`: reused inspector pod (tar subtree) + seed-manifest generation from live CRs (FQName/oldUID/dependsOn/status/sha256) + legacy childCount repair + bundle assembly (TOOL-01)
+- [x] 29-02-PLAN.md — `tide export-envelopes`: reused inspector pod (tar subtree) + seed-manifest generation from live CRs (FQName/oldUID/dependsOn/status/sha256) + legacy childCount repair + bundle assembly (TOOL-01)
 
 **Wave 3** *(29-03 blocked on 29-02 via subcommands.go; 29-04 parallel)*
 
@@ -309,4 +309,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
-| 29. Operator Tooling + E2E | v1.0.3 | 1/5 | In Progress|  |
+| 29. Operator Tooling + E2E | v1.0.3 | 2/5 | In Progress|  |
