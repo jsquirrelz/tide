@@ -251,7 +251,25 @@ Plans:
   3. `tide import-envelopes` (live mode) seeds a new run with the exported bundle so the reconciler adopts valid envelopes on next reconcile, confirmed by the operator seeing zero planner Jobs for adopted levels.
   4. A kind integration test imports the `examples/projects/dogfood/salvage-20260618` fixture into a fresh cluster, lets the reconciler run, asserts all Milestones reach `Succeeded` with no planner Jobs dispatched for already-imported levels, and confirms no planning cost was re-paid.
 
-**Plans**: TBD
+**Plans**: 5 plans (4 waves)
+
+**Wave 1**
+
+- [ ] 29-01-PLAN.md — pkg/bundle/ foundation: BundleEntry/BundleManifest (seed superset + sha256), zip-slip-safe tgz codec, childCount-stamp (D-16a), offline dry-run validator (schema + completeness + sha256 + ComputeWaves cycle) (TOOL-01)
+
+**Wave 2**
+
+- [ ] 29-02-PLAN.md — `tide export-envelopes`: reused inspector pod (tar subtree) + seed-manifest generation from live CRs (FQName/oldUID/dependsOn/status/sha256) + legacy childCount repair + bundle assembly (TOOL-01)
+
+**Wave 3** *(29-03 blocked on 29-02 via subcommands.go; 29-04 parallel)*
+
+- [ ] 29-03-PLAN.md — `tide import-envelopes` + `--dry-run`: offline adopt/re-plan table + json + cycle hard-reject (D-07/08/09), live stage-only loader pod (SPDY exec) + seed ConfigMap + surfaced project.yaml (D-05/06) (TOOL-01)
+- [ ] 29-04-PLAN.md — one-time salvage childCount patch (D-16b) + small drain-to-Succeeded fixture (D-11a) + test-int-kind-prep tide CLI build (D-10) (TOOL-02)
+
+**Wave 4** *(blocked on 29-02, 29-03, 29-04)*
+
+- [ ] 29-05-PLAN.md — kind E2E driving the real CLI: tier a small fixture → all-Milestones-Succeeded; tier b salvage → 0 `{milestone,phase}` planner Jobs + $0 re-paid (D-11b/D-17), long-test gated (D-12) (TOOL-02)
+
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
