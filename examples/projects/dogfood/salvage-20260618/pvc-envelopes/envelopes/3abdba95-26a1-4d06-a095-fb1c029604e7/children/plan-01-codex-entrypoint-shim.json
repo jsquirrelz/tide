@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-entrypoint-shim",
+  "spec": {
+    "phaseRef": "phase-03-codex-image-entrypoint",
+    "objective": "Author cmd/codex-subagent/main.go — the thin harness-wrapped entrypoint shim that loads EnvelopeIn, calls codex.Run, and writes EnvelopeOut — mirroring cmd/claude-subagent/main.go exactly. Include cmd/codex-subagent/main_test.go (six offline unit tests: HappyPath, EnvelopeLoadFailure, VendorMismatch, InvokesEnsureWorktreeBeforeRun, PassesEnvBranchToWorktree, IgnoresDevTestMode) and cmd/codex-subagent/commit_test.go (three executor-path tests: TestRunCommitsExecutorWorktree, TestRunEmptyDiffOverridesExitCode, TestRunPlannerSkipsCommit). Vendor sentinel is 'openai'. No Dev.TestMode branching. newSubagent is the injectable fake seam. All tests pass offline without OPENAI_API_KEY.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "cmd/codex-subagent/main.go",
+      "cmd/codex-subagent/main_test.go",
+      "cmd/codex-subagent/commit_test.go"
+    ]
+  }
+}

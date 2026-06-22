@@ -1,0 +1,13 @@
+{
+  "kind": "Phase",
+  "name": "phase-06-hetero-integration",
+  "spec": {
+    "milestoneRef": "milestone-03-hetero-integration",
+    "dependsOn": [
+      "phase-02-codex-subagent-core",
+      "phase-03-codex-image-entrypoint",
+      "phase-04-per-level-vendor-switch",
+      "phase-05-chart-secret-wiring"
+    ]
+  }
+}

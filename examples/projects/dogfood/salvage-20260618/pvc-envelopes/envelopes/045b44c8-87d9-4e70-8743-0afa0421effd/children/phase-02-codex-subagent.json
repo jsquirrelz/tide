@@ -1,0 +1,8 @@
+{
+  "kind": "Phase",
+  "name": "phase-02-codex-subagent",
+  "spec": {
+    "milestoneRef": "milestone-01-codex-subagent",
+    "dependsOn": []
+  }
+}

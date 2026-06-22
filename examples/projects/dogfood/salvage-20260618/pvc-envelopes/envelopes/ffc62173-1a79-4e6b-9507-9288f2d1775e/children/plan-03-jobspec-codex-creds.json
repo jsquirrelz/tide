@@ -1,0 +1,20 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-jobspec-codex-creds",
+  "spec": {
+    "phaseRef": "phase-04-credential-and-chart-wiring",
+    "objective": "Extend BuildJobSpec and its callers to perform vendor-aware credential injection. When the resolved vendor is 'openai', the credproxy sidecar is skipped and OPENAI_API_KEY is injected directly from the per-level ProviderSecretRef Secret into the subagent container env — the Codex CLI has no proxy-URL concept, so direct env injection is the documented API-key auth path. When vendor is 'anthropic', the existing credproxy path is unchanged. BuildOptions gains Vendor string and LevelProviderSecretRef string fields; dispatch_helpers.go provides the ResolveProviderSecretRef helper (from plan-01); all four planner-level controllers and the task controller are updated to pass both. Offline unit tests in jobspec_test.go cover the Codex credential branch.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-level-config-provider-secret"
+    ],
+    "filesTouched": [
+      "internal/dispatch/podjob/jobspec.go",
+      "internal/dispatch/podjob/jobspec_test.go",
+      "internal/controller/task_controller.go",
+      "internal/controller/milestone_controller.go",
+      "internal/controller/phase_controller.go",
+      "internal/controller/plan_controller.go"
+    ]
+  }
+}

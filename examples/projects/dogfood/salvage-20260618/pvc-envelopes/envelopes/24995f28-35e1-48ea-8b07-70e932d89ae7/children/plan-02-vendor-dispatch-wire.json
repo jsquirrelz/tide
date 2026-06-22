@@ -1,0 +1,18 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-vendor-dispatch-wire",
+  "spec": {
+    "phaseRef": "phase-03-per-level-provider-switch",
+    "objective": "Rewrite ResolveProvider in internal/controller/dispatch_helpers.go to walk the full vendor precedence chain (Levels.<level>.Vendor -> Spec.Subagent.Vendor -> ProviderDefaults.Vendor -> 'anthropic') instead of the current unconditional Vendor:'anthropic'. Add a Vendor string field to the ProviderDefaults struct. Thread a TIDE_DEFAULT_VENDOR environment variable (default 'anthropic') through cmd/manager/env.go (tideHelmProviderDefaults) and cmd/manager/main.go. Update existing dispatch_helpers_test.go and task_controller_extracted_test.go assertions that hardcode Vendor:'anthropic' with the now-conditional default; add new table-driven tests proving a Codex-pinned level resolves Vendor:'openai' while an unpinned level stays 'anthropic' in the same Project. No Codex imports anywhere — this plan is provider-agnostic; verify-import-firewall and verify-dispatch-imports stay green.",
+    "wave": 2,
+    "dependsOn": ["plan-01-vendor-api-types"],
+    "filesTouched": [
+      "internal/controller/dispatch_helpers.go",
+      "internal/controller/dispatch_helpers_test.go",
+      "internal/controller/task_controller_extracted_test.go",
+      "cmd/manager/env.go",
+      "cmd/manager/env_test.go",
+      "cmd/manager/main.go"
+    ]
+  }
+}

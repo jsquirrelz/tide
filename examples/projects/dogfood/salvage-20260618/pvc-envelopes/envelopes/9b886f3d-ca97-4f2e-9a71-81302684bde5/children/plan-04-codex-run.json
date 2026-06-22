@@ -1,0 +1,1 @@
+{"kind":"Plan","name":"plan-04-codex-run","spec":{"phaseRef":"phase-01-codex-subagent-core","dependsOn":["plan-01-codex-pricing","plan-02-codex-stream-parser","plan-03-codex-package-scaffold"],"filesTouched":["internal/subagent/codex/run.go","internal/subagent/codex/run_test.go","internal/subagent/codex/childcrd_read_test.go"]}}

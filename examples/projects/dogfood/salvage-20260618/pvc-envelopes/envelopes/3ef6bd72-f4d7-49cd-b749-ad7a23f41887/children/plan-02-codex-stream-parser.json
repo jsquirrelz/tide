@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-stream-parser",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent-core",
+    "objective": "Author stream_parser.go and stream_parser_test.go for internal/subagent/codex/. ParseStream reads the Codex CLI --json JSONL event stream (one event per line), tees raw bytes to rawSink (the per-task events.jsonl audit log), and extracts the final message plus a pkg/dispatch.Usage struct per D5: usage.prompt_tokens to InputTokens, usage.completion_tokens to OutputTokens, usage.prompt_tokens_details.cached_tokens to CacheReadTokens, and CacheCreationTokens fixed at zero (OpenAI caching is automatic and marker-free — no cache-write billing concept exists). Uses common.ReadLines for the 16MB per-line budget and tolerates non-JSON lines silently per the anthropic pattern. Tests are fully offline: happy path, usage-mapping invariant (CacheCreationTokens == 0 always), tolerates-non-JSON, and no-result-event. No dependency on plan-01-codex-scaffold.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "internal/subagent/codex/stream_parser.go",
+      "internal/subagent/codex/stream_parser_test.go"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-join-verify-and-fix",
+  "spec": {
+    "phaseRef": "phase-06-hetero-integration",
+    "dependsOn": [
+      "plan-01-hetero-example-yaml",
+      "plan-02-mixed-provider-integration-test"
+    ],
+    "filesTouched": [
+      "Makefile",
+      "internal/subagent/codex/pricing.go",
+      "internal/subagent/codex/run.go",
+      "internal/subagent/codex/stream_parser.go",
+      "internal/subagent/codex/client.go",
+      "internal/controller/dispatch_helpers.go",
+      "api/v1alpha1/project_types.go",
+      "charts/tide/values.yaml",
+      "charts/tide/templates/deployment.yaml",
+      "cmd/codex-subagent/main.go",
+      "images/codex-subagent/Dockerfile"
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "Plan",
+  "name": "plan-05-01-codex-image-helm-defaults",
+  "spec": {
+    "phaseRef": "phase-05-chart-secret-wiring",
+    "objective": "Add the Codex image default channel to the Helm chart and wire it into the controller image-resolution machinery. (1) In charts/tide/values.yaml add an images.codexSubagent block (repository ghcr.io/jsquirrelz/tide-codex-subagent, tag empty, pullPolicy IfNotPresent) mirroring the existing claudeSubagent entry. (2) In charts/tide/templates/deployment.yaml inject a CODEX_SUBAGENT_IMAGE env var into the manager Deployment using the same tag-or-appVersion logic used for CLAUDE_SUBAGENT_IMAGE. (3) In internal/controller/dispatch_helpers.go extend ProviderDefaults with a CodexImage string field and make resolveImage vendor-aware: when vendor is openai the Helm-default fallback is helmDefaults.CodexImage; when anthropic it stays helmDefaults.Image. (4) In cmd/manager/env.go extend tideHelmProviderDefaults to accept a codexImage parameter and populate ProviderDefaults.CodexImage from the CODEX_SUBAGENT_IMAGE env var. (5) Add tests: env_test.go proves CODEX_SUBAGENT_IMAGE round-trips into ProviderDefaults.CodexImage; dispatch_helpers_test.go and dispatch_image_test.go prove resolveImage is vendor-aware. make verify-import-firewall and make verify-dispatch-imports must remain green throughout.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "charts/tide/values.yaml",
+      "charts/tide/templates/deployment.yaml",
+      "internal/controller/dispatch_helpers.go",
+      "internal/controller/dispatch_helpers_test.go",
+      "internal/controller/dispatch_image_test.go",
+      "cmd/manager/env.go",
+      "cmd/manager/env_test.go"
+    ]
+  }
+}

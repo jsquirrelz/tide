@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-vendor-api-types",
+  "spec": {
+    "phaseRef": "phase-01-provider-switch",
+    "objective": "Extend the v1alpha1 API types with a per-level Vendor field. Add Vendor string (with +kubebuilder:validation:Enum=anthropic;openai CEL marker) to both LevelConfig and SubagentConfig in api/v1alpha1/project_types.go, then run make manifests generate to regenerate zz_generated.deepcopy.go and the CRD YAML under config/crd/bases/. No controller, chart, or cmd/ changes -- this plan establishes the schema foundation consumed by plan-02.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "api/v1alpha1/project_types.go",
+      "api/v1alpha1/zz_generated.deepcopy.go",
+      "config/crd/bases/tideproject.k8s_projects.crd.yaml"
+    ]
+  }
+}

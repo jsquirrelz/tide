@@ -1,0 +1,10 @@
+{
+  "kind": "Phase",
+  "name": "phase-02-codex-subagent-core",
+  "spec": {
+    "milestoneRef": "milestone-03-hetero-integration",
+    "dependsOn": [
+      "phase-01-codex-pricing-usage"
+    ]
+  }
+}

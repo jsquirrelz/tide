@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-resolve-provider-vendor",
+  "spec": {
+    "phaseRef": "phase-01-provider-switch",
+    "objective": "Rewire ResolveProvider in internal/controller/dispatch_helpers.go to walk the full vendor precedence chain: Levels.<level>.Vendor -> Spec.Subagent.Vendor -> helmDefaults.Vendor -> fallback 'anthropic'. Extend ProviderDefaults with a Vendor string field so the Helm default can propagate. Add dispatch_helpers_test.go cases proving: (a) a Codex-pinned task level resolves Vendor:'openai'; (b) a Claude-pinned phase level resolves Vendor:'anthropic'; (c) a Project with no vendor override resolves Vendor:'anthropic' at every level -- all offline, no network calls. No chart or cmd/ changes in this plan.",
+    "wave": 2,
+    "dependsOn": ["plan-01-vendor-api-types"],
+    "filesTouched": [
+      "internal/controller/dispatch_helpers.go",
+      "internal/controller/dispatch_helpers_test.go"
+    ]
+  }
+}

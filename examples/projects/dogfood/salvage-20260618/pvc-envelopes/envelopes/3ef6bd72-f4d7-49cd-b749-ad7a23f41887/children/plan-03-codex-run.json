@@ -1,0 +1,17 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-codex-run",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent-core",
+    "objective": "Author run.go and run_test.go for internal/subagent/codex/, completing the pkg/dispatch.Subagent implementation. run.go implements Subagent.Run(ctx, EnvelopeIn): (1) vendor fail-fast guard refusing any envelope whose Provider.Vendor != openai; (2) optional params allow-list for known Codex tuning keys; (3) in-pod prompt artifact read via readPromptArtifact when PromptPath is set; (4) events dir creation and D6 CLI invocation (codex exec --ephemeral --skip-git-repo-check --ignore-user-config --json --sandbox workspace-write --output-schema, with prompt via stdin); (5) OPENAI_API_KEY env wiring from in.SignedToken; (6) JSONL stream parsing via plan-02 ParseStream teed to events.jsonl; (7) Usage population via plan-01 estimatedCostCents from the phase-01 pricing table; (8) child-CRD file handoff for planner role via readChildCRDs (all traversal defenses, kind allowlist, double-object detection, sanitizeJSONStringControls — mirroring anthropic/subagent.go); (9) task-level vs dispatch-level error semantics per pkg/dispatch.Subagent godoc. run_test.go tests are fully offline using the execFunc seam from plan-01 Client and a fake codex binary (bash -c cat pattern): vendor mismatch, fixture JSONL stream end-to-end, child-CRD handoff, conservative-tier fallback for unknown model. Any test path that would invoke a real OpenAI endpoint is guarded by an explicit OPENAI_API_KEY env check and skipped when absent.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-codex-scaffold",
+      "plan-02-codex-stream-parser"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/run.go",
+      "internal/subagent/codex/run_test.go"
+    ]
+  }
+}

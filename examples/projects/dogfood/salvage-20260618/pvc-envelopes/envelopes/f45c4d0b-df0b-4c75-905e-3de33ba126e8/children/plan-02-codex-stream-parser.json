@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-stream-parser",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent",
+    "objective": "Author internal/subagent/codex/stream_parser.go — a JSONL event-stream parser for the Codex CLI '--json' output that extracts the final assistant message and normalises the OpenAI usage block (prompt_tokens -> InputTokens, completion_tokens -> OutputTokens, prompt_tokens_details.cached_tokens -> CacheReadTokens, CacheCreationTokens fixed at 0 per D5). Uses common.ReadLines for the 16 MB per-line budget. Also author stream_parser_test.go with fixture JSONL that proves the usage mapping and the zero-CacheCreationTokens invariant fully offline — no OPENAI_API_KEY required.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "internal/subagent/codex/stream_parser.go",
+      "internal/subagent/codex/stream_parser_test.go"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "kind": "Plan",
+  "name": "plan-05-integration-test",
+  "spec": {
+    "phaseRef": "phase-04-credential-and-chart-wiring",
+    "objective": "Author an offline integration test that exercises the full heterogeneous credential path: a Project whose task level resolves vendor='openai' and LevelProviderSecretRef='openai-secrets' must produce a Job spec with OPENAI_API_KEY injected from that secret and without a credproxy sidecar; a Project whose task level resolves vendor='anthropic' must produce the existing credproxy-plus-signed-token shape unchanged. The test uses the existing jobspec test harness (no live API call, no OPENAI_API_KEY env guard required). A second table-driven test confirms make verify-dispatch-imports stays clean — no openai import leaks from controller or cmd/manager packages.",
+    "wave": 3,
+    "dependsOn": [
+      "plan-03-jobspec-codex-creds",
+      "plan-04-demo-manifest"
+    ],
+    "filesTouched": [
+      "internal/dispatch/podjob/heterogeneous_creds_test.go",
+      "internal/controller/dispatch_helpers_codex_test.go"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-subagent-dockerfile",
+  "spec": {
+    "phaseRef": "phase-02-codex-image-binary",
+    "dependsOn": ["plan-01-codex-subagent-entrypoint"],
+    "filesTouched": [
+      "internal/subagent/codex/Dockerfile"
+    ]
+  }
+}

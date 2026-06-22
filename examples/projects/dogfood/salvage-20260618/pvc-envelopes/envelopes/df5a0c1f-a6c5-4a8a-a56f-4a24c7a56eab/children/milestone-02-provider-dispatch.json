@@ -1,0 +1,8 @@
+{
+  "kind": "Milestone",
+  "name": "milestone-02-provider-dispatch",
+  "spec": {
+    "projectRef": "dogfood-codex-runtime",
+    "dependsOn": ["milestone-01-codex-subagent"]
+  }
+}

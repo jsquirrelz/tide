@@ -1,0 +1,1 @@
+{"kind":"Plan","name":"plan-01-codex-pricing","spec":{"phaseRef":"phase-01-codex-subagent-core","dependsOn":[],"filesTouched":["internal/subagent/codex/pricing.go","internal/subagent/codex/pricing_test.go"]}}

@@ -1,0 +1,13 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-package-scaffold",
+  "spec": {
+    "phaseRef": "phase-01-codex-pricing-usage",
+    "objective": "Scaffold the internal/subagent/codex/ Go package: author doc.go with Apache 2.0 header, package-level doc referencing D-C1 layering and D-D2 Usage contract, and the vendorSentinel constant string openai. Establishes the compilable package declaration that all sibling plans depend on.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "internal/subagent/codex/doc.go"
+    ]
+  }
+}

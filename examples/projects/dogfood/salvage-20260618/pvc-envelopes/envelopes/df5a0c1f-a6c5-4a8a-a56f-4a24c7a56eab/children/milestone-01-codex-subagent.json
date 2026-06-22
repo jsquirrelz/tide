@@ -1,0 +1,8 @@
+{
+  "kind": "Milestone",
+  "name": "milestone-01-codex-subagent",
+  "spec": {
+    "projectRef": "dogfood-codex-runtime",
+    "dependsOn": []
+  }
+}

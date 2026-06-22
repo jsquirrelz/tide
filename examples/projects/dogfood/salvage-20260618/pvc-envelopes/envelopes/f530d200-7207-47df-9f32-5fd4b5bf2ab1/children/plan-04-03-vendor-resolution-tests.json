@@ -1,0 +1,12 @@
+{
+  "kind": "Plan",
+  "name": "plan-04-03-vendor-resolution-tests",
+  "spec": {
+    "phaseRef": "phase-04-per-level-vendor-switch",
+    "dependsOn": ["plan-04-02-resolve-provider-rewire"],
+    "filesTouched": [
+      "internal/controller/dispatch_helpers_test.go",
+      "cmd/manager/env_test.go"
+    ]
+  }
+}

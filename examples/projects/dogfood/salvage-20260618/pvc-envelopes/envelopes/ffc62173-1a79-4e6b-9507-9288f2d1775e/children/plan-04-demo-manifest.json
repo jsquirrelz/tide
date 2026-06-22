@@ -1,0 +1,16 @@
+{
+  "kind": "Plan",
+  "name": "plan-04-demo-manifest",
+  "spec": {
+    "phaseRef": "phase-04-credential-and-chart-wiring",
+    "objective": "Finalize the dogfood Project manifest (examples/projects/dogfood/02-codex-runtime-project.yaml) with complete per-level credential and image wiring: planner levels pin the Claude image and tide-secrets; the task level pins ghcr.io/jsquirrelz/tide-codex-subagent plus the new LevelConfig.ProviderSecretRef field pointing to openai-secrets. Confirm the manifest is schema-valid against the v1alpha1 CRD. Update the dogfood README.md with the two-Secret creation steps (tide-secrets carrying ANTHROPIC_API_KEY, openai-secrets carrying OPENAI_API_KEY) and the operator sequencing note.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-level-config-provider-secret"
+    ],
+    "filesTouched": [
+      "examples/projects/dogfood/02-codex-runtime-project.yaml",
+      "examples/projects/dogfood/README.md"
+    ]
+  }
+}

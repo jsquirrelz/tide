@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-foundation",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent",
+    "objective": "Author internal/subagent/codex/doc.go (package-level doc referencing D-C1 layering pattern and the 'openai' vendor sentinel) and internal/subagent/codex/client.go (Client struct, Options, New constructor, NewWithExec test-seam — mirroring the anthropic package's constructor shape exactly). These are the zero-dependency foundation pieces that run.go and the Dockerfile both import.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "internal/subagent/codex/doc.go",
+      "internal/subagent/codex/client.go"
+    ]
+  }
+}

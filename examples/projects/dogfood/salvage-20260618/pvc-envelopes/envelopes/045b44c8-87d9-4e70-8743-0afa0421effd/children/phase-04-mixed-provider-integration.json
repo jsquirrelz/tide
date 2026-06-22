@@ -1,0 +1,8 @@
+{
+  "kind": "Phase",
+  "name": "phase-04-mixed-provider-integration",
+  "spec": {
+    "milestoneRef": "milestone-01-codex-subagent",
+    "dependsOn": ["phase-01-provider-switch", "phase-03-image-and-credentials"]
+  }
+}

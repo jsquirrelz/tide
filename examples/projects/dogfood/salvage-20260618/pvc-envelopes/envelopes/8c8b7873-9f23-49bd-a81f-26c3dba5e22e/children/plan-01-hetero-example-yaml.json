@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-hetero-example-yaml",
+  "spec": {
+    "phaseRef": "phase-06-hetero-integration",
+    "dependsOn": [],
+    "filesTouched": [
+      "examples/projects/dogfood/02-codex-runtime-project.yaml",
+      "examples/projects/dogfood/README.md",
+      "examples/projects/hetero-dispatch/project.yaml",
+      "examples/projects/hetero-dispatch/per-namespace-resources.yaml",
+      "examples/projects/hetero-dispatch/README.md"
+    ]
+  }
+}

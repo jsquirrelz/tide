@@ -1,0 +1,16 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-manager-helm-vendor",
+  "spec": {
+    "phaseRef": "phase-01-provider-switch",
+    "objective": "Thread the per-level vendor default through cmd/manager/env.go and the Helm chart. Add resolveDefaultVendor() helper (reads TIDE_DEFAULT_VENDOR env var, fallback 'anthropic') and extend tideHelmProviderDefaults to populate ProviderDefaults.Vendor. Extend cmd/manager/env_test.go with a round-trip test: TIDE_DEFAULT_VENDOR=openai -> ProviderDefaults.Vendor=='openai'. Add subagent.defaults.vendor (and optional per-level vendor keys under subagent.levels.*) to charts/tide/values.yaml; wire TIDE_DEFAULT_VENDOR into charts/tide/templates/deployment.yaml. Verify helm template renders the env under both default and --set override paths. make verify-import-firewall and make verify-dispatch-imports must remain green -- zero openai or codex imports in controller or cmd/manager.",
+    "wave": 3,
+    "dependsOn": ["plan-02-resolve-provider-vendor"],
+    "filesTouched": [
+      "cmd/manager/env.go",
+      "cmd/manager/env_test.go",
+      "charts/tide/values.yaml",
+      "charts/tide/templates/deployment.yaml"
+    ]
+  }
+}

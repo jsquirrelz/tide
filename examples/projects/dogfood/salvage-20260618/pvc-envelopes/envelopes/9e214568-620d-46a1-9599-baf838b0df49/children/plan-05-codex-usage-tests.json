@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-05-codex-usage-tests",
+  "spec": {
+    "phaseRef": "phase-01-codex-pricing-usage",
+    "objective": "Author internal/subagent/codex/usage_test.go: offline unit tests for normalizeUsage covering field mapping correctness (prompt_tokens to InputTokens, completion_tokens to OutputTokens, cached_tokens to CacheReadTokens), the CacheCreationTokens equals zero invariant for every input (including populated cached_tokens), CacheSavingsCents computation accuracy, zero usage produces zero-value pkg/dispatch.Usage, and EstimatedCostCents delegates to estimatedCostCents (non-zero for non-zero tokens). Confirm make test exits 0 with the full test suite passing offline as the plan's acceptance gate.",
+    "wave": 3,
+    "dependsOn": [
+      "plan-03-codex-usage-normalizer"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/usage_test.go"
+    ]
+  }
+}

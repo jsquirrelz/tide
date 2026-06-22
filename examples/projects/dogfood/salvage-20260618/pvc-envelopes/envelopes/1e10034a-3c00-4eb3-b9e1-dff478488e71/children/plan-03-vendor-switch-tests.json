@@ -1,0 +1,16 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-vendor-switch-tests",
+  "spec": {
+    "phaseRef": "phase-04-per-level-vendor-switch",
+    "objective": "Author unit tests proving the per-level vendor switch: (1) same Project with task-level Vendor:openai and phase-level unset resolves openai vs anthropic respectively; (2) Spec.Subagent.Vendor:openai propagates to un-overridden levels but is shadowed by a level-specific Vendor:anthropic; (3) Helm-default TIDE_DEFAULT_VENDOR env override reaches tideHelmProviderDefaults; (4) all existing TestResolveProvider* assertions still pass unmodified. Update dispatch_helpers_test.go and env_test.go. Gate: make test exits 0 with zero regressions.",
+    "wave": 3,
+    "dependsOn": [
+      "plan-02-resolve-provider-rewire"
+    ],
+    "filesTouched": [
+      "internal/controller/dispatch_helpers_test.go",
+      "cmd/manager/env_test.go"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-chart-image-defaults",
+  "spec": {
+    "phaseRef": "phase-03-image-and-credentials",
+    "objective": "Wire the Codex subagent image default into the Helm chart and manager startup. Adds images.codexSubagent repository/tag/pullPolicy block to charts/tide/values.yaml (mirrors images.claudeSubagent). Adds CODEX_SUBAGENT_IMAGE env var to charts/tide/templates/deployment.yaml (mirrors CLAUDE_SUBAGENT_IMAGE pattern -- required= guard, bare-ref appVersion suffix). Adds codexSubagentImage helper to cmd/manager/env.go + env_test.go. Updates cmd/manager/main.go to read CODEX_SUBAGENT_IMAGE and stamp it onto ProviderDefaults.CodexImage (new field). Verification: helm template renders both CLAUDE_SUBAGENT_IMAGE and CODEX_SUBAGENT_IMAGE; make test green.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "charts/tide/values.yaml",
+      "charts/tide/templates/deployment.yaml",
+      "cmd/manager/env.go",
+      "cmd/manager/env_test.go",
+      "cmd/manager/main.go",
+      "internal/controller/dispatch_helpers.go"
+    ]
+  }
+}

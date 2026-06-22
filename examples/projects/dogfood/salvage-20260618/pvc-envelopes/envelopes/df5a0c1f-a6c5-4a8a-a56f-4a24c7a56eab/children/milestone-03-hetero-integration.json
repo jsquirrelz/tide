@@ -1,0 +1,8 @@
+{
+  "kind": "Milestone",
+  "name": "milestone-03-hetero-integration",
+  "spec": {
+    "projectRef": "dogfood-codex-runtime",
+    "dependsOn": ["milestone-02-provider-dispatch"]
+  }
+}

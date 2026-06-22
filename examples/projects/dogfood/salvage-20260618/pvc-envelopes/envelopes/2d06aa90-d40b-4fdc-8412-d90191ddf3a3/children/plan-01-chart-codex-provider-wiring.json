@@ -1,0 +1,16 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-chart-codex-provider-wiring",
+  "spec": {
+    "phaseRef": "phase-05-heterogeneous-dispatch-demo",
+    "objective": "Add Helm chart surface for Codex provider: images.codexSubagent block, CODEX_SUBAGENT_IMAGE env var on manager Deployment, TIDE_DEFAULT_VENDOR_* env vars for per-level vendor defaults. Extend cmd/manager/env.go with resolvePerLevelVendors() and update tideHelmProviderDefaults() so vendor defaults reach ResolveProvider. helm template renders all new env vars cleanly; verify-import-firewall and verify-dispatch-imports green; make test exits 0.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "charts/tide/values.yaml",
+      "charts/tide/templates/deployment.yaml",
+      "cmd/manager/env.go",
+      "cmd/manager/env_test.go"
+    ]
+  }
+}

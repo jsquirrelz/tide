@@ -1,0 +1,17 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-resolve-provider-rewire",
+  "spec": {
+    "phaseRef": "phase-04-per-level-vendor-switch",
+    "objective": "Replace the unconditional Vendor:anthropic in ResolveProvider (internal/controller/dispatch_helpers.go) with a full precedence chain: Levels.<level>.Vendor -> Spec.Subagent.Vendor -> helmDefaults.Vendor -> anthropic. Add Vendor string field to ProviderDefaults. Add TIDE_DEFAULT_VENDOR env-var support to cmd/manager/env.go (tideHelmProviderDefaults picks it up; default is anthropic for backward compat) and thread it into cmd/manager/main.go. Zero Codex imports in controller or cmd/manager. Gate: make build exits 0; verify-import-firewall and verify-dispatch-imports green.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-vendor-field-schema"
+    ],
+    "filesTouched": [
+      "internal/controller/dispatch_helpers.go",
+      "cmd/manager/env.go",
+      "cmd/manager/main.go"
+    ]
+  }
+}

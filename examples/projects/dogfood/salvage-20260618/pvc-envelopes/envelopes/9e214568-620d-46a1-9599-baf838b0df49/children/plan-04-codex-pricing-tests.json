@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-04-codex-pricing-tests",
+  "spec": {
+    "phaseRef": "phase-01-codex-pricing-usage",
+    "objective": "Author internal/subagent/codex/pricing_test.go: exhaustive offline unit tests for the pricing table and estimatedCostCents covering per-model rate correctness for codex-1 (input, output, cacheRead), ceiling division on sub-cent amounts, unknown-model conservative fallback (non-zero, greater than or equal to any known-model cost), zero tokens returns zero cents, PricingOverrides merge (verify per-instance clone — package-level priceTable never mutated, T-14-02), CacheCreationTokens always 0 in cost sum (OpenAI cache-creation invariant), and conservative-tier identity (conservative tier equals the most-expensive known entry). No real OpenAI API calls; all offline. Mirrors the test structure and naming convention of internal/subagent/anthropic/pricing_test.go.",
+    "wave": 3,
+    "dependsOn": [
+      "plan-02-codex-pricing-table"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/pricing_test.go"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-dockerfile",
+  "spec": {
+    "phaseRef": "phase-03-image-and-credentials",
+    "objective": "Author images/codex-subagent/Dockerfile -- multi-stage build mirroring images/claude-subagent/Dockerfile: stage-1 compiles the static codex-subagent Go binary from cmd/codex-subagent; stage-2 starts from a Node/Debian base, installs the Codex CLI binary (npm install -g @openai/codex pinned to a specific version) and git, copies the Go binary, and sets USER 1000. Image ref convention: ghcr.io/jsquirrelz/tide-codex-subagent. Verified: docker build exits 0 offline (no OPENAI_API_KEY baked in).",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-codex-entrypoint-shim"
+    ],
+    "filesTouched": [
+      "images/codex-subagent/Dockerfile"
+    ]
+  }
+}

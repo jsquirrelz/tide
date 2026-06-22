@@ -1,0 +1,16 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-dockerfile",
+  "spec": {
+    "phaseRef": "phase-03-codex-image-entrypoint",
+    "objective": "Author images/codex-subagent/Dockerfile — a multi-stage build that compiles the static cmd/codex-subagent binary in Stage 1 (golang:1.26-alpine, CGO_ENABLED=0) and produces a runtime image in Stage 2 (node:22-slim base with git installed, pinned @openai/codex npm CLI, Go binary copied, UID 1000, ENTRYPOINT /usr/local/bin/codex-subagent). Mirrors images/claude-subagent/Dockerfile structure exactly. Canonical image ref: ghcr.io/jsquirrelz/tide-codex-subagent. Add Makefile docker-build-codex-subagent and docker-push-codex-subagent targets using IMAGE_TAG convention, wired into the umbrella docker-build and docker-push goals. Dockerfile must build clean from repo root: docker build -t ghcr.io/jsquirrelz/tide-codex-subagent:test -f images/codex-subagent/Dockerfile .",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-codex-entrypoint-shim"
+    ],
+    "filesTouched": [
+      "images/codex-subagent/Dockerfile",
+      "Makefile"
+    ]
+  }
+}

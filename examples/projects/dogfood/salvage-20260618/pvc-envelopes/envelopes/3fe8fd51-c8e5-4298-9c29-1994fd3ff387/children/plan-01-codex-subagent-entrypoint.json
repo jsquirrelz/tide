@@ -1,0 +1,12 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-subagent-entrypoint",
+  "spec": {
+    "phaseRef": "phase-02-codex-image-binary",
+    "dependsOn": [],
+    "filesTouched": [
+      "cmd/codex-subagent/main.go",
+      "cmd/codex-subagent/main_test.go"
+    ]
+  }
+}

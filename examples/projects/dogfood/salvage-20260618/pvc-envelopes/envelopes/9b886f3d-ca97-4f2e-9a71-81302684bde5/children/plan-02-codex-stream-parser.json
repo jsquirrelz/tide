@@ -1,0 +1,1 @@
+{"kind":"Plan","name":"plan-02-codex-stream-parser","spec":{"phaseRef":"phase-01-codex-subagent-core","dependsOn":[],"filesTouched":["internal/subagent/codex/stream_parser.go","internal/subagent/codex/stream_parser_test.go"]}}

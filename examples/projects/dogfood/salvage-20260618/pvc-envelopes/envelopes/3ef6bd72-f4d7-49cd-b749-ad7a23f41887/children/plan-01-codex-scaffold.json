@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-scaffold",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent-core",
+    "objective": "Author the foundational scaffold for internal/subagent/codex/: doc.go naming the D-C1 layering pattern and the openai vendor sentinel, and client.go declaring the Client struct, Options, New() constructor, and NewWithExec() test-seam — mirroring internal/subagent/anthropic/ exactly. The execFunc field on Client is the indirection seam that lets tests inject a fake codex binary offline. No Run() method lives in this file. No OpenAI SDK imports introduced; the only provider dependency is the codex CLI binary resolved via PATH at runtime.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "internal/subagent/codex/doc.go",
+      "internal/subagent/codex/client.go"
+    ]
+  }
+}

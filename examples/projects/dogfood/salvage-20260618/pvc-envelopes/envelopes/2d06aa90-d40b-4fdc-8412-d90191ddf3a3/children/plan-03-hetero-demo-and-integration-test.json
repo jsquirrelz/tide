@@ -1,0 +1,18 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-hetero-demo-and-integration-test",
+  "spec": {
+    "phaseRef": "phase-05-heterogeneous-dispatch-demo",
+    "objective": "Add examples/projects/hetero/project.yaml (reference Claude-planner plus Codex-executor Project using subagent.levels.task.vendor openai, subagent.levels.task.image ghcr.io/jsquirrelz/tide-codex-subagent, and codexProviderSecretRef). Update examples/projects/dogfood/02-codex-runtime-project.yaml to consume the new codexProviderSecretRef and per-level vendor fields. Add test/integration/kind/hetero_dispatch_test.go exercising mixed-provider waves: all real OpenAI API calls are guarded by OPENAI_API_KEY env set and testing.Short(); test reproduces D4 failure semantics (forced Codex task failure causes sibling to continue, dependents to never dispatch, non-dependents to dispatch in strict profile); asserts tide_cost_cents_total and cache-efficiency panel carry non-zero Codex spend under locked label set with task label absent. make test exits 0; metriccardinality analyzer green.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-chart-codex-provider-wiring",
+      "plan-02-codex-secret-injection"
+    ],
+    "filesTouched": [
+      "examples/projects/hetero/project.yaml",
+      "examples/projects/dogfood/02-codex-runtime-project.yaml",
+      "test/integration/kind/hetero_dispatch_test.go"
+    ]
+  }
+}

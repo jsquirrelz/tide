@@ -1,0 +1,13 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-mixed-provider-integration-test",
+  "spec": {
+    "phaseRef": "phase-06-hetero-integration",
+    "dependsOn": [],
+    "filesTouched": [
+      "test/integration/envtest/hetero_vendor_test.go",
+      "test/e2e/live_codex_test.go",
+      "test/e2e/suite_test.go"
+    ]
+  }
+}

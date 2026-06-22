@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-codex-entrypoint-shim",
+  "spec": {
+    "phaseRef": "phase-03-image-and-credentials",
+    "objective": "Author cmd/codex-subagent/main.go -- thin entrypoint shim mirroring cmd/claude-subagent/main.go: load EnvelopeIn from PVC, call codex.Run, write EnvelopeOut, commit worktree via harness. Includes offline unit tests (main_test.go) using the NewWithExec fake-exec seam -- no live OPENAI_API_KEY required. Apache 2.0 header, logr/zap, harness-wrapped.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "cmd/codex-subagent/main.go",
+      "cmd/codex-subagent/main_test.go"
+    ]
+  }
+}

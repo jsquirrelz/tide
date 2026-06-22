@@ -1,0 +1,1 @@
+{"kind":"Phase","name":"phase-05-heterogeneous-dispatch-demo","spec":{"milestoneRef":"milestone-02-provider-dispatch","dependsOn":["phase-01-codex-subagent-core","phase-02-codex-image-binary","phase-03-per-level-provider-switch","phase-04-credential-and-chart-wiring"]}}

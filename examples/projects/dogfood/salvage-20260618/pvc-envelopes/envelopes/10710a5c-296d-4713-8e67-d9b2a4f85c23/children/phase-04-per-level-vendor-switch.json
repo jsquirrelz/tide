@@ -1,0 +1,8 @@
+{
+  "kind": "Phase",
+  "name": "phase-04-per-level-vendor-switch",
+  "spec": {
+    "milestoneRef": "milestone-03-hetero-integration",
+    "dependsOn": []
+  }
+}

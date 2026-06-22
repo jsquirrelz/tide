@@ -1,0 +1,10 @@
+{
+  "kind": "Phase",
+  "name": "phase-03-codex-image-entrypoint",
+  "spec": {
+    "milestoneRef": "milestone-03-hetero-integration",
+    "dependsOn": [
+      "phase-02-codex-subagent-core"
+    ]
+  }
+}

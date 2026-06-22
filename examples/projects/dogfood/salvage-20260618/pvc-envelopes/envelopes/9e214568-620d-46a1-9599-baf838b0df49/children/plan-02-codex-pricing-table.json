@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-codex-pricing-table",
+  "spec": {
+    "phaseRef": "phase-01-codex-pricing-usage",
+    "objective": "Author internal/subagent/codex/pricing.go: the modelPrice struct, the priceTable keyed on OpenAI/Codex model IDs (initial set: codex-1; cacheRead at the OpenAI discounted cached-input rate; no cacheWrite field because OpenAI caching is automatic and marker-free), the conservativeTier fallback pointing at the most-expensive known tier, and the estimatedCostCents method on the Codex receiver — exact structural mirror of internal/subagent/anthropic/pricing.go. CacheCreationTokens is never included in the cost sum: the OpenAI caching model has no cache-creation billing concept. Uses pkg/dispatch.PriceOverride for the per-instance override merge following the same clone-then-merge pattern as the Anthropic implementation to avoid T-14-02 package-var mutation.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-codex-package-scaffold"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/pricing.go"
+    ]
+  }
+}

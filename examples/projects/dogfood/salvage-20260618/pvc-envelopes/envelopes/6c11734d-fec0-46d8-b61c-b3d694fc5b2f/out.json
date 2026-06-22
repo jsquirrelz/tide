@@ -1,0 +1,1 @@
+{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"6c11734d-fec0-46d8-b61c-b3d694fc5b2f","exitCode":1,"result":"Credit balance is too low","reason":"claude exit 1: ","usage":{"inputTokens":0,"outputTokens":0,"estimatedCostCents":0,"iterations":0,"cacheReadTokens":0,"cacheCreationTokens":0},"artifacts":null,"completedAt":"2026-06-18T00:30:17.36156115Z"}

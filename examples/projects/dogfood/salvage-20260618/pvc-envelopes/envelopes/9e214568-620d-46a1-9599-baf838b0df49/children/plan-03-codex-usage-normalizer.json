@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-codex-usage-normalizer",
+  "spec": {
+    "phaseRef": "phase-01-codex-pricing-usage",
+    "objective": "Author internal/subagent/codex/usage.go: the openaiUsage struct mirroring the OpenAI API usage response shape (prompt_tokens, completion_tokens, prompt_tokens_details.cached_tokens), and the normalizeUsage function that maps it into pkg/dispatch.Usage per the D5 contract: prompt_tokens to InputTokens, completion_tokens to OutputTokens, prompt_tokens_details.cached_tokens to CacheReadTokens, CacheCreationTokens fixed at 0 (invariant: OpenAI has no explicit cache-creation billing), EstimatedCostCents delegated to estimatedCostCents from pricing.go, and CacheSavingsCents computed as the savings from cache hits versus full input price for those tokens. This file is the sole import surface phase-02 needs from this phase.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-02-codex-pricing-table"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/usage.go"
+    ]
+  }
+}

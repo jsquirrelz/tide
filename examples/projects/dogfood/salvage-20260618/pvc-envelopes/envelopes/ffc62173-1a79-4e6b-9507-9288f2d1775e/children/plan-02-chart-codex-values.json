@@ -1,0 +1,14 @@
+{
+  "kind": "Plan",
+  "name": "plan-02-chart-codex-values",
+  "spec": {
+    "phaseRef": "phase-04-credential-and-chart-wiring",
+    "objective": "Add chart values for the Codex subagent image reference and the OpenAI credential Secret name so operators have first-class Helm surface for both. charts/tide/values.yaml gains images.codexSubagent (repository + tag, mirroring images.tideReporter shape) and a codexProviderSecretName key that documents the expected Secret name carrying OPENAI_API_KEY. No chart template changes are required — per-level image and ProviderSecretRef are Project-spec fields, not chart-managed ConfigMap keys — but the values additions provide clear guidance and enable future chart-managed defaults.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "charts/tide/values.yaml",
+      "charts/tide/Chart.yaml"
+    ]
+  }
+}

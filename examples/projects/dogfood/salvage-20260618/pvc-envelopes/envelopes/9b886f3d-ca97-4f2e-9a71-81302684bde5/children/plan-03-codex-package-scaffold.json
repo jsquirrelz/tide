@@ -1,0 +1,1 @@
+{"kind":"Plan","name":"plan-03-codex-package-scaffold","spec":{"phaseRef":"phase-01-codex-subagent-core","dependsOn":[],"filesTouched":["internal/subagent/codex/doc.go","internal/subagent/codex/client.go"]}}

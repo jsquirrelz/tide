@@ -1,0 +1,18 @@
+{
+  "kind": "Plan",
+  "name": "plan-03-codex-run",
+  "spec": {
+    "phaseRef": "phase-02-codex-subagent",
+    "objective": "Author internal/subagent/codex/run.go — the Subagent.Run(ctx, EnvelopeIn) (EnvelopeOut, error) implementation that (1) fails fast when Provider.Vendor != 'openai', (2) shells out to 'codex exec' with the D6 flag set (--ephemeral --skip-git-repo-check --ignore-user-config --json --output-schema <schema-file> --sandbox workspace-write), (3) tees stdout through ParseStream into events.jsonl, (4) computes EstimatedCostCents + CacheSavingsCents via the phase-01 pricing helper, (5) reads child-CRD handoff files from the planner children/ dir with the full traversal/Kind-allowlist/empty-name/double-object defenses mirroring anthropic's readChildCRDs. Also author subagent_test.go (Run unit tests against a fake 'codex' binary using the 'bash -c cat' fixture pattern — fully offline; real OpenAI calls guarded behind OPENAI_API_KEY env set) and childcrd_read_test.go (traversal-escape, symlink-reject, Kind-deny, empty-name, double-object defence tests). Deliverable boundary: 'go test ./internal/subagent/codex/...' exits 0 without OPENAI_API_KEY; vendor-sentinel unit test passes; make verify-import-firewall green.",
+    "wave": 2,
+    "dependsOn": [
+      "plan-01-codex-foundation",
+      "plan-02-codex-stream-parser"
+    ],
+    "filesTouched": [
+      "internal/subagent/codex/run.go",
+      "internal/subagent/codex/subagent_test.go",
+      "internal/subagent/codex/childcrd_read_test.go"
+    ]
+  }
+}

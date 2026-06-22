@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-vendor-field-schema",
+  "spec": {
+    "phaseRef": "phase-04-per-level-vendor-switch",
+    "objective": "Add optional Vendor string field to LevelConfig and SubagentConfig in api/v1alpha1/project_types.go — +kubebuilder:validation:Enum=anthropic;openai, +optional, empty means inherit. Regenerate zz_generated.deepcopy.go and CRD YAML via make manifests generate. No controller logic; no test changes. Gate: make manifests generate exits 0 and CRD YAML carries vendor enum under spec.subagent.levels.*.vendor and spec.subagent.vendor.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "api/v1alpha1/project_types.go",
+      "api/v1alpha1/zz_generated.deepcopy.go",
+      "config/crd/bases/tideproject.k8s_projects.yaml"
+    ]
+  }
+}

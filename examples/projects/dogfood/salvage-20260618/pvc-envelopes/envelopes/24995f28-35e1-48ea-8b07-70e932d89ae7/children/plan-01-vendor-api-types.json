@@ -1,0 +1,15 @@
+{
+  "kind": "Plan",
+  "name": "plan-01-vendor-api-types",
+  "spec": {
+    "phaseRef": "phase-03-per-level-provider-switch",
+    "objective": "Add a Vendor field to SubagentConfig and LevelConfig in the v1alpha1 API types — CEL-validated (enum: anthropic | openai), optional, defaults to empty-string (resolved to 'anthropic' at dispatch time by ResolveProvider). Regenerate zz_generated.deepcopy.go and config/crd/bases/tideproject.k8s_projects.yaml via make generate manifests. No controller logic, no chart, no cmd/ changes — pure schema surface that plan-02-vendor-dispatch-wire depends on.",
+    "wave": 1,
+    "dependsOn": [],
+    "filesTouched": [
+      "api/v1alpha1/project_types.go",
+      "api/v1alpha1/zz_generated.deepcopy.go",
+      "config/crd/bases/tideproject.k8s_projects.yaml"
+    ]
+  }
+}
