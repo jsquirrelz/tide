@@ -377,10 +377,14 @@ func execLoaderPod(
 				{
 					Name:  "loader",
 					Image: "busybox:1.36",
-					// T-29-03-01: fixed tar command — no user-controlled path interpolation.
-					Command: []string{"tar", "xzf", "-", "-C", "/workspace"},
-					// Stdin=true required for tar to read from stdin (SPDY exec).
-					Stdin: true,
+					// The pod stays idle; the tgz is unpacked by an exec'd
+					// `tar xzf -` (below) whose stdin is the SPDY stream. The
+					// main container must NOT be the tar reader: a pod-main
+					// `tar xzf -` blocks forever on a container stdin that is
+					// never attached (the pod never leaves Running), so the
+					// exec is the only writer. `sleep` keeps the pod Running
+					// long enough to exec into; the defer Delete reaps it.
+					Command: []string{"sleep", "600"},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "workspace",

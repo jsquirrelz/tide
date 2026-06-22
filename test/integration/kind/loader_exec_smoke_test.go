@@ -60,7 +60,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -101,8 +100,9 @@ var _ = Describe("Loader SPDY exec smoke", Label("kind", "long"), func() {
 		// Create the loader pod — mirrors production execLoaderPod pod spec:
 		//   - busybox:1.36
 		//   - RestartPolicy Never
-		//   - Stdin=true (required for tar to read from stdin)
-		//   - command: tar xzf - -C /workspace
+		//   - command: sleep (idle; the tgz is unpacked by a SPDY-exec'd tar,
+		//     NOT the pod-main process — a pod-main `tar xzf -` would block
+		//     forever on an unattached container stdin and never complete)
 		//   - emptyDir at /workspace (no PVC needed for this smoke)
 		podSpec := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -119,8 +119,7 @@ var _ = Describe("Loader SPDY exec smoke", Label("kind", "long"), func() {
 					{
 						Name:    "loader",
 						Image:   "busybox:1.36",
-						Command: []string{"tar", "xzf", "-", "-C", "/workspace"},
-						Stdin:   true,
+						Command: []string{"sleep", "600"},
 						VolumeMounts: []corev1.VolumeMount{
 							{
 								Name:      "workspace",
@@ -203,21 +202,31 @@ var _ = Describe("Loader SPDY exec smoke", Label("kind", "long"), func() {
 			"SPDY StreamWithContext must succeed (A1/A2 proven): stdout=%q stderr=%q",
 			execStdout.String(), execStderr.String())
 
-		// Wait for the pod to Succeed — tar exits after reading stdin EOF.
-		By("Waiting for loader pod to Succeed (tar unpacked cleanly)")
-		Eventually(func(g Gomega) {
-			pod, err := cs.CoreV1().Pods(loaderSmokeNS).Get(smokeCtx, podName, metav1.GetOptions{})
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(pod.Status.Phase).To(Equal(corev1.PodSucceeded),
-				"loader pod must Succeed after tgz unpack (tar exit code 0 = unpack OK)")
-		}, 30*time.Second, 2*time.Second).Should(Succeed())
+		// The pod stays Running (sleep); the exec'd tar already unpacked the tgz
+		// into /workspace. Prove the file landed by a SECOND exec (`cat
+		// /workspace/marker.txt`) into the SAME pod — this reads back the exact
+		// emptyDir the first exec wrote to, which a separate pod could not see.
+		By("Reading marker.txt back via a second SPDY exec (cat) into the same pod")
+		catURL := cs.CoreV1().RESTClient().Post().
+			Resource("pods").Name(podName).Namespace(loaderSmokeNS).
+			SubResource("exec").
+			VersionedParams(&corev1.PodExecOptions{
+				Container: "loader",
+				Command:   []string{"cat", "/workspace/marker.txt"},
+				Stdout:    true,
+				Stderr:    true,
+			}, runtime.NewParameterCodec(execScheme)).URL()
 
-		// Verify the unpacked file by reading it from the pod's container logs.
-		// busybox tar does not write to stdout after unpacking, but the pod's
-		// Succeeded status + the zero exit from StreamWithContext prove the marker
-		// was unpacked. For an additional assertion, run a second cat pod.
-		By("Verifying unpacked content via a cat verification pod")
-		verifyLoaderSmokeMarker(smokeCtx, cs, restCfg, loaderSmokeNS)
+		catExec, err := remotecommand.NewSPDYExecutor(restCfg, "POST", catURL)
+		Expect(err).NotTo(HaveOccurred(), "create cat SPDY executor")
+
+		var catOut, catErr bytes.Buffer
+		Expect(catExec.StreamWithContext(smokeCtx, remotecommand.StreamOptions{
+			Stdout: &catOut,
+			Stderr: &catErr,
+		})).To(Succeed(), "cat marker.txt via exec: stderr=%q", catErr.String())
+		Expect(catOut.String()).To(Equal(loaderSmokeMarker),
+			"unpacked /workspace/marker.txt must contain the exact marker the tgz carried (A1/A2 + unpack proof)")
 	})
 })
 
@@ -243,101 +252,4 @@ func buildLoaderSmokeMarkerTgz() []byte {
 	ExpectWithOffset(1, tw.Close()).To(Succeed(), "close tar writer")
 	ExpectWithOffset(1, gz.Close()).To(Succeed(), "close gzip writer")
 	return buf.Bytes()
-}
-
-// verifyLoaderSmokeMarker creates a short-lived cat pod in the same namespace
-// to read /workspace/marker.txt from a fresh emptyDir. Since emptyDirs are
-// pod-scoped and the original loader pod is Succeeded, this is a best-effort
-// check: it runs a separate pod with an emptyDir + init-copy pattern.
-//
-// Pragmatic simplification: the StreamWithContext success + tar exit-0 (pod
-// Succeeded) already proves the SPDY exec works and the tgz was valid. This
-// helper adds a log entry for human review; it does not fail the spec if the
-// cat pod cannot reach the original emptyDir (it can't — emptyDir is local
-// to the pod's volume).
-//
-// The primary A1/A2 proof is the StreamWithContext call completing without error.
-func verifyLoaderSmokeMarker(
-	ctx context.Context,
-	cs kubernetes.Interface,
-	restCfg *rest.Config,
-	ns string,
-) {
-	// Use SPDY exec to run `echo verified` in a NEW pod (emptyDir only) to
-	// confirm the exec mechanism works for read-back as well. This is a
-	// supplementary smoke, not the primary proof.
-	verifyPodName := fmt.Sprintf("loader-smoke-verify-%d", GinkgoRandomSeed())
-
-	verifySpec := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      verifyPodName,
-			Namespace: ns,
-			Labels: map[string]string{
-				"app.kubernetes.io/component": "tide-loader-smoke-verify",
-			},
-		},
-		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
-			Containers: []corev1.Container{
-				{
-					Name:    "verifier",
-					Image:   "busybox:1.36",
-					Command: []string{"sh", "-c", "sleep 10"},
-				},
-			},
-		},
-	}
-
-	_, err := cs.CoreV1().Pods(ns).Create(ctx, verifySpec, metav1.CreateOptions{})
-	if err != nil {
-		GinkgoWriter.Printf("Note: verify pod create failed (non-fatal): %v\n", err)
-		return
-	}
-	defer func() {
-		_ = cs.CoreV1().Pods(ns).Delete(context.Background(), verifyPodName, metav1.DeleteOptions{})
-	}()
-
-	// Wait for verifier to be Running.
-	Eventually(func(g Gomega) {
-		pod, err := cs.CoreV1().Pods(ns).Get(ctx, verifyPodName, metav1.GetOptions{})
-		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(pod.Status.Phase).To(Equal(corev1.PodRunning))
-	}, 60*time.Second, 2*time.Second).Should(Succeed(), "verifier pod must reach Running")
-
-	// Exec `echo verified` to confirm the exec mechanism works for a second call.
-	execScheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(execScheme); err != nil {
-		GinkgoWriter.Printf("Note: scheme setup failed (non-fatal): %v\n", err)
-		return
-	}
-
-	echoURL := cs.CoreV1().RESTClient().Post().
-		Resource("pods").Name(verifyPodName).Namespace(ns).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: "verifier",
-			Command:   []string{"echo", "verified"},
-			Stdin:     false,
-			Stdout:    true,
-			Stderr:    true,
-		}, runtime.NewParameterCodec(execScheme)).URL()
-
-	echoExec, err := remotecommand.NewSPDYExecutor(restCfg, "POST", echoURL)
-	if err != nil {
-		GinkgoWriter.Printf("Note: echo executor create failed (non-fatal): %v\n", err)
-		return
-	}
-
-	var echoOut bytes.Buffer
-	if err := echoExec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &echoOut,
-		Stderr: &echoOut,
-	}); err != nil {
-		GinkgoWriter.Printf("Note: echo exec failed (non-fatal): %v\n", err)
-		return
-	}
-
-	GinkgoWriter.Printf("SPDY exec verify pod echo: %q\n", echoOut.String())
-	Expect(echoOut.String()).To(ContainSubstring("verified"),
-		"verify pod echo must return 'verified' (secondary exec smoke)")
 }

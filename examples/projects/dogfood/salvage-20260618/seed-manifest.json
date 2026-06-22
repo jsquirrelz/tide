@@ -1,0 +1,513 @@
+{
+  "milestones": [
+    {
+      "name": "milestone-01-codex-subagent",
+      "fqName": "milestone-01-codex-subagent",
+      "oldUID": "045b44c8-87d9-4e70-8743-0afa0421effd",
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    },
+    {
+      "name": "milestone-02-provider-dispatch",
+      "fqName": "milestone-02-provider-dispatch",
+      "oldUID": "14ac49b6-a01b-4aa4-a063-951366955632",
+      "dependsOn": [
+        "milestone-01-codex-subagent"
+      ],
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    },
+    {
+      "name": "milestone-03-hetero-integration",
+      "fqName": "milestone-03-hetero-integration",
+      "oldUID": "10710a5c-296d-4713-8e67-d9b2a4f85c23",
+      "dependsOn": [
+        "milestone-02-provider-dispatch"
+      ],
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    }
+  ],
+  "phases": [
+    {
+      "name": "phase-01-codex-pricing-usage",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage",
+      "oldUID": "9e214568-620d-46a1-9599-baf838b0df49",
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-01-codex-subagent-core",
+      "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core",
+      "oldUID": "9b886f3d-ca97-4f2e-9a71-81302684bde5",
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-01-provider-switch",
+      "fqName": "milestone-01-codex-subagent/phase-01-provider-switch",
+      "oldUID": "45b12a36-303d-42f1-95ad-0ab089e5e100",
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-02-codex-image-binary",
+      "fqName": "milestone-02-provider-dispatch/phase-02-codex-image-binary",
+      "oldUID": "3fe8fd51-c8e5-4298-9c29-1994fd3ff387",
+      "dependsOn": [
+        "phase-01-codex-subagent-core"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-02-codex-subagent",
+      "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent",
+      "oldUID": "f45c4d0b-df0b-4c75-905e-3de33ba126e8",
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-02-codex-subagent-core",
+      "fqName": "milestone-03-hetero-integration/phase-02-codex-subagent-core",
+      "oldUID": "3ef6bd72-f4d7-49cd-b749-ad7a23f41887",
+      "dependsOn": [
+        "phase-01-codex-pricing-usage"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-03-codex-image-entrypoint",
+      "fqName": "milestone-03-hetero-integration/phase-03-codex-image-entrypoint",
+      "oldUID": "3abdba95-26a1-4d06-a095-fb1c029604e7",
+      "dependsOn": [
+        "phase-02-codex-subagent-core"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-03-image-and-credentials",
+      "fqName": "milestone-01-codex-subagent/phase-03-image-and-credentials",
+      "oldUID": "e5035388-2ff9-4c63-98e7-763725b9b252",
+      "dependsOn": [
+        "phase-02-codex-subagent"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-03-per-level-provider-switch",
+      "fqName": "milestone-02-provider-dispatch/phase-03-per-level-provider-switch",
+      "oldUID": "24995f28-35e1-48ea-8b07-70e932d89ae7",
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-04-credential-and-chart-wiring",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring",
+      "oldUID": "ffc62173-1a79-4e6b-9507-9288f2d1775e",
+      "dependsOn": [
+        "phase-03-per-level-provider-switch"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-04-mixed-provider-integration",
+      "fqName": "milestone-01-codex-subagent/phase-04-mixed-provider-integration",
+      "oldUID": "1e10034a-3c00-4eb3-b9e1-dff478488e71",
+      "dependsOn": [
+        "phase-01-provider-switch",
+        "phase-03-image-and-credentials"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-04-per-level-vendor-switch",
+      "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch",
+      "oldUID": "f530d200-7207-47df-9f32-5fd4b5bf2ab1",
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-05-chart-secret-wiring",
+      "fqName": "milestone-03-hetero-integration/phase-05-chart-secret-wiring",
+      "oldUID": "80621bfb-519b-469c-ad37-49281e0b0dad",
+      "dependsOn": [
+        "phase-04-per-level-vendor-switch"
+      ],
+      "status": "Succeeded",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-05-heterogeneous-dispatch-demo",
+      "fqName": "milestone-02-provider-dispatch/phase-05-heterogeneous-dispatch-demo",
+      "oldUID": "2d06aa90-d40b-4fdc-8412-d90191ddf3a3",
+      "dependsOn": [
+        "phase-01-codex-subagent-core",
+        "phase-02-codex-image-binary",
+        "phase-03-per-level-provider-switch",
+        "phase-04-credential-and-chart-wiring"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-06-hetero-integration",
+      "fqName": "milestone-03-hetero-integration/phase-06-hetero-integration",
+      "oldUID": "8c8b7873-9f23-49bd-a81f-26c3dba5e22e",
+      "dependsOn": [
+        "phase-02-codex-subagent-core",
+        "phase-03-codex-image-entrypoint",
+        "phase-04-per-level-vendor-switch",
+        "phase-05-chart-secret-wiring"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    }
+  ],
+  "plans": [
+    {
+      "name": "plan-01-chart-codex-provider-wiring",
+      "fqName": "milestone-02-provider-dispatch/phase-05-heterogeneous-dispatch-demo/plan-01-chart-codex-provider-wiring",
+      "oldUID": "b509f743-2031-44af-8e2c-9d879a4e44e6",
+      "status": "Running",
+      "phaseRef": "phase-05-heterogeneous-dispatch-demo"
+    },
+    {
+      "name": "plan-01-codex-entrypoint-shim",
+      "fqName": "milestone-03-hetero-integration/phase-03-codex-image-entrypoint/plan-01-codex-entrypoint-shim",
+      "oldUID": "d02614bc-3a75-4542-94e5-d0b2d5c83196",
+      "status": "Running",
+      "phaseRef": "phase-03-codex-image-entrypoint"
+    },
+    {
+      "name": "plan-01-codex-foundation",
+      "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent/plan-01-codex-foundation",
+      "oldUID": "6fa083dd-3167-4c6b-8a4c-0492a8204d4b",
+      "status": "Running",
+      "phaseRef": "phase-02-codex-subagent"
+    },
+    {
+      "name": "plan-01-codex-package-scaffold",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage/plan-01-codex-package-scaffold",
+      "oldUID": "1ccfc108-030d-4853-9078-59236927314f",
+      "status": "Running",
+      "phaseRef": "phase-01-codex-pricing-usage"
+    },
+    {
+      "name": "plan-01-codex-pricing",
+      "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core/plan-01-codex-pricing",
+      "oldUID": "6c11734d-fec0-46d8-b61c-b3d694fc5b2f",
+      "status": "Running",
+      "phaseRef": "phase-01-codex-subagent-core"
+    },
+    {
+      "name": "plan-01-codex-scaffold",
+      "fqName": "milestone-03-hetero-integration/phase-02-codex-subagent-core/plan-01-codex-scaffold",
+      "oldUID": "9de31b50-9ba1-4217-acd7-8527c4896bd8",
+      "status": "Running",
+      "phaseRef": "phase-02-codex-subagent-core"
+    },
+    {
+      "name": "plan-01-codex-subagent-entrypoint",
+      "fqName": "milestone-02-provider-dispatch/phase-02-codex-image-binary/plan-01-codex-subagent-entrypoint",
+      "oldUID": "49558708-fbb0-4e80-bac0-01879cc6e4de",
+      "status": "Running",
+      "phaseRef": "phase-02-codex-image-binary"
+    },
+    {
+      "name": "plan-01-hetero-example-yaml",
+      "fqName": "milestone-03-hetero-integration/phase-06-hetero-integration/plan-01-hetero-example-yaml",
+      "oldUID": "53b5c037-3e95-4fee-bca3-2c34c8d1cc80",
+      "status": "Running",
+      "phaseRef": "phase-06-hetero-integration"
+    },
+    {
+      "name": "plan-01-level-config-provider-secret",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring/plan-01-level-config-provider-secret",
+      "oldUID": "1f0f350e-a2da-4cd5-8eb8-be4b6a386e3e",
+      "status": "Running",
+      "phaseRef": "phase-04-credential-and-chart-wiring"
+    },
+    {
+      "name": "plan-01-vendor-api-types",
+      "fqName": "milestone-02-provider-dispatch/phase-03-per-level-provider-switch/plan-01-vendor-api-types",
+      "oldUID": "51f76654-b118-4623-a8dd-518f3707b3ac",
+      "status": "Running",
+      "phaseRef": "phase-03-per-level-provider-switch"
+    },
+    {
+      "name": "plan-01-vendor-field-schema",
+      "fqName": "milestone-01-codex-subagent/phase-04-mixed-provider-integration/plan-01-vendor-field-schema",
+      "oldUID": "207a7db5-c905-40eb-80bc-1a13e3587375",
+      "status": "Running",
+      "phaseRef": "phase-04-mixed-provider-integration"
+    },
+    {
+      "name": "plan-02-chart-codex-values",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring/plan-02-chart-codex-values",
+      "oldUID": "57d1162c-5853-40ca-add0-d7457a037e79",
+      "status": "Running",
+      "phaseRef": "phase-04-credential-and-chart-wiring"
+    },
+    {
+      "name": "plan-02-codex-dockerfile",
+      "fqName": "milestone-03-hetero-integration/phase-03-codex-image-entrypoint/plan-02-codex-dockerfile",
+      "oldUID": "10d17027-f895-4fce-9b49-4dfa909246ff",
+      "dependsOn": [
+        "plan-01-codex-entrypoint-shim"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-03-codex-image-entrypoint"
+    },
+    {
+      "name": "plan-02-codex-pricing-table",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage/plan-02-codex-pricing-table",
+      "oldUID": "a87f5f44-e404-4e11-97bc-4643bd078ce9",
+      "dependsOn": [
+        "plan-01-codex-package-scaffold"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-codex-pricing-usage"
+    },
+    {
+      "name": "plan-02-codex-secret-injection",
+      "fqName": "milestone-02-provider-dispatch/phase-05-heterogeneous-dispatch-demo/plan-02-codex-secret-injection",
+      "oldUID": "4401c498-fdf2-422c-b384-7dff3623ed0f",
+      "status": "Running",
+      "phaseRef": "phase-05-heterogeneous-dispatch-demo"
+    },
+    {
+      "name": "plan-02-codex-stream-parser",
+      "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent/plan-02-codex-stream-parser",
+      "oldUID": "87a7ce1e-134e-46b6-a1eb-210f19f58082",
+      "status": "Running",
+      "phaseRef": "phase-02-codex-subagent"
+    },
+    {
+      "name": "plan-02-codex-subagent-dockerfile",
+      "fqName": "milestone-02-provider-dispatch/phase-02-codex-image-binary/plan-02-codex-subagent-dockerfile",
+      "oldUID": "c0d8b1b7-8566-4a61-a527-73df36615d7c",
+      "dependsOn": [
+        "plan-01-codex-subagent-entrypoint"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-02-codex-image-binary"
+    },
+    {
+      "name": "plan-02-mixed-provider-integration-test",
+      "fqName": "milestone-03-hetero-integration/phase-06-hetero-integration/plan-02-mixed-provider-integration-test",
+      "oldUID": "939be459-8b69-4c7d-8ce4-451f4c3553d9",
+      "status": "Running",
+      "phaseRef": "phase-06-hetero-integration"
+    },
+    {
+      "name": "plan-02-resolve-provider-rewire",
+      "fqName": "milestone-01-codex-subagent/phase-04-mixed-provider-integration/plan-02-resolve-provider-rewire",
+      "oldUID": "f11774ea-131c-4091-9783-d45d7015a8b3",
+      "dependsOn": [
+        "plan-01-vendor-field-schema"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-mixed-provider-integration"
+    },
+    {
+      "name": "plan-02-resolve-provider-vendor",
+      "fqName": "milestone-01-codex-subagent/phase-01-provider-switch/plan-02-resolve-provider-vendor",
+      "oldUID": "0fa7c8a4-ea81-4e64-b707-b46ab6644f4a",
+      "dependsOn": [
+        "plan-01-vendor-api-types"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-provider-switch"
+    },
+    {
+      "name": "plan-02-vendor-dispatch-wire",
+      "fqName": "milestone-02-provider-dispatch/phase-03-per-level-provider-switch/plan-02-vendor-dispatch-wire",
+      "oldUID": "9d3cf93b-3bae-46a3-a4ae-7d1217b387b5",
+      "dependsOn": [
+        "plan-01-vendor-api-types"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-03-per-level-provider-switch"
+    },
+    {
+      "name": "plan-03-chart-image-defaults",
+      "fqName": "milestone-01-codex-subagent/phase-03-image-and-credentials/plan-03-chart-image-defaults",
+      "oldUID": "576acec6-e58b-4de4-91f6-b710de04afd5",
+      "status": "Running",
+      "phaseRef": "phase-03-image-and-credentials"
+    },
+    {
+      "name": "plan-03-codex-package-scaffold",
+      "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core/plan-03-codex-package-scaffold",
+      "oldUID": "32b8efb4-fecd-4b9c-9a2f-ccba0afaee71",
+      "status": "Running",
+      "phaseRef": "phase-01-codex-subagent-core"
+    },
+    {
+      "name": "plan-03-codex-run",
+      "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent/plan-03-codex-run",
+      "oldUID": "bd55cd02-337b-4e15-acca-0cb3e98345d6",
+      "dependsOn": [
+        "plan-01-codex-foundation",
+        "plan-02-codex-stream-parser"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-02-codex-subagent"
+    },
+    {
+      "name": "plan-03-codex-usage-normalizer",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage/plan-03-codex-usage-normalizer",
+      "oldUID": "f9e26bec-9da4-47dc-ac00-af362bacee0c",
+      "dependsOn": [
+        "plan-02-codex-pricing-table"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-codex-pricing-usage"
+    },
+    {
+      "name": "plan-03-hetero-demo-and-integration-test",
+      "fqName": "milestone-02-provider-dispatch/phase-05-heterogeneous-dispatch-demo/plan-03-hetero-demo-and-integration-test",
+      "oldUID": "e23a53e4-9901-4a36-951f-15f30fd4e638",
+      "dependsOn": [
+        "plan-01-chart-codex-provider-wiring",
+        "plan-02-codex-secret-injection"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-05-heterogeneous-dispatch-demo"
+    },
+    {
+      "name": "plan-03-jobspec-codex-creds",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring/plan-03-jobspec-codex-creds",
+      "oldUID": "99cd1d52-6b6b-4961-b523-811a869529da",
+      "dependsOn": [
+        "plan-01-level-config-provider-secret"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-credential-and-chart-wiring"
+    },
+    {
+      "name": "plan-03-join-verify-and-fix",
+      "fqName": "milestone-03-hetero-integration/phase-06-hetero-integration/plan-03-join-verify-and-fix",
+      "oldUID": "adb6a428-fd44-4104-a2e0-c45661618d78",
+      "dependsOn": [
+        "plan-01-hetero-example-yaml",
+        "plan-02-mixed-provider-integration-test"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-06-hetero-integration"
+    },
+    {
+      "name": "plan-03-manager-helm-vendor",
+      "fqName": "milestone-01-codex-subagent/phase-01-provider-switch/plan-03-manager-helm-vendor",
+      "oldUID": "19f5b290-c684-44a5-a770-b7a1487c67ed",
+      "dependsOn": [
+        "plan-02-resolve-provider-vendor"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-provider-switch"
+    },
+    {
+      "name": "plan-03-vendor-switch-tests",
+      "fqName": "milestone-01-codex-subagent/phase-04-mixed-provider-integration/plan-03-vendor-switch-tests",
+      "oldUID": "d1c0c3d0-3ba8-41f3-8144-1e2858294228",
+      "dependsOn": [
+        "plan-02-resolve-provider-rewire"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-mixed-provider-integration"
+    },
+    {
+      "name": "plan-04-01-api-schema-vendor",
+      "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch/plan-04-01-api-schema-vendor",
+      "oldUID": "4e3ad2ad-85dc-47c6-9bbb-66789b55ddde",
+      "status": "Running",
+      "phaseRef": "phase-04-per-level-vendor-switch"
+    },
+    {
+      "name": "plan-04-02-resolve-provider-rewire",
+      "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch/plan-04-02-resolve-provider-rewire",
+      "oldUID": "7317b4b3-265a-4c07-971d-b2c4c3b7c274",
+      "dependsOn": [
+        "plan-04-01-api-schema-vendor"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-per-level-vendor-switch"
+    },
+    {
+      "name": "plan-04-03-vendor-resolution-tests",
+      "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch/plan-04-03-vendor-resolution-tests",
+      "oldUID": "559ffe83-a2c7-4220-8bfc-ca6dfe4d6e52",
+      "dependsOn": [
+        "plan-04-02-resolve-provider-rewire"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-per-level-vendor-switch"
+    },
+    {
+      "name": "plan-04-codex-pricing-tests",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage/plan-04-codex-pricing-tests",
+      "oldUID": "17c04105-f179-4616-a7af-814c254c3355",
+      "dependsOn": [
+        "plan-02-codex-pricing-table"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-codex-pricing-usage"
+    },
+    {
+      "name": "plan-04-codex-run",
+      "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core/plan-04-codex-run",
+      "oldUID": "ab56d23e-1bad-4e5f-9fd2-ca5e69c7bcaa",
+      "dependsOn": [
+        "plan-01-codex-pricing",
+        "plan-02-codex-stream-parser",
+        "plan-03-codex-package-scaffold"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-codex-subagent-core"
+    },
+    {
+      "name": "plan-04-demo-manifest",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring/plan-04-demo-manifest",
+      "oldUID": "ce50700a-b8e6-4a0d-a959-6dd3d0822449",
+      "dependsOn": [
+        "plan-01-level-config-provider-secret"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-credential-and-chart-wiring"
+    },
+    {
+      "name": "plan-04-jobspec-vendor-credentials",
+      "fqName": "milestone-01-codex-subagent/phase-03-image-and-credentials/plan-04-jobspec-vendor-credentials",
+      "oldUID": "f4568117-3820-4a71-b6a7-185ceef893d1",
+      "status": "Running",
+      "phaseRef": "phase-03-image-and-credentials"
+    },
+    {
+      "name": "plan-05-codex-usage-tests",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage/plan-05-codex-usage-tests",
+      "oldUID": "80581f6d-3799-4ba2-9688-441e0febfe8f",
+      "dependsOn": [
+        "plan-03-codex-usage-normalizer"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-01-codex-pricing-usage"
+    },
+    {
+      "name": "plan-05-integration-test",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring/plan-05-integration-test",
+      "oldUID": "f3a8ccf8-368e-4e8a-a64a-4e08785d7aae",
+      "dependsOn": [
+        "plan-03-jobspec-codex-creds",
+        "plan-04-demo-manifest"
+      ],
+      "status": "Running",
+      "phaseRef": "phase-04-credential-and-chart-wiring"
+    }
+  ]
+}
