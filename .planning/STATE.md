@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: — Planning Resumption & Cost Resilience
-status: executing
+status: verifying
 stopped_at: Phase 29 context gathered
-last_updated: "2026-06-22T06:16:50.206Z"
+last_updated: "2026-06-22T06:25:36.692Z"
 last_activity: 2026-06-22
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 33
-  completed_plans: 32
-  percent: 88
+  completed_plans: 33
+  percent: 100
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 
 Phase: 29 (Operator Tooling + E2E) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-22
 
 ```
@@ -64,6 +64,7 @@ v1.0.3 Progress: [x] 27  [x] 28  [ ] 29
 | Phase 28 P05 | 15m | 2 tasks | 7 files |
 | Phase 29-operator-tooling-e2e P02 | 14m | 2 tasks | 5 files |
 | Phase 29 P03 | 120 | 3 tasks | 6 files |
+| Phase 29-operator-tooling-e2e P05 | 20 | - tasks | - files |
 
 ## Accumulated Context
 
@@ -87,6 +88,8 @@ Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); 
 - [v1.0.3 roadmap]: Wave CRs are NEVER imported (PERSIST-03 / D-10 binding). Import materializes Milestone/Phase/Plan/Task CRs only; Wave CRs always re-derived by deriveGlobalWaves after import.
 - [v1.0.3 roadmap]: client.Create bypasses the validating webhook; any import path must call dag.ComputeWaves explicitly before materializing children (cycle detection is not automatic on import).
 - [Phase ?]: [Phase 28 P04]: Seed-derived planning DAG (Milestone/Phase/Plan nodes + DependsOn edges) used for ImportController cycle detection before any client.Create — NOT buildGlobalEdges which is edgeless under Task-less D-04 seed
+- [Phase ?]: import-envelopes CLI flow
+- [Phase ?]: budget suppression assertion window
 
 ### Pending Todos
 
@@ -131,6 +134,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-22T06:16:50.187Z
+Last session: 2026-06-22T06:25:29.182Z
 Stopped at: Phase 29 context gathered
 Resume file: None

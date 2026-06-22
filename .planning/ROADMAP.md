@@ -268,7 +268,7 @@ Plans:
 
 **Wave 4** *(blocked on 29-02, 29-03, 29-04)*
 
-- [ ] 29-05-PLAN.md — kind E2E driving the real CLI: tier a small fixture → all-Milestones-Succeeded; tier b salvage → 0 `{milestone,phase}` planner Jobs + $0 re-paid (D-11b/D-17), long-test gated (D-12) (TOOL-02)
+- [x] 29-05-PLAN.md — kind E2E driving the real CLI: tier a small fixture → all-Milestones-Succeeded; tier b salvage → 0 `{milestone,phase}` planner Jobs + $0 re-paid (D-11b/D-17), long-test gated (D-12) (TOOL-02)
 
 
 <details>
@@ -309,4 +309,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
-| 29. Operator Tooling + E2E | v1.0.3 | 4/5 | In Progress|  |
+| 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete   | 2026-06-22 |
