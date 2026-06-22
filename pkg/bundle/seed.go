@@ -93,12 +93,24 @@ func PlanFQName(milestoneName, phaseName, planName string) string {
 	return milestoneName + "/" + phaseName + "/" + planName
 }
 
-// computeEnvelopeSHA256 returns the lowercase hex sha256 digest of outJSONBytes.
+// ComputeEnvelopeSHA256 returns the lowercase hex sha256 digest of outJSONBytes.
 // Stable across calls; uses crypto/sha256 stdlib (same approach as
-// internal/credproxy/token.go).
-func computeEnvelopeSHA256(outJSONBytes []byte) string {
+// internal/credproxy/token.go). Exported so cmd/tide export layer can compute
+// per-envelope sha256 for the seed manifest (D-04).
+func ComputeEnvelopeSHA256(outJSONBytes []byte) string {
 	sum := sha256.Sum256(outJSONBytes)
 	return fmt.Sprintf("%x", sum)
+}
+
+// computeEnvelopeSHA256 is the package-internal alias kept for dryrun.go.
+func computeEnvelopeSHA256(outJSONBytes []byte) string {
+	return ComputeEnvelopeSHA256(outJSONBytes)
+}
+
+// StampChildCount is the exported alias for stampChildCount, usable by
+// packages outside pkg/bundle (e.g. cmd/tide export layer, D-16a).
+func StampChildCount(outJSONBytes []byte, w io.Writer) ([]byte, error) {
+	return stampChildCount(outJSONBytes, w)
 }
 
 // stampChildCount repairs legacy out.json bytes that predate the childCount
