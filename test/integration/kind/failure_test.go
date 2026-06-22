@@ -181,12 +181,32 @@ metadata:
 `, ns)
 	_ = applyYAML(nsYAML)
 	ensureSubagentSA(ns)
+	// Phase 28/29 GAP-5: tide-import SA for the ImportController's import Job pod.
+	// The Job references SA "tide-import"; without it the Job controller refuses
+	// to create the pod ("serviceaccount tide-import not found") and imported
+	// envelopes never get rekeyed to new-UID paths. The binary makes no API calls,
+	// so the SA needs no Role/RoleBinding (mirrors the chart's serviceaccount-import.yaml).
+	ensureImportSA(ns)
 	ensureProjectsPVC(ns)
 	ensureSigningKeySecret(ns)
 	// Phase 09 plan 09-06: tide-reporter SA + Role + RoleBinding for the reader Job.
 	ensureReporterSARBAC(ns)
 	// Cascade-11: pre-bind WaitForFirstConsumer PVC for Pod-less fixtures (push-lease).
 	pvcPrewarmPod(ns)
+}
+
+// ensureImportSA creates the tide-import ServiceAccount in the given namespace.
+// The ImportController's import Job pod references it by name; the binary makes
+// no K8s API calls, so no Role/RoleBinding is needed (Phase 28/29 GAP-5).
+func ensureImportSA(ns string) {
+	saYAML := fmt.Sprintf(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-import
+  namespace: %s
+automountServiceAccountToken: true
+`, ns)
+	_ = applyYAML(saYAML)
 }
 
 // ensureReporterSARBAC creates the tide-reporter ServiceAccount + Role +
