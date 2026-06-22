@@ -161,6 +161,27 @@ func TestBuildImportJob_PVCSubPathMounts(t *testing.T) {
 	}
 }
 
+// TestBuildImportJob_FSGroup asserts GAP-6: the pod sets PodSecurityContext
+// {FSGroup:1000, RunAsUser:65532, RunAsGroup:1000} so kubelet chowns the RW
+// new-workspace PVC mount at startup and the nonroot tide-import binary can
+// MkdirAll the new-UID envelope tree (without it: "mkdir ...: permission denied").
+func TestBuildImportJob_FSGroup(t *testing.T) {
+	job := controller.BuildImportJob(newImportTestProject(), newImportTestOpts(), newTestScheme())
+	sc := job.Spec.Template.Spec.SecurityContext
+	if sc == nil {
+		t.Fatal("BuildImportJob: pod spec has no SecurityContext (expected FSGroup=1000)")
+	}
+	if sc.FSGroup == nil || *sc.FSGroup != 1000 {
+		t.Errorf("BuildImportJob: SecurityContext.FSGroup = %v, want 1000 (kubelet chowns the RW PVC mount)", sc.FSGroup)
+	}
+	if sc.RunAsGroup == nil || *sc.RunAsGroup != 1000 {
+		t.Errorf("BuildImportJob: SecurityContext.RunAsGroup = %v, want 1000 (primary gid matching FSGroup)", sc.RunAsGroup)
+	}
+	if sc.RunAsUser == nil || *sc.RunAsUser != 65532 {
+		t.Errorf("BuildImportJob: SecurityContext.RunAsUser = %v, want 65532 (distroless nonroot; required alongside RunAsGroup)", sc.RunAsUser)
+	}
+}
+
 // TestBuildImportJob_ActiveDeadline asserts WR-04: a bounded ActiveDeadlineSeconds
 // is set so a hung copy cannot pin the RW PVC mount indefinitely.
 func TestBuildImportJob_ActiveDeadline(t *testing.T) {

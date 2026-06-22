@@ -160,6 +160,18 @@ func BuildImportJob(
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: importSAName,
+					// Pod-level securityContext so the nonroot tide-import container can
+					// write to the PVC (GAP-6): FSGroup makes kubelet chown+setgid the
+					// mounted new-workspace subPath at startup so MkdirAll on the fresh
+					// new-UID envelope tree succeeds. RunAsUser=65532 is the tide-import
+					// distroless image's nonroot user; RunAsGroup MUST accompany it (the
+					// CRI rejects "runAsGroup without runAsUser") and pins the primary gid
+					// to FSGroup. Mirrors push_helpers.go:218 (same distroless base).
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup:    new(int64(1000)),
+						RunAsUser:  new(int64(65532)),
+						RunAsGroup: new(int64(1000)),
+					},
 					Volumes: []corev1.Volume{
 						{
 							// Single PVC volume; two mounts below use different subPaths
