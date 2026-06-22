@@ -41,4 +41,5 @@ func registerSubcommands(root *cobra.Command) {
 
 	// Plan 29-02/29-03 — envelope portability verbs.
 	root.AddCommand(newExportEnvelopesCmd())
+	root.AddCommand(newImportEnvelopesCmd())
 }
