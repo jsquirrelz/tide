@@ -1,0 +1,114 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Milestone
+  metadata:
+    creationTimestamp: "2026-06-17T23:45:24Z"
+    finalizers:
+    - tideproject.k8s/milestone-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: milestone-01-codex-subagent
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Project
+      name: dogfood-codex-runtime
+      uid: df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab
+    resourceVersion: "349234"
+    uid: 045b44c8-87d9-4e70-8743-0afa0421effd
+  spec:
+    projectRef: dogfood-codex-runtime
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:45:24Z"
+      message: Planner Job tide-milestone-045b44c8-87d9-4e70-8743-0afa0421effd-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-17T23:55:03Z"
+      message: Milestone approved; children will dispatch
+      reason: ApprovedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Milestone
+  metadata:
+    creationTimestamp: "2026-06-17T23:45:24Z"
+    finalizers:
+    - tideproject.k8s/milestone-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: milestone-02-provider-dispatch
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Project
+      name: dogfood-codex-runtime
+      uid: df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab
+    resourceVersion: "349238"
+    uid: 14ac49b6-a01b-4aa4-a063-951366955632
+  spec:
+    dependsOn:
+    - milestone-01-codex-subagent
+    projectRef: dogfood-codex-runtime
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:45:24Z"
+      message: Planner Job tide-milestone-14ac49b6-a01b-4aa4-a063-951366955632-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-17T23:55:03Z"
+      message: Milestone approved; children will dispatch
+      reason: ApprovedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Milestone
+  metadata:
+    creationTimestamp: "2026-06-17T23:45:24Z"
+    finalizers:
+    - tideproject.k8s/milestone-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: milestone-03-hetero-integration
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Project
+      name: dogfood-codex-runtime
+      uid: df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab
+    resourceVersion: "349240"
+    uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+  spec:
+    dependsOn:
+    - milestone-02-provider-dispatch
+    projectRef: dogfood-codex-runtime
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:45:24Z"
+      message: Planner Job tide-milestone-10710a5c-296d-4713-8e67-d9b2a4f85c23-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-17T23:55:03Z"
+      message: Milestone approved; children will dispatch
+      reason: ApprovedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+kind: List
+metadata:
+  resourceVersion: ""

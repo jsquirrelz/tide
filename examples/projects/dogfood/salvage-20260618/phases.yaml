@@ -1,0 +1,490 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-01-codex-pricing-usage
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "349406"
+    uid: 9e214568-620d-46a1-9599-baf838b0df49
+  spec:
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:07Z"
+      message: Planner Job tide-phase-9e214568-620d-46a1-9599-baf838b0df49-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:49:38Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-01-codex-subagent-core
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-02-provider-dispatch
+      uid: 14ac49b6-a01b-4aa4-a063-951366955632
+    resourceVersion: "349251"
+    uid: 9b886f3d-ca97-4f2e-9a71-81302684bde5
+  spec:
+    milestoneRef: milestone-02-provider-dispatch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:04Z"
+      message: Planner Job tide-phase-9b886f3d-ca97-4f2e-9a71-81302684bde5-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:51:05Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-01-provider-switch
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-codex-subagent
+      uid: 045b44c8-87d9-4e70-8743-0afa0421effd
+    resourceVersion: "349329"
+    uid: 45b12a36-303d-42f1-95ad-0ab089e5e100
+  spec:
+    milestoneRef: milestone-01-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:06Z"
+      message: Planner Job tide-phase-45b12a36-303d-42f1-95ad-0ab089e5e100-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:49:38Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-02-codex-image-binary
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-02-provider-dispatch
+      uid: 14ac49b6-a01b-4aa4-a063-951366955632
+    resourceVersion: "349253"
+    uid: 3fe8fd51-c8e5-4298-9c29-1994fd3ff387
+  spec:
+    dependsOn:
+    - phase-01-codex-subagent-core
+    milestoneRef: milestone-02-provider-dispatch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:04Z"
+      message: Planner Job tide-phase-3fe8fd51-c8e5-4298-9c29-1994fd3ff387-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:51:05Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-02-codex-subagent
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-codex-subagent
+      uid: 045b44c8-87d9-4e70-8743-0afa0421effd
+    resourceVersion: "349332"
+    uid: f45c4d0b-df0b-4c75-905e-3de33ba126e8
+  spec:
+    milestoneRef: milestone-01-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:06Z"
+      message: Planner Job tide-phase-f45c4d0b-df0b-4c75-905e-3de33ba126e8-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-02-codex-subagent-core
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "349407"
+    uid: 3ef6bd72-f4d7-49cd-b749-ad7a23f41887
+  spec:
+    dependsOn:
+    - phase-01-codex-pricing-usage
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:07Z"
+      message: Planner Job tide-phase-3ef6bd72-f4d7-49cd-b749-ad7a23f41887-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-03-codex-image-entrypoint
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "349420"
+    uid: 3abdba95-26a1-4d06-a095-fb1c029604e7
+  spec:
+    dependsOn:
+    - phase-02-codex-subagent-core
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:07Z"
+      message: Planner Job tide-phase-3abdba95-26a1-4d06-a095-fb1c029604e7-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:51:05Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-03-image-and-credentials
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-codex-subagent
+      uid: 045b44c8-87d9-4e70-8743-0afa0421effd
+    resourceVersion: "349342"
+    uid: e5035388-2ff9-4c63-98e7-763725b9b252
+  spec:
+    dependsOn:
+    - phase-02-codex-subagent
+    milestoneRef: milestone-01-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:06Z"
+      message: Planner Job tide-phase-e5035388-2ff9-4c63-98e7-763725b9b252-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:49:38Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-03-per-level-provider-switch
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-02-provider-dispatch
+      uid: 14ac49b6-a01b-4aa4-a063-951366955632
+    resourceVersion: "349269"
+    uid: 24995f28-35e1-48ea-8b07-70e932d89ae7
+  spec:
+    milestoneRef: milestone-02-provider-dispatch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:04Z"
+      message: Planner Job tide-phase-24995f28-35e1-48ea-8b07-70e932d89ae7-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:49:38Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-04-credential-and-chart-wiring
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-02-provider-dispatch
+      uid: 14ac49b6-a01b-4aa4-a063-951366955632
+    resourceVersion: "349264"
+    uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+  spec:
+    dependsOn:
+    - phase-03-per-level-provider-switch
+    milestoneRef: milestone-02-provider-dispatch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:04Z"
+      message: Planner Job tide-phase-ffc62173-1a79-4e6b-9507-9288f2d1775e-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:51:05Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-04-mixed-provider-integration
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-codex-subagent
+      uid: 045b44c8-87d9-4e70-8743-0afa0421effd
+    resourceVersion: "349350"
+    uid: 1e10034a-3c00-4eb3-b9e1-dff478488e71
+  spec:
+    dependsOn:
+    - phase-01-provider-switch
+    - phase-03-image-and-credentials
+    milestoneRef: milestone-01-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:06Z"
+      message: Planner Job tide-phase-1e10034a-3c00-4eb3-b9e1-dff478488e71-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-04-per-level-vendor-switch
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "349426"
+    uid: f530d200-7207-47df-9f32-5fd4b5bf2ab1
+  spec:
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:07Z"
+      message: Planner Job tide-phase-f530d200-7207-47df-9f32-5fd4b5bf2ab1-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-05-chart-secret-wiring
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "354020"
+    uid: 80621bfb-519b-469c-ad37-49281e0b0dad
+  spec:
+    dependsOn:
+    - phase-04-per-level-vendor-switch
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:08Z"
+      message: Planner Job tide-phase-80621bfb-519b-469c-ad37-49281e0b0dad-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:42Z"
+      message: Phase planner completed; Plan children materialized
+      reason: PlannerComplete
+      status: "True"
+      type: Succeeded
+    - lastTransitionTime: "2026-06-18T00:08:42Z"
+      message: Phase resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Succeeded
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:49:38Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-05-heterogeneous-dispatch-demo
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-02-provider-dispatch
+      uid: 14ac49b6-a01b-4aa4-a063-951366955632
+    resourceVersion: "349279"
+    uid: 2d06aa90-d40b-4fdc-8412-d90191ddf3a3
+  spec:
+    dependsOn:
+    - phase-01-codex-subagent-core
+    - phase-02-codex-image-binary
+    - phase-03-per-level-provider-switch
+    - phase-04-credential-and-chart-wiring
+    milestoneRef: milestone-02-provider-dispatch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:04Z"
+      message: Planner Job tide-phase-2d06aa90-d40b-4fdc-8412-d90191ddf3a3-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-17T23:53:37Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: phase-06-hetero-integration
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-03-hetero-integration
+      uid: 10710a5c-296d-4713-8e67-d9b2a4f85c23
+    resourceVersion: "349441"
+    uid: 8c8b7873-9f23-49bd-a81f-26c3dba5e22e
+  spec:
+    dependsOn:
+    - phase-02-codex-subagent-core
+    - phase-03-codex-image-entrypoint
+    - phase-04-per-level-vendor-switch
+    - phase-05-chart-secret-wiring
+    milestoneRef: milestone-03-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-17T23:55:08Z"
+      message: Planner Job tide-phase-8c8b7873-9f23-49bd-a81f-26c3dba5e22e-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+kind: List
+metadata:
+  resourceVersion: ""

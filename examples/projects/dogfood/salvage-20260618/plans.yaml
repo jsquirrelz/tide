@@ -1,0 +1,1449 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:09Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-chart-codex-provider-wiring
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-05-heterogeneous-dispatch-demo
+      uid: 2d06aa90-d40b-4fdc-8412-d90191ddf3a3
+    resourceVersion: "383180"
+    uid: b509f743-2031-44af-8e2c-9d879a4e44e6
+  spec:
+    phaseRef: phase-05-heterogeneous-dispatch-demo
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:09Z"
+      message: Planner Job tide-plan-b509f743-2031-44af-8e2c-9d879a4e44e6-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:46Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:02:49Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-entrypoint-shim
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-codex-image-entrypoint
+      uid: 3abdba95-26a1-4d06-a095-fb1c029604e7
+    resourceVersion: "383146"
+    uid: d02614bc-3a75-4542-94e5-d0b2d5c83196
+  spec:
+    phaseRef: phase-03-codex-image-entrypoint
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:02:49Z"
+      message: Planner Job tide-plan-d02614bc-3a75-4542-94e5-d0b2d5c83196-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:47Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:15Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-foundation
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-subagent
+      uid: f45c4d0b-df0b-4c75-905e-3de33ba126e8
+    resourceVersion: "383028"
+    uid: 6fa083dd-3167-4c6b-8a4c-0492a8204d4b
+  spec:
+    phaseRef: phase-02-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:15Z"
+      message: Planner Job tide-plan-6fa083dd-3167-4c6b-8a4c-0492a8204d4b-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:44Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:00:14Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-package-scaffold
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-pricing-usage
+      uid: 9e214568-620d-46a1-9599-baf838b0df49
+    resourceVersion: "418969"
+    uid: 1ccfc108-030d-4853-9078-59236927314f
+  spec:
+    phaseRef: phase-01-codex-pricing-usage
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:00:15Z"
+      message: Planner Job tide-plan-1ccfc108-030d-4853-9078-59236927314f-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:10:11Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:04:00Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-pricing
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-subagent-core
+      uid: 9b886f3d-ca97-4f2e-9a71-81302684bde5
+    resourceVersion: "451807"
+    uid: 6c11734d-fec0-46d8-b61c-b3d694fc5b2f
+  spec:
+    phaseRef: phase-01-codex-subagent-core
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:04:00Z"
+      message: Planner Job tide-plan-6c11734d-fec0-46d8-b61c-b3d694fc5b2f-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:44Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:02:25Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-scaffold
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-subagent-core
+      uid: 3ef6bd72-f4d7-49cd-b749-ad7a23f41887
+    resourceVersion: "383103"
+    uid: 9de31b50-9ba1-4217-acd7-8527c4896bd8
+  spec:
+    phaseRef: phase-02-codex-subagent-core
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:02:26Z"
+      message: Planner Job tide-plan-9de31b50-9ba1-4217-acd7-8527c4896bd8-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:13Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-codex-subagent-entrypoint
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-image-binary
+      uid: 3fe8fd51-c8e5-4298-9c29-1994fd3ff387
+    resourceVersion: "382795"
+    uid: 49558708-fbb0-4e80-bac0-01879cc6e4de
+  spec:
+    phaseRef: phase-02-codex-image-binary
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:14Z"
+      message: Planner Job tide-plan-49558708-fbb0-4e80-bac0-01879cc6e4de-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:57Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-hetero-example-yaml
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-06-hetero-integration
+      uid: 8c8b7873-9f23-49bd-a81f-26c3dba5e22e
+    resourceVersion: "418402"
+    uid: 53b5c037-3e95-4fee-bca3-2c34c8d1cc80
+  spec:
+    phaseRef: phase-06-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:57Z"
+      message: Planner Job tide-plan-53b5c037-3e95-4fee-bca3-2c34c8d1cc80-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:17Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-level-config-provider-secret
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-credential-and-chart-wiring
+      uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+    resourceVersion: "382865"
+    uid: 1f0f350e-a2da-4cd5-8eb8-be4b6a386e3e
+  spec:
+    phaseRef: phase-04-credential-and-chart-wiring
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:17Z"
+      message: Planner Job tide-plan-1f0f350e-a2da-4cd5-8eb8-be4b6a386e3e-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:54Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-vendor-api-types
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-per-level-provider-switch
+      uid: 24995f28-35e1-48ea-8b07-70e932d89ae7
+    resourceVersion: "382937"
+    uid: 51f76654-b118-4623-a8dd-518f3707b3ac
+  spec:
+    phaseRef: phase-03-per-level-provider-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:54Z"
+      message: Planner Job tide-plan-51f76654-b118-4623-a8dd-518f3707b3ac-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:44Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:36Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-01-vendor-field-schema
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-mixed-provider-integration
+      uid: 1e10034a-3c00-4eb3-b9e1-dff478488e71
+    resourceVersion: "382891"
+    uid: 207a7db5-c905-40eb-80bc-1a13e3587375
+  spec:
+    phaseRef: phase-04-mixed-provider-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:36Z"
+      message: Planner Job tide-plan-207a7db5-c905-40eb-80bc-1a13e3587375-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:17Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-chart-codex-values
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-credential-and-chart-wiring
+      uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+    resourceVersion: "418400"
+    uid: 57d1162c-5853-40ca-add0-d7457a037e79
+  spec:
+    phaseRef: phase-04-credential-and-chart-wiring
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:17Z"
+      message: Planner Job tide-plan-57d1162c-5853-40ca-add0-d7457a037e79-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:44Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:02:49Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-codex-dockerfile
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-codex-image-entrypoint
+      uid: 3abdba95-26a1-4d06-a095-fb1c029604e7
+    resourceVersion: "382793"
+    uid: 10d17027-f895-4fce-9b49-4dfa909246ff
+  spec:
+    dependsOn:
+    - plan-01-codex-entrypoint-shim
+    phaseRef: phase-03-codex-image-entrypoint
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:02:49Z"
+      message: Planner Job tide-plan-10d17027-f895-4fce-9b49-4dfa909246ff-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:00:14Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-codex-pricing-table
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-pricing-usage
+      uid: 9e214568-620d-46a1-9599-baf838b0df49
+    resourceVersion: "383140"
+    uid: a87f5f44-e404-4e11-97bc-4643bd078ce9
+  spec:
+    dependsOn:
+    - plan-01-codex-package-scaffold
+    phaseRef: phase-01-codex-pricing-usage
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:00:15Z"
+      message: Planner Job tide-plan-a87f5f44-e404-4e11-97bc-4643bd078ce9-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:46Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:09Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-codex-secret-injection
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-05-heterogeneous-dispatch-demo
+      uid: 2d06aa90-d40b-4fdc-8412-d90191ddf3a3
+    resourceVersion: "382815"
+    uid: 4401c498-fdf2-422c-b384-7dff3623ed0f
+  spec:
+    phaseRef: phase-05-heterogeneous-dispatch-demo
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:09Z"
+      message: Planner Job tide-plan-4401c498-fdf2-422c-b384-7dff3623ed0f-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:15Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-codex-stream-parser
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-subagent
+      uid: f45c4d0b-df0b-4c75-905e-3de33ba126e8
+    resourceVersion: "383035"
+    uid: 87a7ce1e-134e-46b6-a1eb-210f19f58082
+  spec:
+    phaseRef: phase-02-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:15Z"
+      message: Planner Job tide-plan-87a7ce1e-134e-46b6-a1eb-210f19f58082-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:13Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-codex-subagent-dockerfile
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-image-binary
+      uid: 3fe8fd51-c8e5-4298-9c29-1994fd3ff387
+    resourceVersion: "383201"
+    uid: c0d8b1b7-8566-4a61-a527-73df36615d7c
+  spec:
+    dependsOn:
+    - plan-01-codex-subagent-entrypoint
+    phaseRef: phase-02-codex-image-binary
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:14Z"
+      message: Planner Job tide-plan-c0d8b1b7-8566-4a61-a527-73df36615d7c-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:46Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:57Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-mixed-provider-integration-test
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-06-hetero-integration
+      uid: 8c8b7873-9f23-49bd-a81f-26c3dba5e22e
+    resourceVersion: "383030"
+    uid: 939be459-8b69-4c7d-8ce4-451f4c3553d9
+  spec:
+    phaseRef: phase-06-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:57Z"
+      message: Planner Job tide-plan-939be459-8b69-4c7d-8ce4-451f4c3553d9-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:36Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-resolve-provider-rewire
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-mixed-provider-integration
+      uid: 1e10034a-3c00-4eb3-b9e1-dff478488e71
+    resourceVersion: "418414"
+    uid: f11774ea-131c-4091-9783-d45d7015a8b3
+  spec:
+    dependsOn:
+    - plan-01-vendor-field-schema
+    phaseRef: phase-04-mixed-provider-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:36Z"
+      message: Planner Job tide-plan-f11774ea-131c-4091-9783-d45d7015a8b3-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:48Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:40Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-resolve-provider-vendor
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-provider-switch
+      uid: 45b12a36-303d-42f1-95ad-0ab089e5e100
+    resourceVersion: "382804"
+    uid: 0fa7c8a4-ea81-4e64-b707-b46ab6644f4a
+  spec:
+    dependsOn:
+    - plan-01-vendor-api-types
+    phaseRef: phase-01-provider-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:40Z"
+      message: Planner Job tide-plan-0fa7c8a4-ea81-4e64-b707-b46ab6644f4a-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:54Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-02-vendor-dispatch-wire
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-per-level-provider-switch
+      uid: 24995f28-35e1-48ea-8b07-70e932d89ae7
+    resourceVersion: "494681"
+    uid: 9d3cf93b-3bae-46a3-a4ae-7d1217b387b5
+  spec:
+    dependsOn:
+    - plan-01-vendor-api-types
+    phaseRef: phase-03-per-level-provider-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:54Z"
+      message: Planner Job tide-plan-9d3cf93b-3bae-46a3-a4ae-7d1217b387b5-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:11:17Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:08Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-chart-image-defaults
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-image-and-credentials
+      uid: e5035388-2ff9-4c63-98e7-763725b9b252
+    resourceVersion: "451775"
+    uid: 576acec6-e58b-4de4-91f6-b710de04afd5
+  spec:
+    phaseRef: phase-03-image-and-credentials
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:09Z"
+      message: Planner Job tide-plan-576acec6-e58b-4de4-91f6-b710de04afd5-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:04:00Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-codex-package-scaffold
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-subagent-core
+      uid: 9b886f3d-ca97-4f2e-9a71-81302684bde5
+    resourceVersion: "382803"
+    uid: 32b8efb4-fecd-4b9c-9a2f-ccba0afaee71
+  spec:
+    phaseRef: phase-01-codex-subagent-core
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:04:00Z"
+      message: Planner Job tide-plan-32b8efb4-fecd-4b9c-9a2f-ccba0afaee71-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:15Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-codex-run
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-02-codex-subagent
+      uid: f45c4d0b-df0b-4c75-905e-3de33ba126e8
+    resourceVersion: "351049"
+    uid: bd55cd02-337b-4e15-acca-0cb3e98345d6
+  spec:
+    dependsOn:
+    - plan-01-codex-foundation
+    - plan-02-codex-stream-parser
+    phaseRef: phase-02-codex-subagent
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:15Z"
+      message: Planner Job tide-plan-bd55cd02-337b-4e15-acca-0cb3e98345d6-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    phase: Running
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:00:14Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-codex-usage-normalizer
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-pricing-usage
+      uid: 9e214568-620d-46a1-9599-baf838b0df49
+    resourceVersion: "383206"
+    uid: f9e26bec-9da4-47dc-ac00-af362bacee0c
+  spec:
+    dependsOn:
+    - plan-02-codex-pricing-table
+    phaseRef: phase-01-codex-pricing-usage
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:00:15Z"
+      message: Planner Job tide-plan-f9e26bec-9da4-47dc-ac00-af362bacee0c-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:48Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:09Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-hetero-demo-and-integration-test
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-05-heterogeneous-dispatch-demo
+      uid: 2d06aa90-d40b-4fdc-8412-d90191ddf3a3
+    resourceVersion: "418429"
+    uid: e23a53e4-9901-4a36-951f-15f30fd4e638
+  spec:
+    dependsOn:
+    - plan-01-chart-codex-provider-wiring
+    - plan-02-codex-secret-injection
+    phaseRef: phase-05-heterogeneous-dispatch-demo
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:10Z"
+      message: Planner Job tide-plan-e23a53e4-9901-4a36-951f-15f30fd4e638-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:48Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:17Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-jobspec-codex-creds
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-credential-and-chart-wiring
+      uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+    resourceVersion: "383033"
+    uid: 99cd1d52-6b6b-4961-b523-811a869529da
+  spec:
+    dependsOn:
+    - plan-01-level-config-provider-secret
+    phaseRef: phase-04-credential-and-chart-wiring
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:17Z"
+      message: Planner Job tide-plan-99cd1d52-6b6b-4961-b523-811a869529da-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:57Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-join-verify-and-fix
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-06-hetero-integration
+      uid: 8c8b7873-9f23-49bd-a81f-26c3dba5e22e
+    resourceVersion: "383098"
+    uid: adb6a428-fd44-4104-a2e0-c45661618d78
+  spec:
+    dependsOn:
+    - plan-01-hetero-example-yaml
+    - plan-02-mixed-provider-integration-test
+    phaseRef: phase-06-hetero-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:57Z"
+      message: Planner Job tide-plan-adb6a428-fd44-4104-a2e0-c45661618d78-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:46Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:40Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-manager-helm-vendor
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-provider-switch
+      uid: 45b12a36-303d-42f1-95ad-0ab089e5e100
+    resourceVersion: "418398"
+    uid: 19f5b290-c684-44a5-a770-b7a1487c67ed
+  spec:
+    dependsOn:
+    - plan-02-resolve-provider-vendor
+    phaseRef: phase-01-provider-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:40Z"
+      message: Planner Job tide-plan-19f5b290-c684-44a5-a770-b7a1487c67ed-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:01:36Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-03-vendor-switch-tests
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-mixed-provider-integration
+      uid: 1e10034a-3c00-4eb3-b9e1-dff478488e71
+    resourceVersion: "418510"
+    uid: d1c0c3d0-3ba8-41f3-8144-1e2858294228
+  spec:
+    dependsOn:
+    - plan-02-resolve-provider-rewire
+    phaseRef: phase-04-mixed-provider-integration
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:01:36Z"
+      message: Planner Job tide-plan-d1c0c3d0-3ba8-41f3-8144-1e2858294228-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:47Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:08Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-01-api-schema-vendor
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-per-level-vendor-switch
+      uid: f530d200-7207-47df-9f32-5fd4b5bf2ab1
+    resourceVersion: "382853"
+    uid: 4e3ad2ad-85dc-47c6-9bbb-66789b55ddde
+  spec:
+    phaseRef: phase-04-per-level-vendor-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:09Z"
+      message: Planner Job tide-plan-4e3ad2ad-85dc-47c6-9bbb-66789b55ddde-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:43Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:08Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-02-resolve-provider-rewire
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-per-level-vendor-switch
+      uid: f530d200-7207-47df-9f32-5fd4b5bf2ab1
+    resourceVersion: "451812"
+    uid: 7317b4b3-265a-4c07-971d-b2c4c3b7c274
+  spec:
+    dependsOn:
+    - plan-04-01-api-schema-vendor
+    phaseRef: phase-04-per-level-vendor-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:09Z"
+      message: Planner Job tide-plan-7317b4b3-265a-4c07-971d-b2c4c3b7c274-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:03:08Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-03-vendor-resolution-tests
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-per-level-vendor-switch
+      uid: f530d200-7207-47df-9f32-5fd4b5bf2ab1
+    resourceVersion: "418968"
+    uid: 559ffe83-a2c7-4220-8bfc-ca6dfe4d6e52
+  spec:
+    dependsOn:
+    - plan-04-02-resolve-provider-rewire
+    phaseRef: phase-04-per-level-vendor-switch
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:03:09Z"
+      message: Planner Job tide-plan-559ffe83-a2c7-4220-8bfc-ca6dfe4d6e52-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:10:11Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:00:14Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-codex-pricing-tests
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-pricing-usage
+      uid: 9e214568-620d-46a1-9599-baf838b0df49
+    resourceVersion: "451997"
+    uid: 17c04105-f179-4616-a7af-814c254c3355
+  spec:
+    dependsOn:
+    - plan-02-codex-pricing-table
+    phaseRef: phase-01-codex-pricing-usage
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:00:15Z"
+      message: Planner Job tide-plan-17c04105-f179-4616-a7af-814c254c3355-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:09:22Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:04:00Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-codex-run
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-subagent-core
+      uid: 9b886f3d-ca97-4f2e-9a71-81302684bde5
+    resourceVersion: "383144"
+    uid: ab56d23e-1bad-4e5f-9fd2-ca5e69c7bcaa
+  spec:
+    dependsOn:
+    - plan-01-codex-pricing
+    - plan-02-codex-stream-parser
+    - plan-03-codex-package-scaffold
+    phaseRef: phase-01-codex-subagent-core
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:04:00Z"
+      message: Planner Job tide-plan-ab56d23e-1bad-4e5f-9fd2-ca5e69c7bcaa-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:46Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:17Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-demo-manifest
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-credential-and-chart-wiring
+      uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+    resourceVersion: "383205"
+    uid: ce50700a-b8e6-4a0d-a959-6dd3d0822449
+  spec:
+    dependsOn:
+    - plan-01-level-config-provider-secret
+    phaseRef: phase-04-credential-and-chart-wiring
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:17Z"
+      message: Planner Job tide-plan-ce50700a-b8e6-4a0d-a959-6dd3d0822449-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:47Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:08Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-04-jobspec-vendor-credentials
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-03-image-and-credentials
+      uid: e5035388-2ff9-4c63-98e7-763725b9b252
+    resourceVersion: "418438"
+    uid: f4568117-3820-4a71-b6a7-185ceef893d1
+  spec:
+    phaseRef: phase-03-image-and-credentials
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:09Z"
+      message: Planner Job tide-plan-f4568117-3820-4a71-b6a7-185ceef893d1-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:47Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:00:14Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-05-codex-usage-tests
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-01-codex-pricing-usage
+      uid: 9e214568-620d-46a1-9599-baf838b0df49
+    resourceVersion: "383020"
+    uid: 80581f6d-3799-4ba2-9688-441e0febfe8f
+  spec:
+    dependsOn:
+    - plan-03-codex-usage-normalizer
+    phaseRef: phase-01-codex-pricing-usage
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:00:15Z"
+      message: Planner Job tide-plan-80581f6d-3799-4ba2-9688-441e0febfe8f-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:45Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Plan
+  metadata:
+    creationTimestamp: "2026-06-18T00:06:17Z"
+    finalizers:
+    - tideproject.k8s/plan-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: dogfood-codex-runtime
+    name: plan-05-integration-test
+    namespace: tide-dogfood-codex
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Phase
+      name: phase-04-credential-and-chart-wiring
+      uid: ffc62173-1a79-4e6b-9507-9288f2d1775e
+    resourceVersion: "383149"
+    uid: f3a8ccf8-368e-4e8a-a64a-4e08785d7aae
+  spec:
+    dependsOn:
+    - plan-03-jobspec-codex-creds
+    - plan-04-demo-manifest
+    phaseRef: phase-04-credential-and-chart-wiring
+  status:
+    conditions:
+    - lastTransitionTime: "2026-06-18T00:06:19Z"
+      message: Planner Job tide-plan-f3a8ccf8-368e-4e8a-a64a-4e08785d7aae-1 dispatched
+      reason: PlannerDispatched
+      status: "True"
+      type: AuthoringPlanner
+    - lastTransitionTime: "2026-06-18T00:08:47Z"
+      message: Plan resumed from gate boundary
+      reason: ResumedByUser
+      status: "False"
+      type: WaveOrLevelPaused
+    phase: Running
+    validationState: Validated
+kind: List
+metadata:
+  resourceVersion: ""
