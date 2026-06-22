@@ -36,7 +36,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 ### Operator Tooling + E2E (TOOL)
 
 - [x] **TOOL-01**: An operator CLI command exports a Project's planner envelopes to a portable bundle and imports a bundle into a new run, with a dry-run mode that reports what would be adopted vs re-planned.
-- [ ] **TOOL-02**: A kind integration test proves end-to-end resumption against the real `examples/projects/dogfood/salvage-20260618` fixture: import the salvaged plan → planners are skipped → execution proceeds, with planning cost not re-paid.
+- [x] **TOOL-02**: A kind integration test proves end-to-end resumption against the real `examples/projects/dogfood/salvage-20260618` fixture: import the salvaged plan → planners are skipped → execution proceeds, with planning cost not re-paid.
 
 ## Future Requirements (deferred)
 
@@ -67,4 +67,4 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 | IMPORT-04 | Phase 28 | Complete |
 | IMPORT-05 | Phase 28 | Complete |
 | TOOL-01 | Phase 29 | Complete |
-| TOOL-02 | Phase 29 | Pending |
+| TOOL-02 | Phase 29 | Complete |

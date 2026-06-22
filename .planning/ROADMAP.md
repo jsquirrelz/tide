@@ -264,7 +264,7 @@ Plans:
 **Wave 3** *(29-03 blocked on 29-02 via subcommands.go; 29-04 parallel)*
 
 - [ ] 29-03-PLAN.md — `tide import-envelopes` + `--dry-run`: offline adopt/re-plan table + json + cycle hard-reject (D-07/08/09), live stage-only loader pod (SPDY exec) + seed ConfigMap + surfaced project.yaml (D-05/06) (TOOL-01)
-- [ ] 29-04-PLAN.md — one-time salvage childCount patch (D-16b) + small drain-to-Succeeded fixture (D-11a) + test-int-kind-prep tide CLI build (D-10) (TOOL-02)
+- [x] 29-04-PLAN.md — one-time salvage childCount patch (D-16b) + small drain-to-Succeeded fixture (D-11a) + test-int-kind-prep tide CLI build (D-10) (TOOL-02)
 
 **Wave 4** *(blocked on 29-02, 29-03, 29-04)*
 
@@ -309,4 +309,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 26. Multi-Milestone Drive + Spec Conformance | v1.0.2 (Spring Tide) | 4/4 | Complete | 2026-06-17 |
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
-| 29. Operator Tooling + E2E | v1.0.3 | 2/5 | In Progress|  |
+| 29. Operator Tooling + E2E | v1.0.3 | 3/5 | In Progress|  |
