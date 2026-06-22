@@ -23,6 +23,17 @@ e2e_run_1:
       title: "Tier a: ImportController never materializes Milestones after import+apply"
       detail: "Small-fixture import-envelopes + kubectl apply project.yaml succeeded, but after 480s 'no Milestones found' — the in-cluster ImportController did not create the CR tree from the seed ConfigMap. Likely downstream of GAP-1 (envelopes not staged) or a seed-ConfigMap/importSource wiring gap. Re-investigate after GAP-1/GAP-2 fixed."
   what_passed_in_code: "TOOL-01 unit tier fully green (pkg/bundle, cmd/tide); D-05/D-07/D-09/D-16 + zip-slip confirmed in source; Phase 28 isEnvelopeComplete guard untouched. Defects are runtime-integration only — surfaced solely by the live kind run."
+e2e_fix_progress:
+  date: 2026-06-22
+  note: "6 gaps found+fixed across live runs 1-5 + manual repro. GAP-3/4/5/6 were all LATENT PHASE 28 defects — the import Job had never run end-to-end on a real (RBAC/SA/volume-enforcing) cluster; envtest masked them. All committed; all unit suites green."
+  gaps_resolved:
+    - "GAP-1 loader pod (tar blocked on stdin) — FIXED, proven (Loader SPDY smoke PASSED run 3-5)."
+    - "GAP-2 salvage canonical bundle (project.yaml + seed-manifest.json via scripts/gen-salvage-seed) — FIXED, proven (Tier b PASSED run 3)."
+    - "GAP-3 ImportController configmaps RBAC (cached ConfigMap informer hung the seed Get) — FIXED, proven (CRs materialize)."
+    - "GAP-4 tide-import image never built/loaded in kind — FIXED (Makefile + suite --set images.tideImport.tag=test)."
+    - "GAP-5 tide-import ServiceAccount never created — FIXED (chart serviceaccount-import.yaml + ensureImportSA)."
+    - "GAP-6 import Job pod lacked pod-level fsGroup -> 'mkdir new-workspace: permission denied' — FIXED, MANUALLY VALIDATED LIVE: import Job Completes ~5s, ImportComplete=True, envelopes staged at new-UID paths, CR tree materialized, milestone/phase planners skipped (adopted)."
+  status: "Import mechanism now works END-TO-END through adoption on a real cluster (manual repro on kind-tide-test). REMAINING: one full E2E run to confirm Tier a drains the small fixture to all-Milestones-Succeeded (the post-adoption execution cascade — normal reporter->task->stub path, exercised by other passing kind tests). Tier b (salvage adoption) + Loader smoke already PASS. Recommend re-running `make test-int` (focused: 'Import resume E2E|Loader SPDY exec smoke') in a fresh session to confirm Tier a green, then flip VERIFICATION status to passed."
 ---
 
 # Phase 29: Operator Tooling + E2E Verification Report
