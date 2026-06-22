@@ -152,7 +152,11 @@ test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integrati
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
 
-test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter Docker images and load them into the tide-test kind cluster.
+test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter Docker images and load them into the tide-test kind cluster. Also builds bin/tide for the kind E2E (D-10, 29-04).
+	# Phase 29 plan 29-04 (D-10): build the tide CLI binary so the kind E2E can
+	# exec it via TIDE_BINARY or PATH. The binary is a stateless host binary;
+	# no image loading is needed.
+	go build -o bin/tide ./cmd/tide
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-stub-subagent:test -f images/stub-subagent/Dockerfile .
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-credproxy:test -f images/credproxy/Dockerfile .
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-push:test -f images/tide-push/Dockerfile .

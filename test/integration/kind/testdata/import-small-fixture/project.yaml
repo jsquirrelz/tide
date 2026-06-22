@@ -1,0 +1,43 @@
+---
+# project.yaml — the Project manifest that the E2E test applies after
+# `tide import-envelopes` stages the seed ConfigMap and PVC envelopes.
+#
+# spec.importSource drives the Phase 28 ImportController state machine:
+#   - seedManifestConfigMap: the ConfigMap name created by import-envelopes
+#     carrying the seed-manifest.json as the "manifest" key.
+#   - salvagedPVCSubPath: the PVC subpath where loader-pod unpacked the
+#     pvc-envelopes.tgz; matches <oldProjectUID>/workspace per D-06.
+#
+# The E2E test (29-05) creates the namespace, signing-key secret, and
+# provider secret before applying this file. The stub subagent image
+# is wired via helm override (see suite_test.go BeforeSuite).
+#
+# Budget: absoluteCapCents=0 — stub subagent costs nothing; the $0 cap
+# ensures the run never charges real cost (mirroring bare-project.yaml).
+apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: import-small-test
+  # namespace: import-small-ns  (applied by the test per its ns lifecycle)
+spec:
+  schemaRevision: v1alpha2
+  targetRepo: "https://git.example.internal/stub/no-such-repo.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 0
+  subagent:
+    model: stub
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+  importSource:
+    # seedManifestConfigMap is created by `tide import-envelopes` before this
+    # Project is applied. The E2E test (29-05) derives this name from the
+    # bundle's seed-manifest.json (deterministic: "tide-import-seed-<projectName>").
+    seedManifestConfigMap: "tide-import-seed-import-small-test"
+    # salvagedPVCSubPath is the old project UID + /workspace, matching the
+    # loader pod's PVC mount subPath (D-06).
+    salvagedPVCSubPath: "aaaaaaaa-0001-0001-0001-aaaaaaaaaaaa/workspace"

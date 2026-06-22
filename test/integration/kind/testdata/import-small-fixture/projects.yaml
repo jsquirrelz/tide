@@ -1,0 +1,36 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Project
+  metadata:
+    creationTimestamp: "2026-06-22T00:00:00Z"
+    finalizers:
+    - tideproject.k8s/project-cleanup
+    generation: 1
+    name: import-small-test
+    namespace: import-small-ns
+    uid: aaaaaaaa-0001-0001-0001-aaaaaaaaaaaa
+  spec:
+    budget:
+      absoluteCapCents: 0
+    failureProfile: strict
+    gates:
+      milestone: auto
+      phase: auto
+      plan: auto
+      task: auto
+      pauseBetweenWaves: false
+    outcomePrompt: |
+      Small stub fixture for import drain-to-Succeeded E2E test.
+      1 Project / 1 Milestone / 1 Phase / 2 Plans (no Tasks — Tasks materialize
+      from plan-level envelope children). Stub subagent drives execution.
+    providerSecretRef: tide-provider-secret
+    schemaRevision: v1alpha2
+    subagent:
+      model: stub
+    targetRepo: "https://git.example.internal/stub/no-such-repo.git"
+  status:
+    phase: Running
+kind: List
+metadata:
+  resourceVersion: ""

@@ -1,0 +1,28 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-22T00:00:02Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: import-small-test
+    name: phase-01-stub
+    namespace: import-small-ns
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-stub
+      uid: bbbbbbbb-0001-0001-0001-bbbbbbbbbbbb
+    uid: cccccccc-0001-0001-0001-cccccccccccc
+  spec:
+    milestoneRef: milestone-01-stub
+  status:
+    phase: Running
+kind: List
+metadata:
+  resourceVersion: ""

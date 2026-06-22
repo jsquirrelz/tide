@@ -1,0 +1,40 @@
+{
+  "milestones": [
+    {
+      "name": "milestone-01-stub",
+      "fqName": "milestone-01-stub",
+      "oldUID": "bbbbbbbb-0001-0001-0001-bbbbbbbbbbbb",
+      "status": "Running",
+      "projectRef": "import-small-test",
+      "sha256": "c0a9be143400a589b67e3d762328fce4ffa04aed09766f64e6900f5f286c31f6"
+    }
+  ],
+  "phases": [
+    {
+      "name": "phase-01-stub",
+      "fqName": "milestone-01-stub/phase-01-stub",
+      "oldUID": "cccccccc-0001-0001-0001-cccccccccccc",
+      "status": "Running",
+      "milestoneRef": "milestone-01-stub",
+      "sha256": "dd8dc10e3986b44941ff1179ed14bebd7ba778b1a085e631c2a783449350543a"
+    }
+  ],
+  "plans": [
+    {
+      "name": "plan-01-stub",
+      "fqName": "milestone-01-stub/phase-01-stub/plan-01-stub",
+      "oldUID": "dddddddd-0001-0001-0001-dddddddddddd",
+      "status": "Running",
+      "phaseRef": "phase-01-stub",
+      "sha256": "191461009c1ebf3244da23688c4a0c917a8ecd4db9738fcdd87959a3b6270f3a"
+    },
+    {
+      "name": "plan-02-stub",
+      "fqName": "milestone-01-stub/phase-01-stub/plan-02-stub",
+      "oldUID": "eeeeeeee-0001-0001-0001-eeeeeeeeeeee",
+      "status": "Running",
+      "phaseRef": "phase-01-stub",
+      "sha256": "e6307cb5ef46a2e871b397e01883b38e9ec2d476e820cd27bada340b10c55f03"
+    }
+  ]
+}
