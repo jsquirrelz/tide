@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	dag "github.com/jsquirrelz/tide/pkg/dag"
 	dispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -316,6 +317,22 @@ func WritePVCEnvelopesTgz(files map[string][]byte) ([]byte, error) {
 	tw := tar.NewWriter(gz)
 
 	for name, data := range files {
+		// GAP-13: directory entries (name ending in "/") must be written with
+		// TypeDir — Go's archive/tar rejects a trailing-slash Name under TypeReg
+		// ("filename may not have trailing slash"). processEnvelopesTgz preserves
+		// the inspector tar's explicit dir entries, so honor them here rather than
+		// crash assembling the round-trip bundle.
+		if strings.HasSuffix(name, "/") {
+			hdr := &tar.Header{
+				Name:     name,
+				Mode:     0o755,
+				Typeflag: tar.TypeDir,
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return nil, fmt.Errorf("write tar dir header %s: %w", name, err)
+			}
+			continue
+		}
 		hdr := &tar.Header{
 			Name:     name,
 			Mode:     0o644,

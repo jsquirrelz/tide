@@ -26,7 +26,7 @@
       "oldUID": "dddddddd-0001-0001-0001-dddddddddddd",
       "status": "Running",
       "phaseRef": "phase-01-stub",
-      "sha256": "191461009c1ebf3244da23688c4a0c917a8ecd4db9738fcdd87959a3b6270f3a"
+      "sha256": "718e979e6ffd703f7e5bbe255a2501a8fa3a33e0bae16f61baaf6effe738c931"
     },
     {
       "name": "plan-02-stub",
@@ -34,7 +34,7 @@
       "oldUID": "eeeeeeee-0001-0001-0001-eeeeeeeeeeee",
       "status": "Running",
       "phaseRef": "phase-01-stub",
-      "sha256": "e6307cb5ef46a2e871b397e01883b38e9ec2d476e820cd27bada340b10c55f03"
+      "sha256": "663efe561bd65eaa09f65596fb29d009fe8f0556442823498d673242b93ba8c8"
     }
   ]
 }

@@ -496,3 +496,24 @@ func TestBuildInitJobGroupShared(t *testing.T) {
 		t.Errorf("buildInitJob: command missing 'chmod 2775' (setgid group-shared dirs); got: %s", joined)
 	}
 }
+
+// TestBuildInitJobEnvelopesChmodTolerant (GAP-7) pins that the init Job tolerates
+// a chmod failure on /workspace/envelopes. In the resume-from-import flow the
+// tide-import Job (uid 65532) creates+owns /workspace/envelopes and sets it 2775
+// itself; this uid-1000 init Job then cannot chmod it (EPERM, non-owner). The
+// command must swallow that one failure (`|| true`) rather than exit non-zero and
+// flip the Project to InitFailed — while still hard-failing on repo/artifacts.
+func TestBuildInitJobEnvelopesChmodTolerant(t *testing.T) {
+	project := fixtureProject()
+	r := &ProjectReconciler{}
+	job := r.buildInitJob(project, "tide-projects")
+	joined := strings.Join(job.Spec.Template.Spec.Containers[0].Command, " ")
+
+	if !strings.Contains(joined, "chmod 2775 /workspace/envelopes") {
+		t.Errorf("buildInitJob: command missing per-dir envelopes chmod; got: %s", joined)
+	}
+	if !strings.Contains(joined, "|| true") {
+		t.Errorf("buildInitJob: envelopes chmod must be fault-tolerant ('|| true') for the "+
+			"resume-from-import flow where envelopes is owned by uid 65532; got: %s", joined)
+	}
+}

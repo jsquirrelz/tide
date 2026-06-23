@@ -800,6 +800,27 @@ func ensureSigningKeySecret(ns string) {
 	_ = applyYAML(signingKeySecretYAML(ns, keyData))
 }
 
+// ensureProviderSecret creates the dummy tide-provider-secret in the given
+// namespace. The credproxy sidecar injected into every planner/executor Job
+// mounts providerSecretRef ("tide-provider-secret") as env; without it the pod
+// is stuck at Init:CreateContainerConfigError ("secret tide-provider-secret not
+// found") and never runs. applyHierarchy inlines this secret for the
+// hierarchy-fixture tests, but import-resume specs build their namespace via the
+// bare createNamespace path, so they need the explicit equivalent (29-05 / GAP-8;
+// the fixture's project.yaml header documents the test as the secret's creator).
+// The key value is a dummy — the stub subagent never makes a real provider call.
+func ensureProviderSecret(ns string) {
+	_ = applyYAML(fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: %s
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+`, ns))
+}
+
 func controllerSigningKeyData() (string, error) {
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 		"get", "secret", "tide-signing-key",

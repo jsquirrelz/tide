@@ -516,8 +516,21 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		if plSeed.Status != "" {
 			statusPatch := client.MergeFrom(pl.DeepCopy())
 			pl.Status.Phase = plSeed.Status
+			// GAP-12: arm the wave-materialization path for imported plans. Plan
+			// succession (reconcileWaveMaterialization → BoundaryDetected → Succeeded)
+			// is gated on ValidationState=Validated, which is normally stamped from
+			// the planner Job's tiny-status (plan_controller.go:617, envReadOK). An
+			// imported plan has no planner Job/pod for the manager to read, so that
+			// stamp never fires and the plan parks at Running forever even after its
+			// reporter materializes Tasks that all Succeed. The plan's planning IS
+			// validated (its envelope passed the import completeness guard), so stamp
+			// it here — mirroring the status.phase patch above. This only ARMS the
+			// path; reconcileWaveMaterialization still re-runs ComputeWaves + file-
+			// touch checks every reconcile and BoundaryDetected's childless guard
+			// prevents any false Succeeded before Tasks exist.
+			pl.Status.ValidationState = "Validated"
 			if patchErr := r.Status().Patch(ctx, pl, statusPatch); patchErr != nil {
-				logger.V(1).Info("import: could not patch Plan status phase (non-fatal)", "name", pl.Name, "err", patchErr)
+				logger.V(1).Info("import: could not patch Plan status (non-fatal)", "name", pl.Name, "err", patchErr)
 			}
 		}
 	}

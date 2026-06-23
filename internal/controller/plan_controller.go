@@ -304,7 +304,16 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 			if !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, true, err
 			}
-			return ctrl.Result{}, true, nil
+			// Planner Job is gone (TTL/GC) OR never existed in this cluster — the Plan
+			// was materialized by an import with status.phase=Running carried from the
+			// seed (import_controller.go:421 "not blanket Succeeded"). Either way the
+			// planner already ran and its envelope lives on the PVC keyed by plan.UID,
+			// not on the Job. Fall through to completion so the tide-reporter spawns to
+			// materialize Task children from the imported envelope and succession fires
+			// — without this an imported Plan parks at Running forever with no Job, no
+			// reporter, and no Tasks. Mirrors milestone_controller.go:293-296 (GAP-9).
+			res, hErr := r.handlePlannerJobCompletion(ctx, plan, nil)
+			return res, true, hErr
 		}
 		if isJobTerminal(&job) {
 			res, err := r.handlePlannerJobCompletion(ctx, plan, &job)

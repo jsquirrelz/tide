@@ -154,6 +154,29 @@ func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr 
 
 	report := importReport{}
 
+	// GAP-7: ensure the destination envelopes base dir is setgid + group-writable
+	// (2775) so uid-1000 planner/executor pods can create their own envelope
+	// subdirs under it after a resume-from-import. This Job runs as uid 65532 (the
+	// distroless nonroot user); when it is the dir's creator the chmod sets the
+	// bits that a plain MkdirAll (0755) would otherwise leave off — without which
+	// uid-1000 pods cannot write new envelopes here.
+	//
+	// The init Job (uid 1000) sets the SAME 2775 on this dir and the two Jobs race;
+	// whichever loses the race finds the dir already created+owned by the other uid
+	// and cannot chmod it (EPERM, non-owner). That is success, not failure: the
+	// winner already applied the identical bits. So tolerate a permission error
+	// here, exactly mirroring the init Job's `chmod … || true`. os.Chmod needs
+	// os.ModeSetgid; a raw 0o2775 FileMode would not set the setgid bit.
+	dstEnvBase := filepath.Join(cfg.NewWorkspace, "envelopes")
+	if err := os.MkdirAll(dstEnvBase, 0o755); err != nil {
+		fmt.Fprintf(stderr, "tide-import: MkdirAll envelopes base %q: %v\n", dstEnvBase, err)
+		return exitGeneric
+	}
+	if err := os.Chmod(dstEnvBase, os.ModeSetgid|0o775); err != nil && !os.IsPermission(err) {
+		fmt.Fprintf(stderr, "tide-import: chmod envelopes base %q: %v\n", dstEnvBase, err)
+		return exitGeneric
+	}
+
 	for _, entry := range table {
 		if ctx.Err() != nil {
 			fmt.Fprintf(stderr, "tide-import: context cancelled\n")

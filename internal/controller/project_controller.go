@@ -1460,7 +1460,15 @@ func (r *ProjectReconciler) buildInitJob(project *tidev1alpha2.Project, pvcName 
 								// other-uid pods (planner/executor uid 1000, tide-push uid
 								// 65532) inherit the shared gid 1000. Without setgid the
 								// tide-push Job cannot mkdir /workspace/envelopes/push.
-								"mkdir -p /workspace/repo /workspace/artifacts /workspace/envelopes && chmod 2775 /workspace/repo /workspace/artifacts /workspace/envelopes",
+								//
+								// GAP-7: envelopes is chmod'd separately and tolerantly. In
+								// the resume-from-import flow the tide-import Job (uid 65532)
+								// creates+owns /workspace/envelopes and sets it 2775 itself;
+								// this uid-1000 init Job then cannot chmod it (EPERM, non-
+								// owner) — so swallow that failure rather than flip the
+								// Project to InitFailed. In the normal flow init owns the dir
+								// and the chmod succeeds, so the `|| true` never fires.
+								"mkdir -p /workspace/repo /workspace/artifacts /workspace/envelopes && chmod 2775 /workspace/repo /workspace/artifacts && { chmod 2775 /workspace/envelopes 2>/dev/null || true; }",
 							},
 							SecurityContext: &corev1.SecurityContext{
 								RunAsUser: &runAsUser,

@@ -176,6 +176,39 @@ func TestRunHappyCopy(t *testing.T) {
 	}
 }
 
+// TestRunEnvelopesBaseSetgid (GAP-7) verifies the destination envelopes base dir
+// is created with the setgid bit and group-write (2775), unconditionally — even
+// when the rekey table is empty. The tide-import Job runs as uid 65532 and owns
+// /workspace/envelopes; if it left the dir at a plain 0755 the uid-1000 init Job
+// could not chmod it (EPERM, non-owner → Project InitFailed) and uid-1000
+// planner/executor pods could not create their own envelope subdirs after a
+// resume-from-import.
+func TestRunEnvelopesBaseSetgid(t *testing.T) {
+	oldWS := t.TempDir()
+	newWS := t.TempDir()
+
+	// Empty rekey table: the base-dir setup must still run.
+	table := makeRekeyTable(t, []rekeyEntry{})
+
+	cfg := importConfig{OldWorkspace: oldWS, NewWorkspace: newWS}
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), cfg, bytes.NewReader(table), &stdout, &stderr)
+	if code != exitSuccess {
+		t.Fatalf("run exit=%d, stderr=%q", code, stderr.String())
+	}
+
+	info, err := os.Stat(filepath.Join(newWS, "envelopes"))
+	if err != nil {
+		t.Fatalf("stat envelopes base dir: %v", err)
+	}
+	if info.Mode()&os.ModeSetgid == 0 {
+		t.Errorf("envelopes base dir mode = %v, want setgid bit set (2775)", info.Mode())
+	}
+	if perm := info.Mode().Perm(); perm != 0o775 {
+		t.Errorf("envelopes base dir perm = %o, want 0775 (group-writable)", perm)
+	}
+}
+
 // TestNoClobber verifies (b): a pre-existing dst file is not overwritten and
 // the skipped count increments.
 func TestNoClobber(t *testing.T) {
@@ -292,13 +325,26 @@ func TestPathTraversal(t *testing.T) {
 		t.Errorf("path traversal: exit=%d, want %d (exitInvariant); stderr=%q", code, exitInvariant, stderr.String())
 	}
 
-	// Nothing should be written to new-workspace.
+	// The only thing in new-workspace must be the empty envelopes base dir that
+	// run() always creates up front (GAP-7 setgid setup); the traversal entry is
+	// rejected before any copy, so nothing escaped and no rekeyed subdir exists.
 	entries, err := os.ReadDir(newWS)
 	if err != nil {
 		t.Fatalf("ReadDir newWS: %v", err)
 	}
-	if len(entries) != 0 {
-		t.Errorf("new-workspace has %d entries after traversal rejection, want 0", len(entries))
+	if len(entries) != 1 || entries[0].Name() != "envelopes" {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Fatalf("new-workspace entries = %v, want only the empty [envelopes] base dir (no traversal escape)", names)
+	}
+	envEntries, err := os.ReadDir(filepath.Join(newWS, "envelopes"))
+	if err != nil {
+		t.Fatalf("ReadDir newWS/envelopes: %v", err)
+	}
+	if len(envEntries) != 0 {
+		t.Errorf("envelopes dir has %d entries after traversal rejection, want 0 (entry was not rejected before copy)", len(envEntries))
 	}
 }
 

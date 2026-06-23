@@ -103,6 +103,11 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 
 			createNamespace(importResumeNS)
 			createNamespace(importResumeRoundtripNS)
+			// GAP-8: the stub project planner re-runs in the import flow and its
+			// credproxy sidecar mounts tide-provider-secret; create it (the fixture
+			// project.yaml header documents the test as the secret's creator).
+			ensureProviderSecret(importResumeNS)
+			ensureProviderSecret(importResumeRoundtripNS)
 		})
 
 		AfterEach(func() {
@@ -217,7 +222,9 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 				"tide import-envelopes of exported bundle: %s", importRTOut)
 			GinkgoWriter.Printf("import-envelopes (round-trip): %s\n", importRTOut)
 
-			// The import-envelopes writes project.yaml to CWD. Find and apply it.
+			// The import-envelopes writes project.yaml to CWD. Register cleanup
+			// BEFORE the apply so a failed apply doesn't leak the file into the repo.
+			defer func() { _ = os.Remove("project.yaml") }()
 			By("(4c) Applying the project.yaml written by import-envelopes to the round-trip namespace")
 			applyRTCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 				"apply", "-f", "project.yaml",
@@ -228,9 +235,6 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			Expect(err).NotTo(HaveOccurred(),
 				"kubectl apply round-trip project.yaml: %s", applyRTOut)
 			GinkgoWriter.Printf("apply round-trip project.yaml: %s\n", applyRTOut)
-
-			// Best-effort cleanup of the CWD project.yaml emitted by import-envelopes.
-			defer func() { _ = os.Remove("project.yaml") }()
 
 			// (4d) assert adoption in the round-trip namespace:
 			// milestone+phase planners are adopted → 0 planner Jobs at those levels.
@@ -262,6 +266,8 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			}
 
 			createNamespace(importResumeSalvageNS)
+			// GAP-8: provider secret for the credproxy sidecar (see Tier a).
+			ensureProviderSecret(importResumeSalvageNS)
 		})
 
 		AfterEach(func() {
@@ -422,7 +428,12 @@ func assertD02BundleShape(tgzPath string) {
 	tr := tar.NewReader(gr)
 
 	required := map[string]bool{
-		"projects.yaml":      false,
+		// GAP-15: the canonical D-02 bundle (pkg/bundle bundleEntryOrder, =
+		// BundleFileProject) carries the SINGULAR project.yaml — the one Project to
+		// re-apply. The plural projects.yaml the old assertion demanded is never
+		// emitted by export-envelopes nor read by import-envelopes (it applies
+		// project.yaml). Milestones/phases/plans stay plural (they are lists).
+		"project.yaml":       false,
 		"milestones.yaml":    false,
 		"phases.yaml":        false,
 		"plans.yaml":         false,

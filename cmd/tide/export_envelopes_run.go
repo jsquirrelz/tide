@@ -145,17 +145,19 @@ func exportEnvelopesRun(
 //
 // T-29-02-01: ReadOnly PVC mount with SubPath=projectUID confines pod to one project.
 // T-29-02-03: tar command is a fixed string (no user-controlled interpolation).
-func defaultExportInspectorPodRunner(
-	ctx context.Context,
-	cs kubernetes.Interface,
-	ns, projectUID, pvcName string,
-	out, errOut io.Writer,
-) error {
-	podName := fmt.Sprintf("tide-export-%s", randSuffix(8))
-
-	// T-29-02-01: ReadOnly mount with SubPath=projectUID (D-01).
-	// T-29-02-03: tar command is a fixed string — no user path interpolation.
-	podSpec := &corev1.Pod{
+// buildExportInspectorPodSpec constructs the short-lived busybox inspector Pod
+// that tars the project's envelope subtree out of the per-project PVC.
+//
+// GAP-13: the per-project PVC layout is <PVC>/<UID>/workspace/{envelopes,
+// artifacts,repo}, so the mount SubPath MUST be "<UID>/workspace" — matching the
+// init Job, import Job, loader pod, and reporter. Mounting only "<UID>" left
+// envelopes/ at /workspace/workspace/envelopes, so `tar -C /workspace envelopes/`
+// found nothing and the pod exited 1 ("failed before streaming"). The "/workspace"
+// suffix also confines the pod TIGHTER than before (T-29-02-01) — repo/ is no
+// longer reachable. The tar paths stay relative (envelopes/, artifacts/) so the
+// emitted pvc-envelopes.tgz keeps the top-level layout the import loader expects.
+func buildExportInspectorPodSpec(podName, ns, projectUID, pvcName string) *corev1.Pod {
+	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
 			Namespace: ns,
@@ -176,10 +178,8 @@ func defaultExportInspectorPodRunner(
 						{
 							Name:      "workspace",
 							MountPath: "/workspace",
-							// T-29-02-01: SubPath=projectUID — pod cannot reach other
-							// projects' subtrees.
-							SubPath:  projectUID,
-							ReadOnly: true,
+							SubPath:   fmt.Sprintf("%s/workspace", projectUID),
+							ReadOnly:  true,
 						},
 					},
 				},
@@ -197,6 +197,16 @@ func defaultExportInspectorPodRunner(
 			},
 		},
 	}
+}
+
+func defaultExportInspectorPodRunner(
+	ctx context.Context,
+	cs kubernetes.Interface,
+	ns, projectUID, pvcName string,
+	out, errOut io.Writer,
+) error {
+	podName := fmt.Sprintf("tide-export-%s", randSuffix(8))
+	podSpec := buildExportInspectorPodSpec(podName, ns, projectUID, pvcName)
 
 	fmt.Fprintf(errOut, "creating export inspector pod %s/%s...\n", ns, podName)
 	if _, err := cs.CoreV1().Pods(ns).Create(ctx, podSpec, metav1.CreateOptions{}); err != nil {
@@ -445,7 +455,21 @@ func assembleBundleFiles(
 		SeedManifestConfigMap: seedCMName,
 		SalvagedPVCSubPath:    projectUID + "/workspace",
 	}
+	// GAP-16: the controller-runtime typed client strips TypeMeta on Get, so the
+	// fetched Project has empty apiVersion/kind. Re-stamp it — otherwise the
+	// emitted project.yaml fails `kubectl apply` validation ("apiVersion not set,
+	// kind not set") when the round-trip re-applies it.
+	proj.TypeMeta = metav1.TypeMeta{
+		APIVersion: tidev1alpha2.GroupVersion.String(),
+		Kind:       "Project",
+	}
 	// Clear runtime fields so project.yaml is clean for re-apply.
+	// GAP-17: also clear metadata.namespace — the bundle is namespace-portable
+	// (the canonical fixture project.yaml is namespace-less), and `tide import`/
+	// the round-trip apply target the destination namespace with `-n`. Leaving the
+	// origin namespace baked in makes `kubectl apply -n <other>` fail with a
+	// namespace-mismatch error.
+	proj.Namespace = ""
 	proj.ResourceVersion = ""
 	proj.UID = ""
 	proj.Generation = 0
