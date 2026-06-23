@@ -264,6 +264,42 @@ tide completion powershell > $PROFILE/tide-completion.ps1
 Provided by cobra's built-in `completion` subcommand. See
 §4 below for the Krew-renamed-binary form.
 
+### 3.12 `export-envelopes` — export a Project's planner envelopes to a portable bundle
+
+```bash
+# Write a self-contained bundle (project.yaml + per-level CR lists +
+# seed-manifest.json + pvc-envelopes.tgz) for the named Project.
+tide export-envelopes <namespace>/<project> --output run-bundle.tgz
+
+# Or emit an unpacked directory instead of a tgz.
+tide export-envelopes <namespace>/<project> --dir ./run-bundle
+```
+
+Runs a short-lived read-only inspector pod that tars the project's envelope
+subtree off the per-namespace PVC, then assembles a bundle from the live
+Milestone/Phase/Plan CRs. Only Milestone/Phase/Plan envelopes are exported
+(never Wave or Task). The emitted `project.yaml` is namespace-portable and
+carries `spec.importSource` so it can be re-applied into any namespace.
+
+### 3.13 `import-envelopes` — stage a bundle into a new run (resumption)
+
+```bash
+# Offline preview — no cluster writes, no pods. Reports which envelopes would
+# be adopted (complete) vs re-planned (incomplete), and rejects cyclic DAGs.
+tide import-envelopes run-bundle.tgz --dry-run
+
+# Live stage — unpacks the bundle onto the destination namespace's PVC, creates
+# the seed ConfigMap, and writes project.yaml to CWD. Does NOT apply the Project.
+tide import-envelopes run-bundle.tgz --namespace tide-resumed
+kubectl apply -f project.yaml -n tide-resumed
+```
+
+Live mode stages only; applying the surfaced `project.yaml` triggers the
+in-cluster import controller, which materializes the CR tree from the seed and
+adopts the completed planning levels (skipping their planners) so planning cost
+is not re-paid. Incomplete (failed/budget-halted) plan envelopes legitimately
+re-run.
+
 ---
 
 ## 4. Completion
