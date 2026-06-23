@@ -69,7 +69,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 
 - [ ] **Phase 27: Budget-Bypass Resume Correctness** — Fix the three identified bypass-path bugs and add regression coverage for the `2a5e0dc` ordering fix; ships independently of import work
 - [ ] **Phase 28: Plan-Import Core** — Resolve the Approach A vs B design checkpoint FIRST, then implement envelope-import that bridges UID-churn, validates before adoption, runs cycle detection, converts v1alpha1 schema, and never imports Wave CRs
-- [ ] **Phase 29: Operator Tooling + E2E** — `tide` CLI import/export commands and the kind integration test proving end-to-end resumption against the `salvage-20260618` fixture
+- [x] **Phase 29: Operator Tooling + E2E** — `tide` CLI import/export commands and the kind integration test proving end-to-end resumption against the `salvage-20260618` fixture
 
 ## Phase Details
 
