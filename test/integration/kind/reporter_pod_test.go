@@ -71,39 +71,14 @@ var _ = Describe("Manager spawns tide-reporter Job after planner completion (REQ
 	BeforeEach(func() {
 		skipIfCRDsOnlyMode()
 		createNamespace(reporterPodNS)
-		// Apply the same bare-project fixture used by bare_project_test.go with
-		// the test's namespace substituted. We use a dynamically-generated YAML
-		// here to avoid adding another testdata file; the fixture is minimal.
-		projectYAML := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: tide-provider-secret
-  namespace: %s
-type: Opaque
-data:
-  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Project
-metadata:
-  name: reporter-test-project
-  namespace: %s
-spec:
-  schemaRevision: v1alpha2
-  targetRepo: "https://git.example.internal/stub/reporter-test.git"
-  providerSecretRef: "tide-provider-secret"
-  budget:
-    absoluteCapCents: 0
-  subagent:
-    model: stub
-  gates:
-    milestone: auto
-    phase: auto
-    plan: auto
-    task: auto
-    pauseBetweenWaves: false
-`, reporterPodNS, reporterPodNS)
-		Expect(applyYAML(projectYAML)).To(Succeed())
+		// Provider Secret + a minimal stub Project, built via the shared typed
+		// fixture builder (fixtures_test.go) so schemaRevision and the stub
+		// defaults can't be omitted by this fixture.
+		ensureProviderSecret(reporterPodNS)
+		proj := newStubProject(reporterPodNS, "reporter-test-project",
+			withTargetRepo("https://git.example.internal/stub/reporter-test.git"),
+			withProviderSecret("tide-provider-secret"))
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 	})
 
 	AfterEach(func() {
