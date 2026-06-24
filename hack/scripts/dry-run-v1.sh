@@ -124,8 +124,15 @@ docker run --rm \
 # The kind cluster created in Pass 1 is reachable from the outer script because
 # it uses the host Docker daemon. load-images-if-needed.sh uses docker manifest
 # inspect to probe registry availability; builds + kind-loads locally if absent.
-echo "==> loading images into tide-dry-run cluster (IMG-LOAD-01)..."
-bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "tide-dry-run" "1.0.1" 2>&1 | tee -a "${TRANSCRIPT_PATH}"
+# Derive the image tag from the chart appVersion (single source of truth) so the
+# kind-loaded images always match what `helm install ./charts/tide` requests
+# (manager image tag defaults to .Chart.AppVersion). A hardcoded literal silently
+# skews on every appVersion bump: the manager Deployment ImagePullBackOffs on the
+# unbuilt new tag and the rollout times out — the v1.0.1→v1.0.3 release tripped
+# exactly this (the literal was last bumped at v1.0.1 and never since).
+CHART_APP_VERSION="$(grep '^appVersion:' "${REPO_ROOT}/charts/tide/Chart.yaml" | tr -d '"' | awk '{print $2}')"
+echo "==> loading images into tide-dry-run cluster (IMG-LOAD-01, tag=${CHART_APP_VERSION})..."
+bash "${REPO_ROOT}/hack/scripts/load-images-if-needed.sh" "tide-dry-run" "${CHART_APP_VERSION}" 2>&1 | tee -a "${TRANSCRIPT_PATH}"
 
 # ── Pass 2: cert-manager + helm install + kubectl apply + wait ────────────────
 # Runs inside the same DinD environment. The kind cluster and /workspace/tide
