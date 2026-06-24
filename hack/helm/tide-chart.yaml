@@ -8,5 +8,5 @@ description: |
   The CRDs ship as a dedicated subchart (tide-crds) so `helm upgrade` can
   safely roll the controller without touching CRD storage (D-E1 / REQ-DIST-01).
 type: application
-version: 1.0.1
-appVersion: "1.0.1"
+version: 1.0.3
+appVersion: "1.0.3"

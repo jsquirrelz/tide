@@ -256,7 +256,7 @@ ENV3_BLOCK = """        - name: TIDE_PUSH_IMAGE
           value: {{ printf \"%s:%s\" $img .Chart.AppVersion | quote }}
           {{- end }}
         - name: TIDE_DEFAULT_MODEL_MILESTONE
-          value: "{{ .Values.subagent.levels.milestone.model | default \"claude-opus-4-7\" }}"
+          value: "{{ .Values.subagent.levels.milestone.model | default \"claude-opus-4-8\" }}"
         - name: TIDE_DEFAULT_MODEL_PHASE
           value: "{{ .Values.subagent.levels.phase.model | default \"claude-sonnet-4-6\" }}"
         - name: TIDE_DEFAULT_MODEL_PLAN
@@ -310,6 +310,25 @@ if ENV9_MARKER not in content:
             content,
             count=1,
         )
+
+# ── 8e3: Phase 28 (IMPORT-01) — TIDE_IMPORT_IMAGE env injection ──────────────
+# Adds TIDE_IMPORT_IMAGE env var on the manager container, mirroring the Phase-9
+# reporter env. Read by cmd/manager/main.go via envOrDefault (TIDE_IMPORT_IMAGE)
+# and threaded into ImportController; empty → ImportController skips Job creation
+# (mirrors tideReporter empty-skip). Inserted after the phase9 reporter block so
+# the env ordering matches the committed chart.
+ENV28_MARKER = "# phase28-import-env-injected"
+ENV28_BLOCK = """        - name: TIDE_IMPORT_IMAGE
+          value: "{{ .Values.images.tideImport.repository }}:{{ .Values.images.tideImport.tag | default .Chart.AppVersion }}"
+        # phase28-import-env-injected
+"""
+if ENV28_MARKER not in content:
+    content = re.sub(
+        r'(        # phase9-reporter-env-injected\n)',
+        r'\1' + ENV28_BLOCK,
+        content,
+        count=1,
+    )
 
 # ── 8f: Phase 4 plan 04-14 — OTel env-var injection ─────────────────────────
 # Adds OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG,

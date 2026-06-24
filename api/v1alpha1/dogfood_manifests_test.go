@@ -24,8 +24,32 @@ import (
 	"testing"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
+	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	sigsyaml "sigs.k8s.io/yaml"
 )
+
+// projectAPIVersion extracts the declared apiVersion from a Project doc so the
+// strict-decode + required-field checks can validate each manifest against the
+// schema it actually targets. The dogfood set is mixed-version: the
+// codex-runtime project was intentionally converted to v1alpha2 (commit
+// dcd7069), so unconditionally strict-decoding every doc as v1alpha1 is wrong.
+func projectAPIVersion(t *testing.T, doc []byte) string {
+	t.Helper()
+	var meta struct {
+		APIVersion string `json:"apiVersion"`
+	}
+	if err := sigsyaml.Unmarshal(doc, &meta); err != nil {
+		t.Fatalf("unmarshal apiVersion: %v", err)
+	}
+	return meta.APIVersion
+}
+
+// supportedProjectAPIVersions is the set of apiVersions a dogfood Project may
+// declare. New schema versions get added here as they ship.
+var supportedProjectAPIVersions = map[string]bool{
+	"tideproject.k8s/v1alpha1": true,
+	"tideproject.k8s/v1alpha2": true,
+}
 
 // splitYAMLDocs splits a multi-document YAML file on "---" document separators,
 // returning non-empty documents only.
@@ -107,9 +131,19 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 					continue
 				}
 				found = true
-				var proj tideprojectv1alpha1.Project
-				if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-					t.Errorf("UnmarshalStrict failed for Project doc in %s: %v", path, err)
+				switch av := projectAPIVersion(t, doc); av {
+				case "tideproject.k8s/v1alpha1":
+					var proj tideprojectv1alpha1.Project
+					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
+						t.Errorf("UnmarshalStrict (v1alpha1) failed for Project doc in %s: %v", path, err)
+					}
+				case "tideproject.k8s/v1alpha2":
+					var proj tideprojectv1alpha2.Project
+					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
+						t.Errorf("UnmarshalStrict (v1alpha2) failed for Project doc in %s: %v", path, err)
+					}
+				default:
+					t.Errorf("Project doc in %s declares unsupported apiVersion %q", path, av)
 				}
 			}
 			if !found {
@@ -119,8 +153,10 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 	}
 }
 
-// TestDogfoodManifests_RequiredFields asserts per-Project field invariants:
-//   - apiVersion == "tideproject.k8s/v1alpha1"
+// TestDogfoodManifests_RequiredFields asserts per-Project field invariants,
+// validating each manifest against the schema version it declares (the dogfood
+// set is mixed v1alpha1/v1alpha2):
+//   - apiVersion is a supported tideproject.k8s version
 //   - spec.targetRepo == "https://github.com/jsquirrelz/tide.git"
 //   - spec.outcomePrompt is non-empty
 //   - spec.providerSecretRef is non-empty
@@ -137,24 +173,47 @@ func TestDogfoodManifests_RequiredFields(t *testing.T) {
 				if !isProjectDoc(doc) {
 					continue
 				}
-				var proj tideprojectv1alpha1.Project
-				if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-					t.Fatalf("UnmarshalStrict: %v", err)
+
+				// Decode against the declared schema version, then assert the
+				// version-agnostic field invariants on the shared spec fields.
+				var apiVersion, targetRepo, outcomePrompt, providerSecretRef, gitCredsRef string
+				gitNil := true
+				switch av := projectAPIVersion(t, doc); av {
+				case "tideproject.k8s/v1alpha1":
+					var proj tideprojectv1alpha1.Project
+					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
+						t.Fatalf("UnmarshalStrict (v1alpha1): %v", err)
+					}
+					apiVersion, targetRepo, outcomePrompt, providerSecretRef = proj.APIVersion, proj.Spec.TargetRepo, proj.Spec.OutcomePrompt, proj.Spec.ProviderSecretRef
+					if proj.Spec.Git != nil {
+						gitNil, gitCredsRef = false, proj.Spec.Git.CredsSecretRef
+					}
+				case "tideproject.k8s/v1alpha2":
+					var proj tideprojectv1alpha2.Project
+					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
+						t.Fatalf("UnmarshalStrict (v1alpha2): %v", err)
+					}
+					apiVersion, targetRepo, outcomePrompt, providerSecretRef = proj.APIVersion, proj.Spec.TargetRepo, proj.Spec.OutcomePrompt, proj.Spec.ProviderSecretRef
+					if proj.Spec.Git != nil {
+						gitNil, gitCredsRef = false, proj.Spec.Git.CredsSecretRef
+					}
+				default:
+					t.Fatalf("Project doc declares unsupported apiVersion %q", av)
 				}
 
-				if got := proj.APIVersion; got != "tideproject.k8s/v1alpha1" {
-					t.Errorf("apiVersion = %q, want %q", got, "tideproject.k8s/v1alpha1")
+				if !supportedProjectAPIVersions[apiVersion] {
+					t.Errorf("apiVersion = %q, want a supported tideproject.k8s version", apiVersion)
 				}
-				if got := proj.Spec.TargetRepo; got != "https://github.com/jsquirrelz/tide.git" {
-					t.Errorf("spec.targetRepo = %q, want %q", got, "https://github.com/jsquirrelz/tide.git")
+				if targetRepo != "https://github.com/jsquirrelz/tide.git" {
+					t.Errorf("spec.targetRepo = %q, want %q", targetRepo, "https://github.com/jsquirrelz/tide.git")
 				}
-				if strings.TrimSpace(proj.Spec.OutcomePrompt) == "" {
+				if strings.TrimSpace(outcomePrompt) == "" {
 					t.Errorf("spec.outcomePrompt is empty")
 				}
-				if proj.Spec.ProviderSecretRef == "" {
+				if providerSecretRef == "" {
 					t.Errorf("spec.providerSecretRef is empty")
 				}
-				if proj.Spec.Git == nil || proj.Spec.Git.CredsSecretRef == "" {
+				if gitNil || gitCredsRef == "" {
 					t.Errorf("spec.git.credsSecretRef is empty or git is nil")
 				}
 			}

@@ -43,7 +43,7 @@ This path installs TIDE into a local kind cluster and runs the checked-in `small
 Prerequisites: `docker` or compatible runtime, `kubectl`, `helm`, and `kind`. See [docs/INSTALL.md](docs/INSTALL.md) for per-OS setup and troubleshooting.
 
 ```bash
-VERSION=1.0.1
+VERSION=1.0.3
 
 kind create cluster --name tide-demo
 
@@ -124,7 +124,7 @@ spec:
     rollingWindowDuration: 24h
 
   subagent:
-    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.1
+    image: ghcr.io/jsquirrelz/tide-claude-subagent:1.0.3
     model: claude-sonnet-4-6
     levels:
       task:
