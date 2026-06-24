@@ -1,0 +1,72 @@
+# TIDE git hooks — repo-committed, run via pre-commit (https://pre-commit.com).
+#
+#   Install once:  make hooks      (writes .git/hooks/pre-commit + pre-push shims)
+#   Dry-run all:   make hooks-run
+#
+# Two stages, matched to how often they should fire:
+#   pre-commit — fast, path-scoped gates (only run when the relevant files change)
+#   pre-push   — the full local CI mirror (gofmt + go mod tidy + make lint +
+#                make test) so a red build never reaches origin.
+#
+# All hooks are `language: system` local shells that call Make targets — no
+# external hook repos, no Python/Node hook envs, nothing to pin or vendor
+# (matches the project's "no hidden host dependencies" rule). Requires the Go
+# toolchain + Helm already on PATH, same as a normal `make` invocation.
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: local
+    hooks:
+      # ---- pre-commit: chart-source reproducibility -------------------------
+      # Fires only when a commit touches chart sources or the kubebuilder config
+      # that feeds helmify. Regenerates the charts and fails on drift so a hand-
+      # edited charts/ tree (or a forgotten regen) cannot be committed. Mirrors
+      # the ci.yaml helm-lint "Verify chart tree is reproducible" gate locally.
+      - id: chart-reproducibility
+        name: chart reproducibility (make helm + diff)
+        entry: make verify-chart-reproducible
+        language: system
+        pass_filenames: false
+        files: ^(charts/|hack/helm/|config/)
+        stages: [pre-commit]
+
+      # ---- pre-commit: version consistency ----------------------------------
+      # Fires when any version-bearing chart file changes; asserts every
+      # version/appVersion field still agrees (catches a half-applied bump).
+      - id: version-consistency
+        name: chart version/appVersion consistency
+        entry: make verify-version-consistency
+        language: system
+        pass_filenames: false
+        files: ^(charts/.*/Chart\.yaml|hack/helm/tide-(chart|crds-chart)\.yaml)$
+        stages: [pre-commit]
+
+      # ---- pre-push: full local CI mirror -----------------------------------
+      - id: gofmt
+        name: gofmt (fmt-check)
+        entry: make fmt-check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: go-mod-tidy
+        name: go mod tidy (tidy-check)
+        entry: make tidy-check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: make-lint
+        name: make lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: make-test
+        name: make test
+        entry: make test
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

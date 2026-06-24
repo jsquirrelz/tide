@@ -704,3 +704,54 @@ helm-crds: manifests kustomize helmify ## Generate charts/tide-crds/ (CRD subcha
 	@mkdir -p charts/tide-crds
 	@"$(KUSTOMIZE)" build config/crd | "$(HELMIFY)" charts/tide-crds
 	@bash hack/helm/augment-tide-crds-chart.sh
+
+##@ Dev hooks & release versioning
+
+.PHONY: hooks
+hooks: ## Install the repo-committed git hooks (pre-commit + pre-push) from .pre-commit-config.yaml.
+	@command -v pre-commit >/dev/null 2>&1 || { echo "pre-commit not found — install it: 'brew install pre-commit' or 'pipx install pre-commit'"; exit 1; }
+	pre-commit install --install-hooks --hook-type pre-commit --hook-type pre-push
+	@echo "OK: pre-commit + pre-push hooks installed. Dry-run with 'make hooks-run'."
+
+.PHONY: hooks-run
+hooks-run: ## Run every pre-commit hook against all tracked files (manual dry-run, no commit needed).
+	@command -v pre-commit >/dev/null 2>&1 || { echo "pre-commit not found — see 'make hooks'"; exit 1; }
+	pre-commit run --all-files --hook-stage pre-commit
+	pre-commit run --all-files --hook-stage pre-push
+
+.PHONY: fmt-check
+fmt-check: ## Assert gofmt leaves no diffs (pre-push gate; non-mutating counterpart to 'make fmt').
+	@echo "checking gofmt..."
+	@UNFORMATTED=$$(gofmt -l $$(git ls-files '*.go')); \
+	if [ -n "$$UNFORMATTED" ]; then \
+		echo "gofmt: not formatted (run 'make fmt' or 'gofmt -w'):"; \
+		echo "$$UNFORMATTED"; \
+		exit 1; \
+	fi
+	@echo "OK: all Go files gofmt-clean"
+
+.PHONY: tidy-check
+tidy-check: ## Assert 'go mod tidy' leaves go.mod/go.sum unchanged (pre-push gate).
+	@echo "checking go.mod/go.sum are tidy..."
+	@go mod tidy
+	@git diff --exit-code go.mod go.sum || { echo "go.mod/go.sum not tidy — commit the 'go mod tidy' result"; exit 1; }
+	@echo "OK: go.mod/go.sum tidy"
+
+.PHONY: verify-chart-reproducible
+verify-chart-reproducible: helm ## Regenerate charts via helmify and fail if the committed charts/ tree drifted (chart-source reproducibility; mirrors the ci.yaml helm-lint gate).
+	@echo "verifying charts/ tree matches a fresh 'make helm'..."
+	@if ! git diff --quiet -- charts/; then \
+		echo "charts/ drifted from a fresh 'make helm' regeneration — regenerate and stage charts/:"; \
+		git diff --stat -- charts/; \
+		exit 1; \
+	fi
+	@echo "OK: charts/ tree is reproducible from hack/helm/ source"
+
+.PHONY: verify-version-consistency
+verify-version-consistency: ## Assert all chart version + appVersion fields agree. Optional: make verify-version-consistency VERSION=X.Y.Z to also pin.
+	@bash hack/scripts/verify-version-consistency.sh $(VERSION)
+
+.PHONY: bump-version
+bump-version: ## Set chart version + appVersion across every version-bearing file (release STEP ONE). Usage: make bump-version VERSION=X.Y.Z
+	@if [ -z "$(VERSION)" ]; then echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; fi
+	@bash hack/scripts/bump-version.sh $(VERSION)

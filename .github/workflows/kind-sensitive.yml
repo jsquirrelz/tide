@@ -1,0 +1,140 @@
+# TIDE path-gated kind integration workflow.
+#
+# The heavy Layer B kind suite (make test-int) normally runs only nightly
+# (.github/workflows/nightly-integration.yml) because it spins a real kind
+# cluster + builds several images (~13-25min) — too slow for every push.
+#
+# But the classes of change the kind tier actually catches are narrow and
+# high-risk: Job dispatch specs, RBAC, PVC provisioning/subPath, and the
+# uid-keyed import/export loader paths. Layer A envtest does NOT exercise real
+# Jobs, RBAC enforcement, or PVC mounts. So this workflow runs the kind tier
+# pre-merge ONLY when a diff touches one of those surfaces — catching a
+# regression before it reaches main without paying kind's cost on every push.
+#
+# Triggers: push to main + pull_request, gated by the `paths:` filter below,
+# plus workflow_dispatch for on-demand runs. NOT a required status check (a PR
+# that touches no sensitive path simply never starts this run).
+#
+# NOTE: the two `paths:` lists (push + pull_request) MUST be kept in sync —
+# GitHub evaluates them independently per event. Edit both together.
+
+name: kind-sensitive
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      # --- Job dispatch / pool ---
+      - 'internal/dispatch/**'
+      - 'internal/pool/**'
+      - 'pkg/dispatch/**'
+      # --- Reconcilers that build Jobs / provision PVCs / set subPaths ---
+      - 'internal/controller/**'
+      # --- RBAC (generated manifests + helmify rbac source) ---
+      - 'config/rbac/**'
+      - 'config/manager/**'
+      - 'hack/helm/*rbac*.yaml'
+      - 'hack/helm/*serviceaccount*.yaml'
+      - 'charts/**/templates/**'
+      # --- PVC / uid-keyed import-export loader paths ---
+      - 'cmd/tide-import/**'
+      - 'cmd/tide/*envelopes*.go'
+      - 'pkg/bundle/**'
+      # --- Images the kind suite builds + the kind test code itself ---
+      - 'images/**'
+      - 'test/integration/kind/**'
+      - 'test/e2e/**'
+      - '.github/workflows/kind-sensitive.yml'
+  pull_request:
+    paths:
+      # KEEP IN SYNC with push.paths above.
+      - 'internal/dispatch/**'
+      - 'internal/pool/**'
+      - 'pkg/dispatch/**'
+      - 'internal/controller/**'
+      - 'config/rbac/**'
+      - 'config/manager/**'
+      - 'hack/helm/*rbac*.yaml'
+      - 'hack/helm/*serviceaccount*.yaml'
+      - 'charts/**/templates/**'
+      - 'cmd/tide-import/**'
+      - 'cmd/tide/*envelopes*.go'
+      - 'pkg/bundle/**'
+      - 'images/**'
+      - 'test/integration/kind/**'
+      - 'test/e2e/**'
+      - '.github/workflows/kind-sensitive.yml'
+
+permissions: {}
+
+jobs:
+  kind-layer-b:
+    name: Layer B kind suite (gated on Job/RBAC/PVC/uid diffs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      # WR-09 / D-03: CI MUST set =1 so install failures fail loudly (dev runs
+      # leave it unset = soft-skip).
+      TIDE_REQUIRE_CONTROLLER: "1"
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install kind v0.31.0
+        run: |
+          # Hardened download (mirrors nightly-integration.yml): --fail, retries,
+          # bounded connect, -L for the release redirect. Pin per STACK.md.
+          curl -fsSL \
+            --retry 5 --retry-delay 3 --retry-all-errors --retry-connrefused \
+            --connect-timeout 30 \
+            -o ./kind https://kind.sigs.k8s.io/dl/v0.31.0/kind-linux-amd64
+          test -s ./kind
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.3'
+
+      - name: Prepare manifests and envtest binaries
+        run: |
+          make manifests generate fmt vet
+          make setup-envtest
+
+      # Layer B kind integration tier. test-int's internal `timeout` bounds only
+      # the go test invocation; image builds + cluster create are bounded by the
+      # job-level timeout-minutes.
+      - name: Layer B kind integration suite (make test-int)
+        timeout-minutes: 28
+        run: |
+          set -e
+          time make test-int
+
+      - name: Collect kind cluster logs on failure
+        if: failure()
+        run: |
+          kind export logs /tmp/kind-logs-tide-test --name tide-test 2>/dev/null || true
+          echo "=== kubectl get all ==="
+          kubectl --context kind-tide-test get all --all-namespaces 2>/dev/null || true
+          echo "=== kubectl events ==="
+          kubectl --context kind-tide-test get events --all-namespaces --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
+
+      - name: Upload kind logs artifact on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-logs-kind-sensitive
+          path: /tmp/kind-logs-tide-test/
+          retention-days: 7

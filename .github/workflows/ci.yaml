@@ -80,6 +80,9 @@ jobs:
       - name: Run custom analyzers (POOL-03 / Pitfall 6)
         run: make tide-lint
 
+      - name: Verify chart version consistency (release version-skew gate)
+        run: make verify-version-consistency
+
       - name: go vet
         run: go vet ./...
 
