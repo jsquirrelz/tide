@@ -72,7 +72,7 @@ Rules learned from 10 BLOCKED iterations across Phase 02.2. Trust them.
 
 ## What this repository is
 
-**TIDE** (Topologically-Indexed Dependency Execution) — a Kubernetes-native orchestrator for hierarchical agentic coding work, designed to be open-sourced and to run against any project/codebase in any cluster. `README.md` is the design spec (and doubles as the public-facing README); check `git log` and `.planning/` for current implementation state.
+**TIDE** (Topologically-Indexed Dependency Execution) — a Kubernetes-native orchestrator for hierarchical agentic coding work, designed to be open-sourced and to run against any project/codebase in any cluster. `README.md` is the public-facing README; the conceptual/paradigm doc (five-level hierarchy, two-DAG split, derived waves, water metaphor) is `docs/concepts.md`. Check `git log` and `.planning/` for current implementation state.
 
 ## The spec is load-bearing
 
@@ -114,15 +114,15 @@ The anthropic subagent shells out to the `claude` CLI (`internal/subagent/anthro
 - **A future review/verify subagent must prompt for coverage, not conservatism.** None exists today (only the five planner/executor templates). When one is added: Opus 4.8 honors "be conservative / only high-severity" literally and will drop real low-severity bugs — prompt the finding stage for coverage plus confidence/severity tags and filter downstream.
 - **Dashboard UI generation needs an explicit palette.** Opus 4.8's house style (cream/off-white, serif display, terracotta accent) reads as editorial/hospitality and is wrong for a dev-tool dashboard. When generating or restyling the React dashboard, specify a concrete dev-tool palette/typeface or have the model propose directions first — generic "make it clean" shifts it to another fixed default, not the right one.
 
-## Structural conventions in the spec document
+## Structural conventions for the docs
 
-When editing `README.md` (the spec) itself:
+The five-level paradigm now lives in `docs/concepts.md` (operator-facing prose), not in `README.md`. The old README-as-spec was rewritten into a public-facing README (commit `48c7525`) and its hand-authored Mermaid planning/execution diagrams were replaced by live dashboard screenshots in `docs/screenshots/` (commit `0b06c58`). When editing these docs:
 
-- Mermaid diagrams: nested `subgraph` containment for the planning graph; flat wave subgraphs with cross-wave edges for the execution graph. Match the existing style.
-- Pseudocode uses Python-ish syntax with numbered-step comments (`# 1.`, `# 2.`).
-- Worked examples follow pseudocode; the Kahn example walks the indegree map iteration-by-iteration. New algorithms get the same treatment.
-- "Alternatives considered and rejected" is part of the doc's argumentative shape — when proposing a design choice, include the rejected alternatives, not just the winner.
-- Voice is tight, declarative, em-dash-heavy. Match it rather than reverting to hedged corporate prose.
+- `docs/concepts.md`: operator-readable prose for the mental model (hierarchy, the two DAGs, wave derivation, the water metaphor). Match its declarative, example-led voice; explain mechanisms (e.g. Kahn / the indegree map) in prose, not pseudocode.
+- `README.md`: public-facing overview — badges, "Why TIDE", quickstart pointers, screenshots. Keep it skimmable and defer depth to `docs/`.
+- The planning and execution DAGs are shown as dashboard screenshots the orchestrator captures itself — regenerate the screenshot rather than hand-editing diagram source.
+- When a doc argues a design choice, keep the "alternatives considered and rejected" framing — record the rejected options, not just the winner.
+- Voice across docs is tight, declarative, em-dash-heavy. Match it rather than reverting to hedged corporate prose.
 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
