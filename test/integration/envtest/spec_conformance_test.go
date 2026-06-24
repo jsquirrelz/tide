@@ -49,6 +49,7 @@ package envtest_integration
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -132,13 +133,7 @@ func assertWaveMembership(ctx context.Context, projectName string, waveIdx int, 
 			return fmt.Errorf("get wave %d: %w", waveIdx, err)
 		}
 		for _, expected := range expectedTasks {
-			found := false
-			for _, ref := range wave.Status.TaskRefs {
-				if ref == expected {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(wave.Status.TaskRefs, expected)
 			if !found {
 				return fmt.Errorf("task %q not yet in wave %d TaskRefs %v", expected, waveIdx, wave.Status.TaskRefs)
 			}
@@ -297,10 +292,8 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 					// Wave 0 may not exist yet; not a failure condition here
 					return nil
 				}
-				for _, ref := range wave.Status.TaskRefs {
-					if ref == "sc-eta" {
-						return fmt.Errorf("sc-eta found in Wave 0 — γ→η edge not honored (§6d not removed?)")
-					}
+				if slices.Contains(wave.Status.TaskRefs, "sc-eta") {
+					return fmt.Errorf("sc-eta found in Wave 0 — γ→η edge not honored (§6d not removed?)")
 				}
 				return nil
 			}, "5s", "500ms").Should(Succeed(),
@@ -318,12 +311,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				}, wave); err != nil {
 					return false
 				}
-				for _, ref := range wave.Status.TaskRefs {
-					if ref == "sc-zeta" {
-						return true
-					}
-				}
-				return false
+				return slices.Contains(wave.Status.TaskRefs, "sc-zeta")
 			}, "30s", "500ms").Should(BeTrue(),
 				"sc-zeta must be in Wave 0 (Milestone-level dep is planning-only, contributes no execution edges)")
 		})

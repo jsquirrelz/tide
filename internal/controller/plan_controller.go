@@ -1097,7 +1097,7 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 			// Defense-in-depth: the Plan admission webhook should have caught this.
 			patch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.Phase = "Failed"
-			plan.Status.ValidationState = "CycleDetected"
+			plan.Status.ValidationState = conditionTypeCycleDetected
 			plan.Status.CycleEdges = cycleErr.InvolvedNodes
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha2.ConditionFailed,

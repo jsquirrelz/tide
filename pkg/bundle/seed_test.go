@@ -154,7 +154,7 @@ func TestSHA256(t *testing.T) {
 		t.Errorf("sha256 hex length: got %d, want 64", len(sum1))
 	}
 	for _, c := range sum1 {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("sha256 hex contains non-lowercase-hex char: %c", c)
 			break
 		}

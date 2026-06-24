@@ -48,7 +48,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -57,57 +56,6 @@ import (
 // ---------------------------------------------------------------------------
 // Shared test helpers
 // ---------------------------------------------------------------------------
-
-// makeBundleDir creates a temp directory containing a minimal valid bundle
-// (seed-manifest.json + pvc-envelopes.tgz) and returns the path.
-// cleanFn must be called to remove the temp dir.
-func makeBundleDir(t *testing.T, entries []pkgbundle.BundleEntry, envelopes map[string][]byte) (bundleDir string, cleanFn func()) {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "import-test-bundle-*")
-	if err != nil {
-		t.Fatalf("makeBundleDir MkdirTemp: %v", err)
-	}
-	cleanFn = func() { _ = os.RemoveAll(dir) }
-
-	// Build a minimal BundleManifest from entries (all treated as milestones for simplicity).
-	manifest := pkgbundle.BundleManifest{}
-	for _, e := range entries {
-		switch e.MilestoneRef {
-		case "":
-			manifest.Milestones = append(manifest.Milestones, e)
-		default:
-			if e.PhaseRef == "" {
-				manifest.Phases = append(manifest.Phases, e)
-			} else {
-				manifest.Plans = append(manifest.Plans, e)
-			}
-		}
-	}
-
-	manifestJSON, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatalf("makeBundleDir marshal manifest: %v", err)
-	}
-	if err := os.WriteFile(dir+"/"+pkgbundle.BundleFileSeedManifest, manifestJSON, 0o644); err != nil {
-		t.Fatalf("makeBundleDir write seed-manifest.json: %v", err)
-	}
-
-	// Write pvc-envelopes.tgz.
-	pvcTgz, err := pkgbundle.WritePVCEnvelopesTgz(envelopes)
-	if err != nil {
-		t.Fatalf("makeBundleDir WritePVCEnvelopesTgz: %v", err)
-	}
-	if err := os.WriteFile(dir+"/"+pkgbundle.BundleFilePVCEnvelopes, pvcTgz, 0o644); err != nil {
-		t.Fatalf("makeBundleDir write pvc-envelopes.tgz: %v", err)
-	}
-
-	// Write a minimal project.yaml.
-	if err := os.WriteFile(dir+"/"+pkgbundle.BundleFileProject, []byte("apiVersion: tideproject.k8s/v1alpha2\nkind: Project\n"), 0o644); err != nil {
-		t.Fatalf("makeBundleDir write project.yaml: %v", err)
-	}
-
-	return dir, cleanFn
-}
 
 // makeValidEnvelopeBytes returns a minimal valid out.json for dry-run adoption.
 func makeValidEnvelopeBytes(t *testing.T, childCount int) []byte {
@@ -343,7 +291,7 @@ func TestImportEnvelopesDryRunJSONOutput(t *testing.T) {
 	}
 
 	// Must be valid JSON.
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\nstdout:\n%s", err, stdout.String())
 	}
@@ -510,11 +458,10 @@ func TestImportEnvelopesLiveModeCreatesConfigMap(t *testing.T) {
 	defer restore()
 
 	cs := fakeclientset.NewSimpleClientset()
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	ctx := context.Background()
 
-	var stdout, stderr bytes.Buffer
-	err := importEnvelopesRun(ctx, c, cs, nil, dir, "default", "tide-projects", &stdout, &stderr)
+	var stderr bytes.Buffer
+	err := importEnvelopesRun(ctx, cs, dir, "default", "tide-projects", &stderr)
 	if err != nil {
 		t.Fatalf("importEnvelopesRun returned error: %v", err)
 	}
@@ -554,11 +501,10 @@ func TestImportEnvelopesLiveModeIdempotent(t *testing.T) {
 		Data: map[string]string{"manifest": "{}"},
 	}
 	cs := fakeclientset.NewSimpleClientset(existingCM)
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	ctx := context.Background()
 
-	var stdout, stderr bytes.Buffer
-	err := importEnvelopesRun(ctx, c, cs, nil, dir, "default", "tide-projects", &stdout, &stderr)
+	var stderr bytes.Buffer
+	err := importEnvelopesRun(ctx, cs, dir, "default", "tide-projects", &stderr)
 	if err != nil {
 		t.Fatalf("importEnvelopesRun with pre-existing ConfigMap returned error: %v", err)
 	}
@@ -576,11 +522,10 @@ func TestImportEnvelopesLiveModeDoesNotApplyProject(t *testing.T) {
 	defer restore()
 
 	cs := fakeclientset.NewSimpleClientset()
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	ctx := context.Background()
 
-	var stdout, stderr bytes.Buffer
-	err := importEnvelopesRun(ctx, c, cs, nil, dir, "default", "tide-projects", &stdout, &stderr)
+	var stderr bytes.Buffer
+	err := importEnvelopesRun(ctx, cs, dir, "default", "tide-projects", &stderr)
 	if err != nil {
 		t.Fatalf("importEnvelopesRun returned error: %v", err)
 	}
@@ -608,11 +553,10 @@ func TestImportEnvelopesLoaderPodTgzStreamed(t *testing.T) {
 	defer restore()
 
 	cs := fakeclientset.NewSimpleClientset()
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
 	ctx := context.Background()
 
-	var stdout, stderr bytes.Buffer
-	err := importEnvelopesRun(ctx, c, cs, nil, dir, "default", "tide-projects", &stdout, &stderr)
+	var stderr bytes.Buffer
+	err := importEnvelopesRun(ctx, cs, dir, "default", "tide-projects", &stderr)
 	if err != nil {
 		t.Fatalf("importEnvelopesRun returned error: %v", err)
 	}

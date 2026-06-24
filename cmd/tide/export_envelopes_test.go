@@ -228,12 +228,12 @@ func TestExportEnvelopesMissingUID(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(proj).Build()
 	cs := fakeclientset.NewSimpleClientset()
 
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	err := exportEnvelopesRun(
 		context.Background(), c, cs,
 		"default/my-project",
 		"tide-projects", "/tmp/out.tgz", false,
-		&stdout, &stderr,
+		&stderr,
 	)
 	if err == nil {
 		t.Fatal("expected error for project with empty UID; got nil")
@@ -267,12 +267,12 @@ func TestExportEnvelopesRunnerInvoked(t *testing.T) {
 	cs := fakeclientset.NewSimpleClientset()
 
 	outPath := t.TempDir() + "/out.tgz"
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	err := exportEnvelopesRun(
 		context.Background(), c, cs,
 		"default/my-project",
 		"tide-projects", outPath, false,
-		&stdout, &stderr,
+		&stderr,
 	)
 	if err != nil {
 		t.Fatalf("exportEnvelopesRun: %v", err)
@@ -304,12 +304,12 @@ func TestExportEnvelopesTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	err := exportEnvelopesRun(
 		ctx, c, cs,
 		"default/my-project",
 		"tide-projects", "/tmp/x.tgz", false,
-		&stdout, &stderr,
+		&stderr,
 	)
 	if err == nil {
 		t.Fatal("expected error after timeout; got nil")
@@ -370,12 +370,12 @@ func TestExportEnvelopesChildCountRepair(t *testing.T) {
 	cs := fakeclientset.NewSimpleClientset()
 
 	outPath := t.TempDir() + "/out.tgz"
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	if err := exportEnvelopesRun(
 		context.Background(), c, cs,
 		"default/my-project",
 		"tide-projects", outPath, false,
-		&stdout, &stderr,
+		&stderr,
 	); err != nil {
 		t.Fatalf("exportEnvelopesRun: %v", err)
 	}
@@ -473,12 +473,12 @@ func TestExportEnvelopesSeedManifest(t *testing.T) {
 	cs := fakeclientset.NewSimpleClientset()
 
 	outPath := t.TempDir() + "/out.tgz"
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	if err := exportEnvelopesRun(
 		context.Background(), c, cs,
 		"default/my-project",
 		"tide-projects", outPath, false,
-		&stdout, &stderr,
+		&stderr,
 	); err != nil {
 		t.Fatalf("exportEnvelopesRun: %v", err)
 	}
@@ -571,12 +571,12 @@ func TestExportEnvelopesDirMode(t *testing.T) {
 	cs := fakeclientset.NewSimpleClientset()
 
 	outDir := t.TempDir() + "/bundle-dir"
-	var stdout, stderr bytes.Buffer
+	var stderr bytes.Buffer
 	err := exportEnvelopesRun(
 		context.Background(), c, cs,
 		"default/my-project",
 		"tide-projects", outDir, true, // outputDir=true
-		&stdout, &stderr,
+		&stderr,
 	)
 	if err != nil {
 		t.Fatalf("exportEnvelopesRun (--dir): %v", err)

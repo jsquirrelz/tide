@@ -280,6 +280,8 @@ func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha2.Proje
 // reconcileCreatingCRs handles the Pending → CreatingCRs → CopyingEnvelopes transition.
 // It reads the seed ConfigMap, runs cycle detection on the seed-derived planning DAG,
 // materializes the CR tree, records the rekey ConfigMap, then transitions to CopyingEnvelopes.
+//
+//nolint:gocyclo // a flat sequence of mutually-exclusive transition arms over a freshly E2E-validated import path; splitting obscures the contract
 func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *tideprojectv1alpha2.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	logger.Info("import: creating CRs from seed", "project", project.Name)

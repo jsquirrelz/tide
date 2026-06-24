@@ -135,7 +135,7 @@ func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr 
 	// Source the rekey table from the mounted file (production: distroless base
 	// has no shell, so the Job passes --rekey-file instead of `cat … | tide-import`)
 	// or fall back to stdin (test seam).
-	var tableReader io.Reader = stdin
+	var tableReader = stdin
 	if cfg.RekeyFile != "" {
 		data, err := os.ReadFile(cfg.RekeyFile)
 		if err != nil {
@@ -219,7 +219,8 @@ func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr 
 		// Completeness guard (IMPORT-02 / T-28-03-03): reject incomplete envelopes.
 		// exitCode != 0 OR len(ChildCRDs) != ChildCount → incomplete.
 		if !isEnvelopeComplete(env) {
-			fmt.Fprintf(stderr, "tide-import: envelope %q is incomplete (exitCode=%d, childCount=%d, len(childCRDs)=%d) — skipping\n",
+			fmt.Fprintf(stderr,
+				"tide-import: envelope %q is incomplete (exitCode=%d, childCount=%d, len(childCRDs)=%d) — skipping\n",
 				entry.FQName, env.ExitCode, env.ChildCount, len(env.ChildCRDs))
 			report.Incomplete++
 			continue

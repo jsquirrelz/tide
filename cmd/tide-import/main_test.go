@@ -86,7 +86,7 @@ func makeRekeyTable(t *testing.T, entries []rekeyEntry) []byte {
 // planSpecRaw returns a JSON RawMessage for a PlanSpec with phaseRef.
 func planSpecRaw(t *testing.T, phaseRef string) json.RawMessage {
 	t.Helper()
-	raw, err := json.Marshal(map[string]interface{}{
+	raw, err := json.Marshal(map[string]any{
 		"phaseRef": phaseRef,
 	})
 	if err != nil {
@@ -99,7 +99,7 @@ func planSpecRaw(t *testing.T, phaseRef string) json.RawMessage {
 // (objective, wave, filesTouched) that should be stripped by schema conversion.
 func planSpecRawWithExtras(t *testing.T, phaseRef string) json.RawMessage {
 	t.Helper()
-	raw, err := json.Marshal(map[string]interface{}{
+	raw, err := json.Marshal(map[string]any{
 		"phaseRef":     phaseRef,
 		"objective":    "some planning objective",
 		"wave":         2,

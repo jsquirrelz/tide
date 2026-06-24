@@ -110,6 +110,10 @@ func (r *ProjectReconciler) readPushEnvelope(ctx context.Context, namespace, pus
 
 const (
 	projectFinalizer = "tideproject.k8s/project-cleanup"
+	// conditionTypeCycleDetected is the shared name for both the Project's
+	// CycleDetected status condition Type and the Plan's ValidationState value —
+	// the same "a cycle was detected" signal surfaced at two levels.
+	conditionTypeCycleDetected = "CycleDetected"
 	// finalizerCleanupTimeout bounds every finalizer cleanup callback (Pitfall 21).
 	finalizerCleanupTimeout = 5 * time.Minute
 	// defaultSharedPVCName is the cluster-wide PVC provisioned by the Helm chart (Plan 12).
@@ -252,8 +256,8 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	var v2project tidev1alpha2.Project
 	if v2GetErr := r.Get(ctx, req.NamespacedName, &v2project); v2GetErr == nil {
 		// Schema-revision guard: reject v1alpha1-shape objects that slipped through.
-		if blocked, result, gErr := r.checkSchemaRevisionGuard(ctx, &v2project); blocked {
-			return result, gErr
+		if blocked, gErr := r.checkSchemaRevisionGuard(ctx, &v2project); blocked {
+			return ctrl.Result{}, gErr
 		}
 		// Assemble the global dep graph ONCE per reconcile (Pitfall 7 — avoids
 		// double List calls from checkGlobalCycleGate + deriveGlobalWaves each
@@ -268,9 +272,9 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Global cross-scope cycle gate: detect task-level dep cycles across plans.
 		// Returns the computed wave schedule so deriveGlobalWaves need not recompute
 		// (WR-03 — ComputeWaves runs exactly once per reconcile).
-		blocked, globalWaves, result, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges)
+		blocked, globalWaves, gErr := r.checkGlobalCycleGate(ctx, &v2project, depNodes, depEdges)
 		if blocked {
-			return result, gErr
+			return ctrl.Result{}, gErr
 		}
 		if gErr != nil {
 			return ctrl.Result{}, gErr
@@ -1545,9 +1549,9 @@ func isJobFailed(job *batchv1.Job) bool {
 func (r *ProjectReconciler) checkSchemaRevisionGuard(
 	ctx context.Context,
 	project *tidev1alpha2.Project,
-) (blocked bool, result ctrl.Result, err error) {
+) (blocked bool, err error) {
 	if project.Spec.SchemaRevision == "v1alpha2" {
-		return false, ctrl.Result{}, nil
+		return false, nil
 	}
 
 	// The SchemaRevision is absent or wrong — this object was authored under
@@ -1568,7 +1572,7 @@ func (r *ProjectReconciler) checkSchemaRevisionGuard(
 			"failed to update RequiresReinstall condition; condition may not be visible yet",
 			"project", project.Name)
 	}
-	return true, ctrl.Result{}, reconcile.TerminalError(
+	return true, reconcile.TerminalError(
 		fmt.Errorf("project %s/%s requires reinstall (v1alpha1 schema; schemaRevision must be v1alpha2)",
 			project.Namespace, project.Name),
 	)
@@ -1871,7 +1875,7 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 	project *tidev1alpha2.Project,
 	nodes []dag.NodeID,
 	edges []dag.Edge,
-) (blocked bool, waves [][]dag.NodeID, result ctrl.Result, err error) {
+) (blocked bool, waves [][]dag.NodeID, err error) {
 	// ComputeWaves validates the graph and returns *CycleError on a cycle.
 	// The computed waves are returned to the caller for use by deriveGlobalWaves
 	// (WR-03 — compute once, not twice). No schedule is stored (PERSIST-03).
@@ -1880,7 +1884,7 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 		var cyc *dag.CycleError
 		if goErrors.As(computeErr, &cyc) {
 			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               "CycleDetected",
+				Type:               conditionTypeCycleDetected,
 				Status:             metav1.ConditionTrue,
 				Reason:             tidev1alpha2.ReasonGlobalCycleDetected,
 				Message:            fmt.Sprintf("cyclic global Execution DAG involving: %v", cyc.InvolvedNodes),
@@ -1893,27 +1897,27 @@ func (r *ProjectReconciler) checkGlobalCycleGate(
 					"involved", cyc.InvolvedNodes)
 			}
 			// NOT a TerminalError — a plan edit can remove the cycle; allow requeue.
-			return true, nil, ctrl.Result{}, nil
+			return true, nil, nil
 		}
 		// Non-cycle error (e.g., unknown node from edge assembler defect) — transient requeue.
-		return false, nil, ctrl.Result{}, fmt.Errorf("ComputeWaves error for project %s: %w", project.Name, computeErr)
+		return false, nil, fmt.Errorf("ComputeWaves error for project %s: %w", project.Name, computeErr)
 	}
 	// WR-01: no cycle — clear any prior sticky CycleDetected condition so the
 	// operator sees a self-healing signal once the cycle is broken. The doc comment
 	// on taskToProject claims this self-clears; make the code match.
-	if meta.FindStatusCondition(project.Status.Conditions, "CycleDetected") != nil {
+	if meta.FindStatusCondition(project.Status.Conditions, conditionTypeCycleDetected) != nil {
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:               "CycleDetected",
+			Type:               conditionTypeCycleDetected,
 			Status:             metav1.ConditionFalse,
 			Reason:             "NoCycle",
 			Message:            "global Execution DAG is acyclic",
 			LastTransitionTime: metav1.Now(),
 		})
 		if err := r.Status().Update(ctx, project); err != nil {
-			return false, nil, ctrl.Result{}, err
+			return false, nil, err
 		}
 	}
-	return false, computedWaves, ctrl.Result{}, nil
+	return false, computedWaves, nil
 }
 
 // taskToProject maps a Task to a reconcile.Request for its owning Project,

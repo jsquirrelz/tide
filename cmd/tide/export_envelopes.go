@@ -122,7 +122,6 @@ func runExportEnvelopes(
 		pvcName,
 		outputPath,
 		outputDir,
-		cmd.OutOrStdout(),
 		cmd.ErrOrStderr(),
 	)
 }

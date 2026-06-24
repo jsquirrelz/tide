@@ -76,7 +76,7 @@ func exportEnvelopesRun(
 	cs kubernetes.Interface,
 	ref, pvcName, outputPath string,
 	outputDir bool,
-	out, errOut io.Writer,
+	errOut io.Writer,
 ) error {
 	// Parse <namespace>/<project> from the ref.
 	ns, projName, err := parseExportRef(ref)
@@ -275,7 +275,7 @@ func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 	if err != nil {
 		return nil, nil, fmt.Errorf("open pvc-envelopes.tgz gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 	for {

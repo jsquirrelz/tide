@@ -60,12 +60,12 @@ func WriteBundle(tgzPath string, files map[string][]byte) error {
 	if err != nil {
 		return fmt.Errorf("create bundle tgz %s: %w", tgzPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz := gzip.NewWriter(f)
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	for _, name := range bundleEntryOrder {
 		data, ok := files[name]
@@ -99,7 +99,7 @@ func ReadBundle(tgzPath string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open bundle tgz %s: %w", tgzPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	result := make(map[string][]byte)
 	if err := readTgzEntries(f, func(name string, r io.Reader) error {
@@ -126,7 +126,7 @@ func ExtractBundle(tgzPath string) (dir string, cleanup func(), err error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("open bundle tgz %s: %w", tgzPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	destDir, err := os.MkdirTemp("", "tide-bundle-*")
 	if err != nil {
@@ -168,7 +168,7 @@ func extractTgzTo(r io.Reader, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("open gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 	for {
@@ -196,7 +196,7 @@ func extractTgzTo(r io.Reader, destDir string) error {
 			if err := os.MkdirAll(destPath, 0o755); err != nil {
 				return fmt.Errorf("mkdir %s: %w", destPath, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 				return fmt.Errorf("mkdir parent of %s: %w", destPath, err)
 			}
@@ -223,7 +223,7 @@ func readTgzEntries(r io.Reader, fn func(name string, r io.Reader) error) error 
 	if err != nil {
 		return fmt.Errorf("open gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 	for {
@@ -234,7 +234,7 @@ func readTgzEntries(r io.Reader, fn func(name string, r io.Reader) error) error 
 		if err != nil {
 			return fmt.Errorf("read tar entry: %w", err)
 		}
-		if hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeRegA {
+		if hdr.Typeflag == tar.TypeReg {
 			if err := fn(hdr.Name, tr); err != nil {
 				return err
 			}

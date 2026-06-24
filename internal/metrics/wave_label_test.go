@@ -81,7 +81,6 @@ var telem03labelChecks = []struct {
 func TestWaveLabel(t *testing.T) {
 	t.Run("TELEM-03 metrics accept exactly {project,phase,plan,wave} labels", func(t *testing.T) {
 		for _, tc := range telem03labelChecks {
-			tc := tc
 			t.Run(tc.name, func(t *testing.T) {
 				// If WithLabelValues panics (arity mismatch), the test fails via
 				// the test harness panic recovery. A successful call proves 4 labels.

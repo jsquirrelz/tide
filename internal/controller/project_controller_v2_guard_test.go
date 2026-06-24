@@ -85,7 +85,7 @@ func TestOldShapeRejection(t *testing.T) {
 		Scheme: s,
 	}
 
-	blocked, _, err := r.checkSchemaRevisionGuard(ctx, proj)
+	blocked, err := r.checkSchemaRevisionGuard(ctx, proj)
 	if err == nil {
 		t.Fatal("checkSchemaRevisionGuard: expected TerminalError for old-shape Project, got nil")
 	}
@@ -144,7 +144,7 @@ func TestOldShapeRejection_V2ShapePasses(t *testing.T) {
 		Scheme: s,
 	}
 
-	blocked, _, err := r.checkSchemaRevisionGuard(ctx, proj)
+	blocked, err := r.checkSchemaRevisionGuard(ctx, proj)
 	if blocked {
 		t.Errorf("checkSchemaRevisionGuard: expected blocked=false for v1alpha2-shaped Project; err=%v", err)
 	}

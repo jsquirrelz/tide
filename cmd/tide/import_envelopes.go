@@ -100,10 +100,6 @@ func runImportEnvelopes(
 	}
 
 	// Live mode — build clients.
-	k, err := K8sClient()
-	if err != nil {
-		return err
-	}
 	cfg, err := RESTConfig()
 	if err != nil {
 		return err
@@ -116,5 +112,5 @@ func runImportEnvelopes(
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
-	return importEnvelopesRun(ctx, k, cs, cfg, bundlePath, namespace, pvcName, cmd.OutOrStdout(), cmd.ErrOrStderr())
+	return importEnvelopesRun(ctx, cs, bundlePath, namespace, pvcName, cmd.ErrOrStderr())
 }

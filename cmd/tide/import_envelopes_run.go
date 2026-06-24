@@ -60,7 +60,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
@@ -181,12 +180,10 @@ func renderDryRunJSON(result *pkgbundle.ValidationResult, out io.Writer) error {
 // restCfg may be nil in unit tests (loaderPodRunner is faked).
 func importEnvelopesRun(
 	ctx context.Context,
-	k client.Client,
 	cs kubernetes.Interface,
-	restCfg *rest.Config,
 	bundlePath string,
 	namespace, pvcName string,
-	out, errOut io.Writer,
+	errOut io.Writer,
 ) error {
 	fmt.Fprintf(errOut, "importing bundle (live mode): %s\n", bundlePath)
 
@@ -451,7 +448,7 @@ func execLoaderPod(
 	if err != nil {
 		return fmt.Errorf("open pvc-envelopes.tgz: %w", err)
 	}
-	defer tgzFile.Close()
+	defer func() { _ = tgzFile.Close() }()
 
 	// NewSPDYExecutor uses "POST" (same as kubectl exec/cp, A2 resolved).
 	executor, err := remotecommand.NewSPDYExecutor(restCfg, "POST", execURL)

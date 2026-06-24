@@ -60,6 +60,7 @@ import (
 	// span processor before the binary exits.
 	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/pool"
+
 	// All webhooks moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
 	// webhookv1alpha1 no longer needed here; only SetupProjectWebhookWithManager
 	// remains via suite_test.go which still needs the v1alpha1 package for strict_mode.

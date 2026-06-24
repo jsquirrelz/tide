@@ -61,11 +61,17 @@ type ValidationResult struct {
 	CycleError error
 }
 
+// Verdict values for a ValidationRow (D-07).
+const (
+	VerdictAdopt  = "adopt"
+	VerdictRePlan = "re-plan"
+)
+
 // AdoptCount returns the number of rows with verdict "adopt".
 func (r *ValidationResult) AdoptCount() int {
 	n := 0
 	for _, row := range r.Rows {
-		if row.Verdict == "adopt" {
+		if row.Verdict == VerdictAdopt {
 			n++
 		}
 	}
@@ -76,7 +82,7 @@ func (r *ValidationResult) AdoptCount() int {
 func (r *ValidationResult) RePlanCount() int {
 	n := 0
 	for _, row := range r.Rows {
-		if row.Verdict == "re-plan" {
+		if row.Verdict == VerdictRePlan {
 			n++
 		}
 	}
@@ -144,7 +150,7 @@ func ValidateBundle(bundleDir string) (*ValidationResult, error) {
 
 		envBytes, ok := envelopes[le.entry.OldUID]
 		if !ok {
-			row.Verdict = "re-plan"
+			row.Verdict = VerdictRePlan
 			row.Reason = "no complete envelope"
 			result.Rows = append(result.Rows, row)
 			continue
@@ -153,7 +159,7 @@ func ValidateBundle(bundleDir string) (*ValidationResult, error) {
 		// D-16a: stamp legacy childCount before validation.
 		stamped, err := stampChildCount(envBytes, io.Discard)
 		if err != nil {
-			row.Verdict = "re-plan"
+			row.Verdict = VerdictRePlan
 			row.Reason = fmt.Sprintf("envelope parse error: %v", err)
 			result.Rows = append(result.Rows, row)
 			continue
@@ -163,7 +169,7 @@ func ValidateBundle(bundleDir string) (*ValidationResult, error) {
 		if le.entry.SHA256 != "" {
 			actual := computeEnvelopeSHA256(envBytes)
 			if actual != le.entry.SHA256 {
-				row.Verdict = "re-plan"
+				row.Verdict = VerdictRePlan
 				row.Reason = fmt.Sprintf("checksum mismatch: want %s, got %s", le.entry.SHA256, actual)
 				result.Rows = append(result.Rows, row)
 				continue
@@ -173,13 +179,13 @@ func ValidateBundle(bundleDir string) (*ValidationResult, error) {
 		// Schema check.
 		var env dispatch.EnvelopeOut
 		if err := json.Unmarshal(stamped, &env); err != nil {
-			row.Verdict = "re-plan"
+			row.Verdict = VerdictRePlan
 			row.Reason = fmt.Sprintf("envelope parse error: %v", err)
 			result.Rows = append(result.Rows, row)
 			continue
 		}
 		if err := dispatch.ValidateAPIVersionKind(env.APIVersion, env.Kind, dispatch.KindTaskEnvelopeOut); err != nil {
-			row.Verdict = "re-plan"
+			row.Verdict = VerdictRePlan
 			row.Reason = fmt.Sprintf("schema mismatch: %v", err)
 			result.Rows = append(result.Rows, row)
 			continue
@@ -187,14 +193,14 @@ func ValidateBundle(bundleDir string) (*ValidationResult, error) {
 
 		// Completeness check (after stamp, so legacy 0-shape is repaired).
 		if env.ChildCount != len(env.ChildCRDs) {
-			row.Verdict = "re-plan"
+			row.Verdict = VerdictRePlan
 			row.Reason = fmt.Sprintf("completeness failure: childCount=%d len(childCRDs)=%d",
 				env.ChildCount, len(env.ChildCRDs))
 			result.Rows = append(result.Rows, row)
 			continue
 		}
 
-		row.Verdict = "adopt"
+		row.Verdict = VerdictAdopt
 		result.Rows = append(result.Rows, row)
 	}
 
@@ -236,7 +242,7 @@ func loadPVCEnvelopes(tgzPath string) (map[string][]byte, error) {
 		}
 		return nil, fmt.Errorf("open pvc-envelopes.tgz: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	result := make(map[string][]byte)
 	if err := readPVCEnvelopesTgz(f, func(uid string, data []byte) {
@@ -254,7 +260,7 @@ func readPVCEnvelopesTgz(r io.Reader, fn func(uid string, data []byte)) error {
 	if err != nil {
 		return fmt.Errorf("open gzip reader: %w", err)
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	tr := tar.NewReader(gr)
 	for {
@@ -267,7 +273,7 @@ func readPVCEnvelopesTgz(r io.Reader, fn func(uid string, data []byte)) error {
 		}
 
 		// Match "envelopes/<uid>/out.json".
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		uid, ok := parseEnvelopePath(hdr.Name)

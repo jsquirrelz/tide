@@ -167,7 +167,7 @@ func validateSeedDAG(m bundle.BundleManifest) {
 	var edges []dag.Edge
 	add := func(entries []bundle.BundleEntry) {
 		for _, e := range entries {
-			nodes = append(nodes, dag.NodeID(e.Name))
+			nodes = append(nodes, e.Name)
 		}
 	}
 	add(m.Milestones)
@@ -176,7 +176,7 @@ func validateSeedDAG(m bundle.BundleManifest) {
 	edge := func(entries []bundle.BundleEntry) {
 		for _, e := range entries {
 			for _, dep := range e.DependsOn {
-				edges = append(edges, dag.Edge{From: dag.NodeID(dep), To: dag.NodeID(e.Name)})
+				edges = append(edges, dag.Edge{From: dep, To: e.Name})
 			}
 		}
 	}

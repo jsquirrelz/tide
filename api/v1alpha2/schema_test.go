@@ -54,7 +54,7 @@ func TestWaveSpec(t *testing.T) {
 
 	// Assert via reflect that there is NO field named "PlanRef" on WaveSpec.
 	// This catches any regression that re-introduces the old per-plan ownership field.
-	waveSpecType := reflect.TypeOf(tidev1alpha2.WaveSpec{})
+	waveSpecType := reflect.TypeFor[tidev1alpha2.WaveSpec]()
 	if _, ok := waveSpecType.FieldByName("PlanRef"); ok {
 		t.Errorf("WaveSpec has field PlanRef — old Plan-scoped ownership must be removed (SCHEMA-01)")
 	}
@@ -102,7 +102,7 @@ func TestTaskDependsOn(t *testing.T) {
 	}
 
 	// Assert via reflect that DependsOn IS present on TaskSpec.
-	taskSpecType := reflect.TypeOf(tidev1alpha2.TaskSpec{})
+	taskSpecType := reflect.TypeFor[tidev1alpha2.TaskSpec]()
 	if _, ok := taskSpecType.FieldByName("DependsOn"); !ok {
 		t.Errorf("TaskSpec missing field DependsOn — DEPS-01 requires the field")
 	}
@@ -138,7 +138,7 @@ func TestPlanDependsOn(t *testing.T) {
 	}
 
 	// Assert via reflect that DependsOn IS present on PlanSpec (DEPS-02).
-	planSpecType := reflect.TypeOf(tidev1alpha2.PlanSpec{})
+	planSpecType := reflect.TypeFor[tidev1alpha2.PlanSpec]()
 	if _, ok := planSpecType.FieldByName("DependsOn"); !ok {
 		t.Errorf("PlanSpec missing field DependsOn — DEPS-02 requires the field")
 	}
