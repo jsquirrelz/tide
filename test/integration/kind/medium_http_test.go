@@ -177,24 +177,23 @@ spec:
 `, ns, mediumHTTPServerImage, ns)
 }
 
-// loadImageIfNeeded loads a Docker image into the kind cluster if it exists locally.
-// If the image is not present locally, it is skipped (the image must have been
-// built by make test-int-kind-prep or equivalent before the suite runs).
-func loadImageIfNeeded(image string) {
-	// Check if the image exists locally.
+// loadRequiredImage loads a REQUIRED Layer-B fixture image into the kind cluster.
+// These images are private (unpublished) and the consuming pods set
+// imagePullPolicy=IfNotPresent, so a missing image cannot be pulled — it is a
+// hard error. Failing here with an actionable message is deliberate: a silent
+// skip previously let the missing image surface downstream as a misleading
+// 2-minute "Job never completes" timeout (the historical "medium_http flake").
+// Build the images with `make test-int-kind-prep` before running the suite.
+func loadRequiredImage(image string) {
 	checkCmd := exec.CommandContext(ctx, "docker", "image", "inspect", image)
 	if err := checkCmd.Run(); err != nil {
-		GinkgoWriter.Printf("Image %s not found locally — skipping kind load (image must be pre-built)\n", image)
-		return
+		Fail(fmt.Sprintf("required fixture image %s not found locally — run `make test-int-kind-prep` "+
+			"before the kind suite (it is a private image; pods cannot pull it with IfNotPresent)", image))
 	}
-	// Load the image into kind.
 	loadCmd := exec.CommandContext(ctx, "kind", "load", "docker-image", image, "--name", kindClusterName)
 	out, err := loadCmd.CombinedOutput()
-	if err != nil {
-		GinkgoWriter.Printf("Warning: kind load docker-image %s failed: %v\n%s\n", image, err, out)
-	} else {
-		GinkgoWriter.Printf("Loaded image %s into kind cluster %s\n", image, kindClusterName)
-	}
+	Expect(err).NotTo(HaveOccurred(), "kind load docker-image %s failed:\n%s", image, out)
+	GinkgoWriter.Printf("Loaded image %s into kind cluster %s\n", image, kindClusterName)
 }
 
 var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
@@ -208,9 +207,9 @@ var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
 		// Load the git-http-server and demo-init images into the kind cluster so
 		// the Deployment and Job Pods can pull them with IfNotPresent.
 		By("Loading tide-demo-init image into kind cluster")
-		loadImageIfNeeded(mediumHTTPDemoInitImage)
+		loadRequiredImage(mediumHTTPDemoInitImage)
 		By("Loading tide-git-http-server image into kind cluster")
-		loadImageIfNeeded(mediumHTTPServerImage)
+		loadRequiredImage(mediumHTTPServerImage)
 
 		// Create the demo-remote-pvc (distinct from tide-projects, used by the
 		// init Job and git-http server to share the bootstrapped bare repo).
@@ -387,6 +386,11 @@ data:
 				Namespace: mediumHTTPNamespace,
 			},
 			Spec: tideprojectv1alpha2.ProjectSpec{
+				// Required by the Spring Tide CRD enum (schemaRevision ∈ {"v1alpha2"}).
+				// This is the only kind Project built from a struct literal — every other
+				// spec uses a YAML helper that already carries the field — so it was the
+				// one fixture the v1alpha2 migration missed (admission 422 without it).
+				SchemaRevision:    "v1alpha2",
 				TargetRepo:        mediumHTTPTargetRepo,
 				ProviderSecretRef: "tide-secrets",
 				Budget: tideprojectv1alpha2.BudgetConfig{

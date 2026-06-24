@@ -167,6 +167,16 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	# Job pod ImagePullBackoffs and the imported run never stages envelopes at new-UID paths.
 	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-import:test -f images/tide-import/Dockerfile .
 	$(CONTAINER_TOOL) build -t controller:test -f Dockerfile .
+	# SC-5 (medium_http_test.go): build the two Layer-B fixture images the spec
+	# references by their :1.0.0 tag — tide-demo-init bootstraps the bare repo on
+	# demo-remote-pvc, tide-git-http-server serves it over in-cluster http://.
+	# Both are PRIVATE (unpublished) fixtures with imagePullPolicy=IfNotPresent, so
+	# their pods 403 on pull unless pre-loaded — they MUST be built+loaded here.
+	# Previously only the nightly workflow's SC-1 step built them, so `make test-int`
+	# was not self-contained: the spec ImagePullBackoff'd and timed out (read as a
+	# "flaky" 2-minute timeout) anywhere else. Tag matches the test's :1.0.0 consts.
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-demo-init:1.0.0 -f images/tide-demo-init/Dockerfile .
+	$(CONTAINER_TOOL) build -t ghcr.io/jsquirrelz/tide-git-http-server:1.0.0 -f images/tide-git-http-server/Dockerfile .
 	@if ! $(KIND) get clusters 2>/dev/null | grep -q "^tide-test$$"; then \
 		$(KIND) create cluster --name tide-test --config test/integration/kind/cluster.yaml; \
 	fi
@@ -182,6 +192,9 @@ test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + t
 	# (helm sets TIDE_IMPORT_IMAGE=...tide-import:test via images.tideImport.tag override).
 	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-import:test --name tide-test
 	$(KIND) load docker-image controller:test --name tide-test
+	# SC-5: load the medium_http fixture images so loadRequiredImage finds them.
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-demo-init:1.0.0 --name tide-test
+	$(KIND) load docker-image ghcr.io/jsquirrelz/tide-git-http-server:1.0.0 --name tide-test
 
 ##@ Live nightly E2E (TEST-03 — Phase 3 plan 03-11)
 
