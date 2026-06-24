@@ -380,43 +380,44 @@ data:
 		// The stub-subagent ignores the LLM calls but the clone/push Jobs use
 		// targetRepo for the real go-git HTTP transport path (exercising SC-5).
 		projName := fmt.Sprintf("medium-http-project-%d", GinkgoRandomSeed())
-		proj := &tideprojectv1alpha2.Project{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      projName,
-				Namespace: mediumHTTPNamespace,
-			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				// Required by the Spring Tide CRD enum (schemaRevision ∈ {"v1alpha2"}).
-				// This is the only kind Project built from a struct literal — every other
-				// spec uses a YAML helper that already carries the field — so it was the
-				// one fixture the v1alpha2 migration missed (admission 422 without it).
-				SchemaRevision:    "v1alpha2",
-				TargetRepo:        mediumHTTPTargetRepo,
-				ProviderSecretRef: "tide-secrets",
-				Budget: tideprojectv1alpha2.BudgetConfig{
-					AbsoluteCapCents: 0,
-				},
-				Subagent: tideprojectv1alpha2.SubagentConfig{
-					Model: "stub",
-				},
-				Git: &tideprojectv1alpha2.GitConfig{
-					RepoURL:        mediumHTTPTargetRepo,
-					CredsSecretRef: "tide-secrets",
-				},
-				Gates: tideprojectv1alpha2.Gates{
-					Milestone:         "auto",
-					Phase:             "auto",
-					Plan:              "auto",
-					Task:              "auto",
-					PauseBetweenWaves: false,
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, proj)).To(Succeed(),
+		// Build the Project as inline YAML applied via applyYAML — the same idiom
+		// every other kind spec uses (e.g. reporter_pod_test.go). Keeping all
+		// fixtures on one construction pattern means a new Project gets copied from
+		// a known-good template that already carries schemaRevision, instead of
+		// being hand-rolled (which is how the former struct-literal outlier here
+		// originally missed it). The http:// targetRepo exercises go-git's HTTP
+		// transport via the clone/push Jobs.
+		projectYAML := fmt.Sprintf(`apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  schemaRevision: v1alpha2
+  targetRepo: %q
+  providerSecretRef: tide-secrets
+  budget:
+    absoluteCapCents: 0
+  subagent:
+    model: stub
+  git:
+    repoURL: %q
+    credsSecretRef: tide-secrets
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+`, projName, mediumHTTPNamespace, mediumHTTPTargetRepo, mediumHTTPTargetRepo)
+		By("Applying medium Project (stub subagent, http:// targetRepo) into " + mediumHTTPNamespace)
+		Expect(applyYAML(projectYAML)).To(Succeed(),
 			"medium Project must be admitted (http:// targetRepo passes CEL rule)")
 
 		defer func() {
-			_ = k8sClient.Delete(ctx, proj)
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: mediumHTTPNamespace},
+			})
 		}()
 
 		// Wait for Project to reach Complete within 10 minutes.
