@@ -26,7 +26,7 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: large
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
   name: large-project
@@ -36,6 +36,9 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: large
 spec:
+  # Required since Spring Tide (v1.0.2): v1alpha2 is the only served version and
+  # the controller fail-closes any object lacking this explicit opt-in.
+  schemaRevision: v1alpha2
   # D-A1: targetRepo is THIS TIDE repo. TIDE will clone it, author the openai
   # scaffold on a per-run branch, and push back (never to main per Phase 3 D-B6).
   targetRepo: https://github.com/jsquirrelz/tide.git
