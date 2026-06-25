@@ -26,7 +26,6 @@ package kind_integration
 // In CRDs-only mode (no controller Deployment), the tests are skipped gracefully.
 
 import (
-	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -39,12 +38,38 @@ import (
 var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	const testNS = "wave-success-test"
 
+	// fixtureNS is where the wave hierarchy lives (the assertions below reference
+	// it directly); testNS above is only the AfterEach cleanup target.
+	const fixtureNS = "tide-int-test"
+
 	BeforeEach(func() {
 		skipIfCRDsOnlyMode()
-		// Apply the three-task wave fixture.
-		fixturePath := filepath.Join("testdata", "three-task-wave.yaml")
-		Expect(applyFile(fixturePath)).To(Succeed(),
-			"Failed to apply three-task wave fixture")
+		// Build the three-task wave hierarchy via the shared typed fixtures —
+		// replaces testdata/three-task-wave.yaml, which duplicated applyHierarchy
+		// field-for-field. α and β are wave-0 siblings; γ is wave-1 dependsOn both.
+		createNamespace(fixtureNS)
+		ensureProviderSecret(fixtureNS)
+		const proj = "wave-test-project"
+		fixtures := []client.Object{
+			newStubProject(fixtureNS, proj,
+				withTargetRepo("https://github.com/example/three-task-wave.git"),
+				withProviderSecret("tide-provider-secret"),
+				withBudget(100000)),
+			newStubMilestone(fixtureNS, "wave-test-milestone", proj),
+			newStubPhase(fixtureNS, "wave-test-phase", "wave-test-milestone"),
+			newStubPlan(fixtureNS, "wave-test-plan", "wave-test-phase", withPlanProjectLabel(proj)),
+			newStubTask(fixtureNS, "alpha", "wave-test-plan",
+				withTaskProjectLabel(proj), withWallClockCap(120)),
+			newStubTask(fixtureNS, "beta", "wave-test-plan",
+				withTaskProjectLabel(proj), withPromptPath("children/task-02.json"), withWallClockCap(120)),
+			newStubTask(fixtureNS, "gamma", "wave-test-plan",
+				withTaskProjectLabel(proj), withWaveIndex("1"),
+				withPromptPath("children/task-03.json"),
+				withTaskDependsOn("alpha", "beta"), withWallClockCap(120)),
+		}
+		for _, f := range fixtures {
+			Expect(createFixture(ctx, f)).To(Succeed())
+		}
 	})
 
 	AfterEach(func() {

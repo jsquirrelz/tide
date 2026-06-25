@@ -25,7 +25,6 @@ package kind_integration
 // cap-hit OR the Job reaches Failed status.
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -58,37 +57,14 @@ var _ = Describe("Wall-clock cap enforcement (AC5 / HARN-02)", Label("kind"), fu
 		By("Creating a Plan with a hanging Task (caps.WallClockSeconds=10)")
 		Expect(createProjectHierarchy(ctx, capsNS)).To(Succeed())
 
-		capPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha2
-kind: Plan
-metadata:
-  name: cap-plan
-  namespace: %s
-spec:
-  phaseRef: cap-phase
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: hang-task
-  namespace: %s
-  labels:
-    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback.
-    # Project name follows createProjectHierarchy convention: ns+"-project".
-    tideproject.k8s/project: caps-test-project
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: cap-plan
-  promptPath: "children/task-01.json"
-  filesTouched: ["hang.go"]
-  declaredOutputPaths: ["hang.go"]
-  caps:
-    wallClockSeconds: 10
-  dev:
-    testMode: hang
-`, capsNS, capsNS)
-
-		Expect(applyYAML(capPlanYAML)).To(Succeed())
+		// cap-plan keeps its verbatim phaseRef "cap-phase" (the prior fixture's
+		// value); the hang Task carries a 10s wall-clock cap.
+		Expect(createFixture(ctx, newStubPlan(capsNS, "cap-plan", "cap-phase"))).To(Succeed())
+		Expect(createFixture(ctx, newStubTask(capsNS, "hang-task", "cap-plan",
+			withTaskProjectLabel(capsNS+"-project"),
+			withFiles("hang.go"),
+			withTestMode("hang"),
+			withWallClockCap(10)))).To(Succeed())
 
 		// Wait for the task to be created.
 		Eventually(func() error {

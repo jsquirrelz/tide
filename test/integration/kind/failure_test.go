@@ -55,68 +55,23 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 		ns := failNS
 		Expect(createProjectHierarchy(ctx, ns)).To(Succeed())
 
-		planYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha2
-kind: Plan
-metadata:
-  name: fail-plan
-  namespace: %s
-spec:
-  phaseRef: fail-phase
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: alpha-fail
-  namespace: %s
-  labels:
-    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback.
-    # Project name follows createProjectHierarchy convention: ns+"-project".
-    tideproject.k8s/project: failure-test-project
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: fail-plan
-  promptPath: "children/task-01.json"
-  filesTouched: ["alpha-fail.go"]
-  declaredOutputPaths: ["alpha-fail.go"]
-  dev:
-    testMode: success
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: beta-fail
-  namespace: %s
-  labels:
-    tideproject.k8s/project: failure-test-project
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: fail-plan
-  promptPath: "children/task-02.json"
-  filesTouched: ["beta-fail.go"]
-  declaredOutputPaths: ["beta-fail.go"]
-  dev:
-    testMode: fail-exit-1
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: gamma-fail
-  namespace: %s
-  labels:
-    tideproject.k8s/project: failure-test-project
-    tideproject.k8s/wave-index: "1"
-spec:
-  planRef: fail-plan
-  promptPath: "children/task-03.json"
-  dependsOn: ["beta-fail"]
-  filesTouched: ["gamma-fail.go"]
-  declaredOutputPaths: ["gamma-fail.go"]
-  dev:
-    testMode: success
-`, ns, ns, ns, ns)
-
-		Expect(applyYAML(planYAML)).To(Succeed())
+		// AC3 wave shape: α (wave 0, success) and β (wave 0, fail-exit-1) are
+		// independent siblings; γ (wave 1) dependsOn β so it must never dispatch.
+		// Task names match the default file derivation (name.go), so withFiles is
+		// unneeded; only the prompt/mode/wave/deps vary.
+		proj := ns + "-project"
+		fixtures := []client.Object{
+			newStubPlan(ns, "fail-plan", "fail-phase"),
+			newStubTask(ns, "alpha-fail", "fail-plan", withTaskProjectLabel(proj)),
+			newStubTask(ns, "beta-fail", "fail-plan", withTaskProjectLabel(proj),
+				withPromptPath("children/task-02.json"), withTestMode("fail-exit-1")),
+			newStubTask(ns, "gamma-fail", "fail-plan", withTaskProjectLabel(proj),
+				withWaveIndex("1"), withPromptPath("children/task-03.json"),
+				withTaskDependsOn("beta-fail")),
+		}
+		for _, f := range fixtures {
+			Expect(createFixture(ctx, f)).To(Succeed())
+		}
 
 		// Wait for tasks to be created.
 		for _, taskName := range []string{"alpha-fail", "beta-fail", "gamma-fail"} {

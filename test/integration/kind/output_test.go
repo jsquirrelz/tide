@@ -26,7 +26,6 @@ package kind_integration
 // The test asserts the Task reaches Failed phase with an appropriate condition.
 
 import (
-	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -57,37 +56,13 @@ var _ = Describe("Output path violation detection (AC5 / HARN-05)", Label("kind"
 		By("Creating a Plan with a Task set to exceed output paths")
 		Expect(createProjectHierarchy(ctx, outputNS)).To(Succeed())
 
-		outputPlanYAML := fmt.Sprintf(`
-apiVersion: tideproject.k8s/v1alpha2
-kind: Plan
-metadata:
-  name: output-plan
-  namespace: %s
-spec:
-  phaseRef: output-phase
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: exceed-output-task
-  namespace: %s
-  labels:
-    # Phase 04.1 P1.4 (commit 416545c) removed the first-Project fallback in
-    # resolveProject; the label is now required for Task→Project resolution
-    # because PlanReconciler-stamped owner-refs race with the Task reconciler.
-    # The project name follows the createProjectHierarchy convention: ns+"-project".
-    tideproject.k8s/project: output-test-project
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: output-plan
-  promptPath: "children/task-01.json"
-  filesTouched: ["declared.go"]
-  declaredOutputPaths: ["declared.go"]
-  dev:
-    testMode: exceed-output-paths
-`, outputNS, outputNS)
-
-		Expect(applyYAML(outputPlanYAML)).To(Succeed())
+		// The Task declares declared.go but exceed-output-paths mode makes the
+		// harness write outside it, tripping the output-path validator.
+		Expect(createFixture(ctx, newStubPlan(outputNS, "output-plan", "output-phase"))).To(Succeed())
+		Expect(createFixture(ctx, newStubTask(outputNS, "exceed-output-task", "output-plan",
+			withTaskProjectLabel(outputNS+"-project"),
+			withFiles("declared.go"),
+			withTestMode("exceed-output-paths")))).To(Succeed())
 
 		// Wait for task to be created.
 		Eventually(func() error {

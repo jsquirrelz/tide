@@ -887,90 +887,28 @@ func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
 	milestoneName := ns + "-milestone"
 	phaseName := ns + "-phase"
 
-	// Step 3: Construct the full hierarchy as a single multi-doc YAML, mirroring
-	// testdata/three-task-wave.yaml field-for-field (T-02.2-17 mitigation).
-	// Secret + Project + Milestone + Phase + Plan + Task (Namespace already created above).
-	hierarchyYAML := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: tide-provider-secret
-  namespace: %s
-type: Opaque
-data:
-  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Project
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  schemaRevision: v1alpha2
-  targetRepo: "https://github.com/example/%s.git"
-  providerSecretRef: "tide-provider-secret"
-  budget:
-    absoluteCapCents: 100000
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Milestone
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  projectRef: %s
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Phase
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  milestoneRef: %s
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Plan
-metadata:
-  name: %s
-  namespace: %s
-  labels:
-    tideproject.k8s/project: %s
-spec:
-  phaseRef: %s
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Task
-metadata:
-  name: %s
-  namespace: %s
-  labels:
-    tideproject.k8s/project: %s
-    tideproject.k8s/wave-index: "0"
-spec:
-  planRef: %s
-  filesTouched:
-    - %s.go
-  declaredOutputPaths:
-    - %s.go
-  promptPath: "children/task-01.json"
-  dev:
-    testMode: success
-`,
-		// Secret namespace
-		ns,
-		// Project: name, namespace, targetRepo ns
-		projectName, ns, ns,
-		// Milestone: name, namespace, projectRef
-		milestoneName, ns, projectName,
-		// Phase: name, namespace, milestoneRef
-		phaseName, ns, milestoneName,
-		// Plan: name, namespace, label project, phaseRef
-		planName, ns, projectName, phaseName,
-		// Task: name, namespace, label project, planRef, filesTouched, declaredOutputPaths
-		taskName, ns, projectName, planName, taskName, taskName,
-	)
-
-	// Step 4: Apply the hierarchy via the existing applyYAML primitive.
-	return applyYAML(hierarchyYAML)
+	// Step 3: Provider Secret + the full Project→Milestone→Phase→Plan→Task
+	// hierarchy, built via the shared typed fixtures (fixtures_test.go) so
+	// required fields (schemaRevision, the project/wave labels) can't be omitted.
+	// This replaces the prior inline multi-doc YAML that had to be hand-kept
+	// "field-for-field" in sync with testdata/three-task-wave.yaml.
+	ensureProviderSecret(ns)
+	objs := []client.Object{
+		newStubProject(ns, projectName,
+			withTargetRepo("https://github.com/example/"+ns+".git"),
+			withProviderSecret("tide-provider-secret"),
+			withBudget(100000)),
+		newStubMilestone(ns, milestoneName, projectName),
+		newStubPhase(ns, phaseName, milestoneName),
+		newStubPlan(ns, planName, phaseName, withPlanProjectLabel(projectName)),
+		newStubTask(ns, taskName, planName, withTaskProjectLabel(projectName)),
+	}
+	for _, obj := range objs {
+		if err := createFixture(ctx, obj); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // createProjectHierarchy creates the Namespace+Secret+Project+Milestone+Phase
@@ -1009,60 +947,24 @@ func createProjectHierarchy(ctx context.Context, ns string) error {
 	milestoneName := ns + "-milestone"
 	phaseName := ns + "-phase"
 
-	// Step 3: Construct the parent hierarchy as a single multi-doc YAML,
-	// mirroring applyHierarchy's Secret+Project+Milestone+Phase sections
-	// field-for-field (T-02.2-24 byte-identical mitigation). Plan and Task
-	// are intentionally omitted — the caller supplies those via its own
-	// applyYAML call.
-	hierarchyYAML := fmt.Sprintf(`apiVersion: v1
-kind: Secret
-metadata:
-  name: tide-provider-secret
-  namespace: %s
-type: Opaque
-data:
-  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Project
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  schemaRevision: v1alpha2
-  targetRepo: "https://github.com/example/%s.git"
-  providerSecretRef: "tide-provider-secret"
-  budget:
-    absoluteCapCents: 100000
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Milestone
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  projectRef: %s
----
-apiVersion: tideproject.k8s/v1alpha2
-kind: Phase
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  milestoneRef: %s
-`,
-		// Secret namespace
-		ns,
-		// Project: name, namespace, targetRepo ns
-		projectName, ns, ns,
-		// Milestone: name, namespace, projectRef
-		milestoneName, ns, projectName,
-		// Phase: name, namespace, milestoneRef
-		phaseName, ns, milestoneName,
-	)
-
-	// Step 4: Apply the hierarchy via the existing applyYAML primitive.
-	return applyYAML(hierarchyYAML)
+	// Step 3: Provider Secret + the parent Project→Milestone→Phase, built via the
+	// shared typed fixtures (fixtures_test.go). Plan and Task are intentionally
+	// omitted — the caller supplies those (via newStubPlan/newStubTask).
+	ensureProviderSecret(ns)
+	objs := []client.Object{
+		newStubProject(ns, projectName,
+			withTargetRepo("https://github.com/example/"+ns+".git"),
+			withProviderSecret("tide-provider-secret"),
+			withBudget(100000)),
+		newStubMilestone(ns, milestoneName, projectName),
+		newStubPhase(ns, phaseName, milestoneName),
+	}
+	for _, obj := range objs {
+		if err := createFixture(ctx, obj); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // applyFile applies a YAML file to the kind cluster.
