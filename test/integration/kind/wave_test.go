@@ -26,7 +26,6 @@ package kind_integration
 // In CRDs-only mode (no controller Deployment), the tests are skipped gracefully.
 
 import (
-	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -37,83 +36,111 @@ import (
 )
 
 var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
-	const testNS = "wave-success-test"
+	const (
+		testNS    = "wave-success-test"
+		fixtureNS = "tide-int-test"
+		proj      = "wave-test-project"
+	)
+
+	// taskPhase reads a Task's status phase ("" if not found yet).
+	taskPhase := func(name string) string {
+		t := &tideprojectv1alpha2.Task{}
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: fixtureNS}, t); err != nil {
+			return ""
+		}
+		return t.Status.Phase
+	}
+
+	// waveTask builds a wave Task via the shared typed fixture builder.
+	waveTask := func(name, prompt, waveIdx, mode string, capSec int32, deps ...string) *tideprojectv1alpha2.Task {
+		opts := []taskOpt{
+			withTaskProjectLabel(proj),
+			withWaveIndex(waveIdx),
+			withPromptPath(prompt),
+			withTestMode(mode),
+			withWallClockCap(capSec),
+		}
+		if len(deps) > 0 {
+			opts = append(opts, withTaskDependsOn(deps...))
+		}
+		return newStubTask(fixtureNS, name, "wave-test-plan", opts...)
+	}
 
 	BeforeEach(func() {
 		skipIfCRDsOnlyMode()
-		// Apply the three-task wave fixture.
-		fixturePath := filepath.Join("testdata", "three-task-wave.yaml")
-		Expect(applyFile(fixturePath)).To(Succeed(),
-			"Failed to apply three-task wave fixture")
+		// Build the common parents (ns + provider secret + Project→Milestone→
+		// Phase→Plan) via the shared typed fixtures. Each It supplies its own
+		// Tasks because the two specs need different wave-0 task modes.
+		createNamespace(fixtureNS)
+		ensureProviderSecret(fixtureNS)
+		parents := []client.Object{
+			newStubProject(fixtureNS, proj,
+				withTargetRepo("https://github.com/example/three-task-wave.git"),
+				withProviderSecret("tide-provider-secret"),
+				withBudget(100000)),
+			newStubMilestone(fixtureNS, "wave-test-milestone", proj),
+			newStubPhase(fixtureNS, "wave-test-phase", "wave-test-milestone"),
+			newStubPlan(fixtureNS, "wave-test-plan", "wave-test-phase", withPlanProjectLabel(proj)),
+		}
+		for _, o := range parents {
+			Expect(createFixture(ctx, o)).To(Succeed())
+		}
 	})
 
 	AfterEach(func() {
 		deleteNamespace(testNS)
-		// Clean up the fixture namespace.
-		deleteNamespace("tide-int-test")
+		deleteNamespace(fixtureNS)
 		if CurrentSpecReport().Failed() {
 			exportKindLogs()
 		}
 	})
 
-	// AC1: apply α→β→γ plan; Eventually all Tasks Succeeded; Wave 0 Succeeded.
+	// AC1: α,β (wave 0) succeed; γ (wave 1, dependsOn both) then succeeds. This
+	// also proves the wave gate OPENS — γ runs once its dependencies complete.
 	It("AC1: three-task wave — all tasks succeed via stub-subagent", func() {
-		// Wave 0: α and β are independent; γ depends on α and β (Wave 1).
-		// With testMode=success, stub-subagent exits 0 immediately.
-
-		// Wait for alpha task to exist.
-		Eventually(func() error {
-			t := &tideprojectv1alpha2.Task{}
-			return k8sClient.Get(ctx, client.ObjectKey{
-				Name:      "alpha",
-				Namespace: "tide-int-test",
-			}, t)
-		}, 30*time.Second, time.Second).Should(Succeed(),
-			"Task 'alpha' should exist in tide-int-test namespace")
-
-		// Eventually all three tasks should be Succeeded.
-		for _, taskName := range []string{"alpha", "beta", "gamma"} {
-			name := taskName // capture for closure
-			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
-				if err := k8sClient.Get(ctx, client.ObjectKey{
-					Name:      name,
-					Namespace: "tide-int-test",
-				}, t); err != nil {
-					return ""
-				}
-				return t.Status.Phase
-			}, 3*time.Minute, 5*time.Second).Should(Equal("Succeeded"),
-				"Task %s should eventually reach Succeeded phase", name)
+		for _, t := range []*tideprojectv1alpha2.Task{
+			waveTask("alpha", "children/task-01.json", "0", "success", 120),
+			waveTask("beta", "children/task-02.json", "0", "success", 120),
+			waveTask("gamma", "children/task-03.json", "1", "success", 120, "alpha", "beta"),
+		} {
+			Expect(createFixture(ctx, t)).To(Succeed())
 		}
 
+		for _, name := range []string{"alpha", "beta", "gamma"} {
+			n := name // capture for closure
+			Eventually(func() string { return taskPhase(n) }, 3*time.Minute, 5*time.Second).
+				Should(Equal("Succeeded"), "Task %s should eventually reach Succeeded phase", n)
+		}
 		GinkgoWriter.Println("AC1: all three tasks reached Succeeded")
 	})
 
-	// wave-advances-only-after-all-tasks-complete: γ should not dispatch until α and β complete.
+	// AC1: the wave gate HOLDS. α,β are wait-for-signal so they dispatch and BLOCK
+	// (never Succeed without a release), keeping γ's dependsOn permanently
+	// unsatisfied. γ must therefore stay un-dispatched the entire time wave 0 is
+	// open — a deterministic gate, with no reliance on incidental wave-0
+	// completion timing (the prior version's Consistently-over-a-race-window).
 	It("AC1: wave 1 (gamma) does not dispatch until wave 0 tasks complete", func() {
-		// Wait for alpha and beta to exist.
-		Eventually(func() error {
-			t := &tideprojectv1alpha2.Task{}
-			return k8sClient.Get(ctx, client.ObjectKey{
-				Name:      "alpha",
-				Namespace: "tide-int-test",
-			}, t)
-		}, 30*time.Second, time.Second).Should(Succeed())
+		// capSec 300 keeps the blocked wave-0 tasks alive well past the assertion
+		// window so the wall-clock cap can't fail them mid-test (mirrors chaos_resume).
+		for _, t := range []*tideprojectv1alpha2.Task{
+			waveTask("alpha", "children/task-01.json", "0", "wait-for-signal", 300),
+			waveTask("beta", "children/task-02.json", "0", "wait-for-signal", 300),
+			waveTask("gamma", "children/task-03.json", "1", "success", 300, "alpha", "beta"),
+		} {
+			Expect(createFixture(ctx, t)).To(Succeed())
+		}
 
-		// gamma should not be Running while alpha/beta haven't completed.
-		// (this is a Consistently check over a short window immediately after apply)
-		Consistently(func() string {
-			t := &tideprojectv1alpha2.Task{}
-			if err := k8sClient.Get(ctx, client.ObjectKey{
-				Name:      "gamma",
-				Namespace: "tide-int-test",
-			}, t); err != nil {
-				return "notfound"
-			}
-			return t.Status.Phase
-		}, 10*time.Second, time.Second).ShouldNot(Equal("Running"),
-			"gamma should not Run until alpha and beta have completed")
+		// α and β must dispatch and reach Running (blocked on their release signal).
+		for _, name := range []string{"alpha", "beta"} {
+			n := name
+			Eventually(func() string { return taskPhase(n) }, 90*time.Second, 2*time.Second).
+				Should(Equal("Running"), "wave-0 task %s should dispatch and block (wait-for-signal)", n)
+		}
+
+		// With α,β blocked (never Succeeded), γ's dependencies can never be
+		// satisfied, so γ must never dispatch — for as long as we care to check.
+		Consistently(func() string { return taskPhase("gamma") }, 20*time.Second, 2*time.Second).
+			ShouldNot(Equal("Running"), "gamma must not dispatch until wave 0 completes")
 	})
 })
 
