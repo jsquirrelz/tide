@@ -59,6 +59,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
@@ -236,16 +237,18 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 				"kubectl apply round-trip project.yaml: %s", applyRTOut)
 			GinkgoWriter.Printf("apply round-trip project.yaml: %s\n", applyRTOut)
 
-			// (4d) assert adoption in the round-trip namespace:
-			// milestone+phase planners are adopted → 0 planner Jobs at those levels.
-			// Give the controller a moment to reconcile before checking — the wave
-			// controller re-derives adoption from the seed ConfigMap and skips
-			// dispatching planner Jobs for levels whose envelopes are complete.
+			// (4d) assert adoption in the round-trip namespace. Gate on the
+			// deterministic ImportComplete condition — once it fires, adoption is
+			// durable and the milestone/phase levels will NEVER dispatch a planner,
+			// so a Consistently window confirms a permanent property rather than
+			// racing the controller's reconcile.
+			By("(4d) Waiting for ImportComplete in round-trip namespace")
+			waitForImportComplete(importResumeRoundtripNS)
 			By("(4d) Asserting milestone/phase adoption in round-trip namespace (0 planner Jobs)")
-			assertNoPlannerJobsForLevel(importResumeRoundtripNS, "milestone",
-				2*time.Minute, "adopted milestone planners must not dispatch Jobs")
-			assertNoPlannerJobsForLevel(importResumeRoundtripNS, "phase",
-				2*time.Minute, "adopted phase planners must not dispatch Jobs")
+			assertNoPlannerJobsForLevelConsistently(importResumeRoundtripNS, "milestone",
+				15*time.Second, 2*time.Second, "adopted milestone planners must not dispatch Jobs")
+			assertNoPlannerJobsForLevelConsistently(importResumeRoundtripNS, "phase",
+				15*time.Second, 2*time.Second, "adopted phase planners must not dispatch Jobs")
 		})
 	})
 
@@ -336,15 +339,11 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// D-17: we do NOT assert plan-level planners — those re-run.
 			// ----------------------------------------------------------------
 			By("Waiting for Project ImportComplete condition (import processed by controller)")
-			Eventually(func() bool {
-				var msList tideprojectv1alpha2.MilestoneList
-				if err := k8sClient.List(ctx, &msList, client.InNamespace(importResumeSalvageNS)); err != nil {
-					return false
-				}
-				// At least the 3 salvage milestones must have been adopted.
-				return len(msList.Items) >= 3
-			}, 3*time.Minute, 5*time.Second).Should(BeTrue(),
-				"salvage Milestones must materialize in %s after import", importResumeSalvageNS)
+			// Gate on the deterministic adoption signal — not "Milestones exist".
+			// A materialized Milestone does not yet mean adoption has fired; gating
+			// on ImportComplete ensures the no-re-plan + $0 assertions below sample
+			// AFTER adoption settles, not during a transient pre-adoption window.
+			waitForImportComplete(importResumeSalvageNS)
 
 			// ----------------------------------------------------------------
 			// Assert $0 re-paid planning cost (D-14) — BEFORE plan-level planners
@@ -464,24 +463,23 @@ func assertD02BundleShape(tgzPath string) {
 	GinkgoWriter.Printf("D-02 bundle shape verified: all required entries present in %s\n", tgzPath)
 }
 
-// assertNoPlannerJobsForLevel asserts (via Eventually) that zero planner Jobs
-// exist in the namespace for the given level. Used for tier-a round-trip
-// adoption check where we expect the controller to adopt and NOT dispatch.
-func assertNoPlannerJobsForLevel(ns, level string, timeout time.Duration, msg string) {
+// waitForImportComplete blocks until the (single) Project in the namespace
+// reports ImportComplete=True — the deterministic adoption signal. Once it
+// fires, adoption is durable: the wave controller permanently suppresses
+// planner dispatch for the imported milestone/phase levels. Gating the
+// no-re-plan assertions on this (rather than on "Milestones exist" or a fixed
+// time window) removes the race where a planner could dispatch before adoption
+// settles or after a too-short observation window closes.
+func waitForImportComplete(ns string) {
 	GinkgoHelper()
-	// Give the controller a short grace period to process the import, then
-	// assert it consistently does NOT dispatch a planner Job for this level.
 	Eventually(func(g Gomega) {
-		jobs := &batchv1.JobList{}
-		g.Expect(k8sClient.List(ctx, jobs,
-			client.InNamespace(ns),
-			client.MatchingLabels{
-				"tideproject.k8s/role":  "planner",
-				"tideproject.k8s/level": level,
-			},
-		)).To(Succeed())
-		g.Expect(jobs.Items).To(BeEmpty(), msg)
-	}, timeout, 3*time.Second).Should(Succeed())
+		var pl tideprojectv1alpha2.ProjectList
+		g.Expect(k8sClient.List(ctx, &pl, client.InNamespace(ns))).To(Succeed())
+		g.Expect(pl.Items).NotTo(BeEmpty(), "no Project yet in %s", ns)
+		g.Expect(meta.IsStatusConditionTrue(
+			pl.Items[0].Status.Conditions, tideprojectv1alpha2.ConditionImportComplete,
+		)).To(BeTrue(), "Project %s/%s not yet ImportComplete", ns, pl.Items[0].Name)
+	}, 3*time.Minute, 5*time.Second).Should(Succeed())
 }
 
 // assertNoPlannerJobsForLevelConsistently asserts (via Consistently) that zero
