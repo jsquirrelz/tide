@@ -90,6 +90,14 @@ jobs:
           fi
           echo "PASS: charts/ tree matches helmify+augment output"
 
+      # Matrix↔chart image-coverage gate (defense-in-depth at release time).
+      # Mirrors ci.yaml's verify-chart-images-published step. Fails HERE — before
+      # `release` or `build-images` fire (both `needs: [helmify-verify, ...]`) —
+      # if the chart references a ghcr.io/jsquirrelz image the build-images matrix
+      # does not build (the v1.0.4 tide-import miss). Pure bash, no extra deps.
+      - name: Verify chart images are in the release matrix
+        run: make verify-chart-images-published
+
       # FIX-01: dashboard embed freshness gate (defense-in-depth before publish).
       # Mirrors the same step pair in ci.yaml's test job. Runs AFTER the chart-
       # reproducibility gate so a stale dist/ fails HERE before `release` or
@@ -244,7 +252,7 @@ jobs:
           # v1.0.0/v1.0.0-rc.7 shared-commit push).
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
-  # Gate 4 — build and push all 6 component images to ghcr.io (IMG-01).
+  # Gate 4 — build and push all 8 component images to ghcr.io (IMG-01).
   #
   # D-01: goreleaser stays CLI+chart only — no `dockers:` or `docker_manifests:`
   # sections in .goreleaser.yaml. Image publish is handled here via
@@ -253,7 +261,7 @@ jobs:
   # D-04 placement: runs in parallel with `pre-flight` (both need helmify-verify)
   # so images are ready before `chart-publish` fires. The `chart-publish` job
   # gains `needs: [build-images, release]` — a chart is only published after all
-  # 6 matrix jobs succeed and goreleaser has created the GitHub Release. A matrix
+  # 8 matrix jobs succeed and goreleaser has created the GitHub Release. A matrix
   # failure leaves the chart unpublished (no dangling chart with missing images —
   # T-06-03-02 mitigation).
   #
@@ -269,7 +277,7 @@ jobs:
   # for the arm64 node runtime stage in tide-claude-subagent. 30-minute timeout
   # covers QEMU-emulated npm install (2-5 min) with safe margin.
   #
-  # GHA cache: per-component scope prevents the 6 matrix jobs from clobbering
+  # GHA cache: per-component scope prevents the 8 matrix jobs from clobbering
   # each other's cache entries (type=gha,scope=${{ matrix.component }}).
   build-images:
     name: Build and push component images (IMG-01)
@@ -303,6 +311,9 @@ jobs:
             context: .
           - component: tide-reporter
             dockerfile: images/tide-reporter/Dockerfile
+            context: .
+          - component: tide-import
+            dockerfile: images/tide-import/Dockerfile
             context: .
     steps:
       - name: Clone the code
@@ -347,7 +358,7 @@ jobs:
 
   # Gate 5 — Helm OCI chart publish to ghcr.io (D-X5).
   #
-  # Runs AFTER both `build-images` (all 6 matrix jobs) AND `release` succeed
+  # Runs AFTER both `build-images` (all 8 matrix jobs) AND `release` succeed
   # (D-04: images published before the chart that references them; a matrix
   # failure leaves the chart unpublished — T-06-03-02 partial-manifest mitigation).
   #

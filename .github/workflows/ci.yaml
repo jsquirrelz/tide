@@ -83,6 +83,9 @@ jobs:
       - name: Verify chart version consistency (release version-skew gate)
         run: make verify-version-consistency
 
+      - name: Verify chart images are in the release matrix (matrix<->chart coverage gate)
+        run: make verify-chart-images-published
+
       - name: go vet
         run: go vet ./...
 

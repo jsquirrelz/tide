@@ -764,6 +764,10 @@ verify-chart-reproducible: helm ## Regenerate charts via helmify and fail if the
 verify-version-consistency: ## Assert all chart version + appVersion fields agree. Optional: make verify-version-consistency VERSION=X.Y.Z to also pin.
 	@bash hack/scripts/verify-version-consistency.sh $(VERSION)
 
+.PHONY: verify-chart-images-published
+verify-chart-images-published: ## Assert every ghcr.io/jsquirrelz/* image the chart references is built by the release build-images matrix (matrix<->chart coverage gate).
+	@bash hack/scripts/verify-chart-images-published.sh
+
 .PHONY: bump-version
 bump-version: ## Set chart version + appVersion across every version-bearing file (release STEP ONE). Usage: make bump-version VERSION=X.Y.Z
 	@if [ -z "$(VERSION)" ]; then echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; fi
