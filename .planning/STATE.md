@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 Phase: 29 — COMPLETE
 Plan: 5 of 5
 Status: Phase 29 complete
-Last activity: 2026-06-23 -- Phase 29 marked complete
+Last activity: 2026-06-25 -- Completed quick task 260625-k1q: publish tide-import image + matrix↔chart coverage gate (v1.0.4 patch)
 
 ```
 v1.0.3 Progress: [x] 27  [x] 28  [x] 29
@@ -107,6 +107,7 @@ None.
 |---|-------------|------|--------|-----------|
 | 260615-gos | Explore CLI-as-strategy + second SDK/LangGraph strategy — semi-scoped backlog milestone | 2026-06-15 | d43f402 | [260615-gos-explore-abstracting-cli-to-be-a-single-s](./quick/260615-gos-explore-abstracting-cli-to-be-a-single-s/) |
 | 260617-qqh | Fix project-controller planner-completion ordering so reporter spawns + planner cost rolls up (dogfood run #2 root cause) | 2026-06-17 | 2a5e0dc | [260617-qqh-fix-project-controller-planner-completio](./quick/260617-qqh-fix-project-controller-planner-completio/) |
+| 260625-k1q | v1.0.4 patch: publish tide-import image + chart-image release-matrix guardrail | 2026-06-25 | fd86a79 | [260625-k1q-v1-0-4-patch-publish-tide-import-image-c](./quick/260625-k1q-v1-0-4-patch-publish-tide-import-image-c/) |
 
 ## Deferred Items
 
