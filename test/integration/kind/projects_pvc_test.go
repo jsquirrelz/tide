@@ -47,6 +47,25 @@ type kindYAMLDoc struct {
 	} `yaml:"spec"`
 }
 
+func TestThreeTaskWaveFixtureIncludesProjectsPVC(t *testing.T) {
+	docs := readKindYAMLDocs(t, filepath.Join("testdata", "three-task-wave.yaml"))
+
+	var pvc *kindYAMLDoc
+	for i := range docs {
+		doc := &docs[i]
+		if doc.Kind == "PersistentVolumeClaim" &&
+			doc.Metadata.Name == "tide-projects" &&
+			doc.Metadata.Namespace == "tide-int-test" {
+			pvc = doc
+			break
+		}
+	}
+	if pvc == nil {
+		t.Fatal("three-task wave fixture must create tide-projects PVC in tide-int-test")
+	}
+	assertProjectsPVCShape(t, pvc, "tide-int-test")
+}
+
 func TestProjectsPVCYAMLBuildsNamespaceLocalRWOClaim(t *testing.T) {
 	docs := decodeKindYAMLDocs(t, []byte(projectsPVCYAML("caps-test")), "projectsPVCYAML")
 	if len(docs) != 1 {
@@ -242,6 +261,16 @@ func TestHelmDeploymentTemplatePricingOverridesArg(t *testing.T) {
 	if !strings.Contains(outStr, wantKey) {
 		t.Fatalf("render with pricing.overrides must contain model key %q; got:\n%s", wantKey, outStr)
 	}
+}
+
+func readKindYAMLDocs(t *testing.T, path string) []kindYAMLDoc {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return decodeKindYAMLDocs(t, data, path)
 }
 
 func decodeKindYAMLDocs(t *testing.T, data []byte, source string) []kindYAMLDoc {

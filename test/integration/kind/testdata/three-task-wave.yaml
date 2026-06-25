@@ -1,0 +1,147 @@
+---
+# Namespace for isolation
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tide-int-test
+
+---
+# Workspace PVC used by Task Jobs in this namespace
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-int-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# Provider Secret (Anthropic API key placeholder — stub-subagent doesn't use it)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-provider-secret
+  namespace: tide-int-test
+type: Opaque
+data:
+  # base64("test-api-key-stub-subagent-does-not-use-it")
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+
+---
+# Project
+apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: wave-test-project
+  namespace: tide-int-test
+spec:
+  schemaRevision: v1alpha2
+  targetRepo: "https://github.com/example/three-task-wave.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 100000  # $1000 — no budget cap during tests
+
+---
+# Milestone (required by hierarchy; PlanReconciler resolves it via labels)
+apiVersion: tideproject.k8s/v1alpha2
+kind: Milestone
+metadata:
+  name: wave-test-milestone
+  namespace: tide-int-test
+spec:
+  projectRef: wave-test-project
+
+---
+# Phase
+apiVersion: tideproject.k8s/v1alpha2
+kind: Phase
+metadata:
+  name: wave-test-phase
+  namespace: tide-int-test
+spec:
+  milestoneRef: wave-test-milestone
+
+---
+# Plan
+apiVersion: tideproject.k8s/v1alpha2
+kind: Plan
+metadata:
+  name: wave-test-plan
+  namespace: tide-int-test
+  labels:
+    tideproject.k8s/project: wave-test-project
+spec:
+  phaseRef: wave-test-phase
+
+---
+# Task α — wave 0, no dependencies
+apiVersion: tideproject.k8s/v1alpha2
+kind: Task
+metadata:
+  name: alpha
+  namespace: tide-int-test
+  labels:
+    tideproject.k8s/project: wave-test-project
+    tideproject.k8s/wave-index: "0"
+spec:
+  planRef: wave-test-plan
+  promptPath: "children/task-01.json"
+  filesTouched:
+    - alpha.go
+  declaredOutputPaths:
+    - alpha.go
+  dev:
+    testMode: success
+  caps:
+    wallClockSeconds: 120
+
+---
+# Task β — wave 0, no dependencies (independent sibling of α)
+apiVersion: tideproject.k8s/v1alpha2
+kind: Task
+metadata:
+  name: beta
+  namespace: tide-int-test
+  labels:
+    tideproject.k8s/project: wave-test-project
+    tideproject.k8s/wave-index: "0"
+spec:
+  planRef: wave-test-plan
+  promptPath: "children/task-02.json"
+  filesTouched:
+    - beta.go
+  declaredOutputPaths:
+    - beta.go
+  dev:
+    testMode: success
+  caps:
+    wallClockSeconds: 120
+
+---
+# Task γ — wave 1, depends on α and β
+apiVersion: tideproject.k8s/v1alpha2
+kind: Task
+metadata:
+  name: gamma
+  namespace: tide-int-test
+  labels:
+    tideproject.k8s/project: wave-test-project
+    tideproject.k8s/wave-index: "1"
+spec:
+  planRef: wave-test-plan
+  promptPath: "children/task-03.json"
+  dependsOn:
+    - alpha
+    - beta
+  filesTouched:
+    - gamma.go
+  declaredOutputPaths:
+    - gamma.go
+  dev:
+    testMode: success
+  caps:
+    wallClockSeconds: 120
