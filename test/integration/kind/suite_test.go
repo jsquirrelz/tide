@@ -978,7 +978,10 @@ func applyFile(path string) error {
 	return nil
 }
 
-// deleteNamespace deletes a namespace from the kind cluster.
+// deleteNamespace deletes a namespace from the kind cluster (fire-and-forget:
+// kubectl delete --timeout=30s returns after 30s even if the namespace is still
+// Terminating). Callers that need full teardown before the next spec starts
+// should use deleteNamespaceAndWait instead.
 func deleteNamespace(ns string) {
 	if os.Getenv("KEEP_KIND_NAMESPACES") == "true" {
 		GinkgoWriter.Printf("KEEP_KIND_NAMESPACES=true; keeping namespace %s for debug inspection\n", ns)
@@ -987,6 +990,41 @@ func deleteNamespace(ns string) {
 	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", kubeconfigPath,
 		"delete", "namespace", ns, "--ignore-not-found=true", "--timeout=30s")
 	_, _ = cmd.CombinedOutput()
+}
+
+// deleteNamespaceAndWait deletes a namespace and BLOCKS until the namespace is
+// fully gone (NotFound). This prevents cross-tier contention when terminating
+// pods from one tier load the cluster during the next tier's BeforeEach/import.
+//
+// Use this instead of deleteNamespace in AfterEach blocks for long-running specs
+// (e.g. the import-resume tiers) that start heavy workloads. The existing
+// deleteNamespace fire-and-forget behaviour is preserved for specs that don't
+// need strict teardown ordering.
+//
+// KEEP_KIND_NAMESPACES=true skips both the delete and the wait, consistent with
+// deleteNamespace's debug-escape behaviour.
+func deleteNamespaceAndWait(ns string) {
+	if os.Getenv("KEEP_KIND_NAMESPACES") == "true" {
+		GinkgoWriter.Printf("KEEP_KIND_NAMESPACES=true; keeping namespace %s for debug inspection\n", ns)
+		return
+	}
+	// Issue the delete (fire the termination sequence, ignore if already gone).
+	cmd := exec.CommandContext(context.Background(), "kubectl", "--kubeconfig", kubeconfigPath,
+		"delete", "namespace", ns, "--ignore-not-found=true", "--timeout=30s")
+	_, _ = cmd.CombinedOutput()
+
+	// Poll until the namespace is NotFound. We use the k8sClient (controller-
+	// runtime client) that is already set up by BeforeSuite. The poll budget is
+	// generous (3 min) to accommodate slow finalizer chains on low-resource CI
+	// nodes; on a healthy cluster the namespace typically disappears in < 30s.
+	GinkgoHelper()
+	Eventually(func() bool {
+		var ns_ corev1.Namespace
+		err := k8sClient.Get(context.Background(), client.ObjectKey{Name: ns}, &ns_)
+		return err != nil // NotFound → true → Eventually exits
+	}, 3*time.Minute, 5*time.Second).Should(BeTrue(),
+		"namespace %s must be fully deleted (NotFound) before next spec", ns)
+	GinkgoWriter.Printf("namespace %s fully deleted\n", ns)
 }
 
 // kubectlLogs returns the logs of a container in a pod.

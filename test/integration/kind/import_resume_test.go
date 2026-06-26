@@ -115,8 +115,11 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 		})
 
 		AfterEach(func() {
-			deleteNamespace(importResumeNS)
-			deleteNamespace(importResumeRoundtripNS)
+			// Use deleteNamespaceAndWait so that Tier a's terminating pods do not
+			// load the cluster during Tier b's BeforeEach/import (cross-tier
+			// contention fix — see verified_root_cause in 30-03-PLAN.md).
+			deleteNamespaceAndWait(importResumeNS)
+			deleteNamespaceAndWait(importResumeRoundtripNS)
 			if CurrentSpecReport().Failed() {
 				exportKindLogs()
 			}
@@ -277,7 +280,10 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 		})
 
 		AfterEach(func() {
-			deleteNamespace(importResumeSalvageNS)
+			// Use deleteNamespaceAndWait so that Tier b's terminating pods do not
+			// load the cluster during Tier c's BeforeEach/import (cross-tier
+			// contention fix — see verified_root_cause in 30-03-PLAN.md).
+			deleteNamespaceAndWait(importResumeSalvageNS)
 			if CurrentSpecReport().Failed() {
 				exportKindLogs()
 			}
@@ -445,7 +451,10 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 		})
 
 		AfterEach(func() {
-			deleteNamespace(importResumePartialNS)
+			// deleteNamespaceAndWait ensures Tier c's terminating pods are fully gone
+			// before the suite continues to any subsequent spec (cross-tier
+			// contention fix — see verified_root_cause in 30-03-PLAN.md).
+			deleteNamespaceAndWait(importResumePartialNS)
 			if CurrentSpecReport().Failed() {
 				exportKindLogs()
 			}
