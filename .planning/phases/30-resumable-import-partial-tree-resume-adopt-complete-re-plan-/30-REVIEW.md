@@ -52,6 +52,8 @@ pre-stamping order; and a few maintainability nits.
 
 ### WR-01: Adoption guard ownership predicate trusts `Spec.ProjectRef`, not owner reference
 
+**Status: RESOLVED** (commit `8ba705b`)
+
 **File:** `internal/controller/project_controller.go:1109-1120`
 **Issue:** The adoption guard lists all Milestones in the namespace and matches on
 `msList.Items[i].Spec.ProjectRef == project.Name`. Elsewhere in this same file the
@@ -63,19 +65,11 @@ Projects of the same name across recreate cycles, or a stray/leftover Milestone 
 the guard would suppress a legitimately-needed project-planner dispatch. The two predicates
 should agree; the guard is the weaker of the two and is the one that *suppresses paid dispatch*,
 so a false match is a silent "project never bootstraps its milestones" stall.
-**Fix:** Match the established ownership predicate used by `countChildMilestones`:
-```go
-for i := range msList.Items {
-    if metav1.IsControlledBy(&msList.Items[i], project) {
-        // import adopted; skip dispatch
-        return ctrl.Result{}, nil
-    }
-}
-```
-If `ProjectRef`-matching is intentional because import-materialized Milestones may not carry an
-owner ref to *this* Project instance at guard time, document that explicitly and confirm against
-`reconcileCreatingCRs` (which does call `owner.EnsureOwnerRef` on each materialized child) — in
-which case `IsControlledBy` is in fact available and strictly safer.
+**Fix applied:** Switched to `metav1.IsControlledBy(&msList.Items[i], project)` (UID-bound),
+matching `countChildMilestones`. Confirmed `reconcileCreatingCRs` calls `owner.EnsureOwnerRef`
+on every materialized Milestone before `client.Create` (import_controller.go:405), so the owner
+ref is present at guard time. Updated Test 1 to set a real controller owner ref; added Test 3
+(WR-01 pinning): a foreign-owned Milestone with matching `ProjectRef` must NOT suppress dispatch.
 
 ### WR-02: No-regression test discriminator cannot distinguish guard-fired from dispatch-success
 
@@ -101,6 +95,8 @@ or stamp a valid `CredproxyImage` and assert the `tide-project-<uid>-1` Job now 
 
 ### WR-03: WR-02 malformed-envelope guard is bypassed on the export path by pre-stamping
 
+**Status: RESOLVED — option (a) chosen** (commit `72c0079`)
+
 **File:** `cmd/tide/export_envelopes_run.go:299-303` (and `seedStatusFor` at 343-359)
 **Issue:** `IsEnvelopeComplete`'s strict-equality guard (envelope.go:248-256) is documented as
 the invariant that rejects a "ChildCRDs populated but ChildCount==0" malformed envelope (WR-02).
@@ -113,12 +109,21 @@ complete — and the node will *adopt* its live status rather than being marked 
 The `tide-import` Job path does NOT pre-stamp, so the guard is meaningful there; the inconsistency
 is the concern. A planner that crashed after emitting partial children (real truncation) is
 indistinguishable on the export path from a legacy-but-complete envelope.
-**Fix:** Either (a) evaluate completeness on the *pre-stamp* bytes in `processEnvelopesTgz` and
-carry the verdict alongside the repaired bytes, or (b) document explicitly that export treats
-all `len(ChildCRDs)>0` envelopes as complete-by-repair and that truncation detection is
-delegated solely to the runtime succession gate (ChildCount-vs-observed-children). At minimum
-add a code comment at line 299 noting the guard interaction so a future reader does not assume
-`IsEnvelopeComplete` is load-bearing for truncation on this path.
+
+**Design investigation:** `tide-import` reads raw `out.json` from the old PVC mount
+(`/old-workspace/envelopes/<uid>/out.json`) NOT from the bundle's `pvc-envelopes.tgz`.
+StampChildCount repairs the bundle copy, but the old PVC still carries raw bytes. If the export
+adopted a status on stamped bytes that tide-import rejects on raw bytes, the result is a Plan CR
+with `Status=Succeeded` but no Tasks materialized in the new namespace (children never copied).
+No legitimate exit-0-unstamped-complete envelopes appear in future exports — the 18 salvage
+envelopes (plan 29-04, commit b75c73e) were patched directly on the PVC at that time.
+
+**Fix applied (option a):** `processEnvelopesTgz` now evaluates `IsEnvelopeComplete` on raw
+(pre-stamp) bytes and returns a `preStampComplete map[string]bool`. `seedStatusFor` uses the
+pre-stamp verdict to match tide-import's completeness check. `StampChildCount` still runs so the
+bundle's `pvc-envelopes.tgz` carries corrected bytes. Pinning test:
+`TestSeedStatusFor_LegacyUnstampedEnvelopeIsRePlannableOnExport` verifies a legacy exit-0
+unstamped envelope (ChildCount==0, len(ChildCRDs)==2) produces `Status=""` in the seed manifest.
 
 ### WR-04: `deleteNamespaceAndWait` blocks up to 3 min per namespace with no progress signal on hang
 
