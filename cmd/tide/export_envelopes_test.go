@@ -460,9 +460,19 @@ func TestExportEnvelopesSeedManifest(t *testing.T) {
 	}
 	proj := makeProjectForExport("my-project", "default")
 
-	// Build a valid envelope for the plan with its UID.
+	// Build complete envelopes for all three nodes. Only the Plan envelope has
+	// ChildCRDs (Tasks); the Milestone and Phase envelopes are leaf-planner style
+	// (exitCode==0, ChildCount==0). All three are present and complete → their
+	// live status is preserved in the seed manifest (RESUME-PARTIAL-01: complete
+	// envelope → adopt live status).
+	msEnvData := buildValidEnvelopeJSON(t, msUID)
+	phEnvData := buildValidEnvelopeJSON(t, phUID)
 	envData := buildValidEnvelopeJSON(t, plUID)
-	pvcTgz := makeFakePVCTgz(t, map[string][]byte{plUID: envData})
+	pvcTgz := makeFakePVCTgz(t, map[string][]byte{
+		msUID: msEnvData,
+		phUID: phEnvData,
+		plUID: envData,
+	})
 
 	fr := &fakeExportRunner{streamBytes: pvcTgz}
 	restore := injectExportRunner(fr)

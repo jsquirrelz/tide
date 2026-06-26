@@ -59,6 +59,7 @@ import (
 
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
+	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // exportInspectorPodRunner creates and streams the export inspector pod.
@@ -324,6 +325,39 @@ func parseOutJSONPath(name string) (string, bool) {
 	return mid, true
 }
 
+// seedStatusFor returns the status string to stamp on a BundleEntry for the
+// given node UID. A node whose envelope is present AND complete (per
+// pkgdispatch.IsEnvelopeComplete) keeps its live status; all other cases return
+// "" so the ImportController's existing `if seed.Status != ""` guard leaves the
+// CR in a fresh/re-plannable state (RESUME-PARTIAL-01 fix, Plan 30-01).
+//
+// Cases that return "":
+//   - UID has no entry in envelopes (missing out.json — no envelope to evaluate).
+//   - UID has an entry but JSON unmarshal fails (treat corrupt bytes as incomplete;
+//     fail-closed: a malformed envelope can only reset status, never forge "Succeeded").
+//   - Envelope unmarshals successfully but pkgdispatch.IsEnvelopeComplete returns false
+//     (exitCode!=0 or len(ChildCRDs)!=ChildCount).
+//
+// SHA256 stamping is NOT affected by this function — callers still compute SHA256
+// for any present envelope bytes regardless of completeness.
+func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte) string {
+	data, ok := envelopes[uid]
+	if !ok {
+		// No envelope present for this node → re-plannable.
+		return ""
+	}
+	var env pkgdispatch.EnvelopeOut
+	if err := json.Unmarshal(data, &env); err != nil {
+		// Corrupt bytes → treat as incomplete (fail-closed, T-30-01-01).
+		return ""
+	}
+	if !pkgdispatch.IsEnvelopeComplete(env) {
+		// Incomplete envelope → re-plannable.
+		return ""
+	}
+	return liveStatus
+}
+
 // buildSeedManifest lists live Milestone/Phase/Plan CRs in the namespace and
 // builds the BundleManifest with FQName, OldUID, DependsOn, Status, and sha256
 // from the provided envelopes map.
@@ -355,7 +389,7 @@ func buildSeedManifest(
 			FQName:     pkgbundle.MilestoneFQName(ms.Name),
 			OldUID:     string(ms.UID),
 			DependsOn:  ms.Spec.DependsOn,
-			Status:     ms.Status.Phase,
+			Status:     seedStatusFor(string(ms.UID), ms.Status.Phase, envelopes),
 			ProjectRef: ms.Spec.ProjectRef,
 		}
 		if data, ok := envelopes[string(ms.UID)]; ok {
@@ -394,7 +428,7 @@ func buildSeedManifest(
 			FQName:       pkgbundle.PhaseFQName(msRef, ph.Name),
 			OldUID:       string(ph.UID),
 			DependsOn:    ph.Spec.DependsOn,
-			Status:       ph.Status.Phase,
+			Status:       seedStatusFor(string(ph.UID), ph.Status.Phase, envelopes),
 			MilestoneRef: msRef,
 		}
 		if data, ok := envelopes[string(ph.UID)]; ok {
@@ -421,7 +455,7 @@ func buildSeedManifest(
 			FQName:    pkgbundle.PlanFQName(msRef, phRef, pl.Name),
 			OldUID:    string(pl.UID),
 			DependsOn: pl.Spec.DependsOn,
-			Status:    pl.Status.Phase,
+			Status:    seedStatusFor(string(pl.UID), pl.Status.Phase, envelopes),
 			PhaseRef:  phRef,
 		}
 		if data, ok := envelopes[string(pl.UID)]; ok {
