@@ -322,9 +322,11 @@ copied 60 / incomplete 40 → `Task=0`, reporter thrash). Fix = **adopt-complete
 driven by per-node envelope completeness. Full root cause + fix shape + design forks:
 [`.planning/dogfood/run-2-FINDINGS.md`](dogfood/run-2-FINDINGS.md). Unblocks deferred dogfood run #2
 (this is the cheap-mid-planning-halt resumability run #2 was gated on — see line ~277).
-**Requirements**: TBD (derive in planning — see the 4 design forks in the findings doc)
+**Requirements**: RESUME-PARTIAL-01, RESUME-PARTIAL-02, RESUME-PARTIAL-03, RESUME-PARTIAL-04 (derived in planning from the 4 design forks)
 **Depends on:** Phase 29 (import mechanism + Tier-a/b E2E)
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 30 to break down)
+- [ ] 30-01-PLAN.md — Export-time completeness bridge (shared IsEnvelopeComplete; incomplete/missing → empty Status) + per-node materialization envtest [RESUME-PARTIAL-01/04]
+- [ ] 30-02-PLAN.md — Tighten project-planner guard to ImportComplete+owned-Milestones (no post-import re-dispatch) + envtest [RESUME-PARTIAL-02]
+- [ ] 30-03-PLAN.md — Partial-tree fixture + Tier c kind E2E driving partial import to Project=Complete [RESUME-PARTIAL-03]

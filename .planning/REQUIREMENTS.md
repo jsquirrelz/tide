@@ -38,6 +38,18 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 - [x] **TOOL-01**: An operator CLI command exports a Project's planner envelopes to a portable bundle and imports a bundle into a new run, with a dry-run mode that reports what would be adopted vs re-planned.
 - [x] **TOOL-02**: A kind integration test proves end-to-end resumption against the real `examples/projects/dogfood/salvage-20260618` fixture: import the salvaged plan → planners are skipped → execution proceeds, with planning cost not re-paid.
 
+## Milestone v1.0.5 Requirements (Phase 30 — Resumable Import: Partial-Tree Resume)
+
+**Added:** 2026-06-25 — derived in planning from the 4 design forks in `.planning/dogfood/run-2-FINDINGS.md`.
+**Goal:** Make import resume a PARTIALLY-completed salvage tree (its primary use case) via adopt-complete + re-plan-incomplete, driven by per-node envelope completeness. Fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete nodes materialized `Running`-with-no-envelope → permanent stall).
+
+### Partial-Tree Resume (RESUME-PARTIAL)
+
+- [ ] **RESUME-PARTIAL-01**: A node whose salvaged envelope is incomplete (exitCode!=0 or childCount mismatch) or missing is materialized in a fresh, re-plannable state (Status.Phase="", no ValidationState stamp) so its parent/self re-plans against current main; a node whose envelope is complete still adopts its salvaged status. The completeness signal is computed once (single shared definition) and applied at export time, so the seed manifest is the single source of truth and the import controller needs no logic change.
+- [ ] **RESUME-PARTIAL-02**: After import completes, the project planner never re-dispatches a (paid) project-level planner Job when owned Milestones already exist — the import tree is authoritative. The guard is gated on `ImportComplete=True` (not a milestone count), so it does not regress the N>1-milestone incremental-materialization case.
+- [ ] **RESUME-PARTIAL-03**: A kind integration test (new Tier c) drives a PARTIAL import (mixed complete + incomplete envelopes) all the way to `Project=Complete` — asserting the end-to-end outcome (adopt complete, re-plan incomplete, reach completion), not just the adoption gate Tier b asserts. This is the regression guard the run #2 zombie stall slipped past.
+- [ ] **RESUME-PARTIAL-04**: A re-planned (incomplete) node preserves its identity (name/UID) so adopted completed nodes that `dependsOn` it keep valid edges; when it regenerates children, the global indegree re-derives consistently for those adopted dependents (no cached schedule). The known task-name-level cross-plan dependsOn limitation is documented, not solved (out of scope).
+
 ## Future Requirements (deferred)
 
 - Direct-SDK subagent backend for cross-pod prompt-cache benefit (CACHE-F1, carried from Ebb Tide) — would reduce the planning cost this milestone makes resumable, but is orthogonal.
@@ -68,3 +80,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 | IMPORT-05 | Phase 28 | Complete |
 | TOOL-01 | Phase 29 | Complete |
 | TOOL-02 | Phase 29 | Complete |
+| RESUME-PARTIAL-01 | Phase 30 | Pending |
+| RESUME-PARTIAL-02 | Phase 30 | Pending |
+| RESUME-PARTIAL-03 | Phase 30 | Pending |
+| RESUME-PARTIAL-04 | Phase 30 | Pending |
