@@ -231,6 +231,30 @@ type EnvelopeOut struct {
 	SharedContext string `json:"sharedContext,omitempty"`
 }
 
+// IsEnvelopeComplete reports whether env represents a fully-completed dispatch.
+// A complete envelope has ExitCode==0 AND len(ChildCRDs)==ChildCount.
+//
+// The equality is strict by design:
+//   - A legitimate executor-level envelope has ChildCount==0 and no ChildCRDs
+//     (0==0, passes) — the leaf/executor case.
+//   - A planner envelope that authored children must have ChildCount stamped to
+//     len(ChildCRDs). A ChildCRDs slice with ChildCount==0 is MALFORMED for
+//     import and is rejected — the count is the validation invariant that
+//     guards against planner output truncation (WR-02).
+//
+// This is the single source of truth shared by the tide-import Job and the
+// export tooling (RESUME-PARTIAL-01). Both callers must call this function;
+// no caller should re-implement the check inline.
+func IsEnvelopeComplete(env EnvelopeOut) bool {
+	if env.ExitCode != 0 {
+		return false
+	}
+	if len(env.ChildCRDs) != env.ChildCount {
+		return false
+	}
+	return true
+}
+
 // GitOutput carries git-side output fields a dispatch produces, populated by
 // the push Job at level-boundary push success and by executor harnesses
 // committing per-Task worktree changes (D-B4 / D-B6). HeadSHA is the SHA the

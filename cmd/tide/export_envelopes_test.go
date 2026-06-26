@@ -460,9 +460,19 @@ func TestExportEnvelopesSeedManifest(t *testing.T) {
 	}
 	proj := makeProjectForExport("my-project", "default")
 
-	// Build a valid envelope for the plan with its UID.
+	// Build complete envelopes for all three nodes. Only the Plan envelope has
+	// ChildCRDs (Tasks); the Milestone and Phase envelopes are leaf-planner style
+	// (exitCode==0, ChildCount==0). All three are present and complete → their
+	// live status is preserved in the seed manifest (RESUME-PARTIAL-01: complete
+	// envelope → adopt live status).
+	msEnvData := buildValidEnvelopeJSON(t, msUID)
+	phEnvData := buildValidEnvelopeJSON(t, phUID)
 	envData := buildValidEnvelopeJSON(t, plUID)
-	pvcTgz := makeFakePVCTgz(t, map[string][]byte{plUID: envData})
+	pvcTgz := makeFakePVCTgz(t, map[string][]byte{
+		msUID: msEnvData,
+		phUID: phEnvData,
+		plUID: envData,
+	})
 
 	fr := &fakeExportRunner{streamBytes: pvcTgz}
 	restore := injectExportRunner(fr)
@@ -556,6 +566,176 @@ func TestExportEnvelopesSeedManifest(t *testing.T) {
 	}
 	if plEntry.PhaseRef != "ph-beta" {
 		t.Errorf("plan PhaseRef: got %q, want ph-beta", plEntry.PhaseRef)
+	}
+}
+
+// buildIncompleteEnvelopeJSON returns an EnvelopeOut JSON with exitCode!=0 (incomplete).
+func buildIncompleteEnvelopeJSON(t *testing.T, taskUID string) []byte {
+	t.Helper()
+	env := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    taskUID,
+		ExitCode:   1, // nonzero → incomplete
+		Reason:     "forced-failure",
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("buildIncompleteEnvelopeJSON: %v", err)
+	}
+	return b
+}
+
+// TestBuildSeedManifest_CompletenessGating verifies that buildSeedManifest sets
+// BundleEntry.Status="" for incomplete/missing-envelope nodes and preserves the
+// live status for complete-envelope nodes (RESUME-PARTIAL-01 fix, Plan 30-01).
+//
+// Three Plan nodes are used:
+//  1. pl-complete: has a complete envelope → Status == live phase ("Running").
+//  2. pl-incomplete: has an incomplete envelope (exitCode==1) → Status == "".
+//  3. pl-missing: no envelope at all → Status == "".
+//
+// SHA256 is still stamped for present envelopes (complete or incomplete).
+func TestBuildSeedManifest_CompletenessGating(t *testing.T) {
+	const msUID = "ms-uid-compgate-001"
+	const phUID = "ph-uid-compgate-001"
+	const plCompleteUID = "pl-uid-complete-001"
+	const plIncompleteUID = "pl-uid-incomplete-001"
+	const plMissingUID = "pl-uid-missing-001"
+
+	ms := &tidev1alpha2.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-cg",
+			Namespace: "default",
+			UID:       types.UID(msUID),
+		},
+		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha2.MilestoneStatus{Phase: "Running"},
+	}
+	ph := &tidev1alpha2.Phase{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ph-cg",
+			Namespace: "default",
+			UID:       types.UID(phUID),
+		},
+		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-cg"},
+		Status: tidev1alpha2.PhaseStatus{Phase: "Running"},
+	}
+	plComplete := &tidev1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pl-complete",
+			Namespace: "default",
+			UID:       types.UID(plCompleteUID),
+		},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+	}
+	plIncomplete := &tidev1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pl-incomplete",
+			Namespace: "default",
+			UID:       types.UID(plIncompleteUID),
+		},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+	}
+	plMissing := &tidev1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pl-missing",
+			Namespace: "default",
+			UID:       types.UID(plMissingUID),
+		},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+	}
+	proj := makeProjectForExport("my-project", "default")
+
+	// Build envelopes: complete for pl-complete, incomplete for pl-incomplete,
+	// none for pl-missing.
+	completeEnvData := buildValidEnvelopeJSON(t, plCompleteUID)
+	incompleteEnvData := buildIncompleteEnvelopeJSON(t, plIncompleteUID)
+
+	pvcTgz := makeFakePVCTgz(t, map[string][]byte{
+		plCompleteUID:   completeEnvData,
+		plIncompleteUID: incompleteEnvData,
+		// plMissingUID intentionally absent
+	})
+
+	fr := &fakeExportRunner{streamBytes: pvcTgz}
+	restore := injectExportRunner(fr)
+	defer restore()
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(proj, ms, ph, plComplete, plIncomplete, plMissing).Build()
+	cs := fakeclientset.NewSimpleClientset()
+
+	outPath := t.TempDir() + "/out.tgz"
+	var stderr bytes.Buffer
+	if err := exportEnvelopesRun(
+		context.Background(), c, cs,
+		"default/my-project",
+		"tide-projects", outPath, false,
+		&stderr,
+	); err != nil {
+		t.Fatalf("exportEnvelopesRun: %v", err)
+	}
+
+	bundleFiles, err := pkgbundle.ReadBundle(outPath)
+	if err != nil {
+		t.Fatalf("ReadBundle: %v", err)
+	}
+
+	manifestBytes, ok := bundleFiles[pkgbundle.BundleFileSeedManifest]
+	if !ok {
+		t.Fatal("bundle missing seed-manifest.json")
+	}
+	var manifest pkgbundle.BundleManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("unmarshal seed-manifest.json: %v", err)
+	}
+
+	// Build a lookup map by plan name for easy assertions.
+	planByName := make(map[string]pkgbundle.BundleEntry)
+	for _, pl := range manifest.Plans {
+		planByName[pl.Name] = pl
+	}
+
+	// 1. Complete envelope node: Status must be the live phase.
+	completeEntry, found := planByName["pl-complete"]
+	if !found {
+		t.Fatal("pl-complete not found in seed manifest")
+	}
+	if completeEntry.Status != "Running" {
+		t.Errorf("pl-complete Status = %q, want Running (complete envelope → adopt live status)", completeEntry.Status)
+	}
+	if completeEntry.SHA256 == "" {
+		t.Error("pl-complete SHA256 is empty; expected non-empty for present envelope")
+	}
+
+	// 2. Incomplete envelope node: Status must be "".
+	incompleteEntry, found := planByName["pl-incomplete"]
+	if !found {
+		t.Fatal("pl-incomplete not found in seed manifest")
+	}
+	if incompleteEntry.Status != "" {
+		t.Errorf("pl-incomplete Status = %q, want empty (incomplete envelope → re-plannable)", incompleteEntry.Status)
+	}
+	// SHA256 is still stamped for present-but-incomplete envelopes (audit trail).
+	if incompleteEntry.SHA256 == "" {
+		t.Error("pl-incomplete SHA256 is empty; expected non-empty for present envelope even if incomplete")
+	}
+
+	// 3. Missing envelope node: Status must be "".
+	missingEntry, found := planByName["pl-missing"]
+	if !found {
+		t.Fatal("pl-missing not found in seed manifest")
+	}
+	if missingEntry.Status != "" {
+		t.Errorf("pl-missing Status = %q, want empty (no envelope → re-plannable)", missingEntry.Status)
+	}
+	// SHA256 is empty for missing envelopes (no data to hash).
+	if missingEntry.SHA256 != "" {
+		t.Errorf("pl-missing SHA256 = %q, want empty (no envelope present)", missingEntry.SHA256)
 	}
 }
 

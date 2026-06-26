@@ -836,6 +836,79 @@ func TestChildCRDSpec_SharedContext_RoundTrip(t *testing.T) {
 	}
 }
 
+// --- Phase 30 plan 01 Task 1: IsEnvelopeComplete tests (RESUME-PARTIAL-01) ---
+
+// TestIsEnvelopeComplete covers the five behavior cases required by
+// pkg/dispatch.IsEnvelopeComplete:
+//
+//  1. Leaf/executor envelope: ExitCode==0, ChildCount==0, no ChildCRDs → complete.
+//  2. Planner with matching counts: ExitCode==0, ChildCount==2, len(ChildCRDs)==2 → complete.
+//  3. Nonzero exit: ExitCode==1 → incomplete regardless of children.
+//  4. Count mismatch: ExitCode==0, ChildCount==2, len(ChildCRDs)==1 → incomplete.
+//  5. Malformed (children with zero count): ExitCode==0, ChildCount==0, len(ChildCRDs)==1 → incomplete (WR-02).
+func TestIsEnvelopeComplete(t *testing.T) {
+	type tc struct {
+		name     string
+		env      EnvelopeOut
+		wantComp bool
+	}
+	cases := []tc{
+		{
+			name: "leaf executor: exit 0, no children",
+			env: EnvelopeOut{
+				ExitCode:   0,
+				ChildCount: 0,
+				ChildCRDs:  nil,
+			},
+			wantComp: true,
+		},
+		{
+			name: "planner with matching counts",
+			env: EnvelopeOut{
+				ExitCode:   0,
+				ChildCount: 2,
+				ChildCRDs:  []ChildCRDSpec{{Name: "c1"}, {Name: "c2"}},
+			},
+			wantComp: true,
+		},
+		{
+			name: "nonzero exit code",
+			env: EnvelopeOut{
+				ExitCode:   1,
+				ChildCount: 0,
+				ChildCRDs:  nil,
+			},
+			wantComp: false,
+		},
+		{
+			name: "count mismatch: ChildCount>len(ChildCRDs)",
+			env: EnvelopeOut{
+				ExitCode:   0,
+				ChildCount: 2,
+				ChildCRDs:  []ChildCRDSpec{{Name: "c1"}},
+			},
+			wantComp: false,
+		},
+		{
+			name: "malformed: ChildCRDs populated but ChildCount==0 (WR-02)",
+			env: EnvelopeOut{
+				ExitCode:   0,
+				ChildCount: 0,
+				ChildCRDs:  []ChildCRDSpec{{Name: "c1"}},
+			},
+			wantComp: false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := IsEnvelopeComplete(c.env)
+			if got != c.wantComp {
+				t.Errorf("IsEnvelopeComplete(%+v) = %v, want %v", c.env, got, c.wantComp)
+			}
+		})
+	}
+}
+
 // TestNewTerminationStub_ChildCountJSON asserts that ChildCount serializes
 // under the "childCount" JSON key and the stub still stays < 4096 bytes with
 // ChildCount populated alongside a large EnvelopeOut.
