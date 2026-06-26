@@ -143,6 +143,7 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	# B's ~10m baseline plus up-to-3 retries of one flaked spec).
 	@set -e; \
 	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
+	export TIDE_BINARY="$$(pwd)/bin/tide"; \
 	echo "=== Layer A (envtest, Ginkgo-only, flake-attempts=3) ==="; \
 	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'; \
 	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, flake-attempts=3) ==="; \
