@@ -1,0 +1,175 @@
+# examples/projects/medium/per-namespace-resources.yaml — Phase 8/9 per-namespace deps.
+#
+# The TIDE Helm chart provisions tide-projects PVC + tide-subagent SA in tide-system.
+# A Project in a different namespace (tide-dogfood-codex) needs these resources mirrored
+# locally — the controller's reconciler expects them in the Project's namespace.
+#
+# Resources provided here:
+#   1. tide-projects PVC — workspace storage for clone/push/subagent Jobs
+#   2. tide-subagent SA  — identity for the subagent (authoring/executor) pods (D-G3 harness UID)
+#   3. tide-push SA + Role + RoleBinding — identity for the controller's clone and
+#      push Jobs (cmd/tide-push). The Role grants `get` on Secrets so the push pod
+#      can read the git-creds Secret. The chart provisions this in tide-system; the
+#      clone/push Jobs run as `tide-push` in the Project's namespace, so it must be
+#      mirrored here too (a missing tide-push SA makes the clone/push Jobs fail with
+#      "FailedCreate: serviceaccount \"tide-push\" not found" and the git round-trip
+#      never runs).
+#   4. tide-reporter SA + Role + RoleBinding — identity for the controller's in-namespace
+#      reader Job (cmd/tide-reporter, plan 09-04). The Role grants `create` + `get` on
+#      the five TIDE child CRD Kinds so the reader Job can materialize Milestone/Phase/
+#      Plan/Task/Wave CRs from the planner's out.json (defects #11/#12 fix). The chart
+#      provisions this in tide-system; the reader Jobs run as `tide-reporter` in the
+#      Project's namespace, so it must be mirrored here too.
+#
+# Resource NOT provided here (must be manually mirrored from tide-system):
+#   3. tide-signing-key Secret — contains a cluster-unique signing key; must be
+#      copied from tide-system after Helm install (apply sequence step 4):
+#        SIGNING_KEY=$(kubectl get secret tide-signing-key -n tide-system \
+#          -o jsonpath='{.data.TIDE_SIGNING_KEY}')
+#        kubectl apply -f - <<EOF
+#        apiVersion: v1
+#        kind: Secret
+#        metadata:
+#          name: tide-signing-key
+#          namespace: tide-dogfood-codex
+#        type: Opaque
+#        data:
+#          TIDE_SIGNING_KEY: ${SIGNING_KEY}
+#        EOF
+#
+# kind/minikube note: The local-path storage class uses WaitForFirstConsumer binding.
+# The tide-projects PVC won't bind until a Pod is scheduled against it. For kind-based
+# installs, pre-warm with a busybox pod or let the clone Job trigger binding naturally.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+spec:
+  # ReadWriteMany is the production default (multiple Jobs can mount simultaneously).
+  # On kind/minikube with local-path provisioner (ReadWriteOnce only), this PVC
+  # will not bind. For kind-based testing, change to ReadWriteOnce and ensure
+  # only one Job mounts at a time (enforced by wave sequencing).
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-subagent
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+  # No RBAC annotations — the controller's Helm chart manages the ClusterRole binding.
+  # This SA is the identity that the subagent (authoring/executor) pods run as (D-G3).
+  # NOTE: the controller's clone and push Jobs run as the separate `tide-push` SA
+  # defined below — NOT this one.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-push
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+  # Identity for the controller's clone Job (cmd/tide-push --mode=clone) and
+  # push Job (cmd/tide-push push mode). Mirrors tide-system/tide-push.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-push
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+rules:
+  # The push pod reads the git-creds Secret (GIT_PAT) referenced by the Project.
+  # Mirrors the tide-push Role in tide-system (verbs: get on secrets).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-push
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-push
+subjects:
+  - kind: ServiceAccount
+    name: tide-push
+    namespace: tide-dogfood-codex
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-reporter
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+  # Identity for the controller's in-namespace reader Job (cmd/tide-reporter, plan 09-04).
+  # The reader Job reads out.json from the project-namespace PVC and materializes child
+  # CRDs via the K8s API. Mirrors tide-system/tide-reporter provisioned by the chart.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-reporter
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+rules:
+  # Least-privilege: create + get + list child CRDs (list backs the materializer
+  # idempotency guard), plus get the parent Project for UID resolution.
+  # Mirrors the tide-reporter Role in tide-system (chart SOT hack/helm/reporter-rbac.yaml).
+  # 09-07 fix: list on child kinds + get on projects were both missing → the
+  # Project-level reporter Job failed (cannot get projects / cannot list milestones).
+  # T-09-07 mitigation retained: NO watch/update/delete/patch, NO secrets, NO core resources.
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["milestones", "phases", "plans", "tasks", "waves"]
+    verbs: ["create", "get", "list"]
+  - apiGroups: ["tideproject.k8s"]
+    resources: ["projects"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-reporter
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-reporter
+subjects:
+  - kind: ServiceAccount
+    name: tide-reporter
+    namespace: tide-dogfood-codex

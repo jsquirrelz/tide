@@ -1,0 +1,65 @@
+# Dogfood run #2 — in-cluster TIDE mirror (serves tide.git over smart-HTTP).
+# Adapted from examples/projects/medium/git-http-server-deployment.yaml for
+# namespace tide-dogfood-codex, a dedicated RWO PVC, fsGroup 1000 (so UID-1000
+# nginx can write the bare repo), and IfNotPresent (image is kind-loaded locally).
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-mirror-pvc
+  namespace: tide-dogfood-codex
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-http-server
+  namespace: tide-dogfood-codex
+  labels: {app.kubernetes.io/name: tide, app.kubernetes.io/component: git-http-server}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: git-http-server}
+  template:
+    metadata:
+      labels: {app: git-http-server, app.kubernetes.io/component: git-http-server}
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: git-http-server
+          image: ghcr.io/jsquirrelz/tide-git-http-server:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: mirror
+              mountPath: /srv/git
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+            readOnlyRootFilesystem: false
+      volumes:
+        - name: mirror
+          persistentVolumeClaim:
+            claimName: tide-mirror-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-http-server
+  namespace: tide-dogfood-codex
+  labels: {app.kubernetes.io/name: tide, app.kubernetes.io/component: git-http-server}
+spec:
+  type: ClusterIP
+  selector: {app: git-http-server}
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
