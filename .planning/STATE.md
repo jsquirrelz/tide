@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: — Planning Resumption & Cost Resilience
 status: executing
-stopped_at: Phase 29 context gathered
-last_updated: "2026-06-26T04:11:50.442Z"
-last_activity: 2026-06-26 -- Phase 30 execution started
+stopped_at: Phase 30 Plan 03 complete
+last_updated: "2026-06-26T14:49:46.641Z"
+last_activity: 2026-06-26
 progress:
   total_phases: 9
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 36
-  completed_plans: 33
-  percent: 89
+  completed_plans: 36
+  percent: 100
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 ## Current Position
 
 Phase: 30 (resumable-import-partial-tree-resume-adopt-complete-re-plan-) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 30
-Last activity: 2026-06-26 -- Phase 30 execution started
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-06-26
 
 ```
 v1.0.3 Progress: [x] 27  [x] 28  [x] 29
@@ -65,6 +65,7 @@ v1.0.3 Progress: [x] 27  [x] 28  [x] 29
 | Phase 29-operator-tooling-e2e P02 | 14m | 2 tasks | 5 files |
 | Phase 29 P03 | 120 | 3 tasks | 6 files |
 | Phase 29-operator-tooling-e2e P05 | 20 | - tasks | - files |
+| Phase 30 P03 | 45 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,8 @@ Spring Tide build-order decision: the breaking CRD/schema foundation + cross-sco
 Binding constraints carried from REQUIREMENTS.md: spec is the contract; wave-boundary failure semantics preserved EXACTLY at global scope; resumption stays minimal (one global indegree map + completed-task set, no cached schedule); cyclic global DAG rejected at validation; breaking CRD changes ship a migration path (no silent corruption); gates compose as holds, human-gate-policy out of the controller.
 
 Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); no direct-SDK `cache_control`. CACHE-F1 (direct-SDK backend for cross-pod cache benefit) remains a deferred follow-up.
+
+- [Phase ?]: Targeted fix: deleteNamespaceAndWait added alongside deleteNamespace (not replacing it) so unrelated specs keep their fire-and-forget timing
 
 ### Roadmap Evolution
 
@@ -140,6 +143,6 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-22T06:25:29.182Z
-Stopped at: Phase 29 context gathered
+Last session: 2026-06-26T14:49:46.623Z
+Stopped at: Phase 30 Plan 03 complete
 Resume file: None

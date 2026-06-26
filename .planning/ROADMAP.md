@@ -324,9 +324,9 @@ driven by per-node envelope completeness. Full root cause + fix shape + design f
 (this is the cheap-mid-planning-halt resumability run #2 was gated on — see line ~277).
 **Requirements**: RESUME-PARTIAL-01, RESUME-PARTIAL-02, RESUME-PARTIAL-03, RESUME-PARTIAL-04 (derived in planning from the 4 design forks)
 **Depends on:** Phase 29 (import mechanism + Tier-a/b E2E)
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 30-01-PLAN.md — Export-time completeness bridge (shared IsEnvelopeComplete; incomplete/missing → empty Status) + per-node materialization envtest [RESUME-PARTIAL-01/04]
 - [x] 30-02-PLAN.md — Tighten project-planner guard to ImportComplete+owned-Milestones (no post-import re-dispatch) + envtest [RESUME-PARTIAL-02]
-- [ ] 30-03-PLAN.md — Partial-tree fixture + Tier c kind E2E driving partial import to Project=Complete [RESUME-PARTIAL-03]
+- [x] 30-03-PLAN.md — Partial-tree fixture + Tier c kind E2E driving partial import to Project=Complete [RESUME-PARTIAL-03]
