@@ -217,8 +217,9 @@ func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr 
 		}
 
 		// Completeness guard (IMPORT-02 / T-28-03-03): reject incomplete envelopes.
+		// Delegates to the shared single source of truth (RESUME-PARTIAL-01):
 		// exitCode != 0 OR len(ChildCRDs) != ChildCount → incomplete.
-		if !isEnvelopeComplete(env) {
+		if !pkgdispatch.IsEnvelopeComplete(env) {
 			fmt.Fprintf(stderr,
 				"tide-import: envelope %q is incomplete (exitCode=%d, childCount=%d, len(childCRDs)=%d) — skipping\n",
 				entry.FQName, env.ExitCode, env.ChildCount, len(env.ChildCRDs))
@@ -310,24 +311,6 @@ func containedJoin(base, elem string) (string, error) {
 		return "", fmt.Errorf("elem %q resolves outside base %q (rejected)", elem, base)
 	}
 	return full, nil
-}
-
-// isEnvelopeComplete returns true iff the envelope has exitCode==0 and
-// len(ChildCRDs) == ChildCount (completeness guard per IMPORT-02 / D-12).
-//
-// The equality is strict: a legitimate executor-level envelope has
-// ChildCount==0 and no ChildCRDs (0==0, passes). A planner envelope that
-// authored children but whose ChildCount was not stamped — ChildCount==0 with
-// a populated ChildCRDs slice — is MALFORMED for import and is rejected (the
-// count is the validation invariant the guard exists to enforce, WR-02).
-func isEnvelopeComplete(env pkgdispatch.EnvelopeOut) bool {
-	if env.ExitCode != 0 {
-		return false
-	}
-	if len(env.ChildCRDs) != env.ChildCount {
-		return false
-	}
-	return true
 }
 
 // convertSpecRaw round-trips rawBytes through the appropriate v1alpha2 typed
