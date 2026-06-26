@@ -105,15 +105,16 @@ func exportEnvelopesRun(
 	// Walk the pvc-envelopes.tgz: stamp childCount repairs and collect envelope map.
 	// envelopes maps uid → repaired out.json bytes.
 	// repairedTgzFiles holds the full tgz content with repairs applied.
+	// preStampComplete maps uid → completeness verdict on PRE-stamp bytes (WR-03).
 	fmt.Fprintf(errOut, "processing envelopes...\n")
-	envelopes, repairedTgzFiles, err := processEnvelopesTgz(pvcTgzBuf.Bytes(), errOut)
+	envelopes, repairedTgzFiles, preStampComplete, err := processEnvelopesTgz(pvcTgzBuf.Bytes(), errOut)
 	if err != nil {
 		return fmt.Errorf("process pvc-envelopes.tgz: %w", err)
 	}
 
 	// Query live CRs to build the seed manifest.
 	fmt.Fprintf(errOut, "building seed manifest from live CRs...\n")
-	manifest, err := buildSeedManifest(ctx, k, ns, projName, envelopes)
+	manifest, err := buildSeedManifest(ctx, k, ns, projName, envelopes, preStampComplete)
 	if err != nil {
 		return fmt.Errorf("build seed manifest: %w", err)
 	}
@@ -262,19 +263,29 @@ func parseExportRef(ref string) (ns, projName string, err error) {
 
 // processEnvelopesTgz reads the pvc-envelopes.tgz bytes, stamps childCount on
 // legacy out.json entries (D-16a), and returns:
-//   - envelopes: map of uid → repaired out.json bytes
+//   - envelopes: map of uid → repaired out.json bytes (stamped for bundle)
 //   - repairedFiles: full tgz content map for WritePVCEnvelopesTgz re-assembly
+//   - preStampComplete: map of uid → completeness verdict evaluated on PRE-STAMP
+//     bytes (WR-03). tide-import reads raw out.json from the old PVC (not from
+//     the stamped bundle), so seedStatusFor must use this pre-stamp verdict to
+//     stay consistent with tide-import's IsEnvelopeComplete check. If seedStatusFor
+//     evaluated completeness on the post-stamp bytes, a legacy exit-0 envelope with
+//     ChildCount==0 would look complete on the export path (stamped → len==count)
+//     but incomplete on the tide-import path (raw → len!=count), causing the seed
+//     manifest to adopt its status while tide-import skips its children.
 func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 	envelopes map[string][]byte,
 	repairedFiles map[string][]byte,
+	preStampComplete map[string]bool,
 	err error,
 ) {
 	envelopes = make(map[string][]byte)
 	repairedFiles = make(map[string][]byte)
+	preStampComplete = make(map[string]bool)
 
 	gr, err := gzip.NewReader(bytes.NewReader(tgzData))
 	if err != nil {
-		return nil, nil, fmt.Errorf("open pvc-envelopes.tgz gzip reader: %w", err)
+		return nil, nil, nil, fmt.Errorf("open pvc-envelopes.tgz gzip reader: %w", err)
 	}
 	defer func() { _ = gr.Close() }()
 
@@ -285,20 +296,34 @@ func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 			break
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("read pvc-envelopes.tgz entry: %w", err)
+			return nil, nil, nil, fmt.Errorf("read pvc-envelopes.tgz entry: %w", err)
 		}
 
 		data, err := io.ReadAll(tr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read tgz entry %s: %w", hdr.Name, err)
+			return nil, nil, nil, fmt.Errorf("read tgz entry %s: %w", hdr.Name, err)
 		}
 
 		// Check if this is an "envelopes/<uid>/out.json" entry.
 		if uid, ok := parseOutJSONPath(hdr.Name); ok {
-			// D-16a: stamp childCount if legacy.
+			// WR-03: evaluate completeness on pre-stamp bytes so the verdict matches
+			// what tide-import sees when it reads the same raw file from the old PVC.
+			// StampChildCount (D-16a) below may repair ChildCount==0+len(ChildCRDs)>0
+			// to look complete; tide-import does NOT stamp before checking, so a
+			// legacy envelope that fails IsEnvelopeComplete on raw bytes must NOT be
+			// adopted in the seed manifest even if it passes after stamping.
+			var rawEnv pkgdispatch.EnvelopeOut
+			if jsonErr := json.Unmarshal(data, &rawEnv); jsonErr == nil {
+				preStampComplete[uid] = pkgdispatch.IsEnvelopeComplete(rawEnv)
+			}
+			// preStampComplete[uid] remains false (zero value) for parse failures —
+			// consistent with seedStatusFor's corrupt-bytes fail-closed rule.
+
+			// D-16a: stamp childCount if legacy, so the bundle's pvc-envelopes.tgz
+			// carries corrected bytes. This does not affect the pre-stamp verdict above.
 			repaired, err := pkgbundle.StampChildCount(data, errOut)
 			if err != nil {
-				return nil, nil, fmt.Errorf("stampChildCount for %s: %w", hdr.Name, err)
+				return nil, nil, nil, fmt.Errorf("stampChildCount for %s: %w", hdr.Name, err)
 			}
 			envelopes[uid] = repaired
 			repairedFiles[hdr.Name] = repaired
@@ -307,7 +332,7 @@ func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 			repairedFiles[hdr.Name] = data
 		}
 	}
-	return envelopes, repairedFiles, nil
+	return envelopes, repairedFiles, preStampComplete, nil
 }
 
 // parseOutJSONPath extracts the uid from "envelopes/<uid>/out.json".
@@ -326,33 +351,36 @@ func parseOutJSONPath(name string) (string, bool) {
 }
 
 // seedStatusFor returns the status string to stamp on a BundleEntry for the
-// given node UID. A node whose envelope is present AND complete (per
-// pkgdispatch.IsEnvelopeComplete) keeps its live status; all other cases return
-// "" so the ImportController's existing `if seed.Status != ""` guard leaves the
-// CR in a fresh/re-plannable state (RESUME-PARTIAL-01 fix, Plan 30-01).
+// given node UID. A node whose envelope is present AND complete keeps its live
+// status; all other cases return "" so the ImportController's existing
+// `if seed.Status != ""` guard leaves the CR in a fresh/re-plannable state
+// (RESUME-PARTIAL-01 fix, Plan 30-01).
 //
 // Cases that return "":
 //   - UID has no entry in envelopes (missing out.json — no envelope to evaluate).
-//   - UID has an entry but JSON unmarshal fails (treat corrupt bytes as incomplete;
-//     fail-closed: a malformed envelope can only reset status, never forge "Succeeded").
-//   - Envelope unmarshals successfully but pkgdispatch.IsEnvelopeComplete returns false
-//     (exitCode!=0 or len(ChildCRDs)!=ChildCount).
+//   - UID has an entry but preStampComplete[uid] is false (WR-03: completeness
+//     evaluated on pre-stamp bytes to match tide-import's verdict on the raw PVC
+//     file; see processEnvelopesTgz for the invariant).
+//
+// preStampComplete maps uid → IsEnvelopeComplete result on raw (pre-stamp) bytes.
+// envelopes maps uid → repaired (stamped) bytes; its presence indicates the uid
+// had an out.json entry (used only to distinguish "missing" from "incomplete").
 //
 // SHA256 stamping is NOT affected by this function — callers still compute SHA256
 // for any present envelope bytes regardless of completeness.
-func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte) string {
-	data, ok := envelopes[uid]
-	if !ok {
+func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte, preStampComplete map[string]bool) string {
+	if _, ok := envelopes[uid]; !ok {
 		// No envelope present for this node → re-plannable.
 		return ""
 	}
-	var env pkgdispatch.EnvelopeOut
-	if err := json.Unmarshal(data, &env); err != nil {
-		// Corrupt bytes → treat as incomplete (fail-closed, T-30-01-01).
-		return ""
-	}
-	if !pkgdispatch.IsEnvelopeComplete(env) {
-		// Incomplete envelope → re-plannable.
+	// WR-03: use pre-stamp verdict to stay consistent with tide-import, which reads
+	// raw out.json bytes from the old PVC without applying StampChildCount first.
+	// A legacy exit-0 envelope with ChildCount==0 and populated ChildCRDs looks
+	// complete after stamping but incomplete on the raw bytes tide-import reads;
+	// adopting its status without copying its children would leave the plan with
+	// Status=Succeeded but no Tasks materialized in the new namespace.
+	if !preStampComplete[uid] {
+		// Incomplete on raw bytes → re-plannable.
 		return ""
 	}
 	return liveStatus
@@ -366,11 +394,17 @@ func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte) s
 // D-04: sha256 computed from repaired out.json bytes.
 // D-13: Wave CRs excluded.
 // D-15: down to Plan only; Tasks excluded.
+//
+// preStampComplete carries the IsEnvelopeComplete verdict evaluated on PRE-stamp
+// bytes (WR-03). Passed through to seedStatusFor so the seed manifest's Status
+// field reflects the same completeness verdict tide-import will apply when it reads
+// the raw out.json from the old PVC.
 func buildSeedManifest(
 	ctx context.Context,
 	k client.Client,
 	ns, projName string,
 	envelopes map[string][]byte, // uid → repaired out.json bytes
+	preStampComplete map[string]bool, // uid → completeness on pre-stamp bytes (WR-03)
 ) (*pkgbundle.BundleManifest, error) {
 	manifest := &pkgbundle.BundleManifest{}
 
@@ -389,7 +423,7 @@ func buildSeedManifest(
 			FQName:     pkgbundle.MilestoneFQName(ms.Name),
 			OldUID:     string(ms.UID),
 			DependsOn:  ms.Spec.DependsOn,
-			Status:     seedStatusFor(string(ms.UID), ms.Status.Phase, envelopes),
+			Status:     seedStatusFor(string(ms.UID), ms.Status.Phase, envelopes, preStampComplete),
 			ProjectRef: ms.Spec.ProjectRef,
 		}
 		if data, ok := envelopes[string(ms.UID)]; ok {
@@ -428,7 +462,7 @@ func buildSeedManifest(
 			FQName:       pkgbundle.PhaseFQName(msRef, ph.Name),
 			OldUID:       string(ph.UID),
 			DependsOn:    ph.Spec.DependsOn,
-			Status:       seedStatusFor(string(ph.UID), ph.Status.Phase, envelopes),
+			Status:       seedStatusFor(string(ph.UID), ph.Status.Phase, envelopes, preStampComplete),
 			MilestoneRef: msRef,
 		}
 		if data, ok := envelopes[string(ph.UID)]; ok {
@@ -455,7 +489,7 @@ func buildSeedManifest(
 			FQName:    pkgbundle.PlanFQName(msRef, phRef, pl.Name),
 			OldUID:    string(pl.UID),
 			DependsOn: pl.Spec.DependsOn,
-			Status:    seedStatusFor(string(pl.UID), pl.Status.Phase, envelopes),
+			Status:    seedStatusFor(string(pl.UID), pl.Status.Phase, envelopes, preStampComplete),
 			PhaseRef:  phRef,
 		}
 		if data, ok := envelopes[string(pl.UID)]; ok {

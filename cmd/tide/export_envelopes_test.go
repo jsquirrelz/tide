@@ -739,6 +739,126 @@ func TestBuildSeedManifest_CompletenessGating(t *testing.T) {
 	}
 }
 
+// TestSeedStatusFor_LegacyUnstampedEnvelopeIsRePlannableOnExport pins WR-03:
+// a legacy exit-0 envelope with ChildCount==0 and len(ChildCRDs)>0 must produce
+// Status="" in the seed manifest (re-plannable), NOT adopt the live status.
+//
+// Rationale: StampChildCount in processEnvelopesTgz would repair the bytes to
+// ChildCount=len(ChildCRDs), making IsEnvelopeComplete return true on the stamped
+// bytes. But tide-import reads the raw out.json from the old PVC and applies
+// IsEnvelopeComplete WITHOUT stamping first — so it would reject this envelope
+// and skip copying children. Adopting the status while skipping child copies
+// leaves the plan in Status=Succeeded with no Tasks materialized.
+//
+// The WR-03 fix evaluates IsEnvelopeComplete on PRE-stamp bytes so seedStatusFor
+// and tide-import agree on the same completeness verdict.
+func TestSeedStatusFor_LegacyUnstampedEnvelopeIsRePlannableOnExport(t *testing.T) {
+	const plUID = "pl-uid-wr03-unstamped-001"
+	const livePhase = "Succeeded" // would be adopted if the guard were wrong
+
+	// Build a legacy envelope: exit-0, children present, ChildCount==0.
+	// This is the exact case StampChildCount repairs. On raw bytes:
+	//   IsEnvelopeComplete → false (len(ChildCRDs)=2 != ChildCount=0)
+	// On stamped bytes:
+	//   IsEnvelopeComplete → true (len=2 == ChildCount=2 after stamp)
+	legacyEnv := pkgdispatch.EnvelopeOut{
+		APIVersion: pkgdispatch.APIVersionV1Alpha1,
+		Kind:       pkgdispatch.KindTaskEnvelopeOut,
+		TaskUID:    plUID,
+		ExitCode:   0, // claimed success
+		ChildCRDs: []pkgdispatch.ChildCRDSpec{
+			{Name: "task-01"},
+			{Name: "task-02"},
+		},
+		ChildCount: 0, // legacy: field absent / zero
+	}
+	rawBytes, err := json.Marshal(legacyEnv)
+	if err != nil {
+		t.Fatalf("marshal legacy envelope: %v", err)
+	}
+
+	ms := &tidev1alpha2.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-wr03",
+			Namespace: "default",
+			UID:       types.UID("ms-uid-wr03"),
+		},
+		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha2.MilestoneStatus{Phase: livePhase},
+	}
+	ph := &tidev1alpha2.Phase{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ph-wr03",
+			Namespace: "default",
+			UID:       types.UID("ph-uid-wr03"),
+		},
+		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-wr03"},
+		Status: tidev1alpha2.PhaseStatus{Phase: livePhase},
+	}
+	pl := &tidev1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pl-wr03",
+			Namespace: "default",
+			UID:       types.UID(plUID),
+		},
+		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-wr03"},
+		Status: tidev1alpha2.PlanStatus{Phase: livePhase},
+	}
+	proj := makeProjectForExport("my-project", "default")
+
+	pvcTgz := makeFakePVCTgz(t, map[string][]byte{plUID: rawBytes})
+	fr := &fakeExportRunner{streamBytes: pvcTgz}
+	restore := injectExportRunner(fr)
+	defer restore()
+
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(proj, ms, ph, pl).Build()
+	cs := fakeclientset.NewSimpleClientset()
+
+	outPath := t.TempDir() + "/out.tgz"
+	var stderr bytes.Buffer
+	if err := exportEnvelopesRun(
+		context.Background(), c, cs,
+		"default/my-project",
+		"tide-projects", outPath, false,
+		&stderr,
+	); err != nil {
+		t.Fatalf("exportEnvelopesRun: %v", err)
+	}
+
+	bundleFiles, err := pkgbundle.ReadBundle(outPath)
+	if err != nil {
+		t.Fatalf("ReadBundle: %v", err)
+	}
+	manifestBytes, ok := bundleFiles[pkgbundle.BundleFileSeedManifest]
+	if !ok {
+		t.Fatal("bundle missing seed-manifest.json")
+	}
+	var manifest pkgbundle.BundleManifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("unmarshal seed-manifest.json: %v", err)
+	}
+
+	if len(manifest.Plans) != 1 {
+		t.Fatalf("expected 1 plan entry; got %d", len(manifest.Plans))
+	}
+	plEntry := manifest.Plans[0]
+
+	// WR-03 invariant: a legacy exit-0 unstamped envelope must NOT be adopted.
+	// tide-import would reject it (raw bytes fail IsEnvelopeComplete); so the
+	// seed manifest must carry Status="" to keep the node re-plannable.
+	if plEntry.Status != "" {
+		t.Errorf("WR-03 violation: legacy unstamped envelope (exit-0, ChildCount==0, len(ChildCRDs)==2) "+
+			"got Status=%q in seed manifest; want empty (re-plannable). "+
+			"The export path must not adopt status for envelopes tide-import would reject.", plEntry.Status)
+	}
+
+	// SHA256 should still be stamped (the repaired bytes are what go into the bundle).
+	if plEntry.SHA256 == "" {
+		t.Error("expected SHA256 to be stamped even for incomplete envelopes (present bytes → sha256)")
+	}
+}
+
 // TestExportEnvelopesDirMode verifies --dir emits an unpacked directory instead of tgz.
 func TestExportEnvelopesDirMode(t *testing.T) {
 	pvcTgz, _ := pkgbundle.WritePVCEnvelopesTgz(map[string][]byte{})
