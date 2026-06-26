@@ -310,3 +310,21 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 27. Budget-Bypass Resume Correctness | v1.0.3 | 4/4 | Complete   | 2026-06-18 |
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete   | 2026-06-18 |
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete   | 2026-06-22 |
+
+### Phase 30: Resumable Import — Partial-Tree Resume (adopt-complete + re-plan-incomplete)
+
+**Milestone:** v1.0.5 (patch — fixes a defect in the v1.0.3 import feature)
+**Goal:** Make the import feature resume a PARTIALLY-completed tree — its primary use case, which
+dogfood run #2 proved it cannot. Today the ImportController materializes every seed node at its
+salvaged status (`Running`) while the `tide-import` completeness guard skips incomplete envelopes,
+so incomplete nodes become `Running`-with-no-envelope zombies that stall the cascade (run #2:
+copied 60 / incomplete 40 → `Task=0`, reporter thrash). Fix = **adopt-complete + re-plan-incomplete**,
+driven by per-node envelope completeness. Full root cause + fix shape + design forks:
+[`.planning/dogfood/run-2-FINDINGS.md`](dogfood/run-2-FINDINGS.md). Unblocks deferred dogfood run #2
+(this is the cheap-mid-planning-halt resumability run #2 was gated on — see line ~277).
+**Requirements**: TBD (derive in planning — see the 4 design forks in the findings doc)
+**Depends on:** Phase 29 (import mechanism + Tier-a/b E2E)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 30 to break down)

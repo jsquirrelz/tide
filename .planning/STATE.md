@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 Phase: 29 — COMPLETE
 Plan: 5 of 5
 Status: Phase 29 complete
-Last activity: 2026-06-26 -- Completed quick task 260625-txr: dogfood run #2 setup artifacts (v1alpha2 skeleton + project.yaml + runbook); scope at .planning/dogfood/run-2-SCOPE.md
+Last activity: 2026-06-26 -- Dogfood run #2 live-attempted ($0 spent); surfaced import partial-tree-resume defect (.planning/dogfood/run-2-FINDINGS.md); added Phase 30 (v1.0.5) to fix it; run deferred behind the fix. kind-tide-dogfood left up as test bed.
 
 ```
 v1.0.3 Progress: [x] 27  [x] 28  [x] 29
@@ -77,6 +77,10 @@ Spring Tide build-order decision: the breaking CRD/schema foundation + cross-sco
 Binding constraints carried from REQUIREMENTS.md: spec is the contract; wave-boundary failure semantics preserved EXACTLY at global scope; resumption stays minimal (one global indegree map + completed-task set, no cached schedule); cyclic global DAG rejected at validation; breaking CRD changes ship a migration path (no silent corruption); gates compose as holds, human-gate-policy out of the controller.
 
 Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); no direct-SDK `cache_control`. CACHE-F1 (direct-SDK backend for cross-pod cache benefit) remains a deferred follow-up.
+
+### Roadmap Evolution
+
+- Phase 30 added (v1.0.5 patch): Resumable Import — Partial-Tree Resume. Dogfood run #2 ($0, halted) proved the import feature can't resume a partially-completed tree (incomplete-envelope nodes materialize as Running-with-no-envelope zombies → stall). Fix = adopt-complete + re-plan-incomplete. Root cause + design forks in `.planning/dogfood/run-2-FINDINGS.md`. Unblocks deferred dogfood run #2.
 
 - [Phase 20]: Project level passes empty string for BuildPlannerEnvelope sharedContext (ProjectSpec has no SharedContext field; project is the DAG root with no parent)
 - [Phase 20]: maxSharedContextBytes = 64 KiB etcd DoS guard in MaterializeChildCRDs (fail-closed pre-flight check before any child CRD Create, T-20-03-01)
