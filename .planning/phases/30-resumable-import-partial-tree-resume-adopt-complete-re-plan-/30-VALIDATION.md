@@ -1,8 +1,8 @@
 ---
 phase: 30
 slug: resumable-import-partial-tree-resume-adopt-complete-re-plan
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-06-25
 ---
@@ -36,11 +36,25 @@ created: 2026-06-25
 
 ## Per-Task Verification Map
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | — | — | TBD | — | N/A | unit/envtest/kind | TBD | ❌ W0 | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Status |
+|---------|------|------|-------------|-----------|-------------------|--------|
+| 30-01-01 | 30-01 | 1 | RESUME-PARTIAL-01 | unit | `go test ./pkg/dispatch/... ./cmd/tide-import/...` | ⬜ pending |
+| 30-01-02 | 30-01 | 1 | RESUME-PARTIAL-01 | unit | `go test ./cmd/tide/... -run "Export\|SeedManifest\|BuildSeed"` | ⬜ pending |
+| 30-01-03 | 30-01 | 1 | RESUME-PARTIAL-01/04 | envtest | `go test ./internal/controller/ -run "Import"` | ⬜ pending |
+| 30-02-01 | 30-02 | 1 | RESUME-PARTIAL-02 | compile | `go build ./... && go vet ./internal/controller/` | ⬜ pending |
+| 30-02-02 | 30-02 | 1 | RESUME-PARTIAL-02 | envtest | `go test ./internal/controller/ -run "Project"` | ⬜ pending |
+| 30-03-01 | 30-03 | 2 | RESUME-PARTIAL-03 | fixture | shell file-existence + grep assertion | ⬜ pending |
+| 30-03-02 | 30-03 | 2 | RESUME-PARTIAL-03 | kind E2E | `set -o pipefail; go test ./test/integration/kind/ -run "TestKind"` (see latency note) | ⬜ pending |
+| 30-03-03 | 30-03 | 2 | RESUME-PARTIAL-03 | checkpoint:human-verify | N/A | ⬜ pending |
 
-*Planner fills this map per the derived requirements. Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
+
+**Latency tolerance (30-03-02):** the Tier-c kind E2E exceeds the 30s feedback threshold (8-minute
+timeout) — accepted because no faster behavioral substitute exists for an end-to-end kind import, and
+it is guarded by `testing.Short()` + `skipIfCRDsOnlyMode()` so cluster-less CI passes skip it cleanly.
+The real-cluster green run is gated by the blocking human checkpoint 30-03-03 (requires `MAKE_EXIT=0`
+and proof Tier c *ran*, not Skipped). `set -o pipefail` was added so a failing `go test` is not masked
+by the `grep` exit code.
 
 ---
 

@@ -547,17 +547,26 @@ if project.Spec.ImportSource != nil {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Export tooling path for seed.Status population**
-   - What we know: `cmd/tide-import/main.go:isEnvelopeComplete` is the completeness signal in the binary.
-   - What's unclear: Does the export CLI (tide export-envelopes) read the envelope to determine completeness when generating the seed manifest, or does it use live CR status?
-   - Recommendation: Read `cmd/tide/cmd/export_envelopes.go` before implementing Wave 0. If the seed is built from live CR status (not envelope inspection), the fix requires the export CLI to also inspect envelopes and set `Status=""` for incomplete ones.
+1. **Export tooling path for seed.Status population** — RESOLVED.
+   - The path is `cmd/tide/export_envelopes_run.go` (not `cmd/tide/cmd/export_envelopes.go`). Verified
+     against source: `buildSeedManifest` copies `Status` from the LIVE salvaged CR
+     (`ms.Status.Phase` / `ph.Status.Phase` / `pl.Status.Phase` at lines 358/397/424) and does NOT
+     inspect envelope completeness.
+   - Resolution: the completeness→empty-status bridge lands at export time (Option b). Plan 30-01
+     promotes `isEnvelopeComplete` to a shared `pkg/dispatch.IsEnvelopeComplete` and has
+     `buildSeedManifest` set `Status=""` for incomplete/missing envelopes — verified viable because the
+     `tide-import` Job runs in `reconcileCopyingEnvelopes` AFTER `reconcileCreatingCRs` has already
+     stamped status, so an import-Job-skip-list approach (Option a) cannot influence materialization.
+     The controller needs no change — its existing `if seed.Status != ""` guard
+     (import_controller.go:424/471/518) already yields the re-plannable path for empty status.
 
-2. **Tier c test: stub subagent behavior for re-planned incomplete Plans**
-   - What we know: Tier a (small fixture) uses stub subagents to drive milestones to Succeeded.
-   - What's unclear: Do the existing stub subagents in the kind test infra also handle plan-level re-planning correctly for the partial fixture?
-   - Recommendation: Use the same stub subagent pattern from Tier a. The partial fixture Plans with `Status=""` will get re-planned by plan-planners; stub subagents should materialize Tasks that Succeed.
+2. **Tier c test: stub subagent behavior for re-planned incomplete Plans** — RESOLVED.
+   - Tier c (Plan 30-03) reuses Tier a's stub subagent pattern and its `createNamespace()` helper
+     (which already calls `ensureImportSA()`). Partial-fixture Plans with `Status=""` are re-planned by
+     plan-planners; the Tier a stub materializes Tasks that Succeed, driving the partial tree to
+     `Project=Complete`.
 
 ---
 
