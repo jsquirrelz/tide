@@ -1,0 +1,173 @@
+{
+  "milestones": [
+    {
+      "name": "milestone-01-codex-subagent",
+      "fqName": "milestone-01-codex-subagent",
+      "oldUID": "045b44c8-87d9-4e70-8743-0afa0421effd",
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    },
+    {
+      "name": "milestone-02-provider-dispatch",
+      "fqName": "milestone-02-provider-dispatch",
+      "oldUID": "14ac49b6-a01b-4aa4-a063-951366955632",
+      "dependsOn": [
+        "milestone-01-codex-subagent"
+      ],
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    },
+    {
+      "name": "milestone-03-hetero-integration",
+      "fqName": "milestone-03-hetero-integration",
+      "oldUID": "10710a5c-296d-4713-8e67-d9b2a4f85c23",
+      "dependsOn": [
+        "milestone-02-provider-dispatch"
+      ],
+      "status": "Running",
+      "projectRef": "dogfood-codex-runtime"
+    }
+  ],
+  "phases": [
+    {
+      "name": "phase-01-codex-pricing-usage",
+      "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage",
+      "oldUID": "9e214568-620d-46a1-9599-baf838b0df49",
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-01-codex-subagent-core",
+      "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core",
+      "oldUID": "9b886f3d-ca97-4f2e-9a71-81302684bde5",
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-01-provider-switch",
+      "fqName": "milestone-01-codex-subagent/phase-01-provider-switch",
+      "oldUID": "45b12a36-303d-42f1-95ad-0ab089e5e100",
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-02-codex-image-binary",
+      "fqName": "milestone-02-provider-dispatch/phase-02-codex-image-binary",
+      "oldUID": "3fe8fd51-c8e5-4298-9c29-1994fd3ff387",
+      "dependsOn": [
+        "phase-01-codex-subagent-core"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-02-codex-subagent",
+      "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent",
+      "oldUID": "f45c4d0b-df0b-4c75-905e-3de33ba126e8",
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-02-codex-subagent-core",
+      "fqName": "milestone-03-hetero-integration/phase-02-codex-subagent-core",
+      "oldUID": "3ef6bd72-f4d7-49cd-b749-ad7a23f41887",
+      "dependsOn": [
+        "phase-01-codex-pricing-usage"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-03-codex-image-entrypoint",
+      "fqName": "milestone-03-hetero-integration/phase-03-codex-image-entrypoint",
+      "oldUID": "3abdba95-26a1-4d06-a095-fb1c029604e7",
+      "dependsOn": [
+        "phase-02-codex-subagent-core"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-03-image-and-credentials",
+      "fqName": "milestone-01-codex-subagent/phase-03-image-and-credentials",
+      "oldUID": "e5035388-2ff9-4c63-98e7-763725b9b252",
+      "dependsOn": [
+        "phase-02-codex-subagent"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-03-per-level-provider-switch",
+      "fqName": "milestone-02-provider-dispatch/phase-03-per-level-provider-switch",
+      "oldUID": "24995f28-35e1-48ea-8b07-70e932d89ae7",
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-04-credential-and-chart-wiring",
+      "fqName": "milestone-02-provider-dispatch/phase-04-credential-and-chart-wiring",
+      "oldUID": "ffc62173-1a79-4e6b-9507-9288f2d1775e",
+      "dependsOn": [
+        "phase-03-per-level-provider-switch"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-04-mixed-provider-integration",
+      "fqName": "milestone-01-codex-subagent/phase-04-mixed-provider-integration",
+      "oldUID": "1e10034a-3c00-4eb3-b9e1-dff478488e71",
+      "dependsOn": [
+        "phase-01-provider-switch",
+        "phase-03-image-and-credentials"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-01-codex-subagent"
+    },
+    {
+      "name": "phase-04-per-level-vendor-switch",
+      "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch",
+      "oldUID": "f530d200-7207-47df-9f32-5fd4b5bf2ab1",
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-05-chart-secret-wiring",
+      "fqName": "milestone-03-hetero-integration/phase-05-chart-secret-wiring",
+      "oldUID": "80621bfb-519b-469c-ad37-49281e0b0dad",
+      "dependsOn": [
+        "phase-04-per-level-vendor-switch"
+      ],
+      "status": "Succeeded",
+      "milestoneRef": "milestone-03-hetero-integration"
+    },
+    {
+      "name": "phase-05-heterogeneous-dispatch-demo",
+      "fqName": "milestone-02-provider-dispatch/phase-05-heterogeneous-dispatch-demo",
+      "oldUID": "2d06aa90-d40b-4fdc-8412-d90191ddf3a3",
+      "dependsOn": [
+        "phase-01-codex-subagent-core",
+        "phase-02-codex-image-binary",
+        "phase-03-per-level-provider-switch",
+        "phase-04-credential-and-chart-wiring"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-02-provider-dispatch"
+    },
+    {
+      "name": "phase-06-hetero-integration",
+      "fqName": "milestone-03-hetero-integration/phase-06-hetero-integration",
+      "oldUID": "8c8b7873-9f23-49bd-a81f-26c3dba5e22e",
+      "dependsOn": [
+        "phase-02-codex-subagent-core",
+        "phase-03-codex-image-entrypoint",
+        "phase-04-per-level-vendor-switch",
+        "phase-05-chart-secret-wiring"
+      ],
+      "status": "Running",
+      "milestoneRef": "milestone-03-hetero-integration"
+    }
+  ],
+  "plans": []
+}

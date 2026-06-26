@@ -1,6 +1,9 @@
 # Dogfood run #2 — fresh Project (v1alpha2). Real config, NOT the stub fixture.
-# Applied AFTER skeleton.yaml so adoption guards skip project+milestone planning;
-# phase-planners regenerate plans against current main. See .planning/dogfood/run-2-SCOPE.md.
+# M+P adoption is via IMPORT (importSource + ImportComplete), NOT hand-applied skeleton:
+# the project-level planner guard is Job-presence-based, so hand-apply would re-author.
+# Deploy with TIDE_IMPORT_IMAGE blanked so the envelope Job dev-skips (no copy; plans
+# regenerate against current main). Seed ConfigMap = run-2/seed-manifest.trimmed.json.
+# See .planning/dogfood/run-2-SCOPE.md + RUNBOOK.md.
 apiVersion: tideproject.k8s/v1alpha2
 kind: Project
 metadata:
@@ -152,6 +155,9 @@ spec:
   git:
     repoURL: http://git-http-server.tide-dogfood-codex.svc.cluster.local/tide.git
     credsSecretRef: tide-secrets
+  importSource:
+    seedManifestConfigMap: tide-import-seed-dogfood-codex-runtime
+    salvagedPVCSubPath: df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab/workspace
   budget:
     absoluteCapCents: 5000
     rollingWindowCapCents: 5000

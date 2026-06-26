@@ -35,6 +35,17 @@ kubectl -n tide-system get deploy            # tide-controller-manager + tide-da
 All eight v1.0.4 images (controller, dashboard, stub/claude/codex-subagent…, push, reporter,
 import) were built from the same `main` as this chart, so no ImagePullBackOff is expected.
 
+**Blank `TIDE_IMPORT_IMAGE` (dev-skip the envelope Job).** We adopt the M+P skeleton via the
+import path, but we do NOT resume task envelopes (plans regenerate). With the import image empty,
+`ImportController.CopyingEnvelopes` skips the copy Job and sets `ImportComplete=True` right after
+materializing M+P — no envelope copy, no v1alpha1→v1alpha2 envelope-conversion risk
+(`import_controller.go:595-600`). Required, because project-level adoption only happens through
+`ImportComplete` (the project planner guard is Job-presence-based; hand-apply would re-author).
+```bash
+kubectl -n tide-system set env deploy/tide-controller-manager TIDE_IMPORT_IMAGE=""
+kubectl -n tide-system rollout status deploy/tide-controller-manager
+```
+
 ## 3. Real Anthropic key → `tide-secrets` (the run's engine is Claude)
 
 ```bash
@@ -76,24 +87,27 @@ kill $PF
 Service DNS the operator (and the run) use: `http://git-http-server.$NS.svc.cluster.local/tide.git`
 — matches `targetRepo`/`git.repoURL` in `project.yaml`.
 
-## 6. Apply the skeleton, THEN the Project
+## 6. Stage the trimmed seed ConfigMap, THEN apply the Project
 
-Order matters: the milestone/phase CRs must exist before the Project so the adoption guards see
-"already authored" and skip project + milestone planning.
+The ImportController materializes the 3 Milestones + 15 Phases from the seed ConfigMap (key
+`manifest`); `ImportComplete=True` then routes the project/milestone controllers down the adoption
+branch (no re-authoring). No skeleton.yaml is applied — import owns materialization.
 ```bash
-kubectl apply -f "$RUN2"/skeleton.yaml      # 3 Milestones + 15 Phases (structure-only)
-kubectl apply -f "$RUN2"/project.yaml       # fresh v1alpha2 Project ($50 cap, mirror targetRepo)
+kubectl -n "$NS" create configmap tide-import-seed-dogfood-codex-runtime \
+  --from-file=manifest="$RUN2"/seed-manifest.trimmed.json
+kubectl apply -f "$RUN2"/project.yaml        # fresh v1alpha2 Project (importSource, $50 cap, mirror)
 ```
 
-**Pre-run verification (do this before walking away):** confirm the project-level adoption guard
-actually suppresses the project-planner (open item from the scope doc). Watch that NO
-milestone-planner or project-planner Jobs are created, and that phase-planner Jobs DO appear:
+**Pre-run verification (do this before walking away):**
 ```bash
-kubectl -n "$NS" get jobs -w
+# import must reach Complete (dev-skip → no tide-import Job needed)
+kubectl -n "$NS" wait --for=condition=ImportComplete project/dogfood-codex-runtime --timeout=120s
 kubectl -n "$NS" get project,milestone,phase,plan
+kubectl -n "$NS" get jobs -w
 ```
-If milestone/project-planner Jobs spawn (re-authoring), STOP — the adoption guard is not firing for
-this path; reassess before spending.
+EXPECT: 3 Milestones + 15 Phases materialized; NO `tide-project-*` or `tide-milestone-*` planner
+Jobs (adoption working); `tide-phase-*` planner Jobs DO appear (regenerating plans). If a
+project/milestone-planner Job spawns, STOP — adoption isn't firing; reassess before spending.
 
 ## 7. Drive, monitor, kill criteria
 

@@ -113,7 +113,27 @@ Pull the `tide/run-*` branch out of the in-cluster mirror; report:
 | Residual staleness leaks into regenerated plans | Plans are authored against the freshly-cloned current `main`; the prompt forbids rebuilding Spring-Tide infra. |
 | Single-node kind OOM | One cluster at a time; pre-warm; never run acceptance + test clusters concurrently. |
 
-## Open execution decisions (resolve at GSD execution time)
+## Mechanism correction (pre-flight, 2026-06-26)
 
-- Exact v1alpha1→v1alpha2 transform for the skeleton CRs (milestones.yaml/phases.yaml → v1alpha2 manifests). Mechanical.
-- Whether the skeleton apply + cluster bring-up is one `/gsd:quick` task or a small phase.
+The pre-launch static check **disproved hand-apply adoption**. The project-level planner guard
+(`project_controller.go:1037-1052`) is **Job-presence-based, not child-based**, so hand-applying
+milestones with no planner Job would NOT suppress the project-planner — it would re-author its own
+milestones. Project-level adoption only works via the **import path**: `spec.importSource` +
+`ConditionImportComplete` routes dispatch down the adoption branch (`project_controller.go:1078-1084`).
+The milestone→phase guard IS child-based (safe).
+
+Corrected mechanism (verified):
+- **Stage a trimmed seed ConfigMap directly** (`tide-import-seed-dogfood-codex-runtime`, key
+  `manifest` = `run-2/seed-manifest.trimmed.json`, M+P only, plans `[]`). `CreatingCRs` reads only
+  the seed ConfigMap (not the PVC) and materializes M+P. Its cycle-check (`import_controller.go:331-381`)
+  was replicated offline on the trimmed seed → PASS (18 nodes, waves [7,6,4,1], no unknown/cycle).
+- **Blank `TIDE_IMPORT_IMAGE`** so `CopyingEnvelopes` dev-skips the copy Job and sets
+  `ImportComplete=True` (`import_controller.go:595-600`) — no envelope copy, no v1alpha1→v1alpha2
+  envelope-conversion risk. We adopt structure only; plans/tasks regenerate.
+- `project.yaml` carries `spec.importSource`; **`skeleton.yaml` removed** (import owns materialization).
+- The CLI `tide import-envelopes --dry-run` was NOT used — it builds its DAG from bundle manifest
+  YAMLs (fragile to hand-trimming); the controller reads `seed-manifest.json` directly, so the
+  offline cycle-check above is the authoritative validation.
+
+Cost note: this saves only re-authoring the 3 milestone + 15 phase specs (tiny); the 39 plans
+regenerate either way. Accepted by the user to honor the import-resume intent + exercise the feature.
