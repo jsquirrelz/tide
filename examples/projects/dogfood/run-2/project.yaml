@@ -1,0 +1,173 @@
+# Dogfood run #2 — fresh Project (v1alpha2). Real config, NOT the stub fixture.
+# Applied AFTER skeleton.yaml so adoption guards skip project+milestone planning;
+# phase-planners regenerate plans against current main. See .planning/dogfood/run-2-SCOPE.md.
+apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: dogfood-codex-runtime
+  namespace: tide-dogfood-codex
+spec:
+  schemaRevision: v1alpha2
+  targetRepo: http://git-http-server.tide-dogfood-codex.svc.cluster.local/tide.git
+  outcomePrompt: |
+    ## Outcome
+
+    Add a second Subagent implementation for the Codex runtime (OpenAI) and
+    demonstrate real heterogeneous dispatch — mixed-provider waves that actually
+    run, not just interface scaffolding. Concrete outcome: a TIDE operator can
+    configure a Project where the planner pool runs Claude and the executor pool
+    runs Codex, and TIDE dispatches a multi-phase run to completion with correct
+    wave-boundary failure semantics across both providers.
+
+    ## Current foundation — ALREADY IN MAIN, build ON it, do NOT rebuild
+
+    Much of what early drafts of this run assumed it would build now ships in
+    main (milestone v1.0.2 "Spring Tide" + late v1.0.1). Treat all of this as
+    given infrastructure; the ONLY new product surface this run delivers is the
+    Codex subagent package + the per-level provider switch.
+
+    - **v1alpha2 schema + global Execution DAG (Phases 23-26).** `Plan`/`Phase`/
+      `Milestone`/`Task` all carry `dependsOn` at any level; the assembler builds
+      ONE global Execution DAG and derives Project-scoped waves
+      (`tide-wave-<project>-<N>`) across plan/phase/milestone boundaries via
+      layered Kahn. The project planner emits N Milestones up-front with
+      `Milestone.dependsOn` (planning-DAG edge only — zero execution edges).
+      Child CRDs authored by the planner are v1alpha2.
+    - **Global dispatch / failure / gates / resumption (Phase 25).** Readiness is
+      re-derived from the global indegree map + completed-set each reconcile
+      (nothing cached). `failureProfile` and the gate-as-hold model below are live.
+    - **Cost / budget / telemetry / cache (Phases 16, 18-21).** `pkg/dispatch.Usage`,
+      `tide_cost_cents_total`, budget enforcement, and the dashboard Telemetry tab
+      + cache-efficiency panel all exist. The locked metric label set is
+      {project,phase,plan,wave}; the `task` label is FORBIDDEN (cardinality analyzer).
+    - **Dashboard (Phase 26).** A global execution-DAG view renders the whole-Project
+      wave DAG (dagre LR); run #2's waves/spend are watchable live.
+
+    ## Architecture — locked decisions (do NOT reinvent these)
+
+    **Implementation location: internal/subagent/codex/**
+    Mirror the existing internal/subagent/anthropic/ layering exactly:
+    - internal/subagent/codex/client.go — Client struct + constructor
+    - internal/subagent/codex/run.go — Subagent.Run(ctx, EnvelopeIn) (EnvelopeOut, error)
+    - internal/subagent/codex/Dockerfile — multi-stage build mirroring anthropic/Dockerfile
+    - internal/subagent/codex/doc.go — package doc referencing D-C1 layering pattern
+
+    All OpenAI/Codex-specific code stays behind the pkg/dispatch.Subagent
+    interface. No provider hard-coding in the controller. No Codex imports
+    in internal/controller/ or cmd/manager/.
+
+    **Per-level runtime selection (not per-task, not per-project).**
+    Planner pool and executor pool each pin a runtime. This is the correct
+    granularity: it matches the spec's separate-pools argument, achieves real
+    heterogeneity within a single run, and avoids the API/scheduler complexity
+    of per-task selection. Rejected alternatives (do not reopen):
+    - Per-task selection: large API surface, non-trivial scheduler changes.
+    - Per-project selection: no mixing within a run (defeats heterogeneity goal).
+
+    The SubagentConfig field already has Levels.{Milestone,Phase,Plan,Task}
+    per-level LevelConfig overrides (api/v1alpha2/project_types.go via
+    SubagentConfig). Wire the Codex image at the levels the operator wants Codex.
+    NOTE: today `resolveImage` honors a per-level image, but `ResolveProvider`
+    (internal/controller/dispatch_helpers.go) still returns Vendor:"anthropic"
+    unconditionally — so a non-Anthropic image at a level is selected but then
+    rejected at runtime (the image's vendor sentinel expects an anthropic
+    envelope). Adding the per-level vendor/provider switch IS part of this run's
+    deliverable.
+
+    **Credential path.**
+    OPENAI_API_KEY or CODEX_API_KEY via a K8s Secret — the established
+    Secret-ref pattern from providerSecretRef. Never mount host config, never
+    headless OAuth (broken: claude-code#29983, #7100 — same restriction applies
+    to Codex). Chart values for the new Secret name are part of the deliverable.
+
+    **Mixed-provider waves: identical wave-boundary failure semantics.**
+    The spec's failure handling (spec section "Failure handling at wave
+    boundaries") applies unchanged regardless of which provider runs a task:
+    - Failed task: siblings in the same wave continue (they were declared
+      independent).
+    - Dependents in later waves: never dispatch.
+    - Non-dependents in later waves: dispatch in strict profile.
+    This contract must not change when tasks run on different providers. It is now
+    enforced by the global indegree model (Phase 25); do not add a parallel path.
+
+    **Usage accounting + cost — REQUIRED for budget + observability.**
+    The cost/budget/telemetry surfaces (Phases 16, 18-21) depend on every Subagent
+    populating pkg/dispatch.Usage. The Codex Run() MUST normalize the OpenAI/Codex
+    usage block into that struct, or budget enforcement, tide_cost_cents_total, AND
+    the cache-efficiency dashboard panel will all read $0 / blank for Codex:
+    - InputTokens        <- usage.prompt_tokens
+    - OutputTokens       <- usage.completion_tokens
+    - CacheReadTokens    <- usage.prompt_tokens_details.cached_tokens
+      (OpenAI caching is AUTOMATIC, marker-free, process-independent, 1,024-token
+      floor — there is NO cache_control to set and NO separate "cache creation"
+      concept, so CacheCreationTokens stays 0. This differs from Anthropic, whose
+      field is cache_read_input_tokens / cache_creation_input_tokens.)
+    - EstimatedCostCents + CacheSavingsCents <- computed by a Codex-side pricing
+      table mirroring internal/subagent/anthropic/pricing.go (per-model cents/MTok;
+      cacheRead is OpenAI's discounted cached-input rate). Without this table the
+      run cannot honor its own budget cap and the dashboard cannot attribute Codex
+      spend. Keep the locked metric label set {project,phase,plan,wave} — the
+      `task` label remains FORBIDDEN (metriccardinality analyzer).
+    The provider-neutral SharedContext field (Phase 20) on EnvelopeIn is shared
+    Go struct state — the Codex subagent receives it for free; no special handling.
+
+    **Codex CLI facts — carry verbatim, do NOT re-research:**
+    - codex exec is first-class headless: one-shot, no TTY, final message
+      to stdout.
+    - Flags for clean containers: --ephemeral, --skip-git-repo-check,
+      --ignore-user-config.
+    - --json emits a JSONL event stream.
+    - --output-schema <file> constrains the final response to a JSON schema
+      — use this for child-CRD emission (child-CRD format is JSON, mandated).
+    - Sandbox defaults read-only; the runner needs --sandbox workspace-write
+      (fine inside an already-isolated pod — mirrors the Claude runner posture).
+    - API-key env auth (OPENAI_API_KEY) is the documented container path —
+      no headless-OAuth problem.
+    - MCP client support (STDIO + streamable HTTP) via config.toml or
+      codex mcp add — available if needed for child-CRD emission.
+    - Sources: developers.openai.com/codex/{noninteractive,cli/reference,
+      auth,cli/features} (verified 2026-06).
+
+    **Container image.**
+    internal/subagent/codex/Dockerfile must build clean. The final image
+    bundles the Codex CLI binary. Image reference convention mirrors
+    ghcr.io/jsquirrelz/tide-claude-subagent (replace "claude" with
+    "codex" in the image name; exact tag/registry are authoring decisions).
+
+    ## Constraints
+
+    - All Codex/OpenAI-specific code stays in internal/subagent/codex/ and
+      behind the pkg/dispatch.Subagent interface — no provider leakage into
+      the controller or cmd/manager.
+    - Wave-boundary failure semantics unchanged for mixed-provider waves.
+    - Secret material never inlined in manifests or chart values — reference
+      by Secret name only.
+    - Follow all CLAUDE.md conventions: Apache 2.0 headers, logr/zap logging,
+      controller-runtime patterns; keep make verify-* guards green.
+    - Do NOT break existing tests. Confirm make test is green before
+      authoring any plan as delivered.
+    - Do NOT add a real OpenAI API call in tests without an explicit test-env
+      guard (OPENAI_API_KEY env set) — tests must pass offline.
+  providerSecretRef: tide-secrets
+  git:
+    repoURL: http://git-http-server.tide-dogfood-codex.svc.cluster.local/tide.git
+    credsSecretRef: tide-secrets
+  budget:
+    absoluteCapCents: 5000
+    rollingWindowCapCents: 5000
+    rollingWindowDuration: 24h
+  gates:
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+  failureProfile: strict
+  maxAttemptsPerTask: 3
+  subagent:
+    model: claude-sonnet-4-6
+    levels:
+      phase:
+        model: claude-sonnet-4-6
+      plan:
+        model: claude-sonnet-4-6
+      task:
+        model: claude-haiku-4-5
