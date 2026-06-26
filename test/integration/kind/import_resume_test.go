@@ -74,6 +74,9 @@ const importResumeRoundtripNS = "import-resume-roundtrip"
 // importResumeSalvageNS is the namespace for tier-b spec (salvage fixture).
 const importResumeSalvageNS = "import-resume-salvage"
 
+// importResumePartialNS is the namespace for tier-c spec (partial fixture).
+const importResumePartialNS = "import-resume-partial"
+
 // resolveTideBinary returns the path to the tide binary.
 // Resolution order: TIDE_BINARY env → exec.LookPath("tide").
 // Returns "" if not found (caller must Skip).
@@ -401,6 +404,195 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 
 			GinkgoWriter.Printf("Tier b assertions passed: 0 milestone/phase planner Jobs, "+
 				"CostSpentCents=0 for salvage import in namespace %s\n", importResumeSalvageNS)
+		})
+	})
+
+	// -----------------------------------------------------------------------
+	// Tier c: partial fixture (mixed complete/incomplete) drives to
+	// Project.Status.Phase == Complete (RESUME-PARTIAL-03).
+	//
+	// Tier b asserts only the adoption GATE (0 milestone/phase planner Jobs,
+	// ImportComplete=True) and never drives the partial tree to execution —
+	// which is exactly why the run #2 zombie stall (40 Running-with-no-envelope
+	// nodes) shipped green. Tier c fills that gap:
+	//
+	//   - plan-complete:   status="Running" in seed + complete envelope in tgz
+	//                      → ADOPTED (task-complete-01 materialized; no plan planner)
+	//   - plan-incomplete: status="" in seed + NO envelope in tgz
+	//                      → RE-PLANNED (plan planner Job dispatched; stub
+	//                        materializes a Task that Succeeds)
+	//
+	// Both branches must complete for Phase/Milestone/Project to reach terminal
+	// Succeeded/Complete. This test proves RESUME-PARTIAL-01/02/04 end-to-end:
+	// export-time empty-Status gating (P01) + post-ImportComplete project-planner
+	// guard (P02) + fixture+test (P03) + envtest branch (P04).
+	// -----------------------------------------------------------------------
+	Describe("Tier c: partial fixture drains to Project=Complete (RESUME-PARTIAL-03)", func() {
+
+		BeforeEach(func() {
+			skipIfCRDsOnlyMode()
+			if testing.Short() {
+				Skip("Skipping long import-resume (tier c) in short mode")
+			}
+			tideBin := resolveTideBinary()
+			if tideBin == "" {
+				Skip("tide binary not found; build with `make test-int-kind-prep` or set TIDE_BINARY")
+			}
+
+			createNamespace(importResumePartialNS)
+			// GAP-8: provider secret for the credproxy sidecar (see Tier a/b).
+			ensureProviderSecret(importResumePartialNS)
+		})
+
+		AfterEach(func() {
+			deleteNamespace(importResumePartialNS)
+			if CurrentSpecReport().Failed() {
+				exportKindLogs()
+			}
+		})
+
+		It("imports partial fixture, re-plans incomplete plan, drains to Project=Complete (RESUME-PARTIAL-03)", func() {
+			tideBin := resolveTideBinary()
+
+			partialFixtureDir := filepath.Join("testdata", "import-partial-fixture")
+
+			// ----------------------------------------------------------------
+			// Step 1: import the partial fixture bundle.
+			// The fixture directory contains:
+			//   - seed-manifest.json: plan-complete (status=Running) +
+			//     plan-incomplete (status="")
+			//   - pvc-envelopes.tgz: envelopes for MS/Phase/plan-complete only;
+			//     NO envelope for plan-incomplete (eeeeeeee UID absent from tgz)
+			// ----------------------------------------------------------------
+			By("Importing partial fixture via tide import-envelopes (real CLI)")
+			importCmd := exec.CommandContext(ctx, tideBin,
+				"--kubeconfig", kubeconfigPath,
+				"import-envelopes", partialFixtureDir,
+				"--namespace", importResumePartialNS,
+			)
+			importOut, err := importCmd.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(),
+				"tide import-envelopes of partial fixture: %s", importOut)
+			GinkgoWriter.Printf("import-envelopes (partial fixture): %s\n", importOut)
+
+			// ----------------------------------------------------------------
+			// Step 2: apply the partial fixture project.yaml.
+			// ----------------------------------------------------------------
+			By("Applying partial-fixture project.yaml via kubectl apply")
+			projectYAMLPath := filepath.Join(partialFixtureDir, "project.yaml")
+			applyCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+				"apply", "-f", projectYAMLPath,
+				"-n", importResumePartialNS,
+				"--timeout=30s",
+			)
+			applyOut, err := applyCmd.CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(),
+				"kubectl apply -f project.yaml -n %s: %s", importResumePartialNS, applyOut)
+			GinkgoWriter.Printf("apply partial-fixture project.yaml: %s\n", applyOut)
+
+			// ----------------------------------------------------------------
+			// Step 3: wait for ImportComplete — the adoption gate. Once it fires,
+			// all seed nodes are materialized:
+			//   - plan-complete:   Status.Phase="Running", ValidationState="Validated"
+			//   - plan-incomplete: Status.Phase="", ValidationState="" (re-plannable)
+			// ----------------------------------------------------------------
+			By("Waiting for ImportComplete (partial fixture import processed)")
+			waitForImportComplete(importResumePartialNS)
+
+			// ----------------------------------------------------------------
+			// Step 4a: assert plan-complete is NOT re-planned.
+			// The adopted plan has a complete envelope; the PlanReconciler's
+			// "Running" short-circuit prevents a plan planner from dispatching.
+			// Assert this is stable for 15 seconds (Consistently window).
+			// ----------------------------------------------------------------
+			By("Resolving plan-complete UID for adopted-plan assertion")
+			var planComplete tideprojectv1alpha2.Plan
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Namespace: importResumePartialNS,
+				Name:      "plan-complete",
+			}, &planComplete)).To(Succeed(),
+				"plan-complete must exist in %s after import", importResumePartialNS)
+
+			planCompleteUID := string(planComplete.UID)
+			By("Asserting no plan planner Job for plan-complete (adopted — must not be re-planned)")
+			Consistently(func(g Gomega) {
+				jobs := &batchv1.JobList{}
+				g.Expect(k8sClient.List(ctx, jobs,
+					client.InNamespace(importResumePartialNS),
+					client.MatchingLabels{
+						"tideproject.k8s/role":     "planner",
+						"tideproject.k8s/level":    "plan",
+						"tideproject.k8s/plan-uid": planCompleteUID,
+					},
+				)).To(Succeed())
+				g.Expect(jobs.Items).To(BeEmpty(),
+					"adopted plan-complete must not dispatch a plan planner Job")
+			}, 15*time.Second, 2*time.Second).Should(Succeed())
+
+			// ----------------------------------------------------------------
+			// Step 4b: assert plan-incomplete IS re-planned.
+			// The incomplete plan (plan-incomplete) has Status.Phase="" after
+			// import — the PlanReconciler's fresh-authoring path triggers once
+			// ImportComplete fires. A plan planner Job must appear.
+			// ----------------------------------------------------------------
+			By("Resolving plan-incomplete UID for re-plan assertion")
+			var planIncomplete tideprojectv1alpha2.Plan
+			Expect(k8sClient.Get(ctx, client.ObjectKey{
+				Namespace: importResumePartialNS,
+				Name:      "plan-incomplete",
+			}, &planIncomplete)).To(Succeed(),
+				"plan-incomplete must exist in %s after import", importResumePartialNS)
+
+			planIncompleteUID := string(planIncomplete.UID)
+			By("Asserting plan-incomplete dispatches a plan planner Job (re-plan path)")
+			Eventually(func(g Gomega) {
+				jobs := &batchv1.JobList{}
+				g.Expect(k8sClient.List(ctx, jobs,
+					client.InNamespace(importResumePartialNS),
+					client.MatchingLabels{
+						"tideproject.k8s/role":     "planner",
+						"tideproject.k8s/level":    "plan",
+						"tideproject.k8s/plan-uid": planIncompleteUID,
+					},
+				)).To(Succeed())
+				g.Expect(jobs.Items).NotTo(BeEmpty(),
+					"plan-incomplete must dispatch a plan planner Job (re-plan path)")
+			}, 3*time.Minute, 5*time.Second).Should(Succeed())
+
+			GinkgoWriter.Printf("plan-incomplete planner Job dispatched in %s\n", importResumePartialNS)
+
+			// ----------------------------------------------------------------
+			// Step 5: drive the partial tree all the way to Project=Complete.
+			//
+			// Stub subagents handle the re-plan cascade:
+			//   plan-incomplete planner → Task authored → Task Succeeds
+			//   plan-complete:   task-complete-01 already materialized; Succeeds
+			//
+			// Both Plans Succeeded → Phase Succeeded → Milestone Succeeded
+			// → Project.Status.Phase == Complete.
+			//
+			// This assertion is the load-bearing regression guard. The run #2
+			// zombie stall (Running-with-no-envelope → controller stall) would
+			// prevent this Eventually from succeeding, failing the test.
+			//
+			// Generous 8m timeout mirrors Tier a's budget for stub-subagent cascades.
+			// ----------------------------------------------------------------
+			By("Waiting for Project to reach Status.Phase==Complete (partial-tree end-to-end drain)")
+			Eventually(func(g Gomega) {
+				var projects tideprojectv1alpha2.ProjectList
+				g.Expect(k8sClient.List(ctx, &projects,
+					client.InNamespace(importResumePartialNS),
+				)).To(Succeed())
+				g.Expect(projects.Items).NotTo(BeEmpty(),
+					"no Project found in %s", importResumePartialNS)
+				g.Expect(projects.Items[0].Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete),
+					"Project %s/%s must reach Phase=Complete; current=%q",
+					importResumePartialNS, projects.Items[0].Name, projects.Items[0].Status.Phase)
+			}, 8*time.Minute, 5*time.Second).Should(Succeed())
+
+			GinkgoWriter.Printf("Tier c PASSED: partial import drove to Project=Complete in %s; "+
+				"plan-complete adopted (no re-plan), plan-incomplete re-planned and completed.\n",
+				importResumePartialNS)
 		})
 	})
 })
