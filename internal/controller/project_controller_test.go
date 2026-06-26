@@ -26,6 +26,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -1150,6 +1151,186 @@ func buildFailedInitJob(project *tideprojectv1alpha2.Project, _ string) *batchv1
 		},
 	}
 }
+
+// ===== POST-IMPORTCOMPLETE ADOPTION GUARD TESTS (RESUME-PARTIAL-02) =====
+
+// newDispatchReadyReconciler builds a ProjectReconciler with a non-empty
+// SigningKey so reconcileProjectPlannerDispatch proceeds past the signing-key
+// early-return (line ~1000). Without a real credproxy setup the Job creation
+// will fail validation, but we need to prove the guard fires (or doesn't) BEFORE
+// dispatch is attempted.
+func newDispatchReadyReconciler() *ProjectReconciler {
+	return &ProjectReconciler{
+		Client:                  k8sClient,
+		Scheme:                  k8sClient.Scheme(),
+		Dispatcher:              &stubDispatcher{},
+		MaxConcurrentReconciles: 1,
+		SigningKey:              []byte("test-signing-key-for-import-guard"),
+	}
+}
+
+var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("envtest", "phase30"), func() {
+	ctx := context.Background()
+	const ns = "default"
+
+	// -------------------------------------------------------------------------
+	// Test 1 (RESUME-PARTIAL-02): post-ImportComplete project planner must NOT
+	// re-dispatch when owned Milestones already exist.
+	// -------------------------------------------------------------------------
+	It("does not create a planner Job when ImportComplete=True and an owned Milestone exists", func() {
+		const projName = "import-guard-with-milestone"
+		const msName = "ms-import-guard-owned"
+
+		// 1. Create the Project with ImportSource set (required to enter the guard).
+		project := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      projName,
+				Namespace: ns,
+			},
+			Spec: tideprojectv1alpha2.ProjectSpec{
+				SchemaRevision: "v1alpha2",
+				TargetRepo:     "https://github.com/example/repo.git",
+				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+					SeedManifestConfigMap: "seed-cm-guard-test",
+					SalvagedPVCSubPath:    "old-uid/workspace",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, project)).To(Succeed())
+		DeferCleanup(func() {
+			p := &tideprojectv1alpha2.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+		})
+
+		// Re-fetch to get the assigned UID.
+		fetched := &tideprojectv1alpha2.Project{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
+		statusPatch := fetched.DeepCopy()
+		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Status:             metav1.ConditionTrue,
+			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Message:            "Import completed",
+			LastTransitionTime: metav1.Now(),
+		})
+		Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// 3. Create an owned Milestone (Spec.ProjectRef == project.Name).
+		ms := &tideprojectv1alpha2.Milestone{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      msName,
+				Namespace: ns,
+			},
+			Spec: tideprojectv1alpha2.MilestoneSpec{
+				ProjectRef: projName,
+			},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		DeferCleanup(func() {
+			m := &tideprojectv1alpha2.Milestone{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: ns}, m); err == nil {
+				m.Finalizers = nil
+				_ = k8sClient.Update(ctx, m)
+				_ = k8sClient.Delete(ctx, m)
+			}
+		})
+
+		// 4. Call reconcileProjectPlannerDispatch directly with a SigningKey-wired reconciler.
+		reconciler := newDispatchReadyReconciler()
+		result, err := reconciler.reconcileProjectPlannerDispatch(ctx, fetched)
+
+		// 5. Assert: the guard fired — returns ctrl.Result{}, nil (not an error, not a requeue).
+		Expect(err).NotTo(HaveOccurred(), "adoption guard must not return an error")
+		Expect(result).To(Equal(ctrl.Result{}),
+			"adoption guard must return empty Result (no requeue) when import is complete and Milestone exists")
+
+		// 6. Assert: NO tide-project-<uid>-1 planner Job was created.
+		expectedJobName := "tide-project-" + string(fetched.UID) + "-1"
+		var jobList batchv1.JobList
+		Expect(k8sClient.List(ctx, &jobList, client.InNamespace(ns))).To(Succeed())
+		for _, j := range jobList.Items {
+			Expect(j.Name).NotTo(Equal(expectedJobName),
+				"import adopted project must not create a project planner Job post-ImportComplete")
+		}
+	})
+
+	// -------------------------------------------------------------------------
+	// Test 2 (RESUME-PARTIAL-02 no-regression): post-ImportComplete with ZERO
+	// owned Milestones must NOT trip the new guard — dispatch proceeds.
+	// -------------------------------------------------------------------------
+	It("does not suppress dispatch when ImportComplete=True but no owned Milestones exist", func() {
+		const projName = "import-guard-no-milestones"
+
+		// 1. Create the Project with ImportSource set.
+		project := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      projName,
+				Namespace: ns,
+			},
+			Spec: tideprojectv1alpha2.ProjectSpec{
+				SchemaRevision: "v1alpha2",
+				TargetRepo:     "https://github.com/example/repo.git",
+				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+					SeedManifestConfigMap: "seed-cm-no-ms",
+					SalvagedPVCSubPath:    "old-uid/workspace",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, project)).To(Succeed())
+		DeferCleanup(func() {
+			p := &tideprojectv1alpha2.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+		})
+
+		// Re-fetch to get the assigned UID.
+		fetched := &tideprojectv1alpha2.Project{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
+		statusPatch := fetched.DeepCopy()
+		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Status:             metav1.ConditionTrue,
+			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Message:            "Import completed",
+			LastTransitionTime: metav1.Now(),
+		})
+		Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// No Milestones created — the guard should not fire.
+		reconciler := newDispatchReadyReconciler()
+
+		// 3. Call reconcileProjectPlannerDispatch. The adoption guard returns
+		// ctrl.Result{}, nil ONLY when a Milestone is found (it fired). With zero
+		// Milestones, the guard does NOT fire and the function falls through to the
+		// dispatch path. The dispatch path will error (minimal test setup — no
+		// CredproxyImage, etc.), but the key invariant is: the function must NOT
+		// return ctrl.Result{}, nil (which is the guard-only early-return signature).
+		// Any error or non-zero result proves the guard was not triggered.
+		result, err := reconciler.reconcileProjectPlannerDispatch(ctx, fetched)
+
+		// 4. Assert: the guard did NOT suppress dispatch by returning early.
+		// The guard-specific return is ctrl.Result{}, nil (empty result, nil error).
+		// A non-nil error OR a non-zero result both prove the guard was NOT triggered
+		// and execution fell through to the actual dispatch path.
+		guardFiredEarly := err == nil && result == (ctrl.Result{})
+		Expect(guardFiredEarly).To(BeFalse(),
+			"with ImportComplete=True and zero owned Milestones, the adoption guard must not suppress dispatch; "+
+				"guard-only return is ctrl.Result{},nil — got result=%v err=%v", result, err)
+	})
+})
 
 // Ensure ctrl is used to avoid unused import errors.
 var _ ctrl.Result

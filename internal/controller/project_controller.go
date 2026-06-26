@@ -994,6 +994,8 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 // Gated on len(r.SigningKey) > 0 — when SigningKey is not wired (test mode
 // that doesn't configure dispatch), the function is a no-op so existing tests
 // that only exercise clone/push lifecycle are unaffected.
+//
+//nolint:gocyclo // reconcile dispatch is a flat sequence of guard arms; splitting would obscure the contract
 func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	// Guard: SigningKey is required to mint credproxy tokens — if not wired
 	// (e.g. unit tests that only test clone/push lifecycle), skip dispatch.
@@ -1080,6 +1082,46 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		if c == nil || c.Status != metav1.ConditionTrue {
 			logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch", "project", project.Name)
 			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+	}
+
+	// Phase 30 RESUME-PARTIAL-02: post-ImportComplete adoption guard.
+	// When ImportComplete=True AND the Project has at least one owned Milestone,
+	// the import tree is the authoritative materialization — the project planner
+	// must not re-dispatch (run #2 defect: a fresh cluster had no prior planner
+	// Job, so Step 2b above passed, and a paid project-planner Job fired
+	// post-import). This guard permanently skips dispatch once the import tree
+	// is confirmed present.
+	//
+	// Why this does NOT regress the N>1-milestone incremental-materialization
+	// case (per the Step-2b comment above): that concern applies to a
+	// count-based guard that could fire MID-STREAM while milestones are still
+	// being created. This guard is gated on ImportComplete=True, which
+	// reconcileCreatingCRs sets only AFTER materializing ALL seed nodes
+	// (import_controller.go transitions CreatingCRs→CopyingEnvelopes only
+	// after the full seed loop, then CopyingEnvelopes→Complete/ImportComplete=True
+	// after the import Job). So when this arm fires the milestone list is always
+	// complete — the mid-stream abort the Step-2b comment warns about cannot occur.
+	if project.Spec.ImportSource != nil {
+		if importCond := meta.FindStatusCondition(project.Status.Conditions,
+			tidev1alpha2.ConditionImportComplete); importCond != nil &&
+			importCond.Status == metav1.ConditionTrue {
+			var msList tidev1alpha2.MilestoneList
+			if listErr := r.List(ctx, &msList, client.InNamespace(project.Namespace)); listErr == nil {
+				for i := range msList.Items {
+					if msList.Items[i].Spec.ProjectRef == project.Name {
+						logf.FromContext(ctx).V(1).Info(
+							"import adopted; skipping project planner dispatch",
+							"project", project.Name,
+							"milestone", msList.Items[i].Name,
+						)
+						return ctrl.Result{}, nil
+					}
+				}
+			}
+			// List error or no owned Milestones: fall through to normal dispatch.
+			// (A failed/empty import with no materialized Milestones may still
+			// need a project planner run to bootstrap the milestone tree.)
 		}
 	}
 
