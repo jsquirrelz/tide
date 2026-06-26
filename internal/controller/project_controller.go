@@ -994,6 +994,8 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 // Gated on len(r.SigningKey) > 0 — when SigningKey is not wired (test mode
 // that doesn't configure dispatch), the function is a no-op so existing tests
 // that only exercise clone/push lifecycle are unaffected.
+//
+//nolint:gocyclo // reconcile dispatch is a flat sequence of guard arms; splitting would obscure the contract
 func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	// Guard: SigningKey is required to mint credproxy tokens — if not wired
 	// (e.g. unit tests that only test clone/push lifecycle), skip dispatch.
