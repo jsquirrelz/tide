@@ -1222,11 +1222,23 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
 
-		// 3. Create an owned Milestone (Spec.ProjectRef == project.Name).
+		// 3. Create an owned Milestone with a real controller owner reference pointing
+		// to this Project's UID. This mirrors what reconcileCreatingCRs does via
+		// owner.EnsureOwnerRef (import_controller.go:405). The guard must use
+		// metav1.IsControlledBy (UID-bound), not Spec.ProjectRef (WR-01 fix).
+		tru := true
 		ms := &tideprojectv1alpha2.Milestone{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      msName,
 				Namespace: ns,
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					Kind:               "Project",
+					Name:               projName,
+					UID:                fetched.UID,
+					Controller:         &tru,
+					BlockOwnerDeletion: &tru,
+				}},
 			},
 			Spec: tideprojectv1alpha2.MilestoneSpec{
 				ProjectRef: projName,
@@ -1329,6 +1341,105 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		Expect(guardFiredEarly).To(BeFalse(),
 			"with ImportComplete=True and zero owned Milestones, the adoption guard must not suppress dispatch; "+
 				"guard-only return is ctrl.Result{},nil — got result=%v err=%v", result, err)
+	})
+
+	// -------------------------------------------------------------------------
+	// Test 3 (WR-01 pinning): a Milestone whose Spec.ProjectRef matches
+	// project.Name but is NOT owned by this Project (foreign owner ref) must
+	// NOT suppress dispatch — the guard must use IsControlledBy (UID-bound), not
+	// a free-form name-string match.
+	// -------------------------------------------------------------------------
+	It("does not suppress dispatch when a same-namespace Milestone matches ProjectRef but is owned by a different Project", func() {
+		const projName = "import-guard-foreign-ms"
+		const msName = "ms-import-guard-foreign-owned"
+
+		// 1. Create the Project with ImportSource set.
+		project := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      projName,
+				Namespace: ns,
+			},
+			Spec: tideprojectv1alpha2.ProjectSpec{
+				SchemaRevision: "v1alpha2",
+				TargetRepo:     "https://github.com/example/repo.git",
+				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+					SeedManifestConfigMap: "seed-cm-foreign-ms",
+					SalvagedPVCSubPath:    "old-uid/workspace",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, project)).To(Succeed())
+		DeferCleanup(func() {
+			p := &tideprojectv1alpha2.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, p)
+				_ = k8sClient.Delete(ctx, p)
+			}
+		})
+
+		// Re-fetch to get the assigned UID.
+		fetched := &tideprojectv1alpha2.Project{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
+		statusPatch := fetched.DeepCopy()
+		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
+			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Status:             metav1.ConditionTrue,
+			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Message:            "Import completed",
+			LastTransitionTime: metav1.Now(),
+		})
+		Expect(k8sClient.Status().Update(ctx, statusPatch)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
+
+		// 3. Create a Milestone whose Spec.ProjectRef matches projName but whose
+		// OwnerReferences point to a DIFFERENT (foreign/deleted) Project UID.
+		// This simulates a stale Milestone from a prior Project incarnation: same name
+		// collision in the namespace but NOT owned by the current Project object.
+		foreignUID := types.UID("foreign-project-uid-not-this-one")
+		tru := true
+		ms := &tideprojectv1alpha2.Milestone{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      msName,
+				Namespace: ns,
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					Kind:               "Project",
+					Name:               projName,
+					UID:                foreignUID, // points to a DIFFERENT Project UID
+					Controller:         &tru,
+					BlockOwnerDeletion: &tru,
+				}},
+			},
+			Spec: tideprojectv1alpha2.MilestoneSpec{
+				ProjectRef: projName, // same name as current project — the collision case
+			},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		DeferCleanup(func() {
+			m := &tideprojectv1alpha2.Milestone{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: ns}, m); err == nil {
+				m.Finalizers = nil
+				_ = k8sClient.Update(ctx, m)
+				_ = k8sClient.Delete(ctx, m)
+			}
+		})
+
+		// 4. Call reconcileProjectPlannerDispatch directly.
+		reconciler := newDispatchReadyReconciler()
+		result, err := reconciler.reconcileProjectPlannerDispatch(ctx, fetched)
+
+		// 5. Assert: the guard must NOT fire for a foreign-owned Milestone.
+		// The guard-only early return is ctrl.Result{}, nil. The dispatch path
+		// returns an error in the minimal test setup (no CredproxyImage), which
+		// proves fall-through.
+		guardFiredEarly := err == nil && result == (ctrl.Result{})
+		Expect(guardFiredEarly).To(BeFalse(),
+			"WR-01: adoption guard must use IsControlledBy (UID-bound), not Spec.ProjectRef; "+
+				"a foreign-owned Milestone with matching ProjectRef must NOT suppress dispatch; "+
+				"got result=%v err=%v", result, err)
 	})
 })
 

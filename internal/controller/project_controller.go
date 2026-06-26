@@ -1109,7 +1109,14 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 			var msList tidev1alpha2.MilestoneList
 			if listErr := r.List(ctx, &msList, client.InNamespace(project.Namespace)); listErr == nil {
 				for i := range msList.Items {
-					if msList.Items[i].Spec.ProjectRef == project.Name {
+					// WR-01: use UID-bound owner reference (mirrors countChildMilestones)
+					// rather than a free-form name-string match on Spec.ProjectRef.
+					// A stale Milestone from a prior Project incarnation with the same
+					// name would collide on the name check and silently suppress a
+					// legitimately-needed bootstrap dispatch.
+					// reconcileCreatingCRs sets the owner ref via owner.EnsureOwnerRef
+					// before client.Create, so the ref is present at guard time.
+					if metav1.IsControlledBy(&msList.Items[i], project) {
 						logf.FromContext(ctx).V(1).Info(
 							"import adopted; skipping project planner dispatch",
 							"project", project.Name,
