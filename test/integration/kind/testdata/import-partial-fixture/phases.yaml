@@ -1,0 +1,28 @@
+apiVersion: v1
+items:
+- apiVersion: tideproject.k8s/v1alpha2
+  kind: Phase
+  metadata:
+    creationTimestamp: "2026-06-26T00:00:02Z"
+    finalizers:
+    - tideproject.k8s/phase-cleanup
+    generation: 1
+    labels:
+      tideproject.k8s/project: import-partial-test
+    name: phase-01-partial
+    namespace: import-partial-ns
+    ownerReferences:
+    - apiVersion: tideproject.k8s/v1alpha2
+      blockOwnerDeletion: true
+      controller: true
+      kind: Milestone
+      name: milestone-01-partial
+      uid: bbbbbbbb-0002-0002-0002-bbbbbbbbbbbb
+    uid: cccccccc-0002-0002-0002-cccccccccccc
+  spec:
+    milestoneRef: milestone-01-partial
+  status:
+    phase: Running
+kind: List
+metadata:
+  resourceVersion: ""

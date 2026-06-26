@@ -1,0 +1,38 @@
+---
+# project.yaml — the Project manifest the Tier c E2E test (RESUME-PARTIAL-03) applies
+# after `tide import-envelopes` stages the seed ConfigMap and PVC envelopes.
+#
+# This is the PARTIAL fixture: one Plan (plan-complete) has a complete envelope
+# and is ADOPTED; one Plan (plan-incomplete) has no envelope and is RE-PLANNED.
+# The test asserts both branches reach completion (Project.Status.Phase == Complete).
+#
+# spec.importSource drives the ImportController state machine:
+#   - seedManifestConfigMap: name the import-envelopes CLI creates deterministically
+#     as "tide-import-seed-<projectName>".
+#   - salvagedPVCSubPath: old project UID + /workspace (D-06 loader-pod layout).
+#
+# Budget: absoluteCapCents=0 — stub subagent costs nothing.
+apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: import-partial-test
+  # namespace: set by test at apply time
+spec:
+  schemaRevision: v1alpha2
+  targetRepo: "https://git.example.internal/stub/no-such-repo.git"
+  providerSecretRef: "tide-provider-secret"
+  budget:
+    absoluteCapCents: 0
+  subagent:
+    model: stub
+  gates:
+    milestone: auto
+    phase: auto
+    plan: auto
+    task: auto
+    pauseBetweenWaves: false
+  importSource:
+    # Deterministic: "tide-import-seed-<projectName>".
+    seedManifestConfigMap: "tide-import-seed-import-partial-test"
+    # Old project UID + /workspace (D-06).
+    salvagedPVCSubPath: "aaaaaaaa-0002-0002-0002-aaaaaaaaaaaa/workspace"

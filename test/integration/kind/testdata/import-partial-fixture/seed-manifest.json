@@ -1,0 +1,39 @@
+{
+  "milestones": [
+    {
+      "name": "milestone-01-partial",
+      "fqName": "milestone-01-partial",
+      "oldUID": "bbbbbbbb-0002-0002-0002-bbbbbbbbbbbb",
+      "status": "Running",
+      "projectRef": "import-partial-test",
+      "sha256": "59a32d43fef9ecd0d892a5a179d4209deaab0af06a120fe2bd69e39c41c1e15a"
+    }
+  ],
+  "phases": [
+    {
+      "name": "phase-01-partial",
+      "fqName": "milestone-01-partial/phase-01-partial",
+      "oldUID": "cccccccc-0002-0002-0002-cccccccccccc",
+      "status": "Running",
+      "milestoneRef": "milestone-01-partial",
+      "sha256": "00364fe78973ed27d19a9a6b7d47efa94f4346aedbcacafec98307e19639f50a"
+    }
+  ],
+  "plans": [
+    {
+      "name": "plan-complete",
+      "fqName": "milestone-01-partial/phase-01-partial/plan-complete",
+      "oldUID": "dddddddd-0002-0002-0002-dddddddddddd",
+      "status": "Running",
+      "phaseRef": "phase-01-partial",
+      "sha256": "3c5cd053f6a881c88a17c5aa565fe38b5365b275ff555820adbc21efabb4ec0e"
+    },
+    {
+      "name": "plan-incomplete",
+      "fqName": "milestone-01-partial/phase-01-partial/plan-incomplete",
+      "oldUID": "eeeeeeee-0002-0002-0002-eeeeeeeeeeee",
+      "status": "",
+      "phaseRef": "phase-01-partial"
+    }
+  ]
+}
