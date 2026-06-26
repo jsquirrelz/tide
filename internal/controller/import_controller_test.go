@@ -537,6 +537,161 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 		})
 	})
+
+	// -------------------------------------------------------------------------
+	// Test 5 (RESUME-PARTIAL-04): Partial-tree materialization — per-node branch
+	//
+	// Drives reconcileCreatingCRs against a seed manifest with a mix:
+	// one Plan with status:"Running" (complete envelope) and one Plan with status:""
+	// (incomplete/missing envelope). Asserts that:
+	//   - Plan with status:"Running" materializes as Status.Phase=="Running" AND
+	//     Status.ValidationState=="Validated".
+	//   - Plan with status:"" materializes as Status.Phase=="" AND
+	//     Status.ValidationState=="" (truly fresh, not stamped Validated).
+	//   - BOTH Plan CRs exist after reconcile (incomplete node is materialized, not
+	//     omitted — identity preserved for DependsOn edge validity, Fork 2).
+	//   - Both Plans carry their DependsOn so adopted dependents' edges stay valid.
+	//
+	// Note: cross-plan Task-name-level DependsOn is a known limitation
+	// (RESEARCH Pitfall 4) — if an adopted completed Task references a specific
+	// old Task name from a re-planned Plan and the re-plan produces different Task
+	// names, that dependent Task may be permanently blocked. This test exercises
+	// Plan-level DependsOn only (the common case; Pitfall 4 is documented separately).
+	// -------------------------------------------------------------------------
+	Describe("Test 5 (RESUME-PARTIAL-04): partial-tree materialization — complete adopts, incomplete stays fresh", func() {
+		const projName = "import-test-partial"
+		const seedCMName = "import-seed-partial"
+		const msPartName = "ms-partial"
+		const phPartName = "ph-partial"
+		const plCompleteName = "pl-partial-complete"
+		const plIncompleteName = "pl-partial-incomplete"
+
+		BeforeEach(func() {
+			manifest := seedManifest{
+				Milestones: []seedEntry{
+					{
+						Name:       msPartName,
+						FQName:     msPartName,
+						OldUID:     "old-ms-partial",
+						ProjectRef: projName,
+						Status:     "Succeeded",
+					},
+				},
+				Phases: []seedEntry{
+					{
+						Name:         phPartName,
+						FQName:       phPartName,
+						OldUID:       "old-ph-partial",
+						MilestoneRef: msPartName,
+						Status:       "Succeeded",
+					},
+				},
+				Plans: []seedEntry{
+					{
+						// Complete node: has a salvaged status (envelope was complete).
+						// reconcileCreatingCRs stamps Status.Phase + ValidationState.
+						Name:     plCompleteName,
+						FQName:   plCompleteName,
+						OldUID:   "old-pl-complete",
+						PhaseRef: phPartName,
+						Status:   "Running",
+					},
+					{
+						// Incomplete node: status:"" because export cleared it
+						// (RESUME-PARTIAL-01: incomplete envelope → Status=="" in seed).
+						// reconcileCreatingCRs skips the status patch → fresh/empty.
+						// DependsOn links to the complete plan to exercise the
+						// edge-validity assertion (identity preserved via Fork 2).
+						Name:      plIncompleteName,
+						FQName:    plIncompleteName,
+						OldUID:    "old-pl-incomplete",
+						PhaseRef:  phPartName,
+						Status:    "",
+						DependsOn: []string{plCompleteName},
+					},
+				},
+			}
+			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
+			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
+			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+		})
+
+		AfterEach(func() {
+			proj := &tideprojectv1alpha2.Project{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
+				proj.Finalizers = nil
+				_ = k8sClient.Update(ctx, proj)
+				_ = k8sClient.Delete(ctx, proj)
+			}
+			for _, name := range []string{msPartName} {
+				ms := &tideprojectv1alpha2.Milestone{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ms); err == nil {
+					ms.Finalizers = nil
+					_ = k8sClient.Update(ctx, ms)
+					_ = k8sClient.Delete(ctx, ms)
+				}
+			}
+			for _, name := range []string{phPartName} {
+				ph := &tideprojectv1alpha2.Phase{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ph); err == nil {
+					ph.Finalizers = nil
+					_ = k8sClient.Update(ctx, ph)
+					_ = k8sClient.Delete(ctx, ph)
+				}
+			}
+			for _, name := range []string{plCompleteName, plIncompleteName} {
+				pl := &tideprojectv1alpha2.Plan{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pl); err == nil {
+					pl.Finalizers = nil
+					_ = k8sClient.Update(ctx, pl)
+					_ = k8sClient.Delete(ctx, pl)
+				}
+			}
+			cm := &corev1.ConfigMap{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: seedCMName, Namespace: ns}, cm); err == nil {
+				_ = k8sClient.Delete(ctx, cm)
+			}
+		})
+
+		It("materializes both Plans: complete→Running+Validated, incomplete→empty+fresh; both CRs exist with DependsOn", func() {
+			r := newImportReconciler()
+			projKey := types.NamespacedName{Name: projName, Namespace: ns}
+
+			// Drive reconcile until ImportComplete=True.
+			Eventually(func(g Gomega) {
+				_, err := r.Reconcile(ctx, reconcileRequest(projKey))
+				g.Expect(err).NotTo(HaveOccurred())
+				cond := findImportCondition(ctx, projName, ns)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			}, 15*time.Second, 200*time.Millisecond).Should(Succeed())
+
+			// Assert BOTH Plans exist (RESUME-PARTIAL-04: incomplete node materialized, not omitted).
+			var plComplete tideprojectv1alpha2.Plan
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: plCompleteName, Namespace: ns}, &plComplete)).
+				To(Succeed(), "complete Plan CR must exist after reconcile")
+
+			var plIncomplete tideprojectv1alpha2.Plan
+			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: plIncompleteName, Namespace: ns}, &plIncomplete)).
+				To(Succeed(), "incomplete Plan CR must exist after reconcile (identity preserved)")
+
+			// Assert complete plan: Status.Phase=="Running", ValidationState=="Validated".
+			Expect(plComplete.Status.Phase).To(Equal("Running"),
+				"complete Plan must adopt salvaged Status.Phase")
+			Expect(plComplete.Status.ValidationState).To(Equal("Validated"),
+				"complete Plan must have ValidationState=Validated to arm wave-materialization path (GAP-12)")
+
+			// Assert incomplete plan: Status.Phase=="", ValidationState=="".
+			Expect(plIncomplete.Status.Phase).To(BeEmpty(),
+				"incomplete Plan must have Status.Phase=\"\" (re-plannable; not stamped Running)")
+			Expect(plIncomplete.Status.ValidationState).To(BeEmpty(),
+				"incomplete Plan must have ValidationState=\"\" (wave gate stays closed until re-plan)")
+
+			// Assert DependsOn preserved on incomplete Plan so adopted-dependent edges stay valid (Fork 2).
+			Expect(plIncomplete.Spec.DependsOn).To(ContainElement(plCompleteName),
+				"incomplete Plan DependsOn must be preserved in spec so adopted dependents remain wired")
+		})
+	})
 })
 
 // reconcileRequest is a helper to build a reconcile.Request.
