@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.3
 milestone_name: — Planning Resumption & Cost Resilience
-status: completed
+status: executing
 stopped_at: Phase 29 context gathered
-last_updated: "2026-06-23T21:38:16.507Z"
-last_activity: 2026-06-23 -- Phase 29 marked complete
+last_updated: "2026-06-26T04:11:50.442Z"
+last_activity: 2026-06-26 -- Phase 30 execution started
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 8
-  total_plans: 33
+  total_plans: 36
   completed_plans: 33
-  percent: 100
+  percent: 89
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 29 — Operator Tooling + E2E
+**Current focus:** Phase 30 — resumable-import-partial-tree-resume-adopt-complete-re-plan-
 
 ## Current Position
 
-Phase: 29 — COMPLETE
-Plan: 5 of 5
-Status: Phase 29 complete
-Last activity: 2026-06-26 -- Dogfood run #2 live-attempted ($0 spent); surfaced import partial-tree-resume defect (.planning/dogfood/run-2-FINDINGS.md); added Phase 30 (v1.0.5) to fix it; run deferred behind the fix. kind-tide-dogfood left up as test bed.
+Phase: 30 (resumable-import-partial-tree-resume-adopt-complete-re-plan-) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 30
+Last activity: 2026-06-26 -- Phase 30 execution started
 
 ```
 v1.0.3 Progress: [x] 27  [x] 28  [x] 29
