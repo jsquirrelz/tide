@@ -45,10 +45,10 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Partial-Tree Resume (RESUME-PARTIAL)
 
-- [ ] **RESUME-PARTIAL-01**: A node whose salvaged envelope is incomplete (exitCode!=0 or childCount mismatch) or missing is materialized in a fresh, re-plannable state (Status.Phase="", no ValidationState stamp) so its parent/self re-plans against current main; a node whose envelope is complete still adopts its salvaged status. The completeness signal is computed once (single shared definition) and applied at export time, so the seed manifest is the single source of truth and the import controller needs no logic change.
-- [ ] **RESUME-PARTIAL-02**: After import completes, the project planner never re-dispatches a (paid) project-level planner Job when owned Milestones already exist — the import tree is authoritative. The guard is gated on `ImportComplete=True` (not a milestone count), so it does not regress the N>1-milestone incremental-materialization case.
+- [x] **RESUME-PARTIAL-01**: A node whose salvaged envelope is incomplete (exitCode!=0 or childCount mismatch) or missing is materialized in a fresh, re-plannable state (Status.Phase="", no ValidationState stamp) so its parent/self re-plans against current main; a node whose envelope is complete still adopts its salvaged status. The completeness signal is computed once (single shared definition) and applied at export time, so the seed manifest is the single source of truth and the import controller needs no logic change.
+- [x] **RESUME-PARTIAL-02**: After import completes, the project planner never re-dispatches a (paid) project-level planner Job when owned Milestones already exist — the import tree is authoritative. The guard is gated on `ImportComplete=True` (not a milestone count), so it does not regress the N>1-milestone incremental-materialization case.
 - [x] **RESUME-PARTIAL-03**: A kind integration test (new Tier c) drives a PARTIAL import (mixed complete + incomplete envelopes) all the way to `Project=Complete` — asserting the end-to-end outcome (adopt complete, re-plan incomplete, reach completion), not just the adoption gate Tier b asserts. This is the regression guard the run #2 zombie stall slipped past.
-- [ ] **RESUME-PARTIAL-04**: A re-planned (incomplete) node preserves its identity (name/UID) so adopted completed nodes that `dependsOn` it keep valid edges; when it regenerates children, the global indegree re-derives consistently for those adopted dependents (no cached schedule). The known task-name-level cross-plan dependsOn limitation is documented, not solved (out of scope).
+- [x] **RESUME-PARTIAL-04**: A re-planned (incomplete) node preserves its identity (name/UID) so adopted completed nodes that `dependsOn` it keep valid edges; when it regenerates children, the global indegree re-derives consistently for those adopted dependents (no cached schedule). The known task-name-level cross-plan dependsOn limitation is documented, not solved (out of scope).
 
 ## Future Requirements (deferred)
 
@@ -80,7 +80,7 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 | IMPORT-05 | Phase 28 | Complete |
 | TOOL-01 | Phase 29 | Complete |
 | TOOL-02 | Phase 29 | Complete |
-| RESUME-PARTIAL-01 | Phase 30 | Pending |
-| RESUME-PARTIAL-02 | Phase 30 | Pending |
+| RESUME-PARTIAL-01 | Phase 30 | Complete |
+| RESUME-PARTIAL-02 | Phase 30 | Complete |
 | RESUME-PARTIAL-03 | Phase 30 | Complete |
-| RESUME-PARTIAL-04 | Phase 30 | Pending |
+| RESUME-PARTIAL-04 | Phase 30 | Complete |
