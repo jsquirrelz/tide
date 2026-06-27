@@ -373,7 +373,12 @@ func parseOutJSONPath(name string) (string, bool) {
 //
 // SHA256 stamping is NOT affected by this function — callers still compute SHA256
 // for any present envelope bytes regardless of completeness.
-func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte, preStampComplete map[string]bool) string {
+func seedStatusFor(
+	uid string,
+	liveStatus string,
+	envelopes map[string][]byte,
+	preStampComplete map[string]bool,
+) string {
 	if _, ok := envelopes[uid]; !ok {
 		// No envelope present for this node → re-plannable.
 		return ""
