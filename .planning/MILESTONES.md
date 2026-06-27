@@ -1,5 +1,42 @@
 # Milestones
 
+## v1.0.5 Resumable Import: Partial-Tree Resume (Shipped: 2026-06-27)
+
+**Phases completed:** 9 phases, 36 plans, 48 tasks
+
+**Key accomplishments:**
+
+- Multi-stage Dockerfile.dashboard with digest-pinned node:22-alpine spa-builder that regenerates dist/ from source on every image build, plus a make verify-dashboard-freshness gate that fails on stale dist/ or a missing panel-cache-efficiency telemetry marker
+- Wire `make verify-dashboard-freshness` into ci.yaml (PR-time gate in the `test` job) and release.yaml (release-time gate as a step in `helmify-verify`), using `actions/setup-node@v4` (node 22, npm cache on `dashboard/web/package-lock.json`) before each invocation
+- One-liner:
+- 1. [Rule 2 - Missing Critical Functionality] Ported project_webhook to v1alpha2
+- Files:
+- Task 1 — bulk path repoint (commit 8ec1dbe):
+- Commit:
+- Commit:
+- `internal/controller/plan_controller.go`
+- Coarse-ref `DependsOn` is PRESENT in authored fixtures.
+- Envtest:
+- Conservative failure halt via `ConditionFailureHalt` — checkFailureHalt at four execution dispatch gates, cleared by `tide resume --retry-failed` — turns DISP-02 strict+conservative and resume unit tests GREEN (51/51 envtest, 7+2 unit tests)
+- One-liner:
+- Wave aggregator adds ZeroMembers phase (OQ-3 root fix) + in-flight-safe prune guard; globalDependentsMapper fires only on phase/dependsOn transitions (WR-02), proven by 7-case unit test
+- SPEC-01 envtest derives [{α,β,γ,ζ},{δ,η},{ε,θ}] from 2-Milestone real CRDs with cross-milestone γ→η honored; MS-03 proves approve/auto/full-supervised gate profiles via status-inject fixture approach
+- GlobalExecutionDAGView.tsx
+- PlannerRolledUpUID-gated rollup in handleProjectJobCompletion prevents double-counting planning cost on halt→resume when the reporter Job has TTL-GC'd; BYPASS-05 TTL-GC companion envtest proves the nil-Job path rolls up exactly once
+- Budget bypass acknowledges prior spend as a durable baseline (BypassBaselineCents) so raising the absolute cap alone makes a resume stick, and re-halt now names which cap fired (AbsoluteCapReached vs RollingWindowCapReached) with current spend + both cap values
+- Task 1 — `charts/tide/values.yaml`:
+- One-liner:
+- `internal/controller/import_controller.go`
+- One-liner:
+- 1. [Rule 2 - Missing cross-pkg surface] Exported StampChildCount and ComputeEnvelopeSHA256 from pkg/bundle
+- 1. [Rule 1 - Bug] `APIVersionV1Alpha2` does not exist in pkg/dispatch
+- test/integration/kind/testdata/import-small-fixture/
+- Two-tier kind E2E proving zero-cost resumption: small fixture drains to all-Milestones-Succeeded via stub subagents + live tide export-envelopes → import-envelopes round-trip adopts milestone/phase levels; salvage-20260618 import asserts 0 planner Jobs at milestone/phase levels and CostSpentCents==0 before plan dispatch (D-11/D-14/D-17).
+- One-liner:
+- Tier c E2E proves partial-import partial-tree resumes all the way to Project=Complete; deleteNamespaceAndWait eliminates inter-tier namespace contention so all three import-resume tiers pass together
+
+---
+
 ## v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion ✅ SHIPPED 2026-06-13
 
 **One-liner:** Turn the self-hosting MVP into an orchestrator trustworthy

@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.5
-milestone_name: — Resumable Import: Partial-Tree Resume
-status: milestone_complete
-stopped_at: v1.0.5 SHIPPED 2026-06-27 (tag v1.0.5 — release chain green; 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). Predecessors v1.0.3 (Phases 22–29) + v1.0.4 shipped 2026-06-25.
-last_updated: 2026-06-27T07:30:54Z
-last_activity: 2026-06-27
+milestone_name: "— Resumable Import: Partial-Tree Resume"
+status: Awaiting next milestone
+stopped_at: Phase 30 Plan 03 complete
+last_updated: "2026-06-27T15:50:33.244Z"
+last_activity: 2026-06-27 — Milestone v1.0.5 completed and archived
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_phases: 9
+  completed_phases: 9
+  total_plans: 36
+  completed_plans: 36
   percent: 100
 ---
 
@@ -25,19 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 
 ## Current Position
 
-Phase: 30 (v1.0.5)
-Plan: Complete
-Status: v1.0.5 SHIPPED 2026-06-27 (tag v1.0.5, full release chain green, artifacts verified)
-Last activity: 2026-06-27
-
-```
-v1.0.5 Progress:  [x] 30        1 / 1 phase complete — SHIPPED 2026-06-27
-─────────────────────────────────────────────────────────────────────────
-Shipped (published, immutable):
-  v1.0.5  Phase 30       — tag v1.0.5, published 2026-06-27 (Resumable Import: Partial-Tree Resume)
-  v1.0.4  image patch    — tag v1.0.4, published 2026-06-25 (publish tide-import image)
-  v1.0.3  Phases 22–29   — tag v1.0.3, published 2026-06-25 (Spring Tide + resumption tooling)
-```
+Phase: Milestone v1.0.5 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-27 — Milestone v1.0.5 completed and archived
 
 ## Performance Metrics
 
@@ -150,3 +141,7 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 Last session: 2026-06-26T14:49:46.623Z
 Stopped at: Phase 30 Plan 03 complete
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
