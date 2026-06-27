@@ -266,13 +266,18 @@ func parseExportRef(ref string) (ns, projName string, err error) {
 //   - envelopes: map of uid → repaired out.json bytes (stamped for bundle)
 //   - repairedFiles: full tgz content map for WritePVCEnvelopesTgz re-assembly
 //   - preStampComplete: map of uid → completeness verdict evaluated on PRE-STAMP
-//     bytes (WR-03). tide-import reads raw out.json from the old PVC (not from
-//     the stamped bundle), so seedStatusFor must use this pre-stamp verdict to
-//     stay consistent with tide-import's IsEnvelopeComplete check. If seedStatusFor
-//     evaluated completeness on the post-stamp bytes, a legacy exit-0 envelope with
-//     ChildCount==0 would look complete on the export path (stamped → len==count)
-//     but incomplete on the tide-import path (raw → len!=count), causing the seed
-//     manifest to adopt its status while tide-import skips its children.
+//     bytes (WR-03). This is the stricter verdict: StampChildCount (D-16a) can only
+//     upgrade a legacy ChildCount==0+len(ChildCRDs)>0 envelope to look complete,
+//     never the reverse. seedStatusFor uses it so an under-stamped legacy envelope
+//     is materialized re-plannable rather than adopted as Succeeded ("on doubt,
+//     re-plan"). NOTE: the bytes tide-import actually reads are the STAMPED bundle
+//     bytes — export stages the repaired tgz at <oldUID>/workspace, the same subPath
+//     tide-import mounts — so tide-import's own IsEnvelopeComplete sees the post-stamp
+//     verdict and may still copy such an envelope's children even when the seed
+//     manifest re-plans the node. That is a known latent inconsistency for legacy /
+//     hand-rolled bundles only (audit v1.0.3 finding F1; zero occurrences on the
+//     stamped salvage fixture); the stricter pre-stamp basis keeps the materialized
+//     node status conservative regardless.
 func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 	envelopes map[string][]byte,
 	repairedFiles map[string][]byte,
@@ -306,12 +311,12 @@ func processEnvelopesTgz(tgzData []byte, errOut io.Writer) (
 
 		// Check if this is an "envelopes/<uid>/out.json" entry.
 		if uid, ok := parseOutJSONPath(hdr.Name); ok {
-			// WR-03: evaluate completeness on pre-stamp bytes so the verdict matches
-			// what tide-import sees when it reads the same raw file from the old PVC.
+			// WR-03: evaluate completeness on pre-stamp bytes — the stricter verdict.
 			// StampChildCount (D-16a) below may repair ChildCount==0+len(ChildCRDs)>0
-			// to look complete; tide-import does NOT stamp before checking, so a
-			// legacy envelope that fails IsEnvelopeComplete on raw bytes must NOT be
-			// adopted in the seed manifest even if it passes after stamping.
+			// to look complete, so a legacy envelope that fails IsEnvelopeComplete on
+			// raw bytes is kept re-plannable in the seed manifest even though it passes
+			// after stamping (conservative: on doubt, re-plan). See processEnvelopesTgz
+			// doc for the F1 caveat re: tide-import reading the post-stamp bundle bytes.
 			var rawEnv pkgdispatch.EnvelopeOut
 			if jsonErr := json.Unmarshal(data, &rawEnv); jsonErr == nil {
 				preStampComplete[uid] = pkgdispatch.IsEnvelopeComplete(rawEnv)
@@ -359,8 +364,8 @@ func parseOutJSONPath(name string) (string, bool) {
 // Cases that return "":
 //   - UID has no entry in envelopes (missing out.json — no envelope to evaluate).
 //   - UID has an entry but preStampComplete[uid] is false (WR-03: completeness
-//     evaluated on pre-stamp bytes to match tide-import's verdict on the raw PVC
-//     file; see processEnvelopesTgz for the invariant).
+//     evaluated on the stricter pre-stamp bytes — see processEnvelopesTgz for the
+//     rationale and the F1 caveat).
 //
 // preStampComplete maps uid → IsEnvelopeComplete result on raw (pre-stamp) bytes.
 // envelopes maps uid → repaired (stamped) bytes; its presence indicates the uid
@@ -373,12 +378,13 @@ func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte, p
 		// No envelope present for this node → re-plannable.
 		return ""
 	}
-	// WR-03: use pre-stamp verdict to stay consistent with tide-import, which reads
-	// raw out.json bytes from the old PVC without applying StampChildCount first.
+	// WR-03: use the stricter pre-stamp verdict for the materialized status.
 	// A legacy exit-0 envelope with ChildCount==0 and populated ChildCRDs looks
-	// complete after stamping but incomplete on the raw bytes tide-import reads;
-	// adopting its status without copying its children would leave the plan with
-	// Status=Succeeded but no Tasks materialized in the new namespace.
+	// complete after StampChildCount but incomplete on the raw bytes; keeping the
+	// seed-manifest status on the raw verdict materializes such a node re-plannable
+	// rather than adopting a Succeeded status whose completeness is ambiguous.
+	// (tide-import reads the post-stamp bundle bytes and may still copy this node's
+	// children — audit finding F1, latent for legacy bundles; harmless here.)
 	if !preStampComplete[uid] {
 		// Incomplete on raw bytes → re-plannable.
 		return ""
@@ -396,9 +402,9 @@ func seedStatusFor(uid string, liveStatus string, envelopes map[string][]byte, p
 // D-15: down to Plan only; Tasks excluded.
 //
 // preStampComplete carries the IsEnvelopeComplete verdict evaluated on PRE-stamp
-// bytes (WR-03). Passed through to seedStatusFor so the seed manifest's Status
-// field reflects the same completeness verdict tide-import will apply when it reads
-// the raw out.json from the old PVC.
+// bytes (WR-03) — the stricter basis. Passed through to seedStatusFor so the seed
+// manifest's Status field keeps an under-stamped legacy node re-plannable rather
+// than adopting an ambiguous Succeeded status (see processEnvelopesTgz F1 caveat).
 func buildSeedManifest(
 	ctx context.Context,
 	k client.Client,
