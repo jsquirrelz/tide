@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0.5
 milestone_name: — Resumable Import: Partial-Tree Resume
 status: milestone_complete
-stopped_at: v1.0.5 work complete — Phase 30 verified 11/11; AWAITING RELEASE TAG. v1.0.3 (Phases 22–29) and v1.0.4 already shipped 2026-06-25 (published, immutable).
-last_updated: 2026-06-26T18:45:08Z
-last_activity: 2026-06-26
+stopped_at: v1.0.5 SHIPPED 2026-06-27 (tag v1.0.5 — release chain green; 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). Predecessors v1.0.3 (Phases 22–29) + v1.0.4 shipped 2026-06-25.
+last_updated: 2026-06-27T07:30:54Z
+last_activity: 2026-06-27
 progress:
   total_phases: 1
   completed_phases: 1
@@ -21,21 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.5 (Phase 30) complete & verified — awaiting release tag.
+**Current focus:** v1.0.5 SHIPPED — next: TIDE-on-TIDE and/or OpenAI backend + dogfood run #2.
 
 ## Current Position
 
 Phase: 30 (v1.0.5)
 Plan: Complete
-Status: v1.0.5 work complete (Phase 30 verified 11/11) — UNRELEASED, awaiting v1.0.5 release tag
-Last activity: 2026-06-26
+Status: v1.0.5 SHIPPED 2026-06-27 (tag v1.0.5, full release chain green, artifacts verified)
+Last activity: 2026-06-27
 
 ```
-v1.0.5 Progress:  [x] 30        1 / 1 phase complete (verified, UNRELEASED)
+v1.0.5 Progress:  [x] 30        1 / 1 phase complete — SHIPPED 2026-06-27
 ─────────────────────────────────────────────────────────────────────────
-Already shipped (published, immutable):
-  v1.0.3  Phases 22–29  — tag v1.0.3, published 2026-06-25 (Spring Tide + resumption tooling)
+Shipped (published, immutable):
+  v1.0.5  Phase 30       — tag v1.0.5, published 2026-06-27 (Resumable Import: Partial-Tree Resume)
   v1.0.4  image patch    — tag v1.0.4, published 2026-06-25 (publish tide-import image)
+  v1.0.3  Phases 22–29   — tag v1.0.3, published 2026-06-25 (Spring Tide + resumption tooling)
 ```
 
 ## Performance Metrics
