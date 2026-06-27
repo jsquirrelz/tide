@@ -2,38 +2,21 @@
 
 ## v1.0.5 Resumable Import: Partial-Tree Resume (Shipped: 2026-06-27)
 
-**Phases completed:** 9 phases, 36 plans, 48 tasks
+This close archives all planning work since v1.0.1 — **Phases 22–30, shipped across three release tags** (v1.0.3 Spring Tide + resumption, v1.0.4 image patch, v1.0.5 partial-tree resume). The headline is making the Topologically-Indexed paradigm real (one global Execution DAG) and making a halted run cheaply resumable.
+
+**Scope:** Phases 22–30 · ~36 plans · published tags v1.0.3 / v1.0.4 / v1.0.5.
 
 **Key accomplishments:**
 
-- Multi-stage Dockerfile.dashboard with digest-pinned node:22-alpine spa-builder that regenerates dist/ from source on every image build, plus a make verify-dashboard-freshness gate that fails on stale dist/ or a missing panel-cache-efficiency telemetry marker
-- Wire `make verify-dashboard-freshness` into ci.yaml (PR-time gate in the `test` job) and release.yaml (release-time gate as a step in `helmify-verify`), using `actions/setup-node@v4` (node 22, npm cache on `dashboard/web/package-lock.json`) before each invocation
-- One-liner:
-- 1. [Rule 2 - Missing Critical Functionality] Ported project_webhook to v1alpha2
-- Files:
-- Task 1 — bulk path repoint (commit 8ec1dbe):
-- Commit:
-- Commit:
-- `internal/controller/plan_controller.go`
-- Coarse-ref `DependsOn` is PRESENT in authored fixtures.
-- Envtest:
-- Conservative failure halt via `ConditionFailureHalt` — checkFailureHalt at four execution dispatch gates, cleared by `tide resume --retry-failed` — turns DISP-02 strict+conservative and resume unit tests GREEN (51/51 envtest, 7+2 unit tests)
-- One-liner:
-- Wave aggregator adds ZeroMembers phase (OQ-3 root fix) + in-flight-safe prune guard; globalDependentsMapper fires only on phase/dependsOn transitions (WR-02), proven by 7-case unit test
-- SPEC-01 envtest derives [{α,β,γ,ζ},{δ,η},{ε,θ}] from 2-Milestone real CRDs with cross-milestone γ→η honored; MS-03 proves approve/auto/full-supervised gate profiles via status-inject fixture approach
-- GlobalExecutionDAGView.tsx
-- PlannerRolledUpUID-gated rollup in handleProjectJobCompletion prevents double-counting planning cost on halt→resume when the reporter Job has TTL-GC'd; BYPASS-05 TTL-GC companion envtest proves the nil-Job path rolls up exactly once
-- Budget bypass acknowledges prior spend as a durable baseline (BypassBaselineCents) so raising the absolute cap alone makes a resume stick, and re-halt now names which cap fired (AbsoluteCapReached vs RollingWindowCapReached) with current spend + both cap values
-- Task 1 — `charts/tide/values.yaml`:
-- One-liner:
-- `internal/controller/import_controller.go`
-- One-liner:
-- 1. [Rule 2 - Missing cross-pkg surface] Exported StampChildCount and ComputeEnvelopeSHA256 from pkg/bundle
-- 1. [Rule 1 - Bug] `APIVersionV1Alpha2` does not exist in pkg/dispatch
-- test/integration/kind/testdata/import-small-fixture/
-- Two-tier kind E2E proving zero-cost resumption: small fixture drains to all-Milestones-Succeeded via stub subagents + live tide export-envelopes → import-envelopes round-trip adopts milestone/phase levels; salvage-20260618 import asserts 0 planner Jobs at milestone/phase levels and CostSpentCents==0 before plan dispatch (D-11/D-14/D-17).
-- One-liner:
-- Tier c E2E proves partial-import partial-tree resumes all the way to Project=Complete; deleteNamespaceAndWait eliminates inter-tier namespace contention so all three import-resume tiers pass together
+- **Global Execution DAG (Spring Tide, Phases 22–26):** re-architected execution off per-plan waves onto ONE global DAG spanning all Milestones/Phases/Plans — v1alpha2 schema migration (Wave re-owned Plan→Project), global layered-Kahn wave derivation (no cached schedule), global dispatch + wave-boundary failure semantics + gates-as-holds + resumption, multi-milestone drive, and a README-pinned spec-conformance envtest deriving `[{α,β,γ,ζ},{δ,η},{ε,θ}]` with cross-milestone edges honored.
+- **Budget-bypass resume correctness (Phase 27):** durable `CloneComplete` / `PlannerRolledUpUID` / `BypassBaselineCents` status fields — a budget halt resumes at Running with no re-clone, planning cost rolls up exactly once across halt→resume (even after reporter-Job TTL-GC), and raising the absolute cap alone makes a resume stick.
+- **Plan-import core (Phase 28):** `cmd/tide-import` + `ImportController` adopt pre-authored envelopes by stable identity (UID-churn-safe), validate before adoption, run `dag.ComputeWaves` cycle-detection before any `client.Create`, never import Wave CRs, and gate import behind operator + PVC-origin verification.
+- **Operator tooling + E2E (Phase 29):** `tide export-envelopes` / `import-envelopes` (+ `--dry-run`) with a zip-slip-safe bundle format; two-tier kind E2E proving zero-cost resumption against the real `salvage-20260618` fixture (0 planner Jobs at adopted levels, `CostSpentCents==0`).
+- **Partial-tree resume (Phase 30, the v1.0.5 patch):** fixes the dogfood-run-#2 defect where incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies — shared `IsEnvelopeComplete` at export time drives adopt-complete + re-plan-incomplete; Tier-c kind E2E drives a mixed partial import all the way to `Project=Complete`.
+
+**Milestone audit (Phases 27–30):** `tech_debt` — 16/16 requirements satisfied, 0 blockers, Nyquist-compliant; non-blocking debt = integration finding F1 (latent legacy-bundle completeness-basis inconsistency) + Phase-27 IN-01/03/04 robustness follow-ups. See `milestones/v1.0.3-MILESTONE-AUDIT.md`.
+
+**Released artifacts (v1.0.5):** 8 component images + 2 OCI charts + 5 binaries @ 1.0.5, GitHub Release v1.0.5, verified anonymously on ghcr.
 
 ---
 
