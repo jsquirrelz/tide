@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.3
-milestone_name: — Planning Resumption & Cost Resilience
+milestone: v1.0.5
+milestone_name: — Resumable Import: Partial-Tree Resume
 status: milestone_complete
-stopped_at: Milestone complete (Phase 30 was final phase)
-last_updated: 2026-06-26T15:43:28.427Z
+stopped_at: v1.0.5 work complete — Phase 30 verified 11/11; AWAITING RELEASE TAG. v1.0.3 (Phases 22–29) and v1.0.4 already shipped 2026-06-25 (published, immutable).
+last_updated: 2026-06-26T18:45:08Z
 last_activity: 2026-06-26
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 36
-  completed_plans: 50
+  total_phases: 1
+  completed_phases: 1
+  total_plans: 3
+  completed_plans: 3
   percent: 100
 ---
 
@@ -21,18 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Milestone complete
+**Current focus:** v1.0.5 (Phase 30) complete & verified — awaiting release tag.
 
 ## Current Position
 
-Phase: 30
-Plan: Not started
-Status: Milestone complete
+Phase: 30 (v1.0.5)
+Plan: Complete
+Status: v1.0.5 work complete (Phase 30 verified 11/11) — UNRELEASED, awaiting v1.0.5 release tag
 Last activity: 2026-06-26
 
 ```
-v1.0.3 Progress: [x] 27  [x] 28  [x] 29
-                  3 / 3 phases complete
+v1.0.5 Progress:  [x] 30        1 / 1 phase complete (verified, UNRELEASED)
+─────────────────────────────────────────────────────────────────────────
+Already shipped (published, immutable):
+  v1.0.3  Phases 22–29  — tag v1.0.3, published 2026-06-25 (Spring Tide + resumption tooling)
+  v1.0.4  image patch    — tag v1.0.4, published 2026-06-25 (publish tide-import image)
 ```
 
 ## Performance Metrics

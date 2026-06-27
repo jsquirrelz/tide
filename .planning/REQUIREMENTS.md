@@ -19,11 +19,11 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Budget-Bypass Resume Correctness (BYPASS)
 
-- [ ] **BYPASS-01**: Clearing a budget halt (the `tideproject.k8s/bypass-budget` path) resumes the project at `Running`, not `Pending`, so no workspace re-init / re-clone fires. (root cause `project_controller.go:1257`)
-- [ ] **BYPASS-02**: A resume never re-runs the init or clone Jobs when the workspace is already initialized — gated on a durable "already initialized" sentinel (`Status.Git.BranchName != ""` / a `CloneComplete` flag), not on Job/envelope presence.
-- [ ] **BYPASS-03**: Planner-level Usage is rolled up exactly once across a halt→resume cycle — no double-count when the reporter Job has TTL-GC'd during the halt. Backed by a durable per-object rolled-up marker (e.g. `PlannerRolledUpUID`), not reporter-Job existence.
-- [ ] **BYPASS-04**: Resuming a budget halt does not require manually raising both the absolute and rolling-window caps in lockstep — a single resume action (or raising the absolute cap) clears the halt without the rolling-window cap immediately re-halting dispatch.
-- [ ] **BYPASS-05**: The project→milestone planner-completion handoff has regression coverage proving the reporter Job spawns AND planner cost rolls up while the planner Job still exists (locks in the ordering fix already landed in `2a5e0dc`, quick task 260617-qqh).
+- [x] **BYPASS-01**: Clearing a budget halt (the `tideproject.k8s/bypass-budget` path) resumes the project at `Running`, not `Pending`, so no workspace re-init / re-clone fires. (root cause `project_controller.go:1257`)
+- [x] **BYPASS-02**: A resume never re-runs the init or clone Jobs when the workspace is already initialized — gated on a durable "already initialized" sentinel (`Status.Git.BranchName != ""` / a `CloneComplete` flag), not on Job/envelope presence.
+- [x] **BYPASS-03**: Planner-level Usage is rolled up exactly once across a halt→resume cycle — no double-count when the reporter Job has TTL-GC'd during the halt. Backed by a durable per-object rolled-up marker (e.g. `PlannerRolledUpUID`), not reporter-Job existence.
+- [x] **BYPASS-04**: Resuming a budget halt does not require manually raising both the absolute and rolling-window caps in lockstep — a single resume action (or raising the absolute cap) clears the halt without the rolling-window cap immediately re-halting dispatch.
+- [x] **BYPASS-05**: The project→milestone planner-completion handoff has regression coverage proving the reporter Job spawns AND planner cost rolls up while the planner Job still exists (locks in the ordering fix already landed in `2a5e0dc`, quick task 260617-qqh).
 
 ### Plan-Import / Envelope-Resumption (IMPORT)
 
@@ -68,11 +68,11 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BYPASS-01 | Phase 27 | Pending |
-| BYPASS-02 | Phase 27 | Pending |
-| BYPASS-03 | Phase 27 | Pending |
-| BYPASS-04 | Phase 27 | Pending |
-| BYPASS-05 | Phase 27 | Pending |
+| BYPASS-01 | Phase 27 | Complete |
+| BYPASS-02 | Phase 27 | Complete |
+| BYPASS-03 | Phase 27 | Complete |
+| BYPASS-04 | Phase 27 | Complete |
+| BYPASS-05 | Phase 27 | Complete |
 | IMPORT-01 | Phase 28 | Complete |
 | IMPORT-02 | Phase 28 | Complete |
 | IMPORT-03 | Phase 28 | Complete |

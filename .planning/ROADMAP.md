@@ -5,9 +5,11 @@
 - ✅ **v1.0.0 — Self-Hosting MVP** — Phases 1–11 (shipped 2026-06-11) — ⚠ shipped on an invalid execution foundation (per-plan waves; see v1.0.2 Spring Tide)
 - ✅ **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** — Phases 12–17 (shipped 2026-06-13) — ⚠ same invalid foundation
 - ⊘ **v1.0.2 — Ebb Tide: Token & Cost Optimization** — Phases 18–21 (completed; **SUPERSEDED — will not be released**, artifacts preserved). Superseded after dogfood run #2 surfaced the per-plan-waves defect.
-- 🚧 **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22–26 (planning). Re-architect execution to ONE global Execution DAG spanning the entire Project — the patch that makes the Topologically-Indexed paradigm real. Supersedes Ebb Tide; preempts the OpenAI/dogfood milestone.
-- 🚧 **v1.0.3 — Planning Resumption & Cost Resilience** — Phases 27–29 (in progress). Make interrupted or budget-halted TIDE runs cheaply resumable — a halt must never cost the already-authored plan.
-- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.3 landing plan-import/envelope-resumption)
+- ✅ **v1.0.2 — Spring Tide: Global Execution DAG (severe corrective patch)** — Phases 22–26 (complete; **shipped within the v1.0.3 tag**, not separately tagged). Re-architected execution to ONE global Execution DAG spanning the entire Project — the patch that makes the Topologically-Indexed paradigm real. Superseded Ebb Tide.
+- ✅ **v1.0.3 — Spring Tide + Planning Resumption & Cost Resilience** — Phases 22–29 (shipped 2026-06-25, tag `v1.0.3`, published: 7 images + 2 OCI charts). Global Execution DAG end-to-end (22–26) + operator resumption tooling (27–29): budget-bypass resume correctness, plan-import core, and `tide` export/import-envelopes with a kind E2E acceptance gate.
+- ✅ **v1.0.4 — tide-import image publish + release-matrix guardrail** — (shipped 2026-06-25, tag `v1.0.4`, published). Patch: publishes the `tide-import` image in the build-images matrix and adds the matrix↔chart image-coverage release gate.
+- 🚧 **v1.0.5 — Resumable Import: Partial-Tree Resume** — Phase 30 (complete & verified 11/11; **UNRELEASED — awaiting `v1.0.5` release tag**). adopt-complete + re-plan-incomplete: fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies → stall). Unblocks deferred dogfood run #2. Requirements: RESUME-PARTIAL-01..04 (see REQUIREMENTS.md "v1.0.5 Requirements").
+- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; the cheap-mid-planning-halt resumability it was gated on lands in v1.0.5)
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
 ## Phases
@@ -51,7 +53,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 
 </details>
 
-### 🚧 v1.0.2 — Spring Tide: Global Execution DAG (In Progress)
+### ✅ v1.0.2 — Spring Tide: Global Execution DAG (Complete — shipped within tag v1.0.3)
 
 **Milestone Goal:** Re-architect execution so waves are derived from ONE global Execution DAG spanning the entire Project (all milestones/phases/plans), assembled after planning completes — making the Topologically-Indexed paradigm real. v1.0.0/v1.0.1 shipped a per-plan-waves layer (`Plan` has no deps, `Task.dependsOn` is plan-local per D-F1, waves are per-plan via `materializeWaves`, no global indegree map). This is the corrective patch that makes the 1.0 line actually be what it claimed.
 
@@ -63,7 +65,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 - [ ] **Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption** — Dispatch off the global indegree map vs the completed-task set; wave-boundary failure contract preserved exactly at global scope; gates compose as holds; restart re-derives the whole schedule
 - [ ] **Phase 26: Multi-Milestone Drive + Spec Conformance** — A Project drives multiple Milestones via the Milestone DAG with cross-milestone global waves and per-milestone gate policy composing across the DAG; the README worked example is an executable conformance test
 
-### 🚧 v1.0.3 — Planning Resumption & Cost Resilience (In Progress)
+### ✅ v1.0.3 — Planning Resumption & Cost Resilience (Shipped 2026-06-25, tag v1.0.3)
 
 **Milestone Goal:** Make interrupted or budget-halted TIDE runs cheaply resumable — a halt (budget, crash, bug) must never cost the already-authored plan. Motivated by dogfood run #2 budget-halting during planning (~$90, zero execution) with no resume path. Builds on Spring Tide's correct execution foundation.
 
