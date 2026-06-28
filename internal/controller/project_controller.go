@@ -1085,13 +1085,37 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		}
 	}
 
-	// Phase 30 RESUME-PARTIAL-02: post-ImportComplete adoption guard.
+	// Phase 31 D-01/D-02: durable project-planner suppression short-circuit.
+	// Position: AFTER the import-pending hold (above) and BEFORE the live
+	// r.List of owned Milestones (cache-independent) and BEFORE PlannerPool.Acquire
+	// (D-06: no slot leak). When this condition is stamped True it is authoritative —
+	// a cold informer cache cannot resurrect a paid project-planner dispatch (ADOPT-05).
+	if project.Spec.ImportSource != nil {
+		if suppCond := meta.FindStatusCondition(project.Status.Conditions,
+			tidev1alpha2.ConditionProjectPlannerSuppressed); suppCond != nil &&
+			suppCond.Status == metav1.ConditionTrue {
+			logf.FromContext(ctx).V(1).Info(
+				"project planner permanently suppressed (adoption complete); skipping dispatch",
+				"project", project.Name,
+			)
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Phase 30 RESUME-PARTIAL-02 / Phase 31 D-02: post-ImportComplete adoption guard.
 	// When ImportComplete=True AND the Project has at least one owned Milestone,
 	// the import tree is the authoritative materialization — the project planner
 	// must not re-dispatch (run #2 defect: a fresh cluster had no prior planner
 	// Job, so Step 2b above passed, and a paid project-planner Job fired
 	// post-import). This guard permanently skips dispatch once the import tree
 	// is confirmed present.
+	//
+	// Phase 31 D-02 upgrade: on first confirmation, the bare return is replaced
+	// by a SINGLE Status().Patch that advances Phase=Running AND stamps
+	// ConditionProjectPlannerSuppressed=True (Reason=AdoptionComplete) in one
+	// MergeFrom patch (D-07 — never two sequential patches) before returning.
+	// Subsequent reconciles hit the durable short-circuit above instead of
+	// re-running this live List (D-01 cache-as-truth fix).
 	//
 	// Why this does NOT regress the N>1-milestone incremental-materialization
 	// case (per the Step-2b comment above): that concern applies to a
@@ -1118,10 +1142,28 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 					// before client.Create, so the ref is present at guard time.
 					if metav1.IsControlledBy(&msList.Items[i], project) {
 						logf.FromContext(ctx).V(1).Info(
-							"import adopted; skipping project planner dispatch",
+							"import adopted; stamping suppression condition and advancing to Running",
 							"project", project.Name,
 							"milestone", msList.Items[i].Name,
 						)
+						// D-07: batch Phase=Running advance + suppression condition into
+						// ONE Status().Patch(MergeFrom(base)) — never two sequential patches.
+						// D-04: set Phase=Running identically to the normal lifecycle.
+						// D-06: return BEFORE PlannerPool.Acquire — no slot leak.
+						// D-08: return nil (not err) for expected/permanent suppressed state.
+						patch := client.MergeFrom(project.DeepCopy())
+						project.Status.Phase = tidev1alpha2.PhaseRunning
+						meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+							Type:               tidev1alpha2.ConditionProjectPlannerSuppressed,
+							Status:             metav1.ConditionTrue,
+							Reason:             tidev1alpha2.ReasonAdoptionComplete,
+							Message:            "Project adopted from import; project-planner suppressed — import tree is authoritative",
+							LastTransitionTime: metav1.Now(),
+						})
+						if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+							// Conflict is retryable; surface as err so controller retries.
+							return ctrl.Result{}, pErr
+						}
 						return ctrl.Result{}, nil
 					}
 				}
