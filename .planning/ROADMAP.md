@@ -272,7 +272,11 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   4. Budget rollup is exactly-once per reporter Job across halt→resume cycles and after reporter-Job TTL-GC — a second reconcile after the 300-second GC window does not increment `CostSpentCents` a second time for the same Job.
   5. The normal (non-import) Project lifecycle is unchanged — envtest confirms a non-import Project still dispatches a project-planner Job and advances normally, and a manager restart on an adopted-but-Running Project does not re-dispatch the project-planner.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+- [ ] 31-01-PLAN.md — API types: ConditionProjectPlannerSuppressed + per-child-level PlannerRolledUpUID markers; regenerate DeepCopy + CRD manifests
+- [ ] 31-02-PLAN.md — D2 seam: durable suppression short-circuit + single-patch Initialized→Running advance before pool acquire; envtest ADOPT-01/03/05
+- [ ] 31-03-PLAN.md — D1 idempotency: marker-gated exactly-once child rollup (milestone/phase/plan) across reporter-Job TTL-GC; envtest ADOPT-02/04
 
 ### Phase 32: D3 — Dispatch Concurrency Cap
 
