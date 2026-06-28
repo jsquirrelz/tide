@@ -1,234 +1,195 @@
-# Stack Research — TIDE v1.0.3 Planning Resumption & Cost Resilience
+# Stack Research — TIDE v1.0.6 Adoption-Path Correctness & Dispatch Safety
 
-**Domain:** Envelope-resumption and budget-bypass fixes for a mature Go/Kubernetes operator
-**Researched:** 2026-06-18
-**Confidence:** HIGH — all findings derived from the live codebase, go.mod, Go stdlib, and the salvaged dogfood PVC envelopes. No new external libraries proposed.
+**Domain:** Corrective patch to a shipping Go/Kubernetes operator (controller-runtime) — four code-level defects on the import/adoption path
+**Researched:** 2026-06-28
+**Confidence:** HIGH — all findings derived from the live codebase (read directly), go.mod, the Go stdlib, and the existing pool/dispatch infrastructure. No new external libraries proposed.
 
-This file covers ONLY the stack questions specific to v1.0.3. The full prior stack (controller-runtime, Ginkgo, Prometheus, OTel, goldie, etc.) is validated and unchanged from prior milestones.
-
----
-
-## Context — The Specific Problem
-
-Dogfood run #2 budget-halted mid-planning (~$90, zero execution). The full plan tree survived on the PVC:
-
-```
-examples/projects/dogfood/salvage-20260618/pvc-envelopes/envelopes/<old-uid>/
-  in.json        (carries dispatch.parentName + level — the stable identity)
-  out.json       (the authored EnvelopeOut — the artifact we want to reuse)
-  children/      (authored child CRD specs)
-  MILESTONE.md   (authored artifact)
-  events.jsonl   (replay log)
-```
-
-59 envelopes total: 3 milestone, 15 phase, 39 plan, 1 project.
-
-The problem is that `envelopes/` is keyed by the K8s UID of the dispatched CRD object (`in.json: taskUID`), and a fresh `kubectl apply` on the same YAML assigns **new** UIDs to every CRD. The existing `FilesystemEnvelopeReader.ReadOut(ctx, projectUID, taskUID)` cannot find old envelopes because the new run's task UIDs differ from the salvage UIDs.
-
-This research answers:
-1. What scheme allows stable-key envelope lookup across UID churn?
-2. Does the planner-skip idempotency pattern require any new library?
-3. What hashing or identity primitives (if any) are needed?
+This file covers ONLY the stack questions specific to v1.0.6. The full prior stack (Go 1.26, controller-runtime v0.24.x, kubebuilder v4.14.0, Ginkgo v2.28, Gomega, Prometheus client_golang, OTel, etc.) is validated and unchanged from prior milestones.
 
 ---
 
-## Recommended Stack
+## Context — The Four Defects
 
-### Core Technologies — No Changes
+Dogfood run #2b validated the v1.0.5 import-resume path but HALTED on single-node OOM after ~60 concurrent planner pods, while also exposing three additional correctness issues:
 
-| Technology | Version | Purpose | v1.0.3 Role |
-|------------|---------|---------|-------------|
-| Go stdlib: `path/filepath` | Go 1.26 | File path construction | Already used in `FilesystemEnvelopeReader`; extended for stable-key path |
-| Go stdlib: `encoding/json` | Go 1.26 | JSON marshal/unmarshal | Already used throughout; validates adopted envelopes |
-| Go stdlib: `crypto/sha256` | Go 1.26 | Digest for integrity check | Already imported in `internal/credproxy/token.go`; optional write-side checksum |
-| controller-runtime v0.24.1 | locked | Reconcile loop, patch | Existing `AlreadyExists`-is-success pattern extends naturally to planner-skip |
-
-### Supporting Libraries — No New Additions
-
-| Library | Status | Assessment |
-|---------|--------|------------|
-| `github.com/cespare/xxhash/v2 v2.3.0` | Already indirect dep | Available at zero cost if a non-crypto hash is preferred. Not needed — name-based identity requires no hashing at all. |
-| Any CAS library (`ipfs/go-cid`, `opencontainers/go-digest`) | NOT in go.mod | Do not add. The PVC directory structure is already the content store; a full block-level CAS library solves a problem TIDE does not have. |
-| Any external resume-state library | NOT in go.mod | Do not add. Violates spec constraint: resumption state = indegree map + completed-task set, rederivable from artifacts. |
+- **D1** — `Project.status.costSpentCents` and `usage` block stayed empty while 44 plans were authored. The metered `budget.absoluteCapCents` gate cannot enforce if spend is never tallied. Root: the planner→reporter→Project usage rollup is tied to the normal project lifecycle, which the adoption path bypasses (see D2).
+- **D2** — After `ImportComplete=True` the Project stayed `phase: Initialized` even as the phase→plan cascade ran. The adoption path correctly suppresses the project-planner but never advances the Project to `Running`/planning, so anything keyed off project phase (including D1's cost rollup) never fires.
+- **D3** — ~60 subagent pods dispatched at once (15 phase + 44 plan planners). The pool infrastructure exists and is fully wired, but the chart defaults (`plannerConcurrency: 16`, `executorConcurrency: 4`) are too high for a single-node kind cluster. No mechanism counted in-flight Jobs at the planner level before dispatch in the adoption-path cascade.
+- **D4** — A phase was marked `Succeeded` when its planner exited 1 with `childCount 0` and produced no plans. The `expected == 0` arm in `PhaseReconciler.handleJobCompletion` and `MilestoneReconciler.handleJobCompletion` fires `patchPhaseSucceeded`/`patchMilestoneSucceeded` regardless of whether `out.ExitCode != 0`, treating a failed planner as a genuine leaf. Phase 30 added a childless-success guard for plans; phase and milestone lack the equivalent exit-code check before the leaf path.
 
 ---
 
-## Pattern 1: Name-Based Stable-Key Envelope Directory (PRIMARY RECOMMENDATION)
+## D1 — Cost Rollup Under Adoption: No New Dependency
 
-### What
+### Root cause (verified in code)
 
-Add a parallel stable-key shadow path alongside the existing UID-keyed path:
+`budget.RollUpUsage` is called inside `handleJobCompletion` in `milestone_controller.go:587` and `phase_controller.go:518`. That function is entered only when a planner Job completes. Under the adoption path the project-planner Job is suppressed (correct — Phase 30 guard at `project_controller.go:1088`), and the Project lifecycle stalls at `Initialized` (D2), so `reconcileProjectPlannerDispatch` never returns a `Running` project to which rollup accrues.
 
-```
-# Existing (live-run correlation, unchanged):
-/workspaces/{projectUID}/workspace/envelopes/{crdUID}/out.json
+The fix is purely logical in the existing controller code:
 
-# New (stable-key, resume lookup):
-/workspaces/{projectUID}/workspace/envelopes-by-name/{level}/{crdName}/out.json
-```
+1. **Unblock D2 first** (see below) — once the Project advances to `Running` after `ImportComplete=True`, all subsequent planner Jobs at phase/plan levels complete normally and roll up via the existing `handleJobCompletion → budget.RollUpUsage` path already in place.
+2. **Verify the adoption guard** (`project_controller.go:1088`) does not also suppress project-level cost reporting when child planners succeed. It does not — it only suppresses the project-level Job dispatch; phase/plan planner completions are independent and already roll up.
 
-The orchestrator **writes to both paths** when a planner Job completes. On a fresh run, the reconciler **checks the stable-key path before dispatching** a new planner Job. If a valid, validated `out.json` exists there, it adopts the envelope and skips the planner.
+**Stack additions required:** None. `budget.RollUpUsage` in `internal/budget/tally.go` exists and is correct. The path just needs to be reachable.
 
-### Why name-based, not content-addressed (prompt hash)
+**Do NOT add:** A separate "adoption-mode rollup" path, a second `budget.RollUpUsage` callsite in the import controller, or any new budget package. The existing path is correct once D2 is fixed.
 
-The salvaged `in.json` files carry `dispatch.parentName` (the CRD name, e.g., `milestone-01-codex-subagent`) and `level` (e.g., `milestone`). CRD names are human-authored, stable across re-applies, unique within a namespace and level. This is the available stable identity.
+---
 
-Hashing the outcome prompt would be wrong for two reasons:
+## D2 — Project Lifecycle Advances Under Adoption: No New Dependency
 
-1. **Edit-after-halt risk.** If the operator edits the outcome prompt between runs (common after a budget halt to adjust scope), a hash match would silently adopt a stale envelope authored from a different prompt. Name-based identity makes the adoption intent explicit.
-2. **Hash derivation coupling.** Correct prompt hashing would require re-running the same prompt-derivation logic the controller uses at dispatch time. That couples the import tool to internal dispatch code and is fragile if the derivation changes.
+### Root cause (verified in code)
 
-SHA-256 of `in.json` would work as a tie-breaker or integrity check *within* the stable-key directory, but not as the primary identity.
+`reconcileProjectPlannerDispatch` at `project_controller.go:999` short-circuits correctly at `Initialized` when the adoption guard fires — but it returns `ctrl.Result{}` (nil, nil), so the project parks at `Initialized`. The phase/plan planners fire via their own reconcilers (they watch Phase/Plan CRs, not Project phase), but the Project itself never advances to `Running`.
 
-### Stable-key path constructor (stdlib-only)
+The fix is a targeted lifecycle transition in `reconcileProjectPlannerDispatch` (or in the adoption guard arm): when `ImportComplete=True` and the adoption guard fires, patch `Project.Status.Phase = PhaseRunning` before returning. This is a single `r.Status().Patch` call using the same `client.MergeFrom` pattern used throughout the existing reconciler.
 
-```go
-// pkg/dispatch/envelope_paths.go (new file)
+### Integration point
 
-// StableKeyEnvelopePath returns the resume-lookup path for a pre-authored
-// planner envelope keyed by level + CRD name rather than UID.
-// Format: {workspaceRoot}/{projectUID}/workspace/envelopes-by-name/{level}/{crdName}/out.json
-func StableKeyEnvelopePath(workspaceRoot, projectUID, level, crdName string) string {
-    return filepath.Join(workspaceRoot, projectUID, "workspace",
-        "envelopes-by-name", level, crdName, "out.json")
-}
-```
-
-No new imports. `filepath` is already used in `FilesystemEnvelopeReader`.
-
-### `ReadByName` method on FilesystemEnvelopeReader
-
-Extend the existing `EnvelopeReader` interface with a second method (or add a separate `StableKeyReader` interface to avoid breaking existing implementations):
+`project_controller.go` already imports `k8s.io/apimachinery/pkg/api/meta` for `meta.SetStatusCondition`. The phase transition is:
 
 ```go
-// ReadByName reads the stable-key envelope for a CRD identified by level + name.
-// Returns (EnvelopeOut, true) if a valid envelope exists; (zero, false) if not found
-// or if validation fails. Never returns an error for missing files — missing = no
-// prior run, not a hard failure.
-ReadByName(ctx context.Context, projectUID, level, crdName string) (pkgdispatch.EnvelopeOut, bool)
-```
-
-The method reads `StableKeyEnvelopePath(...)`, unmarshals, then validates with the existing `ValidateAPIVersionKind` + `ExitCode == 0` + `len(ChildCRDs) > 0` checks. On any validation failure it returns `(zero, false)` — falling through to normal dispatch.
-
-### Validation before adopting
-
-All four conditions must hold:
-
-1. `pkg/dispatch.ValidateAPIVersionKind` returns nil (existing function).
-2. `out.ExitCode == 0` — non-zero means the previous run's planner failed; re-author.
-3. `len(out.ChildCRDs) > 0` for non-leaf levels (milestone, phase, plan). Zero children at a level that must produce children indicates a corrupt or incomplete envelope.
-4. All `out.ChildCRDs[i].Name` values are non-empty (basic format guard; no K8s API call needed here).
-
-If any check fails, fall through to normal planner dispatch. The stable-key file is left in place; it will be overwritten if the new run completes successfully.
-
-### Write path (on planner Job completion)
-
-The existing `handleJobCompletion` in each planner reconciler writes nothing to the PVC directly — it reads from the PVC via `FilesystemEnvelopeReader.ReadOut`. The stable-key write should happen at the same moment:
-
-```go
-// After reading and validating out.json from the UID-keyed path:
-if writeErr := r.EnvReader.WriteStableKey(ctx, project.UID, level, crdName, out); writeErr != nil {
-    logger.Error(writeErr, "stable-key envelope write failed (non-fatal)")
-    // Non-fatal: the stable-key path is a resume convenience, not required
-    // for the current run's correctness.
-}
-```
-
-The `WriteStableKey` implementation is `os.MkdirAll` + `os.WriteFile` — both already used in the podjob package.
-
-### Integration point in the reconcile loop
-
-The stable-key check belongs in the same early-return position as the existing child-existence idempotency guard (line 304 of `milestone_controller.go`), placed **after** the terminal/AwaitingApproval/Running short-circuits and **before** pool acquisition and Job creation:
-
-```go
-// Step 2b: Stable-key envelope adoption guard — skip planner dispatch when a
-// pre-authored valid envelope exists for this CRD name.
-if r.EnvReader != nil {
-    if out, ok := r.EnvReader.ReadByName(ctx, projectUID, "milestone", ms.Name); ok {
-        return r.adoptEnvelopeAndMaterialize(ctx, ms, out)
+// In the import adoption guard arm, before returning ctrl.Result{}:
+if project.Status.Phase == tidev1alpha2.PhaseInitialized {
+    patch := client.MergeFrom(project.DeepCopy())
+    project.Status.Phase = tidev1alpha2.PhaseRunning
+    meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+        Type:    tidev1alpha2.ConditionReady,
+        Status:  metav1.ConditionTrue,
+        Reason:  "ImportAdopted",
+        Message: "Import tree adopted; advancing to Running for child planner cascade",
+        ...
+    })
+    if err := r.Status().Patch(ctx, project, patch); err != nil {
+        return ctrl.Result{}, err
     }
 }
-// Fall through: normal planner dispatch.
 ```
 
-`adoptEnvelopeAndMaterialize` is a new method that:
-1. Stamps the `tideproject.k8s/envelope-adopted-from` annotation (see Pattern 2 below).
-2. Materializes child CRDs from `out.ChildCRDs` exactly as `handleJobCompletion` does (the existing materialization path is already factored separately and can be called directly).
-3. Does NOT dispatch a planner Job.
+**Stack additions required:** None. All types and helpers already imported in `project_controller.go`.
+
+**Do NOT add:** An `ImportReconciler` lifecycle hook that patches the Project phase, a separate reconciler for "adopted projects", or any new condition type. The ProjectReconciler already owns Project phase transitions.
 
 ---
 
-## Pattern 2: CRD Annotation as the Adoption Signal
+## D3 — Dispatch Concurrency Cap: Existing Pool Infrastructure, Wrong Defaults
 
-When a stable-key envelope is adopted (planner skipped), stamp an annotation on the CRD:
+### The misdiagnosis to avoid
 
-```
-tideproject.k8s/envelope-adopted-from: envelopes-by-name/milestone/milestone-01-codex-subagent
-```
+`MaxConcurrentReconciles` (set via `controller.Options{MaxConcurrentReconciles: N}` in each reconciler's `SetupWithManager`) controls how many **reconcile goroutines** can run concurrently for a given Kind. It does NOT control how many **Jobs** (pods) are in flight. A single reconcile goroutine can dispatch a Job, return, and the next goroutine starts a new reconcile and dispatches another Job. With `MaxConcurrentReconciles: 4` for Plan and 15 phases all reconciling simultaneously, 60 Jobs can and did dispatch.
 
-**Why this matters:**
+**MaxConcurrentReconciles is the wrong lever for D3.** Do not change it to address pod count.
 
-1. Makes the adoption visible in `kubectl describe` without a dashboard lookup.
-2. The existing child-existence idempotency guard (line 304, `milestone_controller.go`) checks for children via `spec.milestoneRef` list scan. After adoption, children are materialized synchronously — the guard would find them and return on the next reconcile without re-dispatching. The annotation is belt-and-suspenders: it provides a cheap early return before the List scan.
-3. Prevents a re-entrant reconcile from dispatching a planner for a CRD whose children were materialized from an adopted envelope, not from a completed Job.
+### The correct mechanism: the existing `internal/pool` semaphore
 
-**Implementation:** standard `r.Patch(ctx, obj, client.MergeFrom(base))` on `metadata.annotations`. This is the exact pattern used for `AnnotationBillingResumedAt` and `AnnotationFailureResumedAt` in `api/v1alpha2/shared_types.go`. No new library.
-
-**Annotation constant:**
+The pool infrastructure is complete and production-wired (verified in `internal/pool/pool.go`, `cmd/manager/main.go:343-353`):
 
 ```go
-// api/v1alpha2/shared_types.go (add alongside existing annotation constants)
-AnnotationEnvelopeAdoptedFrom = "tideproject.k8s/envelope-adopted-from"
+// cmd/manager/main.go:343-353 (verified live)
+plannerPool := pool.New(cfg.PlannerConcurrency, "planner")
+executorPool := pool.New(cfg.ExecutorConcurrency, "executor")
+
+plannerPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=planner")
+executorPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=executor")
 ```
+
+`pool.Acquire` is a blocking `chan struct{}` send that waits until a slot is available:
+
+```go
+// pool.go:61-67 (verified live)
+func (p *Pool) Acquire(ctx context.Context) error {
+    select {
+    case p.sem <- struct{}{}:
+        return nil
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+}
+```
+
+`PlannerPool.Acquire` is called before every planner Job creation at all five dispatch sites (milestone, phase, plan, project, and wave level — verified via grep). The chart default `plannerConcurrency: 16` allows up to 16 simultaneous planner pods, which is the OOM cause: 44 plan + 15 phase = 59 planners can dispatch against a 16-slot pool.
+
+### The fix: lower chart defaults for single-node targets
+
+**`charts/tide/values.yaml` change (FIXED CONTRACT — binary catches up to chart, never reverse):**
+
+```yaml
+# Before (current):
+plannerConcurrency: 16
+executorConcurrency: 4
+
+# After:
+plannerConcurrency: 4   # sane for single-node kind; operator raises for multi-node
+executorConcurrency: 8  # executor pods are smaller; more can coexist
+```
+
+A single-node kind cluster with 8 GiB RAM can sustain roughly 4 concurrent Claude CLI + credproxy sidecar pairs (each ~1-2 GiB footprint) before memory pressure degrades throughput. `plannerConcurrency: 4` prevents the 60-pod cascade. `executorConcurrency: 8` preserves task parallelism (executor pods are lighter than planner+credproxy pairs).
+
+These defaults should ship with documentation in `values.yaml` and `docs/production.md` explaining how to size for multi-node clusters.
+
+### Separately-sized pools preserved
+
+The spec contract "size planner and executor pools separately" is preserved. The existing architecture already has two independent `Pool` structs, two independent `PreCharge` calls with distinct label selectors (`tideproject.k8s/role=planner` vs `tideproject.k8s/role=executor`), and two independent chart values. Nothing in this fix unifies them.
+
+**Stack additions required:** Zero. The pool is wired, the Acquire/Release calls are in place at all five dispatch sites, and `PreCharge` corrects the count on controller restart. The fix is a chart default change plus a `values.yaml` comment.
+
+**Do NOT add:**
+- A new in-process queue, rate limiter, or work queue (`workqueue.RateLimitingInterface`) — the pool semaphore already is the rate limiter
+- `MaxConcurrentReconciles` tuning as the OOM fix — wrong lever
+- An external job scheduler (Argo Workflows, Tekton) — the pool IS the scheduler
+- A Kubernetes `ResourceQuota` on the namespace — correct direction conceptually but adds operator overhead and doesn't replace the pool; complement only
+- Any in-Job concurrency limiting — the issue is at dispatch, not execution
+
+### Enhancements to consider (not blocking)
+
+- **Prometheus metric for pool queue depth** — `pool.go` currently has no instrumentation. A `prometheus.Gauge` for `len(sem)` vs `cap(sem)` would surface saturation. Not needed for the OOM fix, but useful for tuning on production clusters. Implement with existing `prometheus/client_golang v1.23`, zero new dep.
+- **Per-Project pool isolation** — today all projects share one global planner pool. This is correct for v1.0.6; per-project pools are a future concern (multi-tenant) and are explicitly out of scope.
 
 ---
 
-## Pattern 3: `tide import-envelopes` CLI Subcommand
+## D4 — Planner Failure Semantics: No New Dependency
 
-The operator import use case (copying salvaged envelopes to stable-key paths before re-applying the Project CR) needs a concrete workflow. Recommend a `tide import-envelopes` subcommand:
+### Root cause (verified in code)
 
-```
-tide import-envelopes \
-  --salvage-dir examples/projects/dogfood/salvage-20260618/pvc-envelopes \
-  --pvc-mount /workspaces \
-  --project-uid <new-project-uid>
-```
+In both `MilestoneReconciler.handleJobCompletion` (`milestone_controller.go:673`) and `PhaseReconciler.handleJobCompletion` (`phase_controller.go:593`), the `expected == 0` branch fires `patchMilestoneSucceeded`/`patchPhaseSucceeded` unconditionally:
 
-**Algorithm (stdlib-only):**
-
-```
-for each <uid>/ in salvage-dir/envelopes/:
-    read in.json → extract level, dispatch.parentName (= crdName)
-    read out.json → validate (ExitCode==0, ChildCRDs non-empty)
-    if valid:
-        target = StableKeyEnvelopePath("/workspaces", new-project-uid, level, crdName)
-        os.MkdirAll(dir(target), 0755)
-        os.WriteFile(target, out_json_bytes, 0644)
-        also copy children/*.json alongside out.json
+```go
+// milestone_controller.go:672-676 (verified)
+if expected == 0 {
+    // Genuine leaf — planner authored no Phase children.
+    logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
+    return r.patchMilestoneSucceeded(ctx, ms)
+}
 ```
 
-The salvage `in.json` files already carry `dispatch.parentName` in the `dispatch` struct field (confirmed from `examples/projects/dogfood/salvage-20260618/pvc-envelopes/envelopes/045b44c8.../in.json`). The field is populated by `DispatchMeta.ParentName` in `pkg/dispatch/envelope.go`. No new parsing infrastructure needed.
+The defect: when `out.ExitCode != 0` AND `out.ChildCount == 0`, this arm fires, marking the parent Succeeded. A planner that failed with zero children is NOT a genuine leaf — it is a failed planner. The `expected == 0` case must first check `out.ExitCode`.
 
----
+The plan controller has the same structural issue at `plan_controller.go:691-700` (the `expected == 0` arm for the `handlePlannerJobCompletion` path), but plan planner failures manifest differently (they fail the reconcileWaveMaterialization path, not patchPlanSucceeded directly), and the D4 report observed it at the phase level.
 
-## Budget-Bypass Resume Correctness: No New Stack
+### Fix shape
 
-The `project_controller.go:1257` bypass-clears-to-Pending bug requires changing `PhasePending` → `PhaseRunning` in `handleBudgetGate`. No new library. The fix is a one-line constant swap in the existing status-patch block.
+In `handleJobCompletion` for both `MilestoneReconciler` and `PhaseReconciler`, immediately before the `expected == 0 → patchSucceeded` arm, add:
 
-The cap-raise ergonomics improvement (raising absolute cap should not leave rolling cap re-halting) requires a guard in `handleBudgetGate` that checks both caps simultaneously before clearing `BudgetExceeded`. Again, pure logic in existing code, no new dependency.
+```go
+if envReadOK && out.ExitCode != 0 {
+    // Planner failed — do NOT succeed the parent as a leaf.
+    // Fail (or retry) instead. A failed planner with zero children is not
+    // a genuine leaf; it is a broken planner that must be re-run.
+    return r.patchMilestoneFailed(ctx, ms, "PlannerFailed",
+        fmt.Sprintf("planner Job exited %d with 0 children (not a leaf)", out.ExitCode))
+}
+```
 
----
+The existing `patchMilestoneFailed`/`patchPhaseFailed` functions already exist and set `Status.Phase = "Failed"` plus a `ConditionFailed` condition. The retry path is `tide resume --retry-failed`, which already handles Failed phases and milestones (validated in v1.0.1 Phase 12).
 
-## What NOT to Add
+For the `!envReadOK` case (read error): the existing behavior (requeue, let the fallback BoundaryDetected path handle it) is already correct and should not change — we only know to fail when we can actually read the exit code.
 
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| Any content-addressed storage library | Name-based identity suffices; CAS adds complexity without solving the edit-after-halt problem | `filepath.Join` with stable-key directory |
-| Prompt hashing as primary identity | Breaks when operator edits outcome prompt between runs | CRD name (`dispatch.parentName` from `in.json`) |
-| UID-rewrite import (copy old-uid → new-uid) | Requires live cluster + two-phase apply-then-copy; race window; not idempotent | Stable-key directory (offline, idempotent) |
-| New K8s ConfigMap/Secret per envelope | Adds etcd objects, violates no-extra-persistence constraint, hits 1.5 MiB etcd limit at scale | PVC filesystem + CRD annotation |
-| External resume-state database | Violates spec constraint: resumption state = indegree map + completed-task set only | PVC files + rederivable from artifacts |
-| Merkle tree or DAG diff library | Envelope adoption is per-object (one `out.json` per CRD name), not a block tree | Single-file JSON read + validate |
+**Stack additions required:** None. `patchMilestoneFailed`, `patchPhaseFailed` exist. The condition type `tidev1alpha2.ConditionFailed` exists. The retry verb `tide resume --retry-failed` is implemented.
+
+**Do NOT add:**
+- Automatic planner retry inside the controller (re-dispatch on failure is `tide resume --retry-failed`, not a controller backoff loop)
+- A new condition type for "planner failed with zero children"
+- Any change to `handleJobCompletion` for `ProjectReconciler` without separately verifying — project-level planner failures may need the same guard but it was not the observed defect and should be verified independently
 
 ---
 
@@ -236,41 +197,57 @@ The cap-raise ergonomics improvement (raising absolute cap should not leave roll
 
 **Zero new `require` entries.**
 
-All implementation uses:
-- `path/filepath` (stdlib, already used in `FilesystemEnvelopeReader`)
-- `encoding/json` (stdlib, already used throughout)
-- `crypto/sha256` (stdlib, already in `internal/credproxy/token.go`) — optional for the write-side integrity checksum
-- Standard `os.ReadFile` / `os.WriteFile` / `os.MkdirAll` (stdlib)
-- `github.com/cespare/xxhash/v2` is already an indirect dep and could be used for non-crypto fingerprinting, but is not needed
+All four fixes use only:
+- Existing controller-runtime types: `client.MergeFrom`, `ctrl.Result`, `meta.SetStatusCondition`
+- Existing TIDE types: `tidev1alpha2.PhaseRunning`, `tidev1alpha2.ConditionReady`, `tidev1alpha2.ConditionFailed`
+- Existing TIDE functions: `budget.RollUpUsage`, `patchMilestoneFailed`, `patchPhaseFailed`, `r.Status().Patch`
+- Chart values: `plannerConcurrency`, `executorConcurrency` in `charts/tide/values.yaml`
 
-No production code changes require a new module.
+No new packages, no new `require` entries, no external queues or schedulers.
 
 ---
 
-## Summary
+## Summary Table
 
-| Question | Answer |
-|----------|--------|
-| How to find a pre-authored envelope after UID churn? | Stable-key directory `envelopes-by-name/{level}/{crdName}/out.json` written at planner completion, checked before dispatch |
-| What identity scheme? | CRD name (from `in.json: dispatch.parentName`) — not prompt hash, not UID-rewrite |
-| What hashing libraries needed? | None for identity. `crypto/sha256` (already present) for optional integrity checksum only |
-| Does planner-skip need new controller-runtime patterns? | No. It is a pre-dispatch early-return mirroring the existing child-existence idempotency guard at `milestone_controller.go:304` |
-| New go.mod entries? | Zero |
-| New API surface? | `ReadByName` on `EnvelopeReader` interface + `WriteStableKey` method + `AnnotationEnvelopeAdoptedFrom` constant + `tide import-envelopes` subcommand |
+| Defect | Fix mechanism | Integration point | New dep? |
+|--------|--------------|-------------------|----------|
+| D1 — cost rollup under adoption | Unblock D2 so `PhaseRunning` is reached; existing `budget.RollUpUsage` path already correct | `project_controller.go` adoption guard | None |
+| D2 — lifecycle stalls at Initialized | Patch `Project.Status.Phase = PhaseRunning` when adoption guard fires and project is still Initialized | `project_controller.go:reconcileProjectPlannerDispatch` | None |
+| D3 — no concurrency cap | Lower chart defaults: `plannerConcurrency: 4`, `executorConcurrency: 8`; existing `pool.Acquire` already enforces the cap | `charts/tide/values.yaml` | None |
+| D4 — false Succeeded on failed planner | Add `if envReadOK && out.ExitCode != 0 { patchFailed }` before the `expected == 0 → patchSucceeded` arm | `milestone_controller.go`, `phase_controller.go` in `handleJobCompletion` | None |
+
+---
+
+## What NOT to Add (Explicit Prohibition)
+
+| Avoid | Why |
+|-------|-----|
+| `MaxConcurrentReconciles` change to fix D3 | Bounds reconcile goroutines, not in-flight Jobs — wrong lever |
+| External work queue (Redis, NATS, etc.) | Pool semaphore already IS the work queue; adding an external queue violates no-external-DB constraint and adds ops burden |
+| Argo Workflows / Tekton for concurrency | TIDE owns the DAG; waves are derived, not declared as Workflow templates (spec anti-pattern, enforced) |
+| Per-Project planner pools | Out of scope for v1.0.6; shared pool is correct for single-project dogfood run |
+| Automatic planner retry in controller | Retry is `tide resume --retry-failed`; controller retry loops add complexity and re-spend risk |
+| `ImportReconciler` lifecycle hook for D2 | ProjectReconciler owns Project phase; cross-reconciler status writes violate the ownership model |
+| New budget package / second RollUpUsage callsite for D1 | Existing path is correct once D2 is unblocked; a second callsite creates double-counting risk |
+| Kubernetes `ResourceQuota` as the OOM fix | Complementary but does not replace pool; adds operator onboarding burden |
 
 ---
 
 ## Sources
 
-- `internal/dispatch/podjob/backend.go` — `FilesystemEnvelopeReader.ReadOut` reads `WorkspaceRoot/{projectUID}/workspace/envelopes/{taskUID}/out.json` (HIGH confidence, live code)
-- `internal/dispatch/podjob/names.go:SUB-03` — `AlreadyExists`-is-idempotent-success, the canonical TIDE idempotency model (HIGH confidence, live code)
-- `internal/controller/milestone_controller.go:304` — existing child-existence idempotency guard; the planner-skip mirrors this structure exactly (HIGH confidence, live code)
-- `pkg/dispatch/envelope.go` — `ValidateAPIVersionKind`, `EnvelopeOut`, `DispatchMeta.ParentName` field (HIGH confidence, live code)
-- `examples/projects/dogfood/salvage-20260618/pvc-envelopes/envelopes/045b44c8.../in.json` — confirms `dispatch.parentName` carries the CRD name (`milestone-01-codex-subagent`), `level` carries `milestone` (HIGH confidence, live salvage data)
-- `go.mod` — `github.com/cespare/xxhash/v2 v2.3.0` is already an indirect dep; no new `require` entries needed (HIGH confidence, live file)
-- `api/v1alpha2/shared_types.go:216,253` — annotation constant pattern for `AnnotationBillingResumedAt` / `AnnotationFailureResumedAt` (HIGH confidence, live code)
-- Go stdlib documentation — `path/filepath`, `crypto/sha256`, `os`, `encoding/json` (HIGH confidence, stdlib)
+- `internal/pool/pool.go` — `Pool.Acquire`/`Release`/`PreCharge` via `chan struct{}` semaphore; `PreCharge` lists live Jobs by label selector (HIGH confidence, live code, read directly)
+- `cmd/manager/main.go:343-353` — `plannerPool` and `executorPool` constructed with `pool.New(cfg.PlannerConcurrency, "planner")`; both `PreCharge`d at startup; `plannerPool` wired into all five planner reconcilers (HIGH confidence, live code, read directly)
+- `charts/tide/values.yaml:78-79` — `plannerConcurrency: 16`, `executorConcurrency: 4` confirmed (HIGH confidence, live file, read directly)
+- `internal/config/config.go` — `Config.PlannerConcurrency` default 16, `ExecutorConcurrency` default 4; config validated >= 1 (HIGH confidence, live code, read directly)
+- `internal/controller/milestone_controller.go:673-676` — `expected == 0 → patchMilestoneSucceeded` without exit-code check; confirmed D4 gap (HIGH confidence, live code, read directly)
+- `internal/controller/phase_controller.go:593-596` — same `expected == 0 → patchPhaseSucceeded` gap (HIGH confidence, live code, read directly)
+- `internal/controller/phase_controller.go:525-533` — `setBillingHaltIfNeeded` already gated on `envReadOK && out.ExitCode != 0`; D4 fix mirrors this pattern (HIGH confidence, live code, read directly)
+- `internal/controller/project_controller.go:1088-1133` — Phase 30 adoption guard returns `ctrl.Result{}` without advancing `Status.Phase` from Initialized; confirmed D2 root (HIGH confidence, live code, read directly)
+- `internal/controller/milestone_controller.go:587-590` — `budget.RollUpUsage` gated on `isFirstCompletion && envReadOK && project != nil`; reachable only via `handleJobCompletion` (planner Job completion path, not import path); confirmed D1 root (HIGH confidence, live code, read directly)
+- `internal/controller/import_controller.go` — `succeedImport` sets `ConditionImportComplete=True` but performs no Project phase transition; ImportReconciler has no Project.Status.Phase write; confirmed D2 root (HIGH confidence, live code, read directly)
+- controller-runtime v0.24.x docs — `controller.Options{MaxConcurrentReconciles}` documents goroutine concurrency, not Job count (HIGH confidence, verified against existing code usage in all SetupWithManager calls)
 
 ---
-*Stack research for: TIDE v1.0.3 — Planning Resumption & Cost Resilience*
-*Researched: 2026-06-18*
+
+*Stack research for: TIDE v1.0.6 — Adoption-Path Correctness & Dispatch Safety*
+*Researched: 2026-06-28*

@@ -1,614 +1,405 @@
-# Architecture Research: Plan-Import / Envelope Resumption
+# Architecture Research: v1.0.6 Adoption-Path Correctness & Dispatch Safety
 
-**Domain:** TIDE controller integration — plan-import and envelope resumption for v1.0.3
-**Researched:** 2026-06-18
-**Confidence:** HIGH (based on direct code reading of all five integration sites)
-
----
-
-## Context: The UID-Churn Crux
-
-Every TIDE CR gets a K8s-assigned UID at creation time. The PVC envelope path is:
-
-```
-/workspaces/<projectUID>/workspace/envelopes/<parentUID>/{in.json,out.json,children/*.json}
-```
-
-A salvaged run (the dogfood `salvage-20260618` tree — 3 milestones, 15 phases, 42 plans,
-~$90 of planning) has envelopes keyed by the OLD UIDs from the aborted run. A fresh
-`kubectl apply` of a new Project gives every CR a new UID assigned by the K8s API server.
-The salvaged paths and the new CRs point to entirely different address spaces on the PVC.
-This is the crux that any import approach must solve.
+**Domain:** TIDE controller corrective patch — four defects on the import/adoption path (D1–D4)
+**Researched:** 2026-06-28
+**Confidence:** HIGH (all findings from direct code reading at HEAD; verified line numbers cited)
 
 ---
 
-## Existing Dispatch / Skip / Resume Flow (as-built)
+## Context
 
-### Planner-dispatch skip check — where it lives
+This document maps each of D1–D4 from `run-2b-FINDINGS.md` to the exact files and functions
+that must change. All existing infrastructure is already in place (global Execution DAG, layered
+Kahn, shared dispatch helpers, reporter Jobs, CRD-`.status`-only). This is a corrective patch
+on those seams, not new architecture.
 
-All five planner dispatch sites follow the same pattern. The canonical reference is
-`MilestoneReconciler.reconcilePlannerDispatch` in `internal/controller/milestone_controller.go`.
-The skip check is at Step 2b (lines ~304-326):
+---
 
-```
-Step 2b: Idempotency guard — skip NEW planner dispatch when the Milestone
-         already has >=1 child Phase (matched by spec.milestoneRef or ownerRef).
-```
+## D2 + D1: The Single Lifecycle Seam
 
-For the Project level, `reconcileProjectPlannerDispatch` in `project_controller.go`
-(lines ~988-995) uses a different guard: it checks whether a planner Job named
-`tide-project-<uid>-1` already exists in etcd.
+### What the defect is
 
-In both cases, the system has **no awareness of pre-existing envelopes** on the PVC. The
-skip is triggered entirely by K8s objects (child CRs or the planner Job itself). There is no
-"does out.json exist?" pre-check before dispatching.
+**D2**: After `ImportComplete=True`, `project.Status.Phase` stays `Initialized`. The adoption guard
+returns early without advancing the Project to `Running`. Anything keyed off `Running` — including
+the budget gate's halt-on-cap logic — never observes the project as actively spending.
 
-### Envelope read path
+**D1**: `Project.Status.Budget.CostSpentCents` (and `TokensSpent`) stays at zero during the
+adoption planning cascade. The metered `budget.absoluteCapCents` gate cannot halt because
+spend is never tallied. The run spent blind; only the node OOM stopped it.
 
-`FilesystemEnvelopeReader.ReadOut` (`internal/dispatch/podjob/backend.go` lines 94-105)
-constructs the path purely from `(projectUID, taskUID)` arguments:
+D1 and D2 share one root: the adoption guard in `reconcileProjectPlannerDispatch` returns before
+the line that sets `PhaseRunning`.
+
+### Exact seam
+
+**File:** `internal/controller/project_controller.go`
+**Function:** `reconcileProjectPlannerDispatch`
+
+The normal non-adoption path (line 1203–1215) does:
 
 ```go
-path := filepath.Join(r.WorkspaceRoot, projectUID, "workspace", "envelopes", taskUID, "out.json")
+// Step 10: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
+patch := client.MergeFrom(project.DeepCopy())
+project.Status.Phase = tidev1alpha2.PhaseRunning
+meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+    Type:   tidev1alpha2.ConditionAuthoringPlanner,
+    ...
+})
+if err := r.Status().Patch(ctx, project, patch); err != nil { ... }
 ```
 
-The reporter job (`BuildReporterJob` in `reporter_jobspec.go`) mounts the PVC at
-`SubPath: fmt.Sprintf("%s/workspace", project.UID)` and receives flags
-`--project-uid=<project.UID>` and `--task-uid=<parentUID>`. The path key is always
-**the current UID at the time of the call**. Salvaged envelopes under old UIDs are
-unreachable without an explicit bridge.
-
-### "Valid envelope" check
-
-There is no explicit validity check beyond "does `out.json` parse as `EnvelopeOut`?".
-The `EnvelopeOut.TaskUID` field echoes back from `EnvelopeIn.TaskUID`, but no reconciler
-validates `out.TaskUID == currentObject.UID`. The caller treats any parseable `out.json`
-at the expected path as authoritative. A copied envelope re-keyed to the new UID path is
-treated as valid as long as the JSON parses — the import seam can exploit this.
-
----
-
-## Candidate Approaches
-
-### Approach A: Name-Based / Stable-Plan-Key Envelope Lookup
-
-**Core idea:** Change `FilesystemEnvelopeReader.ReadOut` to search for an existing envelope
-by a fallback key derived from the CR's `metadata.name` rather than only by UID.
-
-**Where it hooks:** `FilesystemEnvelopeReader.ReadOut` would grow a secondary resolution
-path:
-
-```
-primary:  workspaceRoot/<projectUID>/workspace/envelopes/<objectUID>/out.json
-fallback: workspaceRoot/<projectUID>/workspace/envelopes/by-name/<objectName>/out.json
-```
-
-The planner-skip checks at Step 2b would also need updating to call this fallback read
-and treat a hit as "already completed" — currently they test only child CR existence.
-
-**New Project spec state needed:**
-If the salvaged envelopes are in a different project's workspace (different PVC subPath),
-a `spec.importSource.pvcSubPath` field is required. For same-project salvage, no new
-field is needed.
-
-**Why Approach A breaks down for `salvage-20260618`:**
-The salvaged `pvc-envelopes.tgz` contains envelopes at `envelopes/<oldUID>/out.json` paths
-only — the original TIDE run never wrote `envelopes/by-name/<name>/` paths, because that
-path structure did not exist. Approach A therefore requires a migration step to create
-by-name copies or symlinks. This migration is functionally equivalent to what Approach B
-does explicitly, but with added permanent complexity to the hot read path (dual-path
-resolution on every `ReadOut` call, cross-project pollution risk if name-uniqueness is not
-enforced globally). Approach A is the right choice only if the system had been writing
-by-name paths from the start.
-
----
-
-### Approach B: UID-Rewrite Import Step (RECOMMENDED)
-
-**Core idea:** A one-shot pre-reconcile step reads the salvage manifest, materializes the
-CR tree in K8s (which assigns new UIDs), then dispatches a `tide-import` Job that copies
-the old-UID envelope trees to the new-UID paths. After the Job succeeds, the normal
-reconcile flow finds:
-- Child CRs already present in etcd (skip guards fire naturally).
-- Envelopes at the correct new-UID paths (ReadOut succeeds).
-
-The five reconcilers and the reporter job are **unchanged** — they see exactly what they
-would see after a normal planner run. No special import logic runs in the steady-state
-reconcile.
-
-**Why Approach B is correct:**
-- The existing planner-skip guards are proven and battle-tested across 26 phases. They test
-  child CR existence + Job/envelope presence. Approach B satisfies both conditions without
-  modifying the guards.
-- The envelope path contract (`envelopes/<uid>/out.json`) is used by five reconcilers, the
-  reporter job, and two `EnvelopeReader` implementations. Changing the path scheme risks
-  regression across all of them. Approach B leaves the path contract untouched.
-- The salvaged tgz already has old-UID paths. Approach B re-keys them as a one-time step.
-
----
-
-## Recommended Architecture: Approach B in Detail
-
-### System Overview
-
-```
-  IMPORT PHASE (one-shot, pre-reconcile, gated by ImportComplete condition)
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  Operator creates Project with spec.importSource set                     │
-  │                                                                          │
-  │  ImportController (new — internal/controller/import_controller.go)       │
-  │    State machine: (absent) → Pending → CreatingCRs                       │
-  │                              → CopyingEnvelopes → Complete / Failed      │
-  │                                                                          │
-  │  CreatingCRs step:                                                       │
-  │    Reads SeedManifestConfigMap (name → oldUID mapping)                   │
-  │    kubectl-creates Milestone/Phase/Plan/Task CRs from seed               │
-  │    K8s assigns NEW UIDs to each CR                                       │
-  │    Records (name → oldUID, name → newUID) rekey table in a ConfigMap     │
-  │                                                                          │
-  │  CopyingEnvelopes step:                                                  │
-  │    Dispatches tide-import Job (cmd/tide-import/main.go)                  │
-  │      mounts salvage PVC subPath (old envelopes) read-only                │
-  │      mounts new project PVC subPath read-write                           │
-  │      for each (oldUID, newUID) pair:                                     │
-  │        cp -n envelopes/<oldUID>/ envelopes/<newUID>/  (no-clobber)       │
-  │        patch out.json: if taskUID != newUID → rewrite to newUID          │
-  │    Sets ImportComplete=True condition on Project.Status                  │
-  └──────────────────────────────────────────────────────────────────────────┘
-              │
-              │ ImportComplete=True
-              ▼
-  NORMAL RECONCILE PHASE (existing, UNCHANGED)
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  ProjectReconciler.reconcileProjectPlannerDispatch                       │
-  │    Step 2b: planner Job tide-project-<newUID>-1 not found                │
-  │    Project.Status.Phase == Running                                        │
-  │    → handleProjectJobCompletion called via TTL/GC branch                 │
-  │      (project_controller.go ~970-975: "envelope lives on PVC keyed by   │
-  │       UID, not on the Job; fall through to completion")                  │
-  │    → ReadOut succeeds at envelopes/<newProjectUID>/out.json              │
-  │    → reporter Job spawned, reads out.json, materializes child Milestones │
-  │      (already in etcd with new UIDs — import created them)               │
-  │                                                                          │
-  │  MilestoneReconciler Step 2b:                                            │
-  │    Child Phase CRs already exist (spec.milestoneRef match)               │
-  │    → planner dispatch skipped; succession proceeds                       │
-  │                                                                          │
-  │  ... repeats at Phase → Plan levels ...                                  │
-  │                                                                          │
-  │  TaskReconciler:                                                         │
-  │    Task CRs from seed carry DependsOn edges                              │
-  │    → assembleProjectDepGraph picks them up on first reconcile            │
-  │    → global wave schedule derived normally by deriveGlobalWaves          │
-  │    → Tasks with existing out.json are treated as completed               │
-  │      (wave derivation advances based on Task.Status.Phase == Succeeded)  │
-  └──────────────────────────────────────────────────────────────────────────┘
-```
-
-### Component Boundaries
-
-| Component | File | New or Modified | Responsibility |
-|-----------|------|-----------------|----------------|
-| `ImportSourceRef` struct | `api/v1alpha2/project_types.go` | NEW field on `ProjectSpec` | Operator-declared reference: seed ConfigMap name + salvaged PVC subPath |
-| `ImportController` | `internal/controller/import_controller.go` | NEW controller | State machine: materialize CRs, dispatch tide-import Job, set ImportComplete condition |
-| `tide-import` binary | `cmd/tide-import/main.go` | NEW binary | In-pod: copies old-UID envelope trees to new-UID paths; patches `out.json` TaskUID |
-| `reconcileProjectPlannerDispatch` | `internal/controller/project_controller.go` | MODIFIED (one guard) | Park if `spec.importSource != nil` and `ImportComplete != True` |
-| `reconcilePlannerDispatch` | `milestone_controller.go`, `phase_controller.go`, `plan_controller.go` | MODIFIED (same guard, three sites) | Same park condition at milestone/phase/plan levels |
-| `FilesystemEnvelopeReader.ReadOut` | `internal/dispatch/podjob/backend.go` | UNCHANGED | Reads `envelopes/<uid>/out.json` — import puts files there |
-| `BuildReporterJob` | `internal/controller/reporter_jobspec.go` | UNCHANGED | Reporter reads envelopes keyed by new UID, which import copied |
-| Wave derivation | `internal/controller/project_controller.go` | UNCHANGED | Operates on Task CRs; import materializes them via normal creation |
-
-### New ProjectSpec Field
+The adoption guard (lines 1105–1133, Phase 30 RESUME-PARTIAL-02) returns before that:
 
 ```go
-// In api/v1alpha2/project_types.go, added to ProjectSpec:
-
-// ImportSource, when set, activates the one-shot envelope-import path.
-// After the import completes (ImportComplete condition on Status), the
-// reconciler proceeds identically to a fresh project — no import logic
-// runs in the steady-state reconcile.
-// +optional
-ImportSource *ImportSourceRef `json:"importSource,omitempty"`
-```
-
-```go
-// New type in api/v1alpha2/import_types.go:
-
-// ImportSourceRef carries the two references an import needs.
-type ImportSourceRef struct {
-    // SeedManifestConfigMap names a ConfigMap in the project namespace
-    // carrying the seed manifest JSON (name-to-old-UID mapping for every
-    // Milestone, Phase, Plan, and Task to be created).
-    // +kubebuilder:validation:MinLength=1
-    SeedManifestConfigMap string `json:"seedManifestConfigMap"`
-
-    // SalvagedPVCSubPath is the sub-path within the shared tide-projects PVC
-    // where the salvaged envelopes reside, e.g. "<oldProjectUID>/workspace".
-    // The import Job mounts this sub-path read-only alongside the new
-    // project's workspace.
-    // +kubebuilder:validation:MinLength=1
-    SalvagedPVCSubPath string `json:"salvagedPVCSubPath"`
+if metav1.IsControlledBy(&msList.Items[i], project) {
+    logf.FromContext(ctx).V(1).Info("import adopted; skipping project planner dispatch", ...)
+    return ctrl.Result{}, nil   // <-- returns here; PhaseRunning never set
 }
 ```
 
-### Seed Manifest ConfigMap
+**Fix for D2**: Before the `return ctrl.Result{}, nil` in the adoption guard, add a status
+patch that sets `project.Status.Phase = tidev1alpha2.PhaseRunning`. This is a narrow
+one-line addition at a single site, idempotent (Initialized → Running is a no-op if already
+Running), and does not affect any other adoption guard invariant.
 
-Carries a structured JSON document mapping each CR's stable name to its salvaged UID:
+**Fix for D1**: The `budget.RollUpUsage` calls at the phase and plan completion seams already
+exist and already reference the correct project object. They were not firing during the run
+because the node OOM killed jobs before they completed. However, D1's headline claim
+("budget.absoluteCapCents cannot enforce") also requires that the budget gate halts on each
+ProjectReconciler reconcile. The `handleBudgetGate` in `reconcileProjectPhase2` already does
+this — but it checks `IsCapExceeded` against `CostSpentCents`, which is zero when jobs are
+killed before completing. The fix for D1 is therefore primarily ensuring that:
 
-```json
-{
-  "apiVersion": "tideproject.k8s/v1",
-  "kind": "ImportSeedManifest",
-  "milestones": [
-    {
-      "name": "milestone-01-codex-subagent",
-      "savedUID": "df5a0c1f-...",
-      "dependsOn": [],
-      "status": "Succeeded"
-    }
-  ],
-  "phases": [
-    {
-      "name": "phase-01-provider-switch",
-      "milestoneRef": "milestone-01-codex-subagent",
-      "savedUID": "...",
-      "dependsOn": [],
-      "status": "Succeeded"
-    }
-  ],
-  "plans": [...],
-  "tasks": [...]
-}
-```
+1. The project phase advances to `Running` (D2 fix), which correctly represents the lifecycle
+   state and ensures the `handleBudgetGate` logic sees the correct phase for bypass/halt
+   decisions (phase=`Initialized` passes through the budget gate today — it only halts on
+   `PhaseBudgetExceeded`).
+2. No additional skip path silently suppresses rollup for adopted plans/phases: confirmed
+   absent. The `if project.Spec.ImportSource != nil { ... skip rollup ... }` exists only in
+   `handleProjectJobCompletion` at line 1306 (project-level planner rollup — correct, because
+   the project planner doesn't run under adoption). Phase and plan `handleJobCompletion`/
+   `handlePlannerJobCompletion` have NO import-source skip — they call `budget.RollUpUsage`
+   normally when `isFirstCompletion && envReadOK && project != nil`.
 
-The `status` field is used by the ImportController to patch each CR's initial
-`Status.Phase` after creation — a Milestone whose entire Phase tree is imported should be
-patched to `Succeeded` immediately so BoundaryDetected succession fires on first reconcile
-without waiting for children to re-complete.
+The D2 fix (advancing to `Running`) is the necessary condition for D1's budget gate to fire
+correctly. No additional D1-specific code change is needed beyond D2's patch — the rollup
+infrastructure is correct; the lifecycle state is wrong.
 
-The operator generates this ConfigMap from `salvage-20260618/SEED-OUTLINE.md` and the
-unpacked `pvc-envelopes.tgz` using the `tide import seed` CLI helper (Phase C-01 below).
+### Component boundary
 
-### Import Controller State Machine
+| What changes | File | Function | Change type |
+|---|---|---|---|
+| Advance Phase=Running under adoption | `internal/controller/project_controller.go` | `reconcileProjectPlannerDispatch` | MODIFIED (add status patch before adoption-guard return) |
+| Budget gate fires on Running | `internal/controller/project_controller.go` | `handleBudgetGate` (called from `reconcileProjectPhase2`) | UNCHANGED (already correct once Phase=Running) |
+| Phase/plan rollup | `internal/controller/phase_controller.go`, `plan_controller.go` | `handleJobCompletion`, `handlePlannerJobCompletion` | UNCHANGED (already call `budget.RollUpUsage`) |
 
-```
-Status.ImportPhase transitions on Project.Status.Conditions:
+### Existing code that must NOT change
 
-  (no ImportSource set) → ImportController does not watch
+- The existing project-level rollup skip at `handleProjectJobCompletion` line 1306
+  (`if project.Spec.ImportSource != nil { skip rollup }`) is **correct**: the project-level
+  planner did not run under adoption, so there is no planner cost to roll up at the project
+  level. Do not remove it.
+- The Phase 30 adoption guard itself (the `metav1.IsControlledBy` check) stays intact. The
+  fix is additive: a status patch BEFORE the `return`, not a removal of the guard.
 
-  ImportSource set:
-    Pending          → (ImportController reconciles)
-    Pending          → CreatingCRs        applies seed CRs to etcd
-    CreatingCRs      → CopyingEnvelopes   dispatches tide-import Job
-    CopyingEnvelopes → Complete           tide-import Job Succeeded
-    *                → Failed             any terminal error
+---
 
-  Retry: operator adds annotation tideproject.k8s/retry-import=true
-    Failed → (annotation consumed) → Pending  (re-run from start)
-```
+## D3: Dispatch Concurrency Cap
 
-The `ConditionImportComplete` condition on `Project.Status` is the downstream gate checked
-by all five planner dispatch sites.
+### What the defect is
 
-### The ImportComplete Guard (all five dispatch sites)
+~60 subagent pods dispatched simultaneously (15 phase planners + 44 plan planners in parallel
+from independent wave derivation). Single-node kind OOM'd. The pool semaphore exists but does
+not limit in-flight running Jobs — it only serializes Job creation calls.
 
-Insert immediately after Step 1 (terminal short-circuit), before pool acquire and before
-Job creation (Pitfall 2 compliance):
+### Why the pool semaphore doesn't help today
+
+**File:** `internal/pool/pool.go`
+
+The `Pool.Acquire` / `Pool.Release` semaphore is held only during the `buildJobSpec + Create`
+window — `defer r.PlannerPool.Release()` fires when `reconcilePlannerDispatch` (a helper)
+returns, immediately after the Job is created. The pool is therefore a creation-rate limiter,
+not an in-flight-Job limiter. After the `Create` call returns, the slot is freed and another
+dispatch can proceed immediately, even though the just-created Job is still running.
+
+**Evidence:** `values.yaml` has `plannerConcurrency: 16`. With 59 independent plan/phase
+objects triggering dispatch within the same reconcile burst, 59 Job creation calls succeed
+in rapid sequence (each holding a pool slot for ~milliseconds during Create), resulting in
+59 simultaneously running pods.
+
+**Confirmed pool wiring (`cmd/manager/main.go` lines 343–353, 445, 475, 501):**
+- `plannerPool = pool.New(cfg.PlannerConcurrency, "planner")` — shared across Project, Milestone, Phase, Plan reconcilers
+- `executorPool = pool.New(cfg.ExecutorConcurrency, "executor")` — shared across Wave, Task reconcilers
+- `plannerPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=planner")` — counts in-flight at startup only
+
+### Fix: in-flight Job count gate at each dispatch site
+
+The fix is to count currently-running planner Jobs cluster-wide BEFORE acquiring the pool
+slot (or instead of the pool slot), and park (requeue) if the in-flight count is at or above
+the configured cap.
+
+**Insertion points** (one per dispatch function, same position — BEFORE `PlannerPool.Acquire`):
+
+| Level | File | Function | Lines (approx) |
+|---|---|---|---|
+| Milestone | `internal/controller/milestone_controller.go` | `reconcilePlannerDispatch` | before line 381 |
+| Phase | `internal/controller/phase_controller.go` | `reconcilePlannerDispatch` | before line 379 |
+| Plan | `internal/controller/plan_controller.go` | `reconcilePlannerDispatch` | before line 384 |
+| Project | `internal/controller/project_controller.go` | `reconcileProjectPlannerDispatch` | before line 1135 |
+
+The gate: count Jobs with label `tideproject.k8s/role=planner` (already stamped by
+`podjob.BuildJobSpec`) and `Status.Active > 0`. If `count >= cfg.PlannerConcurrency`, return
+`ctrl.Result{RequeueAfter: 5 * time.Second}, nil` (park, not fail). This reuses the label
+selector already used by `pool.PreCharge` at startup.
+
+**No change to the executor pool** — task executor dispatch is already gated by the Wave
+controller's wave-boundary failure semantics and the ExecutorPool semaphore, which is
+correctlysized. Wave-boundary failure contract is unaffected: failed tasks continue to let
+siblings in the same wave proceed; the cap only throttles cross-wave dispatch entry.
+
+**Why not change the pool semantics instead:** Changing `Pool` to hold the slot until Job
+completion would require wiring a Job-completion signal back to the pool, which introduces
+a goroutine leak risk and adds cross-reconciler state. The in-flight-count check is a simple
+`client.List` with a label selector, consistent with the PreCharge pattern already in the
+codebase. It also composites cleanly with the existing `PlannerPool.Acquire` — the count
+check parks before Acquire if the cluster is saturated, so the pool slot is only acquired
+when there is actually room.
+
+**The per-level cap is shared (one plannerConcurrency applies to all levels combined),
+preserving the spec's "size planner and executor pools separately" constraint**: planner levels
+(project/milestone/phase/plan) share one cap; executor levels (wave/task) share another.
+The pools are not unified. The new count check operates on the planner label selector, which
+covers all planner-kind Jobs regardless of level.
+
+**Default value change required:** `plannerConcurrency: 16` is too high for a single-node
+kind cluster. A sane single-node default is `plannerConcurrency: 3` (one per level type
+simultaneously). This is a `values.yaml` change only — no controller code change to defaults.
+Operators who know they have a multi-node cluster can increase it via `--set plannerConcurrency=N`.
+
+### Component boundary
+
+| What changes | File | Change type |
+|---|---|---|
+| In-flight count gate | `milestone_controller.go` `phase_controller.go` `plan_controller.go` `project_controller.go` | MODIFIED (add count-check before pool acquire at 4 dispatch sites) |
+| `values.yaml` default | `charts/tide/values.yaml` | MODIFIED (plannerConcurrency: 16 → 3) |
+| `Pool` itself | `internal/pool/pool.go` | UNCHANGED |
+| `ExecutorPool` wiring | `wave_controller.go`, `task_controller.go` | UNCHANGED |
+| Wave-boundary failure semantics | `depgraph.go`, `task_controller.go` | UNCHANGED |
+
+---
+
+## D4: Planner Failure Semantics (Phase + Milestone)
+
+### What the defect is
+
+A phase was marked `Succeeded` ("Plan children materialized") when its planner exited 1 with
+`childCount 0` and produced no plans. The `expected == 0` branch at
+`phase_controller.go:handleJobCompletion` line 593 leads unconditionally to
+`patchPhaseSucceeded` without checking whether the planner actually succeeded.
+
+The same pattern exists in the milestone controller.
+
+### Exact seam — Phase controller
+
+**File:** `internal/controller/phase_controller.go`
+**Function:** `handleJobCompletion` (line 467)
+
+The buggy branch (lines 590–597):
 
 ```go
-// Guard: if an ImportSource is declared, park until import completes.
-// Position: after terminal short-circuit, before pool acquire (Pitfall 2).
-if project.Spec.ImportSource != nil {
-    c := meta.FindStatusCondition(project.Status.Conditions, ConditionImportComplete)
-    if c == nil || c.Status != metav1.ConditionTrue {
-        logger.V(1).Info("import pending; holding planner dispatch", "project", project.Name)
-        return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+if envReadOK {
+    expected := out.ChildCount
+    if expected == 0 {
+        // Genuine leaf — planner authored no Plan children.
+        logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
+        return r.patchPhaseSucceeded(ctx, ph)   // <-- fires even on exitCode != 0
     }
-}
+    ...
 ```
 
-This guard is identical at all five planner dispatch sites
-(`reconcileProjectPlannerDispatch`, `MilestoneReconciler.reconcilePlannerDispatch`,
-`PhaseReconciler.reconcilePlannerDispatch`, `PlanReconciler.reconcilePlannerDispatch`,
-`TaskReconciler.reconcileDispatch`).
+**Fix:** Add an `out.ExitCode != 0` check before succeeding when `expected == 0`:
 
-### Data Flow: Import Path
-
-```
-Operator creates SeedManifestConfigMap + Project with spec.importSource set
-    ↓
-ImportController: Pending → CreatingCRs
-    reads SeedManifestConfigMap
-    creates Milestone/Phase/Plan/Task CRs (K8s assigns new UIDs)
-    records (name → oldUID, name → newUID) in rekey ConfigMap
-    patches each CR's Status.Phase to match salvaged status
-    → transition to CopyingEnvelopes
-
-ImportController: CopyingEnvelopes
-    creates tide-import Job (name: tide-import-<projectUID>)
-          |
-          | mounts: tide-projects at subPath/<oldProjectUID>/workspace (read-only)
-          | mounts: tide-projects at subPath/<newProjectUID>/workspace (read-write)
-          |
-          for each (oldUID, newUID) in rekey table:
-            if /new/envelopes/<newUID>/out.json does not exist:
-              cp -r /old/envelopes/<oldUID>/ /new/envelopes/<newUID>/
-            if /new/envelopes/<newUID>/out.json.taskUID != newUID:
-              rewrite taskUID field (read-modify-write with rename-atomic)
-          writes completion report to termination message
-
-ImportController: Job Succeeded → sets ConditionImportComplete=True
-
-ProjectReconciler: next reconcile
-    reconcileProjectPlannerDispatch:
-      ImportComplete guard passes
-      Step 2b: Job tide-project-<newUID>-1 not found
-      Phase == Running (patched by ImportController)
-      → handleProjectJobCompletion (TTL/GC branch, lines ~970-975)
-      → ReadOut(projectUID, projectUID) → succeeds (envelope copied)
-      → reporter Job spawned
-      → materializes child Milestones (already in etcd, ownerRef resolution fires)
-
-MilestoneReconciler: each Milestone
-    Step 2b: child Phases found by spec.milestoneRef match
-    → planner dispatch skipped
-    Phase == Succeeded (patched by ImportController)
-    → checkProjectComplete fires on next Project reconcile
-
-... repeats at Phase → Plan levels ...
-
-Wave derivation: assembleProjectDepGraph lists Tasks by project label
-    → edges from Task.Spec.DependsOn (imported from seed)
-    → deriveGlobalWaves computes fresh schedule from imported graph
-    → Tasks with Status.Phase == Succeeded: not re-dispatched (TaskReconciler terminal short-circuit)
-    → Tasks with missing status (partial salvage): normal dispatch fires
+```go
+if envReadOK {
+    expected := out.ChildCount
+    if expected == 0 {
+        if out.ExitCode != 0 {
+            // Planner failed (exitCode != 0) and produced no children.
+            // Must not succeed the parent — fail it instead.
+            return r.patchPhaseFailed(ctx, ph, "PlannerFailed",
+                fmt.Sprintf("phase planner exited %d with childCount 0", out.ExitCode))
+        }
+        // Genuine leaf (planner succeeded, authored no Plan children).
+        logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
+        return r.patchPhaseSucceeded(ctx, ph)
+    }
+    ...
 ```
 
-### Interaction with Global Execution DAG and Wave Derivation
+`patchPhaseFailed` must be verified or added. Check `phase_controller.go` for an existing
+`patchPhaseFailed` function — if absent, add it mirroring `patchPlanFailed` in
+`plan_controller.go` line 842.
 
-The import path materializes Task CRs carrying the same `dependsOn` edges declared in the
-seed manifest (from `SEED-OUTLINE.md`). No special handling is required:
+### Exact seam — Milestone controller
 
-- `assembleProjectDepGraph` lists Tasks by `owner.LabelProject` label. The ImportController
-  stamps this label on every Task CR at creation time (mirrors Phase 15 label discipline and
-  the WR-04 requirement that unlabeled Tasks generate an observable warning).
+**File:** `internal/controller/milestone_controller.go`
+**Function:** `handleJobCompletion` (line 517)
 
-- `deriveGlobalWaves` derives the schedule from whatever Task edges are present. Imported
-  Tasks with their original `dependsOn` declarations produce the same wave structure as the
-  original run.
+Same pattern at lines 670–677:
 
-- `checkGlobalCycleGate` runs identically — the salvaged plan passed cycle validation the
-  first time, so it will pass again. If the seed manifest was edited to introduce a cycle,
-  the `CycleDetected` condition surfaces normally.
+```go
+if envReadOK {
+    expected := out.ChildCount
+    if expected == 0 {
+        // Genuine leaf — planner authored no Phase children.
+        logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
+        return r.patchMilestoneSucceeded(ctx, ms)   // <-- same bug
+    }
+    ...
+```
 
-- Wave prune loop: Wave CRs are **not imported** (they are always re-derived). The import
-  does not create Wave CRs. `deriveGlobalWaves` creates them fresh on the first reconcile
-  after import. This is correct per PERSIST-03 / D-10 (schedule never stored in status).
+Same fix: add `out.ExitCode != 0` check before succeeding.
 
-- Task wave-index labels (`tideproject.k8s/wave-index`): set by `stampGlobalTaskLabels` on
-  the normal reconcile path after `deriveGlobalWaves` runs. The ImportController does not
-  set these; they are derived from the current graph, not imported from the salvage.
+### Plan controller — already correct (Phase 30 guard)
 
-**IMPORTANT: do not import Wave CRs or wave-index labels.** These are always rederived from
-the execution DAG per PERSIST-03. Importing a stale wave schedule would conflict with
-`deriveGlobalWaves` and produce incorrect task ordering.
+**File:** `internal/controller/plan_controller.go`
+**Function:** `handlePlannerJobCompletion` (line 508)
 
----
+The plan controller does NOT call `patchPlanSucceeded` in `handlePlannerJobCompletion`
+when `expected == 0`. Instead, when `expected == 0`, it falls through to the boundary-push
+trigger (line 725) and then clears the Running phase (line 730–738) — the plan-level
+`patchPlanSucceeded` is called from `reconcileWaveMaterialization` (line 1168) which is
+gated on `gates.BoundaryDetected(ctx, r.Client, plan, "Task")`, which requires at least
+one Task to have Succeeded. So a plan with `childCount 0` and `exitCode != 0` that clears
+Running will not get `Succeeded` stamped (no Tasks → `BoundaryDetected` returns false →
+the Succeeded path is unreachable). The Phase-30 guard the findings reference is this
+structural separation, not an explicit `exitCode` check. **Plan controller does not need
+this fix.**
 
-## Idempotency Analysis
+### Component boundary
 
-| Operation | Idempotency mechanism |
-|-----------|----------------------|
-| Creating CRs from seed manifest | Name-keyed check before Create; AlreadyExists = success |
-| Dispatching tide-import Job | Deterministic name `tide-import-<projectUID>`; AlreadyExists = success |
-| Copying envelope files | `cp -n` (no-clobber): skip if destination already exists |
-| Patching `out.json` TaskUID | Read-then-skip: if `taskUID == newUID`, do not rewrite |
-| Setting ImportComplete condition | `meta.SetStatusCondition` is idempotent |
-| Reporter Job spawn post-import | Existing `isFirstCompletion` + AlreadyExists guard in `handleProjectJobCompletion` |
-| Retry annotation handling | Annotation consumed on first observation (one-shot, mirrors bypass-push-lease pattern) |
-
-The whole flow is safe to restart at any point. A partial copy (tide-import Job killed mid-run)
-leaves some envelopes copied and some not. On Job retry, the no-clobber copy skips
-already-present envelopes and proceeds to the remaining ones.
-
----
-
-## Failure and Partial-Import Handling
-
-| Failure scenario | Detection | Recovery |
-|-----------------|-----------|----------|
-| SeedManifestConfigMap not found | ImportController `IsNotFound` → `ImportPhase=Failed` + condition | Operator creates ConfigMap; clear via retry annotation |
-| CR Create fails (validation error) | ImportController Create returns error → `ImportPhase=Failed` | Operator fixes CR spec; retry annotation |
-| tide-import Job fails | `isJobFailed` in ImportController → `ImportPhase=Failed` | Inspect Job logs; retry annotation re-dispatches Job |
-| Partial envelope copy (Job killed) | On retry: `cp -n` skips existing, copies remaining | Transparent |
-| Salvaged envelope corrupted | `ReadOut` returns parse error; reconciler logs non-fatal, defers to child-based BoundaryDetected succession | Child CRs exist; when all Succeed, level Succeeds normally |
-| No salvaged envelope for a CR | `ReadOut` returns not-found; reconciler falls through to normal planner dispatch | That CR re-plans fresh — correct for partial salvage |
-| ImportController restarted mid-state | State machine re-derives from `Status.ImportPhase` condition; idempotent steps skip already-done work | Automatic |
-
-The last two rows describe the **graceful partial salvage** behavior: levels with missing
-envelopes dispatch fresh planners; levels with present envelopes skip planner dispatch.
-No manual intervention required for partial salvage.
-
----
-
-## Patterns to Follow
-
-### Pattern 1: One-Shot Import Job as Deterministic, Idempotent Batch
-
-Name: `tide-import-<projectUID>`. BackoffLimit=2, TTLSecondsAfterFinished=600. Mirrors
-`tide-reporter-<uid>` and `tide-push-<uid>` naming. AlreadyExists on Create = idempotent
-success. ImportController does NOT re-create a succeeded import Job once
-`ImportComplete=True` is set.
-
-### Pattern 2: Annotation-Driven Retry (mirrors bypass-push-lease)
-
-When `ImportPhase=Failed`, operator adds annotation `tideproject.k8s/retry-import=true`.
-ImportController consumes the annotation, deletes the failed Job, resets ImportPhase to
-`Pending`, and retries. Mirrors `bypassPushLeaseAnnotation` pattern in
-`project_controller.go:124` exactly.
-
-### Pattern 3: Status Snapshot in Seed Manifest Drives CR Patching
-
-The seed manifest carries a `status` field per CR. The ImportController patches each CR's
-`Status.Phase` to the salvaged value immediately after creation. A `Succeeded` Milestone
-with `Succeeded` Phase children causes `BoundaryDetected` to return true on the first
-reconcile, advancing the succession without waiting for child re-execution. This is the
-key mechanism that avoids re-dispatching planners that have already run.
-
----
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Modifying the Envelope Path Contract
-
-**What:** Adding a by-name fallback to `FilesystemEnvelopeReader.ReadOut` so it searches
-`envelopes/by-name/<name>/out.json` when the UID path misses.
-
-**Why wrong:** The path contract (`envelopes/<uid>/out.json`) is used by five reconcilers,
-the reporter Job binary, and two `EnvelopeReader` implementations. A dual-path scheme adds
-permanent complexity to the hot read path, requires all future envelope writers to maintain
-both paths, and introduces cross-project pollution risk. The by-name paths don't exist in
-the salvaged tgz anyway — a migration step is required regardless.
-
-**Instead:** Approach B. The path contract stays clean; complexity is in the one-shot import.
-
-### Anti-Pattern 2: Importing Wave CRs
-
-**What:** Including Wave CRs in the seed manifest and creating them in ImportController's
-`CreatingCRs` step.
-
-**Why wrong:** Waves are derived from the execution DAG on every reconcile (PERSIST-03 /
-D-10). Importing a Wave CR with stale `TaskRefs` would conflict with `deriveGlobalWaves`
-which creates Waves named `tide-wave-<project>-<N>`. The prune loop would then try to
-delete the imported Waves if their index is outside the new schedule.
-
-**Instead:** Import only Milestone, Phase, Plan, and Task CRs. Wave CRs are always
-re-derived fresh.
-
-### Anti-Pattern 3: Setting TaskUID Rewrite Without Atomic Write
-
-**What:** Read `out.json`, modify the `taskUID` field, write back to the same path with
-`os.WriteFile`.
-
-**Why wrong:** If the tide-import Job is killed between the read and the write, the file is
-left empty or corrupted. On retry, the `cp -n` no-clobber skips the copy (destination exists)
-but the destination is now a corrupted file.
-
-**Instead:** Write to a temp file in the same directory, then `os.Rename` (atomic on Linux
-tmpfs/ext4). If the rename never completes, the original file is untouched; on retry the
-patch step re-runs cleanly.
-
-### Anti-Pattern 4: Patching Task Status.Phase to Succeeded Without Checking Wave Membership
-
-**What:** Blindly patching all imported Tasks to `Status.Phase=Succeeded` so the
-TaskReconciler terminal short-circuit fires on the first reconcile.
-
-**Why wrong:** If the salvaged Task was `Failed` or `Running` at the time of salvage, setting
-it to `Succeeded` creates an inconsistency between the envelope's `ExitCode` (non-zero) and
-the CR status. The budget rollup and failure-halt logic both key on `Task.Status.Phase`.
-
-**Instead:** The seed manifest carries the original `status` value. The ImportController
-patches each Task's Status.Phase to the salvaged value, not unconditionally to `Succeeded`.
-Failed Tasks from the salvaged run remain `Failed` — the operator can selectively retry them
-via the normal `tide resume --retry-failed` path.
-
-### Anti-Pattern 5: Importing Envelopes at the Manager's WorkspaceRoot vs PVC SubPath
-
-**What:** Mounting the PVC in the tide-import Job at the Manager's mount point (`/workspaces`
-with no subPath) and copying across the full tree.
-
-**Why wrong:** The Manager mounts the PVC at `/workspaces` (no subPath); Task pods mount with
-`subPath: {project-uid}/workspace`. The tide-import Job needs to write to the Task-pod
-subPath layout, not the Manager layout. Using the Manager's mount point means the import Job
-runs without namespace isolation between old and new project trees, risking accidental
-overwrite.
-
-**Instead:** Mount the PVC in the import Job with two explicit subPath mounts:
-`subPath: <oldUID>/workspace` at `/old-workspace` (read-only) and
-`subPath: <newUID>/workspace` at `/new-workspace` (read-write). This mirrors how Task pods
-mount their own slice of the PVC.
+| What changes | File | Function | Change type |
+|---|---|---|---|
+| `exitCode != 0` guard on childless success | `internal/controller/phase_controller.go` | `handleJobCompletion` | MODIFIED (add guard before `patchPhaseSucceeded` on `expected == 0`) |
+| `exitCode != 0` guard on childless success | `internal/controller/milestone_controller.go` | `handleJobCompletion` | MODIFIED (same guard) |
+| `patchPhaseFailed` helper | `internal/controller/phase_controller.go` | new function or existing | NEW or VERIFIED (mirror `patchPlanFailed` if absent) |
+| `patchMilestoneFailed` helper | `internal/controller/milestone_controller.go` | new function or existing | NEW or VERIFIED (mirror `patchPlanFailed` if absent) |
+| Plan controller | `internal/controller/plan_controller.go` | `handlePlannerJobCompletion` | UNCHANGED (already structurally correct) |
+| Project controller | `internal/controller/project_controller.go` | `handleProjectJobCompletion` | UNCHANGED (project succeeds via `checkProjectComplete` → BoundaryDetected, not childCount==0) |
 
 ---
 
 ## Build Order
 
-Respects import dependencies. The import feature is new infrastructure placed entirely
-outside the existing reconcile hot path.
+Dependencies between fixes:
 
 ```
-Phase A — Foundation (no controller changes, additive schema only)
+D2 (advance PhaseRunning under adoption)
+    └── D1 (budget rollup fires once lifecycle is correct)
+            ← these are a single commit / phase
 
-  A-01: Define ImportSourceRef struct and ImportSeedManifest schema
-        Files: api/v1alpha2/project_types.go (add ImportSource *ImportSourceRef field)
-               api/v1alpha2/import_types.go (new: ImportSourceRef, ImportSeedManifest)
-        Gate: make manifests generate; CRD YAML carries importSource field;
-              make test exits 0.
+D3 (in-flight count gate)
+    └── independent of D1/D2; can ship in parallel or before
 
-  A-02: Author tide-import binary (cmd/tide-import/main.go)
-        Reads rekey table from env-injected JSON; cp -n + TaskUID rename-atomic patch;
-        writes completion report to stdout for termination message.
-        Gate: unit tests offline with fake filesystem (testenv tempdir).
-
-Phase B — Import Controller and Guards
-
-  B-01: ImportController state machine
-        File: internal/controller/import_controller.go (new)
-        State: Pending → CreatingCRs → CopyingEnvelopes → Complete / Failed
-        CR materialization from SeedManifestConfigMap + rekey table.
-        Dispatches tide-import Job. Sets ConditionImportComplete.
-        Gate: envtest covering all state transitions + partial-failure recovery
-              + retry annotation + idempotent restart.
-
-  B-02: ImportComplete guard at all five planner dispatch sites
-        Files: project_controller.go (~line 950, after Step 1 terminal short-circuit)
-               milestone_controller.go (~line 243, same position)
-               phase_controller.go (equivalent position)
-               plan_controller.go (equivalent position)
-               task_controller.go (equivalent position)
-        Gate: existing envtest suite passes unmodified + new test per file:
-              "import-pending holds planner dispatch".
-
-Phase C — Operator Tooling
-
-  C-01: tide import seed CLI subcommand (cmd/tide/import_seed.go)
-        Reads salvage-20260618/SEED-OUTLINE.md + pvc-envelopes.tgz content.
-        Emits SeedManifestConfigMap YAML + ImportSourceRef YAML snippet to stdout.
-        Gate: golden-file test against salvage-20260618 fixtures.
-
-  C-02: Dogfood import end-to-end (test/integration/kind/import_test.go)
-        Applies salvage-20260618 fixtures to kind cluster.
-        Asserts all Milestones reach Succeeded without any planner re-dispatch.
-        Gate: IMPORT-E2E-01.
+D4 (childless-failed-planner guard at phase + milestone)
+    └── independent of all others; can ship in parallel
 ```
 
-**Dependencies between phases:**
-- A-01 must precede B-01 and B-02 (controller depends on API type).
-- A-02 must precede B-01 (ImportController dispatches the binary as a Job).
-- B-01 and B-02 can be developed in parallel once A-01 is complete.
-- C-01 and C-02 depend on B-01 + B-02 being complete.
+**Recommended sequencing:**
 
-**Carry-in debt to flag in PITFALLS.md:**
-- Status snapshot accuracy: if the seed manifest omits CR status patches, BoundaryDetected
-  may not fire, causing the Project to stall waiting for children that will never re-run.
-- TaskUID rename-atomic on shared PVC (tmpfs rename semantics vary by volume driver).
-- WR-04 label discipline: materialized Task CRs must carry `tideproject.k8s/project` label
-  at Create time, not via the backfill path, to appear in `assembleProjectDepGraph`.
+```
+Phase 1: D2 + D1 together (same seam)
+  Files: internal/controller/project_controller.go
+  Change: add Status.Phase=Running patch before adoption-guard return in
+          reconcileProjectPlannerDispatch
+  Tests: envtest that adopted project accrues CostSpentCents; envtest that
+         project Phase advances to Running after ImportComplete=True with
+         owned Milestones
+
+Phase 2: D3 (dispatch concurrency cap)
+  Files: internal/controller/milestone_controller.go
+         internal/controller/phase_controller.go
+         internal/controller/plan_controller.go
+         internal/controller/project_controller.go
+         charts/tide/values.yaml
+  Change: in-flight count gate before PlannerPool.Acquire at 4 dispatch
+          sites; default plannerConcurrency: 16 → 3
+  Tests: envtest that >N concurrent plans requeue (park) instead of
+         creating Jobs when cap is reached; unit test for count helper
+
+Phase 3: D4 (planner failure semantics)
+  Files: internal/controller/phase_controller.go
+         internal/controller/milestone_controller.go
+  Change: exitCode != 0 guard before patchPhaseSucceeded / patchMilestoneSucceeded
+          in the expected==0 branch; add patchPhaseFailed/patchMilestoneFailed
+          helpers if absent
+  Tests: envtest that a phase/milestone planner exiting 1 with childCount 0
+         marks the parent Failed (not Succeeded); mirrors the plan-level
+         test shape from Phase 30
+```
+
+Phase 2 and Phase 3 have no dependency on each other and can be developed in parallel.
+Phase 1 (D2+D1) is the highest-priority fix (it is the root of "spent blind") and should
+land first.
+
+---
+
+## What Is New vs. Modified
+
+| Component | Status | Notes |
+|---|---|---|
+| `reconcileProjectPlannerDispatch` (adoption guard) | MODIFIED | One status patch added before early return |
+| In-flight count gate at 4 dispatch sites | MODIFIED | Addition before existing PlannerPool.Acquire |
+| `values.yaml` plannerConcurrency default | MODIFIED | 16 → 3 |
+| `handleJobCompletion` exitCode guard (phase, milestone) | MODIFIED | One guard added per file |
+| `patchPhaseFailed` / `patchMilestoneFailed` | NEW (if absent) | Mirror `patchPlanFailed`; verify first |
+| `Pool` struct and `Acquire`/`Release` | UNCHANGED | Existing semaphore preserved |
+| `budget.RollUpUsage` | UNCHANGED | Already correct at phase/plan level |
+| `handleBudgetGate` | UNCHANGED | Already correct once PhaseRunning is set |
+| Wave-boundary failure contract | UNCHANGED | No change to depgraph, failure_halt, task dispatch |
+| Executor pool and wave dispatch | UNCHANGED | D3 cap is planner-only |
+| Plan controller `handlePlannerJobCompletion` | UNCHANGED | Already structurally guards childless success |
+| `import_controller.go` | UNCHANGED | D1/D2 fix is in project_controller, not import |
+
+---
+
+## Constraints Honored
+
+- **CRD-`.status`-only**: the D2 fix is a `Status().Patch` call, consistent with all other
+  lifecycle transitions. No new persistence surface.
+- **Resumability**: the `Phase=Running` patch survives controller restart. On the next
+  reconcile the adoption guard re-fires, and the status patch is idempotent (Running → Running
+  is a no-op via the `handleInitJobCompletion` cascade-13 guard, which skips re-stomping
+  forward phases).
+- **Separately-sized pools**: D3 adds a count check keyed on `tideproject.k8s/role=planner`
+  label — planner-only. The executor pool (`role=executor`) is untouched. Spec constraint
+  honored.
+- **Wave-boundary failure contract**: D3's park-on-cap is a requeue, not a failure. No
+  wave-boundary semantics are involved. Failed tasks → siblings continue as before.
+- **Cycle detection**: none of the four fixes touch `pkg/dag`, `checkGlobalCycleGate`, or
+  `assembleProjectDepGraph`. Cycle semantics are unaffected.
+- **Configurable policy (not baked in)**: D3's cap comes from `plannerConcurrency` in
+  `values.yaml` → `config.yaml` → `cfg.PlannerConcurrency`. No hardcoded value in the
+  controller body.
 
 ---
 
 ## Sources
 
-All findings are from direct reading of the production codebase at HEAD:
+All findings from direct code reading at HEAD of `internal/controller/`:
 
-- `internal/controller/project_controller.go` — `reconcileProjectPlannerDispatch` (lines ~941-1102), `handleProjectJobCompletion` (lines ~1117-1219), `assembleProjectDepGraph` + `deriveGlobalWaves` (lines ~1474-1728)
-- `internal/controller/milestone_controller.go` — `reconcilePlannerDispatch` (lines ~239-493), `handleJobCompletion` (lines ~507-717)
-- `internal/controller/reporter_jobspec.go` — `BuildReporterJob` (full file)
-- `internal/dispatch/podjob/backend.go` — `FilesystemEnvelopeReader.ReadOut` (lines ~94-105), `EnvelopeReader` interface
-- `pkg/dispatch/envelope.go` — `EnvelopeOut`, `EnvelopeIn`, `TerminationStub` (full file)
-- `api/v1alpha2/project_types.go` — `ProjectSpec` (lines ~299-388); `ImportSource` does not yet exist
-- `examples/projects/dogfood/salvage-20260618/SEED-OUTLINE.md` — 3 milestones, 15 phases, 42 plans salvage target
+- `project_controller.go`: `reconcileProjectPlannerDispatch` (lines 999–1218), `handleProjectJobCompletion` (lines 1233–1360), `reconcileProjectPhase2` (lines 313–378), `handleBudgetGate` (lines 1367–1464)
+- `phase_controller.go`: `handleJobCompletion` (lines 467–648), `reconcilePlannerDispatch` (lines 379–384 pool acquire)
+- `milestone_controller.go`: `handleJobCompletion` (lines 517–728), `reconcilePlannerDispatch` (lines 381–386 pool acquire)
+- `plan_controller.go`: `handlePlannerJobCompletion` (lines 508–740), `reconcileWaveMaterialization` (lines 1035–1176), `reconcilePlannerDispatch` (lines 385–389 pool acquire)
+- `import_controller.go`: `succeedImport` (lines 701–706) — sets ConditionImportComplete=True only, does NOT advance Project.Status.Phase
+- `internal/pool/pool.go`: `Pool.Acquire`, `Pool.Release`, `Pool.PreCharge` (full file)
+- `cmd/manager/main.go`: pool wiring (lines 343–353, 445, 475, 501, 529, 547)
+- `charts/tide/values.yaml`: `plannerConcurrency: 16`, `executorConcurrency: 4` (lines 78–79)
+- `internal/budget/tally.go`: `RollUpUsage` (lines 56–89)
+- `.planning/dogfood/run-2b-FINDINGS.md`: defect definitions D1–D4 (authoritative)
 
 ---
 
-*Architecture research for: TIDE v1.0.3 plan-import / envelope resumption*
-*Researched: 2026-06-18*
+*Architecture research for: TIDE v1.0.6 Adoption-Path Correctness & Dispatch Safety*
+*Researched: 2026-06-28*

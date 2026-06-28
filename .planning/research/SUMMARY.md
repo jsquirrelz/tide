@@ -1,206 +1,233 @@
 # Project Research Summary
 
-**Project:** TIDE v1.0.3 — Planning Resumption & Cost Resilience
-**Domain:** Kubernetes CRD operator — envelope-resumption, budget-halt correctness, plan-import
-**Researched:** 2026-06-18
-**Confidence:** HIGH
+**Project:** TIDE v1.0.6 — Adoption-Path Correctness & Dispatch Safety
+**Domain:** Corrective patch — Go/Kubernetes controller-runtime operator; four code-level defects on the import/adoption path exposed by dogfood run #2b
+**Researched:** 2026-06-28
+**Confidence:** HIGH (all four defects grounded in direct code inspection; no external libraries; no WebSearch required)
+
+---
 
 ## Executive Summary
 
-TIDE v1.0.3 addresses a concrete failure observed in dogfood run #2: the project spent ~$90 authoring 59 planning envelopes (3 milestones, 15 phases, 39 plans, 1 project), then budget-halted with zero execution. Re-running from scratch would re-pay the full planning cost. The milestone has two separable workstreams: (1) standalone correctness bugs on the existing budget-bypass path that must be fixed first, independently of any import work, and (2) a plan-import mechanism that bridges the UID-churn gap so a fresh `kubectl apply` can resume from salvaged envelopes. All prior-art workflow orchestrators (Argo, Temporal, Prefect, Dagster, Bazel) converge on the same principle: key on stable, input-derived identifiers rather than runtime IDs; validate before skipping; maintain DAG ordering through the skip.
+TIDE v1.0.6 is a targeted corrective patch on the import/adoption path first shipped in v1.0.5. Dogfood run #2b validated that adoption works (zero re-paid planning cost on resume; 44 plans authored via real Anthropic API) but OOM'd the single-node kind node after dispatching ~60 concurrent planner pods, and surfaced three additional correctness failures: the project lifecycle never advanced past `Initialized` under adoption (D2), the budget meter was therefore never tallied (D1), and a phase whose planner exited nonzero with no children was falsely marked `Succeeded` (D4). All four defects are narrow seam fixes — no new go.mod entries, no new CRDs, no architectural additions — on existing controller code that shipped partially wired.
 
-The most critical correctness bugs are already identified and localized. R-01 (`bypass-clear sets Phase=Pending` should be `Running`; sentinel is `Status.Git.BranchName != ""`) and R-04 (budget rollup double-count when reporter Job TTL-GC races — needs a durable `PlannerRolledUpUID` status field, not reporter-Job-existence) are standalone fixes that do not touch the import path and must be resolved before any import work begins. R-07 (clone Job re-dispatches on resume because TTL-GC'd Job is the only guard — needs `Status.Git.CloneComplete` flag) rounds out the Phase 1 correctness work. The already-landed project-controller ordering fix (`2a5e0dc`) also lacks regression coverage and must be addressed in this phase.
+The recommended approach is to fix in dependency order: D2 and D1 share a single seam in `reconcileProjectPlannerDispatch` and must ship together in one phase; D3 and D4 are independent of each other and of D1/D2 and can be planned in parallel after D1+D2 land. The milestone's critical open design decision is the D3 fix shape: one researcher (STACK.md) found the pool fully wired and concluded a chart-default reduction from 16 to 4 is sufficient; three deeper code-reads (ARCHITECTURE.md, FEATURES.md, PITFALLS.md) found that `defer r.PlannerPool.Release()` fires on reconcile-function return (milliseconds after Job creation, not Job completion), meaning the channel semaphore caps simultaneous `r.Create` calls but not in-flight pod count. That divergence must be resolved at the D3 plan/discuss phase before implementation begins.
 
-The plan-import feature presents an unresolved design tension that is THE key decision for plan-phase discussion. STACK.md and FEATURES.md recommend Approach A (name-based / stable-key envelope directory: `envelopes-by-name/{level}/{crdName}/out.json`, written at planner completion, checked before dispatch). ARCHITECTURE.md recommends Approach B (UID-rewrite import step: one-shot `ImportController` + `tide-import` Job copies old-UID envelope trees to new-UID paths before the normal reconcile runs) as architecturally safer because it leaves all five reconcilers, the reporter Job, and the `FilesystemEnvelopeReader` path contract unchanged. Both approaches are valid; the roadmapper must not pick a winner — this must be surfaced as an explicit checkpoint before Phase 2 implementation begins.
+The milestone has no external risk surface. Every fix uses existing controller-runtime helpers (`client.MergeFrom`, `r.Status().Patch`, `patchPhaseFailed`/`patchMilestoneFailed`), existing TIDE types, and the existing pool and budget infrastructure. All four fixes are envtest-verifiable. The relaunch of dogfood run #2b needs a multi-node cluster or a host with at least 16 GiB RAM regardless of which D3 fix shape is chosen; single-node kind cannot hold the parallelism.
+
+---
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new go.mod entries are required for v1.0.3. All implementation uses existing stdlib (`path/filepath`, `encoding/json`, `os`, `crypto/sha256`) and existing controller-runtime patterns. The `AlreadyExists`-is-success idempotency model already used throughout the dispatcher (`internal/dispatch/podjob/names.go:SUB-03`) extends naturally to both the planner-skip and import-copy operations. The one new binary (`cmd/tide-import/main.go` under Approach B) uses only stdlib I/O. The `github.com/cespare/xxhash/v2 v2.3.0` is already an indirect dep and available at zero cost if a non-crypto hash is wanted, but is not needed for either approach.
+No new dependencies. The fix set uses only what is already in go.mod:
 
-**Core technologies — all existing, zero new additions:**
-- `path/filepath` (stdlib): stable-key path construction — already used in `FilesystemEnvelopeReader`
-- `encoding/json` (stdlib): envelope marshal/unmarshal and import validation — already used throughout
-- `crypto/sha256` (stdlib): optional write-side integrity checksum — already in `internal/credproxy/token.go`
-- `controller-runtime v0.24.1` (locked): reconcile loop, condition patching — existing `AlreadyExists`-is-success pattern extends to both planner-skip and import
-- `os.Rename` (stdlib): atomic write for UID-rewrite step (Approach B) — prevents partial-write corruption on Job kill
+**Core technologies (unchanged):**
+- **Go 1.26 + controller-runtime v0.24.x** — all four fixes are standard `ctrl.Result` + `r.Status().Patch` patterns already used throughout the codebase
+- **`internal/pool/pool.go` (existing `chan struct{}` semaphore)** — D3 fix shape (see design fork below) operates on or alongside this struct; Pool itself may or may not change depending on which approach is chosen
+- **`internal/budget/tally.go` (`RollUpUsage`)** — already correct at phase/plan level; D1 fix ensures the lifecycle state allows the budget gate to evaluate, not changing `RollUpUsage` itself
+- **`charts/tide/values.yaml` (FIXED CONTRACT)** — D3 requires a default change here (`plannerConcurrency: 16` to 3 or 4); binary catches up to chart, never reverse
 
-### Expected Features
+**Version coupling:** No version changes. All fixes target logic inside existing packages.
 
-Research from all prior-art systems converges on a two-tier feature set: fix the broken bypass path first (table stakes, no import required), then add import as the headline differentiator.
+### Expected Features (Behavioral Specifications)
 
-**Must have — Phase 1 correctness (independent of import):**
-- R-01 fix: bypass-clear targets `Running` not `Pending`; guarded by `Status.Git.BranchName != ""`
-- R-04 fix: durable `Status.Budget.PlannerRolledUpUID` replaces reporter-Job-existence guard for rollup idempotency
-- R-07 fix: `Status.Git.CloneComplete` durable flag gates clone-Job dispatch (prevents re-clone on resume)
-- Cap-raise ergonomics (TS-R6): both cap values evaluated simultaneously before re-halting
-- Regression envtest for `2a5e0dc` ordering fix (TS-R7)
+This milestone's "features" are the correct expected behaviors of already-shipped code paths. All four must ship; none are deferrable without leaving run #2b's failure modes in production.
 
-**Must have — Phase 2 import core:**
-- Stable envelope identity: either name-based directory (Approach A) or UID-rewrite import step (Approach B) — decision gates all other import work
-- Envelope completeness validation: `len(ChildCRDs) == ChildCount` before any planner skip (R-03)
-- Explicit cycle detection before creating any child CRDs: `dag.ComputeWaves` must run — webhook bypassed by `client.Create` (R-12)
-- v1alpha1→v1alpha2 schema conversion for salvaged `ChildCRDSpec.Spec.Raw` bytes (R-06)
-- Wave CRs must NOT be imported — always re-derived by `deriveGlobalWaves` (Anti-Pattern 2)
-- Budget rollup suppressed for imported envelopes (R-13)
-- Import atomicity per-Milestone: partial Milestone import rejected (R-05)
-- `ImportComplete` condition as first-step guard for at-least-once idempotency (R-09)
+**Must have (table stakes — all four):**
 
-**Should have — Phase 3 operator tooling:**
-- `tide import-envelopes` or `tide import seed` CLI verb + `SeedManifestConfigMap` generation
-- Dry-run mode: report accepted/rejected envelopes before writing
-- `tide export-envelopes`: export PVC envelopes to local directory for portability across cluster teardowns
+- **D2: Project Phase advances to `Running` after `ImportComplete=True`** — without this the adopted project is permanently parked at `Initialized`; D1's budget halt gate never evaluates; project lifecycle state misrepresents reality. Fix: one `r.Status().Patch` before the adoption-guard `return` in `reconcileProjectPlannerDispatch`. Must not dispatch a project-planner Job; must be idempotent; must not regress the non-import lifecycle path.
 
-**Defer to v1.0.4+:**
-- Per-level "Resumed from envelope" dashboard badge (D-R3): non-blocking observability feature
+- **D1: Budget rollup accrues for adopted-project Jobs** — `absoluteCapCents` is the safety contract for expensive runs; a budget that does not count spend is not a budget. The existing `budget.RollUpUsage` path at phase/plan levels is correct; fix scope is: (a) verify no `if project.Spec.ImportSource != nil { skip }` guards exist at milestone/phase/plan call sites beyond the correct project-planner-level D-11 suppression, and (b) confirm the budget halt gate evaluates once D2 sets `PhaseRunning`. The D-11 suppression (no double-counting of prior-run project-planner spend) must be preserved exactly.
 
-**Anti-features (do not build):**
-- Cache the wave schedule in `.status` — direct spec invariant violation
-- Accept UID-keyed salvaged envelope directly on fresh apply — UID churn guaranteed
-- Skip cycle detection on import — cycles are bugs, not runtime conditions
-- In-memory envelope cache across reconciles — violates CRD-status-only persistence
+- **D3: Per-level max-in-flight planner cap enforced at steady state** — the single-node OOM is a safety failure, not a performance issue. The cap must apply to in-flight running Jobs, not just to concurrent `r.Create` calls. Fix shape is a design decision (see fork below). Default must be sane for single-node kind; cap must NEVER silently truncate a wave without logging or eventing deferred dispatches.
+
+- **D4: Planner `exitCode != 0` with `childCount == 0` must fail the parent phase/milestone** — false-Succeeded levels corrupt the planning DAG; a phase that succeeded with no plans will never be re-planned. Truth table: `(exitCode==0, childCount==0)` is Succeeded (genuine leaf, must not regress); `(exitCode!=0, childCount==0)` is Failed; `(exitCode!=0, childCount>0)` is Failed. A shared `isPlannerFailure` helper should cover phase and milestone (plan controller is already structurally correct via Phase 30).
+
+**Defer (v2+):**
+- Dashboard "Adopted" badge distinguishing imported vs freshly-planned nodes
+- Per-Project concurrency CRD field (chart-level cap is sufficient for v1.0.6)
+- Prometheus pool saturation gauge (logging is sufficient initially; P-D3b notes it as a pitfall mitigation worth adding but not blocking)
+- Automatic planner retry with backoff (operator-driven `tide resume --retry-failed` is the correct v1.0.6 posture)
 
 ### Architecture Approach
 
-The five existing planner dispatch sites (`reconcileProjectPlannerDispatch` and four level-specific `reconcilePlannerDispatch` methods) all follow the same child-existence idempotency guard pattern. Any import approach must satisfy this guard naturally. The `ImportComplete` condition on `Project.Status` (Approach B) or the `tideproject.k8s/envelope-adopted-from` annotation (Approach A) serves as the observable import signal. Wave CRs are never imported — `deriveGlobalWaves` derives them fresh from the imported Task graph on first reconcile.
+All four fixes are modifications to existing controller functions, with no new reconcilers, no new CRDs, and no new persistence surface.
 
-**Major components — Approach B (UID-rewrite, ARCHITECTURE.md recommendation):**
+**Components modified:**
 
-1. `api/v1alpha2/import_types.go` (NEW) — `ImportSourceRef` + `ImportSeedManifest` JSON schema (name → savedUID + status per CR)
-2. `internal/controller/import_controller.go` (NEW) — state machine: `Pending → CreatingCRs → CopyingEnvelopes → Complete / Failed`; materializes CRs from seed, dispatches `tide-import` Job, sets `ConditionImportComplete`
-3. `cmd/tide-import/main.go` (NEW binary) — in-pod: `cp -n` old-UID → new-UID + rename-atomic `out.json` TaskUID patch
-4. `ImportComplete` guard at all five dispatch sites (5x one-liner after Step 1 terminal short-circuit)
-5. `cmd/tide/import_seed.go` (NEW subcommand) — reads salvage tgz, emits `SeedManifestConfigMap` YAML
+1. **`internal/controller/project_controller.go` — `reconcileProjectPlannerDispatch`** — D2+D1: one status patch inserted before the adoption-guard `return ctrl.Result{}, nil`; sets `project.Status.Phase = PhaseRunning` when `ImportComplete=True` and phase is still `Initialized`.
 
-**Major components — Approach A (stable-key, STACK.md / FEATURES.md recommendation):**
+2. **`internal/controller/phase_controller.go` — `handleJobCompletion`** — D4: add `if envReadOK && out.ExitCode != 0 && out.ChildCount == 0 { return r.patchPhaseFailed(...) }` before the existing `expected == 0 -> patchPhaseSucceeded` leaf-success arm. Add `patchPhaseFailed` helper if absent (mirror `patchPlanFailed`).
 
-1. `pkg/dispatch/envelope_paths.go` (NEW) — `StableKeyEnvelopePath(workspaceRoot, projectUID, level, crdName)` constructor
-2. `ReadByName` / `WriteStableKey` on `EnvelopeReader` interface — stable-key read/write alongside existing UID-keyed path
-3. `adoptEnvelopeAndMaterialize` method on each planner reconciler (5x) — stamps annotation, materializes children, skips Job dispatch
-4. `api/v1alpha2/shared_types.go` addition — `AnnotationEnvelopeAdoptedFrom` constant
-5. `tide import-envelopes` CLI subcommand — reads salvage tgz, extracts `in.json: dispatch.parentName`, writes to stable-key paths
+3. **`internal/controller/milestone_controller.go` — `handleJobCompletion`** — D4: same guard and helper pattern as phase controller.
+
+4. **D3 dispatch sites (4 files)** — `milestone_controller.go`, `phase_controller.go`, `plan_controller.go`, `project_controller.go`: fix shape depends on the design fork resolution.
+
+5. **`charts/tide/values.yaml`** — D3: `plannerConcurrency: 16` to 3 or 4; both values appear across research files.
+
+**Components unchanged:** `internal/pool/pool.go` (unless D3 Option B is chosen), `internal/budget/tally.go`, `import_controller.go`, `wave_controller.go`, `task_controller.go`, `depgraph.go`, `failure_halt.go`, global Execution DAG, wave-boundary failure semantics.
 
 ### Critical Pitfalls
 
-1. **R-01: Bypass-clear sets Phase=Pending, triggering re-init loop** — Fix `project_controller.go:1257` to `PhaseRunning`; guard with `Status.Git.BranchName != ""` sentinel; also gate init-Job dispatch on `BranchName == ""` to make a second init-Job structurally impossible. Directly observed failure.
+1. **D3 design fork: pool `Release` fires on reconcile-function return, not Job completion** — three of four researchers (ARCHITECTURE.md, FEATURES.md, PITFALLS.md) confirmed via direct code inspection that `defer r.PlannerPool.Release()` fires when `reconcilePlannerDispatch` returns, milliseconds after `r.Create(job)`, not when the Job finishes. This means the semaphore caps concurrent Job-creation calls, not in-flight running pods. A chart-default reduction alone (STACK.md's proposal) would lower the creation burst but would not prevent 60 separate creation calls from firing across multiple reconcile rounds and reaching 60 running pods. **This is the milestone's highest-priority design decision; see the fork section below.**
 
-2. **R-04: TTL-GC race on reporter Job causes budget double-count** — Replace reporter-Job-existence guard at `project_controller.go:1156-1175` with durable `Status.Budget.PlannerRolledUpUID` field. Import path must suppress rollup unconditionally for salvaged envelopes (prior run already counted the cost). Directly observed failure class.
+2. **Double-counting rollup via reporter-Job TTL-GC (P-D1a / P-D1c)** — `isFirstCompletion` is gated on reporter Job IsNotFound; after TTL-GC at 300s the Job disappears and the flag becomes true again, re-invoking `budget.RollUpUsage`. Phase 27 fixed this at the project level via `PlannerRolledUpUID`. The D1 phase must verify whether `MilestoneRolledUpUID` / `PhaseRolledUpUID` equivalent markers exist at child levels; if not, add them. Failing to do so causes `costSpentCents` to increment every 300s after planning completes.
 
-3. **R-05: Partial-plan import corrupts global Execution DAG** — `depgraph.go:28` conservative design (unresolved ref = no edge) means missing Tasks silently produce zero indegree and dispatch immediately. Import atomicity must be per-Milestone; every `Task.Spec.DependsOn` entry must resolve before any CRs are created.
+3. **Re-dispatching the suppressed project-planner on informer cache miss (P-D2a)** — after the D2 fix advances `Status.Phase=Running`, a subsequent reconcile with a transiently empty informer cache (post-restart) may not see owned Milestones and let the adoption guard fall through, dispatching a paid project-planner Job. Prevention: stamp a durable adoption-complete sentinel in `.status` (not just rely on the List returning non-empty), or use a `ConditionAuthoringPlanner=False, Reason=AdoptionSuppressed` short-circuit.
 
-4. **R-06: v1alpha1 salvage envelopes carry v1alpha1 `ChildCRDSpec.Spec.Raw`** — `MaterializeChildCRDs` decodes into v1alpha2 structs; `Wave.Spec.ProjectRef` (Phase 23) is zero-valued from v1alpha1 bytes, producing orphan Waves that never dispatch. Import must run v1alpha1→v1alpha2 conversion on each `Spec.Raw`.
+4. **D4 retry storm if a Go error is returned for planner failure (P-D4a)** — returning `ctrl.Result{}, err` from `handleJobCompletion` on planner failure triggers controller-runtime exponential backoff, exhausting the pool. Use `patchPhaseFailed`/`patchMilestoneFailed` (permanent condition patch), not an error return, for definitive failures. Only fail permanently when `envReadOK && exitCode != 0`; let `!envReadOK` requeue.
 
-5. **R-12: Cycle detection bypassed for imported plan trees** — `client.Create` bypasses the admission webhook. Import must explicitly call `dag.ComputeWaves` on the full task set before creating any child CRDs. A cyclic salvage must produce `ImportFailed / CyclicPlanDetected` condition.
+5. **Silent wave truncation when pool cap is smaller than the widest wave (P-D3e / P-D3b)** — if `plannerConcurrency < widest wave width`, tasks that cannot acquire a slot park at `Phase=""` and `gates.BoundaryDetected` never returns true. The run stalls indefinitely without an observable signal. Document that the cap must be at least as large as the widest expected wave, and ensure parked dispatches emit a log line and (optionally) a Prometheus counter.
 
-6. **R-02: UID-churn aliasing** — Import must validate `out.ChildCRDs[*].Name` against expected children of the current object at its level. Salvaged envelopes are untrusted foreign data; same threat model as T-308 `ChildCRDSpec` allowlist.
+---
 
 ## Implications for Roadmap
 
-The research strongly supports a three-phase milestone structure. Phase 1 is standalone correctness bugs — no design decisions required, all fixes are localized. Phase 2 is the import feature core, preceded by an explicit Approach A vs B decision checkpoint. Phase 3 is operator tooling gated on Phase 2 working end-to-end.
+Suggested phase structure: **3 phases**. D1+D2 are one lifecycle seam and must ship together. D3 and D4 are independent and can be developed in parallel; recommended serial order (D3 before D4) based on severity and the open design fork.
 
-### Phase 1: Budget-Bypass Correctness
+### Phase 1: D2 + D1 — Adoption Lifecycle Seam
 
-**Rationale:** All three bugs (R-01, R-04, R-07) are independently observable, localized to `project_controller.go`, and produce immediate user-visible failures (re-init loop, budget double-count, clone re-dispatch). They are prerequisites to import work — import on top of a broken bypass path compounds failures. These fixes have zero design ambiguity; no research checkpoint needed.
+**Rationale:** D2 and D1 share a single call site in `reconcileProjectPlannerDispatch`. D1 cannot be fully verified until D2 is fixed (budget halt gate requires `Phase==Running`). This is the "spent blind" defect that directly undermines the budget-safety guarantee of the v1.0.x line. Highest priority.
 
-**Delivers:** A budget-halt/resume cycle that correctly resumes at `Running`, never re-initializes an already-cloned workspace, and does not double-count planning cost. Plus regression coverage for the `2a5e0dc` ordering fix.
+**Delivers:**
+- Project advances from `Initialized` to `Running` on `ImportComplete=True` without dispatching a project-planner Job
+- `Project.Status.Budget.CostSpentCents` and `TokensSpent` accrue as phase/plan/milestone planners complete
+- `absoluteCapCents` halt enforcement fires correctly on adopted projects
+- D-11 project-level rollup suppression preserved (no double-count of prior-run planning cost)
 
-**Addresses:** TS-R4, TS-R5, TS-R6, TS-R7, R-01, R-04, R-07
+**Addresses:** D1, D2 from run-2b-FINDINGS.md
 
-**Avoids:** R-01 re-init loop, R-04 double-count, R-07 re-clone, R-08 cap-raise re-halt
+**Avoids:**
+- P-D2a (project-planner re-dispatch on cache miss) — add durable adoption sentinel in `.status`
+- P-D1a / P-D1c (double-count via reporter TTL-GC) — verify or add `MilestoneRolledUpUID`/`PhaseRolledUpUID` markers
+- P-D2b (normal lifecycle regression) — gate all new code on `ImportSource != nil`; run full envtest suite as gate
 
-**Research flag:** None needed. All fixes are mechanical, code-located, with zero design ambiguity.
+**Research flag:** Standard patterns (no research-phase needed). Fix shape is unambiguous. Primary complexity is the idempotency pitfalls documented in PITFALLS.md; address these in planning via targeted envtest requirements.
 
-### Phase 2: Plan-Import Design Decision + Core Implementation
+---
 
-**Rationale:** The Approach A vs B decision is the foundation for all import work and must be resolved before any implementation begins. Both approaches are architecturally valid; the choice has downstream implications for the number of files changed, the operator workflow, and long-term maintenance of the envelope path contract. A plan-phase research step is needed to present both approaches with their tradeoffs, surface the salvage fixture constraint (only UID-keyed paths exist in the tgz), and checkpoint with the operator before any code is written.
+### Phase 2: D3 — Dispatch Concurrency Cap
 
-Key data point for the decision: the `salvage-20260618/pvc-envelopes.tgz` contains only `envelopes/<oldUID>/` paths — no `envelopes-by-name/` paths were ever written (the original TIDE run predates Approach A). Approach A therefore requires a migration step that is functionally equivalent to what Approach B does explicitly. This narrows the practical gap between the two for the immediate dogfood use case.
+**Rationale:** D3 is the direct cause of the OOM that halted run #2b. Independent of D1/D2. Requires an explicit design decision on the D3 fork before planning can proceed.
 
-**Delivers:** Working envelope-import mechanism that bridges UID-churn, validated against the `salvage-20260618` fixture. Envelopes adopted from salvage skip planner dispatch; cycle detection runs; v1alpha1 schema is converted; Wave CRs are re-derived fresh; budget rollup suppressed for imported envelopes.
+**Delivers:**
+- In-flight planner Job count bounded by `plannerConcurrency` at steady state (not just at Job creation time)
+- Default `plannerConcurrency` reduced to a safe single-node value (3 or 4 — resolve in planning)
+- Deferred dispatches observable (log line minimum; Prometheus counter recommended)
+- Separately-sized planner and executor pools preserved; executor pool unchanged
+- Pool capacity vs MaxConcurrentReconciles distinction documented in chart
 
-**Addresses:** TS-R1, TS-R2, TS-R3, R-02, R-03, R-05, R-06, R-09, R-10, R-11, R-12, R-13
+**Addresses:** D3 from run-2b-FINDINGS.md
 
-**Avoids:** AF-R1 (wave schedule caching), AF-R3 (skip cycle detection), Anti-Pattern 2 (importing Wave CRs), Anti-Pattern 3 (non-atomic UID rewrite)
+**Avoids:**
+- P-D3a (PreCharge misses live Jobs on restart) — verify label selector matches `BuildJobSpec` labels
+- P-D3b (silent wave truncation) — add deferred-dispatch log line
+- P-D3c (pool cap must be < MaxConcurrentReconciles) — document invariant in chart values
+- P-D3d (pool unification) — run `make lint` (crosspool analyzer)
+- P-D3e (BoundaryDetected stalls on undispatched tasks) — document cap sizing floor
 
-**Research flag:** Needs `/gsd:plan-phase --research-phase` to present Approach A vs B tradeoffs and checkpoint. Do not pick a winner during roadmap.
+**Research flag: NEEDS DISCUSS-PHASE before implementation.** The D3 design fork must be resolved:
 
-### Phase 3: Operator Tooling and End-to-End Validation
+**Option A (STACK.md — 1 of 4 researchers):** `defer r.PlannerPool.Release()` fires on function return, working as designed. Fix is to lower `plannerConcurrency` from 16 to 4 in `values.yaml`. Pool is fully wired; chart default is the only problem.
 
-**Rationale:** CLI commands are gated on Phase 2 completion — they wrap the validated import mechanism. The end-to-end kind integration test using `salvage-20260618` is the acceptance gate for the entire milestone.
+**Option B (ARCHITECTURE.md, FEATURES.md, PITFALLS.md — 3 of 4 researchers, deeper code reads):** `defer Release()` fires milliseconds after `r.Create(job)`, not on Job terminal state. The semaphore caps simultaneous creation calls, not in-flight pod count. 59 goroutines can cycle through the 16-slot pool in rapid succession, creating 59 Jobs before any completes. Fix requires a live `client.List` count of Jobs with `tideproject.k8s/role=planner` label at each dispatch site BEFORE `PlannerPool.Acquire`, returning `ctrl.Result{RequeueAfter: 5s}` when `count >= plannerConcurrency`.
 
-**Delivers:** `tide import-envelopes` / `tide import seed` CLI verb for the dogfood operator workflow; dry-run mode; `tide export-envelopes` for portable salvage across cluster teardowns; kind integration test `IMPORT-E2E-01` asserting all Milestones reach `Succeeded` without planner re-dispatch.
+**Evidence weight:** Option B has 3 researchers with deeper code reads. Resolution: set `plannerConcurrency=2`, create 5 Milestone objects, observe whether `kubectl get jobs -l tideproject.k8s/role=planner` shows at most 2 active Jobs or all 5 — one observation closes the fork. Recommendation is Option B (count-based live-Job check) plus the chart default reduction regardless.
 
-**Addresses:** D-R1, D-R2, D-R4
+---
 
-**Avoids:** Partial-import footgun (dry-run surfaces rejections before write)
+### Phase 3: D4 — Planner Failure Semantics
 
-**Research flag:** None needed. CLI wrappers over validated core logic. Standard `cobra` subcommand patterns already used in TIDE CLI.
+**Rationale:** D4 is a correctness guard that prevents false-Succeeded phases from corrupting the planning DAG. Independent of D1/D2/D3. Lower operational severity than D3 but must ship in v1.0.6 to prevent silent planning tree gaps.
+
+**Delivers:**
+- Phase/milestone planner `exitCode != 0` with `childCount == 0` marks parent Failed, not Succeeded
+- `exitCode == 0` with `childCount == 0` Succeeds (genuine leaf, no regression)
+- Shared `isPlannerFailure(out, envReadOK)` helper at phase and milestone controllers
+- `patchPhaseFailed`/`patchMilestoneFailed` helpers added or verified present
+- `tide resume --retry-failed` is the operator's explicit recovery path (no auto-retry in controller)
+
+**Addresses:** D4 from run-2b-FINDINGS.md
+
+**Avoids:**
+- P-D4a (retry storm from Go error return) — use `patchFailed` condition, not error return
+- P-D4b (level divergence — guard at phase but not milestone) — shared helper; envtest at all three levels
+- P-D4c (leaf regression — `exitCode=0, childCount=0` wrongly fails) — guard requires `exitCode != 0`; ordering: fail check before succeed check
+
+**Research flag:** Standard patterns. Fix shape is unambiguous. Envtest shape fully specified in FEATURES.md.
+
+---
 
 ### Phase Ordering Rationale
 
-- Phase 1 before Phase 2: bypass bugs are independent and must be fixed first; a broken bypass running alongside import code makes integration failures ambiguous.
-- Explicit design checkpoint between Phase 2 plan-phase and implementation: Approach A vs B is a one-way door; resolve before writing code.
-- Phase 3 after Phase 2: operator tooling wraps the core; writing CLI commands before the core works produces rework.
-- Wave CRs are never in scope for Phase 2/3 import — always re-derived. This must be stated explicitly in each plan that touches the import path.
-- v1alpha1→v1alpha2 schema conversion belongs in Phase 2 alongside the import materializer, not deferred to Phase 3 — it is a correctness gate.
+- D1+D2 must ship first: D2 is a prerequisite for D1's budget halt to evaluate; both are the root of "spent blind" — the headline safety failure
+- D3 before D4: D3 requires a design decision and is higher operational severity; D4 is a narrow correctness fix with no design ambiguity
+- D3 and D4 are independent: if parallelizing, D4 can ship concurrently with D3's design discussion; D4 has no dependency on D3's resolution
+- Relaunch (run #2c) should not start until D1+D2+D3 are shipped AND adequate infrastructure (multi-node or at least 16 GiB VM) is in place
 
 ### Research Flags
 
-Phases needing deeper research during planning:
-- **Phase 2 (Plan-Import):** Approach A vs B design decision must be resolved before implementation plans are written. The research files provide full analysis for both; the plan-phase should surface the salvage fixture constraint (only UID-keyed paths exist in the tgz) and checkpoint with the operator.
+Needs discuss-phase before implementation:
+- **Phase 2 (D3):** The D3 design fork (pool semantics vs count-based check) must be resolved explicitly. A single `kubectl get jobs` observation on the existing `kind-tide-dogfood` cluster with `plannerConcurrency=2` and 5 Milestones would close it definitively. Resolve in a Phase 2 discuss step before writing the implementation plan.
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1 (Bypass Correctness):** All fixes are code-located, fully diagnosed. No new patterns needed.
-- **Phase 3 (Operator Tooling):** CLI wrappers over validated core. Standard cobra subcommand pattern already used in TIDE CLI.
+Standard patterns (no research-phase needed):
+- **Phase 1 (D1+D2):** Fix shape fully specified. Primary risk is idempotency edge cases (P-D2a, P-D1a/c) documented in PITFALLS.md; address via targeted envtest requirements in planning.
+- **Phase 3 (D4):** Fix shape fully specified. The `isPlannerFailure` helper and ordering constraints are clear. Envtest shapes enumerated in FEATURES.md.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Zero new dependencies; all findings derived from live codebase + go.mod. No inference required. |
-| Features | HIGH | P1 correctness bugs are observed failures with code-located root causes. Import features have solid prior art from Argo/Temporal/Prefect/Dagster/Bazel. |
-| Architecture | HIGH | Both approaches derived from direct code reading of all five integration sites + the salvage fixture. Tradeoffs clearly documented. |
-| Pitfalls | HIGH | R-01 and R-04 are directly observed; R-02/R-03/R-05/R-06/R-12 derived from code inspection; all have code-location citations. |
+| Stack | HIGH | All findings from direct code inspection; go.mod confirmed; zero new dependencies |
+| Features (D1, D2, D4) | HIGH | Root causes pinned to specific files and line numbers; fix shapes unambiguous |
+| Features (D3) | MEDIUM | Mechanism is code-confirmed but fix shape has a genuine divergence across researchers |
+| Architecture (D1, D2, D4) | HIGH | Component boundaries clear; existing patchFailed/patchSucceeded helpers verified |
+| Architecture (D3) | MEDIUM | In-flight-count vs creation-rate dispute needs one empirical test or code-archaeology to close |
+| Pitfalls | HIGH | All pitfalls are code-grounded; idempotency and TTL-GC patterns sourced from Phase 27 lessons already in this codebase |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH for D1, D2, D4. MEDIUM for D3 pending fork resolution.
 
 ### Gaps to Address
 
-- **Approach A vs B decision:** This is the only true gap. Both approaches are fully documented; the gap is an operator decision, not a research gap. Must be resolved at plan-phase before implementation begins.
-- **`tide export-envelopes` PVC access mechanism:** kubectl-cp wrapper vs. controller-spawned Job — operational preference decision for Phase 3 plan-phase.
-- **Envelope schema version constant:** If v1.0.3 adds any field to `EnvelopeOut`, `APIVersionV1Alpha1` must be bumped or new fields must be `omitempty`. Flag for Phase 2 schema design review — not a research gap.
+- **D3 fix shape (design fork):** Resolve before planning Phase 2. Either run a targeted cluster test (observe active Job count vs pool depth with `plannerConcurrency=2` and 5 Milestones), or resolve in the Phase 2 discuss step. Do not begin D3 implementation until resolved.
+
+- **D-11 scope at child levels:** During D1 implementation, grep all `budget.RollUpUsage` call sites for `if project.Spec.ImportSource != nil { skip }` guards at the milestone, phase, and plan controllers. FEATURES.md expects these guards do not exist at child levels (rollup is unconditional); confirm by inspection. If found, remove guards that suppress child-level rollup — they are new spend, not prior-run spend.
+
+- **`MilestoneRolledUpUID` / `PhaseRolledUpUID` markers:** During D1 implementation, check whether the Phase 27 `PlannerRolledUpUID` idempotency pattern was extended to child levels. If not, add it. This is a concrete gap with a documented prior-art fix shape in the codebase.
+
+- **`patchPhaseFailed` / `patchMilestoneFailed` existence:** During D4 implementation, verify these helpers exist. If absent, add them by mirroring `patchPlanFailed` in `plan_controller.go:842`. ARCHITECTURE.md marks this as "NEW or VERIFIED."
+
+- **Default `plannerConcurrency` value:** ARCHITECTURE.md recommends 3; STACK.md and FEATURES.md recommend 4. Resolve in the D3 planning step to one canonical value with documented rationale.
+
+---
 
 ## Sources
 
-### Primary (HIGH confidence — live codebase)
+### Primary (HIGH confidence — direct code inspection, line numbers verified)
 
-- `internal/controller/project_controller.go` (lines 339, 969-1102, 1156-1182, 1257, 1300-1321) — bypass-clear bug, rollup guard, dispatch sites
-- `internal/dispatch/podjob/backend.go` (lines 92-141) — `FilesystemEnvelopeReader.ReadOut`, UID-keyed path contract
-- `pkg/dispatch/envelope.go` (lines 21-24, 400-409) — `EnvelopeOut`, `ValidateAPIVersionKind`, `APIVersionV1Alpha1` constant
-- `internal/controller/depgraph.go` (lines 17-30) — conservative empty-return on unresolved scope (R-05 root)
-- `internal/controller/dispatch_helpers.go` (lines 17-36) — `MaterializeChildCRDs`, T-308 Kind allowlist
-- `internal/controller/milestone_controller.go` (lines 239-493, 507-717) — canonical dispatch site + idempotency guard at line 304
-- `api/v1alpha2/shared_types.go` (lines 216, 253) — annotation constant pattern for `AnnotationBillingResumedAt`
-- `examples/projects/dogfood/salvage-20260618/pvc-envelopes/` — 59 envelopes, UID-keyed paths only, `in.json` carries `dispatch.parentName`
-- `go.mod` — zero new `require` entries needed
+- `internal/controller/project_controller.go` — adoption guard (`reconcileProjectPlannerDispatch` lines ~1088–1133); D-11 suppression (L1304–1307); lifecycle advance sites (L1203–1215); `handleBudgetGate` (L1367–1464)
+- `internal/controller/phase_controller.go` — `handleJobCompletion` (L467–648); `setBillingHaltIfNeeded` pattern (L525); ChildCount succession / false-Succeeded arm (L590–597); pool acquire (L379–384)
+- `internal/controller/milestone_controller.go` — `handleJobCompletion` (L517–728); `budget.RollUpUsage` (L587–590); false-Succeeded arm (L670–677); pool acquire (L381–386)
+- `internal/controller/plan_controller.go` — `handlePlannerJobCompletion` (L508–740); Phase-30 childless guard (L692); `patchPlanFailed` (L842)
+- `internal/controller/import_controller.go` — `succeedImport` (L701–706); `AnnotationRetryImport` reset path
+- `internal/pool/pool.go` — `Pool.Acquire`/`Release`/`PreCharge` (full file)
+- `internal/budget/tally.go` — `RollUpUsage` (L56–89)
+- `internal/config/config.go` — `PlannerConcurrency` default 16; `ExecutorConcurrency` default 4
+- `charts/tide/values.yaml` — `plannerConcurrency: 16`, `executorConcurrency: 4` (L78–79)
+- `cmd/manager/main.go` — pool construction and wiring (L343–353, 445, 475, 501, 529, 547)
+- `.planning/dogfood/run-2b-FINDINGS.md` — authoritative D1–D4 defect definitions and run outcome
 
-### Primary (HIGH confidence — official docs)
+### Secondary (MEDIUM confidence — operator-space precedents from training knowledge)
 
-- Argo Workflows memoization docs + issues #12936 and #2320 — skip-without-DAG-ordering bug, retry vs resubmit distinction
-- Temporal workflow execution docs — event-history replay, durable execution model, budget-halt signal pattern
-- Prefect task caching docs — INPUTS cache policy, result persistence requirement
-- Dagster asset versioning docs — code_version + data_version staleness model
-- Bazel remote caching docs + ACM Queue article — action key construction, CAS + AC separation
-
-### Secondary (MEDIUM confidence — community consensus)
-
-- Augment Code async AI workflows guide — per-step snapshots, structured handoff files
-- Addy Osmani long-running agents blog — budget circuit breakers, artifact-based session continuity
-- Zylos AI checkpointing research — user expectation of "no double billing" on resume
-- Astronomer Airflow rerunning DAGs guide — "skip succeeded, re-run failed" reprocessing modes
-- Opsmeter budget exceeded response playbook — soft limits with human-in-the-loop escalation
+- Argo Workflows controller ConfigMap pattern for concurrency caps — supports chart-value surface for D3
+- Tekton Pipelines `config-feature-flags` ConfigMap — same surface decision
+- Kueue `ClusterQueue` CRD, Volcano `Queue` CRD — considered and rejected for D3 (adds external dependency)
 
 ---
-*Research completed: 2026-06-18*
-*Ready for roadmap: yes*
+
+*Research completed: 2026-06-28*
+*Ready for roadmap: yes — with D3 design fork flagged for Phase 2 discuss step*

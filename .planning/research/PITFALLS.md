@@ -1,356 +1,332 @@
-# Domain Pitfalls — v1.0.3 Planning Resumption & Cost Resilience
+# Domain Pitfalls — v1.0.6 Adoption-Path Correctness & Dispatch Safety
 
-**Domain:** Resume/import layer on a Kubernetes CRD reconciler that dispatches LLM Jobs with UID-keyed PVC artifacts
-**Researched:** 2026-06-18
-**Milestone context:** v1.0.3 — observed bug class: `bypass-budget=true` annotation sets `Status.Phase = Pending` → re-init fires → re-clone fires → looping reporters against already-authored children
-**Confidence:** HIGH — derived from direct codebase inspection (`project_controller.go`, `backend.go`, `dispatch_helpers.go`, `depgraph.go`, `pkg/dispatch/envelope.go`) and cross-referenced against `.planning/PROJECT.md` constraints and `README.md` spec invariants
-
-> **Scope.** These pitfalls cover adding (1) artifact-import / stage-skip resumption and (2) safe halt-resume to the existing TIDE controller. Each pitfall is at the intersection of: (a) the five-level paradigm with UID-keyed PVC envelopes, (b) controller-runtime's at-least-once reconcile model, and (c) the CRD-status-only persistence constraint. Prior milestone pitfalls (Pitfalls 1-24) remain valid and are not repeated here.
+**Domain:** Corrective patch on an existing Go controller-runtime operator (TIDE v1.0.5)
+**Defects addressed:** D1 (cost rollup under adoption), D2 (lifecycle stall at Initialized), D3 (dispatch concurrency cap), D4 (planner failure semantics — childless/exit-nonzero)
+**Researched:** 2026-06-28
+**Source:** Direct code inspection of internal/controller/\*, internal/pool/\*, internal/budget/\*, run-2b-FINDINGS.md, PROJECT.md
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall R-01: Budget-bypass clears to `Pending` instead of `Running`, triggering re-init
+### P-D1a: Double-counting `costSpentCents` under at-least-once reconcile
 
-**Severity:** Critical (observed, root-cause identified)
+**What goes wrong:** `handleProjectJobCompletion` calls `budget.RollUpUsage` conditionally on `isFirstCompletion`. The `isFirstCompletion` signal was historically "reporter Job IsNotFound" — which reverts to `true` once the reporter Job TTL-GC's at 300 s. This exact bug was caught in Phase 27 (PlannerRolledUpUID marker added). The fix pattern is a durable `PlannerRolledUpUID` marker in `.status`. If the adoption-path fix introduces a new rollup call (e.g., rolling up per-planner-Job usage when a phase- or milestone-level planner fires under adoption) without a matching durable idempotency marker, the same double-count recurs every time the Job GC's.
 
-**What goes wrong:**
-`handleBudgetGate` at `project_controller.go:1257` patches `Status.Phase = PhasePending` on bypass-clear. `reconcileProjectPhase2` then sees a non-Running, non-Initialized project and falls through to the init-Job check. The init-Job name is `tide-init-<project.UID>` (deterministic, `project_controller.go:339`), but its TTL is 300s (`buildInitJob:1321`). When a budget halt happens during a long planning wave, the init-Job has long since been TTL-GC'd. The init-Job lookup returns NotFound; `ensureInitJob` creates a new one; the workspace re-initializes (overwriting the `workspace/` subPath on the PVC); the clone Job (`tide-clone-<UID>`, also TTL-GC'd) re-dispatches; and the project loops. Reporter Jobs that already materialized Milestone children read from a workspace that has been wiped underneath them.
+**Why it happens:** The pool.Pool semaphore is in-memory; the rollup guard must live in CRD `.status` to survive controller restarts and Job TTL-GC. Any "first time?" check that relies on in-memory state or on the presence/absence of a K8s Job object fails when the Job disappears.
 
-**Why it happens:**
-The push-lease bypass at `reconcilePhase3Lifecycle:530` correctly resets to `PhaseRunning`. The budget bypass path at line 1257 diverged and was never brought into alignment with that pattern. `PhasePending` is the pre-init phase; resetting to it is semantically "restart from scratch."
-
-**Code locations:**
-- `project_controller.go:1257` — wrong target phase on bypass-clear
-- `project_controller.go:339` — init-Job check runs on every reconcile for non-Running/non-Initialized projects
-- `project_controller.go:1321` — init-Job TTL = 300s
-- `project_controller.go:500-510` — `Status.Git.BranchName` is the reliable "already-initialized" sentinel (set after init, never cleared)
+**Consequences:** `Project.Status.Budget.CostSpentCents` exceeds real spend; `absoluteCapCents` may fire spuriously; or conversely (if the guard overcounts the deduplication), real spend is never reported.
 
 **Prevention:**
-- Fix line 1257: set `Status.Phase = tidev1alpha2.PhaseRunning`. Guard this with a check that confirms the project has already advanced past init — the most reliable signal is `project.Status.Git.BranchName != ""` (set at `reconcilePhase3Lifecycle:504`, never cleared).
-- Also gate init-Job dispatch on `project.Status.Git.BranchName == ""` so a second init-Job is structurally impossible once the project has cloned.
-- Test: envtest scenario where init-Job has been TTL-GC'd, bypass fires, verify no new init-Job is created and `Status.Phase` lands at `Running`.
+- Mirror the existing `PlannerRolledUpUID` pattern exactly for every new rollup call site: check the marker before calling `budget.RollUpUsage`, set it only on successful rollup, never clear it.
+- The marker key must be unique per planner Job (e.g., `MilestoneRolledUpUID`, `PhaseRolledUpUID` paralleling the existing field), not a boolean flag.
+- For the adoption path specifically: `project.Spec.ImportSource != nil` already suppresses rollup at the project-planner level (D-11 / `if project.Spec.ImportSource != nil { … skip … }`). Verify this guard is present at every reconciler level that calls `budget.RollUpUsage` — milestone, phase, and plan — not only the project level.
 
-**Warning signs:**
-- `tide-init-<UID>` Job appearing in a namespace that already has Milestone children
-- `Status.Phase` oscillating between `Pending` and `Running` in project Events
-- Reporter Jobs re-running after a bypass annotation is consumed
+**Warning sign:** `Project.Status.Budget.PlannerRolledUpUID` is set but `costSpentCents` increments on every reconcile pass, or `costSpentCents` does not increase at all after 60 s of real API calls.
 
-**Phase to address:** Phase 1 of v1.0.3 — this is the directly observed bug; must be fixed before any import work.
+**Detection:** Envtest: call `budget.RollUpUsage` twice with identical usage; assert `CostSpentCents` changes only once. Integration test: inject a fake `isFirstCompletion=true` condition twice on the same project; assert the rollup is idempotent.
+
+**Phase owner:** D1 phase.
 
 ---
 
-### Pitfall R-02: UID-churn aliasing — importing the wrong level's envelope
+### P-D1b: Rollup fires before or skips the lifecycle gate under adoption
 
-**Severity:** Critical (silent planning corruption)
+**What goes wrong:** The rollup for child-level planners (milestone, phase, plan) is keyed off `handleJobCompletion` completion handlers, which are only reached when the corresponding level is `Running` and its planner Job reaches terminal state. Under adoption (D2), the project stays at `Initialized` — `reconcilePhase3Lifecycle`'s Step 0b `reconcileProjectPlannerDispatch` has an adoption guard at line ~1105 that returns early, so the project never transitions to `Running`, and the planner Job is never dispatched. Child-level planners (phase-, plan-) fire independently via their own reconcilers, which have no equivalent "adoption: do not dispatch" guard at the milestone or phase level.
 
-**What goes wrong:**
-Envelopes are keyed by UID: `{projectUID}/workspace/envelopes/{taskUID}/out.json` (per `backend.go:95`). When a project is re-applied after a budget halt, all CRD objects get new UIDs from the API server. The salvaged envelopes on the PVC still carry the old UIDs. An import step that resolves old-UID envelopes onto new-UID objects must use a stable secondary key (object name). If the name-based lookup collides — two Milestones with similar names, or a name collision across levels — the envelope for Milestone B's planner gets injected as if it were Milestone A's planner output. The ChildCRDs in that envelope contain Phase names scoped to Milestone B, materialized under Milestone A. The planning DAG is silently corrupted; the global Execution DAG built on it has wrong edges.
+This means usage from phase and plan planners under adoption reaches `handleJobCompletion`, calls `budget.RollUpUsage`, but the budget gate (`handleBudgetGate`) reads `project.Status.Budget.CostSpentCents` only when `reconcileProjectPhase2` runs — which is gated on `project.Status.Phase`. If D2 is not fixed first, the budget gate can never fire even after rollup lands.
 
-**Why it happens:**
-The PVC path is UID-keyed for runtime (correct — UIDs are unique per object-lifetime). Import must bridge from UID-keyed storage to name-keyed lookup. This bridging logic is new code with no existing pattern in the codebase. Without explicit content-identity validation, a name collision causes silent mis-routing.
+**Why it happens:** D1 and D2 share the same lifecycle seam. The cost meter and the lifecycle phase are co-dependent: the phase gate reads the meter, the meter only fires from the Running state's code path.
 
-**Code locations:**
-- `backend.go:95` — `filepath.Join(r.WorkspaceRoot, projectUID, "workspace", "envelopes", taskUID, "out.json")`
-- `pkg/dispatch/envelope.go:49` — `EnvelopeIn.TaskUID` is the only identifier carried forward in the envelope
-- `project_controller.go:1131` — `ReadOut(ctx, string(project.UID), string(project.UID))` — both segments are the *current* project's UID
+**Consequences:** Budget cap never enforces during an adopted run — exactly the run-2b failure mode.
 
-**Prevention:**
-- The import layer must treat salvaged envelopes as untrusted foreign data (same threat model as the T-308 ChildCRDSpec allowlist). Before injecting a salvaged envelope:
-  1. Parse it and read `EnvelopeOut.ChildCRDs[*].Name`. Verify each Name matches an expected child of the *current* object at this level, not just any object.
-  2. Reject envelopes whose `apiVersion` does not match `APIVersionV1Alpha1` via the existing `ValidateAPIVersionKind` (`envelope.go:407`).
-  3. Record an `importSourcePath` alongside the accepted envelope in a new `Status.Import` section for operator-visible provenance.
-- Design the stable-key for import as `{project.Name}/{level}/{objectName}`, not the raw PVC path.
+**Prevention:** Fix D2 (lifecycle advance after ImportComplete=True) before D1 can be verified. The envtest for D1 must assert that `BudgetExceeded` fires after enough mock usage accumulates — not just that `costSpentCents` > 0.
 
-**Warning signs:**
-- Phase CRDs appearing under the wrong Milestone parent after import
-- Global indegree mismatches: tasks from wrong plans counted as predecessors
-- `Status.Conditions` showing `ConditionAuthoringPlanner=True` but ChildCRDs pointing to wrong-level children
+**Warning sign:** `costSpentCents` is non-zero in `.status.budget` but `Phase` is still `Initialized` and no `BudgetExceeded` condition appears.
 
-**Phase to address:** Phase 2 of v1.0.3 (envelope-import design specification, before any import code is written).
+**Detection:** Envtest: create an adopted project (ImportSource set, ImportComplete=True, milestone present), fire a plan-level planner completion with usage that exceeds `absoluteCapCents`, then assert `Project.Status.Phase == BudgetExceeded`.
+
+**Phase owner:** D1+D2 phase (same fix).
 
 ---
 
-### Pitfall R-03: Stale or partial-write envelope accepted as valid — planner skipped incorrectly
+### P-D2a: Re-firing the suppressed project-planner after lifecycle advance
 
-**Severity:** Critical (silent planning corruption)
+**What goes wrong:** The adoption guard in `reconcileProjectPlannerDispatch` (lines ~1105–1132) returns early when `ImportComplete=True` AND an owned Milestone exists. If the D2 fix advances `project.Status.Phase` from `Initialized` to `Running` via a new code path, and that path does not call `reconcileProjectPlannerDispatch` at all (i.e., bypasses Step 0b entirely), the guard is never evaluated. But if D2's advance patches `Status.Phase=Running` and then on the next reconcile `reconcilePhase3Lifecycle` reaches Step 0b as normal, the adoption guard runs — and if the list of owned Milestones is momentarily empty (informer lag between milestone creation and the list cache syncing), the guard falls through and dispatches the project planner.
 
-**What goes wrong:**
-A planner Job was in-flight when the budget halt fired. The Job was killed mid-write. The result is a partial `out.json`. If the planner used write-then-rename (write to a temp, then `mv` to `out.json`) and the crash happened after the rename, the file is structurally complete JSON but only contains the children emitted up to that point. `FilesystemEnvelopeReader.ReadOut` (`backend.go:94`) does a single `os.ReadFile` + `json.Unmarshal` — no completeness check. `ValidateAPIVersionKind` (`envelope.go:407`) checks `apiVersion` and `kind` only. The import layer accepts the envelope as valid, skips the planner, and materializes a partial child set. Downstream levels that depend on missing children are never dispatched; the global indegree map is wrong.
+**Why it happens:** The WR-01 guard in the existing adoption guard comments on exactly this: a free-form Spec.ProjectRef check would collide with same-name Milestones from a prior project. The UID-bound owner reference check (`metav1.IsControlledBy`) is correct, but only if the informer cache is warm. Under a fresh controller restart with a stale cache, `r.List` may return 0 items transiently, letting the guard fall through.
 
-**Code locations:**
-- `backend.go:94-105` — `ReadOut` has no completeness check beyond valid JSON parse
-- `pkg/dispatch/envelope.go:400-409` — `ValidateAPIVersionKind` checks only `apiVersion` and `kind`
-- `project_controller.go:1204` — `out.ChildCount` exists and is already used as a succession guard; the same field must gate import validation
+**Consequences:** A paid project-planner Job fires post-import, re-generating the milestone tree from scratch and potentially overwriting the adopted status.
 
 **Prevention:**
-- Before import, validate `len(ChildCRDs) == ChildCount`. A mismatch means a partial write; reject the envelope and re-plan.
-- Optionally, require the planner harness to write `"complete": true` as the final field in `out.json` (written only after the full JSON is formed). The reader rejects envelopes without this sentinel.
-- Log the envelope source path, `ChildCount`, and `len(ChildCRDs)` as structured fields before committing any planner-skip decision.
+- Do not rely on `r.List` returning a non-empty result as a one-shot gate. Add a second sentinel: a durable `.status` field (e.g., `Status.Import.AdoptionComplete: true`) set once the adoption guard has permanently suppressed dispatch. Check the field first, before the List.
+- Alternatively: after ImportComplete=True, set `Status.Phase=Running` via a Status patch but also stamp `ConditionAuthoringPlanner=False` with `Reason=AdoptionSuppressed`. The existing dispatch guard at reconcileProjectPlannerDispatch already short-circuits on `ConditionAuthoringPlanner.Reason==PlannerDispatched` — adding a parallel `AdoptionSuppressed` short-circuit prevents re-dispatch even on cache miss.
+- The fix must not change the non-adoption path. The adoption code path is gated on `project.Spec.ImportSource != nil` throughout; keep all new conditions inside that gate.
 
-**Warning signs:**
-- Fewer Milestone/Phase/Plan/Task children than expected after a resume
-- `checkProjectComplete` firing on a project that has not finished planning
-- Global indegree map showing 0 for tasks that should have predecessors from unimported plans
+**Warning sign:** After a controller restart mid-adoption, a `tide-project-<uid>-1` Job appears in the namespace even though `ImportComplete=True` is already set and owned Milestones exist.
 
-**Phase to address:** Phase 2 of v1.0.3 (import completeness validation).
+**Detection:** Envtest: set ImportComplete=True + create owned Milestone, then reconcile the project multiple times (simulate cache-cold by using `fake.NewClientBuilder()` with no pre-populated Milestones on the first reconcile). Assert no planner Job is created.
+
+**Phase owner:** D2 phase.
 
 ---
 
-### Pitfall R-04: TTL-GC race — reporter Job GC'd before completion handler fires, causing budget double-count
+### P-D2b: Lifecycle advance breaks the normal (non-adoption) path
 
-**Severity:** Critical (financial correctness + this is the observed class of bug)
+**What goes wrong:** Adding a new `if project.Spec.ImportSource != nil` arm to `reconcilePhase3Lifecycle` that advances `Status.Phase=Running` can accidentally alter the phase machine for non-import projects if the condition check is too broad or the new arm does not `return` before reaching the existing Step 0b.
 
-**What goes wrong:**
-The planner Job succeeds. Its TTL is 600s (`jobspec.go:73`). The reporter Job that materializes children also has a TTL (`reporter_jobspec.go:175`). If the project is in BudgetExceeded long enough for both Jobs to TTL-GC, then on bypass-clear the reconcile path sees no reporter Job and sets `isFirstCompletion = true` (`project_controller.go:1156-1175`). The `isFirstCompletion && envReadOK` guard fires `budget.RollUpUsage` (`project_controller.go:1178-1182`) a second time for the same planner envelope. `Status.Budget.CostSpentCents` increases by the planner's cost again — which may immediately re-trigger the budget cap that was just bypassed.
+**Why it happens:** `reconcilePhase3Lifecycle` is a flat fallthrough function with comments labeling each step. A new arm inserted at the wrong position (e.g., after the `complete` fast-path but before Step 0b) can execute for non-import projects if `project.Spec.ImportSource` is nil but the surrounding logic alters control flow.
 
-**Why it happens:**
-The `isFirstCompletion` guard uses reporter-Job *existence* as its signal. The reporter Job is an ephemeral K8s resource with a TTL. A long-lived halt makes reporter-Job-existence an unreliable indicator of whether rollup has already been performed.
-
-**Code locations:**
-- `project_controller.go:1156-1162` — reporter Job existence check drives `isFirstCompletion`
-- `project_controller.go:1178-1182` — `if isFirstCompletion && envReadOK { budget.RollUpUsage(...) }`
-- `jobspec.go:73` — planner Job TTL = 600s
-- `reporter_jobspec.go:175` — reporter Job TTL
+**Consequences:** Regression in the normal project lifecycle — most immediately in the existing `TestProjectLifecycle` envtest suite.
 
 **Prevention:**
-- Replace the `isFirstCompletion` guard with a durable status field: `Status.Budget.PlannerRolledUpUID` (or a per-level map). After rollup fires for a given planner job name, record that job name. On subsequent reconciles, skip rollup if `PlannerRolledUpUID == currentPlannerJobName`.
-- For the import path specifically: when injecting a salvaged envelope, set `skipBudgetRollup = true` unconditionally — the prior run's cost was already recorded in `Status.Budget.CostSpentCents` and must not be re-counted.
+- Gate every new block with `if project.Spec.ImportSource != nil { … return … }` — never fall through from the adoption arm.
+- Run the full envtest suite (`make test-int-fast`) as the D2 gate, not just the new adoption test. Any regression in `project_controller_test.go` or `project_phase3_test.go` is a no-ship blocker.
+- Add a regression envtest: create a project WITHOUT `ImportSource` and assert the existing lifecycle (init→clone→running→complete) is unaffected.
 
-**Warning signs:**
-- `Status.Budget.CostSpentCents` increasing by the same amount twice in Events
-- Budget cap re-triggering immediately after bypass annotation is consumed
-- `ConditionBudgetExceeded` flipping back to True within seconds of bypass
+**Warning sign:** `TestProjectLifecycle` or `TestProjectPhase3` fails after the D2 change.
 
-**Phase to address:** Phase 1 of v1.0.3 — prerequisite to all import work; this is a standalone correctness bug on the existing bypass path.
+**Detection:** `make test-int-fast`; also grep for all callers that reach `reconcilePhase3Lifecycle` and confirm none of the new ImportSource arms are reachable when `project.Spec.ImportSource == nil`.
+
+**Phase owner:** D2 phase.
 
 ---
 
-### Pitfall R-05: Partial-plan import corrupts the global Execution DAG
+### P-D3a: Pool `Acquire` counts in-process goroutines, not in-flight Kubernetes Jobs
 
-**Severity:** Critical (silent correctness, possibly undetectable without explicit validation)
+**What goes wrong:** `pool.Pool.Acquire` is a `chan struct{}` semaphore that counts reconcile-goroutine acquisitions. It correctly caps simultaneous `r.Create(job)` calls within one manager process. However:
 
-**What goes wrong:**
-Import succeeds for all Milestones and Phases but only partially for Plans — e.g., the planner for Milestone B Phase 2 was in-flight at halt time and its envelope is absent. Tasks from the imported plans exist as CRD objects; their `DependsOn` references task names from the missing plans. The `computeGlobalIndegree` function at `task_controller.go:481` re-derives the indegree map from all current Tasks. For a task reference that does not resolve to any existing Task CRD, the `depgraph.go` resolver returns empty (`depgraph.go:28: "An unresolved ref returns empty (conservative — never invents an edge, D-06)"`). Tasks that should have waited for missing-plan tasks now have indegree 0 and dispatch immediately. The global wave schedule is wrong with no error surfaced.
+1. After a manager restart, `PreCharge` re-inspects live Jobs via `client.List` and charges one slot per `Status.Active > 0` Job. If the D3 fix uses a new label selector for the PreCharge call, or uses the wrong label, the pre-charge misses running Jobs and the pool starts at 0 slots consumed — allowing a fresh wave to dispatch up to the cap again on top of already-running Jobs.
+2. The pool tracks goroutines, not Jobs. A TTL-GC'd Job (gone from the API server) whose goroutine already released the slot means the pool has "free" capacity that corresponds to a Job still running (if the container runtime is alive but the Job object was GC'd). On a kind cluster this matters for the TTL=300s Jobs.
+3. `PreCharge` panics (via the `default:` arm returning an error) if live Jobs exceed capacity. That turns a misconfiguration into a manager startup failure rather than a soft degraded-mode. This is intentional and correct, but must be documented for the chart values.
 
-**Why it happens:**
-The depgraph resolver's conservative design (unresolved ref = no edge) is correct for the normal case (a typo should not block indefinitely). For import, "no such task" means "task not yet materialized," not "wrong reference." The resolver cannot distinguish these cases.
+**Why it happens:** The pool is an in-process semaphore, not a remote count. The K8s source of truth for in-flight Jobs is `Status.Active`, not the pool's channel depth.
 
-**Code locations:**
-- `depgraph.go:28` — conservative empty-return on unresolved scope
-- `task_controller.go:470-482` — `computeGlobalIndegree` lists all Tasks; missing tasks silently produce zero indegree contribution
+**Consequences:** After manager restart, the cap is effectively inoperative until `plannerCapsFloorSeconds` (1800 s) has elapsed and old Jobs complete, during which the effective concurrency is `cap + (pre-existing active jobs that were missed)`.
 
 **Prevention:**
-- Import atomicity must be per-Milestone: either all Plans for a Milestone are imported (every plan envelope valid + complete), or none are and the Milestone re-plans. Partial Milestone import is rejected.
-- Before committing any import, verify the full task set is self-consistent: every `Task.Spec.DependsOn` entry must resolve to an existing Task CRD. Unresolved refs at import time are an import failure, not a silent skip.
-- Surface a `Status.Condition` of type `ImportIncomplete` that blocks execution dispatch (TaskReconciler checks it before indegree computation). Clear it only when the full consistency check passes.
+- Use `tideproject.k8s/role=planner` and `tideproject.k8s/role=executor` as the label selectors for PreCharge — verify these labels are stamped on every planner and executor Job in `podjob.BuildJobSpec`. Do not use a broader selector.
+- Envtest: call `pool.PreCharge` with a fake client containing 3 active Jobs on a capacity-4 pool; assert 3 slots consumed; then Acquire the 4th; assert 5th blocks.
+- Document in chart values that `plannerPool.capacity` and `executorPool.capacity` must be set to the expected peak parallelism — not the desired parallelism. A too-small cap fails manager startup via PreCharge overflow.
 
-**Warning signs:**
-- Tasks dispatching before their declared predecessors complete on a resumed run
-- Plans completing faster than expected on resume (sign of missing wait edges)
-- `computeGlobalIndegree` returning 0 for tasks with non-empty `DependsOn`
+**Warning sign:** After a manager restart, the pool appears to have full capacity even though `kubectl get jobs -n <ns> -l tideproject.k8s/role=planner` shows N active Jobs.
 
-**Phase to address:** Phase 2 of v1.0.3 (import atomicity contract and import-consistency pre-check).
+**Phase owner:** D3 phase.
 
 ---
 
-### Pitfall R-06: Schema mismatch — salvaged v1alpha1 envelope ChildCRDSpec decoded into v1alpha2 typed structs
+### P-D3b: Pool that silently truncates a wave — no queuing, no log
 
-**Severity:** Serious (import silently drops v1alpha2-required fields)
+**What goes wrong:** When a pool slot is unavailable, `pool.Acquire` blocks the reconcile goroutine until the context is cancelled (if no slot frees). If the cap is 5 and wave 0 has 15 phases, the first 5 reconciles acquire slots and dispatch; the next 10 block in `Acquire` until context timeout. From the operator's perspective, the 10 stalled phases just do not dispatch. There is no condition on the Phase CR, no event on the Project, no metric count of deferred dispatches. The stall is invisible unless the operator reads manager logs.
 
-**What goes wrong:**
-The dogfood run #2 salvage artifacts were authored by the v1alpha1 planner. The v1.0.2 CRD schema is v1alpha2. The envelope contract version check (`ValidateAPIVersionKind`, `envelope.go:407`) correctly accepts envelopes with `apiVersion = "tideproject.k8s/v1alpha1"`. But the `ChildCRDSpec.Spec.Raw` bytes inside those envelopes were produced against the v1alpha1 typed spec. Phase 23 added `Wave.Spec.ProjectRef` replacing `Wave.Spec.PlanRef`. When `MaterializeChildCRDs` decodes `Spec.Raw` into the v1alpha2 Wave struct, `ProjectRef` is zero-valued. A Wave with empty `ProjectRef` cannot be traced back to its Project by the global wave derivation engine; it becomes an orphan Wave that never dispatches.
+The current pool.go has no `Waiting() int` or `Deferred() int` metric. The only signal is the context-timeout error that surfaces as a reconcile error (which controller-runtime logs at error level and requeues).
 
-**Code locations:**
-- `dispatch_helpers.go:32-36` — `MaterializeChildCRDs` decodes `Spec.Raw` into typed v1alpha2 structs without schema-version awareness
-- `pkg/dispatch/envelope.go:407-409` — version check is at the envelope level, not at the per-child-spec level
-- Phase 23 schema migration — introduced `Wave.Spec.ProjectRef`
+**Why it happens:** The pool is a simple `chan struct{}` without observability hooks.
+
+**Consequences:** Operators cannot distinguish "cap hit, dispatch deferred" from "something is stuck". On a single-node kind cluster with cap=5, a 15-phase run will stall silently for up to 5 × plannerCapsFloorSeconds before all phases dispatch.
 
 **Prevention:**
-- The import path must run a v1alpha1→v1alpha2 conversion on each `ChildCRDSpec.Spec.Raw` before materialization. The conversion function is already scaffolded in the API package (the conversion webhook infrastructure from Phase 23).
-- For the v1.0.3 dogfood import: the salvage directory must be pre-processed through a one-shot migration tool (`tide import --upgrade-schema`) that rewrites `Spec.Raw` bytes before the controller sees them.
-- Acceptance test: import a v1alpha1 salvage fixture, verify all Wave CRDs have non-empty `Spec.ProjectRef`.
+- Add a Prometheus counter `tide_pool_deferred_total{pool="planner"}` incremented before each `Acquire` call when the pool is at capacity (check `len(sem) == cap(sem)` before calling). This is a non-blocking check.
+- Add a log line at `Info` level: "planner pool at capacity; dispatch will block" when `len(sem) == cap(sem)` before `Acquire`.
+- Envtest: create more phases than pool capacity; assert `tide_pool_deferred_total > 0` after reconcile.
 
-**Warning signs:**
-- Wave CRDs with empty `Spec.ProjectRef` after import
-- `computeGlobalIndegree` returning wrong counts because Waves cannot be traced to their Project
-- Import appearing to succeed but execution never dispatching
+**Warning sign:** 15 phases exist, only 5 have planner Jobs in `Active` state, and the remaining 10 show no conditions or events.
 
-**Phase to address:** Phase 2 of v1.0.3 (schema-version-aware materializer and one-shot migration tool for the dogfood salvage).
+**Phase owner:** D3 phase.
+
+---
+
+### P-D3c: Deadlock-adjacent: pool capacity must be strictly less than `MaxConcurrentReconciles`
+
+**What goes wrong:** `pool.Pool.Acquire` blocks the reconcile goroutine. `Release` fires on `return` from `reconcilePlannerDispatch` — immediately after `r.Create(job)` — not when the Job finishes. So the pool slot is held only for the duration of the API call, and there is no true deadlock. However: if pool capacity equals `MaxConcurrentReconciles`, every reconcile goroutine can block in `Acquire` simultaneously, leaving zero goroutines available to process Owns-watch events (which would otherwise trigger completions). Controller-runtime's work queue does not distinguish goroutine states; with all goroutines in `Acquire`, no new events process until one goroutine's `Create` call completes.
+
+**Prevention:** Set pool capacity strictly less than `MaxConcurrentReconciles`. The recommended configuration: `pool.capacity = N`, `MaxConcurrentReconciles = 2N` or more. Document this invariant in chart values.
+
+**Warning sign:** The manager appears to freeze — no reconcile completions logged — while all goroutines are in `Acquire`.
+
+**Phase owner:** D3 phase.
+
+---
+
+### P-D3d: Pool-unification — planner and executor pools unified into one
+
+**What goes wrong:** If the chart values or manager startup code passes the same `*pool.Pool` instance to both `PlannerPool` and `ExecutorPool` fields across all reconcilers, the spec's "size planner and executor pools separately" constraint is violated. The immediate effect: planner Jobs compete with executor Jobs for slots; a full executor wave can exhaust the pool, blocking all planners.
+
+The existing code has a `crosspool` static analyzer (`tools/analyzers/crosspool/`) that enforces this constraint. If D3 adds new pool wiring, the analyzer's known field set may need updating.
+
+**Prevention:**
+- Keep the two pools as distinct named variables in `cmd/manager/main.go`. Never assign `plannerPool` to an `ExecutorPool` field or vice versa.
+- After any change to pool construction or wiring, run `make lint` (which invokes the crosspool analyzer via golangci-lint).
+
+**Warning sign:** `crosspool` analyzer fires, or both pools have the same `name` field value in manager logs.
+
+**Phase owner:** D3 phase.
+
+---
+
+### P-D3e: Cap interacting with wave-boundary failure semantics — undispatched tasks stall the wave
+
+**What goes wrong:** The spec's wave-boundary contract requires that failed-task siblings continue and dependents never dispatch. But if the pool cap prevents some wave-N tasks from dispatching — they never acquire a slot — those tasks are not failed; they are simply pending with `Phase=""`. The wave-boundary completion check in `gates.BoundaryDetected` counts owned Tasks by Succeeded status. An undispatched task has `Phase=""`, making `observed Succeeded < total tasks` — the wave never completes.
+
+**Why it happens:** `BoundaryDetected` counts Succeeded children vs total children. A task that never dispatches (pool blocked) stays at `Phase=""` forever, making the wave stall indefinitely.
+
+**Consequences:** A wave that cannot fully dispatch because the pool is too small will stall indefinitely. The run neither advances nor fails.
+
+**Prevention:**
+- The default pool capacity must be at least as large as the widest wave in the target workload. For run-2b (15 phases in wave 0), a cap of 15 or larger is required. The "sane single-node default" from D3's scope must document: "set to a value smaller than the cluster's pod capacity, not smaller than your widest wave."
+- The fallback for a too-small cap is not to silently truncate but to serialize: all N tasks dispatch one-at-a-time through the semaphore, each wave member completing before the next acquires a slot. Verify this serial behavior in envtest.
+
+**Warning sign:** `gates.BoundaryDetected(ctx, r.Client, plan, "Task")` returns false even though some tasks Succeeded, and the undispatched tasks have `Phase=""` with no planner Job.
+
+**Phase owner:** D3 phase.
+
+---
+
+### P-D4a: Retry storm from returning a Go error on transient planner failure
+
+**What goes wrong:** If the D4 fix returns `ctrl.Result{}, fmt.Errorf("transient error")` from the planner completion handler for a non-zero exit code, controller-runtime will exponentially backoff-requeue the item — up to 500+ requeues per minute under the default rate limiter. This retry storm exhausts the pool and blocks all other reconciles.
+
+The existing `setBillingHaltIfNeeded` already classifies `billing` vs other reasons. The D4 fix must follow the same classification: `out.Reason == "billing"` → BillingHalt (existing path); `exitCode != 0 && childCount == 0` → PlannerFailed (new path); transient read error (`!envReadOK`) → do not fail, requeue.
+
+**Prevention:**
+- Only fail (set Phase=Failed via condition patch) when the reason is definitively non-transient: `exitCode != 0 AND childCount == 0 AND envReadOK`. Never fail when `!envReadOK` (transient envelope read failure).
+- Use `patchPhaseFailed` / `patchMilestoneFailed` (sets a condition permanently), not a Go error return. Returning an error re-queues; setting Failed patches the condition permanently.
+- The billing-halt check (`setBillingHaltIfNeeded`) runs before the D4 childless check; keep this ordering.
+
+**Warning sign:** Manager logs show the same milestone or phase item being requeued 100+ times in a minute after a planner failure.
+
+**Detection:** Envtest: inject a planner Job with `exitCode=1, reason="timeout"` and `childCount=0`; assert `Phase.Status.Phase=Failed` is set (not a requeue loop). Then inject `exitCode=1, reason="billing"` and assert `BillingHalt=True` is set on the project (not `Phase.Status.Phase=Failed`).
+
+**Phase owner:** D4 phase.
+
+---
+
+### P-D4b: Level-divergent semantics — Phase/Milestone guard diverges from the Plan guard Phase 30 added
+
+**What goes wrong:** Phase 30 added the childless-plan guard only at the plan controller level. D4 must add the equivalent at the phase and milestone controllers. Current state as read from the code:
+
+- `plan_controller.go`: `handlePlannerJobCompletion` reads `out.ExitCode` via `setBillingHaltIfNeeded`, but has no explicit `patchPlanFailed` on `exitCode!=0/childCount==0`. (The task-level cycle detection sets `Phase=Failed` separately, at line ~1099.)
+- `phase_controller.go`: `handleJobCompletion` calls `setBillingHaltIfNeeded` if `out.ExitCode != 0` but has no `patchPhaseFailed` path.
+- `milestone_controller.go`: same — `setBillingHaltIfNeeded` but no `patchMilestoneFailed` on `exitCode!=0/childCount==0`.
+
+D4 must add `patchFailed` at all three levels with identical conditions, or the Phase false-Succeeded bug (run-2b D4) persists at milestone and phase level.
+
+**Prevention:**
+- Implement the guard identically at all three levels: `if envReadOK && out.ExitCode != 0 && out.ChildCount == 0 { return patchFailed(...) }`.
+- Do NOT use `out.ExitCode != 0` alone (without `childCount == 0`) — a planner that successfully authors children but exits with a warning code should not fail the level.
+- Do NOT use `out.ChildCount == 0` alone — `exitCode == 0` with `childCount == 0` is a valid leaf handled by the existing "genuine leaf" succeed path.
+- Extract a shared helper: `func isPlannerFailure(out pkgdispatch.EnvelopeOut, envReadOK bool) bool { return envReadOK && out.ExitCode != 0 && out.ChildCount == 0 }`. Three call sites, one definition.
+
+**Warning sign:** `Phase.Status.Phase=Succeeded` when `kubectl logs <planner-job-pod>` shows `exitCode: 1` and no Plans were created. Or the guard fires for `exitCode=0, childCount=0` (incorrectly failing a leaf).
+
+**Detection:** Envtest at three levels:
+- Milestone: inject planner Job with exitCode=1, childCount=0; assert `ms.Status.Phase=Failed`.
+- Phase: inject planner Job with exitCode=1, childCount=0; assert `ph.Status.Phase=Failed`.
+- Plan: verify existing Phase-30 test still passes with the same conditions.
+- Regression: inject exitCode=0, childCount=0 at all three levels; assert `Status.Phase=Succeeded` (leaf path, NOT Failed).
+
+**Phase owner:** D4 phase.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall R-07: Clone Job re-dispatches on resume because TTL-GC'd Job is the only guard
+### P-Cross-1: Sequencing — D1+D2 must land before D3 can be validated end-to-end
 
-**What goes wrong:**
-After R-01 is fixed (bypass targets `Running`), the clone-Job dispatch at `reconcilePhase3Lifecycle:549` still checks only for Job existence: `cloneErr = apierrors.IsNotFound`. The clone Job TTL is 300s (`push_helpers.go:212`). On resume after a long halt, the clone Job is gone. A new clone Job is dispatched into an already-initialized workspace. `git clone` fails with "destination path already exists"; the project stalls at `InitFailed`.
+**What goes wrong:** D3's real-world efficacy cannot be verified until D1+D2 are fixed. With D2 unfixed, `project.Status.Phase` stays at `Initialized` and plan-level planner dispatch is gated on the ImportComplete check (plan_controller.go:374). Before D1+D2, the pool cap prevents nothing because dispatches are held by D2's lifecycle stall.
 
-**Code locations:**
-- `project_controller.go:549-571` — clone Job creation gated only on `apierrors.IsNotFound(cloneErr)`
-- `push_helpers.go:212` — clone Job TTL = 300s
+**Prevention:** Fix D2 in the first phase of this milestone; fix D3 in a subsequent phase after D2 is envtest-verified. Do not attempt to integration-test D3 on run-2b infra before D2 ships.
 
-**Prevention:**
-- Add `Status.Git.CloneComplete: bool` (set to `true` when the clone Job succeeds, never cleared). Gate the clone-Job dispatch on `!project.Status.Git.CloneComplete`. This is the durable idempotency guard that Job-existence-based logic cannot provide across a TTL gap.
-
-**Warning signs:**
-- Second `tide-clone-<UID>` Job appearing in project Events after a resume
-- Clone Job failing with "destination path already exists"
-- `Status.Phase = InitFailed` on a project that had previously been Running
-
-**Phase to address:** Phase 1 of v1.0.3 (alongside R-01 fix).
+**Phase owner:** Per FINDINGS.md recommended sequencing.
 
 ---
 
-### Pitfall R-08: Cap-raise ergonomics — raising `AbsoluteCapCents` leaves `RollingCapCents` re-halting
+### P-Cross-2: Single-node kind cannot hold the parallelism — infra, not a code fix
 
-**What goes wrong:**
-A project hits `AbsoluteCapCents`. The operator raises `AbsoluteCapCents` in the Project spec. The rolling-window cap (`RollingCapCents`) was not raised; the trailing spend is above the rolling cap. The spec change triggers a reconcile; `handleBudgetGate` checks `IsCapExceeded` which evaluates the rolling cap; the project re-halts immediately. The operator raised the cap but the project still halts — confusing without a clear error distinguishing which cap fired.
+**What goes wrong:** A single-node kind cluster has approximately 2–4 vCPU and 7–8 GiB RAM. Each claude-CLI pod (planner or executor) consumes ~300–800 MB RSS plus the credproxy sidecar. At 10 concurrent planner pods, RSS exceeds available memory and the node OOM-kills. This is the direct cause of run-2b's `Exited 137`.
 
-**Code locations:**
-- `budget/cap.go:64` — two cap forms: absolute and TTL-bypass
-- `handleBudgetGate:1227` — checks both caps without surfacing which one triggered
+**Prevention:** Do not validate D3's concurrency cap on single-node kind. Use a multi-node kind cluster or a VM with at least 16 GiB RAM for the relaunch run. Single-node kind is sufficient for envtest and unit tests of the pool logic, but not for verifying that 15 concurrent planner pods are stable.
 
-**Prevention:**
-- `tide resume` CLI verb must display *both* cap values and current spend before proceeding, and indicate which cap is currently exceeded.
-- Promote the TTL-bypass form (`bypass-budget-until=<RFC3339>`, already documented at `budget/cap.go:64`) as the default ergonomic for cap-raise-and-resume so the project does not immediately re-halt while the operator adjusts both caps.
-- Consider a combined `CapExceededReason` field in the `BudgetExceeded` condition that names which cap triggered.
-
-**Warning signs:**
-- `ConditionBudgetExceeded` cycling between True and False within a single reconcile window
-- Operator annotation consumed but project re-halts before any dispatch fires
-- Confusing event sequence with back-to-back cap-exceeded events citing different cap types
-
-**Phase to address:** Phase 1 of v1.0.3.
+**Phase owner:** Infrastructure concern for the relaunch run, not a code fix in this milestone.
 
 ---
 
-### Pitfall R-09: At-least-once reconcile causes double-import on informer lag
+### P-Cross-3: `MaxConcurrentReconciles` is NOT the dispatch cap
 
-**What goes wrong:**
-The import step runs during reconcile; creates child CRDs; the status patch setting `ImportComplete = true` fails with a ResourceVersion conflict; the reconcile errors and retries. On the second reconcile, the import step runs again. `MaterializeChildCRDs` hits `AlreadyExists` for all children (idempotent at the K8s API level). But side effects that fire during import — recording `importSourceUID` annotations, triggering budget-rollup suppression, writing provenance fields — are not idempotent if they append to a list or patch over a field with a non-idempotent operation.
+**What goes wrong:** `MaxConcurrentReconciles` limits how many reconcile goroutines run simultaneously for a given Kind. It does NOT limit how many planner Jobs are in flight — a reconcile goroutine creates a Job and returns immediately (holding the pool slot only for the duration of `r.Create`). Setting `MaxConcurrentReconciles=5` with `pool.capacity=20` means up to 5 goroutines create Jobs simultaneously, but 20 Jobs can be active at once.
 
-**Prevention:**
-- Check a `Status.Condition` of type `ImportComplete` as the *first step* of the import block. If already True, skip the entire import block unconditionally. This is the correct controller-runtime idiom for once-only bootstrap actions.
-- All import side effects must be idempotent patch operations (use `meta.SetStatusCondition`, `MergeFrom` patches, never append-to-slice operations within the reconcile critical section).
+**Prevention:** Document the distinction in the chart values and in the manager's flag help text. The D3 fix must wire `pool.Pool.capacity` as the knob, not `MaxConcurrentReconciles`. The chart should expose both independently.
 
-**Warning signs:**
-- `Annotations["importSourceUID"]` values appearing duplicated or with malformed multi-value formats
-- Import-related Events appearing twice in `kubectl describe project`
-- Budget rollup recording two entries for the same salvaged planner UID
-
-**Phase to address:** Phase 2 of v1.0.3 (import idempotency design).
+**Phase owner:** D3 phase (documentation and chart).
 
 ---
 
-### Pitfall R-10: Attacker-supplied envelopes injected via PVC
+### P-D1c: Reporter-Job TTL race at rollup — same class as Phase 27 PlannerRolledUpUID bug
 
-**What goes wrong:**
-The import step reads `out.json` from the PVC. The PVC is a shared namespace resource. If another pod in the same namespace writes to `{projectUID}/workspace/envelopes/{levelUID}/out.json`, it can inject arbitrary `ChildCRDSpec.Spec.Raw` bytes. The Kind allowlist (`dispatch_helpers.go:33`, T-308 mitigation) prevents creating arbitrary CRDs. But within the allowed Kinds, `Spec.Raw` is decoded and applied. A crafted spec can set `Task.Spec.Prompt` to a prompt-injection payload that is then sent to the next subagent.
+**What goes wrong:** In `spawnReporterIfNeeded` (called from `handleJobCompletion` at the milestone and phase levels), `isFirstCompletion` is set to `true` when the reporter Job is NotFound. After TTL-GC at 300 s, the reporter Job disappears and the next reconcile sees IsNotFound again, setting `isFirstCompletion=true` and calling `budget.RollUpUsage` a second time.
 
-**Prevention:**
-- Import paths must apply the same `ValidateAPIVersionKind` call as the runtime materializer, plus a content-origin check. The recommended approach: require that `out.json` on the PVC was written by a subagent pod running as UID 1000 (enforce via PVC POSIX ownership), or HMAC-sign `out.json` using the project's signing key (the same key used for credproxy tokens at `project_controller.go:1045`). The signing key differs between runs, so for salvage import, rely on operator-gated invocation (`tide import`) as the trust boundary.
-- Apply the same path-traversal defense as `FilesystemEnvelopeReader.ReadPrompt` (`backend.go:116-127`) to all import path lookups.
+Phase 27 fixed this at the project level with `PlannerRolledUpUID`. Check whether milestone and phase controllers already have an equivalent durable marker. If not, add `MilestoneRolledUpUID` / `PhaseRolledUpUID` fields to Project status (or an equivalent label on the child CR), set after successful rollup, checked before calling `budget.RollUpUsage`.
 
-**Warning signs:**
-- `out.json` files on the PVC with POSIX owner other than UID 1000
-- Unexpected CRD objects appearing after import with unusual `Spec.Prompt` fields
-- Subagents executing prompts that reference content from unrelated projects
+**Warning sign:** `costSpentCents` continues to increment approximately every 300 s after the planning cascade completes.
 
-**Phase to address:** Phase 2 of v1.0.3 (import security model — define trust boundary before writing import code).
-
----
-
-### Pitfall R-11: Resume re-dispatches already-Succeeded execution Tasks
-
-**What goes wrong:**
-On resume with import, the `TaskReconciler` re-derives readiness from `computeGlobalIndegree` on every reconcile. If any code path in the resume sequence clears `Status.Phase` on a Succeeded Task (an over-eager `tide resume --retry-failed` is the documented class of this bug, caught in Phase 25 code review), those Tasks re-dispatch — potentially overwriting already-merged commits on the run branch.
-
-**Code locations:**
-- Phase 25 time-fence fix (referenced in MEMORY.md): the correct fix requires both (a) only clearing Tasks in `Failed` phase and (b) a time-fence guard to prevent clearing a Task that succeeded after the resume command was issued.
-
-**Prevention:**
-- The import path must never touch `Status.Phase` on Tasks with `Status.Phase = Succeeded`. Write a pre-import invariant check: enumerate all Tasks, assert none transition from Succeeded to any other phase during import.
-- Acceptance test: import a salvage fixture that includes completed Tasks; verify none are re-dispatched; verify the run branch gains no new commits from re-executed Tasks.
-
-**Warning signs:**
-- Tasks with `Status.Phase = Succeeded` appearing in the `ConditionAuthoringPlanner` active set
-- Duplicate commits on the run branch (same diff applied twice)
-- `computeGlobalIndegree` returning 0 for tasks that should be blocked by Succeeded predecessors
-
-**Phase to address:** Phase 2 of v1.0.3 (import must not touch execution-layer Tasks).
-
----
-
-### Pitfall R-12: Cycle detection bypassed for imported plan trees
-
-**What goes wrong:**
-The Plan admission webhook runs `ComputeWaves` with `CycleError` detection at apply time. CRD objects created via `client.Create` from within the controller bypass the admission webhook. A salvaged plan tree that contained a cycle (authored by a hallucinating planner) is imported without validation. The global Execution DAG contains a cycle; `computeGlobalIndegree` never reaches 0 for the cyclic tasks; those tasks never dispatch; the project stalls silently with no error surfaced.
-
-**Prevention:**
-- The import step must explicitly call `dag.ComputeWaves` on the full imported task set *before* creating any child CRDs. If `CycleError` is returned, the import fails with an operator-visible condition: `ImportFailed / CyclicPlanDetected`. The spec invariant is explicit (`README.md`: "Cycles are bugs, not runtime conditions"). The import path is not an exception.
-
-**Warning signs:**
-- Tasks with indegree > 0 that never reach 0 after import completes
-- Project stalled indefinitely at `Running` with no active dispatch
-- `dag.ComputeWaves` not called anywhere in the import code path
-
-**Phase to address:** Phase 2 of v1.0.3.
+**Phase owner:** D1 phase.
 
 ---
 
 ## Minor Pitfalls
 
-### Pitfall R-13: Budget double-count from salvage import re-triggering cost rollup for already-counted planners
+### P-D2c: ImportComplete idempotency and the retry annotation
 
-**What goes wrong:**
-Salvaged planner envelopes carry `out.Usage` (token counts, cost). If the import step triggers `budget.RollUpUsage` for each imported envelope, and the original run already rolled those costs before the halt, `Status.Budget.CostSpentCents` is inflated by the prior run's planning cost. This may cause an instant budget halt on the resumed run and obscures the true cost of the resume work.
+**What goes wrong:** The `ImportReconciler` has a `ConditionImportComplete=True` idempotency guard that returns early. If D2's lifecycle-advance code path is triggered by `ConditionImportComplete` becoming True, and the operator sets `AnnotationRetryImport` to reset the import, the import controller clears `ConditionImportComplete` — but D2's advance may have already set `Status.Phase=Running`. On the next reconcile, D2 checks `ConditionImportComplete` and finds it `False` (because of the retry), but the project is already at `Running`. This creates an inconsistent state.
 
-**Prevention:**
-- Import-path envelope injection must suppress budget rollup. Either zero out `out.Usage` in the salvaged envelope before it enters the completion handler, or add a `salvageImport: true` flag that the completion handler checks before calling `budget.RollUpUsage`.
-- Expose the prior run's cost as a separate `Status.Budget.SalvagedPlanningCostCents` field so operators can see what was inherited vs. newly spent.
+**Prevention:** D2's lifecycle-advance must check `ConditionImportComplete=True` and that `Status.Phase != Running` before acting. It must not re-advance if `Running` is already set, and must not conflict with the import retry path.
 
-**Phase to address:** Phase 2 of v1.0.3.
+**Phase owner:** D2 phase.
 
 ---
 
-### Pitfall R-14: Envelope `apiVersion` constant not bumped if v1.0.3 changes the envelope schema
+### P-D4c: The childless guard for leaf levels — exitCode=0, childCount=0 is valid
 
-**What goes wrong:**
-`APIVersionV1Alpha1 = "tideproject.k8s/v1alpha1"` is a constant in `pkg/dispatch/envelope.go:24`. If v1.0.3 adds a field to `EnvelopeOut` that is required for the import path, old envelopes from the salvage will silently read the zero value for that field. `ValidateAPIVersionKind` does not guard against missing fields within a version.
+**What goes wrong:** The D4 guard triggers on `exitCode != 0 AND childCount == 0`. The existing "genuine leaf" path for milestones (milestone_controller.go:673 `if expected == 0 { return r.patchMilestoneSucceeded }`) fires on `expected == 0` regardless of exit code. If the D4 guard fires before the leaf-check (wrong ordering), it fails a planner that legitimately authored no children with exit code 0.
 
-**Prevention:**
-- v1.0.3 must not add required fields to `EnvelopeOut` or `EnvelopeIn` without bumping the constant to `v1alpha2`. Optional fields with `omitempty` are safe.
-- The salvage import path should use a new wrapper type (`SalvageImportManifest`) that wraps `EnvelopeOut` rather than extending the envelope contract, keeping the existing contract stable.
+**Prevention:** Ordering in `handleJobCompletion`:
+1. BillingHalt check (existing).
+2. D4 childless-failure check: `if envReadOK && out.ExitCode != 0 && out.ChildCount == 0 { patchFailed }`.
+3. Leaf-success check: `if out.ChildCount == 0 { patchSucceeded }`.
 
-**Phase to address:** Phase 2 of v1.0.3 (schema design review before any new fields are added).
+The two checks are mutually exclusive when `envReadOK=true` because they branch on `ExitCode`. When `!envReadOK`, neither fires (fallback to children-based BoundaryDetected).
+
+**Phase owner:** D4 phase.
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase / Topic | Likely Pitfall | Mitigation |
-|---------------|---------------|------------|
-| Phase 1 — Budget-bypass correctness | R-01 (Pending re-init), R-04 (reporter TTL-GC double rollup), R-07 (clone re-dispatch) | Fix bypass to target `Running`; add durable `UsageRolledUp` guard; add `Status.Git.CloneComplete` flag |
-| Phase 1 — Budget-bypass ergonomics | R-08 (cap-raise leaves rolling cap re-halting) | Surface both cap values in `tide resume`; promote TTL-bypass form as default |
-| Phase 2 — Import design | R-02 (UID aliasing), R-03 (partial-write acceptance), R-05 (partial-plan DAG corruption), R-06 (v1alpha1 schema mismatch), R-10 (PVC injection), R-11 (Succeeded task re-dispatch), R-12 (cycle bypass) | Full import spec before code: stable-key lookup, ChildCount completeness check, Milestone-level atomicity, schema conversion, trust boundary, `ImportComplete` condition guard, cycle pre-check |
-| Phase 2 — Import financial correctness | R-09 (at-least-once double-import), R-13 (budget double-count from salvage) | `ImportComplete` condition as first-step guard; suppress rollup on salvaged envelopes |
-| Any phase touching `EnvelopeOut` schema | R-14 (version constant not bumped) | Only add `omitempty` optional fields; use `SalvageImportManifest` wrapper for import-specific fields |
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| D1: rollup under adoption | Double-count via isFirstCompletion reporter TTL race | PlannerRolledUpUID-style durable marker at every rollup call site |
+| D1: budget gate fires | Budget gate blocked by D2 lifecycle stall | Fix D2 first; envtest must assert BudgetExceeded not just costSpentCents > 0 |
+| D2: lifecycle advance | Re-firing suppressed project-planner on informer cache miss | Durable adoption-complete sentinel in .status, not just List count |
+| D2: normal path regression | adoption arm falls through to non-import code | Gate every new block on ImportSource != nil; run full envtest suite |
+| D3: pool pre-charge | Wrong label selector misses live Jobs at manager restart | Verify labels stamped in BuildJobSpec match PreCharge selector |
+| D3: pool vs reconcile concurrency | MaxConcurrentReconciles confused with dispatch cap | Document distinction; wire pool.capacity as the real cap |
+| D3: silent wave truncation | Pool-blocked tasks have no observable signal | Add deferred-dispatch Prometheus counter and Info log line |
+| D3: pool unification | Same Pool pointer in PlannerPool and ExecutorPool | crosspool analyzer; separate named vars in main.go |
+| D4: retry storm | Returning Go error for transient planner failure | Use patchFailed (condition), not error return, for definitive failures |
+| D4: level divergence | Guard added at phase but not milestone (or vice versa) | Shared isPlannerFailure helper; envtest at all three levels |
+| D4: leaf regression | exitCode=0 childCount=0 wrongly fails level | D4 guard requires exitCode != 0; ordering: fail check before succeed check |
+| Relaunch infra | Single-node kind OOM at peak parallelism | Multi-node cluster or 16 GiB VM for run-2b relaunch |
 
 ---
 
 ## Sources
 
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/project_controller.go` (lines 339, 969-972, 1156-1182, 1257, 1300-1321)
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/dispatch/podjob/backend.go` (lines 92-141)
-- Direct inspection: `/Users/justinsearles/Projects/tide/pkg/dispatch/envelope.go` (lines 21-24, 400-409)
-- Direct inspection: `/Users/justinsearles/Projects/tide/pkg/dispatch/childcrd.go` (T-308 threat comment)
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/depgraph.go` (lines 17-30)
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/dispatch_helpers.go` (lines 17-36)
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/dispatch/podjob/jobspec.go` (lines 72-73: `DefaultTTLSecondsAfterFinished = 600`)
-- Direct inspection: `/Users/justinsearles/Projects/tide/internal/controller/reporter_jobspec.go` (line 175: reporter Job TTL)
-- `.planning/PROJECT.md` — milestone v1.0.3 scope, constraints, and key decisions
-- `README.md` spec — resumption invariants (§"Failure handling at wave boundaries"), cycle detection, CRD-status-only persistence
-- MEMORY.md — Phase 25 code review finding: `resume --retry-failed` clearing FailureHalt before resetting Failed tasks; time-fence fix pattern
+- `.planning/dogfood/run-2b-FINDINGS.md` — authoritative defect descriptions (D1–D4)
+- `.planning/PROJECT.md` — Key Decisions: PlannerRolledUpUID, BillingHalt, pool sizing, CRD-status-only persistence
+- `internal/controller/project_controller.go` — `handleProjectJobCompletion`, `reconcileProjectPlannerDispatch`, adoption guard (~L1088–1132), `handleBudgetGate`
+- `internal/controller/milestone_controller.go` — `handleJobCompletion`, `spawnReporterIfNeeded`, `patchMilestoneSucceeded`
+- `internal/controller/phase_controller.go` — `handleJobCompletion`, `patchPhaseSucceeded`
+- `internal/controller/plan_controller.go` — `handlePlannerJobCompletion`, childless-success/failure shape, Phase-30 leaf guard
+- `internal/controller/import_controller.go` — `succeedImport`, `ConditionImportComplete`, `AnnotationRetryImport` reset path
+- `internal/pool/pool.go` — `Pool.Acquire`/`Release`/`PreCharge` semantics, TTL-GC behavior
+- `internal/dispatch/podjob/caps.go` — `DefaultCaps`, `JobKindPlanner` / `JobKindExecutor` discriminator
