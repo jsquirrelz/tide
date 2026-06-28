@@ -77,6 +77,22 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: tide-import
+  namespace: tide-dogfood-codex
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: dogfood-codex
+  # Identity for the ImportController's tide-import Job pod. The chart provisions
+  # this only in tide-system (.Release.Namespace); the project namespace needs the
+  # manual equivalent or the import Job 403s on pod create (run-2b finding).
+  # The import binary makes no K8s API calls, so no Role/RoleBinding is needed
+  # (Phase 28/29 GAP-5; mirrors ensureImportSA in test/integration/kind).
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: tide-push
   namespace: tide-dogfood-codex
   labels:

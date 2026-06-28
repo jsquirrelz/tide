@@ -4,7 +4,7 @@
       "name": "milestone-01-codex-subagent",
       "fqName": "milestone-01-codex-subagent",
       "oldUID": "045b44c8-87d9-4e70-8743-0afa0421effd",
-      "status": "Running",
+      "status": "",
       "projectRef": "dogfood-codex-runtime"
     },
     {
@@ -14,7 +14,7 @@
       "dependsOn": [
         "milestone-01-codex-subagent"
       ],
-      "status": "Running",
+      "status": "",
       "projectRef": "dogfood-codex-runtime"
     },
     {
@@ -24,7 +24,7 @@
       "dependsOn": [
         "milestone-02-provider-dispatch"
       ],
-      "status": "Running",
+      "status": "",
       "projectRef": "dogfood-codex-runtime"
     }
   ],
@@ -33,21 +33,21 @@
       "name": "phase-01-codex-pricing-usage",
       "fqName": "milestone-03-hetero-integration/phase-01-codex-pricing-usage",
       "oldUID": "9e214568-620d-46a1-9599-baf838b0df49",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     },
     {
       "name": "phase-01-codex-subagent-core",
       "fqName": "milestone-02-provider-dispatch/phase-01-codex-subagent-core",
       "oldUID": "9b886f3d-ca97-4f2e-9a71-81302684bde5",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-02-provider-dispatch"
     },
     {
       "name": "phase-01-provider-switch",
       "fqName": "milestone-01-codex-subagent/phase-01-provider-switch",
       "oldUID": "45b12a36-303d-42f1-95ad-0ab089e5e100",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-01-codex-subagent"
     },
     {
@@ -57,14 +57,14 @@
       "dependsOn": [
         "phase-01-codex-subagent-core"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-02-provider-dispatch"
     },
     {
       "name": "phase-02-codex-subagent",
       "fqName": "milestone-01-codex-subagent/phase-02-codex-subagent",
       "oldUID": "f45c4d0b-df0b-4c75-905e-3de33ba126e8",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-01-codex-subagent"
     },
     {
@@ -74,7 +74,7 @@
       "dependsOn": [
         "phase-01-codex-pricing-usage"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     },
     {
@@ -84,7 +84,7 @@
       "dependsOn": [
         "phase-02-codex-subagent-core"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     },
     {
@@ -94,14 +94,14 @@
       "dependsOn": [
         "phase-02-codex-subagent"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-01-codex-subagent"
     },
     {
       "name": "phase-03-per-level-provider-switch",
       "fqName": "milestone-02-provider-dispatch/phase-03-per-level-provider-switch",
       "oldUID": "24995f28-35e1-48ea-8b07-70e932d89ae7",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-02-provider-dispatch"
     },
     {
@@ -111,7 +111,7 @@
       "dependsOn": [
         "phase-03-per-level-provider-switch"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-02-provider-dispatch"
     },
     {
@@ -122,14 +122,14 @@
         "phase-01-provider-switch",
         "phase-03-image-and-credentials"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-01-codex-subagent"
     },
     {
       "name": "phase-04-per-level-vendor-switch",
       "fqName": "milestone-03-hetero-integration/phase-04-per-level-vendor-switch",
       "oldUID": "f530d200-7207-47df-9f32-5fd4b5bf2ab1",
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     },
     {
@@ -139,7 +139,7 @@
       "dependsOn": [
         "phase-04-per-level-vendor-switch"
       ],
-      "status": "Succeeded",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     },
     {
@@ -152,7 +152,7 @@
         "phase-03-per-level-provider-switch",
         "phase-04-credential-and-chart-wiring"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-02-provider-dispatch"
     },
     {
@@ -165,7 +165,7 @@
         "phase-04-per-level-vendor-switch",
         "phase-05-chart-secret-wiring"
       ],
-      "status": "Running",
+      "status": "",
       "milestoneRef": "milestone-03-hetero-integration"
     }
   ],

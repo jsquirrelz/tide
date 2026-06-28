@@ -9,9 +9,38 @@ The run pushes to an in-cluster TIDE mirror — never to public origin.
 Set once:
 ```bash
 NS=tide-dogfood-codex
-VER=1.0.4
+VER=1.0.5   # was 1.0.4 when authored 2026-06-25; v1.0.5 shipped 2026-06-27 — dogfood the latest (it carries the Phase 30 ImportController fix this run exercises)
 RUN2=examples/projects/dogfood/run-2
 ```
+
+---
+
+> ## ⚠ Corrections from run 2b (2026-06-28) — read before running
+> The first live attempt hit these gaps; they are now fixed in the artifacts/steps but
+> call them out so the bring-up is reproducible:
+> 1. **cert-manager is a hard prereq** — the tide chart references `cert-manager.io/v1`
+>    Certificate/Issuer. Install `v1.20.2` BEFORE the chart (see `hack/scripts/acceptance-v1.sh`).
+> 2. **Override the chart PVC to RWO on kind** — `helm install … --set 'workspaces.pvc.accessModes={ReadWriteOnce}'`
+>    (local-path is RWO-only; default RWX leaves the manager Pending). PVC accessModes are
+>    immutable, so on a retry delete the stale `tide-projects` PVC first.
+> 3. **Build + `kind load` the `tide-git-http-server` fixture image** — it is unpublished
+>    (`make` builds it; 403 on ghcr). Also: its `nginx.conf` needed `client_max_body_size 0`
+>    to accept a real repo push (fixed in `images/tide-git-http-server/nginx.conf`).
+> 4. **`TIDE_IMPORT_IMAGE=""` does NOT dev-skip** — `cmd/manager/main.go` `envOrDefault` treats
+>    empty as unset and falls back to a missing default. Point it at the real published image:
+>    `kubectl -n tide-system set env deploy/tide-controller-manager TIDE_IMPORT_IMAGE=ghcr.io/jsquirrelz/tide-import:$VER`.
+> 5. **Strip the API key newline** — `kubectl create secret --from-file` keeps a trailing `\n`,
+>    which makes the credproxy `X-Api-Key` header invalid (every `claude` call exits 1). Use:
+>    `--from-literal=ANTHROPIC_API_KEY="$(tr -d '\n\r' < ~/.tide/anthropic.key)"`.
+> 6. **Per-namespace `tide-import` SA** — now in `per-namespace-resources.yaml` (was missing →
+>    import Job pod 403'd on create).
+> 7. **Seed statuses must be empty + gates milestone/phase: auto** — fixed in
+>    `seed-manifest.trimmed.json` (was `Running` → reporter thrash) and `project.yaml`.
+>
+> **Known product defects this run surfaced (NOT yet fixed — see `.planning/dogfood/run-2b-FINDINGS.md`):**
+> cost tracking never wires under import-adoption (budget cap can't enforce); project lifecycle
+> stalls at `Initialized`; no planner-concurrency bound (single-node OOM at ~60 parallel planners);
+> phase false-`Succeeded` on a failed planner. **A real run needs these fixed + a bigger/multi-node cluster.**
 
 ---
 
@@ -23,7 +52,7 @@ kind create cluster --name tide-dogfood
 kubectl config use-context kind-tide-dogfood
 ```
 
-## 2. Install the published v1.0.4 chart (CRDs FIRST — Pitfall 4)
+## 2. Install the published v1.0.5 chart (CRDs FIRST — Pitfall 4)
 
 ```bash
 helm install tide-crds oci://ghcr.io/jsquirrelz/tide-charts/tide-crds \
@@ -32,7 +61,7 @@ helm install tide oci://ghcr.io/jsquirrelz/tide-charts/tide \
   --version "$VER" -n tide-system --wait
 kubectl -n tide-system get deploy            # tide-controller-manager + tide-dashboard Available
 ```
-All eight v1.0.4 images (controller, dashboard, stub/claude/codex-subagent…, push, reporter,
+All eight v1.0.5 images (controller, dashboard, stub/claude/codex-subagent…, push, reporter,
 import) were built from the same `main` as this chart, so no ImagePullBackOff is expected.
 
 **Blank `TIDE_IMPORT_IMAGE` (dev-skip the envelope Job).** We adopt the M+P skeleton via the

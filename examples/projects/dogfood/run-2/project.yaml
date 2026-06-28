@@ -163,6 +163,8 @@ spec:
     rollingWindowCapCents: 5000
     rollingWindowDuration: 24h
   gates:
+    milestone: auto
+    phase: auto
     plan: auto
     task: auto
     pauseBetweenWaves: false
