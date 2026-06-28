@@ -57,6 +57,14 @@ type MilestoneStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// MilestoneRolledUpUID is the name of this Milestone's planner Job whose Usage
+	// was successfully rolled up into the Project budget. Prevents double-counting
+	// when the reporter Job has TTL-GC'd before a reconcile re-observes it.
+	// Mirrors the project-level budget rollup marker at the Milestone level
+	// per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
+	// +optional
+	MilestoneRolledUpUID string `json:"milestoneRolledUpUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
