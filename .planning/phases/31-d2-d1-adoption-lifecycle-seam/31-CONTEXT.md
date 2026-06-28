@@ -70,8 +70,8 @@ This is a **corrective** phase. It removes two genuine anti-patterns currently i
 - `internal/controller/milestone_controller.go` — `budget.RollUpUsage` site (~L587); add `MilestoneRolledUpUID` dedup.
 - `internal/controller/phase_controller.go` — rollup site; add `PhaseRolledUpUID` dedup.
 - `internal/controller/plan_controller.go` — check for an existing plan-level rollup marker (Phase 27/30) before adding one.
-- `api/v1alpha1/shared_types.go` — condition-name convention (`ConditionBillingHalt`/`ConditionBudgetBlocked`/`ConditionImportComplete`); add `ConditionProjectPlannerSuppressed`.
-- `api/v1alpha1/*_types.go` (budget status structs) — add `MilestoneRolledUpUID` / `PhaseRolledUpUID` fields next to `PlannerRolledUpUID`.
+- `api/v1alpha2/shared_types.go` — condition-name convention (`ConditionBillingHalt`/`ConditionBudgetBlocked`/`ConditionImportComplete`); add `ConditionProjectPlannerSuppressed`. (The live types are in `v1alpha2`; `ConditionImportComplete` exists only there.)
+- `api/v1alpha2/*_types.go` (child status structs — children have no `BudgetStatus`) — add the per-level rollup markers `MilestoneRolledUpUID` / `PhaseRolledUpUID` / `PlanRolledUpUID` directly on each child's `.status`, mirroring project-level `BudgetStatus.PlannerRolledUpUID`.
 - `internal/budget/tally.go` — `RollUpUsage` (unchanged; the markers gate its invocation).
 - `internal/controller/billing_halt.go` / `failure_halt.go` / `budget_blocked.go` — reference patterns for condition-patch + `nil`-error halts (do not return `err`).
 
