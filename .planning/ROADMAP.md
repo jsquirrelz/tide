@@ -275,8 +275,8 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 **Plans**: 3 plans
 
 - [x] 31-01-PLAN.md — API types: ConditionProjectPlannerSuppressed + per-child-level PlannerRolledUpUID markers; regenerate DeepCopy + CRD manifests
-- [ ] 31-02-PLAN.md — D2 seam: durable suppression short-circuit + single-patch Initialized→Running advance before pool acquire; envtest ADOPT-01/03/05
-- [ ] 31-03-PLAN.md — D1 idempotency: marker-gated exactly-once child rollup (milestone/phase/plan) across reporter-Job TTL-GC; envtest ADOPT-02/04
+- [x] 31-02-PLAN.md — D2 seam: durable suppression short-circuit + single-patch Initialized→Running advance before pool acquire; envtest ADOPT-01/03/05
+- [x] 31-03-PLAN.md — D1 idempotency: marker-gated exactly-once child rollup (milestone/phase/plan) across reporter-Job TTL-GC; envtest ADOPT-02/04
 
 ### Phase 32: D3 — Dispatch Concurrency Cap
 
@@ -355,6 +355,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete | 2026-06-18 |
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete | 2026-06-22 |
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
-| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 1/3 | In Progress|  |
+| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete   | 2026-06-28 |
 | 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 0/TBD | Not started | - |
 | 33. D4 — Planner Failure Semantics | v1.0.6 | 0/TBD | Not started | - |
