@@ -1,8 +1,8 @@
 # Design: The Harness & Memory Model
 
-**Status:** Design — for review (not yet planned/implemented)
+**Status:** ⏸ **DEFERRED VISION — NOT the next milestone.** An adversarial complexity review (4 lenses, 2026-06-28) returned a unanimous *significantly-overscoped* verdict: the four dogfood-run-2b defects (D1–D4) that motivated this are small, localized controller fixes that require **none** of the harness grammar, fractal recursion, memory model, `router`/`verdict`/`compute` atoms, or the dashboard filmstrip. **Ship D1–D4 first** as small envtested controller PRs (see [`../../../.planning/dogfood/run-2b-FINDINGS.md`](../../../.planning/dogfood/run-2b-FINDINGS.md)). Revisit this design only when a **second** real harness instance justifies the abstraction (rule of three). **Correction the review caught:** §3's `effort [have]` tag is **wrong** — `LevelConfig` (api/v1alpha2) carries only `Model`+`Image`, and TIDE passes no `--effort`; treat `compute`/`router`/`verdict`/`loop`/`consolidation` as **net-new** when sizing (the "mostly unification, not a rebuild" headline was overstated). If verification is ever wanted near-term, add it as **option (a)** — a flat per-level enum `{plain|verify|reflect}` on `LevelConfig`, *not* this recursive grammar.
 **Date:** 2026-06-28
-**Scope:** The domain *model* (abstraction + CRD/`project.yml` shape + invariants + observability contract). Concrete harnesses (verify/reflect/etc.) and the dashboard build are downstream instances, scoped separately.
+**Scope:** The domain *model* (abstraction + CRD/`project.yml` shape + invariants + observability contract). Concrete harnesses (verify/reflect/etc.) and the dashboard build are downstream instances, scoped separately. **(Deferred per the review above.)**
 
 ---
 
