@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: "Roadmap defined; ready for /gsd:plan-phase 31"
+status: executing
 stopped_at: Phase 31 context gathered
-last_updated: "2026-06-28T19:57:59.324Z"
-last_activity: 2026-06-28 — Roadmap created for v1.0.6
+last_updated: "2026-06-28T21:06:54.070Z"
+last_activity: 2026-06-28 -- Phase 31 execution started
 progress:
   total_phases: 12
   completed_phases: 0
-  total_plans: 0
+  total_plans: 3
   completed_plans: 0
   percent: 0
 ---
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-28)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.6 — Adoption-Path Correctness & Dispatch Safety. Phases 31–33. Roadmap defined; Phase 31 is the first planned phase (D2+D1 adoption lifecycle seam).
+**Current focus:** Phase 31 — d2-d1-adoption-lifecycle-seam
 
 ## Current Position
 
-Phase: 31 (D2+D1 — Adoption Lifecycle Seam)
-Plan: — (not started; awaiting plan-phase)
-Status: Roadmap defined; ready for /gsd:plan-phase 31
-Last activity: 2026-06-28 — Roadmap created for v1.0.6
+Phase: 31 (d2-d1-adoption-lifecycle-seam) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 31
+Last activity: 2026-06-28 -- Phase 31 execution started
 
 ```
 [Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]
