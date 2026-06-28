@@ -520,14 +520,15 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
 	// durable PhaseRolledUpUID marker (lives in CRD .status, survives restart)
 	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
+	phaseJobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
 	if isFirstCompletion && envReadOK && project != nil {
-		if ph.Status.PhaseRolledUpUID != jobName {
+		if ph.Status.PhaseRolledUpUID != phaseJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "phase planner budget rollup failed (non-fatal)", "phase", ph.Name)
 			} else {
 				// Stamp the durable marker only after a successful rollup (Pitfall-2 ordering).
 				markerPatch := client.MergeFrom(ph.DeepCopy())
-				ph.Status.PhaseRolledUpUID = jobName
+				ph.Status.PhaseRolledUpUID = phaseJobName
 				if pErr := r.Status().Patch(ctx, ph, markerPatch); pErr != nil {
 					logger.Error(pErr, "patch PhaseRolledUpUID failed (non-fatal)", "phase", ph.Name)
 				}

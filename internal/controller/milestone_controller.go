@@ -589,15 +589,16 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
 	// durable MilestoneRolledUpUID marker (lives in CRD .status, survives restart)
 	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
+	milestoneJobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
 	if isFirstCompletion && envReadOK && project != nil {
-		if ms.Status.MilestoneRolledUpUID != jobName {
+		if ms.Status.MilestoneRolledUpUID != milestoneJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
 			} else {
 				// Stamp the durable marker only after a successful rollup (mirrors project-level
 				// Pitfall-2 ordering: leaving the marker unset on error lets the next reconcile retry).
 				markerPatch := client.MergeFrom(ms.DeepCopy())
-				ms.Status.MilestoneRolledUpUID = jobName
+				ms.Status.MilestoneRolledUpUID = milestoneJobName
 				if pErr := r.Status().Patch(ctx, ms, markerPatch); pErr != nil {
 					logger.Error(pErr, "patch MilestoneRolledUpUID failed (non-fatal)", "milestone", ms.Name)
 				}
