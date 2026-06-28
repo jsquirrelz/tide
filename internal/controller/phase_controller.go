@@ -515,9 +515,23 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	}
 
 	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
+	//
+	// Phase 31 D-03 / T-31-07: isFirstCompletion flips true again after the reporter
+	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
+	// durable PhaseRolledUpUID marker (lives in CRD .status, survives restart)
+	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
 	if isFirstCompletion && envReadOK && project != nil {
-		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
-			logger.Error(rollErr, "phase planner budget rollup failed (non-fatal)", "phase", ph.Name)
+		if ph.Status.PhaseRolledUpUID != jobName {
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "phase planner budget rollup failed (non-fatal)", "phase", ph.Name)
+			} else {
+				// Stamp the durable marker only after a successful rollup (Pitfall-2 ordering).
+				markerPatch := client.MergeFrom(ph.DeepCopy())
+				ph.Status.PhaseRolledUpUID = jobName
+				if pErr := r.Status().Patch(ctx, ph, markerPatch); pErr != nil {
+					logger.Error(pErr, "patch PhaseRolledUpUID failed (non-fatal)", "phase", ph.Name)
+				}
+			}
 		}
 	}
 

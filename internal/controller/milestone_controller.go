@@ -584,9 +584,24 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// exactly once per planner Job completion (guarded by isFirstCompletion).
 	// Task executors already roll up in task_controller.go; this adds the planner's
 	// own token/cost spend so Project.Status.Budget reflects the full planning cost.
+	//
+	// Phase 31 D-03 / T-31-07: isFirstCompletion flips true again after the reporter
+	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
+	// durable MilestoneRolledUpUID marker (lives in CRD .status, survives restart)
+	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
 	if isFirstCompletion && envReadOK && project != nil {
-		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
-			logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
+		if ms.Status.MilestoneRolledUpUID != jobName {
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "milestone planner budget rollup failed (non-fatal)", "milestone", ms.Name)
+			} else {
+				// Stamp the durable marker only after a successful rollup (mirrors project-level
+				// Pitfall-2 ordering: leaving the marker unset on error lets the next reconcile retry).
+				markerPatch := client.MergeFrom(ms.DeepCopy())
+				ms.Status.MilestoneRolledUpUID = jobName
+				if pErr := r.Status().Patch(ctx, ms, markerPatch); pErr != nil {
+					logger.Error(pErr, "patch MilestoneRolledUpUID failed (non-fatal)", "milestone", ms.Name)
+				}
+			}
 		}
 	}
 
