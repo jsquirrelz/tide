@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.5
-milestone_name: "— Resumable Import: Partial-Tree Resume"
-status: Awaiting next milestone
-stopped_at: Phase 30 Plan 03 complete
-last_updated: "2026-06-27T15:50:33.244Z"
-last_activity: 2026-06-27 — Milestone v1.0.5 completed and archived
+milestone: v1.0.6
+milestone_name: Adoption-Path Correctness & Dispatch Safety
+status: planning
+last_updated: "2026-06-28T18:53:11.707Z"
+last_activity: 2026-06-28
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 36
-  completed_plans: 36
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-18)
 
 ## Current Position
 
-Phase: Milestone v1.0.5 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-27 — Milestone v1.0.5 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-28 — Milestone v1.0.6 started
 
 ## Performance Metrics
 

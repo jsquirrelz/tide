@@ -8,24 +8,25 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Current Milestone: v1.0.3 — Planning Resumption & Cost Resilience
+## Current Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety
 
-**Goal:** Make interrupted or budget-halted TIDE runs cheaply resumable — a halt (budget, crash, bug) must never cost the already-authored plan. Extend the spec's re-derive resumption philosophy (indegree map + completed-set) to planning artifacts (planner envelopes).
+**Goal:** Close the four product defects dogfood run #2b surfaced on the v1.0.5 import/adoption path — so a real completing TIDE-on-TIDE run can be relaunched on adequate infrastructure without spending blind or OOM'ing the node. A corrective patch on the resumption/import line v1.0.5 just shipped.
 
-**Why now:** TIDE-on-TIDE dogfood run #2 (2026-06-17/18), run on the freshly-correct Spring Tide foundation, budget-halted *during planning* (~$90 of LLM calls; 3 milestones / 15 phases / 42 plans; ZERO execution) and could not resume without re-paying all planning — the planner always re-authors from the outcome prompt. The full plan tree survived on the PVC and was salvaged to `examples/projects/dogfood/salvage-20260618/`, giving the first real plan-import fixture.
+**Why now:** TIDE-on-TIDE dogfood run #2b (2026-06-28, on a real Anthropic key, `kind-tide-dogfood`) *validated* import-resume end-to-end — a fresh Project adopted the salvaged 3-Milestone / 15-Phase tree with zero re-paid upper-level planning, then regenerated 44 plans via real API calls. But it **HALTED on single-node OOM**, and surfaced four code-level defects (run-2b-FINDINGS.md D1–D4): the budget meter never wired under adoption (spent blind), the Project never advanced past `Initialized`, ~60 planner pods dispatched at once with no concurrency cap, and a phase falsely marked `Succeeded` on a failed planner. A completing run needs D1+D2 and D3 fixed first (plus bigger infra); D4 lands alongside as a correctness guard.
 
-**Target features:**
-- **Plan-import / envelope-resumption (headline):** a fresh run adopts pre-authored planner envelopes and SKIPS the planner when a valid envelope already exists, going straight to materialize → execution. Design crux: envelopes are UID-keyed (`envelopes/<objUID>/out.json`) and a fresh run assigns new UIDs, so import needs name-based / stable-key envelope lookup or a UID-rewrite import step (not a drop-in restore).
-- **Budget-bypass resume correctness:** bypass-clear must resume at `Running`, not `Pending` (`project_controller.go:1257`), and re-init must not fire when children already exist; safer cap-raise ergonomics (raising one of absolute/rolling cap should not leave the other re-halting instantly).
-- **Regression coverage** for the project-controller planner-completion ordering fix already landed (`2a5e0dc`, quick task 260617-qqh): the Running-branch terminal-completion check precedes the idempotency early-return at the project→milestone dispatch site.
+**Target defects:**
+- **D1 — Cost rollup under adoption (headline; correctness/safety):** wire the planner→reporter→Project usage rollup for adopted/imported trees so `costSpentCents`/`usage` accrue and the metered `budget.absoluteCapCents` gate can halt. Today the rollup is tied to the normal project lifecycle, which the adoption path bypasses (see D2) — the run spent blind and only the node OOM stopped it.
+- **D2 — Project lifecycle advances under adoption:** after `ImportComplete=True` the Project must advance from `Initialized` to `Running`/planning (the adoption path correctly suppresses the project-planner but then never advances the phase), so anything keyed off project phase — including D1's cost rollup — fires. Same lifecycle seam as D1.
+- **D3 — Dispatch concurrency caps:** enforce per-level max-in-flight (planner/executor pools, separately sized per the spec) at the dispatch site, configurable, with a sane single-node default — so the cascade can't dispatch ~60 subagent pods at once and OOM the node.
+- **D4 — Planner failure semantics:** a planner that exits `!=0` or produces `childCount 0` must fail (or retry) the parent, not succeed it — the childless-success guard Phase 30 added for plans, applied at the phase + milestone levels with envtest coverage.
 
 **Key constraints for this milestone:**
-- Persistence stays CRD-`.status`-only — no external DB; resumption state stays minimal and re-derivable (spec §resumption).
-- The planner-skip path must not weaken cycle detection or the wave-boundary failure contract.
-- Plan-import must be safe across CRD UID churn — no silent adoption of a stale or mismatched envelope (validate before skipping a planner).
-- This milestone de-risks the still-deferred OpenAI-backend + dogfood-run-#2-completion milestone; it does not itself add a provider.
+- Persistence stays CRD-`.status`-only — no external DB; resumption/usage state stays minimal and re-derivable (spec §resumption).
+- The lifecycle-advance and concurrency-cap changes must not weaken cycle detection or the wave-boundary failure contract.
+- Concurrency caps respect the spec's "size planner and executor pools separately" — do not unify into one worker pool, and keep the policy configurable (chart/Project), not baked into the controller.
+- All four are internal corrective fixes against TIDE's own controller; this milestone adds no provider and de-risks (does not itself complete) the still-deferred OpenAI/Codex-backend + dogfood-run-#2-completion milestone.
 
-**Predecessor:** v1.0.2 Spring Tide — Global Execution DAG (phases 22–26) is COMPLETE — the global Execution DAG is real end-to-end; this milestone builds on it.
+**Predecessor:** v1.0.5 Resumable Import — Partial-Tree Resume (Phases 22–30, shipped across tags v1.0.3/v1.0.4/v1.0.5) is COMPLETE — the global Execution DAG and import-resumption are real end-to-end; this milestone hardens the adoption path they ship on.
 
 ## Current State (v1.0.1 — SHIPPED 2026-06-13)
 
@@ -172,4 +173,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-18 — Started milestone v1.0.3 (Planning Resumption & Cost Resilience). v1.0.2 Spring Tide (phases 22–26, global Execution DAG) complete; dogfood run #2 budget-halted in planning (~$90, zero execution) and could not resume, motivating plan-import/envelope-resumption + budget-bypass resume correctness + regression coverage for the project-controller ordering fix (`2a5e0dc`).*
+*Last updated: 2026-06-28 — Started milestone v1.0.6 (Adoption-Path Correctness & Dispatch Safety). v1.0.5 Resumable Import (phases 22–30) complete and archived; dogfood run #2b validated import-resume end-to-end but HALTED on single-node OOM and surfaced four code-level defects on the adoption path (run-2b-FINDINGS.md D1–D4): cost rollup never wires under adoption (spent blind), Project stalls at `Initialized`, no planner-concurrency cap (~60 pods → OOM), and phase false-`Succeeded` on a failed planner. This corrective patch closes all four to unblock a completing dogfood run #2 on adequate infra.*
