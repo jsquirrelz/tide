@@ -2,11 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: planning
-last_updated: "2026-06-28"
-last_activity: 2026-06-28
+status: "Roadmap defined; ready for /gsd:plan-phase 31"
+stopped_at: Phase 31 context gathered
+last_updated: "2026-06-28T19:57:59.324Z"
+last_activity: 2026-06-28 — Roadmap created for v1.0.6
 progress:
-  total_phases: 3
+  total_phases: 12
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -56,6 +57,7 @@ Last activity: 2026-06-28 — Roadmap created for v1.0.6
 Decisions are logged in PROJECT.md Key Decisions table.
 
 **v1.0.6 binding constraints (from REQUIREMENTS.md and PROJECT.md):**
+
 - Persistence stays CRD-`.status`-only — no new fields beyond what is needed for idempotency markers; no external DB.
 - Planner and executor pools remain separately sized — Phase 32 (D3) must not unify the two pools. The cross-pool analyzer (`make lint`) enforces this.
 - Wave-boundary failure semantics are intact and must not be weakened by lifecycle-advance or concurrency-cap changes.
@@ -123,15 +125,16 @@ Items acknowledged and deferred at v1.0.1 milestone close on 2026-06-13:
 All v1.0.0-era quick-task records. Work landed; artifact status fields never flipped. Non-blocking administrative debt.
 
 **v1.0.6 deferred to v2 (per REQUIREMENTS.md):**
+
 - OBS-01: Prometheus pool-saturation gauge for deferred planner dispatches (logging sufficient for v1.0.6)
 - OBS-02: Dashboard "Adopted" badge distinguishing imported vs freshly-planned nodes
 - CONCUR-F1: Per-Project concurrency override CRD field (chart-level cap is sufficient for v1.0.6)
 
 ## Session Continuity
 
-Last session: 2026-06-28
-Stopped at: Roadmap created for v1.0.6 (Phases 31–33 defined)
-Resume file: None
+Last session: 2026-06-28T19:57:59.165Z
+Stopped at: Phase 31 context gathered
+Resume file: .planning/phases/31-d2-d1-adoption-lifecycle-seam/31-CONTEXT.md
 
 ## Operator Next Steps
 
