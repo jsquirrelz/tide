@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
 status: planning
-last_updated: "2026-06-28T18:53:11.707Z"
+last_updated: "2026-06-28"
 last_activity: 2026-06-28
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,90 +17,77 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-18)
+See: .planning/PROJECT.md (updated 2026-06-28)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** v1.0.5 SHIPPED — next: TIDE-on-TIDE and/or OpenAI backend + dogfood run #2.
+**Current focus:** v1.0.6 — Adoption-Path Correctness & Dispatch Safety. Phases 31–33. Roadmap defined; Phase 31 is the first planned phase (D2+D1 adoption lifecycle seam).
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-28 — Milestone v1.0.6 started
+Phase: 31 (D2+D1 — Adoption Lifecycle Seam)
+Plan: — (not started; awaiting plan-phase)
+Status: Roadmap defined; ready for /gsd:plan-phase 31
+Last activity: 2026-06-28 — Roadmap created for v1.0.6
+
+```
+[Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]
+0% ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0/3 phases
+```
 
 ## Performance Metrics
 
-**Velocity:**
+**Velocity (v1.0.5 reference):**
 
-- Total plans completed: 64 (v1.0.1, Phases 12–17)
-- Tasks: 46
-- Commits since v1.0.0: 330+
+- Total plans completed across v1.0.1–v1.0.5: ~64+
+- Phase 30: 3 plans, completed 2026-06-27
 
-**By Phase (v1.0.1):**
+**v1.0.6 Phase Tracking:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 12 | 5 | Complete |
-| 13 | 7 | Complete |
-| 14 | 7 | Complete |
-| 15 | 7 | Complete |
-| 16 | 8 | Complete |
-| 17 | 4 | Complete |
-| Phase 20 P01 | 15m | 2 tasks | 11 files |
-| Phase 20 P04 | 35 | 2 tasks | 5 files |
-| Phase 20-sharedcontext-injection-cache-verification-spike P03 | 25 | 2 tasks | 9 files |
-| Phase 25 P02 | 5h45m | 2 tasks | 9 files |
-| Phase 25 P03 | 35 | 2 tasks | 6 files |
-| Phase 28-plan-import-core P01 | 5m | 2 tasks | 2 files |
-| Phase 28-plan-import-core P03 | 513 | 2 tasks | 3 files |
-| Phase 28 P04 | 10m | 2 tasks | 3 files |
-| Phase 28 P05 | 15m | 2 tasks | 7 files |
-| Phase 29-operator-tooling-e2e P02 | 14m | 2 tasks | 5 files |
-| Phase 29 P03 | 120 | 3 tasks | 6 files |
-| Phase 29-operator-tooling-e2e P05 | 20 | - tasks | - files |
-| Phase 30 P03 | 45 | 3 tasks | 2 files |
+| 31. D2+D1 — Adoption Lifecycle Seam | TBD | Not started |
+| 32. D3 — Dispatch Concurrency Cap | TBD | Not started |
+| 33. D4 — Planner Failure Semantics | TBD | Not started |
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table (v1.0.1 entries added at close).
+Decisions are logged in PROJECT.md Key Decisions table.
 
-Spring Tide build-order decision: the breaking CRD/schema foundation + cross-scope dependency model (Phase 23) land before the global wave-derivation engine (Phase 24), which lands before global dispatch + failure semantics + gates-as-holds + resumption (Phase 25), which lands before the multi-milestone drive + spec-conformance close (Phase 26). FIX-01 (dashboard embed, Phase 22) is independent and ships first.
+**v1.0.6 binding constraints (from REQUIREMENTS.md and PROJECT.md):**
+- Persistence stays CRD-`.status`-only — no new fields beyond what is needed for idempotency markers; no external DB.
+- Planner and executor pools remain separately sized — Phase 32 (D3) must not unify the two pools. The cross-pool analyzer (`make lint`) enforces this.
+- Wave-boundary failure semantics are intact and must not be weakened by lifecycle-advance or concurrency-cap changes.
+- The D3 cap parks/requeues excess dispatches — it never silently truncates a wave.
+- D1 rollup is exactly-once under reporter-Job TTL-GC — the Phase-27 `PlannerRolledUpUID` durable-marker pattern must be extended to milestone/phase levels if not already present.
+- D4 uses a permanent `patchPhaseFailed`/`patchMilestoneFailed` condition patch — not a Go error return — to avoid controller retry storms (P-D4a).
+- `MaxConcurrentReconciles` is NOT the D3 lever — it bounds reconcile goroutines, not in-flight Jobs. Must stay strictly greater than `plannerConcurrency`.
+- The dogfood run #2c relaunch is OUT OF SCOPE for this milestone; it requires multi-node or ≥16 GiB infrastructure.
 
-Binding constraints carried from REQUIREMENTS.md: spec is the contract; wave-boundary failure semantics preserved EXACTLY at global scope; resumption stays minimal (one global indegree map + completed-task set, no cached schedule); cyclic global DAG rejected at validation; breaking CRD changes ship a migration path (no silent corruption); gates compose as holds, human-gate-policy out of the controller.
-
-Carried-forward Ebb Tide constraint: TIDE stays CLI-based (`claude -p --bare`); no direct-SDK `cache_control`. CACHE-F1 (direct-SDK backend for cross-pod cache benefit) remains a deferred follow-up.
-
-- [Phase ?]: Targeted fix: deleteNamespaceAndWait added alongside deleteNamespace (not replacing it) so unrelated specs keep their fire-and-forget timing
+**Phase 32 design fork (must resolve before implementation):**
+Option A (1 researcher): pool `Release` fires on function return and already caps in-flight — chart default reduction alone is sufficient.
+Option B (3 researchers, deeper code reads): `defer r.PlannerPool.Release()` fires milliseconds after `r.Create(job)`, not on Job terminal state; a live `client.List` count-check is required before pool acquire. Resolution: one `kubectl get jobs -l tideproject.k8s/role=planner` observation with `plannerConcurrency=2` and 5 Milestones closes the fork. No implementation plan for Phase 32 may be written until this is resolved.
 
 ### Roadmap Evolution
 
-- Phase 30 added (v1.0.5 patch): Resumable Import — Partial-Tree Resume. Dogfood run #2 ($0, halted) proved the import feature can't resume a partially-completed tree (incomplete-envelope nodes materialize as Running-with-no-envelope zombies → stall). Fix = adopt-complete + re-plan-incomplete. Root cause + design forks in `.planning/dogfood/run-2-FINDINGS.md`. Unblocks deferred dogfood run #2.
-
-- [Phase 20]: Project level passes empty string for BuildPlannerEnvelope sharedContext (ProjectSpec has no SharedContext field; project is the DAG root with no parent)
-- [Phase 20]: maxSharedContextBytes = 64 KiB etcd DoS guard in MaterializeChildCRDs (fail-closed pre-flight check before any child CRD Create, T-20-03-01)
-- [Phase ?]: scopeResolver lives in controller not pkg/dag to satisfy verify-dag-imports guard
-- [Phase ?]: Both ProjectReconciler and TaskReconciler call the same buildScopeResolver/resolveScope, eliminating any possibility of indegree/wave disagreement
-- [Phase ?]: computeGlobalIndegree treats unresolved DependsOn refs as unsatisfied to prevent ghost dispatches
-- [Phase ?]: Wave prune OQ-3 deferred: zero-member waves show Phase=Running; guard deferred to Phase 26 to avoid CR-01 regression
-- [v1.0.3 roadmap]: Phase 28 (Plan-Import Core) has a mandatory design checkpoint: Approach A (name-based / stable-key paths) vs Approach B (UID-rewrite ImportController + tide-import Job). The salvage fixture contains only UID-keyed paths — narrowing the practical gap. No implementation plans may be written until the operator resolves this via /gsd:discuss-phase or /gsd:spec-phase.
-- [v1.0.3 roadmap]: Wave CRs are NEVER imported (PERSIST-03 / D-10 binding). Import materializes Milestone/Phase/Plan/Task CRs only; Wave CRs always re-derived by deriveGlobalWaves after import.
-- [v1.0.3 roadmap]: client.Create bypasses the validating webhook; any import path must call dag.ComputeWaves explicitly before materializing children (cycle detection is not automatic on import).
-- [Phase ?]: [Phase 28 P04]: Seed-derived planning DAG (Milestone/Phase/Plan nodes + DependsOn edges) used for ImportController cycle detection before any client.Create — NOT buildGlobalEdges which is edgeless under Task-less D-04 seed
-- [Phase ?]: import-envelopes CLI flow
-- [Phase ?]: budget suppression assertion window
+- v1.0.6 roadmap defined 2026-06-28: Phases 31–33, 13 requirements (ADOPT-01..05, CONCUR-01..04, PLANFAIL-01..04), 100% mapped.
+- Phase numbering continues from v1.0.5 (Phase 30 was the last phase). Phase 31 is the first v1.0.6 phase.
+- Phase 31 (D2+D1) is highest priority: D2 lifecycle advance is a prerequisite for D1 budget rollup; both are the "spent blind" headline safety failure.
+- Phase 32 (D3) carries a mandatory design fork — no implementation plan may be written before the fork is resolved at the discuss/plan step.
+- Phase 33 (D4) is independent of D1/D2/D3; it follows Phase 32 by severity ordering but has no dependency on D3's resolution.
 
 ### Pending Todos
 
-None.
+- Resolve Phase 32 D3 design fork before writing implementation plans for Phase 32. Method: observe active Job count with `plannerConcurrency=2` on `kind-tide-dogfood` while 5+ Milestones are enqueued, or resolve via discuss step.
+- During Phase 31 planning: grep all `budget.RollUpUsage` call sites for any `if project.Spec.ImportSource != nil { skip }` guards at milestone, phase, and plan controllers. Child-level rollup must be unconditional.
+- During Phase 31 planning: verify whether `MilestoneRolledUpUID` / `PhaseRolledUpUID` idempotency markers exist at child levels (Phase-27 pattern). If absent, add them — this is the P-D1a/P-D1c double-count risk.
+- During Phase 33 planning: verify whether `patchPhaseFailed` / `patchMilestoneFailed` helpers already exist. If absent, add by mirroring `patchPlanFailed` in `plan_controller.go:842`.
 
 ### Blockers/Concerns
 
-- Phase 28 (Plan-Import Core): Approach A vs B is an unresolved one-way door. Must be resolved at plan-phase before any implementation begins. Both are fully documented in research/ARCHITECTURE.md, research/STACK.md, and research/FEATURES.md.
-- SCHEMA-03 is the breaking surface: Wave re-ownership (Plan → Project) and `wave`-label resemantics change the CRD contract. The migration/conversion path must carry in-flight Projects without silent corruption — this is the highest-risk plan in Phase 23 and gates everything downstream.
-- Phase 21 (Ebb Tide) is still in Needs Review with 2 live-cluster human-UAT checks outstanding. Ebb Tide is superseded and will not be released, so this is administrative; resolve or formally defer at the Spring Tide close.
+- **Phase 32 design fork (BLOCKER for Phase 32 implementation):** The D3 fix shape diverges across research subagents. Option A (chart default only) vs Option B (live `client.List` count-check). Must be resolved before any Phase 32 implementation plan is authored. This is encoded as a mandatory gate in the ROADMAP.md Phase 32 detail section.
+- **Phase 32 default value TBD:** ARCHITECTURE.md recommends `plannerConcurrency: 3`; STACK.md and FEATURES.md recommend `4`. Canonical value to be resolved and documented at Phase 32 discuss/plan step.
 
 ### Quick Tasks Completed
 
@@ -135,12 +122,19 @@ Items acknowledged and deferred at v1.0.1 milestone close on 2026-06-13:
 
 All v1.0.0-era quick-task records. Work landed; artifact status fields never flipped. Non-blocking administrative debt.
 
+**v1.0.6 deferred to v2 (per REQUIREMENTS.md):**
+- OBS-01: Prometheus pool-saturation gauge for deferred planner dispatches (logging sufficient for v1.0.6)
+- OBS-02: Dashboard "Adopted" badge distinguishing imported vs freshly-planned nodes
+- CONCUR-F1: Per-Project concurrency override CRD field (chart-level cap is sufficient for v1.0.6)
+
 ## Session Continuity
 
-Last session: 2026-06-26T14:49:46.623Z
-Stopped at: Phase 30 Plan 03 complete
+Last session: 2026-06-28
+Stopped at: Roadmap created for v1.0.6 (Phases 31–33 defined)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+1. Plan Phase 31 with `/gsd:plan-phase 31` — D2+D1 adoption lifecycle seam (highest priority; no design ambiguity)
+2. Before planning Phase 32: resolve the D3 design fork (Option A vs B) via a targeted cluster observation or discuss step
+3. Phase 33 can be planned any time after Phase 31; no dependency on Phase 32 resolution

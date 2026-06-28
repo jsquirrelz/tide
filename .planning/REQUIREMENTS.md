@@ -66,25 +66,25 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ADOPT-01 | — | Pending |
-| ADOPT-02 | — | Pending |
-| ADOPT-03 | — | Pending |
-| ADOPT-04 | — | Pending |
-| ADOPT-05 | — | Pending |
-| CONCUR-01 | — | Pending |
-| CONCUR-02 | — | Pending |
-| CONCUR-03 | — | Pending |
-| CONCUR-04 | — | Pending |
-| PLANFAIL-01 | — | Pending |
-| PLANFAIL-02 | — | Pending |
-| PLANFAIL-03 | — | Pending |
-| PLANFAIL-04 | — | Pending |
+| ADOPT-01 | Phase 31 | Pending |
+| ADOPT-02 | Phase 31 | Pending |
+| ADOPT-03 | Phase 31 | Pending |
+| ADOPT-04 | Phase 31 | Pending |
+| ADOPT-05 | Phase 31 | Pending |
+| CONCUR-01 | Phase 32 | Pending |
+| CONCUR-02 | Phase 32 | Pending |
+| CONCUR-03 | Phase 32 | Pending |
+| CONCUR-04 | Phase 32 | Pending |
+| PLANFAIL-01 | Phase 33 | Pending |
+| PLANFAIL-02 | Phase 33 | Pending |
+| PLANFAIL-03 | Phase 33 | Pending |
+| PLANFAIL-04 | Phase 33 | Pending |
 
 **Coverage:**
 - v1 requirements: 13 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 13 ⚠️
+- Mapped to phases: 13 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-28*
-*Last updated: 2026-06-28 after initial definition*
+*Last updated: 2026-06-28 — traceability table populated after roadmap creation (Phase 31: ADOPT-01..05, Phase 32: CONCUR-01..04, Phase 33: PLANFAIL-01..04)*
