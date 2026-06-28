@@ -589,9 +589,25 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 
 	// Plan 09-08 Defect C: roll up planner-level Usage once per planner Job completion.
 	// Guard on envReadOK: out.Usage is only valid when the envelope read succeeded.
+	//
+	// Phase 31 D-03a / T-31-07: isFirstCompletion flips true again after the reporter
+	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
+	// durable PlanRolledUpUID marker (lives in CRD .status, survives restart)
+	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
+	// D-03a: the plan level previously had no marker — this is a new addition.
+	planJobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
 	if isFirstCompletion && envReadOK && project != nil {
-		if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
-			logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
+		if plan.Status.PlanRolledUpUID != planJobName {
+			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
+				logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
+			} else {
+				// Stamp the durable marker only after a successful rollup (Pitfall-2 ordering).
+				markerPatch := client.MergeFrom(plan.DeepCopy())
+				plan.Status.PlanRolledUpUID = planJobName
+				if pErr := r.Status().Patch(ctx, plan, markerPatch); pErr != nil {
+					logger.Error(pErr, "patch PlanRolledUpUID failed (non-fatal)", "plan", plan.Name)
+				}
+			}
 		}
 	}
 
