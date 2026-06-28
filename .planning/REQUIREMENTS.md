@@ -13,11 +13,11 @@ Requirements for the v1.0.6 patch release. Each maps to exactly one roadmap phas
 
 The single lifecycle seam in `reconcileProjectPlannerDispatch` — D2 (lifecycle advance) is a prerequisite for D1 (budget rollup); they ship together. This closes the "spent blind" failure that undermines the budget-safety guarantee of the entire v1.0.x line.
 
-- [ ] **ADOPT-01**: An adopted/imported Project advances from `Initialized` to `Running` after `ImportComplete=True`, without dispatching a project-planner Job. *(D2)*
-- [ ] **ADOPT-02**: An adopted Project accrues `costSpentCents` and token usage as its milestone/phase/plan planners complete (the budget rollup fires under the adoption path, not only the normal lifecycle). *(D1)*
-- [ ] **ADOPT-03**: The metered `budget.absoluteCapCents` halt enforces on an adopted Project — the budget gate evaluates once the Project is `Running` and halts the fan-out when spend crosses the cap. *(D1)*
-- [ ] **ADOPT-04**: Budget rollup is exactly-once at every level across halt→resume and reporter-Job TTL-GC — no double-counting after a reporter Job is garbage-collected (extend the Phase-27 `RolledUpUID` durable-marker pattern to milestone/phase levels if absent; preserve the D-11 project-planner suppression exactly). *(D1 idempotency)*
-- [ ] **ADOPT-05**: The normal (non-import) Project lifecycle is unchanged, and the suppressed project-planner is never re-dispatched on an informer-cache miss after a manager restart (durable adoption sentinel in `.status`, not a live List alone). *(D2 no-regression)*
+- [x] **ADOPT-01**: An adopted/imported Project advances from `Initialized` to `Running` after `ImportComplete=True`, without dispatching a project-planner Job. *(D2)*
+- [x] **ADOPT-02**: An adopted Project accrues `costSpentCents` and token usage as its milestone/phase/plan planners complete (the budget rollup fires under the adoption path, not only the normal lifecycle). *(D1)*
+- [x] **ADOPT-03**: The metered `budget.absoluteCapCents` halt enforces on an adopted Project — the budget gate evaluates once the Project is `Running` and halts the fan-out when spend crosses the cap. *(D1)*
+- [x] **ADOPT-04**: Budget rollup is exactly-once at every level across halt→resume and reporter-Job TTL-GC — no double-counting after a reporter Job is garbage-collected (extend the Phase-27 `RolledUpUID` durable-marker pattern to milestone/phase levels if absent; preserve the D-11 project-planner suppression exactly). *(D1 idempotency)*
+- [x] **ADOPT-05**: The normal (non-import) Project lifecycle is unchanged, and the suppressed project-planner is never re-dispatched on an informer-cache miss after a manager restart (durable adoption sentinel in `.status`, not a live List alone). *(D2 no-regression)*
 
 ### Dispatch Concurrency Cap (D3)
 
@@ -66,11 +66,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ADOPT-01 | Phase 31 | Pending |
-| ADOPT-02 | Phase 31 | Pending |
-| ADOPT-03 | Phase 31 | Pending |
-| ADOPT-04 | Phase 31 | Pending |
-| ADOPT-05 | Phase 31 | Pending |
+| ADOPT-01 | Phase 31 | Complete |
+| ADOPT-02 | Phase 31 | Complete |
+| ADOPT-03 | Phase 31 | Complete |
+| ADOPT-04 | Phase 31 | Complete |
+| ADOPT-05 | Phase 31 | Complete |
 | CONCUR-01 | Phase 32 | Pending |
 | CONCUR-02 | Phase 32 | Pending |
 | CONCUR-03 | Phase 32 | Pending |

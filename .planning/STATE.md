@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: executing
-stopped_at: Phase 31 context gathered
-last_updated: "2026-06-28T21:06:54.070Z"
+status: ready_to_plan
+stopped_at: Phase 31 complete (3/3) — ready to discuss Phase 32
+last_updated: 2026-06-28T23:03:06.683Z
 last_activity: 2026-06-28 -- Phase 31 execution started
 progress:
   total_phases: 12
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 3
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-28)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 31 — d2-d1-adoption-lifecycle-seam
+**Current focus:** Phase 32 — d3 — dispatch concurrency cap
 
 ## Current Position
 
-Phase: 31 (d2-d1-adoption-lifecycle-seam) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 31
-Last activity: 2026-06-28 -- Phase 31 execution started
+Phase: 32
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-28
 
 ```
 [Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]

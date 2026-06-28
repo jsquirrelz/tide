@@ -355,6 +355,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete | 2026-06-18 |
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete | 2026-06-22 |
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
-| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete   | 2026-06-28 |
+| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete    | 2026-06-28 |
 | 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 0/TBD | Not started | - |
 | 33. D4 — Planner Failure Semantics | v1.0.6 | 0/TBD | Not started | - |
