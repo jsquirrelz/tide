@@ -53,6 +53,14 @@ type PhaseStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// PhaseRolledUpUID is the name of this Phase's planner Job whose Usage
+	// was successfully rolled up into the Project budget. Prevents double-counting
+	// when the reporter Job has TTL-GC'd before a reconcile re-observes it.
+	// Mirrors the project-level budget rollup marker at the Phase level
+	// per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
+	// +optional
+	PhaseRolledUpUID string `json:"phaseRolledUpUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

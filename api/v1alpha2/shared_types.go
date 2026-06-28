@@ -288,6 +288,23 @@ const (
 	AnnotationRetryImport = "tideproject.k8s/retry-import"
 )
 
+// Phase 31 condition + reason vocabulary — project-planner adoption suppression (ADOPT-01 / D-01).
+const (
+	// ConditionProjectPlannerSuppressed — durable .status condition that permanently
+	// suppresses project-planner re-dispatch on an adopted/imported Project once the
+	// import tree is confirmed present (ConditionImportComplete=True and all child
+	// Milestones exist). Survives manager restart because it lives in .status and is
+	// self-documenting in `kubectl describe`. Read by reconcileProjectPlannerDispatch
+	// as a short-circuit before the live List of owned Milestones, preventing a
+	// cache-miss re-dispatch on cold restart (P-D2a pitfall). Phase 31 ADOPT-01 / D-01.
+	ConditionProjectPlannerSuppressed = "ProjectPlannerSuppressed"
+
+	// ReasonAdoptionComplete — the project-planner suppression was stamped because
+	// the Project was imported (ConditionImportComplete=True) and its adoption tree
+	// was confirmed present; the project-planner will not be re-dispatched.
+	ReasonAdoptionComplete = "AdoptionComplete"
+)
+
 // FailureProfileType is the failure-propagation policy for this Project.
 // +kubebuilder:validation:Enum=strict;conservative
 type FailureProfileType string

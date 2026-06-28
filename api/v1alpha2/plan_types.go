@@ -78,6 +78,14 @@ type PlanStatus struct {
 	// Zero means no waves have been integrated yet.
 	// +optional
 	IntegratedThroughWave int `json:"integratedThroughWave,omitempty"`
+
+	// PlanRolledUpUID is the name of this Plan's planner Job whose Usage
+	// was successfully rolled up into the Project budget. Prevents double-counting
+	// when the reporter Job has TTL-GC'd before a reconcile re-observes it.
+	// Mirrors the project-level budget rollup marker at the Plan level
+	// per the D-03 level-specific marker pattern (D-03a new addition). Phase 31 ADOPT-04 / D-03.
+	// +optional
+	PlanRolledUpUID string `json:"planRolledUpUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
