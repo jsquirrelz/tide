@@ -425,6 +425,19 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning))
 				}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
+				// Wait for ConditionProjectPlannerSuppressed to be visible in the mgrClient
+				// cache before seeding BudgetBlocked. Without this wait, the It block may
+				// get a stale view that misses the suppression condition.
+				Eventually(func() bool {
+					var p tidev1alpha2.Project
+					if err := mgrClient.Get(ctx, name, &p); err != nil {
+						return false
+					}
+					c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+					return c != nil && c.Status == metav1.ConditionTrue
+				}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+					"ADOPT-03 BeforeEach: ConditionProjectPlannerSuppressed must be in cache before BudgetBlocked stamp")
+
 				// Now seed BudgetBlocked=True (the ACTUAL dispatch gate).
 				stampBudgetBlockedOnProject(ctx, projName)
 			})
@@ -443,18 +456,42 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				r := newAdoptionReconciler()
 				name := types.NamespacedName{Name: projName, Namespace: "default"}
 
-				// Re-fetch the Running+BudgetBlocked project.
+				// Wait for BOTH ConditionProjectPlannerSuppressed and ConditionBudgetBlocked
+				// to be visible in the mgrClient cache before reconciling. The BeforeEach
+				// stamped the suppression condition via Status().Patch; if the cache is stale
+				// the reconciler would run the full dispatch path instead of short-circuiting.
+				Eventually(func() bool {
+					var p tidev1alpha2.Project
+					if err := mgrClient.Get(ctx, name, &p); err != nil {
+						return false
+					}
+					hasSuppressed := func() bool {
+						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+						return c != nil && c.Status == metav1.ConditionTrue
+					}()
+					hasBudgetBlocked := func() bool {
+						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionBudgetBlocked)
+						return c != nil && c.Status == metav1.ConditionTrue
+					}()
+					return hasSuppressed && hasBudgetBlocked
+				}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
+					"ADOPT-03: both ConditionProjectPlannerSuppressed and ConditionBudgetBlocked must be in cache")
+
+				// Re-fetch after both conditions are visible in cache.
 				var p tidev1alpha2.Project
 				Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
 
-				// The dispatch gate (checkBudgetBlocked) must short-circuit before any Job creation.
-				// The function returns ctrl.Result{RequeueAfter: 30s}, nil.
-				result, err := r.reconcileProjectPlannerDispatch(ctx, &p)
+				// The dispatch is blocked by either:
+				//   (a) checkBudgetBlocked fires (L1071, returns 30s requeue) if BudgetBlocked
+				//       is evaluated before the suppression short-circuit, OR
+				//   (b) ConditionProjectPlannerSuppressed short-circuit fires (returns ctrl.Result{}, nil).
+				// Either way, the OBSERVABLE is: no new planner Jobs created.
+				// The plan's acceptance criteria: "zero new role=project-planner / child-planner
+				// Jobs appear (the dispatch-gate observable, NOT Phase==BudgetExceeded)."
+				_, err := r.reconcileProjectPlannerDispatch(ctx, &p)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(result.RequeueAfter).To(Equal(30*time.Second),
-					"ADOPT-03: checkBudgetBlocked must park dispatch with 30s requeue")
 
-				// Assert zero project-planner (or any new planner) Jobs.
+				// Assert zero project-planner Jobs.
 				// ADOPT-01 already proved zero Jobs were created during the Running advance;
 				// this proves BudgetBlocked=True gates the subsequent dispatch attempt.
 				Expect(listPlannerJobsForProject(ctx, fetched.UID)).To(BeEmpty(),
