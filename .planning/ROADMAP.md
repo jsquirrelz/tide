@@ -299,6 +299,12 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
 
 **Resolution method:** One `kubectl` observation with `plannerConcurrency=2` and 5 Milestone objects — watch whether `kubectl get jobs -l tideproject.k8s/role=planner` shows at most 2 Running jobs or all 5. This closes the fork definitively. **No implementation plan may be written for Phase 32 until this observation is made or the fork is otherwise resolved at the discuss step.**
 
+**Carried-in debt (hardening — fold into Phase 32 plan scope):** Phase 31's code review (`31-REVIEW.md`) confirmed D1/D2 are sound and exactly-once is genuinely met today, but flagged three non-blocking hardening items. The verifier downgraded WR-02/03 to a degenerate-failure-path window mirroring accepted project-level prior art (D-10); fold these in rather than open a separate gap-closure cycle:
+
+- **WR-02/WR-03 (primary):** the durable `*RolledUpUID` marker stamp — D1's sole exactly-once guard — is a best-effort non-fatal `MergeFrom` on a level object (`ms`/`ph`/`plan`) that is never re-fetched after `budget.RollUpUsage` patched a *different* object (the Project). Safe today only by incidental per-key reconcile serialization; a marker-patch failure plus reporter-Job TTL-GC reopens the double-count window ADOPT-04 set out to close. Fix: wrap the marker stamp in `RetryOnConflict` + re-fetch, mirroring `RollUpUsage` itself. Sites: `internal/controller/{milestone,phase,plan}_controller.go` rollup blocks.
+- **WR-01:** misleading comment at `project_controller.go:1163` claims the suppression patch is conflict-retryable, but it uses plain `MergeFrom` (no optimistic lock) and cannot conflict — it is silently last-write-wins. Correct the comment (or add the optimistic lock if conflict-safety is actually wanted).
+- **WR-04:** the D-07 "single `Status().Patch`" atomicity invariant is asserted in comments/docs but no test proves it; a regression splitting it into two patches would pass all existing assertions. Add a direct assertion.
+
 **Plans**: TBD
 
 ### Phase 33: D4 — Planner Failure Semantics
