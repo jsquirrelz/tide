@@ -44,8 +44,8 @@ func TestConfigLoad_DefaultsApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load empty config: %v", err)
 	}
-	if cfg.PlannerConcurrency != 16 {
-		t.Errorf("PlannerConcurrency = %d, want 16", cfg.PlannerConcurrency)
+	if cfg.PlannerConcurrency != 4 {
+		t.Errorf("PlannerConcurrency = %d, want 4 (default changed from 16 to 4 in CONCUR-02)", cfg.PlannerConcurrency)
 	}
 	if cfg.ExecutorConcurrency != 4 {
 		t.Errorf("ExecutorConcurrency = %d, want 4", cfg.ExecutorConcurrency)
