@@ -82,7 +82,7 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 
 - [ ] **Phase 31: D2+D1 — Adoption Lifecycle Seam** — Project advances to `Running` on `ImportComplete=True` (D2), which enables budget rollup and cap enforcement on adopted projects (D1); idempotency guards prevent re-dispatch of the project-planner and double-counting after reporter-Job TTL-GC
 - [ ] **Phase 32: D3 — Dispatch Concurrency Cap** — Per-level max-in-flight planner cap at steady state, configurable from `charts/tide/values.yaml`, with a sane single-node default; **MANDATORY DESIGN FORK** (Option A vs B) must be resolved before implementation begins
-- [ ] **Phase 33: D4 — Planner Failure Semantics** — A phase or milestone whose planner exits nonzero with zero children is marked `Failed`, not `Succeeded`; shared `isPlannerFailure` helper across levels; operator recovery via `tide resume --retry-failed`
+- [x] **Phase 33: D4 — Planner Failure Semantics** — A phase or milestone whose planner exits nonzero with zero children is marked `Failed`, not `Succeeded`; shared `isPlannerFailure` helper across levels; operator recovery via `tide resume --retry-failed`
 
 ## Phase Details
 
