@@ -491,6 +491,21 @@ var _ = Describe("PhaseReconciler — PLANFAIL D4 false-leaf guard (Phase 33)", 
 	// marked Failed (not Succeeded). This is the D4 false-leaf guard.
 	It("PLANFAIL-01: phase planner exitCode=1,childCount=0 → Status.Phase=Failed with ReasonPlannerFailed", func() {
 		const phName = "planfail-01-phase"
+
+		// CR-01 regression guard: run under the phase APPROVE gate (not auto). A
+		// failed planner must be marked Failed BEFORE the gate-policy hook would park
+		// it at AwaitingApproval — with the guard ordered after the gate hook this
+		// test would park instead of fail.
+		var gproj tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: planfailProjectName, Namespace: "default"}, &gproj)).To(Succeed())
+		gproj.Spec.Gates.Phase = tideprojectv1alpha2.GatePolicy("approve")
+		Expect(k8sClient.Update(ctx, &gproj)).To(Succeed())
+		Eventually(func(g Gomega) {
+			var p tideprojectv1alpha2.Project
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planfailProjectName, Namespace: "default"}, &p)).To(Succeed())
+			g.Expect(p.Spec.Gates.Phase).To(Equal(tideprojectv1alpha2.GatePolicy("approve")))
+		}, "5s", "100ms").Should(Succeed())
+
 		ph := &tideprojectv1alpha2.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: phName, Namespace: "default"},
 			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: planfailMilestoneName},
@@ -518,9 +533,14 @@ var _ = Describe("PhaseReconciler — PLANFAIL D4 false-leaf guard (Phase 33)", 
 		// Drive reconcile to dispatch the planner Job.
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phName, Namespace: "default"}, 5)).To(Succeed())
 
+		// WR-01 precondition: the planner must have actually dispatched (Status.Phase=Running)
+		// before we inject the failure envelope — otherwise the final "Failed" assertion
+		// could pass vacuously on a phase that never reached succession at all.
 		var got tideprojectv1alpha2.Phase
-		Eventually(func() error {
-			return mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &got)
+		Eventually(func(g Gomega) {
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phName, Namespace: "default"}, &got)).To(Succeed())
+			g.Expect(got.Status.Phase).To(Equal("Running"),
+				"WR-01: planner must have dispatched (Status.Phase=Running) before injecting the failure envelope")
 		}, "5s", "100ms").Should(Succeed())
 
 		// Simulate planner exiting nonzero with zero children (the false-leaf case).

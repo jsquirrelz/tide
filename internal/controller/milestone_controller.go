@@ -648,6 +648,21 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		}
 	}
 
+	// Phase 33 PLANFAIL-02/03 (CR-01 fix): a planner that exits nonzero with zero
+	// children is terminally Failed and MUST be marked BEFORE the gate-policy hook.
+	// The milestone default gate is approve (gates.policy D-G1), so without this the
+	// failure parks at AwaitingApproval instead of Failed, hiding planning-DAG
+	// corruption — you cannot gate-approve a planner that authored nothing. Ordered
+	// before the succeed path too (PLANFAIL-03: a genuine leaf, exitCode==0/
+	// childCount==0, still Succeeds — isPlannerFailure requires exitCode != 0). Plan
+	// and project are NOT guarded — they succeed only via gates.BoundaryDetected
+	// (matched > 0, false on zero children); see 33-CONTEXT.md D-01/D-02.
+	// isPlannerFailure re-checks envReadOK internally, so calling it here is safe.
+	if isPlannerFailure(out, envReadOK) {
+		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha2.ReasonPlannerFailed,
+			fmt.Sprintf("planner exited nonzero (exitCode=%d) with zero children; marked Failed to prevent false succession", out.ExitCode))
+	}
+
 	// Plan 04-05: gate-policy hook (approve/pause). Reject check moved to
 	// top of handleJobCompletion per Phase 04.1 — reject should not be
 	// gated on envelope-read success.
@@ -713,17 +728,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// When EnvReader is nil, fall back to the prior hasChild-based behavior so
 	// non-Option-C / unit-test paths keep working.
 	if envReadOK {
-		// Phase 33 PLANFAIL-02/03: guard against false-leaf succession. A planner
-		// that exits nonzero with zero children would otherwise be misclassified as
-		// a genuine leaf (exitCode==0, childCount==0) and falsely advance its parent.
-		// exitCode==0, childCount==0 falls through to the genuine-leaf succeed path
-		// below (PLANFAIL-03 ordering: fail-check before succeed-check is load-bearing).
-		// Plan and project are NOT guarded here — they succeed only via
-		// gates.BoundaryDetected (matched > 0, false on zero children). See 33-CONTEXT.md D-02.
-		if isPlannerFailure(out, envReadOK) {
-			return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha2.ReasonPlannerFailed,
-				fmt.Sprintf("planner exited nonzero (exitCode=%d) with zero children; marked Failed to prevent false succession", out.ExitCode))
-		}
+		// PLANFAIL false-leaf guard ran before the gate-policy hook above.
 		// Option-C path: gate on out.ChildCount from tiny status.
 		expected := out.ChildCount
 		if expected == 0 {
