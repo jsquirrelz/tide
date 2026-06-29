@@ -404,3 +404,94 @@ func TestResumeWithoutBillingHalt_StillSucceeds(t *testing.T) {
 		t.Fatalf("resumeRun on project without BillingHalt should succeed; got %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 33 PLANFAIL-04 — resume recovery for PlannerFailed phase/milestone
+// ---------------------------------------------------------------------------
+
+// TestResumeRetryFailedPlannerFailed asserts that a Failed Phase and Failed
+// Milestone each carrying ConditionFailed/Reason=ReasonPlannerFailed are reset
+// (Status.Phase != "Failed") by resumeRun(retryFailed=true), with a
+// ConditionWaveOrLevelPaused condition stamped with Reason=ReasonResumedByUser.
+// No new resume.go code is needed — the walker already resets Failed Phases and
+// Milestones; this test proves the guard's output is recoverable (PLANFAIL-04).
+func TestResumeRetryFailedPlannerFailed(t *testing.T) {
+	p := makeProject("my-project")
+
+	ms := &tidev1alpha2.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-planner-failed",
+			Namespace: "default",
+			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
+		},
+		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha2.MilestoneStatus{Phase: "Failed"},
+	}
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             tidev1alpha2.ReasonPlannerFailed,
+		Message:            "planner exited nonzero (exitCode=1) with zero children",
+		LastTransitionTime: metav1.Now(),
+	})
+
+	ph := &tidev1alpha2.Phase{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ph-planner-failed",
+			Namespace: "default",
+			Labels:    map[string]string{"tideproject.k8s/project": "my-project"},
+		},
+		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-planner-failed"},
+		Status: tidev1alpha2.PhaseStatus{Phase: "Failed"},
+	}
+	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             tidev1alpha2.ReasonPlannerFailed,
+		Message:            "planner exited nonzero (exitCode=1) with zero children",
+		LastTransitionTime: metav1.Now(),
+	})
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(p, ms, ph).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}).
+		Build()
+
+	var buf bytes.Buffer
+	if err := resumeRun(context.Background(), c, "default", "my-project", true, &buf); err != nil {
+		t.Fatalf("resumeRun(retryFailed=true): %v", err)
+	}
+
+	// Phase must be reset.
+	var gotPH tidev1alpha2.Phase
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ph-planner-failed"}, &gotPH); err != nil {
+		t.Fatalf("get phase: %v", err)
+	}
+	if gotPH.Status.Phase == "Failed" {
+		t.Errorf("PLANFAIL-04: Phase still Failed after retry-failed with ReasonPlannerFailed")
+	}
+	phCond := meta.FindStatusCondition(gotPH.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
+	if phCond == nil {
+		t.Fatal("PLANFAIL-04: expected WaveOrLevelPaused condition on reset Phase; got nil")
+	}
+	if phCond.Reason != tidev1alpha2.ReasonResumedByUser {
+		t.Errorf("PLANFAIL-04: Phase condition Reason=%q, want %q", phCond.Reason, tidev1alpha2.ReasonResumedByUser)
+	}
+
+	// Milestone must be reset.
+	var gotMS tidev1alpha2.Milestone
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-planner-failed"}, &gotMS); err != nil {
+		t.Fatalf("get milestone: %v", err)
+	}
+	if gotMS.Status.Phase == "Failed" {
+		t.Errorf("PLANFAIL-04: Milestone still Failed after retry-failed with ReasonPlannerFailed")
+	}
+	msCond := meta.FindStatusCondition(gotMS.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused)
+	if msCond == nil {
+		t.Fatal("PLANFAIL-04: expected WaveOrLevelPaused condition on reset Milestone; got nil")
+	}
+	if msCond.Reason != tidev1alpha2.ReasonResumedByUser {
+		t.Errorf("PLANFAIL-04: Milestone condition Reason=%q, want %q", msCond.Reason, tidev1alpha2.ReasonResumedByUser)
+	}
+}

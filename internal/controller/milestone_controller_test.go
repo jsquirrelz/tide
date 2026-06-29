@@ -637,3 +637,174 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 		})
 	})
 })
+
+// ---------------------------------------------------------------------------
+// Phase 33 PLANFAIL-02 / PLANFAIL-03 — milestone planner false-leaf guard
+// ---------------------------------------------------------------------------
+
+var _ = Describe("MilestoneReconciler — PLANFAIL D4 false-leaf guard (Phase 33)", Label("envtest", "phase33"), func() {
+	const planfailProjectName = "test-proj-ms-planfail"
+	ctx := context.Background()
+
+	BeforeEach(func() {
+		proj := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: planfailProjectName, Namespace: "default"},
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				TargetRepo: "https://github.com/example/test.git",
+				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-sonnet-4-6"},
+				Git: &tideprojectv1alpha2.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+				// auto gate so planner Job completion flows directly to succession logic
+				// without parking at AwaitingApproval — the guard fires inside if envReadOK {.
+				Gates: tideprojectv1alpha2.Gates{
+					Milestone: tideprojectv1alpha2.GatePolicy("auto"),
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(planfailProjectName, "default", &tideprojectv1alpha2.Project{})
+	})
+
+	AfterEach(func() {
+		cleanObj := func(obj client.Object) {
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: "default"}, obj); err == nil {
+				obj.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, obj)
+				_ = k8sClient.Delete(ctx, obj)
+			}
+		}
+		var milestones tideprojectv1alpha2.MilestoneList
+		_ = k8sClient.List(ctx, &milestones, client.InNamespace("default"),
+			client.MatchingLabels{"tideproject.k8s/project": planfailProjectName})
+		for i := range milestones.Items {
+			cleanObj(&milestones.Items[i])
+		}
+		cleanObj(&tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{Name: planfailProjectName, Namespace: "default"}})
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			_ = k8sClient.Delete(ctx, &j)
+		}
+	})
+
+	// PLANFAIL-02: a milestone planner that exits nonzero with zero children must
+	// be marked Failed (not Succeeded). This is the D4 false-leaf guard.
+	It("PLANFAIL-02: milestone planner exitCode=1,childCount=0 → Status.Phase=Failed with ReasonPlannerFailed", func() {
+		const msName = "planfail-02-ms"
+		ms := &tideprojectv1alpha2.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: planfailProjectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &tideprojectv1alpha2.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
+
+		envReader := newMapEnvReader()
+		r := &MilestoneReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+		}
+
+		// Drive reconcile to dispatch the planner Job.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha2.Milestone
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)
+		}, "5s", "100ms").Should(Succeed())
+
+		// Simulate planner exiting nonzero with zero children (the false-leaf case).
+		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(got.UID),
+			ExitCode:   1,
+			Reason:     "forced-failure",
+			ChildCount: 0,
+		})
+		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
+		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+
+		// Reconcile — guard must fire and mark Milestone Failed.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha2.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
+			g.Expect(after.Status.Phase).To(Equal("Failed"),
+				"PLANFAIL-02: milestone planner exitCode!=0,childCount==0 must mark Milestone Failed")
+			cond := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionFailed)
+			g.Expect(cond).NotTo(BeNil(), "ConditionFailed must be set")
+			g.Expect(cond.Status).To(Equal(metav1.ConditionTrue), "ConditionFailed must be True")
+			g.Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonPlannerFailed),
+				"ConditionFailed.Reason must be ReasonPlannerFailed")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
+	// PLANFAIL-03 (milestone): a genuine leaf (exitCode==0, childCount==0) must still
+	// Succeed — fail-check ordering before succeed-check is load-bearing.
+	It("PLANFAIL-03: milestone planner exitCode=0,childCount=0 (genuine leaf) → Status.Phase=Succeeded", func() {
+		const msName = "planfail-03-ms"
+		ms := &tideprojectv1alpha2.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: planfailProjectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &tideprojectv1alpha2.Milestone{})
+		}, "5s", "100ms").Should(Succeed())
+
+		envReader := newMapEnvReader()
+		r := &MilestoneReconciler{
+			Client:         mgrClient,
+			Scheme:         k8sClient.Scheme(),
+			Dispatcher:     &stubDispatcher{},
+			PlannerPool:    newPlannerPoolForTest(),
+			EnvReader:      envReader,
+			SubagentImage:  testSubagentImage,
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+		}
+
+		// Drive reconcile to dispatch the planner Job.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
+
+		var got tideprojectv1alpha2.Milestone
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)
+		}, "5s", "100ms").Should(Succeed())
+
+		// Genuine leaf: exitCode=0, childCount=0 — must NOT trigger the fail guard.
+		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(got.UID),
+			ExitCode:   0,
+			ChildCount: 0,
+		})
+		jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
+		Expect(makeFakeJobTerminal(ctx, mgrClient, jobName, "default", true)).To(Succeed())
+
+		// Reconcile — genuine leaf must Succeed.
+		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 3)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var after tideprojectv1alpha2.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &after)).To(Succeed())
+			g.Expect(after.Status.Phase).To(Equal("Succeeded"),
+				"PLANFAIL-03: genuine leaf (exitCode==0,childCount==0) must still Succeed at milestone level")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+})
