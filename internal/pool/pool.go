@@ -77,6 +77,14 @@ func (p *Pool) Release() {
 	<-p.sem
 }
 
+// Capacity returns the maximum number of concurrent acquisitions this Pool
+// permits. Used by the D3 concurrency cap gate to compare the live in-flight
+// planner Job count against the configured cap without requiring a separate
+// PlannerConcurrency field on each reconciler struct.
+func (p *Pool) Capacity() int {
+	return cap(p.sem)
+}
+
 // PreCharge inspects the cluster for Jobs matching labelSelector and consumes
 // one Pool slot per Job with Status.Active > 0. This is called once per Pool
 // at Manager startup so a leader-election failover doesn't accidentally
