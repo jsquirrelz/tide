@@ -305,7 +305,10 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
 - **WR-01:** misleading comment at `project_controller.go:1163` claims the suppression patch is conflict-retryable, but it uses plain `MergeFrom` (no optimistic lock) and cannot conflict — it is silently last-write-wins. Correct the comment (or add the optimistic lock if conflict-safety is actually wanted).
 - **WR-04:** the D-07 "single `Status().Patch`" atomicity invariant is asserted in comments/docs but no test proves it; a regression splitting it into two patches would pass all existing assertions. Add a direct assertion.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+- [ ] 32-01-PLAN.md — D3 dispatch concurrency cap: plannerInFlightCount gate before pool acquire at all four sites + default 16→4 (CONCUR-01..04)
+- [ ] 32-02-PLAN.md — Carried-in hardening: RetryOnConflict marker stamps (WR-02/03) + suppression-patch comment fix (WR-01) + single-patch test (WR-04)
 
 ### Phase 33: D4 — Planner Failure Semantics
 
