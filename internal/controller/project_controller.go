@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1371,12 +1372,26 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
 			} else {
-				// Record the durable marker only after a successful rollup (Pitfall 2:
+				// Stamp the durable marker only after a successful rollup (Pitfall-2 ordering:
 				// leaving the marker unset on error lets the next reconcile retry).
-				markerPatch := client.MergeFrom(project.DeepCopy())
-				project.Status.Budget.PlannerRolledUpUID = plannerJobName
-				if pErr := r.Status().Patch(ctx, project, markerPatch); pErr != nil {
-					logger.Error(pErr, "patch PlannerRolledUpUID failed (non-fatal)", "project", project.Name)
+				// WR-02: re-fetch + RetryOnConflict + MergeFromWithOptimisticLock mirrors the
+				// milestone/phase/plan pattern, making the stamp durable against concurrent status
+				// writes on the Project. On retry-budget exhaustion return the error to requeue —
+				// the marker must be durably set before the reporter Job's TTL-GC window reopens
+				// rollup (PREFLIGHT-02 / T-34-03).
+				if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tidev1alpha2.Project{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+						return err
+					}
+					if latest.Status.Budget.PlannerRolledUpUID == plannerJobName {
+						return nil // already set by a concurrent reconcile — idempotent
+					}
+					markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.Budget.PlannerRolledUpUID = plannerJobName
+					return r.Status().Patch(ctx, latest, markerPatch)
+				}); mErr != nil {
+					return ctrl.Result{}, fmt.Errorf("patch PlannerRolledUpUID: %w", mErr)
 				}
 			}
 		}
