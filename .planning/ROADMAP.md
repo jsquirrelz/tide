@@ -324,7 +324,10 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
 
 **Carried-in debt (from Phase 32 code review — sizing policy):** 32-REVIEW.md flagged that the D3 default `plannerConcurrency=4` is narrower than the chart's own documented guidance that the cap be sized at least as wide as the widest expected wave (the chart comment cites `6`). This is internally inconsistent (degraded throughput when a wide milestone serializes, not a deadlock — single-shot planner Jobs drain). Decide deliberately in Phase 33 planning: either raise the default, soften the chart's "≥ widest wave" wording to a per-workload tuning note, or document that single-node defaults intentionally trade throughput for safety. The other two Phase-32 review advisories (skip `DeletionTimestamp` Jobs in the in-flight count; stale "size 16" comment) were fixed in-phase at commit `91f7499`.
 
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 33-01-PLAN.md — shared isPlannerFailure helper + ReasonPlannerFailed constant + unit test (Wave 1)
+- [ ] 33-02-PLAN.md — carried-in D3 sizing-policy doc fix in values.yaml (Wave 1, parallel)
+- [ ] 33-03-PLAN.md — patchPhaseFailed/patchMilestoneFailed helpers + guard insertion at both sites + envtests PLANFAIL-01/02/03 + resume recovery PLANFAIL-04 (Wave 2)
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
@@ -367,5 +370,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete | 2026-06-22 |
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete    | 2026-06-28 |
-| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete   | 2026-06-29 |
-| 33. D4 — Planner Failure Semantics | v1.0.6 | 0/TBD | Not started | - |
+| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete    | 2026-06-29 |
+| 33. D4 — Planner Failure Semantics | v1.0.6 | 0/3 | Planned | - |
