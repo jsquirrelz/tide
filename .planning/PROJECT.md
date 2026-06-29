@@ -8,9 +8,11 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
-## Current Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety
+## Last Shipped Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety (SHIPPED 2026-06-29, tag `v1.0.6`)
 
-**Goal:** Close the four product defects dogfood run #2b surfaced on the v1.0.5 import/adoption path — so a real completing TIDE-on-TIDE run can be relaunched on adequate infrastructure without spending blind or OOM'ing the node. A corrective patch on the resumption/import line v1.0.5 just shipped.
+**Outcome (shipped 2026-06-29):** All four adoption-path defects D1–D4 closed across Phases 31/32/33; published 8 images + 2 OCI charts + 5 binaries @ 1.0.6 (verified anon); milestone audit `tech_debt` (13/13 reqs, 0 blockers). Next-milestone candidate: OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra → the TIDE-on-TIDE headline.
+
+**Goal (as scoped):** Close the four product defects dogfood run #2b surfaced on the v1.0.5 import/adoption path — so a real completing TIDE-on-TIDE run can be relaunched on adequate infrastructure without spending blind or OOM'ing the node.
 
 **Why now:** TIDE-on-TIDE dogfood run #2b (2026-06-28, on a real Anthropic key, `kind-tide-dogfood`) *validated* import-resume end-to-end — a fresh Project adopted the salvaged 3-Milestone / 15-Phase tree with zero re-paid upper-level planning, then regenerated 44 plans via real API calls. But it **HALTED on single-node OOM**, and surfaced four code-level defects (run-2b-FINDINGS.md D1–D4): the budget meter never wired under adoption (spent blind), the Project never advanced past `Initialized`, ~60 planner pods dispatched at once with no concurrency cap, and a phase falsely marked `Succeeded` on a failed planner. A completing run needs D1+D2 and D3 fixed first (plus bigger infra); D4 lands alongside as a correctness guard.
 
@@ -28,14 +30,16 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **Predecessor:** v1.0.5 Resumable Import — Partial-Tree Resume (Phases 22–30, shipped across tags v1.0.3/v1.0.4/v1.0.5) is COMPLETE — the global Execution DAG and import-resumption are real end-to-end; this milestone hardens the adoption path they ship on.
 
-## Current State (v1.0.1 — SHIPPED 2026-06-13)
+## Current State (latest: v1.0.6 — SHIPPED 2026-06-29)
 
-Two milestones shipped:
+Seven milestones shipped (v1.0.0, v1.0.1, v1.0.3 [incl. Spring Tide], v1.0.4, v1.0.5, v1.0.6; v1.0.2 Ebb superseded). The two earliest are detailed below for reference; v1.0.2–v1.0.6 are archived under `.planning/milestones/`. The historical detail below is preserved as-is.
+
+Two earliest milestones shipped:
 
 - **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 - **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Current focus:** Milestone **Planning Resumption & Cost Resilience** — **Phase 30 (Resumable Import — Partial-Tree Resume) COMPLETE 2026-06-26**: the import feature now resumes a PARTIALLY-completed tree via adopt-complete + re-plan-incomplete, driven by per-node envelope completeness (`pkg/dispatch.IsEnvelopeComplete` as the single authority). The run-#2 zombie shape (incomplete nodes materialized as `Running`-with-no-envelope) is structurally impossible — incomplete/missing-envelope seed nodes now materialize with empty Status and re-plan, complete nodes adopt salvaged status; a post-ImportComplete project-planner adoption guard prevents re-paid dispatch; Tier c kind E2E drives a mixed partial import to `Project=Complete`. v1.0.2 Spring Tide (phases 22–26, the global Execution DAG) remains the foundation. The OpenAI/Codex backend + dogfood-run-#2 completion remain deferred; the headline beyond that remains full TIDE-on-TIDE.
+**Current focus:** Between milestones — **v1.0.6 Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED 2026-06-29**, closing the four dogfood-run-#2b adoption-path defects: D1+D2 (adopted Project advances Initialized→Running on ImportComplete with budget rollup + cap enforcement), D3 (single-node-safe planner concurrency cap, default 4), D4 (failed planner marked Failed not Succeeded via isPlannerFailure, before the gate hook). v1.0.5 Resumable Import + v1.0.2 Spring Tide (global Execution DAG) remain the foundation. **Next:** OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra (single-node kind OOM'd run #2b); the headline beyond remains full TIDE-on-TIDE. v1.0.7 carries the v1.0.6 audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest-suite tier split).
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -126,6 +130,9 @@ Everything below this line reflects v1 planning state, preserved for reference.
 | Reserve/settle budget accounting bounds in-flight overshoot | run-1 overshot ~$40 past the $100 cap from already-dispatched sessions; a ReservationStore (rederivable on restart) bounds overshoot to one wave | ✓ Validated v1.0.1 Phase 14 |
 | `tide resume --retry-failed` is the one sanctioned recovery verb; approve never doubles as a spend-retry | run-1 needed a kubectl status-reset recipe to recover Failed levels; codifying it as a CLI verb keeps approval semantics clean (D-07) | ✓ Validated v1.0.1 Phase 12/17 |
 | **Cross-pod prompt caching does NOT realize on caller content via `claude -p --bare`; SharedContext ships as token-minimization, cache benefit deferred to a direct-SDK backend (CACHE-F1)** | Phase 20 CACHE-01 spike: cross-pod caching *fires* but only for the CLI's ~1.1–1.3k-token tool/system scaffold; the CLI front-loads a per-request `cch` billing nonce ahead of caller content and exposes no suppression lever — the documented `--exclude-dynamic-system-prompt-sections` flag does not recover it | ✓ Validated v1.0.2 Phase 20 — 3 live runs on kind-tide-dogfood + official Claude Code caching docs |
+| Adoption lifecycle advance + budget rollup share one seam; project-planner suppression is a durable CRD condition | run-2b D1+D2: cost meter never wired under import-adoption (spent blind) because the Project stalled at `Initialized`; advancing to `Running` on `ImportComplete` (without dispatching the project-planner) is what makes rollup + cap enforcement fire | ✓ Validated v1.0.6 Phase 31 |
+| Planner concurrency capped by a live in-flight `client.List` count before pool acquire, single-node-safe default 4 | run-2b D3: the in-process semaphore caps concurrent `r.Create` calls, not in-flight running pods, so ~60 planner pods dispatched and OOM'd the single node; an explicit count-gate parks excess dispatches | ✓ Validated v1.0.6 Phase 32 |
+| A planner that exits nonzero with zero children is marked `Failed` BEFORE the gate-policy hook | run-2b D4 + CR-01: phase/milestone took a direct `expected==0 → Succeeded` shortcut ignoring exitCode; and because the milestone default gate is `approve`, a guard placed after the gate hook would park the failure at `AwaitingApproval` instead of `Failed`. Plan/project are not exposed (they succeed only via `BoundaryDetected`, false on zero children) | ✓ Validated v1.0.6 Phase 33 |
 
 ### CACHE-01 decision record (Phase 20 — cross-pod cache verification spike)
 
@@ -173,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-28 — Started milestone v1.0.6 (Adoption-Path Correctness & Dispatch Safety). v1.0.5 Resumable Import (phases 22–30) complete and archived; dogfood run #2b validated import-resume end-to-end but HALTED on single-node OOM and surfaced four code-level defects on the adoption path (run-2b-FINDINGS.md D1–D4): cost rollup never wires under adoption (spent blind), Project stalls at `Initialized`, no planner-concurrency cap (~60 pods → OOM), and phase false-`Succeeded` on a failed planner. This corrective patch closes all four to unblock a completing dogfood run #2 on adequate infra.*
+*Last updated: 2026-06-29 after v1.0.6 milestone — Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED (tag `v1.0.6`, 8 images + 2 OCI charts + 5 binaries, verified anon; audit tech_debt, 13/13 reqs, 0 blockers). All four dogfood-run-#2b adoption-path defects (D1–D4) closed. Next: OpenAI/Codex backend + a completing dogfood run #2 on adequate multi-node infra → TIDE-on-TIDE. v1.0.7 carries the audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest tier split).*

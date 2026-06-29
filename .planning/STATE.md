@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: verifying
+status: Awaiting next milestone
 stopped_at: Phase 33 context gathered
-last_updated: "2026-06-29T13:13:12.079Z"
-last_activity: 2026-06-29
+last_updated: "2026-06-29T19:47:46.596Z"
+last_activity: 2026-06-29 — Milestone v1.0.6 completed and archived
 progress:
   total_phases: 12
   completed_phases: 3
@@ -25,15 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-28)
 
 ## Current Position
 
-Phase: 33 (D4 — Planner Failure Semantics) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-06-29
-
-```
-[Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]
-0% ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0/3 phases
-```
+Phase: Milestone v1.0.6 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-29 — Milestone v1.0.6 completed and archived
 
 ## Performance Metrics
 
@@ -138,6 +133,16 @@ Resume file: None
 
 ## Operator Next Steps
 
-1. Plan Phase 31 with `/gsd:plan-phase 31` — D2+D1 adoption lifecycle seam (highest priority; no design ambiguity)
-2. Before planning Phase 32: resolve the D3 design fork (Option A vs B) via a targeted cluster observation or discuss step
-3. Phase 33 can be planned any time after Phase 31; no dependency on Phase 32 resolution
+- Start the next milestone with /gsd-new-milestone
+
+## Deferred Items
+
+Items acknowledged and deferred at v1.0.6 milestone close (2026-06-29). All are stale historical capture-log entries, not active work:
+
+| Category | Count | Notes |
+|----------|-------|-------|
+| quick_tasks | 20 | Phase-02/03 cascade recipes + Phase 5/6 closeout notes + assorted (260521–260625 era), long resolved; never cleaned from the capture log |
+| todos | 1 | historical |
+| uat_gaps | 1 | partial-status historical entry |
+
+v1.0.6 tech-debt carried to v1.0.7 (from milestone audit): (W1) retrofit project-level `PlannerRolledUpUID` stamp to the hardened `RetryOnConflict` pattern; (W2) chart `configmap.yaml` `plannerConcurrency | default 16` → `default 4`; plus the deeper "controller envtest suite outgrew the unit tier — move heavy specs to TEST-02" item surfaced during the release (raised the TEST-01 budget to 300s as a stopgap).

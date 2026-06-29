@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.0.6 Adoption-Path Correctness & Dispatch Safety (Shipped: 2026-06-29)
+
+**Phases completed:** 3 phases, 8 plans, 12 tasks
+
+**Key accomplishments:**
+
+- Contract-first wave: ConditionProjectPlannerSuppressed (D-01) + MilestoneRolledUpUID / PhaseRolledUpUID / PlanRolledUpUID scalar markers (D-03) added to api/v1alpha2 with regenerated CRD YAML and Helm chart templates
+- Adoption lifecycle seam: adopted Project advances Initialized→Running with zero project-planner Jobs dispatched, durably suppresses re-dispatch via ConditionProjectPlannerSuppressed, and refuses planner dispatch via ConditionBudgetBlocked on an over-cap adopted Project
+- Exactly-once child budget rollup gated on durable MilestoneRolledUpUID / PhaseRolledUpUID / PlanRolledUpUID markers (D-03/D-03a), proven by three Ginkgo envtest specs (ADOPT-02 accrual + ADOPT-04 no double-count across TTL-GC)
+- D3 dispatch concurrency cap (Phase 32): live in-flight planner-count gate before pool acquire at all four dispatch sites with a single-node-safe default (plannerConcurrency=4, down from 16); excess dispatches park/requeue, planner and executor pools stay separately sized
+- Carried-in hardening (Phase 32): RetryOnConflict + optimistic-lock on the child-level *RolledUpUID marker stamps (WR-02/WR-03); softened the chart plannerConcurrency sizing-policy comment (D-04, value held at 4 for single-node safety)
+- D4 planner failure semantics (Phase 33): patchPhaseFailed/patchMilestoneFailed helpers + shared isPlannerFailure guard wired at both phase and milestone succession sites BEFORE the gate-policy hook (CR-01 fix), closing the false-leaf DAG-corruption bug — locked by PLANFAIL-01/02/03 envtests (run under the production approve gate) and a PLANFAIL-04 resume-recovery test
+
+**Audit:** tech_debt — 13/13 requirements satisfied, 0 blockers, 2 verified tech-debt items deferred to v1.0.7 (project-level PlannerRolledUpUID hardening; configmap `default 16`→`4`). See milestones/v1.0.6-MILESTONE-AUDIT.md.
+**Released:** tag `v1.0.6` — 8 component images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon on ghcr; GitHub Release live.
+**Known deferred items at close:** 22 stale open artifacts (20 historical Phase-02/03 quick-tasks + 1 todo + 1 uat_gap) — see STATE.md Deferred Items.
+
+---
+
 ## v1.0.5 Resumable Import: Partial-Tree Resume (Shipped: 2026-06-27)
 
 This close archives all planning work since v1.0.1 — **Phases 22–30, shipped across three release tags** (v1.0.3 Spring Tide + resumption, v1.0.4 image patch, v1.0.5 partial-tree resume). The headline is making the Topologically-Indexed paradigm real (one global Execution DAG) and making a halted run cheaply resumable.
