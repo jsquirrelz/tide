@@ -71,32 +71,32 @@ Deferred beyond v1.0.7. Tracked but not in this roadmap.
 
 ## Traceability
 
-Populated during roadmap creation. Each requirement maps to exactly one phase.
+Each requirement maps to exactly one phase. Phase numbering continues from v1.0.6 (last phase was 33); v1.0.7's first phase is 34.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PREFLIGHT-01 | TBD | Pending |
-| PREFLIGHT-02 | TBD | Pending |
-| INFRA-01 | TBD | Pending |
-| INFRA-02 | TBD | Pending |
-| INFRA-03 | TBD | Pending |
-| IMPORT-01 | TBD | Pending |
-| IMPORT-02 | TBD | Pending |
-| IMPORT-03 | TBD | Pending |
-| RUN-01 | TBD | Pending |
-| RUN-02 | TBD | Pending |
-| RUN-03 | TBD | Pending |
-| RUN-04 | TBD | Pending |
-| REVIEW-01 | TBD | Pending |
-| REVIEW-02 | TBD | Pending |
-| REVIEW-03 | TBD | Pending |
-| RELEASE-01 | TBD | Pending |
+| PREFLIGHT-01 | Phase 34 | Pending |
+| PREFLIGHT-02 | Phase 34 | Pending |
+| INFRA-01 | Phase 35 | Pending |
+| INFRA-02 | Phase 35 | Pending |
+| INFRA-03 | Phase 35 | Pending |
+| IMPORT-01 | Phase 36 | Pending |
+| IMPORT-02 | Phase 36 | Pending |
+| IMPORT-03 | Phase 36 | Pending |
+| RUN-01 | Phase 37 | Pending |
+| RUN-02 | Phase 37 | Pending |
+| RUN-03 | Phase 37 | Pending |
+| RUN-04 | Phase 37 | Pending |
+| REVIEW-01 | Phase 38 | Pending |
+| REVIEW-02 | Phase 38 | Pending |
+| REVIEW-03 | Phase 38 | Pending |
+| RELEASE-01 | Phase 39 | Pending |
 
 **Coverage:**
 - v1.0.7 requirements: 16 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 16 ⚠️ (filled by roadmapper)
+- Mapped to phases: 16 (100%)
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-29*
-*Last updated: 2026-06-29 after initial definition (milestone v1.0.7 Flood Tide)*
+*Last updated: 2026-06-29 after roadmap creation (milestone v1.0.7 Flood Tide) — all 16 requirements mapped across Phases 34–39, 100% coverage.*

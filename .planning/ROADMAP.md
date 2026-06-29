@@ -10,10 +10,22 @@
 - ✅ **v1.0.4 — tide-import image publish + release-matrix guardrail** — (shipped 2026-06-25, tag `v1.0.4`, published). Patch: publishes the `tide-import` image in the build-images matrix and adds the matrix↔chart image-coverage release gate.
 - ✅ **v1.0.5 — Resumable Import: Partial-Tree Resume** — Phase 30 (shipped 2026-06-27, tag `v1.0.5`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). adopt-complete + re-plan-incomplete: fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies → stall). Unblocks deferred dogfood run #2. Requirements: RESUME-PARTIAL-01..04 (see REQUIREMENTS.md "v1.0.5 Requirements").
 - ✅ **v1.0.6 — Adoption-Path Correctness & Dispatch Safety** — Phases 31–33 (shipped 2026-06-29, tag `v1.0.6`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon). Corrective patch closing the four code-level defects dogfood run #2b surfaced on the adoption path: D1+D2 lifecycle/cost seam (Phase 31), D3 dispatch concurrency cap (Phase 32), D4 planner failure semantics (Phase 33). Audit: tech_debt (13/13 reqs, 0 blockers). Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md).
-- 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.6 adoption-path correctness + adequate multi-node infrastructure)
+- 🚧 **v1.0.7 — Flood Tide: TIDE-on-TIDE Self-Hosting Proof** — Phases 34–39 (in progress). Operations/dogfood milestone: the human operates TIDE while **TIDE builds the entire OpenAI backend** — drive a *completing* dogfood run #2 on a slightly-bigger single-node cluster under a hard $100 cap, then review (not merge) TIDE's authored output. Ships the two load-bearing v1.0.7 audit carry-ins (configmap `plannerConcurrency` `16→4`; project-level rollup-marker hardening) as real release artifacts. 16 requirements (PREFLIGHT/INFRA/IMPORT/RUN/REVIEW/RELEASE).
+- 📋 **vNext — Extend TIDE: Mergeable OpenAI Backend** — (planned; seeded by v1.0.7's REVIEW output). Rework TIDE's authored OpenAI backend into a mergeable provider-agnostic `Subagent` implementation behind the interface (EXTEND-01), with live functional parity via the CACHE-F1 direct-SDK path (EXTEND-02).
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
 ## Phases
+
+### 🚧 v1.0.7 — Flood Tide: TIDE-on-TIDE Self-Hosting Proof (In Progress)
+
+**Milestone Goal:** Drive a *completing* dogfood run #2 end-to-end — TIDE orchestrating Claude subagents to build the OpenAI backend — on a slightly-bigger single-node cluster under a hard $100 cap, proving the five-level paradigm self-hosts; then review TIDE's authored output to feed a follow-up "extend TIDE" pass. The phase chain is forced sequential: harden → deploy → import → operate → review → release. **No hand-written backend code this milestone — the backend is TIDE's output, reviewed not merged.**
+
+- [ ] **Phase 34: Pre-flight Tech-Debt Hardening** — Land the two load-bearing v1.0.7 audit carry-ins before launch (configmap `plannerConcurrency` `16→4`; project-level rollup-marker exactly-once hardening)
+- [ ] **Phase 35: Infra + Fresh v1.0.7 Deploy** — Stand up a slightly-bigger single-node kind cluster and deploy current-version v1.0.7 TIDE (carrying the PREFLIGHT fixes) wired to the real Anthropic key via credproxy
+- [ ] **Phase 36: Salvaged-Tree Import + Dry-Run + Tuning** — Import/adopt the `salvage-20260618` tree, cost-project before launch, set `absoluteCapCents=$100`, and tune dispatch concurrency to the node's memory ceiling
+- [ ] **Phase 37: Launch + Operate Run #2 to Completion** — Launch and babysit run #2 to `Project=Complete` under the $100 cap without OOM, root-fixing surfacing orchestrator defects, and deliver a mid-execution dashboard screenshot
+- [ ] **Phase 38: Output Review + Extraction** — Code-review TIDE's authored OpenAI backend (expected not mergeable), extract a run retrospective, and record cherry-pick candidates to seed the follow-up "extend TIDE" milestone
+- [ ] **Phase 39: Release v1.0.7** — Publish v1.0.7 (images + charts + binaries) carrying the PREFLIGHT tech-debt fixes, verified anonymously on ghcr
 
 <details>
 <summary>✅ v1.0.0 — Self-Hosting MVP (Phases 1–11) — SHIPPED 2026-06-11</summary>
@@ -80,11 +92,93 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
 
 **Milestone Goal:** Close the four code-level defects dogfood run #2b surfaced on the v1.0.5 import/adoption path — so a completing TIDE-on-TIDE run can be relaunched without spending blind or OOM'ing the node. All fixes are narrow seam edits on existing controller code: no new CRDs, no new go.mod entries, no new persistence surface.
 
-- [ ] **Phase 31: D2+D1 — Adoption Lifecycle Seam** — Project advances to `Running` on `ImportComplete=True` (D2), which enables budget rollup and cap enforcement on adopted projects (D1); idempotency guards prevent re-dispatch of the project-planner and double-counting after reporter-Job TTL-GC
-- [ ] **Phase 32: D3 — Dispatch Concurrency Cap** — Per-level max-in-flight planner cap at steady state, configurable from `charts/tide/values.yaml`, with a sane single-node default; **MANDATORY DESIGN FORK** (Option A vs B) must be resolved before implementation begins
+- [x] **Phase 31: D2+D1 — Adoption Lifecycle Seam** — Project advances to `Running` on `ImportComplete=True` (D2), which enables budget rollup and cap enforcement on adopted projects (D1); idempotency guards prevent re-dispatch of the project-planner and double-counting after reporter-Job TTL-GC
+- [x] **Phase 32: D3 — Dispatch Concurrency Cap** — Per-level max-in-flight planner cap at steady state, configurable from `charts/tide/values.yaml`, with a sane single-node default
 - [x] **Phase 33: D4 — Planner Failure Semantics** — A phase or milestone whose planner exits nonzero with zero children is marked `Failed`, not `Succeeded`; shared `isPlannerFailure` helper across levels; operator recovery via `tide resume --retry-failed`
 
 ## Phase Details
+
+### Phase 34: Pre-flight Tech-Debt Hardening
+
+**Goal**: The two load-bearing v1.0.7 audit carry-ins land in the controller and chart before run #2 launches — the single-node OOM-safety default (`plannerConcurrency 16→4`) and exactly-once project-level cost rollup — so the run can be deployed and metered without a latent over-dispatch or a double-counted cap.
+**Depends on**: Phase 33 (v1.0.6 adoption-path correctness shipped; these are its carried-in audit debt)
+**Requirements**: PREFLIGHT-01, PREFLIGHT-02
+**Success Criteria** (what must be TRUE):
+
+  1. Rendering the chart with defaults yields `plannerConcurrency: 4` in the configmap (the prior `16` is gone), and a controller-level assertion confirms a fresh default deploy dispatches at most 4 concurrent planners.
+  2. An envtest proves the project-level rollup marker (`PlannerRolledUpUID` / equivalent) follows the milestone/phase exactly-once pattern: a second reconcile after reporter-Job TTL-GC does not increment the project's `CostSpentCents` a second time for the same Job.
+  3. The hardened project-level marker stamp uses the same `RetryOnConflict` + re-fetch pattern as the milestone/phase markers (no best-effort last-write-wins window remains at the project level).
+
+**Plans**: TBD
+
+### Phase 35: Infra + Fresh v1.0.7 Deploy
+
+**Goal**: A fresh, *slightly*-bigger single-node kind cluster is running current-version v1.0.7 TIDE (images + charts carrying the Phase-34 PREFLIGHT fixes), wired to the real Anthropic key through credproxy so subagents dispatch against the real API — the deploy surface run #2 launches on, with the node memory ceiling documented.
+**Depends on**: Phase 34 (the deployed artifacts must carry the PREFLIGHT fixes)
+**Requirements**: INFRA-01, INFRA-02, INFRA-03
+**Success Criteria** (what must be TRUE):
+
+  1. A fresh single-node kind cluster sized slightly above the ~8GiB host (well under 16GB) is up, and its node memory ceiling is documented in the run artifacts.
+  2. `helm`/`kubectl` show v1.0.7 TIDE components running on the cluster (not stale, local pre-Spring-Tide, or older-tag artifacts) — the deployed manager image carries the Phase-34 `plannerConcurrency=4` default.
+  3. One successful real subagent dispatch against the live Anthropic API completes via credproxy + the key at `~/.tide/anthropic.key` (smoke), confirming creds are wired before any cost-bearing run.
+
+**Plans**: TBD
+
+### Phase 36: Salvaged-Tree Import + Dry-Run + Tuning
+
+**Goal**: The `salvage-20260618` tree (3 Milestones / 15 Phases) is imported and validated onto the fresh cluster, a cost projection is produced so expected spend against the cap is known, `absoluteCapCents=10000` ($100) is set on the Project, and effective planner/executor concurrency is tuned to the node's memory ceiling — so launch proceeds with a known cost envelope and no OOM risk.
+**Depends on**: Phase 35 (a deployed, credentialed cluster to import into)
+**Requirements**: IMPORT-01, IMPORT-02, IMPORT-03
+**Success Criteria** (what must be TRUE):
+
+  1. `tide import-envelopes` adopts the `salvage-20260618` tree onto the cluster and it passes validation (cycle-detection + completeness) before any dispatch — observable as the Project reaching `ImportComplete` with no `ImportFailed`/`CyclicPlanDetected` condition.
+  2. A cost-projection / dry-run is produced and recorded before launch, giving expected spend against the $100 cap; `absoluteCapCents=10000` is set and present on the Project CR.
+  3. Effective dispatch concurrency (planner and executor pools, separately sized) is chosen to fit the documented node memory ceiling and the chosen values are recorded — the cascade's worst-case in-flight pod count cannot OOM the single node.
+
+**Plans**: TBD
+
+### Phase 37: Launch + Operate Run #2 to Completion
+
+**Goal**: Run #2 is launched and driven to `Project=Complete` on the single node, under the $100 cap, without OOM — the human babysits budget/waves/OOM headroom, root-fixes any orchestrator defects that surface (the v1.0.6 D1–D4 pattern, each with a symptom-reproducing test), and captures + delivers a mid-execution dashboard screenshot. This phase proves the paradigm self-hosts and produces TIDE's authored OpenAI backend as output.
+**Depends on**: Phase 36 (imported tree + cap + tuned concurrency)
+**Requirements**: RUN-01, RUN-02, RUN-03, RUN-04
+**Success Criteria** (what must be TRUE):
+
+  1. The Project reaches `Project=Complete` on the single-node cluster with no OOM event during the run.
+  2. Total spend stays within the $100 cap; if the cap halts the run, the human is asked before any cap raise or resume — no blind spend (a clean cap-halt followed by an explicit human approve-to-continue is an acceptable path to completion).
+  3. A mid-execution dashboard screenshot is captured during the run and delivered to the user.
+  4. Any orchestrator defect that surfaces during the run is root-fixed in-repo with a symptom-reproducing test and the run is relaunched/resumed — defects are fixed at the root, not worked around.
+
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 38: Output Review + Extraction
+
+**Goal**: TIDE's authored OpenAI backend is collected from the run output and code-reviewed for quality/correctness (expected *not* mergeable as-is), a retrospective captures what the paradigm got right/wrong plus surfaced defects and cost/perf, and cherry-pick candidates (keep vs rework) are recorded to seed the follow-up "extend TIDE" milestone.
+**Depends on**: Phase 37 (a completed run with authored backend output to review)
+**Requirements**: REVIEW-01, REVIEW-02, REVIEW-03
+**Success Criteria** (what must be TRUE):
+
+  1. TIDE's authored OpenAI backend code is collected from the run output and a code review is recorded assessing quality/correctness (with the expectation, confirmed or refuted, that it is not mergeable as-is).
+  2. A retrospective artifact extracts the run's learnings — what the five-level paradigm got right/wrong, defects surfaced, and cost/performance observations.
+  3. Cherry-pick candidates (what to keep vs rework) from the backend output are identified and recorded to seed the follow-up "extend TIDE" milestone (EXTEND-01/02 inputs).
+
+**Plans**: TBD
+
+### Phase 39: Release v1.0.7
+
+**Goal**: v1.0.7 is published (images + charts + binaries) carrying the Phase-34 PREFLIGHT tech-debt fixes as real release artifacts, verified anonymously on ghcr — so the OOM-safety default and rollup hardening ship, not just sit in main.
+**Depends on**: Phase 38 (run proven complete and output reviewed; release closes the milestone)
+**Requirements**: RELEASE-01
+**Success Criteria** (what must be TRUE):
+
+  1. A `v1.0.7` tag publishes images + charts + binaries (matching the established release-matrix coverage) carrying the PREFLIGHT fixes — the chart's appVersion is bumped as release step one to avoid version skew.
+  2. The published v1.0.7 artifacts are verified anonymously on ghcr (pullable without auth), and a GitHub Release is live.
+
+**Plans**: TBD
+
+<details>
+<summary>✅ v1.0.0 / v1.0.1 / v1.0.2 (Spring Tide) / v1.0.3 / v1.0.5 / v1.0.6 — Phase Details (Phases 22–33)</summary>
 
 ### Phase 22: Dashboard Embed Freshness Fix
 
@@ -290,21 +384,6 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   3. The executor pool (`executorConcurrency`) is unchanged; `make lint` passes the cross-pool analyzer with the pools remaining separately sized.
   4. A dispatch deferred by the cap emits a log line identifying the deferred level and requeues — it is never silently dropped, and the operator can observe a stalled wave by seeing the log lines accumulate without new Jobs starting.
 
-**MANDATORY DESIGN FORK — resolve before implementation:**
-
-The D3 fix shape has a confirmed divergence across research subagents that must be resolved at the Phase 32 discuss/plan step before any implementation plan is written:
-
-- **Option A** (STACK.md — 1 of 4 researchers): `defer r.PlannerPool.Release()` fires on reconcile-function return and the pool is therefore fully wired as a steady-state in-flight cap. Fix = lower `plannerConcurrency` in `values.yaml` from 16 to 4. No controller changes needed.
-- **Option B** (ARCHITECTURE.md, FEATURES.md, PITFALLS.md — 3 of 4 researchers, deeper code reads): `defer r.PlannerPool.Release()` fires milliseconds after `r.Create(job)`, not on Job terminal state. The semaphore caps concurrent `r.Create` calls, not in-flight running pods. Fix requires a live `client.List` in-flight count-check before pool acquire at each dispatch site, returning `ctrl.Result{RequeueAfter: 5s}` when `count >= plannerConcurrency`.
-
-**Resolution method:** One `kubectl` observation with `plannerConcurrency=2` and 5 Milestone objects — watch whether `kubectl get jobs -l tideproject.k8s/role=planner` shows at most 2 Running jobs or all 5. This closes the fork definitively. **No implementation plan may be written for Phase 32 until this observation is made or the fork is otherwise resolved at the discuss step.**
-
-**Carried-in debt (hardening — fold into Phase 32 plan scope):** Phase 31's code review (`31-REVIEW.md`) confirmed D1/D2 are sound and exactly-once is genuinely met today, but flagged three non-blocking hardening items. The verifier downgraded WR-02/03 to a degenerate-failure-path window mirroring accepted project-level prior art (D-10); fold these in rather than open a separate gap-closure cycle:
-
-- **WR-02/WR-03 (primary):** the durable `*RolledUpUID` marker stamp — D1's sole exactly-once guard — is a best-effort non-fatal `MergeFrom` on a level object (`ms`/`ph`/`plan`) that is never re-fetched after `budget.RollUpUsage` patched a *different* object (the Project). Safe today only by incidental per-key reconcile serialization; a marker-patch failure plus reporter-Job TTL-GC reopens the double-count window ADOPT-04 set out to close. Fix: wrap the marker stamp in `RetryOnConflict` + re-fetch, mirroring `RollUpUsage` itself. Sites: `internal/controller/{milestone,phase,plan}_controller.go` rollup blocks.
-- **WR-01:** misleading comment at `project_controller.go:1163` claims the suppression patch is conflict-retryable, but it uses plain `MergeFrom` (no optimistic lock) and cannot conflict — it is silently last-write-wins. Correct the comment (or add the optimistic lock if conflict-safety is actually wanted).
-- **WR-04:** the D-07 "single `Status().Patch`" atomicity invariant is asserted in comments/docs but no test proves it; a regression splitting it into two patches would pass all existing assertions. Add a direct assertion.
-
 **Plans**: 2 plans
 
 - [x] 32-01-PLAN.md — D3 dispatch concurrency cap: plannerInFlightCount gate before pool acquire at all four sites + default 16→4 (CONCUR-01..04)
@@ -322,30 +401,34 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
   3. A genuine leaf planner that exits zero with zero children still transitions to `Succeeded` — the fail check is ordered before the succeed check and requires `exitCode != 0`; envtest with `exitCode=0, childCount=0` remains green.
   4. A falsely-Failed phase or milestone is recoverable via `tide resume --retry-failed` without triggering a controller retry storm — the guard patches a permanent `Failed` condition rather than returning a Go error, and no automatic retry loop fires.
 
-**Carried-in debt (from Phase 32 code review — sizing policy):** 32-REVIEW.md flagged that the D3 default `plannerConcurrency=4` is narrower than the chart's own documented guidance that the cap be sized at least as wide as the widest expected wave (the chart comment cites `6`). This is internally inconsistent (degraded throughput when a wide milestone serializes, not a deadlock — single-shot planner Jobs drain). Decide deliberately in Phase 33 planning: either raise the default, soften the chart's "≥ widest wave" wording to a per-workload tuning note, or document that single-node defaults intentionally trade throughput for safety. The other two Phase-32 review advisories (skip `DeletionTimestamp` Jobs in the in-flight count; stale "size 16" comment) were fixed in-phase at commit `91f7499`.
-
 **Plans**: 3 plans
+
 - [x] 33-01-PLAN.md — shared isPlannerFailure helper + ReasonPlannerFailed constant + unit test (Wave 1)
 - [x] 33-02-PLAN.md — carried-in D3 sizing-policy doc fix in values.yaml (Wave 1, parallel)
 - [x] 33-03-PLAN.md — patchPhaseFailed/patchMilestoneFailed helpers + guard insertion at both sites + envtests PLANFAIL-01/02/03 + resume recovery PLANFAIL-04 (Wave 2)
 
-<details>
-<summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
+</details>
 
-Scope TBD. Extends credproxy route allowlist for OpenAI paths, wires an OpenAI provider into the dispatch chain, and runs dogfood run #2. Gated on v1.0.6 adoption-path correctness + adequate multi-node infrastructure (single-node kind cannot hold the parallelism; needs ≥16 GiB or a multi-node cluster).
+<details>
+<summary>📋 vNext — Extend TIDE: Mergeable OpenAI Backend (Planned)</summary>
+
+Scope seeded by v1.0.7's REVIEW output (Phase 38 cherry-pick candidates). Rework TIDE's authored OpenAI backend into a mergeable, provider-agnostic `Subagent` implementation behind the interface (EXTEND-01), and prove live functional parity by driving a real subagent dispatch through the OpenAI backend end-to-end — the CACHE-F1 direct-SDK path that realizes cross-pod prompt caching (EXTEND-02).
 
 </details>
 
 <details>
 <summary>📋 v1.x — Polyglot Subagent Runtimes: LangGraph Strategy (Backlog)</summary>
 
-Architecture locked; task breakdown deferred. The `claude` CLI subagent becomes one named strategy behind the existing `pkg/dispatch.Subagent` image contract; a second Python/LangGraph container image implements the same envelope contract for full agent-loop parity. Sequenced after v1.0.2 "Spring Tide" and after the OpenAI-backend milestone.
+Architecture locked; task breakdown deferred. The `claude` CLI subagent becomes one named strategy behind the existing `pkg/dispatch.Subagent` image contract; a second Python/LangGraph container image implements the same envelope contract for full agent-loop parity. Sequenced after the OpenAI-backend milestone.
 
 See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-subagent-MILESTONE.md) for the full framing: parity inventory, contract-conformance table, provider-firewall gap analysis, alternatives considered, and open questions.
 
 </details>
 
 ## Progress
+
+**Execution Order:**
+v1.0.7 phases execute in numeric order: 34 → 35 → 36 → 37 → 38 → 39 (forced sequential — each phase's deliverable is the next's prerequisite).
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -369,6 +452,12 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 28. Plan-Import Core | v1.0.3 | 5/5 | Complete | 2026-06-18 |
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete | 2026-06-22 |
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
-| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete    | 2026-06-28 |
-| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete    | 2026-06-29 |
-| 33. D4 — Planner Failure Semantics | v1.0.6 | 3/3 | Complete   | 2026-06-29 |
+| 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete | 2026-06-28 |
+| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete | 2026-06-29 |
+| 33. D4 — Planner Failure Semantics | v1.0.6 | 3/3 | Complete | 2026-06-29 |
+| 34. Pre-flight Tech-Debt Hardening | v1.0.7 | 0/TBD | Not started | - |
+| 35. Infra + Fresh v1.0.7 Deploy | v1.0.7 | 0/TBD | Not started | - |
+| 36. Salvaged-Tree Import + Dry-Run + Tuning | v1.0.7 | 0/TBD | Not started | - |
+| 37. Launch + Operate Run #2 to Completion | v1.0.7 | 0/TBD | Not started | - |
+| 38. Output Review + Extraction | v1.0.7 | 0/TBD | Not started | - |
+| 39. Release v1.0.7 | v1.0.7 | 0/TBD | Not started | - |

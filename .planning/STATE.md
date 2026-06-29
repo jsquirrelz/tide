@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-06-29T20:39:48.135Z"
 last_activity: 2026-06-29
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,32 +17,37 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-28)
+See: .planning/PROJECT.md (updated 2026-06-29)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 33 — D4 — Planner Failure Semantics
+**Current focus:** Phase 34 — Pre-flight Tech-Debt Hardening
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-29 — Milestone v1.0.7 started
+Phase: 34 of 39 (Pre-flight Tech-Debt Hardening) — first v1.0.7 phase
+Plan: — (ready to plan)
+Status: Ready to plan Phase 34
+Last activity: 2026-06-29 — v1.0.7 roadmap created (Phases 34–39, 16 reqs, 100% mapped)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-**Velocity (v1.0.5 reference):**
+**Velocity (reference):**
 
-- Total plans completed across v1.0.1–v1.0.5: ~64+
-- Phase 30: 3 plans, completed 2026-06-27
+- Total plans completed across v1.0.1–v1.0.6: ~80+
+- v1.0.6 (Phases 31–33): 8 plans, 12 tasks, shipped 2026-06-29
 
-**v1.0.6 Phase Tracking:**
+**v1.0.7 Phase Tracking:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 31. D2+D1 — Adoption Lifecycle Seam | TBD | Not started |
-| 32. D3 — Dispatch Concurrency Cap | TBD | Not started |
-| 33. D4 — Planner Failure Semantics | TBD | Not started |
+| 34. Pre-flight Tech-Debt Hardening | TBD | Not started |
+| 35. Infra + Fresh v1.0.7 Deploy | TBD | Not started |
+| 36. Salvaged-Tree Import + Dry-Run + Tuning | TBD | Not started |
+| 37. Launch + Operate Run #2 to Completion | TBD | Not started |
+| 38. Output Review + Extraction | TBD | Not started |
+| 39. Release v1.0.7 | TBD | Not started |
 
 ## Accumulated Context
 
@@ -50,98 +55,52 @@ Last activity: 2026-06-29 — Milestone v1.0.7 started
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-**v1.0.6 binding constraints (from REQUIREMENTS.md and PROJECT.md):**
+**v1.0.7 binding constraints (from REQUIREMENTS.md and PROJECT.md):**
 
-- Persistence stays CRD-`.status`-only — no new fields beyond what is needed for idempotency markers; no external DB.
-- Planner and executor pools remain separately sized — Phase 32 (D3) must not unify the two pools. The cross-pool analyzer (`make lint`) enforces this.
-- Wave-boundary failure semantics are intact and must not be weakened by lifecycle-advance or concurrency-cap changes.
-- The D3 cap parks/requeues excess dispatches — it never silently truncates a wave.
-- D1 rollup is exactly-once under reporter-Job TTL-GC — the Phase-27 `PlannerRolledUpUID` durable-marker pattern must be extended to milestone/phase levels if not already present.
-- D4 uses a permanent `patchPhaseFailed`/`patchMilestoneFailed` condition patch — not a Go error return — to avoid controller retry storms (P-D4a).
-- `MaxConcurrentReconciles` is NOT the D3 lever — it bounds reconcile goroutines, not in-flight Jobs. Must stay strictly greater than `plannerConcurrency`.
-- The dogfood run #2c relaunch is OUT OF SCOPE for this milestone; it requires multi-node or ≥16 GiB infrastructure.
-
-**Phase 32 design fork (must resolve before implementation):**
-Option A (1 researcher): pool `Release` fires on function return and already caps in-flight — chart default reduction alone is sufficient.
-Option B (3 researchers, deeper code reads): `defer r.PlannerPool.Release()` fires milliseconds after `r.Create(job)`, not on Job terminal state; a live `client.List` count-check is required before pool acquire. Resolution: one `kubectl get jobs -l tideproject.k8s/role=planner` observation with `plannerConcurrency=2` and 5 Milestones closes the fork. No implementation plan for Phase 32 may be written until this is resolved.
+- This is an operations/dogfood milestone: the human operates TIDE; **TIDE builds the entire OpenAI backend** — no hand-written backend code. The backend is TIDE's *output*, reviewed not merged (rework is the follow-up "extend TIDE" milestone).
+- Single-node OOM safety comes from the D3 concurrency cap + low effective `plannerConcurrency` (PREFLIGHT-01 default = 4), NOT from large RAM — 16GB is explicitly too much; the node is sized *slightly* above ~8GiB.
+- The hard `$100 absoluteCapCents` (10000 cents) gate must halt the run cleanly; relaunch/resume only on explicit human approval of more spend (RUN-02 — no blind spend).
+- Orchestrator defects that surface during the run are root-fixed in-repo with a symptom-reproducing test and the run relaunched/resumed — not worked around (RUN-04, the v1.0.6 D1–D4 pattern).
+- Persistence stays CRD-`.status`-only; resumption stays minimal/re-derivable. No new CRD schema this milestone.
+- v1.0.7 ships the two PREFLIGHT tech-debt fixes as real release artifacts (RELEASE-01).
 
 ### Roadmap Evolution
 
-- v1.0.6 roadmap defined 2026-06-28: Phases 31–33, 13 requirements (ADOPT-01..05, CONCUR-01..04, PLANFAIL-01..04), 100% mapped.
-- Phase numbering continues from v1.0.5 (Phase 30 was the last phase). Phase 31 is the first v1.0.6 phase.
-- Phase 31 (D2+D1) is highest priority: D2 lifecycle advance is a prerequisite for D1 budget rollup; both are the "spent blind" headline safety failure.
-- Phase 32 (D3) carries a mandatory design fork — no implementation plan may be written before the fork is resolved at the discuss/plan step.
-- Phase 33 (D4) is independent of D1/D2/D3; it follows Phase 32 by severity ordering but has no dependency on D3's resolution.
+- v1.0.7 roadmap created 2026-06-29: Phases 34–39, 16 requirements (PREFLIGHT/INFRA/IMPORT/RUN/REVIEW/RELEASE-01), 100% mapped.
+- Phase numbering continues from v1.0.6 (Phase 33 was the last phase). Phase 34 is the first v1.0.7 phase.
+- The phase chain is forced sequential: each phase's deliverable is the next's prerequisite (harden → deploy → import → operate → review → release). 34 → 35 → 36 → 37 → 38 → 39.
+- Phase 34 (PREFLIGHT) must land before launch — it protects single-node OOM safety (configmap default) and $100-cap cost accuracy (project-level rollup hardening); it is also part of what RELEASE-01 ships.
+- RUN-04 (root-fix surfacing defects) lives inside Phase 37 as an expected iterative operate activity, not a separate phase.
 
 ### Pending Todos
 
-- Resolve Phase 32 D3 design fork before writing implementation plans for Phase 32. Method: observe active Job count with `plannerConcurrency=2` on `kind-tide-dogfood` while 5+ Milestones are enqueued, or resolve via discuss step.
-- During Phase 31 planning: grep all `budget.RollUpUsage` call sites for any `if project.Spec.ImportSource != nil { skip }` guards at milestone, phase, and plan controllers. Child-level rollup must be unconditional.
-- During Phase 31 planning: verify whether `MilestoneRolledUpUID` / `PhaseRolledUpUID` idempotency markers exist at child levels (Phase-27 pattern). If absent, add them — this is the P-D1a/P-D1c double-count risk.
-- During Phase 33 planning: verify whether `patchPhaseFailed` / `patchMilestoneFailed` helpers already exist. If absent, add by mirroring `patchPlanFailed` in `plan_controller.go:842`.
+- Phase 34 planning: locate the project-level rollup marker (`PlannerRolledUpUID` / equivalent) in `project_controller.go` and confirm whether it already uses the milestone/phase `RetryOnConflict` + re-fetch pattern (v1.0.6 carried this in as W1). If best-effort, harden it.
+- Phase 34 planning: render the chart with defaults and confirm `plannerConcurrency` configmap value; the v1.0.6 chart-comment softening held the value at 4 but the configmap `default 16` may still be present (W2).
+- Phase 35: document the kind node memory ceiling; the durable real key lives at `~/.tide/anthropic.key` (outside the repo, survives teardowns) and the in-cluster `tide-secrets` is recreated at full-deploy.
+- Phase 36: salvage tree is `salvage-20260618` (3 Milestones / 15 Phases); use `tide import-envelopes` (+ `--dry-run` for the cost projection); set `absoluteCapCents=10000`.
 
 ### Blockers/Concerns
 
-- **Phase 32 design fork (BLOCKER for Phase 32 implementation):** The D3 fix shape diverges across research subagents. Option A (chart default only) vs Option B (live `client.List` count-check). Must be resolved before any Phase 32 implementation plan is authored. This is encoded as a mandatory gate in the ROADMAP.md Phase 32 detail section.
-- **Phase 32 default value TBD:** ARCHITECTURE.md recommends `plannerConcurrency: 3`; STACK.md and FEATURES.md recommend `4`. Canonical value to be resolved and documented at Phase 32 discuss/plan step.
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260615-gos | Explore CLI-as-strategy + second SDK/LangGraph strategy — semi-scoped backlog milestone | 2026-06-15 | d43f402 | [260615-gos-explore-abstracting-cli-to-be-a-single-s](./quick/260615-gos-explore-abstracting-cli-to-be-a-single-s/) |
-| 260617-qqh | Fix project-controller planner-completion ordering so reporter spawns + planner cost rolls up (dogfood run #2 root cause) | 2026-06-17 | 2a5e0dc | [260617-qqh-fix-project-controller-planner-completio](./quick/260617-qqh-fix-project-controller-planner-completio/) |
-| 260625-k1q | v1.0.4 patch: publish tide-import image + chart-image release-matrix guardrail | 2026-06-25 | fd86a79 | [260625-k1q-v1-0-4-patch-publish-tide-import-image-c](./quick/260625-k1q-v1-0-4-patch-publish-tide-import-image-c/) |
-| 260625-txr | Dogfood run #2 setup artifacts — v1alpha2 skeleton CRs + project.yaml + runbook | 2026-06-26 | 49b7b0e | [260625-txr-dogfood-run-2-setup-artifacts-v1alpha2-s](./quick/260625-txr-dogfood-run-2-setup-artifacts-v1alpha2-s/) |
+- The prior `kind-tide-dogfood` cluster is v1alpha1-only / pre-Spring-Tide and its stored Project would orphan on a no-conversion CRD upgrade — Phase 35 stands up a *fresh* cluster rather than reusing it (per the v1.0.2 spec-shot lesson).
+- `make test-int` has a pre-existing kind `medium_http` fixture flake (MAKE_EXIT=2) unrelated to v1.0.7 work — do not treat it as a v1.0.7 regression unless a v1.0.7 commit touches `test/integration/kind/`.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v1.0.1 milestone close on 2026-06-13:
+Carried forward at v1.0.6 close (2026-06-29), now scoped:
 
-| Category | Item | Status |
-|----------|------|--------|
-| quick_task | 260521-ccz-push-lease-cascade-9-recipe | missing |
-| quick_task | 260521-eoz-phase-03-cascade-10-filter-pillar-4-list | missing |
-| quick_task | 260521-f8x-phase-03-cascade-7-gate-plan-planner-dis | missing |
-| quick_task | 260521-gmm-phase-03-cascade-11-pvcprewarmpod-helper | missing |
-| quick_task | 260521-hk4-phase-03-cascade-12-patchjobtofailed-mus | missing |
-| quick_task | 260521-jz0-phase-03-cascade-13-idempotency-guard-in | missing |
-| quick_task | 260526-w11-phase-5-closeout-polish-roadmap-16-16-17 | missing |
-| quick_task | 260530-h2h-boot-04-acceptance-v1-cert-manager-prere | missing |
-| quick_task | 260530-hrc-open-phase-6-v1-0-image-publish-pipeline | missing |
-| quick_task | 260531-oek-fix-cascade-12-chart-template-dispatch-i | missing |
-| quick_task | 260610-vcp-audit-codebase-against-k8s-helm-best-pra | missing |
-| quick_task | 260610-x3d-draft-the-three-tide-on-tide-dogfood-pro | missing |
-| quick_task | 260611-3o9-planning-dag-lr-orientation | unknown |
-| quick_task | 260611-439-podjob-caps-floor-bump | unknown |
-| quick_task | 260611-cz8-salvage-branch-merge-prep-4-review-fixes | missing |
-
-All v1.0.0-era quick-task records. Work landed; artifact status fields never flipped. Non-blocking administrative debt.
-
-**v1.0.6 deferred to v2 (per REQUIREMENTS.md):**
-
-- OBS-01: Prometheus pool-saturation gauge for deferred planner dispatches (logging sufficient for v1.0.6)
-- OBS-02: Dashboard "Adopted" badge distinguishing imported vs freshly-planned nodes
-- CONCUR-F1: Per-Project concurrency override CRD field (chart-level cap is sufficient for v1.0.6)
+| Category | Item | Status | Deferred At |
+|----------|------|--------|-------------|
+| tech_debt | Project-level `PlannerRolledUpUID` hardening (W1) | Folded into Phase 34 (PREFLIGHT-02) | v1.0.6 |
+| tech_debt | Chart configmap `plannerConcurrency default 16→4` (W2) | Folded into Phase 34 (PREFLIGHT-01) | v1.0.6 |
+| tech_debt | Controller-envtest-suite tier split | Deferred (DEBT-01) — not load-bearing for run #2 | v1.0.6 |
+| stale artifacts | 20 historical quick-tasks + 1 todo + 1 uat_gap | Non-blocking administrative debt | v1.0.6 |
 
 ## Session Continuity
 
-Last session: 2026-06-29T13:13:12.047Z
-Stopped at: Phase 33 context gathered
+Last session: 2026-06-29 — v1.0.7 roadmap created
+Stopped at: ROADMAP.md + REQUIREMENTS.md traceability + STATE.md written for v1.0.7 (Phases 34–39)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
-
-## Deferred Items
-
-Items acknowledged and deferred at v1.0.6 milestone close (2026-06-29). All are stale historical capture-log entries, not active work:
-
-| Category | Count | Notes |
-|----------|-------|-------|
-| quick_tasks | 20 | Phase-02/03 cascade recipes + Phase 5/6 closeout notes + assorted (260521–260625 era), long resolved; never cleaned from the capture log |
-| todos | 1 | historical |
-| uat_gaps | 1 | partial-status historical entry |
-
-v1.0.6 tech-debt carried to v1.0.7 (from milestone audit): (W1) retrofit project-level `PlannerRolledUpUID` stamp to the hardened `RetryOnConflict` pattern; (W2) chart `configmap.yaml` `plannerConcurrency | default 16` → `default 4`; plus the deeper "controller envtest suite outgrew the unit tier — move heavy specs to TEST-02" item surfaced during the release (raised the TEST-01 budget to 300s as a stopgap).
+- Plan Phase 34 with `/gsd:plan-phase 34` (Pre-flight Tech-Debt Hardening — PREFLIGHT-01/02)
