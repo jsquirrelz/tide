@@ -11,11 +11,17 @@ You may obtain a copy of the License at
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
@@ -390,4 +396,113 @@ func containsHelper(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// ---------- plannerInFlightCount tests (D3 concurrency cap — CONCUR-01) ----------
+
+// newFakeClientForController builds a fake client with batchv1 + TIDE types registered.
+func newFakeClientForController(t *testing.T, objs ...client.Object) client.Client {
+	t.Helper()
+	s := runtime.NewScheme()
+	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tide: %v", err)
+	}
+	if err := batchv1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme batchv1: %v", err)
+	}
+	if err := corev1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme corev1: %v", err)
+	}
+	return fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).Build()
+}
+
+// makePlannerJob creates a batchv1.Job with the tideproject.k8s/role=planner label.
+// terminal=true sets a Complete condition so isJobTerminal returns true.
+func makePlannerJob(name, ns string, terminal bool) *batchv1.Job {
+	j := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+			Labels:    map[string]string{"tideproject.k8s/role": "planner"},
+		},
+	}
+	if terminal {
+		j.Status.Conditions = []batchv1.JobCondition{
+			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+		}
+	}
+	return j
+}
+
+// TestPlannerInFlightCount exercises the four key behaviors of plannerInFlightCount.
+func TestPlannerInFlightCount(t *testing.T) {
+	cases := []struct {
+		name           string
+		jobs           []*batchv1.Job
+		watchNamespace string
+		wantCount      int
+	}{
+		{
+			name: "three non-terminal jobs returns 3",
+			jobs: []*batchv1.Job{
+				makePlannerJob("j1", "default", false),
+				makePlannerJob("j2", "default", false),
+				makePlannerJob("j3", "default", false),
+			},
+			watchNamespace: "",
+			wantCount:      3,
+		},
+		{
+			name: "two non-terminal and one terminal returns 2",
+			jobs: []*batchv1.Job{
+				makePlannerJob("j1", "default", false),
+				makePlannerJob("j2", "default", false),
+				makePlannerJob("j3", "default", true), // terminal
+			},
+			watchNamespace: "",
+			wantCount:      2,
+		},
+		{
+			name:           "zero jobs returns 0",
+			jobs:           nil,
+			watchNamespace: "",
+			wantCount:      0,
+		},
+		{
+			name: "namespace-scoped: only counts jobs in watched namespace",
+			jobs: []*batchv1.Job{
+				makePlannerJob("j-a1", "ns-a", false),
+				makePlannerJob("j-a2", "ns-a", false),
+				makePlannerJob("j-b1", "ns-b", false),
+			},
+			watchNamespace: "ns-a",
+			wantCount:      2,
+		},
+		{
+			name: "watchNamespace empty: counts all namespaces",
+			jobs: []*batchv1.Job{
+				makePlannerJob("j-a1", "ns-a", false),
+				makePlannerJob("j-b1", "ns-b", false),
+			},
+			watchNamespace: "",
+			wantCount:      2,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []client.Object
+			for _, j := range tc.jobs {
+				objs = append(objs, j)
+			}
+			c := newFakeClientForController(t, objs...)
+			count, err := plannerInFlightCount(context.Background(), c, tc.watchNamespace)
+			if err != nil {
+				t.Fatalf("plannerInFlightCount: %v", err)
+			}
+			if count != tc.wantCount {
+				t.Errorf("plannerInFlightCount = %d, want %d", count, tc.wantCount)
+			}
+		})
+	}
 }

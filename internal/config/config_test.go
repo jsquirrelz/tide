@@ -44,8 +44,8 @@ func TestConfigLoad_DefaultsApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load empty config: %v", err)
 	}
-	if cfg.PlannerConcurrency != 16 {
-		t.Errorf("PlannerConcurrency = %d, want 16", cfg.PlannerConcurrency)
+	if cfg.PlannerConcurrency != 4 {
+		t.Errorf("PlannerConcurrency = %d, want 4 (default changed from 16 to 4 in CONCUR-02)", cfg.PlannerConcurrency)
 	}
 	if cfg.ExecutorConcurrency != 4 {
 		t.Errorf("ExecutorConcurrency = %d, want 4", cfg.ExecutorConcurrency)
@@ -120,6 +120,23 @@ func TestConfigLoad_RejectsZeroValues(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "plannerConcurrency") {
 		t.Errorf("error %q should mention plannerConcurrency", err.Error())
+	}
+}
+
+// TestDefaultPlannerConcurrency asserts that an empty config file yields
+// PlannerConcurrency == 4 (single-node-safe default — CONCUR-02 / RQ-2).
+func TestDefaultPlannerConcurrency(t *testing.T) {
+	p := writeConfig(t, "")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load empty config: %v", err)
+	}
+	if cfg.PlannerConcurrency != 4 {
+		t.Errorf("PlannerConcurrency = %d, want 4 (single-node-safe default, CONCUR-02)", cfg.PlannerConcurrency)
+	}
+	// ExecutorConcurrency must remain 4 (CONCUR-03 — executor pool untouched).
+	if cfg.ExecutorConcurrency != 4 {
+		t.Errorf("ExecutorConcurrency = %d, want 4 (executor pool must remain unchanged)", cfg.ExecutorConcurrency)
 	}
 }
 

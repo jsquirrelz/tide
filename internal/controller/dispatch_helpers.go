@@ -290,6 +290,37 @@ func resolveImage(project *tideprojectv1alpha2.Project, level string, helmDefaul
 	}
 }
 
+// plannerInFlightCount returns the count of non-terminal planner Jobs currently
+// visible in the informer cache. Used by the D3 concurrency cap gate before
+// PlannerPool.Acquire at each of the four planner dispatch sites.
+//
+// An empty watchNamespace counts across all namespaces (cluster-scoped install
+// posture — mirrors pool.PreCharge and project_controller.go:949). When
+// watchNamespace is non-empty, the list is restricted to that namespace so the
+// namespace-scoped informer cache is not asked for cross-namespace entries.
+//
+// Returns (0, err) on List failure; callers treat this as a transient error and
+// return ctrl.Result{}, fmt.Errorf("planner in-flight count: %w", err).
+func plannerInFlightCount(ctx context.Context, c client.Client, watchNamespace string) (int, error) {
+	var jobs batchv1.JobList
+	opts := []client.ListOption{
+		client.MatchingLabels{"tideproject.k8s/role": "planner"},
+	}
+	if watchNamespace != "" {
+		opts = append(opts, client.InNamespace(watchNamespace))
+	}
+	if err := c.List(ctx, &jobs, opts...); err != nil {
+		return 0, err
+	}
+	n := 0
+	for i := range jobs.Items {
+		if !isJobTerminal(&jobs.Items[i]) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // checkParentApproval implements the D-02 descent hold — children materialize
 // but dispatch waits for parental approval (tidal lock pending).
 //

@@ -141,6 +141,18 @@ func TestPoolPreChargeFromLiveJobs(t *testing.T) {
 	p.Release()
 }
 
+// TestPoolCapacity verifies that Pool.Capacity() returns the configured cap.
+func TestPoolCapacity(t *testing.T) {
+	p := New(7, "planner")
+	if got := p.Capacity(); got != 7 {
+		t.Errorf("Capacity() = %d, want 7", got)
+	}
+	p2 := New(1, "executor")
+	if got := p2.Capacity(); got != 1 {
+		t.Errorf("Capacity() = %d, want 1", got)
+	}
+}
+
 func TestPoolPreChargeOverflow(t *testing.T) {
 	labels := map[string]string{"tideproject.k8s/role": "executor"}
 	c := newFakeClient(t,

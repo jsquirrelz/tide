@@ -75,7 +75,17 @@ webhookService:
 # Phase/Plan reconciles), execution fans out narrow (Wave/Task reconciles). The
 # crosspool analyzer (cmd/tide-lint) prevents the two budgets from being unified at
 # compile time; this values surface keeps them separately tunable at deploy time.
-plannerConcurrency: 16
+#
+# plannerConcurrency caps concurrent in-flight planner Jobs globally across all planner
+# levels (project/milestone/phase/plan). The D3 gate counts non-terminal planner Jobs
+# via a cached client.List and parks new dispatches with RequeueAfter(10s) when the
+# count meets or exceeds this cap. Default 4 is single-node-safe: each planner pod
+# (subagent + credproxy sidecar) consumes ~300-500 MiB; 4 pods leave headroom for the
+# executor pool + system pods on a 7.65 GiB single-node kind cluster (RQ-2). Must be
+# sized at least as wide as the widest expected planning wave (e.g. a 6-phase milestone
+# needs plannerConcurrency >= 6 to avoid serialising phase dispatch). Increase for
+# multi-node clusters where memory constraints are relaxed.
+plannerConcurrency: 4
 executorConcurrency: 4
 
 # Per-Kind controller-runtime MaxConcurrentReconciles. Values match the Plan 04

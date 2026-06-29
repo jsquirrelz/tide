@@ -114,7 +114,7 @@ func Load(path string) (*Config, error) {
 // its explicit value (validated >= 1) or applying the documented default.
 func applyAndValidate(raw *rawConfig, out *Config) error {
 	// Top-level pools.
-	if err := resolveField("plannerConcurrency", raw.PlannerConcurrency, 16, &out.PlannerConcurrency); err != nil {
+	if err := resolveField("plannerConcurrency", raw.PlannerConcurrency, 4, &out.PlannerConcurrency); err != nil {
 		return err
 	}
 	if err := resolveField("executorConcurrency", raw.ExecutorConcurrency, 4, &out.ExecutorConcurrency); err != nil {
