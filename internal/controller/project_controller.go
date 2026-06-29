@@ -1151,7 +1151,10 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 						// D-04: set Phase=Running identically to the normal lifecycle.
 						// D-06: return BEFORE PlannerPool.Acquire — no slot leak.
 						// D-08: return nil (not err) for expected/permanent suppressed state.
-						patch := client.MergeFrom(project.DeepCopy())
+						// WR-01: use MergeFromWithOptimisticLock so the "conflict is retryable"
+						// comment is actually true — a plain MergeFrom performs a last-write-wins
+						// server-side merge that embeds no resourceVersion and cannot conflict.
+						patch := client.MergeFromWithOptions(project.DeepCopy(), client.MergeFromWithOptimisticLock{})
 						project.Status.Phase = tidev1alpha2.PhaseRunning
 						meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 							Type:               tidev1alpha2.ConditionProjectPlannerSuppressed,
@@ -1161,7 +1164,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 							LastTransitionTime: metav1.Now(),
 						})
 						if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
-							// Conflict is retryable; surface as err so controller retries.
+							// Conflict is retryable (resourceVersion embedded by MergeFromWithOptimisticLock);
+							// surface as err so controller requeues and re-fetches before retrying.
 							return ctrl.Result{}, pErr
 						}
 						return ctrl.Result{}, nil

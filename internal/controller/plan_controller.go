@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -617,10 +618,23 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				logger.Error(rollErr, "plan planner budget rollup failed (non-fatal)", "plan", plan.Name)
 			} else {
 				// Stamp the durable marker only after a successful rollup (Pitfall-2 ordering).
-				markerPatch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.PlanRolledUpUID = planJobName
-				if pErr := r.Status().Patch(ctx, plan, markerPatch); pErr != nil {
-					logger.Error(pErr, "patch PlanRolledUpUID failed (non-fatal)", "plan", plan.Name)
+				// WR-02: re-fetch + RetryOnConflict + MergeFromWithOptimisticLock mirrors RollUpUsage,
+				// making the stamp durable against concurrent status writes on this level object.
+				// WR-03: on retry-budget exhaustion, return the error to requeue rather than swallow —
+				// the marker must be durably set before the reporter Job's TTL-GC window reopens rollup.
+				if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha2.Plan{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+						return err
+					}
+					if latest.Status.PlanRolledUpUID == planJobName {
+						return nil // already set by a concurrent reconcile — idempotent
+					}
+					markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.PlanRolledUpUID = planJobName
+					return r.Status().Patch(ctx, latest, markerPatch)
+				}); mErr != nil {
+					return ctrl.Result{}, fmt.Errorf("patch PlanRolledUpUID: %w", mErr)
 				}
 			}
 		}
