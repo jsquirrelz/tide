@@ -55,18 +55,9 @@ import (
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-// countingStatusWriter wraps a client.StatusClient and counts Status().Patch calls.
-// Used by WR-04 to assert the adoption advance issues exactly one Status patch
-// (D-07 single-patch atomicity: Phase=Running + suppression condition in one patch).
-type countingStatusWriter struct {
-	inner client.StatusClient
-	count *atomic.Int64
-}
-
-func (c *countingStatusWriter) Status() client.StatusWriter {
-	return &countingStatusPatcher{inner: c.inner.Status(), count: c.count}
-}
-
+// countingStatusPatcher counts Status().Patch calls. Used by WR-04 to assert the
+// adoption advance issues exactly one Status patch (D-07 single-patch atomicity:
+// Phase=Running + suppression condition in one patch).
 type countingStatusPatcher struct {
 	inner client.StatusWriter
 	count *atomic.Int64
@@ -89,7 +80,7 @@ func (c *countingStatusPatcher) Apply(ctx context.Context, obj runtime.ApplyConf
 	return c.inner.Apply(ctx, obj, opts...)
 }
 
-// countingClient wraps client.Client and delegates Status() to a countingStatusWriter.
+// countingClient wraps client.Client and delegates Status() to a countingStatusPatcher.
 type countingClient struct {
 	client.Client
 	statusCounter *atomic.Int64
@@ -108,7 +99,7 @@ func newCountingAdoptionReconciler() (*ProjectReconciler, *atomic.Int64) {
 		Client:         wrapped,
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
-		SigningKey:      testSigningKey,
+		SigningKey:     testSigningKey,
 		CredproxyImage: testCredproxyImage,
 		HelmProviderDefaults: ProviderDefaults{
 			Image: testSubagentImage,
