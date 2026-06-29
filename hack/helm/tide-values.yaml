@@ -81,10 +81,11 @@ webhookService:
 # via a cached client.List and parks new dispatches with RequeueAfter(10s) when the
 # count meets or exceeds this cap. Default 4 is single-node-safe: each planner pod
 # (subagent + credproxy sidecar) consumes ~300-500 MiB; 4 pods leave headroom for the
-# executor pool + system pods on a 7.65 GiB single-node kind cluster (RQ-2). Must be
-# sized at least as wide as the widest expected planning wave (e.g. a 6-phase milestone
-# needs plannerConcurrency >= 6 to avoid serialising phase dispatch). Increase for
-# multi-node clusters where memory constraints are relaxed.
+# executor pool + system pods on a 7.65 GiB single-node kind cluster (RQ-2). The
+# single-node default intentionally trades throughput for safety: sizing the cap below
+# a milestone's widest planning wave serialises that wave's dispatch (degraded
+# throughput, not a deadlock — single-shot planner Jobs drain and the next dispatches).
+# Tune upward for multi-node clusters where memory constraints are relaxed.
 plannerConcurrency: 4
 executorConcurrency: 4
 
