@@ -549,7 +549,7 @@ This phase is a pure code/config change. No external services, databases, or CLI
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `isPlannerFailure` also handle `exitCode != 0, childCount > 0`?**
    - What we know: CONTEXT.md D-06 specifies the check as `envReadOK && out.ExitCode != 0 && out.ChildCount == 0` only.
