@@ -42,6 +42,34 @@
 
 ---
 
+## Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety
+
+**Shipped:** 2026-06-29 (tag `v1.0.6`) | **Phases:** 3 (31–33) | **Plans:** 8
+
+### What Was Built
+Closed the four code-level defects dogfood run #2b surfaced on the v1.0.5 import/adoption path: D1+D2 (adopted Project advances Initialized→Running on `ImportComplete` with budget rollup + cap enforcement; durable project-planner suppression), D3 (live in-flight planner-count cap before pool acquire, single-node-safe default 4), D4 (failed planner marked `Failed` not `Succeeded` via shared `isPlannerFailure`, ordered before the gate-policy hook). Published 8 images + 2 OCI charts + 5 binaries; audit `tech_debt` (13/13 reqs, 0 blockers).
+
+### What Worked
+- **Adversarial code review caught what the verifier + green tests missed — again.** `gsd-code-review` flagged CR-01 (D4 guard placed after the gate-policy hook → a failed milestone parks at `AwaitingApproval` under the default `approve` gate instead of `Failed`). The PLANFAIL-02 envtest had masked it by forcing `Gates{Milestone:"auto"}`. This is the second milestone (after v1.0.2 Phase 25) where the code-review pass found a real blocker post-verification.
+- Confirming every subagent finding against source before acting (CR-01, the two audit warnings) — none were taken on faith.
+
+### What Was Inefficient
+- **The release pre-push hook failed twice on a test timeout before the cause was found.** The unit-tier `make test` (`-timeout 120s`) tripped because the `internal/controller` envtest suite had grown to ~120–135s. A clean standalone run passed (120.169s, barely under), masking it as a flake; only capturing full hook output revealed the `TestControllers timed out at 2m0s` panic. Lesson: when a pre-push/CI gate fails but a local re-run passes, capture the *full* gate output before assuming flake.
+
+### Patterns Established
+- **Green tests that override production defaults prove nothing about the default path.** PLANFAIL-02 used `Gates{Milestone:"auto"}` (non-default) and passed while the default-`approve` path was broken. Fix: exercise the production gate config in the test, and assert a `Running` precondition so a silent dispatch failure can't pass vacuously.
+- Release ordering held: STEP-ONE chart/appVersion bump → push main → rc dry-run gate → release tag → close-out (no re-tag).
+
+### Key Lessons
+- The `internal/controller` Ginkgo envtest suite has outgrown the "unit" tier (~34s → ~120s across phases). Raised the TEST-01 budget 120→300s and go-test timeout 120→360s as a stopgap; the real fix (move heavy specs to the TEST-02 integration tier) is carried to v1.0.7.
+- A failure-classification guard must run before any approval/hold gate — you cannot gate-approve a planner that authored nothing.
+
+### Cost Observations
+- Model mix: planning sonnet/opus, executors sonnet, verifier opus, code-review/integration sonnet. Fable still unavailable (planner→opus).
+- Notable: the discuss→plan→execute→verify→code-review→secure→audit→release→close-out chain ran end-to-end in one session; the release blocker (test timeout) was the only unplanned detour.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
