@@ -381,6 +381,21 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		}
 	}
 
+	// D3 in-flight cap gate — BEFORE pool Acquire (D-03: no slot leak).
+	// Counts non-terminal planner Jobs via a cached-client List; returns RequeueAfter
+	// (never an error) when the count meets or exceeds the configured cap (CONCUR-04).
+	if r.PlannerPool != nil {
+		inFlight, err := plannerInFlightCount(ctx, r.Client, r.WatchNamespace)
+		if err != nil {
+			return ctrl.Result{}, true, fmt.Errorf("planner in-flight count: %w", err)
+		}
+		if inFlight >= r.PlannerPool.Capacity() {
+			logf.FromContext(ctx).V(1).Info("planner dispatch deferred: concurrency cap reached",
+				"inFlight", inFlight, "cap", r.PlannerPool.Capacity(), "plan", plan.Name)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, true, nil
+		}
+	}
+
 	// Acquire plannerPool (POOL-01) before Job creation (D-A4).
 	if r.PlannerPool != nil {
 		if err := r.PlannerPool.Acquire(ctx); err != nil {
