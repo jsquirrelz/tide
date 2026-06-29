@@ -322,6 +322,8 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
   3. A genuine leaf planner that exits zero with zero children still transitions to `Succeeded` — the fail check is ordered before the succeed check and requires `exitCode != 0`; envtest with `exitCode=0, childCount=0` remains green.
   4. A falsely-Failed phase or milestone is recoverable via `tide resume --retry-failed` without triggering a controller retry storm — the guard patches a permanent `Failed` condition rather than returning a Go error, and no automatic retry loop fires.
 
+**Carried-in debt (from Phase 32 code review — sizing policy):** 32-REVIEW.md flagged that the D3 default `plannerConcurrency=4` is narrower than the chart's own documented guidance that the cap be sized at least as wide as the widest expected wave (the chart comment cites `6`). This is internally inconsistent (degraded throughput when a wide milestone serializes, not a deadlock — single-shot planner Jobs drain). Decide deliberately in Phase 33 planning: either raise the default, soften the chart's "≥ widest wave" wording to a per-workload tuning note, or document that single-node defaults intentionally trade throughput for safety. The other two Phase-32 review advisories (skip `DeletionTimestamp` Jobs in the in-flight count; stale "size 16" comment) were fixed in-phase at commit `91f7499`.
+
 **Plans**: TBD
 
 <details>
