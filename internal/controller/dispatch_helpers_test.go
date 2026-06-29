@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -434,6 +435,17 @@ func makePlannerJob(name, ns string, terminal bool) *batchv1.Job {
 	return j
 }
 
+// makeDeletingPlannerJob creates a non-terminal planner Job that is mid-deletion
+// (DeletionTimestamp set). A finalizer is required so the fake client persists an
+// object carrying a deletion timestamp. plannerInFlightCount must NOT count it.
+func makeDeletingPlannerJob(name, ns string) *batchv1.Job {
+	j := makePlannerJob(name, ns, false)
+	ts := metav1.NewTime(time.Unix(1_700_000_000, 0))
+	j.DeletionTimestamp = &ts
+	j.Finalizers = []string{"tideproject.k8s/test-hold"}
+	return j
+}
+
 // TestPlannerInFlightCount exercises the four key behaviors of plannerInFlightCount.
 func TestPlannerInFlightCount(t *testing.T) {
 	cases := []struct {
@@ -467,6 +479,15 @@ func TestPlannerInFlightCount(t *testing.T) {
 			jobs:           nil,
 			watchNamespace: "",
 			wantCount:      0,
+		},
+		{
+			name: "deleting (DeletionTimestamp set) non-terminal job is not counted",
+			jobs: []*batchv1.Job{
+				makePlannerJob("j1", "default", false),
+				makeDeletingPlannerJob("j2-deleting", "default"),
+			},
+			watchNamespace: "",
+			wantCount:      1,
 		},
 		{
 			name: "namespace-scoped: only counts jobs in watched namespace",

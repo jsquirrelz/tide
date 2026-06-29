@@ -314,6 +314,13 @@ func plannerInFlightCount(ctx context.Context, c client.Client, watchNamespace s
 	}
 	n := 0
 	for i := range jobs.Items {
+		// A Job being deleted (DeletionTimestamp set) is on its way out — its pod
+		// is terminating — so it must not hold a cap slot. A stalled-GC Job would
+		// otherwise linger non-terminal and throttle dispatch across all namespaces
+		// (global cap). Skip it; count only live, non-terminal planner Jobs.
+		if jobs.Items[i].DeletionTimestamp != nil {
+			continue
+		}
 		if !isJobTerminal(&jobs.Items[i]) {
 			n++
 		}

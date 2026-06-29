@@ -65,8 +65,8 @@ type MilestoneReconciler struct {
 
 	MaxConcurrentReconciles int
 
-	// PlannerPool is the planner-pool semaphore (Phase 1 POOL-01, default
-	// size 16). MilestoneReconciler acquires plannerPool before creating
+	// PlannerPool is the planner-pool semaphore (Phase 1 POOL-01, sized from
+	// the plannerConcurrency config). MilestoneReconciler acquires plannerPool before creating
 	// the planner Job (D-A4). POOL-03 cross-pool wait analyzer prohibits
 	// acquiring both pools in the same code path; up-stack reconcilers
 	// acquire plannerPool only.
