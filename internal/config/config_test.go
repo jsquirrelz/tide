@@ -123,6 +123,23 @@ func TestConfigLoad_RejectsZeroValues(t *testing.T) {
 	}
 }
 
+// TestDefaultPlannerConcurrency asserts that an empty config file yields
+// PlannerConcurrency == 4 (single-node-safe default — CONCUR-02 / RQ-2).
+func TestDefaultPlannerConcurrency(t *testing.T) {
+	p := writeConfig(t, "")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load empty config: %v", err)
+	}
+	if cfg.PlannerConcurrency != 4 {
+		t.Errorf("PlannerConcurrency = %d, want 4 (single-node-safe default, CONCUR-02)", cfg.PlannerConcurrency)
+	}
+	// ExecutorConcurrency must remain 4 (CONCUR-03 — executor pool untouched).
+	if cfg.ExecutorConcurrency != 4 {
+		t.Errorf("ExecutorConcurrency = %d, want 4 (executor pool must remain unchanged)", cfg.ExecutorConcurrency)
+	}
+}
+
 func TestConfigLoad_RejectsNegativeValues(t *testing.T) {
 	p := writeConfig(t, "executorConcurrency: -1\n")
 	_, err := Load(p)
