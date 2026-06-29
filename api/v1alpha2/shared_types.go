@@ -203,6 +203,14 @@ const (
 	ReasonWaveIntegrationFailed = "WaveIntegrationFailed"
 )
 
+// Phase 33 condition + reason vocabulary — planner failure semantics (D4).
+const (
+	// ReasonPlannerFailed — phase or milestone planner exited nonzero with zero
+	// children, preventing false-leaf succession. Level is marked terminal Failed;
+	// run `tide resume --retry-failed` to reset and re-dispatch.
+	ReasonPlannerFailed = "PlannerFailed"
+)
+
 // Phase 13 condition + reason vocabulary — provider billing halt (HALT-01).
 const (
 	// ConditionBillingHalt — provider returned a credit-exhaustion 400;
