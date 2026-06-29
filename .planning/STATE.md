@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: ready_to_plan
-stopped_at: Phase 31 complete (3/3) — ready to discuss Phase 32
-last_updated: 2026-06-28T23:03:06.683Z
-last_activity: 2026-06-28 -- Phase 31 execution started
+status: planning
+stopped_at: Phase 32 context gathered
+last_updated: "2026-06-29T02:02:10.731Z"
+last_activity: 2026-06-28
 progress:
   total_phases: 12
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
   completed_plans: 3
-  percent: 0
+  percent: 8
 ---
 
 # Project State
@@ -132,9 +132,9 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-28T19:57:59.165Z
-Stopped at: Phase 31 context gathered
-Resume file: .planning/phases/31-d2-d1-adoption-lifecycle-seam/31-CONTEXT.md
+Last session: 2026-06-29T02:02:10.632Z
+Stopped at: Phase 32 context gathered
+Resume file: .planning/phases/32-d3-dispatch-concurrency-cap/32-CONTEXT.md
 
 ## Operator Next Steps
 
