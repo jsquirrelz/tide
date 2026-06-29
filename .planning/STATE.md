@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: executing
-stopped_at: Phase 32 context gathered
-last_updated: "2026-06-29T02:36:17.517Z"
-last_activity: 2026-06-29 -- Phase 32 execution started
+status: planning
+stopped_at: Phase 33 context gathered
+last_updated: "2026-06-29T11:09:28.239Z"
+last_activity: 2026-06-29
 progress:
   total_phases: 12
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 3
-  percent: 8
+  completed_plans: 5
+  percent: 17
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-28)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 32 — D3 — Dispatch Concurrency Cap
+**Current focus:** Phase 33 — d4 — planner failure semantics
 
 ## Current Position
 
-Phase: 32 (D3 — Dispatch Concurrency Cap) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 32
-Last activity: 2026-06-29 -- Phase 32 execution started
+Phase: 33
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-06-29
 
 ```
 [Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]
@@ -132,9 +132,9 @@ All v1.0.0-era quick-task records. Work landed; artifact status fields never fli
 
 ## Session Continuity
 
-Last session: 2026-06-29T02:02:10.632Z
-Stopped at: Phase 32 context gathered
-Resume file: .planning/phases/32-d3-dispatch-concurrency-cap/32-CONTEXT.md
+Last session: 2026-06-29T11:09:28.142Z
+Stopped at: Phase 33 context gathered
+Resume file: .planning/phases/33-d4-planner-failure-semantics/33-CONTEXT.md
 
 ## Operator Next Steps
 
