@@ -233,7 +233,10 @@ if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
     latest.Status.MilestoneRolledUpUID = milestoneJobName
     return r.Status().Patch(ctx, latest, patch)
 }); err != nil {
-    logger.Error(err, "patch MilestoneRolledUpUID failed (non-fatal)", "milestone", ms.Name)
+    // WR-03 closure: retry budget exhausted — return the error to requeue the
+    // reconcile rather than swallowing it. The marker must be durably set before
+    // the reporter Job's TTL-GC window can trigger a second rollup opportunity.
+    return ctrl.Result{}, fmt.Errorf("patch MilestoneRolledUpUID: %w", err)
 }
 ```
 
@@ -480,7 +483,8 @@ if isFirstCompletion && envReadOK && project != nil {
                 latest.Status.MilestoneRolledUpUID = milestoneJobName
                 return r.Status().Patch(ctx, latest, patch)
             }); err != nil {
-                logger.Error(err, "patch MilestoneRolledUpUID failed (non-fatal)", "milestone", ms.Name)
+                // WR-03 closure: retry budget exhausted — requeue rather than swallow.
+                return ctrl.Result{}, fmt.Errorf("patch MilestoneRolledUpUID: %w", err)
             }
         }
     }
@@ -504,22 +508,24 @@ Not applicable — this phase is a controller code edit. No stored data, no live
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three were resolved during planning; the decisions are reflected in 32-01 / 32-02.
 
 1. **`pool.Pool.Capacity()` vs `PlannerConcurrency int` reconciler field**
    - What we know: `pool.Pool.sem` is private; `cap(p.sem)` is the Go built-in.
-   - What's unclear: planner prefers `pool.Pool.Capacity()` (encapsulated) or a new `PlannerConcurrency int` field on each reconciler (more explicit, no pool.go change).
    - Recommendation: Add `Capacity()` to `pool.Pool`. One-line change; keeps the cap tied to the pool object. Avoids four new reconciler fields and four new main.go wiring assignments.
+   - **RESOLVED:** `pool.Pool.Capacity()` chosen — added in 32-01 Task 1 (`func (p *Pool) Capacity() int { return cap(p.sem) }`); no new reconciler field.
 
 2. **`RequeueAfter` interval for cap-reached parking**
    - What we know: import-hold uses 5s; billing-halt uses 30s; budget-blocked uses 30s.
-   - What's unclear: optimal interval for a condition (planner Job completion) that changes every ~5-30 minutes.
-   - Recommendation: `10 * time.Second`. Not so short as to hot-poll, not so long as to stall a wave for a full minute. Can be tuned as a constant.
+   - Recommendation: `10 * time.Second`. Not so short as to hot-poll, not so long as to stall a wave for a full minute.
+   - **RESOLVED:** `10 * time.Second` chosen — used at all four gate sites in 32-01 Task 2.
 
 3. **WR-04 single-patch invariant test (IN SCOPE per CONTEXT D-06)**
    - What we know: The test asserts end state only, not single-patch atomicity.
-   - What's unclear: Whether the plan should include an additional test assertion.
-   - Recommendation: Yes, add a patch-count assertion in `adoption_lifecycle_test.go`. Scope it as a small addition in the WR plan — not a separate phase.
+   - Recommendation: Add a patch-count assertion in `adoption_lifecycle_test.go`. Scope it as a small addition in the WR plan — not a separate phase.
+   - **RESOLVED:** Patch-count assertion added in 32-02 Task 2 (within the WR plan, not a separate phase).
 
 ---
 
