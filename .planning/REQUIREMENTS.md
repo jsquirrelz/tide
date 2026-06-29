@@ -34,8 +34,8 @@ A childless-success guard at the phase and milestone levels, mirroring the plan-
 
 - [x] **PLANFAIL-01**: A phase whose planner exits non-zero with zero children (`envReadOK && exitCode != 0 && childCount == 0`) is marked `Failed`, not `Succeeded`.
 - [x] **PLANFAIL-02**: A milestone whose planner exits non-zero with zero children is marked `Failed`, not `Succeeded` (same guard, shared `isPlannerFailure` helper across levels).
-- [ ] **PLANFAIL-03**: A genuine leaf (planner exits zero with zero children) still `Succeeds` — no regression; the fail-check is ordered before the succeed-check.
-- [ ] **PLANFAIL-04**: A falsely-failed parent is recoverable via the existing `tide resume --retry-failed` verb — the guard patches a permanent `Failed` condition rather than returning a Go error (no controller-side retry storm, no auto-retry).
+- [x] **PLANFAIL-03**: A genuine leaf (planner exits zero with zero children) still `Succeeds` — no regression; the fail-check is ordered before the succeed-check.
+- [x] **PLANFAIL-04**: A falsely-failed parent is recoverable via the existing `tide resume --retry-failed` verb — the guard patches a permanent `Failed` condition rather than returning a Go error (no controller-side retry storm, no auto-retry).
 
 ## v2 Requirements
 
@@ -77,8 +77,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 | CONCUR-04 | Phase 32 | Complete |
 | PLANFAIL-01 | Phase 33 | Complete |
 | PLANFAIL-02 | Phase 33 | Complete |
-| PLANFAIL-03 | Phase 33 | Pending |
-| PLANFAIL-04 | Phase 33 | Pending |
+| PLANFAIL-03 | Phase 33 | Complete |
+| PLANFAIL-04 | Phase 33 | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total

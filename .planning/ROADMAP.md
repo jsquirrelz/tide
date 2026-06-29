@@ -327,7 +327,7 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
 **Plans**: 3 plans
 - [x] 33-01-PLAN.md — shared isPlannerFailure helper + ReasonPlannerFailed constant + unit test (Wave 1)
 - [x] 33-02-PLAN.md — carried-in D3 sizing-policy doc fix in values.yaml (Wave 1, parallel)
-- [ ] 33-03-PLAN.md — patchPhaseFailed/patchMilestoneFailed helpers + guard insertion at both sites + envtests PLANFAIL-01/02/03 + resume recovery PLANFAIL-04 (Wave 2)
+- [x] 33-03-PLAN.md — patchPhaseFailed/patchMilestoneFailed helpers + guard insertion at both sites + envtests PLANFAIL-01/02/03 + resume recovery PLANFAIL-04 (Wave 2)
 
 <details>
 <summary>📋 vNext — OpenAI Backend + Dogfood Run #2 (Planned)</summary>
@@ -371,4 +371,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete    | 2026-06-28 |
 | 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete    | 2026-06-29 |
-| 33. D4 — Planner Failure Semantics | v1.0.6 | 2/3 | In Progress|  |
+| 33. D4 — Planner Failure Semantics | v1.0.6 | 3/3 | Complete   | 2026-06-29 |
