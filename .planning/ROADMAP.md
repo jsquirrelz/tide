@@ -109,7 +109,10 @@ Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect.
   2. An envtest proves the project-level rollup marker (`PlannerRolledUpUID` / equivalent) follows the milestone/phase exactly-once pattern: a second reconcile after reporter-Job TTL-GC does not increment the project's `CostSpentCents` a second time for the same Job.
   3. The hardened project-level marker stamp uses the same `RetryOnConflict` + re-fetch pattern as the milestone/phase markers (no best-effort last-write-wins window remains at the project level).
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+- [ ] 34-01-PLAN.md — Fix configmap plannerConcurrency Helm fallback 16→4 + pure-Go default-cap assertion + kind helm-template render contract test (PREFLIGHT-01)
+- [ ] 34-02-PLAN.md — Harden project-level PlannerRolledUpUID stamp to RetryOnConflict+re-fetch+optimistic-lock + project-level no-double-count-across-TTL-GC envtest (PREFLIGHT-02)
 
 ### Phase 35: Infra + Fresh v1.0.7 Deploy
 
@@ -455,7 +458,7 @@ v1.0.7 phases execute in numeric order: 34 → 35 → 36 → 37 → 38 → 39 (f
 | 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete | 2026-06-28 |
 | 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete | 2026-06-29 |
 | 33. D4 — Planner Failure Semantics | v1.0.6 | 3/3 | Complete | 2026-06-29 |
-| 34. Pre-flight Tech-Debt Hardening | v1.0.7 | 0/TBD | Not started | - |
+| 34. Pre-flight Tech-Debt Hardening | v1.0.7 | 0/2 | Not started | - |
 | 35. Infra + Fresh v1.0.7 Deploy | v1.0.7 | 0/TBD | Not started | - |
 | 36. Salvaged-Tree Import + Dry-Run + Tuning | v1.0.7 | 0/TBD | Not started | - |
 | 37. Launch + Operate Run #2 to Completion | v1.0.7 | 0/TBD | Not started | - |
