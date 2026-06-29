@@ -23,17 +23,17 @@ The single lifecycle seam in `reconcileProjectPlannerDispatch` — D2 (lifecycle
 
 A per-level max-in-flight cap that prevents the cascade from OOM'ing a single node. The fix shape (pool `Release` semantics vs a live `client.List` count-check) is a design fork to be resolved at this phase's discuss/plan step before implementation; the requirements state the behavior, not the mechanism.
 
-- [ ] **CONCUR-01**: In-flight planner Jobs are bounded by the configurable `plannerConcurrency` cap at steady state (counting running pods, not merely concurrent Job-creation calls), so the planning cascade cannot exceed the cap regardless of how many reconcile rounds fire.
-- [ ] **CONCUR-02**: The default `plannerConcurrency` is reduced from 16 to a value safe for a single-node cluster (canonical value resolved in planning), documented in `charts/tide/values.yaml`.
-- [ ] **CONCUR-03**: Planner and executor pools remain separately sized — the cap does not unify the two pools (spec contract), and the executor pool is unchanged.
-- [ ] **CONCUR-04**: Dispatches deferred by the cap are observable (log line at minimum) and never silently truncate a wave — excess dispatches park/requeue rather than being dropped, and the chart documents that the cap must be sized at least as wide as the widest expected wave.
+- [x] **CONCUR-01**: In-flight planner Jobs are bounded by the configurable `plannerConcurrency` cap at steady state (counting running pods, not merely concurrent Job-creation calls), so the planning cascade cannot exceed the cap regardless of how many reconcile rounds fire.
+- [x] **CONCUR-02**: The default `plannerConcurrency` is reduced from 16 to a value safe for a single-node cluster (canonical value resolved in planning), documented in `charts/tide/values.yaml`.
+- [x] **CONCUR-03**: Planner and executor pools remain separately sized — the cap does not unify the two pools (spec contract), and the executor pool is unchanged.
+- [x] **CONCUR-04**: Dispatches deferred by the cap are observable (log line at minimum) and never silently truncate a wave — excess dispatches park/requeue rather than being dropped, and the chart documents that the cap must be sized at least as wide as the widest expected wave.
 
 ### Planner Failure Semantics (D4)
 
 A childless-success guard at the phase and milestone levels, mirroring the plan-level guard Phase 30 already shipped — so a failed planner cannot falsely succeed its parent and corrupt the planning DAG.
 
-- [ ] **PLANFAIL-01**: A phase whose planner exits non-zero with zero children (`envReadOK && exitCode != 0 && childCount == 0`) is marked `Failed`, not `Succeeded`.
-- [ ] **PLANFAIL-02**: A milestone whose planner exits non-zero with zero children is marked `Failed`, not `Succeeded` (same guard, shared `isPlannerFailure` helper across levels).
+- [x] **PLANFAIL-01**: A phase whose planner exits non-zero with zero children (`envReadOK && exitCode != 0 && childCount == 0`) is marked `Failed`, not `Succeeded`.
+- [x] **PLANFAIL-02**: A milestone whose planner exits non-zero with zero children is marked `Failed`, not `Succeeded` (same guard, shared `isPlannerFailure` helper across levels).
 - [ ] **PLANFAIL-03**: A genuine leaf (planner exits zero with zero children) still `Succeeds` — no regression; the fail-check is ordered before the succeed-check.
 - [ ] **PLANFAIL-04**: A falsely-failed parent is recoverable via the existing `tide resume --retry-failed` verb — the guard patches a permanent `Failed` condition rather than returning a Go error (no controller-side retry storm, no auto-retry).
 
@@ -71,12 +71,12 @@ Which phases cover which requirements. Populated during roadmap creation.
 | ADOPT-03 | Phase 31 | Complete |
 | ADOPT-04 | Phase 31 | Complete |
 | ADOPT-05 | Phase 31 | Complete |
-| CONCUR-01 | Phase 32 | Pending |
-| CONCUR-02 | Phase 32 | Pending |
-| CONCUR-03 | Phase 32 | Pending |
-| CONCUR-04 | Phase 32 | Pending |
-| PLANFAIL-01 | Phase 33 | Pending |
-| PLANFAIL-02 | Phase 33 | Pending |
+| CONCUR-01 | Phase 32 | Complete |
+| CONCUR-02 | Phase 32 | Complete |
+| CONCUR-03 | Phase 32 | Complete |
+| CONCUR-04 | Phase 32 | Complete |
+| PLANFAIL-01 | Phase 33 | Complete |
+| PLANFAIL-02 | Phase 33 | Complete |
 | PLANFAIL-03 | Phase 33 | Pending |
 | PLANFAIL-04 | Phase 33 | Pending |
 
