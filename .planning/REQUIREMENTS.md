@@ -13,8 +13,8 @@
 
 Load-bearing v1.0.7 audit carry-ins that protect run #2; fixed before launch.
 
-- [ ] **PREFLIGHT-01**: The chart configmap default for `plannerConcurrency` is corrected from `16` to `4`, so a fresh default deploy can dispatch at most 4 concurrent planners (no latent 16-wide over-dispatch on the single node). Verified by rendering the chart and asserting the configmap value plus a controller-level assertion of the effective cap.
-- [ ] **PREFLIGHT-02**: The project-level rollup marker (`PlannerRolledUpUID` / equivalent) is hardened to the milestone/phase exactly-once pattern, so planning-cost rollup at the project level is exactly-once under reporter-Job TTL-GC and the $100 cap accounting stays accurate. Verified by an envtest proving no double-count across TTL-GC at the project level.
+- [x] **PREFLIGHT-01**: The chart configmap default for `plannerConcurrency` is corrected from `16` to `4`, so a fresh default deploy can dispatch at most 4 concurrent planners (no latent 16-wide over-dispatch on the single node). Verified by rendering the chart and asserting the configmap value plus a controller-level assertion of the effective cap.
+- [x] **PREFLIGHT-02**: The project-level rollup marker (`PlannerRolledUpUID` / equivalent) is hardened to the milestone/phase exactly-once pattern, so planning-cost rollup at the project level is exactly-once under reporter-Job TTL-GC and the $100 cap accounting stays accurate. Verified by an envtest proving no double-count across TTL-GC at the project level.
 
 ### Infra & Fresh Deploy
 
@@ -75,8 +75,8 @@ Each requirement maps to exactly one phase. Phase numbering continues from v1.0.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PREFLIGHT-01 | Phase 34 | Pending |
-| PREFLIGHT-02 | Phase 34 | Pending |
+| PREFLIGHT-01 | Phase 34 | Complete |
+| PREFLIGHT-02 | Phase 34 | Complete |
 | INFRA-01 | Phase 35 | Pending |
 | INFRA-02 | Phase 35 | Pending |
 | INFRA-03 | Phase 35 | Pending |

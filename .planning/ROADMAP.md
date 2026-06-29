@@ -458,7 +458,7 @@ v1.0.7 phases execute in numeric order: 34 → 35 → 36 → 37 → 38 → 39 (f
 | 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete | 2026-06-28 |
 | 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 2/2 | Complete | 2026-06-29 |
 | 33. D4 — Planner Failure Semantics | v1.0.6 | 3/3 | Complete | 2026-06-29 |
-| 34. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete   | 2026-06-29 |
+| 34. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete    | 2026-06-29 |
 | 35. Infra + Fresh v1.0.7 Deploy | v1.0.7 | 0/TBD | Not started | - |
 | 36. Salvaged-Tree Import + Dry-Run + Tuning | v1.0.7 | 0/TBD | Not started | - |
 | 37. Launch + Operate Run #2 to Completion | v1.0.7 | 0/TBD | Not started | - |
