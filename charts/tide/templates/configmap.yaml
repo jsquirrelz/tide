@@ -19,7 +19,7 @@ metadata:
     {{- include "tide.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    plannerConcurrency: {{ .Values.plannerConcurrency | default 16 }}
+    plannerConcurrency: {{ .Values.plannerConcurrency | default 4 }}
     executorConcurrency: {{ .Values.executorConcurrency | default 4 }}
     maxConcurrentReconciles:
       project: {{ .Values.maxConcurrentReconciles.project | default 1 }}
