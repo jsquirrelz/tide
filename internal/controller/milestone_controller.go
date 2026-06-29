@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -612,10 +613,23 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			} else {
 				// Stamp the durable marker only after a successful rollup (mirrors project-level
 				// Pitfall-2 ordering: leaving the marker unset on error lets the next reconcile retry).
-				markerPatch := client.MergeFrom(ms.DeepCopy())
-				ms.Status.MilestoneRolledUpUID = milestoneJobName
-				if pErr := r.Status().Patch(ctx, ms, markerPatch); pErr != nil {
-					logger.Error(pErr, "patch MilestoneRolledUpUID failed (non-fatal)", "milestone", ms.Name)
+				// WR-02: re-fetch + RetryOnConflict + MergeFromWithOptimisticLock mirrors RollUpUsage,
+				// making the stamp durable against concurrent status writes on this level object.
+				// WR-03: on retry-budget exhaustion, return the error to requeue rather than swallow —
+				// the marker must be durably set before the reporter Job's TTL-GC window reopens rollup.
+				if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha2.Milestone{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+						return err
+					}
+					if latest.Status.MilestoneRolledUpUID == milestoneJobName {
+						return nil // already set by a concurrent reconcile — idempotent
+					}
+					markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.MilestoneRolledUpUID = milestoneJobName
+					return r.Status().Patch(ctx, latest, markerPatch)
+				}); mErr != nil {
+					return ctrl.Result{}, fmt.Errorf("patch MilestoneRolledUpUID: %w", mErr)
 				}
 			}
 		}
