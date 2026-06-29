@@ -4,8 +4,8 @@ milestone: v1.0.6
 milestone_name: Adoption-Path Correctness & Dispatch Safety
 status: executing
 stopped_at: Phase 32 context gathered
-last_updated: "2026-06-29T02:35:10.341Z"
-last_activity: 2026-06-29 -- Phase 32 planning complete
+last_updated: "2026-06-29T02:36:17.517Z"
+last_activity: 2026-06-29 -- Phase 32 execution started
 progress:
   total_phases: 12
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-28)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 32 — d3 — dispatch concurrency cap
+**Current focus:** Phase 32 — D3 — Dispatch Concurrency Cap
 
 ## Current Position
 
-Phase: 32
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-29 -- Phase 32 planning complete
+Phase: 32 (D3 — Dispatch Concurrency Cap) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 32
+Last activity: 2026-06-29 -- Phase 32 execution started
 
 ```
 [Phase 31: D2+D1] [ ] --> [Phase 32: D3] [ ] --> [Phase 33: D4] [ ]

@@ -307,7 +307,7 @@ The D3 fix shape has a confirmed divergence across research subagents that must 
 
 **Plans**: 2 plans
 
-- [ ] 32-01-PLAN.md — D3 dispatch concurrency cap: plannerInFlightCount gate before pool acquire at all four sites + default 16→4 (CONCUR-01..04)
+- [x] 32-01-PLAN.md — D3 dispatch concurrency cap: plannerInFlightCount gate before pool acquire at all four sites + default 16→4 (CONCUR-01..04)
 - [ ] 32-02-PLAN.md — Carried-in hardening: RetryOnConflict marker stamps (WR-02/03) + suppression-patch comment fix (WR-01) + single-patch test (WR-04)
 
 ### Phase 33: D4 — Planner Failure Semantics
@@ -365,5 +365,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 29. Operator Tooling + E2E | v1.0.3 | 5/5 | Complete | 2026-06-22 |
 | 30. Resumable Import — Partial-Tree Resume | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31. D2+D1 — Adoption Lifecycle Seam | v1.0.6 | 3/3 | Complete    | 2026-06-28 |
-| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 0/TBD | Not started | - |
+| 32. D3 — Dispatch Concurrency Cap | v1.0.6 | 1/2 | In Progress|  |
 | 33. D4 — Planner Failure Semantics | v1.0.6 | 0/TBD | Not started | - |
