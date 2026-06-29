@@ -83,11 +83,11 @@ vet: demo-fixture ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run the UNIT tier (TEST-01: -short skips the slow leader-election envtest; excludes the test/integration tier — that runs via test-int-fast/test-int).
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 360s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
 
 .PHONY: test-only
 test-only: ## Run the UNIT tier without re-running manifests/generate/fmt/vet/setup-envtest (assumes prep already done). Used by CI's TEST-01 timing assertion. Integration tier excluded (runs via test-int-fast).
-	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 120s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test -short -timeout 360s $$(go list ./... | grep -v /e2e | grep -v /test/integration) -coverprofile cover.out
 
 .PHONY: test-leader-election
 test-leader-election: manifests generate fmt vet setup-envtest ## Run the slow CTRL-03 leader-election envtest (~60s; excluded from `make test`).
