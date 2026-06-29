@@ -632,6 +632,17 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// When EnvReader is nil, fall back to the prior hasChildPlans behavior so
 	// non-Option-C / unit-test paths keep working.
 	if envReadOK {
+		// Phase 33 PLANFAIL-01/03: guard against false-leaf succession. A planner
+		// that exits nonzero with zero children would otherwise be misclassified as
+		// a genuine leaf (exitCode==0, childCount==0) and falsely advance its parent.
+		// exitCode==0, childCount==0 falls through to the genuine-leaf succeed path
+		// below (PLANFAIL-03 ordering: fail-check before succeed-check is load-bearing).
+		// Plan and project are NOT guarded here — they succeed only via
+		// gates.BoundaryDetected (matched > 0, false on zero children). See 33-CONTEXT.md D-02.
+		if isPlannerFailure(out, envReadOK) {
+			return r.patchPhaseFailed(ctx, ph, tideprojectv1alpha2.ReasonPlannerFailed,
+				fmt.Sprintf("planner exited nonzero (exitCode=%d) with zero children; marked Failed to prevent false succession", out.ExitCode))
+		}
 		// Option-C path: gate on out.ChildCount from tiny status.
 		expected := out.ChildCount
 		if expected == 0 {
@@ -713,6 +724,26 @@ func (r *PhaseReconciler) countChildPlans(ctx context.Context, ph *tideprojectv1
 		}
 	}
 	return count
+}
+
+// patchPhaseFailed sets Phase.Status.Phase=Failed with the given reason/message.
+// Used by the Phase 33 D4 false-leaf guard (PLANFAIL-01).
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.patchPhaseFailed(...)` in the reconcile chain
+func (r *PhaseReconciler) patchPhaseFailed(ctx context.Context, ph *tideprojectv1alpha2.Phase, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(ph.DeepCopy())
+	ph.Status.Phase = "Failed"
+	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha2.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ph, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideprojectv1alpha2.Phase) (ctrl.Result, error) {

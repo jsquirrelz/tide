@@ -713,6 +713,17 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// When EnvReader is nil, fall back to the prior hasChild-based behavior so
 	// non-Option-C / unit-test paths keep working.
 	if envReadOK {
+		// Phase 33 PLANFAIL-02/03: guard against false-leaf succession. A planner
+		// that exits nonzero with zero children would otherwise be misclassified as
+		// a genuine leaf (exitCode==0, childCount==0) and falsely advance its parent.
+		// exitCode==0, childCount==0 falls through to the genuine-leaf succeed path
+		// below (PLANFAIL-03 ordering: fail-check before succeed-check is load-bearing).
+		// Plan and project are NOT guarded here — they succeed only via
+		// gates.BoundaryDetected (matched > 0, false on zero children). See 33-CONTEXT.md D-02.
+		if isPlannerFailure(out, envReadOK) {
+			return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha2.ReasonPlannerFailed,
+				fmt.Sprintf("planner exited nonzero (exitCode=%d) with zero children; marked Failed to prevent false succession", out.ExitCode))
+		}
 		// Option-C path: gate on out.ChildCount from tiny status.
 		expected := out.ChildCount
 		if expected == 0 {
@@ -795,6 +806,26 @@ func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideproj
 		}
 	}
 	return count
+}
+
+// patchMilestoneFailed sets Milestone.Status.Phase=Failed with the given reason/message.
+// Used by the Phase 33 D4 false-leaf guard (PLANFAIL-02).
+//
+//nolint:unparam // ctrl.Result kept so callers can `return r.patchMilestoneFailed(...)` in the reconcile chain
+func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha2.Milestone, reason, message string) (ctrl.Result, error) {
+	patch := client.MergeFrom(ms.DeepCopy())
+	ms.Status.Phase = "Failed"
+	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha2.ConditionFailed,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, ms, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha2.Milestone) (ctrl.Result, error) {
