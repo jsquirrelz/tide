@@ -8,6 +8,30 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current Milestone: v1.0.7 Flood Tide — TIDE-on-TIDE Self-Hosting Proof
+
+**Goal:** Drive a *completing* dogfood run #2 end-to-end — TIDE orchestrating Claude subagents to build the OpenAI backend — on a slightly-bigger single-node cluster under a hard $100 cap, proving the five-level paradigm self-hosts; then review TIDE's authored output to feed a follow-up "extend TIDE" pass.
+
+**Why now:** v1.0.6 closed the four adoption-path defects (D1–D4) that halted run #2b on single-node OOM. The orchestrator is finally trustworthy enough to let TIDE drive its own next capability to completion. The project's headline bar — "TIDE-on-TIDE must work" — is now reachable: the salvaged tree's content *is* "build an OpenAI backend," so a completing run proves the paradigm and produces a (reviewed, not-yet-merged) provider backend simultaneously.
+
+**Division of labor:** The human operates TIDE (infra, deploy, launch, babysit, root-fix orchestrator defects that surface, capture a mid-run dashboard screenshot). **TIDE builds the entire OpenAI backend** — no hand-written backend code this milestone.
+
+**Target features:**
+- **Pre-flight tech-debt hardening** — fix the two load-bearing v1.0.7 audit carry-ins before launch: chart configmap `plannerConcurrency default 16→4` (single-node OOM safety) + project-level rollup-marker hardening (cost-cap accuracy). Envtest tier split deferred.
+- **Infra + fresh deploy** — current-version (v1.0.7) TIDE on a *slightly* bigger single-node kind (well under 16GB; fit via the D3 concurrency cap, not RAM).
+- **Salvaged-tree import + dry-run** — adopt `salvage-20260618` (3 Milestones / 15 Phases), validate, cost-project, set `absoluteCapCents=$100`, tune concurrency to the node.
+- **Launch + operate run #2** — run to `Project=Complete`; babysit budget/waves/OOM headroom; root-fix surfacing defects (the v1.0.6 D1–D4 pattern); capture + deliver a mid-execution dashboard screenshot.
+- **Review + extract** — code-review TIDE's authored OpenAI backend (expected *not* mergeable as-is), extract learnings, mark cherry-pick candidates for a follow-up milestone.
+
+**Done bar:** `Project=Complete` on the single node under $100, mid-run dashboard screenshot delivered, and TIDE's backend output reviewed.
+
+**Key constraints for this milestone:**
+- Subagents are Claude (real Anthropic key, durable at `~/.tide/anthropic.key`); the OpenAI backend is TIDE's *output*, reviewed not merged this milestone — reworking it to actually extend TIDE is a follow-up.
+- Persistence stays CRD-`.status`-only; resumption stays minimal/re-derivable.
+- Single-node OOM safety comes from the D3 concurrency cap + low effective `plannerConcurrency`, NOT from large RAM (16GB is explicitly too much).
+- The hard `$100 absoluteCapCents` gate must halt the run cleanly; relaunch/resume only on explicit human approval of more spend.
+- v1.0.7 also ships the two load-bearing tech-debt fixes as real release artifacts.
+
 ## Last Shipped Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety (SHIPPED 2026-06-29, tag `v1.0.6`)
 
 **Outcome (shipped 2026-06-29):** All four adoption-path defects D1–D4 closed across Phases 31/32/33; published 8 images + 2 OCI charts + 5 binaries @ 1.0.6 (verified anon); milestone audit `tech_debt` (13/13 reqs, 0 blockers). Next-milestone candidate: OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra → the TIDE-on-TIDE headline.
@@ -180,4 +204,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-29 after v1.0.6 milestone — Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED (tag `v1.0.6`, 8 images + 2 OCI charts + 5 binaries, verified anon; audit tech_debt, 13/13 reqs, 0 blockers). All four dogfood-run-#2b adoption-path defects (D1–D4) closed. Next: OpenAI/Codex backend + a completing dogfood run #2 on adequate multi-node infra → TIDE-on-TIDE. v1.0.7 carries the audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest tier split).*
+*Last updated: 2026-06-29 — started milestone v1.0.7 Flood Tide (TIDE-on-TIDE Self-Hosting Proof): a completing dogfood run #2 on a slightly-bigger single node under a $100 cap, TIDE building the OpenAI backend, output reviewed not merged; folds in the two load-bearing v1.0.7 audit carry-ins (configmap plannerConcurrency default 16→4; project-level rollup-marker hardening). Prior: 2026-06-29 after v1.0.6 milestone — Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED (tag `v1.0.6`, 8 images + 2 OCI charts + 5 binaries, verified anon; audit tech_debt, 13/13 reqs, 0 blockers). All four dogfood-run-#2b adoption-path defects (D1–D4) closed. Next: OpenAI/Codex backend + a completing dogfood run #2 on adequate multi-node infra → TIDE-on-TIDE. v1.0.7 carries the audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest tier split).*

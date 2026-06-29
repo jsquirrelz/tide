@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.6
-milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: Awaiting next milestone
-stopped_at: Phase 33 context gathered
-last_updated: "2026-06-29T19:47:46.596Z"
-last_activity: 2026-06-29 — Milestone v1.0.6 completed and archived
+milestone: v1.0.7
+milestone_name: Flood Tide — TIDE-on-TIDE Self-Hosting Proof
+status: planning
+last_updated: "2026-06-29T20:39:48.135Z"
+last_activity: 2026-06-29
 progress:
-  total_phases: 12
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 25
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-28)
 
 ## Current Position
 
-Phase: Milestone v1.0.6 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-29 — Milestone v1.0.6 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-29 — Milestone v1.0.7 started
 
 ## Performance Metrics
 
