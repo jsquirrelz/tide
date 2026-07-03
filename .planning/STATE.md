@@ -1,10 +1,14 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.7
-milestone_name: "First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
+milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
+current_phase: 34
+current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
-last_updated: "2026-07-03"
+stopped_at: Phase 34 context gathered
+last_updated: "2026-07-03T23:19:05.687Z"
 last_activity: 2026-07-03
+last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
   total_phases: 5
   completed_phases: 0
@@ -61,9 +65,11 @@ Context beyond what the 2026-07-03 todos + the `verify-level-subagent` seed carr
   `tide-projects` PVC in the run's project namespace on the operator's local
   **minikube** cluster. Deleting the namespace or cluster destroys the
   integration-miss repro evidence — export before cleanup if the namespace must go.
+
 - **Real-vs-tallied spend:** dashboard/status said $10.86; Anthropic console said
   $3.84. Use console numbers when sizing budget caps until the pricing table is
   fixed (Phase 38 / COST-01).
+
 - **Downstream state:** two PRs on the target repo were open and CI-green at session
   end; the pushed run branch carried one hand-recovered commit (the integration-miss
   deliverable) plus two human cleanup commits.
@@ -117,9 +123,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-03
-Stopped at: v1.0.7 roadmap created — Phases 34–38 defined, 26/26 requirements mapped
-Resume file: None
+Last session: 2026-07-03T23:19:05.680Z
+Stopped at: Phase 34 context gathered
+Resume file: .planning/phases/34-run-integrity-integration-miss-gate-lastpushedsha/34-CONTEXT.md
 
 ## Operator Next Steps
 
