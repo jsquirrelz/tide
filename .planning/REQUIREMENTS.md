@@ -27,12 +27,11 @@ Requirements for this milestone. Each maps to roadmap phases.
 - [ ] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
 - [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
 
-### Signed Commits (SIGN)
+### Agent Identity (SIGN)
 
-- [ ] **SIGN-01**: TIDE Bot identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push (the tide-push hardcoded identity is removed)
-- [ ] **SIGN-02**: With an optional signing-key Secret ref configured, commits at all three sites — including integrate merge commits — are GPG-signed; absent ref preserves current unsigned behavior
-- [ ] **SIGN-03**: The signing key is validated at first reconcile (armored, not passphrase-protected, email-match triple) with a clear failure condition — not discovered at commit time
-- [ ] **SIGN-04**: Operator docs cover the machine-account + key-generation + public-key-upload recipe for GitHub/GitLab/Gitea Verified badges
+- [ ] **SIGN-01**: TIDE agent identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push — via `spec.git.agentName`/`agentEmail` → chart value → compiled-in default precedence (the tide-push hardcoded identity is removed; agent terminology replaces bot everywhere, including the compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`)
+
+> **Descoped 2026-07-03 (Phase 36 discussion):** SIGN-02/03/04 (GPG signing, key validation, Verified-badge docs) are deferred out of v1.0.7 — the branch-protection payoff is hypothetical today and the cost (gpg-shim spike, signing-oracle key-exposure design, external UAT) is real. Moved to Future Requirements below; full analysis preserved in `.planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md`.
 
 ### Prompt File (PROMPT)
 
@@ -71,6 +70,12 @@ Deferred. Tracked but not in the current roadmap.
 - **CACHE-F1**: Direct-SDK subagent backend realizing cross-pod prompt caching — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md`
 - **PROV-01**: OpenAI/Codex backend + completing dogfood run #2 on multi-node infra
 
+### Signed Commits (deferred from v1.0.7, 2026-07-03)
+
+- **SIGN-02**: With an optional signing-key Secret ref configured, commits at all three sites — including integrate merge commits — are GPG-signed; absent ref preserves current unsigned behavior. Requires the gpg-shim vs plumbing spike (go-git cannot sign three-way merges via `SignKey`) and the key-exposure decision (likely mount-everywhere + dedicated machine-account key) — see `36-CONTEXT.md` deferred section.
+- **SIGN-03**: Signing key validated at first reconcile (armored / no passphrase / email-match triple) with a clear failure condition
+- **SIGN-04**: Operator docs for the machine-account + keygen + public-key-upload Verified-badge recipe (GitHub/GitLab/Gitea); UAT is one manual push to a real GitHub repo including an integrate merge commit
+
 ## Out of Scope
 
 Explicitly excluded. Documented to prevent scope creep.
@@ -99,9 +104,6 @@ Which phases cover which requirements. Updated during roadmap creation.
 | BASE-02 | Phase 35 | Pending |
 | BASE-03 | Phase 35 | Pending |
 | SIGN-01 | Phase 36 | Pending |
-| SIGN-02 | Phase 36 | Pending |
-| SIGN-03 | Phase 36 | Pending |
-| SIGN-04 | Phase 36 | Pending |
 | DASH-01 | Phase 37 | Pending |
 | DASH-02 | Phase 37 | Pending |
 | DASH-03 | Phase 37 | Pending |
@@ -118,10 +120,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEBT-03 | Phase 38 | Pending |
 
 **Coverage:**
-- v1.0.7 requirements: 26 total
-- Mapped to phases: 26 ✓
+- v1.0.7 requirements: 23 total
+- Mapped to phases: 23 ✓
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-03*
-*Last updated: 2026-07-03 after v1.0.7 roadmap creation (traceability populated — Phases 34–38)*
+*Last updated: 2026-07-03 after Phase 36 discussion (SIGN-02/03/04 descoped to Future Requirements; 26 → 23 active)*
