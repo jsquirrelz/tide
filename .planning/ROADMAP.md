@@ -10,7 +10,7 @@
 - ✅ **v1.0.4 — tide-import image publish + release-matrix guardrail** — (shipped 2026-06-25, tag `v1.0.4`, published). Patch: publishes the `tide-import` image in the build-images matrix and adds the matrix↔chart image-coverage release gate.
 - ✅ **v1.0.5 — Resumable Import: Partial-Tree Resume** — Phase 30 (shipped 2026-06-27, tag `v1.0.5`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). adopt-complete + re-plan-incomplete: fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies → stall). Unblocked deferred dogfood run #2. Full archive: [milestones/v1.0.5-ROADMAP.md](milestones/v1.0.5-ROADMAP.md) · [milestones/v1.0.5-REQUIREMENTS.md](milestones/v1.0.5-REQUIREMENTS.md).
 - ✅ **v1.0.6 — Adoption-Path Correctness & Dispatch Safety** — Phases 31–33 (shipped 2026-06-29, tag `v1.0.6`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon). Corrective patch closing the four code-level defects dogfood run #2b surfaced on the adoption path: D1+D2 lifecycle/cost seam (Phase 31), D3 dispatch concurrency cap (Phase 32), D4 planner failure semantics (Phase 33). Audit: tech_debt (13/13 reqs, 0 blockers). Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md).
-- 🚧 **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–38 (in progress; started 2026-07-03). Closes what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss (run branch shipped incomplete yet stamped Complete), the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, signed commits, promptFile), dashboard blind spots (artifact view at approve gates, project view, empty log drawer), the Prometheus setup step, and the v1.0.6 audit tech-debt carry. 26 requirements (INTEG/COST/BASE/SIGN/PROMPT/DASH/TELEM/DEBT), 100% mapped.
+- 🚧 **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–38 (in progress; started 2026-07-03). Closes what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss (run branch shipped incomplete yet stamped Complete), the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, agent identity, promptFile), dashboard blind spots (artifact view at approve gates, project view, empty log drawer), the Prometheus setup step, and the v1.0.6 audit tech-debt carry. 23 requirements (INTEG/COST/BASE/SIGN/PROMPT/DASH/TELEM/DEBT), 100% mapped — SIGN-02/03/04 (GPG signing) descoped 2026-07-03 at Phase 36 discussion.
 - 📋 **vNext — OpenAI Backend + Dogfood Run #2** — (planned; gated on v1.0.7 run-integrity fixes + adequate multi-node infrastructure)
 - 📋 **v1.x — Polyglot Subagent Runtimes: LangGraph Strategy** — (backlog; architecture locked, phases TBD) — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md)
 
@@ -107,11 +107,11 @@ Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [m
 
 ### 🚧 v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics (In Progress)
 
-**Milestone Goal:** Make a second external-repo run trustworthy and reviewable — a pushed run branch provably contains every Succeeded task's work, the budget tally matches the provider console, git ergonomics (baseRef, signed commits, promptFile) work, the dashboard is a sufficient approve-gate review surface, telemetry setup is guided, and the v1.0.6 audit tech-debt is retired.
+**Milestone Goal:** Make a second external-repo run trustworthy and reviewable — a pushed run branch provably contains every Succeeded task's work, the budget tally matches the provider console, git ergonomics (baseRef, agent identity, promptFile) work, the dashboard is a sufficient approve-gate review surface, telemetry setup is guided, and the v1.0.6 audit tech-debt is retired.
 
 - [ ] **Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA** - Every Succeeded task's worktree branch is provably merged into the run branch (final wave included), merges are serialized and idempotent, boundary push gates on git-verified completeness, and `status.git.lastPushedSHA` arms the force-with-lease fence
 - [ ] **Phase 35: Git Base Ref** - `spec.git.baseRef` bases a run on any branch/tag/SHA, unresolvable refs fail fast with a typed condition, and the resolved SHA is stamped in `status.git.baseSHA` across both API versions
-- [ ] **Phase 36: Signed Commits + Bot Identity** - TIDE Bot identity is uniformly configurable and, with an opt-in signing-key Secret ref, commits at all three sites are GPG-signed — with operator docs that earn the Verified badge
+- [ ] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7
 - [ ] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
 - [ ] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed
 
@@ -136,7 +136,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 ### Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA
 
 **Goal**: A pushed run branch provably contains every Succeeded task's work — the wave-parallel integration step cannot silently drop a merge, boundary push is gated on completeness verified from git, and a run can no longer stamp `Complete` while a declared deliverable is missing from the branch. The mechanical, no-LLM degenerate case of the verify-stage seed.
-**Depends on**: Nothing (first phase of milestone; headline — merge code must stabilize before Phase 36's signing touches the same sites)
+**Depends on**: Nothing (first phase of milestone; headline. The former "before Phase 36's signing" sequencing constraint is void — signing was descoped 2026-07-03)
 **Requirements**: INTEG-01, INTEG-02, INTEG-03, INTEG-04, INTEG-05
 **Success Criteria** (what must be TRUE):
   1. Every Succeeded task's worktree branch has a merge commit reachable from the run branch — including tasks in a plan's final Kahn wave; a single-wave plan integrates its tasks (the `plan_controller.go:1192` last-wave skip is closed).
@@ -160,15 +160,15 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 
 ### Phase 36: Signed Commits + Bot Identity
 
-**Goal**: TIDE Bot commits are uniformly attributed and, with an opt-in signing-key Secret ref, GPG-signed at all three commit sites — harness, integrate, tide-push — with operator docs that earn the Verified badge on GitHub, GitLab, and Gitea. Absent ref preserves today's unsigned behavior exactly.
-**Depends on**: Phase 34 (signing lands on stabilized merge code — same three commit sites), Phase 35 (chart/CRD bumps batch into one version bump)
-**Requirements**: SIGN-01, SIGN-02, SIGN-03, SIGN-04
-**Research flag**: `research: true` — spike gpg-shim vs plumbing-level merge-commit signing before planning (go-git cannot create signed three-way merges via `SignKey`; `--no-commit` + go-git commit silently flattens merge topology). Contains an ASK-FIRST scope decision: signing-key exposure at the harness commit site (a mounted key in an LLM-executing pod is a signing oracle — sign-controller-sites-only vs harness restructure vs documented risk).
+> **Descoped 2026-07-03 (discussion):** this phase delivers agent identity only (SIGN-01). GPG signing (SIGN-02/03/04) — the Secret ref, the gpg-shim/plumbing spike, key validation, and the Verified-badge docs — is deferred out of v1.0.7; see REQUIREMENTS.md Future Requirements and `.planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md` for the preserved analysis (key-exposure options, spike framing).
+
+**Goal**: The TIDE agent identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push — via the precedence chain `spec.git.agentName`/`agentEmail` → chart value → compiled-in default, with the tide-push hardcoded identity removed. The bot→agent rename applies everywhere: env vars become `TIDE_AGENT_NAME`/`TIDE_AGENT_EMAIL` and the compiled-in default becomes `TIDE Agent <tide-agent@tideproject.k8s>`.
+**Depends on**: Phase 35 (chart/CRD bumps batch into one version bump). The former Phase 34 dependency was signing-specific and no longer applies.
+**Requirements**: SIGN-01
 **Success Criteria** (what must be TRUE):
-  1. Configuring the bot identity (name/email) once changes the committer identity at all three commit sites — harness, integrate, tide-push — and the tide-push hardcoded identity is removed.
-  2. With a signing-key Secret ref configured, commits from all three sites — including integrate merge commits — pass `git verify-commit`; with no ref configured, commits remain unsigned exactly as today.
-  3. An invalid signing key (unarmored, passphrase-protected, or UID email mismatching the bot identity) surfaces a clear failure condition at first reconcile — not discovered at commit time mid-run.
-  4. An operator following the docs recipe (machine account + key generation + public-key upload) sees the Verified badge on GitHub/GitLab/Gitea; UAT includes one manual push to a real GitHub repo that contains an integrate merge commit.
+  1. Configuring the agent identity once (Project spec or chart value) changes the committer identity at all three commit sites — harness, integrate, tide-push — with Project spec taking precedence over the chart value, and the tide-push hardcoded `tideBotSignature()` removed.
+  2. An unconfigured install commits as `TIDE Agent <tide-agent@tideproject.k8s>` at all three sites (one consistent compiled-in default; the `TIDE_BOT_*` env names are gone).
+  3. The new `spec.git.agentName`/`agentEmail` CRD fields ride the same chart version bump as Phase 35's `baseRef` (FIXED-contract batching).
 **Plans**: TBD
 
 ### Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States

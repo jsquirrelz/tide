@@ -5,8 +5,8 @@ milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
 current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
-stopped_at: Phase 34 context gathered
-last_updated: "2026-07-03T23:19:05.687Z"
+stopped_at: Phase 36 context gathered (descoped to agent identity only; SIGN-02/03/04 deferred out of v1.0.7)
+last_updated: "2026-07-03T23:43:01.082Z"
 last_activity: 2026-07-03
 last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
@@ -82,9 +82,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - Gate the *boundary push* on integration completeness, not `Complete` directly (preserves the #13b decision); the completeness verdict is always recomputed from git (`merge-base --is-ancestor`), never cached in `.status`.
 - Tasks stay parallel; only run-branch merges serialize. No lockfile-existence protocols on the PVC — kernel `flock(2)` only, as belt-and-braces behind control-plane serialization.
-- `charts/tide/values.yaml` is a FIXED contract — Phase 35's CRD change and Phase 36's signing config batch into one chart version bump.
+- `charts/tide/values.yaml` is a FIXED contract — Phase 35's CRD change and Phase 36's agent-identity CRD/chart config batch into one chart version bump.
 - No `+kubebuilder:default` on `baseRef` — absent means current HEAD behavior, one encoding.
-- Signing is opt-in (Secret ref); absent ref preserves unsigned behavior exactly. go-git `SignKey` cannot sign three-way merges — gpg-shim spike required (Phase 36, research: true).
+- GPG signing is DESCOPED from v1.0.7 (2026-07-03, Phase 36 discussion) — SIGN-02/03/04 moved to REQUIREMENTS.md Future Requirements; Phase 36 delivers agent identity (SIGN-01) only. The gpg-shim spike and key-exposure analysis are preserved in `36-CONTEXT.md` `<deferred>`.
 - Artifact ConfigMaps are a size-capped display cache (owner-ref'd, ~512 KiB, truncation markers); PVC/git remain source of truth. The manager cannot mount project PVCs.
 - Dashboard stays read-only — no reader pods, no mutation surfaces.
 
@@ -95,6 +95,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Phase 34 (run integrity) is the headline and must land before Phase 36 — signing touches the same three commit sites the integration fix stabilizes.
 - Phase 36 carries `research: true` (gpg-shim vs plumbing spike) and an ASK-FIRST key-exposure scope decision.
 - Phases 35, 37, 38 are order-independent; Phase 38 items can interleave anywhere.
+- **Phase 36 descoped 2026-07-03 (discussion):** SIGN-02/03/04 (GPG signing) deferred out of v1.0.7 — 26 → 23 active requirements. Phase 36 = SIGN-01 agent identity only (`spec.git.agentName`/`agentEmail` → chart → compiled-in `TIDE Agent <tide-agent@tideproject.k8s>`; full bot→agent rename). The `research: true` flag and ASK-FIRST decision above are void; the Phase 34 → 36 sequencing constraint no longer applies (Phase 35 batching stays).
 
 ### Pending Todos
 
@@ -104,10 +105,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Blockers/Concerns
 
-- **Phase 36 ASK-FIRST (scope-defining):** signing-key exposure at the harness commit site — sign-controller-sites-only vs harness restructure vs documented risk. Must be resolved with the operator at the Phase 36 discuss/plan step before implementation.
 - **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
 - **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
-- **Verified-badge UAT is external:** `git verify-commit` in-cluster does not prove the badge; Phase 36 UAT needs one manual push to a real GitHub repo including an integrate merge commit.
 
 ## Deferred Items
 
@@ -123,9 +122,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-03T23:19:05.680Z
-Stopped at: Phase 34 context gathered
-Resume file: .planning/phases/34-run-integrity-integration-miss-gate-lastpushedsha/34-CONTEXT.md
+Last session: 2026-07-03T23:43:01.078Z
+Stopped at: Phase 36 context gathered (descoped to agent identity only; SIGN-02/03/04 deferred out of v1.0.7)
+Resume file: .planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md
 
 ## Operator Next Steps
 
