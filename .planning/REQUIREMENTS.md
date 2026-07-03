@@ -90,13 +90,38 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| INTEG-01 | Phase 34 | Pending |
+| INTEG-02 | Phase 34 | Pending |
+| INTEG-03 | Phase 34 | Pending |
+| INTEG-04 | Phase 34 | Pending |
+| INTEG-05 | Phase 34 | Pending |
+| BASE-01 | Phase 35 | Pending |
+| BASE-02 | Phase 35 | Pending |
+| BASE-03 | Phase 35 | Pending |
+| SIGN-01 | Phase 36 | Pending |
+| SIGN-02 | Phase 36 | Pending |
+| SIGN-03 | Phase 36 | Pending |
+| SIGN-04 | Phase 36 | Pending |
+| DASH-01 | Phase 37 | Pending |
+| DASH-02 | Phase 37 | Pending |
+| DASH-03 | Phase 37 | Pending |
+| DASH-04 | Phase 37 | Pending |
+| COST-01 | Phase 38 | Pending |
+| COST-02 | Phase 38 | Pending |
+| COST-03 | Phase 38 | Pending |
+| PROMPT-01 | Phase 38 | Pending |
+| TELEM-01 | Phase 38 | Pending |
+| TELEM-02 | Phase 38 | Pending |
+| TELEM-03 | Phase 38 | Pending |
+| DEBT-01 | Phase 38 | Pending |
+| DEBT-02 | Phase 38 | Pending |
+| DEBT-03 | Phase 38 | Pending |
 
 **Coverage:**
 - v1.0.7 requirements: 26 total
-- Mapped to phases: 0
-- Unmapped: 26 ⚠️
+- Mapped to phases: 26 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-03*
-*Last updated: 2026-07-03 after initial definition*
+*Last updated: 2026-07-03 after v1.0.7 roadmap creation (traceability populated — Phases 34–38)*
