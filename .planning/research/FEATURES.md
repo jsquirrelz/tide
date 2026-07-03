@@ -1,524 +1,222 @@
-# Feature Research — TIDE v1.0.6 Adoption-Path Correctness & Dispatch Safety
-
-**Domain:** Corrective patch for a Kubernetes-native agentic orchestrator — adoption-path lifecycle,
-budget rollup, dispatch concurrency, and planner failure semantics.
-**Researched:** 2026-06-28
-**Confidence:** HIGH for all four defects — direct codebase inspection of live controller code,
-pool.go, config.go, budget/tally.go, and all planner controllers; no WebSearch required.
-**Mode:** Ecosystem (corrective patch)
-
----
-
-## Research Context
-
-This is NOT a new-feature milestone. Each "feature" is the **correct expected behavior** of an
-existing code path that is currently broken. The four defects come directly from dogfood run #2b
-(run-2b-FINDINGS.md D1–D4). The audience for this document is the requirements author and
-roadmap planner who will turn these behavioral specifications into testable envtest acceptance
-criteria.
-
-**TIDE invariants that constrain every fix in this document:**
-
-1. Waves are derived, never declared — don't cache the schedule; re-derive from the completed-task
-   set in O(V+E).
-2. Persistence is CRD-`.status` only — no external DB; rollup/concurrency state is re-derivable.
-3. Cycles are bugs, not runtime conditions — cycle detection happens at plan-validation time.
-4. Resumption state is minimal: indegree map + completed-task set, nothing more.
-5. Pool semantic: `pool.Pool` is a channel-based semaphore whose slot is held for the duration of
-   the reconcile call, not the duration of the Job. Release is deferred to function return.
-6. The adoption path suppresses the project-planner (correct) — the lifecycle advance must come
-   from a distinct adoption-complete transition, not from `handleProjectJobCompletion`.
-
----
-
-## Existing Features This Milestone Builds On (Do NOT re-propose)
-
-These are already shipped and must not be duplicated or weakened:
-
-- Global Execution DAG (Spring Tide, phases 22–26)
-- Import/adoption flow: ImportController state machine, `tide-import` Job, `ImportComplete=True`
-  condition, adoption guard that suppresses the project-planner post-import (project_controller.go:1105)
-- Budget reserve/settle via ReservationStore + BudgetBlocked condition
-- BillingHalt (provider billing-400 halts the entire project)
-- Gates-as-holds at every planning-DAG level
-- Reporter Jobs materializing child CRDs (MilestoneReconciler, PhaseReconciler, PlanReconciler all
-  spawn tide-reporter)
-- `tide resume --retry-failed` recovery verb
-- Pool infrastructure: `internal/pool/pool.go` (chan-based semaphore), `PlannerPool` and
-  `ExecutorPool` fields on every reconciler, `config.go` `PlannerConcurrency`/`ExecutorConcurrency`
-  fields, PreCharge at manager startup
-- Plan childCount guard in plan_controller.go:692 (Phase 30) — what D4 extends to phase + milestone
-
----
-
-## D2 — Project Lifecycle Advances Under Adoption
-
-### Root Cause (verified in project_controller.go)
-
-After `ImportComplete=True`, `reconcileProjectPlannerDispatch` hits the adoption guard at line 1119
-and returns `ctrl.Result{}` (no requeue, no error). This zero result passes the
-`if result.Requeue || result.RequeueAfter > 0` gate at reconcilePhase3Lifecycle line 509 and
-execution falls through. However `Project.Status.Phase` stays at `PhaseInitialized` because the
-only places that advance Phase to `PhaseRunning` are:
-
-- `handleProjectJobCompletion` line 1205/1402 — only called after the project-planner Job
-  completes; the adoption path suppresses that Job entirely.
-- `handleBudgetGate` line 1402 — only fires after bypass logic; irrelevant here.
-
-So the adopted project is permanently parked at `Initialized` even as milestone/phase/plan planners
-run and produce output. Anything downstream keyed on `project.Status.Phase == PhaseRunning` — most
-critically D1's budget rollup — never fires.
-
-### Table-Stakes Behavior
-
-| Behavior | Acceptance Signal (envtest) |
-|----------|-----------------------------|
-| After `ImportComplete=True`, the Project must advance from `PhaseInitialized` to `PhaseRunning` without a project-planner Job dispatching | `kubectl wait --for=jsonpath='{.status.phase}'=Running` on the Project object after ImportComplete=True |
-| The advance must happen on the same reconcile pass that detects `ImportComplete=True` with at least one owned Milestone — not on a subsequent requeue triggered by a child event | Envtest: create an adopted project with a seed Milestone; patch ImportComplete=True; reconcile; assert Project.Status.Phase == "Running" in a single test step, no additional triggers |
-| The advance must be idempotent: a second reconcile after the advance must not revert Phase to `Initialized` | Envtest: reconcile twice; assert Phase stays "Running" on both passes |
-| The advance must not fire the project-planner Job: Phase==Running on an imported project must not trigger the normal dispatch path at reconcilePhase3Lifecycle Step 0b | Envtest: assert zero planner Jobs for the imported project namespace after the Phase advance |
-| The `ConditionReady` or an equivalent condition must reflect the post-import running state | Optional: assert a condition documenting "Adopted" or "Running" so operators can distinguish a freshly-initialized project from an adoption-completed one |
-
-### Implementation Note
-
-The fix is a narrow state-machine transition: at the point where `reconcileProjectPlannerDispatch`
-would early-return on the adoption guard (project_controller.go line 1119), it should first
-advance `Project.Status.Phase` to `PhaseRunning` if the current phase is still `PhaseInitialized`.
-This is a single Status patch before the `return ctrl.Result{}, nil`. No new controller, no new
-condition type, no pool acquire.
-
-### Dependency
-
-D1 depends on D2: budget rollup in milestone/phase/plan controllers calls
-`budget.RollUpUsage(ctx, r.Client, project, out.Usage)` but the rollup calls
-`budget.IsCapExceeded(project)` which reads `project.Status.Budget.CostSpentCents` — none of this
-is gated on project Phase. However the D-11 suppression at project_controller.go line 1306 (`if
-project.Spec.ImportSource != nil { skip rollup }`) is the actual blocker for D1. D2 is a
-prerequisite for the correct budget gate check (the `BudgetBlocked` condition and halt logic are
-gated on project Phase via `reconcilePhase3Lifecycle`), so D2 must ship before or with D1.
-
----
-
-## D1 — Cost Rollup Under Adoption
-
-### Root Cause (verified in project_controller.go and milestone/phase/plan controllers)
-
-The milestone/phase/plan controllers already call `budget.RollUpUsage` on Job completion — these
-paths are NOT gated on project Phase and DO fire for adopted trees. The actual blocker is the
-D-11 suppression in `handleProjectJobCompletion` (project_controller.go line 1304–1307):
-
-```go
-// D-11/R-13: budget rollup is suppressed unconditionally for imported envelopes —
-// the prior run already counted the planning cost; rolling up here would double-count.
-if project.Spec.ImportSource != nil {
-    logger.V(1).Info("skipping budget rollup: project has importSource (D-11)", "project", project.Name)
-}
-```
-
-This suppression was correct and intentional for the project-level planner envelope (which is a
-pre-paid artifact from a prior run). But it does NOT suppress rollup in the milestone, phase, and
-plan controllers — those rollups fire from NEWLY-DISPATCHED Jobs that did incur real spend. The
-run-2b finding that `costSpentCents` stayed zero is most likely explained by D2: if the Project
-never advanced to `PhaseRunning`, the budget gate check never evaluated `IsCapExceeded`, and the
-controller never stamped a `BudgetBlocked` condition that operators or tests would observe as proof
-the rollup worked. The budget tally itself (the patch in `budget/tally.go`) is unconditional —
-`RollUpUsage` patches `Project.Status.Budget.TokensSpent` and `CostSpentCents` regardless of
-project phase.
-
-**Critical gap to verify during implementation:** Confirm by adding an envtest that milestone/phase/plan
-controllers DO call `RollUpUsage` for adopted projects (where `project.Spec.ImportSource != nil`).
-If they are also guarded (grep all callsites for similar `if project.Spec.ImportSource != nil`
-checks), those guards must be removed or scoped to the planner-level suppression only. The D-11
-intent was to avoid double-counting the prior-run planning cost; newly-dispatched Jobs in the
-adopted run are genuinely new spend and must be tallied.
-
-### Table-Stakes Behavior
-
-| Behavior | Acceptance Signal (envtest) |
-|----------|-----------------------------|
-| `Project.Status.Budget.CostSpentCents` accrues as phase/plan/milestone planner Jobs complete under an imported project | Envtest: create imported project (ImportSource set), confirm ImportComplete=True, allow one phase-planner Job to complete with Usage.EstimatedCostCents > 0; assert Project.Status.Budget.CostSpentCents > 0 |
-| `Project.Status.Budget.TokensSpent` accrues similarly | Same envtest: assert TokensSpent > 0 after completion |
-| A project with `absoluteCapCents` set to a low value halts once `CostSpentCents` exceeds the cap, even on the import path | Envtest: set budget.absoluteCapCents to 1 cent; confirm BudgetBlocked=True or BudgetExceeded phase after rollup |
-| The project-level planner envelope rollup suppression (D-11) remains in place: the project-planner Job itself does NOT double-count the imported planning cost | Regression: assert that project_controller.go's D-11 suppression block is preserved; no project-level envelope rollup fires |
-| Rollup is idempotent: re-running the same Job completion handler does not double-count | The existing `PlannerRolledUpUID` marker guards idempotency at the project level; for milestone/phase/plan, the isFirstCompletion flag gates rollup (preserved) |
-
-### Edge Cases
-
-**Budget cap crossed mid-adoption cascade:** The `BudgetBlocked` condition is evaluated at dispatch
-time by `checkBudgetBlocked(project)`. If the cap is crossed mid-cascade, the NEXT dispatch
-(whichever reconciler fires next) will observe `BudgetBlocked=True` and park. Already-dispatched
-Jobs continue to completion — this is the correct bounded-overshoot behavior per the
-`ReservationStore` design. The fix must not change this.
-
-**Rollup with no project reference:** `milestone_controller.go` and `phase_controller.go` guard
-rollup with `if isFirstCompletion && envReadOK && project != nil` — this nil guard is already
-correct. The adoption path changes nothing about how `project` is resolved (it comes from
-`ms.Spec.ProjectRef` / `ph.Spec.ProjectRef`).
-
-**D-11 scope clarification:** D-11 was "suppress project-level envelope rollup for imported
-projects." The correct re-scoping is: suppress ONLY the project-planner Job's usage rollup (because
-that Job ran in a prior run and its cost was already counted then). Do not suppress milestone-,
-phase-, or plan-level rollups for Jobs dispatched in the current run. The guard comment and
-behavior must be updated to reflect this narrower scope.
-
-### Dependency
-
-D1 depends on D2 for the budget HALT gate to fire correctly (`reconcilePhase3Lifecycle` must be
-running, which requires Phase==Running). The rollup itself (the tally increment) can fire
-independently of Phase — but the halt enforcement that stops future dispatch depends on the
-project phase being in a state where `handleBudgetGate` evaluates.
-
----
-
-## D3 — Dispatch Concurrency Caps
-
-### Root Cause (verified in pool.go and milestone_controller.go / phase_controller.go)
-
-The `pool.Pool` infrastructure exists and is correctly wired at all planner dispatch sites:
-- `milestone_controller.go:382` — `r.PlannerPool.Acquire(ctx)` + `defer r.PlannerPool.Release()`
-- `phase_controller.go:380` — same pattern
-- `plan_controller.go` — same pattern (not verified above but structurally identical)
-- `project_controller.go:1137` — same pattern
-
-**The problem is the semantics of `defer r.PlannerPool.Release()`.**
-
-The reconcile function for milestone (and phase, plan) calls `Acquire`, creates the Job, then
-returns. `defer Release()` fires when the function returns — which is moments after Job creation.
-So the pool slot is held only for the duration of the `reconcileDispatch` function (milliseconds),
-not for the duration of the Job (1800s+). This means:
-
-- Pool capacity=16 (the default from config.go) allows 16 SIMULTANEOUS RECONCILE CALLS to create
-  Jobs, each releasing their slot as soon as they return.
-- The next batch of reconcile calls (triggered by child events, requeue, or status changes) can
-  immediately acquire slots and create more Jobs.
-- Because the cascading fan-out runs many reconcile goroutines in quick succession (15 phases × 44
-  plans = 59 goroutines ready from the wave fan-out), all 59 can cycle through the pool in 59/16
-  rounds over a few seconds, dispatching all 59 Jobs with no effective throttle.
-
-The `PreCharge` at startup (pool.go:88) is the mechanism for RESTART scenarios — it pre-fills the
-pool from live Jobs to prevent double-dispatch on leader failover. It is NOT a steady-state throttle
-because `Release()` is called on function return, not Job completion.
-
-**The fix requires changing `Release()` semantics:** either defer Release to the Job's terminal
-state (Job watch → release on Complete/Failed), or replace the per-reconcile acquire/release with
-a separate "slot lease" that is retained in the pool's state until the Job terminates.
-
-### Table-Stakes Behavior
-
-| Behavior | Acceptance Signal (envtest or integration) |
-|----------|--------------------------------------------|
-| At most `PlannerConcurrency` planner Jobs are Active at any moment across all reconcilers | Envtest: configure PlannerConcurrency=2; observe via periodic Job List that `.status.active` count for planner Jobs never exceeds 2 |
-| At most `ExecutorConcurrency` executor (task) Jobs are Active at any moment | Envtest: configure ExecutorConcurrency=2; same observation |
-| Excess dispatches queue (controller reconcile blocks on Acquire) rather than fail or leak | Envtest: with concurrency=2 and 5 ready-to-dispatch milestones, eventually all 5 milestone Jobs start and complete (not stuck); no Jobs are dropped |
-| On manager restart with N live Jobs, PreCharge correctly accounts for all N slots | Existing PreCharge test coverage; no regression |
-| Single-node kind default is safe: with the default PlannerConcurrency the cluster does not OOM | Integration test (kind tier): set PlannerConcurrency to 4 (or a tuned single-node default); drive a 15-phase adoption run; kind node does not exit 137 |
-| Planner and executor pools remain independent: executor cap does not bleed into planner cap | Unit test on pool.go; crosspool analyzer already enforces this statically (tools/analyzers/crosspool/) |
-
-### Hard vs Soft Queue Decision
-
-**Hard queue (blocking Acquire) is the correct choice.** The existing `pool.Pool.Acquire(ctx)`
-already blocks the reconcile goroutine until a slot is free. This is not an external queue; it is
-in-process backpressure via a Go channel. When the reconcile context is cancelled (controller-
-runtime workqueue timeout), the goroutine returns an error and is requeued by the workqueue for
-retry. No Jobs are lost. This matches how batch/workflow operators (Argo, Tekton, Volcano) handle
-admission: a submitted unit is held in a pending queue until a resource slot is available.
-
-**No external queue.** An external queue (Redis, K8s Queue CRD, Kueue) is out of scope for this
-milestone, out of spec (CRD-status-only), and would create an operational dependency. The channel
-semaphore is sufficient.
-
-**How Operators in This Space Expose a Concurrency Cap**
-
-This is the question asked by the downstream consumer: chart value vs CRD field vs both?
-
-**Precedents:**
-- Argo Workflows: `controller.workflowWorkers` in the controller ConfigMap; no per-workflow cap
-  at the CRD level for the concurrency of the workflow controller itself. Per-workflow parallelism
-  is a separate field (`parallelism` on the Workflow spec).
-- Tekton Pipelines: `config-feature-flags` ConfigMap with `max-running-tasks-per-taskrun` (not a
-  CRD field). Per-pipeline concurrency via LimitRange.
-- Kueue (K8s-native batch queue): `ClusterQueue` CRD defines `nominalQuota` for slots. This is
-  a separate CRD, not a field on the workload CRD.
-- Volcano: `Queue` CRD with `capability` field (both CRD and chart-configurable).
-
-**TIDE recommendation:** Chart value (via `config.yaml` ConfigMap) for the global pool caps;
-no per-Project CRD field in v1.0.6. Rationale:
-
-1. Pool caps are cluster-resource policy, not per-project intent. They belong in the operator's
-   deployment config, not in the workload CR.
-2. The infrastructure already exists: `config.go` `PlannerConcurrency`/`ExecutorConcurrency` feed
-   `pool.New(cfg.PlannerConcurrency, "planner")` in manager main.go. Only the default value and
-   the Release semantics need to change.
-3. A per-Project `concurrency` field would require the controller to select the minimum of
-   project-level and cluster-level caps, adding complexity without a real use case in v1.0.6.
-4. The chart is the FIXED contract (binary catches up to chart, never reverse per project rule).
-   Adding a chart value for the pool default is safe and reversible.
-
-**Default value recommendation:** Reduce `PlannerConcurrency` default from 16 to 4 for
-single-node kind cluster safety. The dogfood run dispatched ~60 Jobs simultaneously; a cap of 4
-active planner Jobs at a time would have serialized them safely. Document in chart values.yaml
-and in `config.go` with a comment referencing the run-2b-FINDINGS.md OOM incident.
-
-### Implementation Note: Release Semantics Change
-
-The Release must move from "deferred to function return" to "deferred to Job terminal state."
-Two viable approaches:
-
-1. **Watch-triggered release:** Add a watch on `batchv1.Job` with a label selector for
-   `tideproject.k8s/role=planner`. When a Job transitions to Complete or Failed, enqueue the
-   owning reconciler which calls `r.PlannerPool.Release()`. This requires a separate "leased jobs"
-   counter or a per-Job semaphore token keyed by Job UID.
-
-2. **Count-based live-Jobs check at Acquire time:** Instead of holding a channel slot, at dispatch
-   time count the number of `Active` Jobs with role=planner using a label selector list, and
-   short-circuit if the count >= cap. Return `ctrl.Result{RequeueAfter: 5s}` if at cap. This is
-   simpler but slightly less precise (label-indexed List has a short cache lag).
-
-Approach 2 (count-based check) is simpler to implement, matches how Argo and Tekton compute
-admission, and avoids the complexity of per-Job token tracking. The channel semaphore in pool.go
-is replaced or supplemented with a live-Job count check. The pool.PreCharge mechanism remains
-useful for accounting on restart.
-
-### Anti-Features for D3
-
-| Anti-Feature | Why Not |
-|---|---|
-| External queue (Redis, RabbitMQ, Kueue) | Out of spec (CRD-status-only); adds ops dependency |
-| Per-Project concurrency CRD field in v1.0.6 | Over-engineered for the actual use case; chart value is sufficient |
-| Wave-level concurrency cap (separate from pool) | Wave internal parallelism is already bounded by the pool; two caps would interact unpredictably |
-| Per-level (milestone/phase/plan) separate caps | The spec says "size planner and executor pools separately" — two pools, not six |
-| Cycle-recovery features | Cycles are bugs; refuse at validation time; no runtime recovery |
-
----
-
-## D4 — Planner Failure Semantics
-
-### Root Cause (verified in phase_controller.go:590–596)
-
-The plan controller's ChildCount-gated succession (plan_controller.go:692) already has a
-`if expected == 0 { return ctrl.Result{} }` fast-path that succeeds a plan with zero child tasks
-— this was the Phase 30 guard. But this guard is for the case where the planner SUCCEEDED with
-zero children (a genuine leaf: "I authored no tasks"). A planner that exits !=0 OR produces
-childCount=0 on an error is a different failure mode.
-
-In phase_controller.go, the exitCode check at line 525 (`if envReadOK && out.ExitCode != 0`)
-calls `setBillingHaltIfNeeded` but does NOT call `patchPhaseFailed`. The function falls through
-to the ChildCount-gated succession at line 590. If `out.ChildCount == 0` (planner failed and
-wrote no children), the succession path at line 596 calls `patchPhaseSucceeded`. This is the bug:
-a failed planner with zero children succeeds the Phase.
-
-The milestone controller has the same structure (milestone_controller.go:596). The plan controller
-does NOT directly call `patchPlanFailed` from `handlePlannerJobCompletion` on exitCode != 0 either.
-
-### Table-Stakes Behavior
-
-| Behavior | Acceptance Signal (envtest) |
-|----------|-----------------------------|
-| A phase whose planner Job exits 1 must result in Phase.Status.Phase == "Failed", not "Succeeded" | Envtest: configure EnvReader to return ExitCode=1, ChildCount=0; reconcile PhaseReconciler; assert Phase.Status.Phase == "Failed" |
-| A phase whose planner produces ChildCount=0 AND ExitCode=0 (genuine leaf) must Succeed | Envtest: ExitCode=0, ChildCount=0; assert Phase.Status.Phase == "Succeeded" — this is the leaf success case and must not regress |
-| A milestone whose planner exits !=0 must result in Milestone.Status.Phase == "Failed" | Envtest: same pattern at milestone level |
-| A milestone whose planner produces ChildCount=0 AND ExitCode=0 must Succeed | Envtest: genuine leaf milestone — must not regress |
-| The ExitCode check and the ChildCount=0+ExitCode!=0 check are evaluated BEFORE the ChildCount-gated succession fast-path | Code order: exitCode guard at line 525 must set Failed before the line 596 leaf-success fires |
-| A failed planner does not trigger BudgetBlocked or BillingHalt unless the reason is billing-related | The existing `setBillingHaltIfNeeded` call is retained; exitCode != 0 with non-billing reason does NOT halt the project |
-
-### Edge Cases
-
-**exitCode != 0 but envelope unreadable (envReadOK=false):** If the Job exited non-zero but the
-envelope could not be read from the PVC (e.g., the process died before writing), `envReadOK=false`
-and `out.ExitCode` is zero-valued. The fix must handle this case: if the Job's
-`batchv1.Job.Status.Failed > 0` (the Job-level failure count), treat as a planner failure
-regardless of envelope readability. This is the "Job failed with no readable envelope" shape.
-
-**Retry semantics — retry-then-fail vs fail-fast:** Based on TIDE's existing patterns, the
-correct behavior is:
-- Phase/milestone planner failure → mark the level `Failed` immediately (fail-fast at this
-  level). The `tide resume --retry-failed` verb is the operator's explicit recovery path.
-- Do NOT auto-retry planner Jobs. Auto-retry without operator intent risks spending budget on
-  broken prompts repeatedly. The existing plan_controller.go approach (patchPlanFailed, not
-  auto-retry) is the correct pattern to replicate.
-- Retry is operator-driven via `tide resume --retry-failed` which clears the Failed status and
-  allows re-dispatch on the next reconcile.
-
-**Interaction with gates:** A planner that fails while awaiting approval (`AwaitingApproval`
-condition) should be classified as Failed regardless of gate state. The gate-on-failure path
-must not park a Failed level as AwaitingApproval.
-
-**Guard scope:** Phase 30 added the childless-success guard for PLANS. D4 extends the
-exitCode!=0 + childCount=0 guard to PHASES and MILESTONES. Task executors have a separate
-failure path (task_controller.go handles Job.Status.Failed via a different code path). D4 does
-NOT touch the task controller or the executor pool.
-
-### Differentiating "genuine leaf" from "failed with no children"
-
-The critical invariant to preserve:
-
-```
-exitCode == 0 AND childCount == 0 → Succeeded (genuine leaf — planner decided no work)
-exitCode != 0 AND childCount == 0 → Failed (planner failed, never authored children)
-exitCode == 0 AND childCount > 0  → Wait for children (normal case)
-exitCode != 0 AND childCount > 0  → Failed (planner failed but somehow wrote some children — rare; treat as failed)
-```
-
-The third row (exitCode != 0, childCount > 0) may indicate a planner that partially authored
-then died. The safest treatment is Failed: a partial child set is unreliable. Any authored
-children can be cleaned up via the normal finalizer cascade on level deletion/retry.
-
-### Anti-Features for D4
-
-| Anti-Feature | Why Not |
-|---|---|
-| Auto-retry on planner failure | Risks budget burn on broken prompts; operator must explicitly approve retry |
-| Cycle recovery for cyclic child sets produced by a failed planner | Cycles are bugs; refuse at plan-validation time; a failed planner that produced a cycle is doubly failed — mark Failed, do not attempt recovery |
-| Re-extending this guard to the plan controller | Phase 30 already added this for plans; do not re-implement |
-| Treating exitCode != 0 as AwaitingApproval | Conflates gate semantics with failure semantics; gates hold successful completions; failures are Failed |
-
----
-
-## Feature Map: Table Stakes, Differentiators, Anti-Features
-
-### Table Stakes (All four must ship in v1.0.6)
+# Feature Research
+
+**Domain:** K8s-native workflow orchestrator — first-run operator ergonomics (v1.0.7 First-Run Paper Cuts)
+**Researched:** 2026-07-03
+**Confidence:** MEDIUM-HIGH (git-host verification rules HIGH from official docs; dashboard/UX conventions MEDIUM from ecosystem survey)
+
+Scope: how the v1.0.7 target capabilities work in comparable tools (Renovate, Dependabot, Argo CD/Workflows, Tekton, kubebuilder-ecosystem operators) and what operators expect. The two run-integrity features (integration-miss gate, pricing table) are TIDE-internal correctness fixes with no external comparable — they appear in the landscape tables but the ecosystem research below covers the five behavior-shaped features: baseRef, signed commits, promptFile, dashboard artifact/log surfaces, telemetry setup nudge.
+
+## Ecosystem Findings (per question)
+
+### 1. Base-ref selection for automation-created branches
+
+How comparable tools do it:
+
+- **Dependabot** — `target-branch` per `package-ecosystem` block in `dependabot.yml`. Branch name only. Applies to version updates only (security updates always target the default branch). Unknown branch → run fails with a config error surfaced in the Dependabot UI; no silent fallback.
+- **Renovate** — `baseBranches` array (multiple branches, regex patterns supported). Missing branch → warning/error in the job log, not silent.
+- **Argo CD** — `spec.source.targetRevision` accepts branch, tag, or commit SHA (also `HEAD`). Unresolvable ref → app creation **rejected** with `Unable to resolve 'X' to a commit SHA`, and at sync time a `ComparisonError` condition on the Application. The resolved SHA is stamped in `status.sync.revision`. Docs recommend explicit branch/SHA over `HEAD`.
+- **Tekton** — git-clone task `revision` param (branch/tag/SHA; empty = remote default branch). Bad ref → TaskRun `Failed` with the raw git stderr in the step log; historically rough edges around tag refs (tektoncd/pipeline#2425).
+- **Argo Workflows** — GitArtifact `revision`; notably rejects the fully-qualified `refs/heads/*` form (argo-workflows#5629) — accept short names, be liberal in what the field takes or document the accepted forms precisely.
+
+**Operator expectations distilled:**
+1. One optional string field accepting branch OR tag OR SHA — tools that split these into separate fields are the minority; a single `revision`-style string is the convention.
+2. Default = the remote's default branch when unset (never require it).
+3. **Fail fast with a typed condition** — reject at admission/first-reconcile with a message naming the unresolvable ref (Argo CD's `Unable to resolve 'X' to a commit SHA` is the canonical wording), never mid-run.
+4. **Pin the resolved SHA in status** (Argo CD `status.sync.revision` pattern) so the run is reproducible even if the branch moves — pairs naturally with the planned `status.git.lastPushedSHA`.
+
+TIDE's planned `spec.git.baseRef` + reject-unresolvable-with-condition matches the ecosystem exactly. The one addition worth making: stamp `status.git.baseSHA` (resolved at run start) alongside `lastPushedSHA`.
+
+### 2. Bot commit signing + Verified badges
+
+Verification rules per host (this is where bots most often "sign but never verify"):
+
+- **GitHub** — a signature shows **Verified** only when: (a) the signature is cryptographically valid, (b) the public key is registered on a GitHub account, and (c) the **committer email matches an identity (UID) on the key AND a verified email on that account**. GPG and SSH signing keys are both supported. Hosted bots (Dependabot, the Mend Renovate app) get Verified *without* managing keys — they commit via the GitHub API as a GitHub App, and **GitHub signs with its own key**. That route requires committing via the REST API, not `git push` — unavailable to TIDE's generic-git-remote architecture.
+- **GitLab** — committer email must match a **verified email of the GPG key's owner account**; GitLab verifies against its own keyring (no keyservers). SSH-signed commits also supported. Well-documented failure mode: valid key + mismatched committer email → "Unverified" (gitlab-org/gitlab#29368).
+- **Gitea** — marks Verified only if the key is registered on a Gitea account **and the committer email is registered on the account that owns the key** (the documented Renovate+Gitea recipe: gitAuthor email must match the bot account's email or "the commits sign but never verify"). Gitea uniquely also supports instance-level signing (`SIGNING_NAME`/`SIGNING_EMAIL`) and allows signer ≠ committer in some flows — but the portable rule is the same email-match triple.
+
+Self-hosted **Renovate** is the closest architectural comparable to TIDE (signs locally, pushes over git): a single env var (`RENOVATE_GIT_PRIVATE_KEY`, ASCII-armored GPG private key) + the constraint that `gitAuthor` name/email must match the key's UID. That is exactly the shape TIDE plans: optional Secret ref carrying the armored key + uniformly configurable bot identity.
+
+**Operator expectations distilled:**
+1. GPG (openpgp) is the interop-widest choice — all three hosts verify it; SSH signing is newer and Gitea/GitLab support lags versions. Pure-Go `openpgp` + go-git's `CommitOptions.SignKey` is the standard implementation path (no gpg binary in the container).
+2. Signing must be **uniform across every commit site** — a run with mixed Verified/unverified commits reads worse than unsigned (TIDE's tide-push hardcoded identity is precisely this bug class).
+3. **Document the email-match triple** (key UID = committer email = registered bot-account email) — it's the #1 support issue for every bot that signs; the feature is incomplete without that doc paragraph.
+4. Key passphrase support: armored keys in Secrets are conventionally unencrypted (Renovate's is); supporting passphrases is optional polish.
+5. Anti-pattern for TIDE: the GitHub-App API-commit route — host-specific, violates the no-hard-coded-git-host constraint.
+
+### 3. Prompt-from-file config UX
+
+Kubernetes ecosystem patterns for "a chunk of text the user authored in a file":
+
+- **valueFrom-style union in the CRD** — inline field XOR ConfigMap/Secret key selector, mutually exclusive, CEL/webhook-validated. Canonical examples: KubeVirt `userData` vs `userDataSecretRef`, Grafana Operator dashboard `json` vs `configMapRef` vs `url`, Prometheus Operator's `additionalScrapeConfigs` SecretKeySelector. This is the pattern when the content must be **cluster-resident and GitOps-manageable** independent of the CR.
+- **CLI-side file expansion** — the client reads the file and inlines it into the spec at apply time (`kubectl create configmap --from-file` is the archetype). This is the pattern when the field is small, immutable-per-run, and the pain being solved is *authoring YAML multiline strings*, not content lifecycle.
+- Size bounds: ConfigMaps cap at 1 MiB; whole CR objects at etcd's ~1.5 MiB. Outcome prompts are KBs — both routes fit trivially.
+
+**Which fits TIDE:** the pain from the first run is authoring ergonomics (writing a long prompt as a YAML block scalar), not prompt lifecycle. A ConfigMap ref buys nothing here and costs: a second object to create/RBAC/garbage-collect, a watch (or a deliberate no-watch policy — and a mutable prompt under a running Project is semantically wrong anyway), and a resolution failure mode. **CLI-side `--prompt-file` (or `promptFile:` in the tide CLI's project file, expanded before apply) is the low-complexity, convention-consistent route.** The CRD keeps one field, `spec.outcomePrompt`, and stays the single source of truth. A `configMapRef` union can be added later behind the same field pair without breaking anything if GitOps-managed prompts become a real demand.
+
+### 4. Artifact/log review surfaces at approval gates
+
+- **Argo Workflows UI** — clicking a node opens a panel with INPUTS/OUTPUTS artifact lists (download links; in-browser preview for some types) plus a logs tab. When the pod is GC'd, the UI falls back to **archived logs** from the artifact repository — the interim state literally renders *"Still waiting for data or an error? Try getting logs from the artifacts."* This fallback is chronically buggy (issues #12948, #8814, #12759, #13785: "artifact not found: main-logs", 500s, per-node-type gaps) — the ecosystem lesson is that **the fallback state must be explicit and tested per node type**, not best-effort.
+- **Tekton Dashboard** — live logs stream from the pod; when the pod is gone it shows *"Unable to fetch logs"* and supports a configured **external logs fallback service** (`--external-logs`, object-storage-backed); Tekton Results persists logs past pruning. Again: an explicit "pod gone → here's the fallback (or here's why there isn't one)" state.
+- **Argo CD** — approval-adjacent review happens against *rendered manifests + diff view*, i.e. the reviewed artifact is shown **in-UI, rendered**, not as a download link. That's the right analogy for TIDE's approve gates: the operator is approving `MILESTONE.md`/phase briefs/`PLAN.md` — rendered markdown in the dashboard, not a raw-file download.
+
+**Operator expectations distilled:**
+1. At an approve gate, the artifact under review is viewable **in the dashboard, rendered** (markdown), one click from the gated node. The first external run needed three ad-hoc PVC reader pods for this — the exact failure these tools' artifact viewers exist to prevent.
+2. Log surfaces have a **mandatory tri-state**: loading (spinner + "connecting to pod"), streaming (live tail), and pod-gone (explicit message + fallback if any). A silently empty drawer is indistinguishable from broken — TIDE's current state.
+3. TIDE has a structural advantage over Argo/Tekton here: artifacts already live on the run PVC and are pushed to git at level boundaries. The dashboard's manager API can serve them from the PVC directly — no object-storage artifact repo needed (Argo's biggest fallback-complexity source). For the pod-gone log state, v1.0.7 does *not* need log archiving (Argo's experience says it's a tarpit); an honest "pod completed and was garbage-collected — see the task's result envelope / artifact" message is the table-stakes fix, with envelope stdout/stderr capture as the cheap fallback if the envelope already carries it.
+
+### 5. "Telemetry disabled" empty states + setup nudges
+
+- **NOTES.txt convention** — Go-templated conditional blocks keyed on values: when an optional integration is off, print a short warning naming the flag, the exact enable command (`helm upgrade ... --set prometheus.enabled=true`), and a docs link. Keep it brief (it prints on install/upgrade/status); point to README/INSTALL for depth. kube-prometheus-stack-family charts and most ServiceMonitor-optional charts do exactly this. TIDE's `prometheus.enabled=false` default (chosen to avoid ServiceMonitor CRD-not-found) makes the nudge mandatory — dark-by-default without a nudge reads as broken telemetry.
+- **Dashboard empty-state convention** — the load-bearing distinction is **"disabled by configuration" vs "enabled but no data" vs "error"**. A good disabled-state banner: states that telemetry is off (not failing), shows the one-line enable step, links docs. Tools that conflate "no data" with "not configured" generate a steady stream of confused issues; the fix is always the same explicit banner.
+- **INSTALL.md step** — a numbered optional step ("Enable telemetry") mirroring the NOTES.txt text, so the three surfaces (INSTALL, NOTES.txt, dashboard banner) say the same thing with the same command.
+
+## Feature Landscape
+
+### Table Stakes (Users Expect These)
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| D2: Project Phase advances to Running after ImportComplete=True | Without this, the adopted project is permanently stuck at Initialized; D1's halt gate never evaluates | Low — targeted state-machine fix, one Status patch before the adoption guard return | Must not dispatch a project-planner Job |
-| D1: Budget rollup accrues for adopted-project plan/phase/milestone Jobs | `absoluteCapCents` is the safety contract for expensive runs; a budget that doesn't count spend is not a budget | Low-Medium — verify D-11 suppression scope; narrow the guard to project-planner only; add envtest | Must preserve D-11 no-double-count for the project-planner envelope |
-| D3: Per-level max-in-flight cap enforced at steady state, not just at startup | Single-node OOM is a safety failure, not a performance issue; any operator deploying on a real cluster expects the cap to work | Medium — Release semantics change from function-return to Job-terminal-state; default cap reduction | Config-only surface (chart values), not a CRD field |
-| D4: Planner exitCode!=0 or childCount=0+exitCode!=0 → Phase/Milestone Failed | False-Succeeded levels corrupt the planning DAG; a phase that succeeded with no plans will never be re-planned, leaving a gap in the execution tree | Low-Medium — exitCode check before ChildCount succession in phase + milestone controllers; envtest |Genuine leaf (exitCode==0, childCount==0) must not regress |
+| Integration-miss gate (serialize/retry task→run-branch merges; gate `Complete` on reachability; `status.git.lastPushedSHA`) | A run stamped `Complete` with a deliverable silently missing breaks the core trust contract; every CI system treats "reported success = artifacts present" as axiomatic | MEDIUM | TIDE-internal, no ecosystem comparable needed. Mechanical degenerate case of the verify-stage seed |
+| Claude 5 pricing rows | Budget meter overcounting 2.8× makes `absoluteCapCents` useless; correct pricing per model is assumed | LOW | Pure table addition + fallback-tier audit. Keep the "unknown model → most-expensive tier" fallback but log it loudly |
+| `spec.git.baseRef` accepting branch/tag/SHA, default = remote default branch | Every comparable (Dependabot `target-branch`, Renovate `baseBranches`, Argo CD `targetRevision`, Tekton `revision`) offers this; single-string field is the convention | LOW-MEDIUM | Reject unresolvable ref at first reconcile with a typed condition (Argo CD wording is canonical). Stamp resolved `status.git.baseSHA`. Document accepted forms (avoid Argo Workflows' `refs/heads/*` rejection surprise) |
+| Uniform, configurable bot identity across all three commit sites | Mixed identities/signatures across one run's commits read as broken; prerequisite for verification email-match | LOW | tide-push currently hardcodes it — fix regardless of signing |
+| Dashboard artifact view at gated Planning-DAG nodes (rendered markdown) | Argo CD reviews rendered manifests in-UI; Argo Workflows shows per-node artifacts. Operators expect to review what they're approving without `kubectl exec`/reader pods | MEDIUM | Serve from run PVC via manager API — TIDE needs no artifact-repo object storage. This is the approve-gate review surface, the milestone's biggest ergonomics win |
+| Log-drawer tri-state (loading / streaming / pod-gone) | Every workflow dashboard (Argo, Tekton) has explicit states; silently empty = indistinguishable from broken | LOW-MEDIUM | Pod-gone state: honest message + point to result envelope/artifact. Do NOT build log archiving (see anti-features) |
+| Telemetry-disabled nudge (NOTES.txt conditional + INSTALL.md step + dashboard banner) | Dark-by-default (`prometheus.enabled=false`) without a nudge reads as broken telemetry; NOTES.txt conditional warnings are standard chart practice | LOW | Same enable command verbatim on all three surfaces. Banner must distinguish "disabled by config" from "no data" |
+| promptFile via CLI-side expansion (`--prompt-file` / `promptFile:` expanded to `spec.outcomePrompt` at apply) | `kubectl --from-file` archetype; solves the actual pain (YAML block-scalar authoring) with zero new CRD surface | LOW | CRD unchanged; single source of truth stays `spec.outcomePrompt` |
 
-### Differentiators (Not in v1.0.6 scope)
+### Differentiators (Competitive Advantage)
 
-These are follow-on improvements that the defect fixes unlock but do not require:
+| Feature | Value Proposition | Complexity | Notes |
+|---------|-------------------|------------|-------|
+| GPG-signed bot commits (pure-Go openpgp, optional Secret ref) | Verified badges on orchestrator commits across GitHub/GitLab/Gitea; self-hosted Renovate is the only comparable that does portable local signing — hosted bots cheat via host APIs | MEDIUM | go-git `CommitOptions.SignKey`. Opt-in (unset Secret ref = unsigned, today's behavior). MUST ship with the email-match-triple doc (key UID = committer email = bot-account verified email) per host, or users file "signs but never verifies" issues |
+| Project view (outcome prompt + settings in dashboard) | Operators reviewing a gate want the run's intent visible next to it; comparable dashboards show the app/workflow spec | LOW | Read-only render of Project spec; pairs with artifact view |
+| PVC-direct artifact serving (no artifact-repo dependency) | Argo's artifact-fallback bug tail comes from object-storage indirection; TIDE's PVC + git-boundary-push design lets the dashboard serve artifacts with zero extra infra | — | Architectural advantage to preserve, not a work item — don't add an object-store artifact repo |
+| `status.git.baseSHA` pinning | Reproducibility: the run records what it branched from even if the ref moves (Argo CD `status.sync.revision` pattern) | LOW | Cheap addition riding the baseRef work |
 
-| Feature | Value | Why Defer |
-|---------|-------|-----------|
-| Dashboard "Adopted" badge distinguishing imported vs freshly-planned nodes | Operator visibility into what was re-planned vs adopted | Read-only dashboard; low urgency vs correctness |
-| Per-Project concurrency CRD field | Allows per-project tuning | Chart-level cap is sufficient for v1.0.6; adds schema complexity |
-| Prometheus metrics for pool saturation (slots-in-use/capacity gauge) | Operators can observe when the pool is the bottleneck | Nice to have; logging is sufficient initially |
-| Automatic retry on planner failure (with backoff and max-attempts) | Reduces manual intervention | Out of scope; operator-driven retry is the correct v1.0.6 posture |
+### Anti-Features (Commonly Requested, Often Problematic)
 
-### Anti-Features (Explicitly Not Building)
-
-| Anti-Feature | Why Not | What to Do Instead |
-|---|---|---|
-| External queue (Kueue, Redis) for dispatch throttling | Out of spec (CRD-status-only); adds external dependency | In-process count-based or channel-based pool check |
-| Schedule caching in `.status` | Direct invariant violation — waves are derived, never declared | Re-derive from task DAG + completed-task set in O(V+E) |
-| Cycle recovery for cycles produced by a broken planner | Cycles are bugs — refuse at validation time | Mark parent Failed; operator fixes and retries |
-| Auto-advance Project Phase without fixing the lifecycle seam | Side-effects on non-import paths | Scope the advance to ImportComplete=True + owned Milestone present |
-| Double-counting prior-run planning cost in rollup | Ruins budget accuracy for adopted projects | Keep the D-11 project-level suppression; remove suppression only from milestone/phase/plan-level Jobs |
-| Per-wave concurrency cap separate from per-pool cap | Two caps on the same resource interact unpredictably | One planner pool, one executor pool; wave-internal parallelism is a derived consequence |
-| Collapse planner failure into BudgetBlocked or BillingHalt | Conflates provider errors with code errors | Keep three distinct conditions: Failed (planner bug), BillingHalt (provider 400), BudgetBlocked (cap) |
-
----
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| ConfigMap-ref promptFile (`spec.promptRef`) | "K8s-native", GitOps-manageable prompts | Second object lifecycle (create/RBAC/GC), resolution failure modes, and mutable-prompt-under-running-Project semantics that are wrong anyway; solves lifecycle when the pain is authoring | CLI-side expansion now; a valueFrom-style union (`outcomePrompt` XOR `promptRef`, CEL mutual exclusion) can be added compatibly later if GitOps demand materializes |
+| GitHub-App API-commit signing ("GitHub signs for you") | Zero key management, how Dependabot/hosted-Renovate get Verified | Requires committing via GitHub's REST API, not `git push` — hard-codes one git host, violating TIDE's portability constraint | Local GPG signing over the generic git remote (self-hosted-Renovate model) |
+| Log archiving to object storage (Argo `archiveLogs` model) | "Logs survive pod GC" | Argo's own docs say don't rely on it; its fallback UI is a multi-year bug tail (artifact-not-found, 500s, per-node-type gaps); adds an artifact-repo dependency TIDE deliberately doesn't have | Explicit pod-gone state + result-envelope stdout/stderr as the reviewable residue; artifacts (the actual deliverables) are already on PVC + git |
+| Auto-fallback when baseRef unresolvable ("just use default branch") | "Don't fail my run over a typo" | Silent fallback = run built from the wrong base, discovered after spend; every comparable fails fast instead | Typed condition + clear message at first reconcile, before any subagent spend |
+| SSH commit signing (instead of / alongside GPG) | Simpler key format, newer hotness | Verification support is uneven across GitLab/Gitea versions; GPG verifies everywhere; supporting both doubles the doc/test matrix | GPG-only for v1.0.7; SSH signing later if demanded |
+| In-dashboard approve/reject buttons on the new artifact view | "I can see it, let me approve it" | Breaks the v1 read-only-dashboard decision (single auth surface via CLI/kubectl) | Artifact view shows the gate state + the exact `tide approve` command to copy |
 
 ## Feature Dependencies
 
 ```
-D2 (Project lifecycle advance)
-    └──enables──> D1 (budget halt gate fires on adopted projects)
-    └──independent──> D3 (pool cap; no lifecycle dependency)
-    └──independent──> D4 (planner failure semantics; no lifecycle dependency)
+Artifact view (approve-gate surface)
+    └──requires──> manager API endpoint serving PVC artifacts
+    └──enhanced by──> Project view (spec/settings render — same read-only API surface)
 
-D1 (budget rollup)
-    └──requires──> D2 (Phase must be Running for halt enforcement to evaluate)
-    └──independent──> D3 (rollup fires regardless of pool state)
-    └──independent──> D4 (rollup fires from reporters, not affected by planner failure path)
+Log-drawer tri-state
+    └──requires──> same manager API/SSE surface (pod-log proxy states)
 
-D3 (concurrency cap)
-    └──independent──> D1, D2, D4
-    └──requires──> chart value change for new default (not a CRD change)
+Signed commits
+    └──requires──> uniform configurable bot identity (email-match rule spans all 3 commit sites)
+    └──interacts──> integration-miss gate (both touch the same 3 commit sites; sign the
+                    merge commits the gate serializes — land gate first or together)
 
-D4 (planner failure semantics)
-    └──independent──> D1, D2, D3
-    └──touches same controllers as D1/D2 but different code paths
+spec.git.baseRef
+    └──independent; pairs with──> status.git.lastPushedSHA (both live in status.git)
+
+Telemetry nudge (NOTES.txt + INSTALL + banner)
+    └──requires──> dashboard knowing prometheus.enabled state (chart → manager config → API)
+
+promptFile (CLI-side)
+    └──independent──> touches tide CLI only; no CRD/controller change
+
+Pricing table ──independent
+Integration-miss gate ──independent (headline; touches integrate + push + Complete gating)
 ```
 
-### Ordering Rationale for Phases
+### Dependency Notes
 
-Implement D2 and D1 together in one phase (they share the same lifecycle seam in project_controller.go
-and the same envtest setup: an adopted project running real planner Jobs). D3 and D4 can be
-separate phases since they touch different code paths. Recommended order:
+- **Signed commits require identity uniformity first:** the Verified badge depends on committer email matching the key UID and the bot account's verified email at *every* commit site; the hardcoded tide-push identity must become configurable before (or with) signing, or some commits verify and others don't.
+- **Signed commits interact with the integration-miss gate:** both touch the harness/integrate/tide-push commit sites. Sequencing them in the same phase (or gate-first) avoids double-touching merge-commit creation.
+- **Artifact view, project view, and log-drawer states share one surface:** all three are read-only manager-API + dashboard work; batching them into one dashboard phase amortizes the API plumbing.
+- **Banner needs config plumbing:** the dashboard can't render "telemetry disabled" without the manager exposing whether metrics/ServiceMonitor are enabled — small chart→manager→API thread.
 
-1. Phase A: D2 + D1 (lifecycle advance + rollup wire-up; single adopted-project envtest)
-2. Phase B: D3 (pool cap semantics; requires envtest with multiple concurrent dispatches)
-3. Phase C: D4 (planner failure guards at phase + milestone; envtest with exiting-nonzero planner)
+## MVP Definition
 
----
+### Launch With (v1.0.7)
 
-## Envtest Shape Reference
+- [ ] Integration-miss gate + `status.git.lastPushedSHA` — run-integrity headline; trust in `Complete` is the product
+- [ ] Claude 5 pricing rows — budget meter correctness; blocks trustworthy second run
+- [ ] `spec.git.baseRef` with fail-fast condition (+ `status.git.baseSHA` stamp) — low cost, ecosystem-standard shape
+- [ ] Uniform configurable bot identity + GPG signing behind optional Secret ref + email-match docs — the docs are part of the feature
+- [ ] promptFile via CLI-side expansion — lowest-complexity route, no CRD change
+- [ ] Dashboard: artifact view at gated nodes (rendered), project view, log-drawer tri-state — the approve-gate review surface
+- [ ] Telemetry nudge: NOTES.txt conditional + INSTALL.md step + dashboard banner (same command on all three)
+- [ ] v1.0.6 tech-debt carry (RetryOnConflict hardening, plannerConcurrency default 4, envtest tier split)
 
-These are envtest-shaped acceptance criteria for the roadmapper. All in `internal/controller/`:
+### Add After Validation (v1.x)
 
-### D2 + D1 Combined Test
+- [ ] `promptRef` ConfigMap union — trigger: real GitOps-managed-prompt demand
+- [ ] SSH commit signing — trigger: user demand + Gitea/GitLab version support stabilizing
+- [ ] Result-envelope stdout/stderr surfaced in the pod-gone log state — trigger: operators still wanting post-GC log residue after the honest empty state ships
 
-```go
-// Create a Project with Spec.ImportSource set
-// Create an owned Milestone (simulating ImportComplete)
-// Patch Project.Status.Conditions: ImportComplete=True
-// Reconcile ProjectReconciler
-// Assert: Project.Status.Phase == "Running"
-// Assert: No planner Job created in the namespace
-//
-// Then: Allow one Phase-level planner Job to complete
-// (mock EnvReader to return ExitCode=0, ChildCount=1, Usage{EstimatedCostCents: 10})
-// Reconcile PhaseReconciler
-// Assert: Project.Status.Budget.CostSpentCents > 0
-// Assert: Project.Status.Budget.TokensSpent > 0
-//
-// Then: Set budget.absoluteCapCents = 1
-// Reconcile ProjectReconciler
-// Assert: BudgetBlocked condition = True OR Project.Status.Phase == "BudgetExceeded"
-```
+### Future Consideration (v2+)
 
-### D3 Test
+- [ ] Verify-tier LLM subagents (seed) — deferred by milestone decision; mechanical case ships now
+- [ ] Log persistence/archiving — only if the envelope-residue approach proves insufficient; Argo's experience says avoid
 
-```go
-// Configure PlannerConcurrency=2 in the Pool
-// Create 5 Milestone objects all ready to dispatch
-// Reconcile all 5 MilestoneReconcilers concurrently
-// At any point-in-time inspection: count Active planner Jobs <= 2
-// Eventually: all 5 Jobs complete (no deadlock)
-```
+## Feature Prioritization Matrix
 
-### D4 Tests
+| Feature | User Value | Implementation Cost | Priority |
+|---------|------------|---------------------|----------|
+| Integration-miss gate | HIGH | MEDIUM | P1 |
+| Pricing table (Claude 5 rows) | HIGH | LOW | P1 |
+| Dashboard artifact view (gate surface) | HIGH | MEDIUM | P1 |
+| Log-drawer tri-state | MEDIUM | LOW-MEDIUM | P1 |
+| `spec.git.baseRef` | MEDIUM | LOW-MEDIUM | P1 |
+| Bot identity uniformity | MEDIUM | LOW | P1 (prereq for signing) |
+| GPG-signed commits + docs | MEDIUM | MEDIUM | P2 |
+| promptFile (CLI-side) | MEDIUM | LOW | P2 |
+| Project view | MEDIUM | LOW | P2 |
+| Telemetry nudge (3 surfaces) | MEDIUM | LOW | P2 |
+| Tech-debt carry | MEDIUM | LOW-MEDIUM | P2 |
 
-```go
-// Phase failure test:
-// Create a Phase; mock EnvReader to return ExitCode=1, ChildCount=0
-// Reconcile PhaseReconciler handleJobCompletion
-// Assert: Phase.Status.Phase == "Failed"
-// Assert: No child Plans created
+## Competitor Feature Analysis
 
-// Phase genuine-leaf regression:
-// Create a Phase; mock EnvReader to return ExitCode=0, ChildCount=0
-// Reconcile PhaseReconciler handleJobCompletion
-// Assert: Phase.Status.Phase == "Succeeded"
-
-// Milestone failure test (same pattern at milestone level)
-// Milestone genuine-leaf regression
-```
-
----
+| Feature | Renovate/Dependabot | Argo CD/Workflows/Tekton | Our Approach |
+|---------|---------------------|--------------------------|--------------|
+| Base-ref config | `baseBranches` array / `target-branch` per block; config error on missing branch | `targetRevision` / `revision` single string (branch/tag/SHA); Argo CD rejects unresolvable with "Unable to resolve to a commit SHA", pins resolved SHA in status | Single optional `spec.git.baseRef` string; fail-fast typed condition; stamp resolved SHA in `status.git` |
+| Verified bot commits | Hosted: GitHub App API commits (GitHub's key). Self-hosted: armored GPG key env var + gitAuthor email match | N/A (don't author commits as bots the same way) | Self-hosted-Renovate model: armored GPG key in Secret ref, go-git SignKey, uniform identity, email-match-triple docs for GitHub/GitLab/Gitea |
+| Prompt/config from file | N/A | Inline vs `workflowTemplateRef`; ecosystem valueFrom unions (KubeVirt, Grafana Operator) | CLI-side file expansion into the existing inline field; union deferred |
+| Artifact review at gates | N/A (PR diff IS the review surface) | Argo Workflows node panel artifact lists; Argo CD rendered-manifest diff; Tekton external-logs fallback | Rendered markdown artifacts served from run PVC via manager API; no object-store dependency |
+| Logs after pod GC | N/A | Argo `archiveLogs` → artifact repo (buggy fallback UI); Tekton `--external-logs` service | Explicit pod-gone state, no archiving; envelope residue as cheap fallback later |
+| Optional-telemetry nudge | N/A | Standard NOTES.txt conditionals in ServiceMonitor-optional charts | Conditional NOTES.txt + INSTALL step + dashboard "disabled by config" banner, identical enable command |
 
 ## Sources
 
-All findings are HIGH confidence — direct source-code inspection, no inference:
+**Base-ref selection (MEDIUM-HIGH):**
+- [Dependabot options reference — GitHub Docs](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) (target-branch; version-updates-only)
+- [Argo CD tracking strategies](https://argo-cd.readthedocs.io/en/stable/user-guide/tracking_strategies/) (targetRevision forms)
+- [argo-cd#7282 — "Unable to resolve to a commit SHA"](https://github.com/argoproj/argo-cd/issues/7282) (fail-fast behavior)
+- [argo-workflows#5629 — refs/heads/* rejected](https://github.com/argoproj/argo-workflows/issues/5629); [tektoncd/pipeline#2425 — tag revision handling](https://github.com/tektoncd/pipeline/issues/2425)
 
-- `/Users/justinsearles/Projects/tide/internal/controller/project_controller.go` — D-11 suppression at line 1304; adoption guard at 1105; lifecycle advance gap at 1119; Phase advance sites at 1205/1402
-- `/Users/justinsearles/Projects/tide/internal/controller/milestone_controller.go` — rollup at 588; exitCode check at 596; ChildCount succession at line 593+
-- `/Users/justinsearles/Projects/tide/internal/controller/phase_controller.go` — exitCode check at 525; ChildCount succession at 593–596 (false-success bug); rollup at 519
-- `/Users/justinsearles/Projects/tide/internal/controller/plan_controller.go` — Phase 30 childCount guard at 692; exitCode check at 600; rollup at 593
-- `/Users/justinsearles/Projects/tide/internal/pool/pool.go` — Acquire/Release semantics (function-return); PreCharge for restart accounting
-- `/Users/justinsearles/Projects/tide/internal/budget/tally.go` — RollUpUsage unconditional (no Phase gate)
-- `/Users/justinsearles/Projects/tide/internal/config/config.go` — PlannerConcurrency default=16; ExecutorConcurrency default=4
-- `/Users/justinsearles/Projects/tide/.planning/dogfood/run-2b-FINDINGS.md` — D1–D4 authoritative descriptions; "60 pods dispatched at once"
-- `/Users/justinsearles/Projects/tide/.planning/PROJECT.md` — constraints, key decisions, failure semantics contract
-- Operator-space precedents for concurrency cap surface (chart vs CRD vs both): Argo Workflows
-  controller ConfigMap pattern; Tekton `config-feature-flags` ConfigMap; Kueue `ClusterQueue` CRD;
-  Volcano `Queue` CRD — all sourced from training knowledge, MEDIUM confidence; sufficient for the
-  surface-decision question (chart value is correct for v1.0.6)
+**Signed commits (HIGH — official docs):**
+- [About commit signature verification — GitHub Docs](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification); [Using a verified email address in your GPG key](https://docs.github.com/en/authentication/troubleshooting-commit-signature-verification/using-a-verified-email-address-in-your-gpg-key)
+- [Sign commits with GPG — GitLab Docs](https://docs.gitlab.com/user/project/repository/signed_commits/gpg/); [gitlab#29368 — email-mismatch → unverified](https://gitlab.com/gitlab-org/gitlab/-/issues/29368)
+- [GPG/SSH Commit Signatures — Gitea Docs](https://docs.gitea.com/administration/signing)
+- [renovate discussion #22751 — self-hosted verified commits](https://github.com/renovatebot/renovate/discussions/22751); [Signed Renovate commits on Gitea (2026)](https://johanneskueber.com/posts/2026-05-26-sign-renovate-commits/); [GitHub community #50055 — commit signing with GitHub Apps](https://github.com/orgs/community/discussions/50055)
+
+**promptFile patterns (MEDIUM):**
+- [Kubernetes configuration patterns, Part 2 — Red Hat Developer](https://developers.redhat.com/blog/2021/05/05/kubernetes-configuration-patterns-part-2-patterns-for-kubernetes-controllers) (large config → ConfigMap ref; validated config → inline)
+- [ConfigMaps — Kubernetes docs](https://kubernetes.io/docs/concepts/configuration/configmap/) (1 MiB limit)
+
+**Artifact/log surfaces (MEDIUM):**
+- [Configuring Archive Logs — Argo Workflows docs](https://argo-workflows.readthedocs.io/en/latest/configure-archive-logs/) ("does not recommend relying on Argo to archive logs")
+- [argo-workflows discussion #7656](https://github.com/argoproj/argo-workflows/discussions/7656), [#12948](https://github.com/argoproj/argo-workflows/issues/12948), [#8814](https://github.com/argoproj/argo-workflows/issues/8814), [#12759](https://github.com/argoproj/argo-workflows/issues/12759) (fallback bug tail)
+- [Tekton Dashboard logs-persistence walkthrough](https://github.com/tektoncd/dashboard/blob/main/docs/walkthrough/walkthrough-logs.md) (external-logs fallback, "Unable to fetch logs")
+
+**Telemetry nudges (MEDIUM):**
+- [Creating a NOTES.txt File — Helm docs](https://helm.sh/docs/chart_template_guide/notes_files/); [NOTES.txt guide — devopscube](https://devopscube.com/helm-notes-txt-file/) (conditional sections, keep brief)
 
 ---
-
-*Feature research for: TIDE v1.0.6 — Adoption-Path Correctness & Dispatch Safety*
-*Researched: 2026-06-28*
-*Scope: Corrective patch — D1 through D4 from dogfood run #2b-FINDINGS.md only*
+*Feature research for: TIDE v1.0.7 — First-Run Paper Cuts (Run Integrity & Operator Ergonomics)*
+*Researched: 2026-07-03*
