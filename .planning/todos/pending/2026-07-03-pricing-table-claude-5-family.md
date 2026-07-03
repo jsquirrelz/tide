@@ -2,6 +2,7 @@
 created: 2026-07-03T18:08:15.231Z
 title: Update subagent pricing table for Claude 5 family models
 area: subagent
+resolves_phase: 38
 files:
   - cmd/claude-subagent
 ---

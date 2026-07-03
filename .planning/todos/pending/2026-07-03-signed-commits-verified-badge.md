@@ -2,6 +2,7 @@
 created: 2026-07-03T21:00:00.000Z
 title: GPG-sign TIDE Bot commits so git hosts show them as Verified
 area: git
+resolves_phase: 36
 files:
   - internal/harness/commit.go:58
   - pkg/git/integrate.go:56

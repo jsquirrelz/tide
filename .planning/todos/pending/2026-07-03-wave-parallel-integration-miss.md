@@ -2,6 +2,7 @@
 created: 2026-07-03T18:40:00.000Z
 title: Wave-parallel task integrate step skipped; Complete does not gate on unintegrated worktree branches
 area: git
+resolves_phase: 34
 files:
   - internal/harness/commit.go
   - pkg/git/worktree.go

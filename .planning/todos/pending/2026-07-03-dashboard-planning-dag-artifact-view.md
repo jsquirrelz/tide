@@ -2,6 +2,7 @@
 created: 2026-07-03T20:30:00.000Z
 title: Dashboard — clicking a Planning DAG node shows the artifacts it produced
 area: ui
+resolves_phase: 37
 files:
   - dashboard/
 ---

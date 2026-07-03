@@ -2,6 +2,7 @@
 created: 2026-07-03T18:08:15.231Z
 title: Add spec.git.baseRef so runs can branch off a non-default ref
 area: git
+resolves_phase: 35
 files:
   - pkg/git/branch.go:40
   - pkg/git/clone.go:44

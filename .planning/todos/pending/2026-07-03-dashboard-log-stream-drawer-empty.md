@@ -2,6 +2,7 @@
 created: 2026-07-03T18:55:00.000Z
 title: Dashboard "Open log stream" drawer renders empty
 area: ui
+resolves_phase: 37
 files:
   - dashboard/
 ---
