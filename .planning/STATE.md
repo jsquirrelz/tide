@@ -47,6 +47,26 @@ Last activity: 2026-06-29 — Milestone v1.0.6 completed and archived
 
 ## Accumulated Context
 
+### Session Continuity (2026-07-03 — first external-repo run)
+
+Context for `/gsd-new-milestone` beyond what the 2026-07-03 todos + the
+`verify-level-subagent` seed carry (run details deliberately kept out of
+this public repo — the operator has them):
+
+- **Run evidence is live but perishable.** The completed run's envelopes,
+  bare repo, and worktree branches (incl. the never-integrated
+  `tide/wt-e088c86c-…`) live on the `tide-projects` PVC in the run's
+  project namespace on the operator's local **minikube** cluster. Deleting
+  the namespace or cluster destroys the integration-miss repro evidence —
+  export before cleanup if the namespace must go.
+- **Real-vs-tallied spend:** dashboard/status said $10.86; Anthropic console
+  said $3.84 (pricing-table todo has the breakdown). Use console numbers
+  when sizing budget caps until the table is fixed.
+- **Downstream state:** two PRs on the target repo were open and CI-green at
+  session end (the run's implementation + a related docs PR); the pushed run
+  branch carried one hand-recovered commit (the integration-miss
+  deliverable) plus two human cleanup commits.
+
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
@@ -80,6 +100,14 @@ Option B (3 researchers, deeper code reads): `defer r.PlannerPool.Release()` fir
 - During Phase 31 planning: grep all `budget.RollUpUsage` call sites for any `if project.Spec.ImportSource != nil { skip }` guards at milestone, phase, and plan controllers. Child-level rollup must be unconditional.
 - During Phase 31 planning: verify whether `MilestoneRolledUpUID` / `PhaseRolledUpUID` idempotency markers exist at child levels (Phase-27 pattern). If absent, add them — this is the P-D1a/P-D1c double-count risk.
 - During Phase 33 planning: verify whether `patchPhaseFailed` / `patchMilestoneFailed` helpers already exist. If absent, add by mirroring `patchPlanFailed` in `plan_controller.go:842`.
+- Rename `subagent.levels` semantics so each key names the artifact being planned (DECIDED — operator preference; breaking remap, needs SchemaRevision/v1alpha3 treatment) — `.planning/todos/pending/2026-07-03-project-level-subagent-override-slot.md`.
+- Update subagent pricing table for Claude 5 family models (budget tally overcounts at most-expensive tier) — `.planning/todos/pending/2026-07-03-pricing-table-claude-5-family.md`.
+- Add `spec.git.baseRef` so runs can branch off a non-default ref — `.planning/todos/pending/2026-07-03-git-baseref-run-branch.md`.
+- **Dispatch-safety class:** wave-parallel task integrate step skipped (Succeeded task's wt branch never merged; Complete didn't gate on it) — `.planning/todos/pending/2026-07-03-wave-parallel-integration-miss.md`.
+- Add a Prometheus setup step so run telemetry beyond budget is present — `.planning/todos/pending/2026-07-03-prometheus-setup-step-for-run-telemetry.md`.
+- Dashboard "Open log stream" drawer renders empty — `.planning/todos/pending/2026-07-03-dashboard-log-stream-drawer-empty.md`.
+- Dashboard — clicking a Planning DAG node shows the artifacts it produced (approve-gate review surface; artifacts currently live only on the PVC) — `.planning/todos/pending/2026-07-03-dashboard-planning-dag-artifact-view.md`.
+- GPG-sign TIDE Bot commits so git hosts show them as Verified (incl. tide-push hardcoded identity fix) — `.planning/todos/pending/2026-07-03-signed-commits-verified-badge.md`.
 
 ### Blockers/Concerns
 
