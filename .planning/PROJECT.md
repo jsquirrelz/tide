@@ -8,6 +8,24 @@ A Kubernetes-native orchestrator that runs hierarchical agentic coding work as a
 
 **The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.** If everything else fails, TIDE-on-TIDE must work — that's what proves the paradigm and the implementation simultaneously, and it's the bar for "v1 ships."
 
+## Current Milestone: v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics
+
+**Goal:** Close everything the first external-repo run (2026-07-03) surfaced short of new subagent stages — the silent run-branch integration miss, budget-tally accuracy, git ergonomics, and the dashboard/telemetry blind spots — plus the v1.0.6 audit tech-debt.
+
+**Why now:** The first run of TIDE against an external repo (2026-07-03, TIDE 1.0.6 on minikube) completed — but it shipped `Complete` with a declared deliverable missing from the pushed run branch (a wave-parallel integration merge was silently lost), the budget tally overcounted 2.8× ($10.86 tallied vs $3.84 actual — Claude 5 family models fall back to the most-expensive pricing tier), the operator needed three ad-hoc PVC reader pods to review artifacts at approve gates, and run telemetry beyond budget was dark. These are the fixes a second external run needs to be trustworthy and reviewable.
+
+**Target features:**
+- **Integration-miss gate (run-integrity headline):** serialize/retry the wave-parallel task→run-branch integration step so same-wave merges can't race and silently drop; gate boundary push/`Complete` on every Succeeded task's worktree branch having a merge commit reachable from the run branch; stamp `status.git.lastPushedSHA`. The mechanical, no-LLM degenerate case of the verify-stage seed — lands regardless of that seed's fate.
+- **Pricing table:** Claude 5 family rows (claude-fable-5, claude-opus-4-8, claude-sonnet-5) so `BudgetStatus.CostSpentCents` stops overcounting several-fold and tripping `absoluteCapCents` early.
+- **git baseRef:** optional `spec.git.baseRef` so runs can branch off a non-default ref (branch/tag/SHA), rejecting unresolvable refs with a clear condition.
+- **Signed commits:** GPG-sign TIDE Bot commits at all three commit sites (harness, integrate, tide-push) via pure-Go openpgp behind an optional Secret ref; make bot identity uniformly configurable (tide-push currently hardcodes it).
+- **promptFile:** reference a prompt file instead of inlining `spec.outcomePrompt` (route — CLI-side inline vs ConfigMap ref — decided at planning).
+- **Dashboard visibility:** Planning-DAG node artifact view (the approve-gate review surface), project view (outcome prompt + settings), log-drawer loading/streaming/pod-gone states instead of empty.
+- **Prometheus setup step:** INSTALL.md telemetry step + chart NOTES.txt warning + dashboard "telemetry disabled" banner.
+- **v1.0.6 tech-debt carry:** W1 project-level rollup-marker RetryOnConflict hardening; W2 chart configmap `plannerConcurrency | default 16` → `4`; controller-envtest tier split (heavy specs out of TEST-01).
+
+**Deferred by choice:** `subagent.levels` semantic rename (breaking, needs SchemaRevision/v1alpha3 — own milestone), verify-tier LLM subagents (seed stays planted; its mechanical case ships here), CACHE-F1 direct-SDK backend, OpenAI/Codex backend + dogfood run #2 completion.
+
 ## Last Shipped Milestone: v1.0.6 — Adoption-Path Correctness & Dispatch Safety (SHIPPED 2026-06-29, tag `v1.0.6`)
 
 **Outcome (shipped 2026-06-29):** All four adoption-path defects D1–D4 closed across Phases 31/32/33; published 8 images + 2 OCI charts + 5 binaries @ 1.0.6 (verified anon); milestone audit `tech_debt` (13/13 reqs, 0 blockers). Next-milestone candidate: OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra → the TIDE-on-TIDE headline.
@@ -39,7 +57,7 @@ Two earliest milestones shipped:
 - **v1.0.0 — Self-Hosting MVP** (2026-06-11) — published: goreleaser binaries (5 platforms), 7 component images and both Helm charts on GHCR (`oci://ghcr.io/jsquirrelz/tide-charts`), rc-gated release pipeline with a $0 Docker-in-Docker external-operator dry-run. Live medium DoD proven on minikube (Project=Complete, real authored commits pushed to a per-run branch). All 82 v1 requirements delivered — [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md).
 - **v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion** (2026-06-13) — every dogfood run-1 finding fixed with a symptom-reproducing regression test: gate-semantics run-killer (approve-at-descent), reject/resume recovery, the image-resolution chain (closing the v1.0 stub-image bug), provider billing-400 project-wide halt, budget visibility with bounded overshoot, seven paper cuts, the telemetry foundation end-to-end, and the audit tech-debt subset. 28/28 requirements satisfied; milestone audit passed with zero blockers. [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md).
 
-**Current focus:** Between milestones — **v1.0.6 Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED 2026-06-29**, closing the four dogfood-run-#2b adoption-path defects: D1+D2 (adopted Project advances Initialized→Running on ImportComplete with budget rollup + cap enforcement), D3 (single-node-safe planner concurrency cap, default 4), D4 (failed planner marked Failed not Succeeded via isPlannerFailure, before the gate hook). v1.0.5 Resumable Import + v1.0.2 Spring Tide (global Execution DAG) remain the foundation. **Next:** OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra (single-node kind OOM'd run #2b); the headline beyond remains full TIDE-on-TIDE. v1.0.7 carries the v1.0.6 audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest-suite tier split).
+**Current focus:** **Milestone v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics (started 2026-07-03)**, closing what the first external-repo run surfaced: the silent wave-parallel integration miss (run branch shipped incomplete yet stamped Complete), the 2.8× budget-tally overcount on Claude 5 family models, git ergonomics (baseRef, signed commits, promptFile), dashboard blind spots (artifact view at approve gates, project view, empty log drawer), the Prometheus setup step, and the v1.0.6 audit tech-debt carry. **Next after this:** OpenAI/Codex backend + a completing dogfood run #2 on adequate (multi-node) infra; the headline beyond remains full TIDE-on-TIDE.
 
 Everything below this line reflects v1 planning state, preserved for reference.
 
@@ -180,4 +198,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-29 after v1.0.6 milestone — Adoption-Path Correctness & Dispatch Safety (Phases 31–33) SHIPPED (tag `v1.0.6`, 8 images + 2 OCI charts + 5 binaries, verified anon; audit tech_debt, 13/13 reqs, 0 blockers). All four dogfood-run-#2b adoption-path defects (D1–D4) closed. Next: OpenAI/Codex backend + a completing dogfood run #2 on adequate multi-node infra → TIDE-on-TIDE. v1.0.7 carries the audit tech-debt (project-level rollup-marker hardening; configmap default; controller-envtest tier split).*
+*Last updated: 2026-07-03 after starting milestone v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics (integration-miss gate, pricing table, baseRef, signed commits, promptFile, dashboard visibility, Prometheus setup step, v1.0.6 tech-debt carry).*

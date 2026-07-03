@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0.6
-milestone_name: Adoption-Path Correctness & Dispatch Safety
-status: Awaiting next milestone
-stopped_at: Phase 33 context gathered
-last_updated: "2026-06-29T19:47:46.596Z"
-last_activity: 2026-06-29 — Milestone v1.0.6 completed and archived
+milestone: v1.0.7
+milestone_name: "First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
+status: planning
+last_updated: "2026-07-03T21:51:42.144Z"
+last_activity: 2026-07-03
 progress:
-  total_phases: 12
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 25
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-28)
 
 ## Current Position
 
-Phase: Milestone v1.0.6 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-29 — Milestone v1.0.6 completed and archived
+Status: Defining requirements
+Last activity: 2026-07-03 — Milestone v1.0.7 started
 
 ## Performance Metrics
 
@@ -59,9 +58,11 @@ this public repo — the operator has them):
   project namespace on the operator's local **minikube** cluster. Deleting
   the namespace or cluster destroys the integration-miss repro evidence —
   export before cleanup if the namespace must go.
+
 - **Real-vs-tallied spend:** dashboard/status said $10.86; Anthropic console
   said $3.84 (pricing-table todo has the breakdown). Use console numbers
   when sizing budget caps until the table is fixed.
+
 - **Downstream state:** two PRs on the target repo were open and CI-green at
   session end (the run's implementation + a related docs PR); the pushed run
   branch carried one hand-recovered commit (the integration-miss
