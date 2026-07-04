@@ -5,8 +5,8 @@ milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
 current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
-stopped_at: Phase 36 context gathered (descoped to agent identity only; SIGN-02/03/04 deferred out of v1.0.7)
-last_updated: "2026-07-03T23:43:01.082Z"
+stopped_at: Phase 37 context gathered
+last_updated: "2026-07-04T00:25:33.113Z"
 last_activity: 2026-07-03
 last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
@@ -122,9 +122,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-03T23:43:01.078Z
-Stopped at: Phase 36 context gathered (descoped to agent identity only; SIGN-02/03/04 deferred out of v1.0.7)
-Resume file: .planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md
+Last session: 2026-07-04T00:25:33.109Z
+Stopped at: Phase 37 context gathered
+Resume file: .planning/phases/37-dashboard-surfaces-artifact-view-project-view-log-drawer-sta/37-CONTEXT.md
 
 ## Operator Next Steps
 
