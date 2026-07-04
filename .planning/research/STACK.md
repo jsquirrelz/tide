@@ -1,253 +1,155 @@
-# Stack Research — TIDE v1.0.6 Adoption-Path Correctness & Dispatch Safety
+# Stack Research — TIDE v1.0.7 First-Run Paper Cuts
 
-**Domain:** Corrective patch to a shipping Go/Kubernetes operator (controller-runtime) — four code-level defects on the import/adoption path
-**Researched:** 2026-06-28
-**Confidence:** HIGH — all findings derived from the live codebase (read directly), go.mod, the Go stdlib, and the existing pool/dispatch infrastructure. No new external libraries proposed.
+**Domain:** Kubernetes operator additions — GPG-signed bot commits, Claude 5 pricing rows, promptFile, dashboard artifact views (Run Integrity & Operator Ergonomics)
+**Researched:** 2026-07-03
+**Confidence:** HIGH — every load-bearing claim below was verified against a primary source today (go-git `options.go`, TIDE's own `go.mod`, npm registry JSON, official Anthropic pricing docs fetched live). The generic web-provider confidence classifier tiers raw search results LOW; per-claim confidence is noted in Sources where it diverges.
 
-This file covers ONLY the stack questions specific to v1.0.6. The full prior stack (Go 1.26, controller-runtime v0.24.x, kubebuilder v4.14.0, Ginkgo v2.28, Gomega, Prometheus client_golang, OTel, etc.) is validated and unchanged from prior milestones.
+**Scope note:** This milestone needs almost no new stack. The existing validated stack (Go 1.26, controller-runtime v0.24.x, go-git v5, React 18 + Tailwind v4 dashboard) covers the integration-miss gate, `spec.git.baseRef`, log-drawer states, and the Prometheus setup step with zero additions. New surface: **one Go dep promotion** (indirect → direct), **three npm packages**, and **one data-only pricing table**.
 
----
+## Recommended Stack
 
-## Context — The Four Defects
+### Core Technologies (new for v1.0.7)
 
-Dogfood run #2b validated the v1.0.5 import-resume path but HALTED on single-node OOM after ~60 concurrent planner pods, while also exposing three additional correctness issues:
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| `github.com/ProtonMail/go-crypto/openpgp` | **v1.1.6** (promote indirect → direct) | Pure-Go GPG: parse armored private key from a K8s Secret, sign commits | Already in TIDE's dependency graph — pinned as an *indirect* dep of go-git v5.19.0 (`go.mod:43`). go-git's `CommitOptions.SignKey` is typed as `*openpgp.Entity` from **this fork specifically**, so it is the only compatible choice. Zero new supply-chain surface, no `gpg` binary in any image. |
+| go-git v5 `CommitOptions.SignKey` | v5.19.0 (already pinned) | Sign at all three commit sites (harness, integrate, tide-push) | Verified against `options.go`: `SignKey *openpgp.Entity` — "nil means the commit will not be signed. The private key must be present and already decrypted." go-git produces the armored detached OpenPGP signature internally; the signing call site is a one-field change per `Commit()`. |
+| `react-markdown` | **v10.1.0** | Render planning artifacts (MILESTONE.md, PLAN.md) in the dashboard artifact view | Verified on npm 2026-07-03; peerDeps `react >=18` — compatible with the dashboard's React 18.3.1. Renders markdown to real React elements with **no `dangerouslySetInnerHTML`** — XSS-safe by construction, which matters because artifacts are LLM-authored content. |
+| `remark-gfm` | **v4.0.1** | GFM tables, task lists, strikethrough in artifacts | Verified on npm. Planner templates emit GFM tables (task tables, dependency tables); CommonMark-only rendering would break the approve-gate review surface. |
+| `@tailwindcss/typography` | **v0.5.20** | `prose` styling for rendered markdown | Verified on npm; peerDep `tailwindcss >=3.0.0 \|\| >=4.0.0` — compatible with the dashboard's Tailwind ^4.3.0. Register in CSS (v4 style, no config file): `@plugin "@tailwindcss/typography";` |
 
-- **D1** — `Project.status.costSpentCents` and `usage` block stayed empty while 44 plans were authored. The metered `budget.absoluteCapCents` gate cannot enforce if spend is never tallied. Root: the planner→reporter→Project usage rollup is tied to the normal project lifecycle, which the adoption path bypasses (see D2).
-- **D2** — After `ImportComplete=True` the Project stayed `phase: Initialized` even as the phase→plan cascade ran. The adoption path correctly suppresses the project-planner but never advances the Project to `Running`/planning, so anything keyed off project phase (including D1's cost rollup) never fires.
-- **D3** — ~60 subagent pods dispatched at once (15 phase + 44 plan planners). The pool infrastructure exists and is fully wired, but the chart defaults (`plannerConcurrency: 16`, `executorConcurrency: 4`) are too high for a single-node kind cluster. No mechanism counted in-flight Jobs at the planner level before dispatch in the adoption-path cascade.
-- **D4** — A phase was marked `Succeeded` when its planner exited 1 with `childCount 0` and produced no plans. The `expected == 0` arm in `PhaseReconciler.handleJobCompletion` and `MilestoneReconciler.handleJobCompletion` fires `patchPhaseSucceeded`/`patchMilestoneSucceeded` regardless of whether `out.ExitCode != 0`, treating a failed planner as a genuine leaf. Phase 30 added a childless-success guard for plans; phase and milestone lack the equivalent exit-code check before the leaf path.
+### Pricing table rows (data, not a dependency)
 
----
+Verified 2026-07-03 against `platform.claude.com/docs/en/pricing.md` (official, fetched live) and cross-checked against the models overview page. All USD per MTok; all values are exact integer cents at MTok granularity, so `CostSpentCents` math stays integral.
 
-## D1 — Cost Rollup Under Adoption: No New Dependency
+| Model ID | Input | Output | Cache read (0.1×) | 5m cache write (1.25×) | 1h cache write (2×) |
+|----------|-------|--------|-------------------|------------------------|---------------------|
+| `claude-fable-5` | $10.00 | $50.00 | $1.00 | $12.50 | $20.00 |
+| `claude-opus-4-8` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
+| `claude-opus-4-7` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
+| `claude-opus-4-6` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
+| `claude-sonnet-5` (standard, from 2026-09-01) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `claude-sonnet-5` (intro, through 2026-08-31) | $2.00 | $10.00 | $0.20 | $2.50 | $4.00 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 | $2.00 |
 
-### Root cause (verified in code)
+**Notes for the implementation:**
 
-`budget.RollUpUsage` is called inside `handleJobCompletion` in `milestone_controller.go:587` and `phase_controller.go:518`. That function is entered only when a planner Job completes. Under the adoption path the project-planner Job is suppressed (correct — Phase 30 guard at `project_controller.go:1088`), and the Project lifecycle stalls at `Initialized` (D2), so `reconcileProjectPlannerDispatch` never returns a `Running` project to which rollup accrues.
+- **Sonnet 5 is date-dependent.** Recommend encoding the **standard** ($3/$15) rate, not the intro rate: a tally that slightly overcounts during the intro window is conservative for `absoluteCapCents` enforcement and needs no code change on 2026-09-01. If exactness is wanted, add an effective-date column — but that's schema complexity for a two-month window.
+- **Match exact IDs, not prefixes.** The 2.8× overcount came from unknown IDs falling back to the most-expensive tier. Current-generation IDs are dateless pinned snapshots (`claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`), but **Haiku 4.5's full ID is dated**: `claude-haiku-4-5-20251001` — the API may report either the alias or the full ID depending on surface. Add both spellings (or normalize by stripping a trailing `-YYYYMMDD` before lookup).
+- **Fallback behavior should warn, not silently price at max.** Keep a most-expensive fallback for cap safety, but emit a log line / condition when an unpriced model ID is encountered — that's the observable that would have caught this bug on day one.
+- Cache multipliers (0.1× read, 1.25× 5m write, 2× 1h write) are uniform across models, so the table can store base input/output only and derive cache rates — fewer rows to keep current.
 
-The fix is purely logical in the existing controller code:
+## Installation
 
-1. **Unblock D2 first** (see below) — once the Project advances to `Running` after `ImportComplete=True`, all subsequent planner Jobs at phase/plan levels complete normally and roll up via the existing `handleJobCompletion → budget.RollUpUsage` path already in place.
-2. **Verify the adoption guard** (`project_controller.go:1088`) does not also suppress project-level cost reporting when child planners succeed. It does not — it only suppresses the project-level Job dispatch; phase/plan planner completions are independent and already roll up.
+```bash
+# Go — promote existing indirect dep to direct (no version change; go-git v5.19.0 pins v1.1.6)
+go get github.com/ProtonMail/go-crypto@v1.1.6 && go mod tidy
 
-**Stack additions required:** None. `budget.RollUpUsage` in `internal/budget/tally.go` exists and is correct. The path just needs to be reachable.
+# Dashboard (dashboard/web/)
+npm install react-markdown@10.1.0 remark-gfm@4.0.1
+npm install -D @tailwindcss/typography@0.5.20
+```
 
-**Do NOT add:** A separate "adoption-mode rollup" path, a second `budget.RollUpUsage` callsite in the import controller, or any new budget package. The existing path is correct once D2 is fixed.
+```css
+/* dashboard/web CSS entry — Tailwind v4 plugin registration */
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+```
 
----
+## Integration Notes
 
-## D2 — Project Lifecycle Advances Under Adoption: No New Dependency
-
-### Root cause (verified in code)
-
-`reconcileProjectPlannerDispatch` at `project_controller.go:999` short-circuits correctly at `Initialized` when the adoption guard fires — but it returns `ctrl.Result{}` (nil, nil), so the project parks at `Initialized`. The phase/plan planners fire via their own reconcilers (they watch Phase/Plan CRs, not Project phase), but the Project itself never advances to `Running`.
-
-The fix is a targeted lifecycle transition in `reconcileProjectPlannerDispatch` (or in the adoption guard arm): when `ImportComplete=True` and the adoption guard fires, patch `Project.Status.Phase = PhaseRunning` before returning. This is a single `r.Status().Patch` call using the same `client.MergeFrom` pattern used throughout the existing reconciler.
-
-### Integration point
-
-`project_controller.go` already imports `k8s.io/apimachinery/pkg/api/meta` for `meta.SetStatusCondition`. The phase transition is:
+### GPG signing (pure-Go, no gpg binary)
 
 ```go
-// In the import adoption guard arm, before returning ctrl.Result{}:
-if project.Status.Phase == tidev1alpha2.PhaseInitialized {
-    patch := client.MergeFrom(project.DeepCopy())
-    project.Status.Phase = tidev1alpha2.PhaseRunning
-    meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-        Type:    tidev1alpha2.ConditionReady,
-        Status:  metav1.ConditionTrue,
-        Reason:  "ImportAdopted",
-        Message: "Import tree adopted; advancing to Running for child planner cascade",
-        ...
-    })
-    if err := r.Status().Patch(ctx, project, patch); err != nil {
-        return ctrl.Result{}, err
-    }
-}
+import "github.com/ProtonMail/go-crypto/openpgp"
+
+entities, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(armoredKeyFromSecret))
+// validate: len(entities) >= 1, entities[0].PrivateKey != nil
+// if entities[0].PrivateKey.Encrypted → Decrypt(passphrase) (entity + signing subkeys), or reject with a clear condition
+_, err = wt.Commit(msg, &git.CommitOptions{
+    Author:  &object.Signature{Name: botName, Email: botEmail, When: time.Now()},
+    SignKey: entities[0],
+})
 ```
 
-**Stack additions required:** None. All types and helpers already imported in `project_controller.go`.
+- **`SignKey` over `Signer`.** `CommitOptions` has both; `Signer` (an interface, takes precedence over `SignKey`) is the seam for non-OpenPGP schemes (SSH signing) later. For this milestone `SignKey` is the minimal change at all three commit sites; wrap key loading in one shared helper so a future `Signer` swap is one function. Neither field is deprecated (verified against `options.go`).
+- **Key must be decrypted before use** — go-git will not prompt. Recommend documenting the Secret contract as an *unencrypted* armored private key (`gpg --export-secret-keys --armor`), with an optional `passphrase` Secret key handled via `PrivateKey.Decrypt` on the entity **and each signing subkey** if provided.
+- **GitHub/GitLab "Verified" badge** requires (a) the committer email to match a UID on the key and (b) the public key uploaded to the bot account. The signing work is therefore coupled to the "bot identity uniformly configurable" fix — the hardcoded tide-push identity would break verification if it diverges from the key's UID. One config surface (name, email, secretRef) feeding all three sites.
+- **Secret reach:** signing happens wherever `Commit()` runs. If the harness commit site executes in the subagent container (not the manager), the key Secret must be projected there too — same pattern as the existing git-push creds, but audit all three sites' pod specs.
+- **Optionality:** nil `SignKey` = unsigned commit, so "no secretRef configured → unsigned" falls out naturally; no flag plumbing needed beyond the Secret resolution.
 
-**Do NOT add:** An `ImportReconciler` lifecycle hook that patches the Project phase, a separate reconciler for "adopted projects", or any new condition type. The ProjectReconciler already owns Project phase transitions.
+### promptFile (outcomePrompt from file) — both routes are zero-dependency
 
----
+| Route | Mechanism | Costs |
+|-------|-----------|-------|
+| **CLI-side inlining (recommended)** | `tide apply --prompt-file ./prompt.md` reads the file and sets `spec.outcomePrompt` before create | None: no CRD change beyond docs, no controller change, no RBAC change, no drift semantics. `kubectl`-only users inline the text themselves (status quo). |
+| ConfigMap keyRef | `spec.outcomePromptFrom.configMapKeyRef` (reuse `corev1.ConfigMapKeySelector` — already vendored via `k8s.io/api`); controller resolves via the existing client `Get` | New CRD field + CEL (`outcomePrompt` XOR `outcomePromptFrom`), controller Role needs ConfigMap `get` in watch namespaces, and drift semantics: prompt must be resolved **once** (snapshot into status or an annotation at Initialize) or a mid-run ConfigMap edit changes replanning behavior. |
 
-## D3 — Dispatch Concurrency Cap: Existing Pool Infrastructure, Wrong Defaults
+Recommendation: ship CLI-side inlining now; it's the operator-ergonomics fix the first run actually surfaced (a human authoring a long prompt in an editor). Add the ConfigMap route only if a GitOps consumer asks — and note the size ceiling either way: CRD objects live under etcd's ~1.5 MiB request cap, ConfigMaps under a documented 1 MiB data cap, so any realistic prompt fits both.
 
-### The misdiagnosis to avoid
+### Dashboard artifact transport — ConfigMap persistence over reader Jobs
 
-`MaxConcurrentReconciles` (set via `controller.Options{MaxConcurrentReconciles: N}` in each reconciler's `SetupWithManager`) controls how many **reconcile goroutines** can run concurrently for a given Kind. It does NOT control how many **Jobs** (pods) are in flight. A single reconcile goroutine can dispatch a Job, return, and the next goroutine starts a new reconcile and dispatches another Job. With `MaxConcurrentReconciles: 4` for Plan and 15 phases all reconciling simultaneously, 60 Jobs can and did dispatch.
+**Recommendation: controller writes each planning artifact into a per-artifact ConfigMap at the level boundary** (owner-ref'd to the level CRD, labeled for lookup), and the chi dashboard handler serves it via the manager's existing cached client.
 
-**MaxConcurrentReconciles is the wrong lever for D3.** Do not change it to address pod count.
+- **Size:** ConfigMap data (data + binaryData combined) is capped at **1 MiB** (Kubernetes docs; etcd request cap ~1.5 MiB behind it). TIDE planning artifacts are typically 5–50 KiB — two orders of magnitude of headroom. Guard anyway: truncate at ~900 KiB with a "see git" marker rather than failing the boundary.
+- **Why not a reader Job:** the artifact PVC is **RWO** — on a multi-node cluster a reader pod can hit volume-attach conflicts with a running task pod on another node (exactly the multi-node infra the next milestone targets); plus pod-startup latency (seconds) on every approve-gate view, plus Job GC and RBAC for log streaming. The three ad-hoc reader pods in the first run are the symptom this feature removes — don't automate the symptom.
+- **Why this doesn't violate CRD-status-only persistence:** the ConfigMap is a *display cache*, not truth — git (pushed at level boundaries) remains the artifact source of truth, and the ConfigMap is rederivable/deletable. Do **not** put artifact bodies in CRD `.status` (etcd per-object budget is the reason that constraint exists).
+- **Markdown rendering:** `react-markdown` + `remark-gfm` + `prose` classes (versions above). v10 removed the `className` prop — wrap: `<div className="prose prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown></div>`. Do **not** add `rehype-raw`: it re-enables raw-HTML passthrough and reintroduces injection risk from model-authored artifacts.
 
-### The correct mechanism: the existing `internal/pool` semaphore
+### Features needing NO stack additions
 
-The pool infrastructure is complete and production-wired (verified in `internal/pool/pool.go`, `cmd/manager/main.go:343-353`):
+| Feature | Covered by |
+|---------|-----------|
+| Integration-miss gate (serialize merges, reachability check, `lastPushedSHA`) | go-git v5.19.0: existing merge plumbing + `repo.ResolveRevision`, `object.Commit.IsAncestor` for reachability; serialization is a controller-side mutex/workqueue concern |
+| `spec.git.baseRef` | `repo.ResolveRevision(plumbing.Revision(ref))` resolves branch/tag/SHA; reject unresolvable with a clear condition — no new dep |
+| Log-drawer loading/streaming/pod-gone states | Existing SSE + client-go pod log API; pure frontend state-machine work |
+| Prometheus setup step | Docs (INSTALL.md), chart NOTES.txt, dashboard banner — no code deps; keep `prometheus.enabled=false` default per existing anti-pattern |
+| v1.0.6 tech-debt carry (RetryOnConflict, plannerConcurrency default, test-tier split) | `k8s.io/client-go/util/retry` already vendored |
 
-```go
-// cmd/manager/main.go:343-353 (verified live)
-plannerPool := pool.New(cfg.PlannerConcurrency, "planner")
-executorPool := pool.New(cfg.ExecutorConcurrency, "executor")
+## Alternatives Considered
 
-plannerPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=planner")
-executorPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=executor")
-```
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| `CommitOptions.SignKey` | `CommitOptions.Signer` interface | When adding a second signature scheme (SSH signing / KMS-held keys). Takes precedence over SignKey; same package. Wrap key loading in one helper now so this swap stays cheap. |
+| ProtonMail/go-crypto v1.1.6 (go-git's pin) | Bumping go-crypto to latest (v1.3.x) | Only if go-git itself bumps it. Independent bumps risk type/behavior skew with go-git's internal signing path — same coupling rule as `k8s.io/*`. |
+| ConfigMap artifact cache | In-namespace PVC reader Job | If artifacts routinely exceed ~1 MiB (they don't) or if raw task *diffs* (potentially large) later need serving — then a streaming reader is worth its latency. |
+| ConfigMap artifact cache | go-git read of the bare repo from the manager | If the manager already has the project PVC mounted at dashboard-serve time; avoids the copy. Verify mount topology before choosing — RWO makes this fragile on multi-node. |
+| CLI-side prompt inlining | `spec.outcomePromptFrom.configMapKeyRef` | GitOps pipelines that can't shell out to `tide`; costs a CRD field, RBAC, and resolve-once snapshot semantics. |
+| react-markdown | `marked`/`markdown-it` + DOMPurify | Never for this dashboard — string-HTML pipelines need a sanitizer and `dangerouslySetInnerHTML`; react-markdown avoids the class of bug entirely for LLM-authored input. |
+| Standard Sonnet 5 pricing row | Effective-dated intro pricing rows | Only if budget-tally exactness during Jul–Aug 2026 matters more than schema simplicity; intro window ends 2026-08-31. |
 
-`pool.Acquire` is a blocking `chan struct{}` send that waits until a slot is available:
+## What NOT to Use
 
-```go
-// pool.go:61-67 (verified live)
-func (p *Pool) Acquire(ctx context.Context) error {
-    select {
-    case p.sem <- struct{}{}:
-        return nil
-    case <-ctx.Done():
-        return ctx.Err()
-    }
-}
-```
+| Avoid | Why | Use Instead |
+|-------|-----|-------------|
+| `golang.org/x/crypto/openpgp` | Frozen/deprecated upstream **and** type-incompatible: go-git's `SignKey` is ProtonMail's `openpgp.Entity`, not x/crypto's | `github.com/ProtonMail/go-crypto/openpgp` |
+| Shelling out to a `gpg` binary | Adds a binary + keyring state to every image; breaks the pure-Go constraint; keyring permissions in containers are a known pain | go-git `SignKey` (pure Go) |
+| Artifact bodies in CRD `.status` | Blows the per-object etcd budget the CRD-status-only constraint depends on | Per-artifact ConfigMap display cache (git = truth) |
+| `rehype-raw` / `dangerouslySetInnerHTML` in the artifact view | Re-enables HTML injection from model-authored markdown | react-markdown's default (raw HTML rendered as text) |
+| Prefix/substring model-ID matching in the pricing table | The `-fast`, dated-snapshot, and Bedrock-prefixed variants make prefix matching wrong in both directions | Exact-ID lookup with a normalizer for trailing `-YYYYMMDD`, plus a logged most-expensive fallback |
+| Hardcoding "$2/$10" for Sonnet 5 | Intro pricing expires 2026-08-31 → silent *under*count after that, the inverse of the bug being fixed | Standard $3/$15 row (conservative during intro) |
 
-`PlannerPool.Acquire` is called before every planner Job creation at all five dispatch sites (milestone, phase, plan, project, and wave level — verified via grep). The chart default `plannerConcurrency: 16` allows up to 16 simultaneous planner pods, which is the OOM cause: 44 plan + 15 phase = 59 planners can dispatch against a 16-slot pool.
+## Version Compatibility
 
-### The fix: lower chart defaults for single-node targets
-
-**`charts/tide/values.yaml` change (FIXED CONTRACT — binary catches up to chart, never reverse):**
-
-```yaml
-# Before (current):
-plannerConcurrency: 16
-executorConcurrency: 4
-
-# After:
-plannerConcurrency: 4   # sane for single-node kind; operator raises for multi-node
-executorConcurrency: 8  # executor pods are smaller; more can coexist
-```
-
-A single-node kind cluster with 8 GiB RAM can sustain roughly 4 concurrent Claude CLI + credproxy sidecar pairs (each ~1-2 GiB footprint) before memory pressure degrades throughput. `plannerConcurrency: 4` prevents the 60-pod cascade. `executorConcurrency: 8` preserves task parallelism (executor pods are lighter than planner+credproxy pairs).
-
-These defaults should ship with documentation in `values.yaml` and `docs/production.md` explaining how to size for multi-node clusters.
-
-### Separately-sized pools preserved
-
-The spec contract "size planner and executor pools separately" is preserved. The existing architecture already has two independent `Pool` structs, two independent `PreCharge` calls with distinct label selectors (`tideproject.k8s/role=planner` vs `tideproject.k8s/role=executor`), and two independent chart values. Nothing in this fix unifies them.
-
-**Stack additions required:** Zero. The pool is wired, the Acquire/Release calls are in place at all five dispatch sites, and `PreCharge` corrects the count on controller restart. The fix is a chart default change plus a `values.yaml` comment.
-
-**Do NOT add:**
-- A new in-process queue, rate limiter, or work queue (`workqueue.RateLimitingInterface`) — the pool semaphore already is the rate limiter
-- `MaxConcurrentReconciles` tuning as the OOM fix — wrong lever
-- An external job scheduler (Argo Workflows, Tekton) — the pool IS the scheduler
-- A Kubernetes `ResourceQuota` on the namespace — correct direction conceptually but adds operator overhead and doesn't replace the pool; complement only
-- Any in-Job concurrency limiting — the issue is at dispatch, not execution
-
-### Enhancements to consider (not blocking)
-
-- **Prometheus metric for pool queue depth** — `pool.go` currently has no instrumentation. A `prometheus.Gauge` for `len(sem)` vs `cap(sem)` would surface saturation. Not needed for the OOM fix, but useful for tuning on production clusters. Implement with existing `prometheus/client_golang v1.23`, zero new dep.
-- **Per-Project pool isolation** — today all projects share one global planner pool. This is correct for v1.0.6; per-project pools are a future concern (multi-tenant) and are explicitly out of scope.
-
----
-
-## D4 — Planner Failure Semantics: No New Dependency
-
-### Root cause (verified in code)
-
-In both `MilestoneReconciler.handleJobCompletion` (`milestone_controller.go:673`) and `PhaseReconciler.handleJobCompletion` (`phase_controller.go:593`), the `expected == 0` branch fires `patchMilestoneSucceeded`/`patchPhaseSucceeded` unconditionally:
-
-```go
-// milestone_controller.go:672-676 (verified)
-if expected == 0 {
-    // Genuine leaf — planner authored no Phase children.
-    logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
-    return r.patchMilestoneSucceeded(ctx, ms)
-}
-```
-
-The defect: when `out.ExitCode != 0` AND `out.ChildCount == 0`, this arm fires, marking the parent Succeeded. A planner that failed with zero children is NOT a genuine leaf — it is a failed planner. The `expected == 0` case must first check `out.ExitCode`.
-
-The plan controller has the same structural issue at `plan_controller.go:691-700` (the `expected == 0` arm for the `handlePlannerJobCompletion` path), but plan planner failures manifest differently (they fail the reconcileWaveMaterialization path, not patchPlanSucceeded directly), and the D4 report observed it at the phase level.
-
-### Fix shape
-
-In `handleJobCompletion` for both `MilestoneReconciler` and `PhaseReconciler`, immediately before the `expected == 0 → patchSucceeded` arm, add:
-
-```go
-if envReadOK && out.ExitCode != 0 {
-    // Planner failed — do NOT succeed the parent as a leaf.
-    // Fail (or retry) instead. A failed planner with zero children is not
-    // a genuine leaf; it is a broken planner that must be re-run.
-    return r.patchMilestoneFailed(ctx, ms, "PlannerFailed",
-        fmt.Sprintf("planner Job exited %d with 0 children (not a leaf)", out.ExitCode))
-}
-```
-
-The existing `patchMilestoneFailed`/`patchPhaseFailed` functions already exist and set `Status.Phase = "Failed"` plus a `ConditionFailed` condition. The retry path is `tide resume --retry-failed`, which already handles Failed phases and milestones (validated in v1.0.1 Phase 12).
-
-For the `!envReadOK` case (read error): the existing behavior (requeue, let the fallback BoundaryDetected path handle it) is already correct and should not change — we only know to fail when we can actually read the exit code.
-
-**Stack additions required:** None. `patchMilestoneFailed`, `patchPhaseFailed` exist. The condition type `tidev1alpha2.ConditionFailed` exists. The retry verb `tide resume --retry-failed` is implemented.
-
-**Do NOT add:**
-- Automatic planner retry inside the controller (re-dispatch on failure is `tide resume --retry-failed`, not a controller backoff loop)
-- A new condition type for "planner failed with zero children"
-- Any change to `handleJobCompletion` for `ProjectReconciler` without separately verifying — project-level planner failures may need the same guard but it was not the observed defect and should be verified independently
-
----
-
-## go.mod Impact
-
-**Zero new `require` entries.**
-
-All four fixes use only:
-- Existing controller-runtime types: `client.MergeFrom`, `ctrl.Result`, `meta.SetStatusCondition`
-- Existing TIDE types: `tidev1alpha2.PhaseRunning`, `tidev1alpha2.ConditionReady`, `tidev1alpha2.ConditionFailed`
-- Existing TIDE functions: `budget.RollUpUsage`, `patchMilestoneFailed`, `patchPhaseFailed`, `r.Status().Patch`
-- Chart values: `plannerConcurrency`, `executorConcurrency` in `charts/tide/values.yaml`
-
-No new packages, no new `require` entries, no external queues or schedulers.
-
----
-
-## Summary Table
-
-| Defect | Fix mechanism | Integration point | New dep? |
-|--------|--------------|-------------------|----------|
-| D1 — cost rollup under adoption | Unblock D2 so `PhaseRunning` is reached; existing `budget.RollUpUsage` path already correct | `project_controller.go` adoption guard | None |
-| D2 — lifecycle stalls at Initialized | Patch `Project.Status.Phase = PhaseRunning` when adoption guard fires and project is still Initialized | `project_controller.go:reconcileProjectPlannerDispatch` | None |
-| D3 — no concurrency cap | Lower chart defaults: `plannerConcurrency: 4`, `executorConcurrency: 8`; existing `pool.Acquire` already enforces the cap | `charts/tide/values.yaml` | None |
-| D4 — false Succeeded on failed planner | Add `if envReadOK && out.ExitCode != 0 { patchFailed }` before the `expected == 0 → patchSucceeded` arm | `milestone_controller.go`, `phase_controller.go` in `handleJobCompletion` | None |
-
----
-
-## What NOT to Add (Explicit Prohibition)
-
-| Avoid | Why |
-|-------|-----|
-| `MaxConcurrentReconciles` change to fix D3 | Bounds reconcile goroutines, not in-flight Jobs — wrong lever |
-| External work queue (Redis, NATS, etc.) | Pool semaphore already IS the work queue; adding an external queue violates no-external-DB constraint and adds ops burden |
-| Argo Workflows / Tekton for concurrency | TIDE owns the DAG; waves are derived, not declared as Workflow templates (spec anti-pattern, enforced) |
-| Per-Project planner pools | Out of scope for v1.0.6; shared pool is correct for single-project dogfood run |
-| Automatic planner retry in controller | Retry is `tide resume --retry-failed`; controller retry loops add complexity and re-spend risk |
-| `ImportReconciler` lifecycle hook for D2 | ProjectReconciler owns Project phase; cross-reconciler status writes violate the ownership model |
-| New budget package / second RollUpUsage callsite for D1 | Existing path is correct once D2 is unblocked; a second callsite creates double-counting risk |
-| Kubernetes `ResourceQuota` as the OOM fix | Complementary but does not replace pool; adds operator onboarding burden |
-
----
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| ProtonMail/go-crypto v1.1.6 | go-git v5.19.0 | go-git's `go.mod` dictates this pin; never bump independently (same rule as `k8s.io/*` ← controller-runtime) |
+| react-markdown 10.1.0 | React ≥18 (dashboard: 18.3.1 ✓) | v10 removed `className` prop — style via a wrapper element |
+| remark-gfm 4.0.1 | react-markdown 10.x (unified v11 ecosystem) | Both on `unified@^11` / `remark-parse@^11` — matched majors |
+| @tailwindcss/typography 0.5.20 | tailwindcss ≥4 (dashboard: ^4.3.0 ✓) | v4 registration is CSS `@plugin`, not `tailwind.config.js` |
 
 ## Sources
 
-- `internal/pool/pool.go` — `Pool.Acquire`/`Release`/`PreCharge` via `chan struct{}` semaphore; `PreCharge` lists live Jobs by label selector (HIGH confidence, live code, read directly)
-- `cmd/manager/main.go:343-353` — `plannerPool` and `executorPool` constructed with `pool.New(cfg.PlannerConcurrency, "planner")`; both `PreCharge`d at startup; `plannerPool` wired into all five planner reconcilers (HIGH confidence, live code, read directly)
-- `charts/tide/values.yaml:78-79` — `plannerConcurrency: 16`, `executorConcurrency: 4` confirmed (HIGH confidence, live file, read directly)
-- `internal/config/config.go` — `Config.PlannerConcurrency` default 16, `ExecutorConcurrency` default 4; config validated >= 1 (HIGH confidence, live code, read directly)
-- `internal/controller/milestone_controller.go:673-676` — `expected == 0 → patchMilestoneSucceeded` without exit-code check; confirmed D4 gap (HIGH confidence, live code, read directly)
-- `internal/controller/phase_controller.go:593-596` — same `expected == 0 → patchPhaseSucceeded` gap (HIGH confidence, live code, read directly)
-- `internal/controller/phase_controller.go:525-533` — `setBillingHaltIfNeeded` already gated on `envReadOK && out.ExitCode != 0`; D4 fix mirrors this pattern (HIGH confidence, live code, read directly)
-- `internal/controller/project_controller.go:1088-1133` — Phase 30 adoption guard returns `ctrl.Result{}` without advancing `Status.Phase` from Initialized; confirmed D2 root (HIGH confidence, live code, read directly)
-- `internal/controller/milestone_controller.go:587-590` — `budget.RollUpUsage` gated on `isFirstCompletion && envReadOK && project != nil`; reachable only via `handleJobCompletion` (planner Job completion path, not import path); confirmed D1 root (HIGH confidence, live code, read directly)
-- `internal/controller/import_controller.go` — `succeedImport` sets `ConditionImportComplete=True` but performs no Project phase transition; ImportReconciler has no Project.Status.Phase write; confirmed D2 root (HIGH confidence, live code, read directly)
-- controller-runtime v0.24.x docs — `controller.Options{MaxConcurrentReconciles}` documents goroutine concurrency, not Job count (HIGH confidence, verified against existing code usage in all SetupWithManager calls)
+- `go-git/go-git` `options.go` (master, fetched 2026-07-03) — `CommitOptions.SignKey` / `Signer` field declarations, decrypted-key requirement, precedence, no deprecation — HIGH (primary source)
+- `/Users/justinsearles/Workspace/repos/tide/go.mod` — go-git v5.19.0 pinned; ProtonMail/go-crypto v1.1.6 already indirect — HIGH (local evidence)
+- `platform.claude.com/docs/en/pricing.md` + `docs/en/about-claude/models/overview.md` (fetched live 2026-07-03) — full per-model input/output/cache-read/5m-write/1h-write table; Sonnet 5 intro pricing through 2026-08-31; cache multipliers 0.1×/1.25×/2× — HIGH (official docs, cross-checked against the claude-api skill's cached table dated 2026-06-24)
+- npm registry (`registry.npmjs.org`, fetched 2026-07-03) — react-markdown 10.1.0 (peer react ≥18), remark-gfm 4.0.1, @tailwindcss/typography 0.5.20 (peer tailwindcss ≥4) — HIGH (primary source)
+- [react-markdown changelog](https://github.com/remarkjs/react-markdown/blob/main/changelog.md) — v10 `className` removal, v9 React-18 floor — HIGH
+- Kubernetes ConfigMap documentation (concepts/configuration/configmap) — 1 MiB data cap — HIGH (stable documented limit)
+- [tailwindcss-typography](https://github.com/tailwindlabs/tailwindcss-typography) + [Tailwind v4 plugin discussion](https://github.com/tailwindlabs/tailwindcss/discussions/14551) — `@plugin` registration in v4 — MEDIUM (community-confirmed, matches npm peerDeps)
+- Supporting search results: [go-git commit signature verification](https://darkowlzz.github.io/post/git-commit-signature-verification/), [react-markdown repo](https://github.com/remarkjs/react-markdown), [remark-gfm repo](https://github.com/remarkjs/remark-gfm)
 
 ---
-
-*Stack research for: TIDE v1.0.6 — Adoption-Path Correctness & Dispatch Safety*
-*Researched: 2026-06-28*
+*Stack research for: TIDE v1.0.7 First-Run Paper Cuts*
+*Researched: 2026-07-03*

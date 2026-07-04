@@ -1,405 +1,196 @@
-# Architecture Research: v1.0.6 Adoption-Path Correctness & Dispatch Safety
+# Architecture Research — v1.0.7 First-Run Paper Cuts (Integration Architecture)
 
-**Domain:** TIDE controller corrective patch — four defects on the import/adoption path (D1–D4)
-**Researched:** 2026-06-28
-**Confidence:** HIGH (all findings from direct code reading at HEAD; verified line numbers cited)
+**Domain:** Kubernetes operator (TIDE) — brownfield integration of run-integrity + git-ergonomics + dashboard-visibility features into the shipped v1.0.6 codebase
+**Researched:** 2026-07-03
+**Confidence:** HIGH (every claim below is grounded in direct reads of the v1.0.6 source at the cited file:line; the one MEDIUM-confidence item — the exact race mechanism of the observed miss — is flagged explicitly and needs the repro the todo already calls for)
 
----
+## Existing Architecture (as-built, relevant slice)
 
-## Context
-
-This document maps each of D1–D4 from `run-2b-FINDINGS.md` to the exact files and functions
-that must change. All existing infrastructure is already in place (global Execution DAG, layered
-Kahn, shared dispatch helpers, reporter Jobs, CRD-`.status`-only). This is a corrective patch
-on those seams, not new architecture.
-
----
-
-## D2 + D1: The Single Lifecycle Seam
-
-### What the defect is
-
-**D2**: After `ImportComplete=True`, `project.Status.Phase` stays `Initialized`. The adoption guard
-returns early without advancing the Project to `Running`. Anything keyed off `Running` — including
-the budget gate's halt-on-cap logic — never observes the project as actively spending.
-
-**D1**: `Project.Status.Budget.CostSpentCents` (and `TokensSpent`) stays at zero during the
-adoption planning cascade. The metered `budget.absoluteCapCents` gate cannot halt because
-spend is never tallied. The run spent blind; only the node OOM stopped it.
-
-D1 and D2 share one root: the adoption guard in `reconcileProjectPlannerDispatch` returns before
-the line that sets `PhaseRunning`.
-
-### Exact seam
-
-**File:** `internal/controller/project_controller.go`
-**Function:** `reconcileProjectPlannerDispatch`
-
-The normal non-adoption path (line 1203–1215) does:
-
-```go
-// Step 10: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
-patch := client.MergeFrom(project.DeepCopy())
-project.Status.Phase = tidev1alpha2.PhaseRunning
-meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-    Type:   tidev1alpha2.ConditionAuthoringPlanner,
-    ...
-})
-if err := r.Status().Patch(ctx, project, patch); err != nil { ... }
+```
+┌──────────────────────────── manager pod ────────────────────────────┐
+│ ProjectReconciler          PlanReconciler           Phase/Milestone │
+│  · clone Job dispatch       · wave gate (interior    reconcilers    │
+│  · boundary-push state        boundaries only)       · level push   │
+│    machine (Complete-only)  · plan-boundary push       trigger      │
+│  · reads push envelope        (nil branches!)                       │
+│    (FAILED arm only)                                                │
+└───────┬──────────────────────────┬──────────────────────┬───────────┘
+        │ creates Jobs             │ creates Jobs         │
+┌───────▼───────┐  ┌───────────────▼─────────┐  ┌─────────▼──────────┐
+│ tide-clone-   │  │ tide-push-wave-         │  │ tide-push-         │
+│ <proj.UID>    │  │ <plan.UID>-<k>          │  │ <proj.UID>         │
+│ clone + Ensure│  │ merge wave-k branches   │  │ integrate (nil) +  │
+│ RunBranch@HEAD│  │ into run branch, local  │  │ commit-skip + push │
+└───────┬───────┘  └───────────────┬─────────┘  └─────────┬──────────┘
+        │                          │                      │
+        └───────────┬──────────────┴──────────────────────┘
+                    ▼  all mount the SAME RWO PVC subPath <uid>/workspace
+   /workspace/repo.git                    (shared bare repo)
+   /workspace/worktrees/run-<branch>/     (ONE shared integration+push worktree)
+   /workspace/worktrees/<task-uid>/       (per-task worktrees, executor commits)
+   /workspace/envelopes/<cr-uid>/         (planner artifacts: *.md, children/*.json, out.json)
 ```
 
-The adoption guard (lines 1105–1133, Phase 30 RESUME-PARTIAL-02) returns before that:
+Key as-built facts the new features must integrate with:
 
-```go
-if metav1.IsControlledBy(&msList.Items[i], project) {
-    logf.FromContext(ctx).V(1).Info("import adopted; skipping project planner dispatch", ...)
-    return ctrl.Result{}, nil   // <-- returns here; PhaseRunning never set
-}
+| Fact | Where | Consequence |
+|------|-------|-------------|
+| Task branches `tide/wt-<uid>` fork from run branch via `git worktree add -b` | `pkg/git/worktree.go:59` (called from `internal/harness/worktree.go:31`) | Executor commits land in the shared bare repo's object DB directly; no push step |
+| Integration = `git merge --no-ff` loops inside tide-push Jobs | `pkg/git/integrate.go:60`, invoked from `cmd/tide-push/main.go:361` | All merges run in the ONE shared worktree `worktrees/run-<branch>/` |
+| Interior wave boundaries gated per plan: Job `tide-push-wave-<plan.UID>-<k>`, `Status.IntegratedThroughWave` ladder | `internal/controller/plan_controller.go:986-1078` | Serialized within a plan; NOT across plans |
+| Boundary pushes are commit-skip pushes of run-branch HEAD | `cmd/tide-push/main.go:488-528` (`worktreeClean` → push existing HEAD) | A push "succeeding" says nothing about integration completeness |
+| Push result envelope (incl. `HeadSHA`) written to `/dev/termination-log` + PVC | `cmd/tide-push/main.go:662-703` | The controller CAN read HeadSHA without mounting the PVC — it just doesn't on success |
+| Manager/dashboard cannot mount per-project RWO PVCs | dashboard is a chi `manager.Runnable` (`cmd/dashboard/main.go:162`, `router.go:110`) | Artifact view needs an in-namespace transport |
+| `tide artifact-get` already implements an inspector-pod PVC reader | `cmd/tide/artifact_get_run.go:154-283` | Precedent for reader-pod transport exists — CLI-side, not dashboard-side |
+
+## Q1 — Where the wave-parallel integrate race lives
+
+Three concrete defect surfaces, in decreasing certainty. The fix design below covers all three; the repro test should discriminate which one bit the 2026-07-03 run.
+
+### 1a. CONFIRMED structural gap: the final wave of every plan is never integrated
+
+- `reconcileWaveBoundary` iterates `for k := 0; k < len(layers)-1; k++` — comment says it outright: *"Skip the last wave (no k+1 to gate on)"* (`plan_controller.go:1192-1193`). The final wave's branches get no `tide-push-wave-*` Job.
+- The only code that would merge them at the plan boundary — the D-04 branch-collection loop in `PlanReconciler.maybeTriggerBoundaryPush` (`boundary_push.go:215-223`) — is **effectively dead code**: its sole caller passes `taskItems=nil` (`plan_controller.go:770`), and it fires at *planner-Job completion*, before Tasks even exist. The CR-03 comment at `plan_controller.go:757-766` documents this as a known deferred defect ("firing the push from a separate seam in the wave-materialization path on task-status updates — out of REVIEW-FIX scope").
+- Phase/milestone/project boundary pushes pass no branches either (`boundary_push.go:200-207`, `project_controller.go:849-855`). Net: **any task in a plan's last Kahn layer relies on nothing to reach the run branch.** For a single-wave plan, NO task is ever integrated. This has been true since the gate was born (commit `7eb78d2`, Plan 11-03) and the kind suite never asserts run-branch content (`grep 'tide: integrate' test/integration/kind/` → zero hits).
+- Fit to the observed miss: with layers `[[01,02],[03]]` this predicts exactly "integrate commits for 01 and 02, task 03 missing." The todo recalls 02+03 as the parallel pair — layer layout needs the repro to pin (MEDIUM confidence on attribution, HIGH on the gap itself).
+
+### 1b. Job-identity hazard: the branch set is not part of the integration Job's identity
+
+`tide-push-wave-<plan.UID>-<waveIndex>` is the idempotency key; the `--integrate-task-branches` CSV is frozen at first dispatch (`boundary_push.go:164-172`). If a Job is ever created against a stale informer-cache task snapshot, later reconciles see the Job exists → stamp `IntegratedThroughWave` on its success (`plan_controller.go:1038-1046`) → any branch missing from the original CSV is dropped **silently and permanently**. Nothing ever re-checks the set.
+
+### 1c. Cross-plan / cross-Job concurrency on the shared worktree
+
+Within a plan, the `IntegratedThroughWave` ladder serializes. Across the project it does not: two plans in the same global wave finishing near-simultaneously produce two concurrent `tide-push-wave-<planA/B.UID>-*` Jobs, and a level boundary push (`tide-push-<project.UID>`) can run concurrently with either. All of them mutate the same `worktrees/run-<branch>/` checkout and the same run-branch ref. Concurrent `git merge`/`commit` in one worktree is a lost-update surface (index.lock contention at best; ref read-merge-write interleaving at worst). Note the RWO PVC forces all these pods onto **one node** — which makes a filesystem `flock` a sound serialization primitive here.
+
+### Serialization/retry recommendation (per-task-serialized vs retry-on-lost-merge vs merge queue)
+
+**Recommendation: keep the per-wave Job model, add (i) final-wave coverage, (ii) idempotent full-set re-merge + post-merge ancestry verification inside tide-push, (iii) a per-workspace flock. Do NOT build a merge queue.**
+
+- *Per-task serialized integrate* — unnecessary granularity; merges within one Job are already sequential in-process. The gap is between Jobs, not between tasks.
+- *Merge queue* (single long-lived integrator per project) — a new component + queue state that violates the "resumption state is minimal" constraint; overkill for one-human-one-run scale.
+- *Retry-on-lost-merge* — fits the reconcile model exactly: level-triggered, idempotent, verifiable. `git merge --no-ff` of an already-merged branch is an "Already up to date" no-op (exit 0, no commit), so passing the **full** set of Succeeded-task branches at every integration point converges. Verification is `git merge-base --is-ancestor <branch> HEAD` per branch after the merge loop; any failure → new exit code (e.g. `14` / reason `integration-incomplete`) → the reconciler's existing Failed-Job arms retry (wave gate: `plan_controller.go:1031-1037`; boundary push: bounded retry in `reconcileBoundaryPush`).
+
+Concrete changes (all MODIFY, no new components):
+
+| Change | Site |
+|--------|------|
+| Extend the wave loop to `k < len(layers)` so the final wave gets a `tide-push-wave-<plan.UID>-<len(layers)>` Job, and gate `patchPlanSucceeded` on it | `plan_controller.go:1192-1214` |
+| Pass all-Succeeded branches (cumulative, not just wave-k) into each integration Job; merges are idempotent so this self-heals 1b | `plan_controller.go:1063-1069`, `boundary_push.go:146-176` |
+| `flock` on `<workspace>/integrate.lock` around the merge loop | `pkg/git/integrate.go:60` (new guard at top) |
+| Post-merge `--is-ancestor` verification + exit 14 | `pkg/git/integrate.go` (new verify step), `cmd/tide-push/main.go` exit-code map |
+
+## Q2 — Completeness gate placement + lastPushedSHA stamping
+
+### Completeness gate: two seams, upstream-prevent + downstream-detect
+
+The manager cannot run git against the PVC (it can't mount it), so **verification must execute inside a Job**; the controller's job is to pass the expected set and interpret the exit code.
+
+1. **Plan level (prevent):** plan `Succeeded` is only stamped after the final-wave integration Job (which now merges + verifies every Succeeded task branch of the plan) succeeds. This is the Q1 fix — same seam.
+2. **Project boundary push (detect):** `runPush` gains `--verify-task-branches=<CSV>` — verify-only ancestry check of every Succeeded Task's `tide/wt-<uid>` branch against run-branch HEAD *before* pushing. The ProjectReconciler collects the set with a cheap `List` of Tasks by the `tideproject.k8s/project` label filtered to `Status.Phase=="Succeeded"`, in `dispatchBoundaryPush` (`project_controller.go:842-856`). On exit 14 the existing envelope-classification arm (`project_controller.go:753-824`) maps `integration-incomplete` to a **new sticky condition** (mirror the leak/lease operator-recovery arms) — the run branch never ships incomplete again, and the miss is loud.
+   - Respect the #13b decision: `Complete` stays a control-plane rollup and is **not** gated on the push (`project_controller.go:637-641` documents this deliberately). The trust signal is `BoundaryPushed=True` + the new verification — gate the *push*, not `Complete`.
+   - No empty-diff marker needed: `CommitWorktree` already fails empty-diff tasks (`internal/harness/commit.go:37-47`), so every Succeeded task is guaranteed a branch with a real commit.
+
+### lastPushedSHA: CONFIRMED missing stamp, exact location
+
+`reconcileBoundaryPush`'s success arm (`project_controller.go:734-749`) sets `BoundaryPushed=True` and clears `LeaseFailureCount` — but **never calls `readPushEnvelope`**; that helper is only invoked in the `isJobFailed` arm (`:754`). The envelope's `HeadSHA` exists precisely for this (design comment at `project_controller.go:472-473`: "on success, patch Status.Git.LastPushedSHA" — never implemented). Fix: in the success arm, call the existing `readPushEnvelope(ctx, ns, pushJobName)` and add `project.Status.Git.LastPushedSHA = env.HeadSHA` to the same status patch.
+
+Side effect worth noting in the plan: today every push runs with an empty lease anchor (`--last-pushed-sha=""` → `pkg/git/push.go:70` omits force-with-lease entirely), so the D-B6 external-mutation fence has been inert. Stamping fixes the fence too. Also note mid-run level pushes (`triggerBoundaryPush` from plan/phase/milestone) are fire-and-forget — nothing observes their envelopes; acceptable for v1.0.7 if the project-boundary stamp lands, but the plan should state that scope choice.
+
+## Q3 — baseRef plumbing
+
+Chain (matches the todo; all sites verified):
+
+```
+Project.spec.git.baseRef                    api/v1alpha2/project_types.go:205 (GitConfig — NEW optional field, CEL: optional string)
+  → ProjectReconciler clone dispatch        project_controller.go:571-580 (CloneOptions gains BaseRef)
+  → buildCloneJob args --base-ref=<ref>     push_helpers.go:292-303
+  → runClone                                cmd/tide-push/main.go:259-326
+  → EnsureRunBranch(bareRepo, branch, ref)  pkg/git/branch.go:40 (resolve refs/heads/<ref> → refs/tags/<ref> (peel) → SHA via CommitObject; today it hard-codes repo.Head() at :58)
 ```
 
-**Fix for D2**: Before the `return ctrl.Result{}, nil` in the adoption guard, add a status
-patch that sets `project.Status.Phase = tidev1alpha2.PhaseRunning`. This is a narrow
-one-line addition at a single site, idempotent (Initialized → Running is a no-op if already
-Running), and does not affect any other adoption guard invariant.
+- Fetch coverage: `Clone` is a full bare `PlainCloneContext(bare=true)` with no depth (`pkg/git/clone.go:45`) — all heads + tags arrive, so branch/tag refs need no CloneOptions change; an arbitrary SHA resolves iff reachable from a fetched ref (document that limit).
+- Failure surface: unresolvable ref → exit 2 invariant with a distinct reason written to the termination log (clone-mode currently writes **no envelope** — add one, or reuse `TerminationMessageFallbackToLogsOnError` which `buildCloneJob` doesn't set today). The ProjectReconciler's terminal-failed clone arm (`project_controller.go:610-628`) currently deletes + re-dispatches ANY failed clone forever-ish — it must classify: `baseref-unresolvable` → permanent condition (e.g. `CloneFailed/BaseRefUnresolvable`), no re-dispatch loop. That satisfies the todo's "clear condition rather than a cryptic worktree-add failure."
+- Chart: CRD schema addition rides a chart version bump (FIXED-contract rule); no values change needed beyond the CRD.
 
-**Fix for D1**: The `budget.RollUpUsage` calls at the phase and plan completion seams already
-exist and already reference the correct project object. They were not firing during the run
-because the node OOM killed jobs before they completed. However, D1's headline claim
-("budget.absoluteCapCents cannot enforce") also requires that the budget gate halts on each
-ProjectReconciler reconcile. The `handleBudgetGate` in `reconcileProjectPhase2` already does
-this — but it checks `IsCapExceeded` against `CostSpentCents`, which is zero when jobs are
-killed before completing. The fix for D1 is therefore primarily ensuring that:
+## Q4 — Signing at the three commit sites + Secret plumbing
 
-1. The project phase advances to `Running` (D2 fix), which correctly represents the lifecycle
-   state and ensures the `handleBudgetGate` logic sees the correct phase for bypass/halt
-   decisions (phase=`Initialized` passes through the budget gate today — it only halts on
-   `PhaseBudgetExceeded`).
-2. No additional skip path silently suppresses rollup for adopted plans/phases: confirmed
-   absent. The `if project.Spec.ImportSource != nil { ... skip rollup ... }` exists only in
-   `handleProjectJobCompletion` at line 1306 (project-level planner rollup — correct, because
-   the project planner doesn't run under adoption). Phase and plan `handleJobCompletion`/
-   `handlePlannerJobCompletion` have NO import-source skip — they call `budget.RollUpUsage`
-   normally when `isFirstCompletion && envReadOK && project != nil`.
+The three sites split by mechanism, which drives the design:
 
-The D2 fix (advancing to `Running`) is the necessary condition for D1's budget gate to fire
-correctly. No additional D1-specific code change is needed beyond D2's patch — the rollup
-infrastructure is correct; the lifecycle state is wrong.
+| Site | Mechanism today | go-git-native signing possible? |
+|------|-----------------|--------------------------------|
+| Executor task commit — `internal/harness/commit.go:40-82` | shells out `git commit` | Would require rewriting to go-git `Worktree.Commit` |
+| Integrate merge commits — `pkg/git/integrate.go:94-107` | shells out `git merge --no-ff` | No — go-git can't create three-way merges (the D-01 reason the CLI is used) |
+| Boundary commit — `cmd/tide-push/main.go:521` via `pkggit.Commit` | go-git `Worktree.Commit` | Yes — `CommitOptions.SignKey` (`*openpgp.Entity`, ProtonMail/go-crypto) |
 
-### Component boundary
+**Recommendation: one pure-Go gpg-shim, uniform across all three sites.** Because the merge site *cannot* move to go-git, per-site go-git signing can never cover everything; a mixed approach (SignKey at site 3, shim at 1–2) is two code paths for one feature. Instead ship a tiny `tide-signer` binary (or subcommand of the existing harness/tide-push binaries — both images already exist) that implements git's `gpg.program` interface (sign: read payload on stdin → armored detached sig on stdout → `[GNUPG:] SIG_CREATED` on the status fd) using ProtonMail/go-crypto — no gpg binary in images, satisfying the todo. Each git invocation gains, when `GIT_SIGNING_KEY` is present:
+`-c gpg.program=tide-signer -c commit.gpgsign=true -c user.signingkey=<key-id>` (git merge respects `commit.gpgsign` for merge commits). Site 3 can use go-git `SignKey` directly OR route through the same env — pick one in planning; `SignKey` is less code for that site.
 
-| What changes | File | Function | Change type |
-|---|---|---|---|
-| Advance Phase=Running under adoption | `internal/controller/project_controller.go` | `reconcileProjectPlannerDispatch` | MODIFIED (add status patch before adoption-guard return) |
-| Budget gate fires on Running | `internal/controller/project_controller.go` | `handleBudgetGate` (called from `reconcileProjectPhase2`) | UNCHANGED (already correct once Phase=Running) |
-| Phase/plan rollup | `internal/controller/phase_controller.go`, `plan_controller.go` | `handleJobCompletion`, `handlePlannerJobCompletion` | UNCHANGED (already call `budget.RollUpUsage`) |
+Secret + identity plumbing (all MODIFY):
 
-### Existing code that must NOT change
+- `GitConfig.SigningKeySecretRef` (new optional field next to `CredsSecretRef`, `project_types.go:214`), data key `GIT_SIGNING_KEY` = armored private key. Absent = current unsigned behavior.
+- Env injection at the three pod-spec builders: executor Jobs (`internal/dispatch/podjob/jobspec.go:357` subagentEnv), push/integration Jobs (`push_helpers.go` `buildPushJob` — wave-integration Jobs reuse it, so one change covers merge + boundary sites).
+- Bot identity unification: `cmd/tide-push/main.go:131-137` `tideBotSignature()` hardcodes name/email — switch to the same `TIDE_BOT_NAME`/`TIDE_BOT_EMAIL` env fallback the other two sites use (`commit.go:56-63`, `integrate.go:85-92`), and surface both in chart values + optionally Project spec. **Committer email must match a verified email on the machine account holding the public key** — that's an operator-docs requirement (docs/project-authoring.md), not code.
+- Chart bump carries: CRD field, values for bot identity, env wiring in any chart-templated pod specs.
 
-- The existing project-level rollup skip at `handleProjectJobCompletion` line 1306
-  (`if project.Spec.ImportSource != nil { skip rollup }`) is **correct**: the project-level
-  planner did not run under adoption, so there is no planner cost to roll up at the project
-  level. Do not remove it.
-- The Phase 30 adoption guard itself (the `metav1.IsControlledBy` check) stays intact. The
-  fix is additive: a status patch BEFORE the `return`, not a removal of the guard.
+## Q5 — promptFile resolution point
 
----
+**Recommendation: CLI-side inline in `cmd/tide/apply.go` (a `--outcome-prompt-file` flag or sibling-file convention resolved in `runApply` after decode, before the SSA patch at `apply.go:94`).**
 
-## D3: Dispatch Concurrency Cap
-
-### What the defect is
-
-~60 subagent pods dispatched simultaneously (15 phase planners + 44 plan planners in parallel
-from independent wave derivation). Single-node kind OOM'd. The pool semaphore exists but does
-not limit in-flight running Jobs — it only serializes Job creation calls.
-
-### Why the pool semaphore doesn't help today
-
-**File:** `internal/pool/pool.go`
-
-The `Pool.Acquire` / `Pool.Release` semaphore is held only during the `buildJobSpec + Create`
-window — `defer r.PlannerPool.Release()` fires when `reconcilePlannerDispatch` (a helper)
-returns, immediately after the Job is created. The pool is therefore a creation-rate limiter,
-not an in-flight-Job limiter. After the `Create` call returns, the slot is freed and another
-dispatch can proceed immediately, even though the just-created Job is still running.
-
-**Evidence:** `values.yaml` has `plannerConcurrency: 16`. With 59 independent plan/phase
-objects triggering dispatch within the same reconcile burst, 59 Job creation calls succeed
-in rapid sequence (each holding a pool slot for ~milliseconds during Create), resulting in
-59 simultaneously running pods.
-
-**Confirmed pool wiring (`cmd/manager/main.go` lines 343–353, 445, 475, 501):**
-- `plannerPool = pool.New(cfg.PlannerConcurrency, "planner")` — shared across Project, Milestone, Phase, Plan reconcilers
-- `executorPool = pool.New(cfg.ExecutorConcurrency, "executor")` — shared across Wave, Task reconcilers
-- `plannerPool.PreCharge(ctx, mgr.GetClient(), "tideproject.k8s/role=planner")` — counts in-flight at startup only
-
-### Fix: in-flight Job count gate at each dispatch site
-
-The fix is to count currently-running planner Jobs cluster-wide BEFORE acquiring the pool
-slot (or instead of the pool slot), and park (requeue) if the in-flight count is at or above
-the configured cap.
-
-**Insertion points** (one per dispatch function, same position — BEFORE `PlannerPool.Acquire`):
-
-| Level | File | Function | Lines (approx) |
-|---|---|---|---|
-| Milestone | `internal/controller/milestone_controller.go` | `reconcilePlannerDispatch` | before line 381 |
-| Phase | `internal/controller/phase_controller.go` | `reconcilePlannerDispatch` | before line 379 |
-| Plan | `internal/controller/plan_controller.go` | `reconcilePlannerDispatch` | before line 384 |
-| Project | `internal/controller/project_controller.go` | `reconcileProjectPlannerDispatch` | before line 1135 |
-
-The gate: count Jobs with label `tideproject.k8s/role=planner` (already stamped by
-`podjob.BuildJobSpec`) and `Status.Active > 0`. If `count >= cfg.PlannerConcurrency`, return
-`ctrl.Result{RequeueAfter: 5 * time.Second}, nil` (park, not fail). This reuses the label
-selector already used by `pool.PreCharge` at startup.
-
-**No change to the executor pool** — task executor dispatch is already gated by the Wave
-controller's wave-boundary failure semantics and the ExecutorPool semaphore, which is
-correctlysized. Wave-boundary failure contract is unaffected: failed tasks continue to let
-siblings in the same wave proceed; the cap only throttles cross-wave dispatch entry.
-
-**Why not change the pool semantics instead:** Changing `Pool` to hold the slot until Job
-completion would require wiring a Job-completion signal back to the pool, which introduces
-a goroutine leak risk and adds cross-reconciler state. The in-flight-count check is a simple
-`client.List` with a label selector, consistent with the PreCharge pattern already in the
-codebase. It also composites cleanly with the existing `PlannerPool.Acquire` — the count
-check parks before Acquire if the cluster is saturated, so the pool slot is only acquired
-when there is actually room.
-
-**The per-level cap is shared (one plannerConcurrency applies to all levels combined),
-preserving the spec's "size planner and executor pools separately" constraint**: planner levels
-(project/milestone/phase/plan) share one cap; executor levels (wave/task) share another.
-The pools are not unified. The new count check operates on the planner label selector, which
-covers all planner-kind Jobs regardless of level.
-
-**Default value change required:** `plannerConcurrency: 16` is too high for a single-node
-kind cluster. A sane single-node default is `plannerConcurrency: 3` (one per level type
-simultaneously). This is a `values.yaml` change only — no controller code change to defaults.
-Operators who know they have a multi-node cluster can increase it via `--set plannerConcurrency=N`.
-
-### Component boundary
-
-| What changes | File | Change type |
+| | CLI-side inline | Controller-side ConfigMap keyRef |
 |---|---|---|
-| In-flight count gate | `milestone_controller.go` `phase_controller.go` `plan_controller.go` `project_controller.go` | MODIFIED (add count-check before pool acquire at 4 dispatch sites) |
-| `values.yaml` default | `charts/tide/values.yaml` | MODIFIED (plannerConcurrency: 16 → 3) |
-| `Pool` itself | `internal/pool/pool.go` | UNCHANGED |
-| `ExecutorPool` wiring | `wave_controller.go`, `task_controller.go` | UNCHANGED |
-| Wave-boundary failure semantics | `depgraph.go`, `task_controller.go` | UNCHANGED |
+| Schema change | none (spec.outcomePrompt already a plain string, `project_types.go:345`) | new `outcomePromptFrom.configMapKeyRef` + CEL oneOf vs `outcomePrompt` |
+| RBAC | none | planner-dispatch path needs ConfigMap read |
+| Staleness | prompt frozen at apply (desirable — the prompt is the run's contract) | CM edits mid-run create ambiguity |
+| Dashboard project view (also in this milestone) | reads `spec.outcomePrompt` directly — free | must resolve the ref too |
+| Works via bare kubectl | no (feature is CLI-only) | yes |
+| Chart impact | none | CRD bump |
 
----
+`runApply` decodes to `unstructured.Unstructured` (`apply.go:69-76`), so the injection is: detect `kind: Project` + flag present → `unstructured.SetNestedField(obj.Object, string(fileBytes), "spec", "outcomePrompt")`. Guard prompt size (etcd 1.5 MiB object cap; warn well below). The kubectl-parity gap is acceptable for v1.0.7 and reversible — the ConfigMap route can be added later without breaking the inline path.
 
-## D4: Planner Failure Semantics (Phase + Milestone)
+## Q6 — Artifact-view transport (the approve-gate review surface)
 
-### What the defect is
+Ground truth: artifacts exist ONLY at `/workspace/<project-uid>/workspace/envelopes/<cr-uid>/` (`internal/harness/envelope_io.go:31,115`) on the RWO per-project PVC. The reporter Job already mounts exactly that subPath in-namespace (`reporter_jobspec.go:205`) at the exact moment the artifacts are fresh, and gate-at-descent parks the parent *after* the planner writes artifacts and the reporter materializes children — so reporter-time is at-or-before every review moment.
 
-A phase was marked `Succeeded` ("Plan children materialized") when its planner exited 1 with
-`childCount 0` and produced no plans. The `expected == 0` branch at
-`phase_controller.go:handleJobCompletion` line 593 leads unconditionally to
-`patchPhaseSucceeded` without checking whether the planner actually succeeded.
+| Option | Timeliness at approve gate | New moving parts | Posture cost |
+|--------|---------------------------|------------------|--------------|
+| **A. On-demand reader Job from the dashboard** (mirror `tide artifact-get`'s inspector pod, `artifact_get_run.go:154`) | OK but 5–15 s pod-startup latency per click | manager creates pods in every project namespace | **Violates the read-only-dashboard decision** (all mutations via CLI/kubectl); RBAC expansion (pods create/delete across project namespaces) |
+| **B. Persist to ConfigMaps at reporter-materialization time** ✅ | Available the instant the gate parks | reporter writes CMs; dashboard reads via K8s API it already has | reporter SA gains configmaps create/update (namespace-scoped); bounded etcd growth |
+| C. Commit artifacts to the run branch at boundary push | **Too late** — boundary push fires only after the gate passes; useless for the review moment | git-host linking UI | disqualified for this feature (independently nice someday) |
 
-The same pattern exists in the milestone controller.
+**Recommendation: B.** Concretely: in the reporter flow (`cmd/tide-reporter` / `internal/reporter/materialize.go`), after reading `out.json`, write one ConfigMap per CR UID (`tide-artifacts-<cr-uid>`), keys = artifact filenames (`MILESTONE.md`, `children.json`, `out.json` summary), labels `tideproject.k8s/artifact-of: <cr-uid>` + project label, owner-ref to the CR (GC for free), size-capped per key + total (~512 KiB / 1 MiB) with a `truncated` annotation — the reporter already has the etcd-guard idiom (`maxSharedContextBytes`, `materialize.go:48-56`). Dashboard: new chi routes on `cmd/dashboard/router.go` (`GET /api/.../artifacts/<cr-uid>`), served from the informer cache; UI reuses the log-drawer surface (fix its empty-state handling first/together per the companion todo), markdown-render `*.md`, pretty-print JSON, and surface the artifact front-and-center on gate-parked nodes next to the approve action. Not a PERSIST-02 violation: these are source documents, not derived schedules — but say so in the plan and keep the caps.
 
-### Exact seam — Phase controller
+## Q7 — Suggested build order
 
-**File:** `internal/controller/phase_controller.go`
-**Function:** `handleJobCompletion` (line 467)
+Ordering by dependency + risk-retirement (headline first, chart changes batched):
 
-The buggy branch (lines 590–597):
+1. **lastPushedSHA stamp** — tiny, confirmed, zero deps; also arms force-with-lease for everything after (`project_controller.go` success arm).
+2. **Integration-miss gate** (headline): (a) kind-suite repro — 2-parallel-task **final** wave asserting `tide: integrate` merge commits + run-branch ancestry; (b) final-wave coverage + gate `patchPlanSucceeded`; (c) tide-push full-set idempotent merge + flock + `--is-ancestor` verify + exit 14; (d) project-boundary `--verify-task-branches` + sticky `integration-incomplete` condition. Touches `tide-push`, `pkg/git`, plan/project reconcilers — land before signing so the merge code is stable under it.
+3. **baseRef** — independent, small, clone-path-only; first CRD schema change of the milestone.
+4. **Signed commits + bot identity** — touches all three commit sites and the pod-spec builders step 2 just stabilized; second CRD/values change. Batch the chart version bump to cover 3+4.
+5. **promptFile** — CLI-only, independent; any time after planning settles the route.
+6. **Artifact view** — reporter ConfigMap persistence → dashboard API routes → drawer UI (sequence within: log-drawer empty-state fix, then artifact drawer). Independent of 1–5; UI last because it consumes the CM contract.
+7. **Pricing table, Prometheus setup step, v1.0.6 tech-debt carry** — fully independent; slot anywhere as filler waves.
 
-```go
-if envReadOK {
-    expected := out.ChildCount
-    if expected == 0 {
-        // Genuine leaf — planner authored no Plan children.
-        logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
-        return r.patchPhaseSucceeded(ctx, ph)   // <-- fires even on exitCode != 0
-    }
-    ...
-```
+## Anti-Patterns (project-specific, for the fix work)
 
-**Fix:** Add an `out.ExitCode != 0` check before succeeding when `expected == 0`:
-
-```go
-if envReadOK {
-    expected := out.ChildCount
-    if expected == 0 {
-        if out.ExitCode != 0 {
-            // Planner failed (exitCode != 0) and produced no children.
-            // Must not succeed the parent — fail it instead.
-            return r.patchPhaseFailed(ctx, ph, "PlannerFailed",
-                fmt.Sprintf("phase planner exited %d with childCount 0", out.ExitCode))
-        }
-        // Genuine leaf (planner succeeded, authored no Plan children).
-        logger.V(1).Info("boundary push skipped: planner authored no Plan children (leaf)", "phase", ph.Name)
-        return r.patchPhaseSucceeded(ctx, ph)
-    }
-    ...
-```
-
-`patchPhaseFailed` must be verified or added. Check `phase_controller.go` for an existing
-`patchPhaseFailed` function — if absent, add it mirroring `patchPlanFailed` in
-`plan_controller.go` line 842.
-
-### Exact seam — Milestone controller
-
-**File:** `internal/controller/milestone_controller.go`
-**Function:** `handleJobCompletion` (line 517)
-
-Same pattern at lines 670–677:
-
-```go
-if envReadOK {
-    expected := out.ChildCount
-    if expected == 0 {
-        // Genuine leaf — planner authored no Phase children.
-        logger.V(1).Info("boundary push skipped: planner authored no Phase children (leaf)", "milestone", ms.Name)
-        return r.patchMilestoneSucceeded(ctx, ms)   // <-- same bug
-    }
-    ...
-```
-
-Same fix: add `out.ExitCode != 0` check before succeeding.
-
-### Plan controller — already correct (Phase 30 guard)
-
-**File:** `internal/controller/plan_controller.go`
-**Function:** `handlePlannerJobCompletion` (line 508)
-
-The plan controller does NOT call `patchPlanSucceeded` in `handlePlannerJobCompletion`
-when `expected == 0`. Instead, when `expected == 0`, it falls through to the boundary-push
-trigger (line 725) and then clears the Running phase (line 730–738) — the plan-level
-`patchPlanSucceeded` is called from `reconcileWaveMaterialization` (line 1168) which is
-gated on `gates.BoundaryDetected(ctx, r.Client, plan, "Task")`, which requires at least
-one Task to have Succeeded. So a plan with `childCount 0` and `exitCode != 0` that clears
-Running will not get `Succeeded` stamped (no Tasks → `BoundaryDetected` returns false →
-the Succeeded path is unreachable). The Phase-30 guard the findings reference is this
-structural separation, not an explicit `exitCode` check. **Plan controller does not need
-this fix.**
-
-### Component boundary
-
-| What changes | File | Function | Change type |
-|---|---|---|---|
-| `exitCode != 0` guard on childless success | `internal/controller/phase_controller.go` | `handleJobCompletion` | MODIFIED (add guard before `patchPhaseSucceeded` on `expected == 0`) |
-| `exitCode != 0` guard on childless success | `internal/controller/milestone_controller.go` | `handleJobCompletion` | MODIFIED (same guard) |
-| `patchPhaseFailed` helper | `internal/controller/phase_controller.go` | new function or existing | NEW or VERIFIED (mirror `patchPlanFailed` if absent) |
-| `patchMilestoneFailed` helper | `internal/controller/milestone_controller.go` | new function or existing | NEW or VERIFIED (mirror `patchPlanFailed` if absent) |
-| Plan controller | `internal/controller/plan_controller.go` | `handlePlannerJobCompletion` | UNCHANGED (already structurally correct) |
-| Project controller | `internal/controller/project_controller.go` | `handleProjectJobCompletion` | UNCHANGED (project succeeds via `checkProjectComplete` → BoundaryDetected, not childCount==0) |
-
----
-
-## Build Order
-
-Dependencies between fixes:
-
-```
-D2 (advance PhaseRunning under adoption)
-    └── D1 (budget rollup fires once lifecycle is correct)
-            ← these are a single commit / phase
-
-D3 (in-flight count gate)
-    └── independent of D1/D2; can ship in parallel or before
-
-D4 (childless-failed-planner guard at phase + milestone)
-    └── independent of all others; can ship in parallel
-```
-
-**Recommended sequencing:**
-
-```
-Phase 1: D2 + D1 together (same seam)
-  Files: internal/controller/project_controller.go
-  Change: add Status.Phase=Running patch before adoption-guard return in
-          reconcileProjectPlannerDispatch
-  Tests: envtest that adopted project accrues CostSpentCents; envtest that
-         project Phase advances to Running after ImportComplete=True with
-         owned Milestones
-
-Phase 2: D3 (dispatch concurrency cap)
-  Files: internal/controller/milestone_controller.go
-         internal/controller/phase_controller.go
-         internal/controller/plan_controller.go
-         internal/controller/project_controller.go
-         charts/tide/values.yaml
-  Change: in-flight count gate before PlannerPool.Acquire at 4 dispatch
-          sites; default plannerConcurrency: 16 → 3
-  Tests: envtest that >N concurrent plans requeue (park) instead of
-         creating Jobs when cap is reached; unit test for count helper
-
-Phase 3: D4 (planner failure semantics)
-  Files: internal/controller/phase_controller.go
-         internal/controller/milestone_controller.go
-  Change: exitCode != 0 guard before patchPhaseSucceeded / patchMilestoneSucceeded
-          in the expected==0 branch; add patchPhaseFailed/patchMilestoneFailed
-          helpers if absent
-  Tests: envtest that a phase/milestone planner exiting 1 with childCount 0
-         marks the parent Failed (not Succeeded); mirrors the plan-level
-         test shape from Phase 30
-```
-
-Phase 2 and Phase 3 have no dependency on each other and can be developed in parallel.
-Phase 1 (D2+D1) is the highest-priority fix (it is the root of "spent blind") and should
-land first.
-
----
-
-## What Is New vs. Modified
-
-| Component | Status | Notes |
-|---|---|---|
-| `reconcileProjectPlannerDispatch` (adoption guard) | MODIFIED | One status patch added before early return |
-| In-flight count gate at 4 dispatch sites | MODIFIED | Addition before existing PlannerPool.Acquire |
-| `values.yaml` plannerConcurrency default | MODIFIED | 16 → 3 |
-| `handleJobCompletion` exitCode guard (phase, milestone) | MODIFIED | One guard added per file |
-| `patchPhaseFailed` / `patchMilestoneFailed` | NEW (if absent) | Mirror `patchPlanFailed`; verify first |
-| `Pool` struct and `Acquire`/`Release` | UNCHANGED | Existing semaphore preserved |
-| `budget.RollUpUsage` | UNCHANGED | Already correct at phase/plan level |
-| `handleBudgetGate` | UNCHANGED | Already correct once PhaseRunning is set |
-| Wave-boundary failure contract | UNCHANGED | No change to depgraph, failure_halt, task dispatch |
-| Executor pool and wave dispatch | UNCHANGED | D3 cap is planner-only |
-| Plan controller `handlePlannerJobCompletion` | UNCHANGED | Already structurally guards childless success |
-| `import_controller.go` | UNCHANGED | D1/D2 fix is in project_controller, not import |
-
----
-
-## Constraints Honored
-
-- **CRD-`.status`-only**: the D2 fix is a `Status().Patch` call, consistent with all other
-  lifecycle transitions. No new persistence surface.
-- **Resumability**: the `Phase=Running` patch survives controller restart. On the next
-  reconcile the adoption guard re-fires, and the status patch is idempotent (Running → Running
-  is a no-op via the `handleInitJobCompletion` cascade-13 guard, which skips re-stomping
-  forward phases).
-- **Separately-sized pools**: D3 adds a count check keyed on `tideproject.k8s/role=planner`
-  label — planner-only. The executor pool (`role=executor`) is untouched. Spec constraint
-  honored.
-- **Wave-boundary failure contract**: D3's park-on-cap is a requeue, not a failure. No
-  wave-boundary semantics are involved. Failed tasks → siblings continue as before.
-- **Cycle detection**: none of the four fixes touch `pkg/dag`, `checkGlobalCycleGate`, or
-  `assembleProjectDepGraph`. Cycle semantics are unaffected.
-- **Configurable policy (not baked in)**: D3's cap comes from `plannerConcurrency` in
-  `values.yaml` → `config.yaml` → `cfg.PlannerConcurrency`. No hardcoded value in the
-  controller body.
-
----
+- **Don't gate `Complete` on the push.** Debug #13b deliberately decoupled them (`project_controller.go:486-495`); gate the push and the plan-Succeeded seam instead.
+- **Don't cache "integrated" as a branch list in `.status`.** `IntegratedThroughWave` (an int watermark) + re-derivable ancestry checks stay within the minimal-resumption-state constraint; a stored branch set would be a PERSIST-02 smell.
+- **Don't reach for a merge-queue component or per-task Jobs.** The Job-per-boundary model + idempotent re-merge + flock converges; new long-lived components fight the reconcile model.
+- **Don't sign via a gpg binary in images** (todo constraint) and don't try go-git for merge commits (`ErrUnsupportedMergeStrategy` — the documented D-01 reason `integrate.go` shells out).
+- **Don't have the dashboard create pods.** Read-only dashboard is a logged Key Decision; option A quietly breaks it.
+- **Don't edit `charts/tide/values.yaml` outside the batched chart bump.** Chart is the FIXED contract; binary catches up to chart.
 
 ## Sources
 
-All findings from direct code reading at HEAD of `internal/controller/`:
-
-- `project_controller.go`: `reconcileProjectPlannerDispatch` (lines 999–1218), `handleProjectJobCompletion` (lines 1233–1360), `reconcileProjectPhase2` (lines 313–378), `handleBudgetGate` (lines 1367–1464)
-- `phase_controller.go`: `handleJobCompletion` (lines 467–648), `reconcilePlannerDispatch` (lines 379–384 pool acquire)
-- `milestone_controller.go`: `handleJobCompletion` (lines 517–728), `reconcilePlannerDispatch` (lines 381–386 pool acquire)
-- `plan_controller.go`: `handlePlannerJobCompletion` (lines 508–740), `reconcileWaveMaterialization` (lines 1035–1176), `reconcilePlannerDispatch` (lines 385–389 pool acquire)
-- `import_controller.go`: `succeedImport` (lines 701–706) — sets ConditionImportComplete=True only, does NOT advance Project.Status.Phase
-- `internal/pool/pool.go`: `Pool.Acquire`, `Pool.Release`, `Pool.PreCharge` (full file)
-- `cmd/manager/main.go`: pool wiring (lines 343–353, 445, 475, 501, 529, 547)
-- `charts/tide/values.yaml`: `plannerConcurrency: 16`, `executorConcurrency: 4` (lines 78–79)
-- `internal/budget/tally.go`: `RollUpUsage` (lines 56–89)
-- `.planning/dogfood/run-2b-FINDINGS.md`: defect definitions D1–D4 (authoritative)
+Primary (code read directly, v1.0.6 @ `main` 9344358):
+- `pkg/git/integrate.go`, `pkg/git/worktree.go`, `pkg/git/branch.go`, `pkg/git/clone.go`, `pkg/git/push.go`
+- `internal/harness/commit.go`, `internal/harness/envelope_io.go`
+- `internal/controller/plan_controller.go` (:690-790, :981-1220), `boundary_push.go`, `push_helpers.go`, `project_controller.go` (:454-930), `reporter_jobspec.go`
+- `cmd/tide-push/main.go`, `cmd/tide/apply.go`, `cmd/tide/artifact_get_run.go`, `cmd/dashboard/{main,router}.go`
+- `api/v1alpha2/project_types.go` (:202-360), `internal/reporter/materialize.go`, `internal/dispatch/podjob/jobspec.go`
+- git history: `7eb78d2` (wave gate born with final-wave exclusion), `69c1c78` (plan boundary push wiring)
+- `.planning/todos/pending/2026-07-03-*.md` (4 todos), `.planning/STATE.md` (run evidence)
 
 ---
-
-*Architecture research for: TIDE v1.0.6 Adoption-Path Correctness & Dispatch Safety*
-*Researched: 2026-06-28*
+*Architecture research for: TIDE v1.0.7 First-Run Paper Cuts*
+*Researched: 2026-07-03*

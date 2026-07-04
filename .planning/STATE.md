@@ -1,107 +1,132 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0.7
-milestone_name: Flood Tide — TIDE-on-TIDE Self-Hosting Proof
-status: ready_to_plan
-stopped_at: Phase 34 complete (2/2) — ready to discuss Phase 35
-last_updated: 2026-06-29T22:52:48.955Z
-last_activity: 2026-06-29 -- Phase 34 execution started
+milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
+current_phase: 34
+current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
+status: planning
+stopped_at: Phase 38 context gathered
+last_updated: "2026-07-04T00:45:55.393Z"
+last_activity: 2026-07-03
+last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
-  total_phases: 18
-  completed_phases: 3
-  total_plans: 10
-  completed_plans: 10
-  percent: 17
+  total_phases: 6
+  completed_phases: 1
+  total_plans: 33
+  completed_plans: 2
+  percent: 6
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-29)
+See: .planning/PROJECT.md (updated 2026-07-03)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 35 — infra + fresh v1.0.7 deploy
+**Current focus:** Phase 34 — Run Integrity: Integration-Miss Gate + lastPushedSHA
 
 ## Current Position
 
-Phase: 35
-Plan: Not started
+Phase: 34 of 34–39 (Run Integrity — Integration-Miss Gate + lastPushedSHA)
+Plan: — (not yet planned)
 Status: Ready to plan
-Last activity: 2026-06-29
+Last activity: 2026-07-03 — v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 
 Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
-**Velocity (reference):**
+**Velocity (recent milestones):**
 
-- Total plans completed across v1.0.1–v1.0.6: ~80+
-- v1.0.6 (Phases 31–33): 8 plans, 12 tasks, shipped 2026-06-29
+- v1.0.6: 8 plans across 3 phases in ~2 days (2026-06-28 → 2026-06-29)
+- v1.0.5: 3 plans, 1 phase (2026-06-27)
+- Total plans completed v1.0.1–v1.0.6: ~85+
 
 **v1.0.7 Phase Tracking:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 34. Pre-flight Tech-Debt Hardening | TBD | Not started |
-| 35. Infra + Fresh v1.0.7 Deploy | TBD | Not started |
-| 36. Salvaged-Tree Import + Dry-Run + Tuning | TBD | Not started |
-| 37. Launch + Operate Run #2 to Completion | TBD | Not started |
-| 38. Output Review + Extraction | TBD | Not started |
-| 39. Release v1.0.7 | TBD | Not started |
+| 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
+| 35. Git Base Ref | TBD | Not started |
+| 36. Signed Commits + Bot Identity | TBD | Not started |
+| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
+| 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
 
 ## Accumulated Context
+
+### Session Continuity (2026-07-03 — first external-repo run)
+
+Context beyond what the 2026-07-03 todos + the `verify-level-subagent` seed carry
+(run details deliberately kept out of this public repo — the operator has them):
+
+- **Run evidence is live but perishable.** The completed run's envelopes, bare repo,
+  and worktree branches (incl. the never-integrated `tide/wt-e088c86c-…`) live on the
+  `tide-projects` PVC in the run's project namespace on the operator's local
+  **minikube** cluster. Deleting the namespace or cluster destroys the
+  integration-miss repro evidence — export before cleanup if the namespace must go.
+
+- **Real-vs-tallied spend:** dashboard/status said $10.86; Anthropic console said
+  $3.84. Use console numbers when sizing budget caps until the pricing table is
+  fixed (Phase 38 / COST-01).
+
+- **Downstream state:** two PRs on the target repo were open and CI-green at session
+  end; the pushed run branch carried one hand-recovered commit (the integration-miss
+  deliverable) plus two human cleanup commits.
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-**v1.0.7 binding constraints (from REQUIREMENTS.md and PROJECT.md):**
+**v1.0.7 binding constraints (from research + requirements):**
 
-- This is an operations/dogfood milestone: the human operates TIDE; **TIDE builds the entire OpenAI backend** — no hand-written backend code. The backend is TIDE's *output*, reviewed not merged (rework is the follow-up "extend TIDE" milestone).
-- Single-node OOM safety comes from the D3 concurrency cap + low effective `plannerConcurrency` (PREFLIGHT-01 default = 4), NOT from large RAM — 16GB is explicitly too much; the node is sized *slightly* above ~8GiB.
-- The hard `$100 absoluteCapCents` (10000 cents) gate must halt the run cleanly; relaunch/resume only on explicit human approval of more spend (RUN-02 — no blind spend).
-- Orchestrator defects that surface during the run are root-fixed in-repo with a symptom-reproducing test and the run relaunched/resumed — not worked around (RUN-04, the v1.0.6 D1–D4 pattern).
-- Persistence stays CRD-`.status`-only; resumption stays minimal/re-derivable. No new CRD schema this milestone.
-- v1.0.7 ships the two PREFLIGHT tech-debt fixes as real release artifacts (RELEASE-01).
+- Gate the *boundary push* on integration completeness, not `Complete` directly (preserves the #13b decision); the completeness verdict is always recomputed from git (`merge-base --is-ancestor`), never cached in `.status`.
+- Tasks stay parallel; only run-branch merges serialize. No lockfile-existence protocols on the PVC — kernel `flock(2)` only, as belt-and-braces behind control-plane serialization.
+- `charts/tide/values.yaml` is a FIXED contract — Phase 35's CRD change and Phase 36's agent-identity CRD/chart config batch into one chart version bump.
+- No `+kubebuilder:default` on `baseRef` — absent means current HEAD behavior, one encoding.
+- GPG signing is DESCOPED from v1.0.7 (2026-07-03, Phase 36 discussion) — SIGN-02/03/04 moved to REQUIREMENTS.md Future Requirements; Phase 36 delivers agent identity (SIGN-01) only. The gpg-shim spike and key-exposure analysis are preserved in `36-CONTEXT.md` `<deferred>`.
+- Artifact ConfigMaps are a size-capped display cache (owner-ref'd, ~512 KiB, truncation markers); PVC/git remain source of truth. The manager cannot mount project PVCs.
+- Dashboard stays read-only — no reader pods, no mutation surfaces.
 
 ### Roadmap Evolution
 
-- v1.0.7 roadmap created 2026-06-29: Phases 34–39, 16 requirements (PREFLIGHT/INFRA/IMPORT/RUN/REVIEW/RELEASE-01), 100% mapped.
+- v1.0.7 roadmap defined 2026-07-03: Phases 34–38, 26 requirements (INTEG-01..05, COST-01..03, BASE-01..03, SIGN-01..04, PROMPT-01, DASH-01..04, TELEM-01..03, DEBT-01..03), 100% mapped.
 - Phase numbering continues from v1.0.6 (Phase 33 was the last phase). Phase 34 is the first v1.0.7 phase.
-- The phase chain is forced sequential: each phase's deliverable is the next's prerequisite (harden → deploy → import → operate → review → release). 34 → 35 → 36 → 37 → 38 → 39.
-- Phase 34 (PREFLIGHT) must land before launch — it protects single-node OOM safety (configmap default) and $100-cap cost accuracy (project-level rollup hardening); it is also part of what RELEASE-01 ships.
-- RUN-04 (root-fix surfacing defects) lives inside Phase 37 as an expected iterative operate activity, not a separate phase.
+- Phase 34 (run integrity) is the headline and must land before Phase 36 — signing touches the same three commit sites the integration fix stabilizes.
+- Phase 36 carries `research: true` (gpg-shim vs plumbing spike) and an ASK-FIRST key-exposure scope decision.
+- Phases 35, 37, 38 are order-independent; Phase 38 items can interleave anywhere.
+- **Phase 36 descoped 2026-07-03 (discussion):** SIGN-02/03/04 (GPG signing) deferred out of v1.0.7 — 26 → 23 active requirements. Phase 36 = SIGN-01 agent identity only (`spec.git.agentName`/`agentEmail` → chart → compiled-in `TIDE Agent <tide-agent@tideproject.k8s>`; full bot→agent rename). The `research: true` flag and ASK-FIRST decision above are void; the Phase 34 → 36 sequencing constraint no longer applies (Phase 35 batching stays).
 
 ### Pending Todos
 
-- Phase 34 planning: locate the project-level rollup marker (`PlannerRolledUpUID` / equivalent) in `project_controller.go` and confirm whether it already uses the milestone/phase `RetryOnConflict` + re-fetch pattern (v1.0.6 carried this in as W1). If best-effort, harden it.
-- Phase 34 planning: render the chart with defaults and confirm `plannerConcurrency` configmap value; the v1.0.6 chart-comment softening held the value at 4 but the configmap `default 16` may still be present (W2).
-- Phase 35: document the kind node memory ceiling; the durable real key lives at `~/.tide/anthropic.key` (outside the repo, survives teardowns) and the in-cluster `tide-secrets` is recreated at full-deploy.
-- Phase 36: salvage tree is `salvage-20260618` (3 Milestones / 15 Phases); use `tide import-envelopes` (+ `--dry-run` for the cost projection); set `absoluteCapCents=10000`.
+- All ten 2026-07-03 first-run todos are now covered by v1.0.7 requirements (see REQUIREMENTS.md traceability); their files remain under `.planning/todos/pending/` until their phases close.
+- `subagent.levels` semantic rename (DECIDED — breaking, needs SchemaRevision/v1alpha3; own milestone) — `.planning/todos/pending/2026-07-03-project-level-subagent-override-slot.md`.
+- CACHE-F1 direct-SDK cross-pod caching backend — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md` (deferred; vNext or later).
 
 ### Blockers/Concerns
 
-- The prior `kind-tide-dogfood` cluster is v1alpha1-only / pre-Spring-Tide and its stored Project would orphan on a no-conversion CRD upgrade — Phase 35 stands up a *fresh* cluster rather than reusing it (per the v1.0.2 spec-shot lesson).
-- `make test-int` has a pre-existing kind `medium_http` fixture flake (MAKE_EXIT=2) unrelated to v1.0.7 work — do not treat it as a v1.0.7 regression unless a v1.0.7 commit touches `test/integration/kind/`.
+- **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
+- **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
 
 ## Deferred Items
 
-Carried forward at v1.0.6 close (2026-06-29), now scoped:
+Items acknowledged and carried forward at v1.0.6 milestone close (2026-06-29):
 
-| Category | Item | Status | Deferred At |
-|----------|------|--------|-------------|
-| tech_debt | Project-level `PlannerRolledUpUID` hardening (W1) | Folded into Phase 34 (PREFLIGHT-02) | v1.0.6 |
-| tech_debt | Chart configmap `plannerConcurrency default 16→4` (W2) | Folded into Phase 34 (PREFLIGHT-01) | v1.0.6 |
-| tech_debt | Controller-envtest-suite tier split | Deferred (DEBT-01) — not load-bearing for run #2 | v1.0.6 |
-| stale artifacts | 20 historical quick-tasks + 1 todo + 1 uat_gap | Non-blocking administrative debt | v1.0.6 |
+| Category | Count | Notes |
+|----------|-------|-------|
+| quick_tasks | 20 | Stale historical capture-log entries (260521–260625 era), long resolved |
+| todos | 1 | historical |
+| uat_gaps | 1 | partial-status historical entry |
+
+v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2 → DEBT-02, envtest tier split → DEBT-03 (all Phase 38).
 
 ## Session Continuity
 
-Last session: 2026-06-29 — v1.0.7 roadmap created
-Stopped at: ROADMAP.md + REQUIREMENTS.md traceability + STATE.md written for v1.0.7 (Phases 34–39)
-Resume file: None
+Last session: 2026-07-04T00:45:55.389Z
+Stopped at: Phase 38 context gathered
+Resume file: .planning/phases/38-small-independents-pricing-accuracy-promptfile-telemetry-nud/38-CONTEXT.md
 
 ## Operator Next Steps
 
-- Plan Phase 34 with `/gsd:plan-phase 34` (Pre-flight Tech-Debt Hardening — PREFLIGHT-01/02)
+- Plan the first phase: `/gsd-plan-phase 34`

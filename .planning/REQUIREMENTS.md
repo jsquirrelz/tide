@@ -1,102 +1,138 @@
-# Requirements: TIDE — v1.0.7 Flood Tide (TIDE-on-TIDE Self-Hosting Proof)
+# Requirements: TIDE v1.0.7 — First-Run Paper Cuts
 
-**Defined:** 2026-06-29
-**Core Value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-
-**Milestone goal:** Drive a *completing* dogfood run #2 end-to-end — TIDE orchestrating Claude subagents to build the OpenAI backend — on a slightly-bigger single-node cluster under a hard $100 cap, proving the paradigm self-hosts; then review TIDE's authored output to feed a follow-up "extend TIDE" pass.
-
-**Division of labor:** The human operates TIDE (infra, deploy, launch, babysit, root-fix orchestrator defects). **TIDE builds the entire OpenAI backend** — no hand-written backend code this milestone. The backend is TIDE's *output*, reviewed not merged.
+**Defined:** 2026-07-03
+**Core Value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end. This milestone: the fixes a second external run needs to be trustworthy and reviewable.
 
 ## v1.0.7 Requirements
 
-### Pre-flight Tech-Debt Hardening
+Requirements for this milestone. Each maps to roadmap phases.
 
-Load-bearing v1.0.7 audit carry-ins that protect run #2; fixed before launch.
+### Pre-flight Tech-Debt Hardening (PREFLIGHT) — ✅ COMPLETE, Phase 39
 
-- [x] **PREFLIGHT-01**: The chart configmap default for `plannerConcurrency` is corrected from `16` to `4`, so a fresh default deploy can dispatch at most 4 concurrent planners (no latent 16-wide over-dispatch on the single node). Verified by rendering the chart and asserting the configmap value plus a controller-level assertion of the effective cap.
-- [x] **PREFLIGHT-02**: The project-level rollup marker (`PlannerRolledUpUID` / equivalent) is hardened to the milestone/phase exactly-once pattern, so planning-cost rollup at the project level is exactly-once under reporter-Job TTL-GC and the $100 cap accounting stays accurate. Verified by an envtest proving no double-count across TTL-GC at the project level.
+Carried in from a parallel session that started a different (now-superseded) v1.0.7 scope the same day v1.0.6 shipped; landed for real before the two sessions merged. See `.planning/milestones/v1.0.7-floodtide-REQUIREMENTS.md` for the superseded milestone this was originally scoped under.
 
-### Infra & Fresh Deploy
+- [x] **PREFLIGHT-01**: The chart configmap default for `plannerConcurrency` is corrected from `16` to `4`, so a fresh default deploy can dispatch at most 4 concurrent planners (no latent 16-wide over-dispatch on a single node). Verified by rendering the chart and asserting the configmap value plus a controller-level assertion of the effective cap. **Satisfies DEBT-02 below.**
+- [x] **PREFLIGHT-02**: The project-level rollup marker (`PlannerRolledUpUID` / equivalent) is hardened to the milestone/phase exactly-once pattern, so planning-cost rollup at the project level is exactly-once under reporter-Job TTL-GC. Verified by an envtest proving no double-count across TTL-GC at the project level. **Satisfies DEBT-01 below.**
 
-- [ ] **INFRA-01**: A fresh single-node kind cluster sized *slightly* above the current ~8GiB host (well under 16GB) is stood up for run #2, with the node memory ceiling documented.
-- [ ] **INFRA-02**: Current-version v1.0.7 TIDE — images + charts carrying the PREFLIGHT fixes — is built and deployed to the cluster (not stale or local pre-Spring-Tide artifacts), verified by `helm`/`kubectl` showing v1.0.7 components running.
-- [ ] **INFRA-03**: The credproxy + real Anthropic key (from `~/.tide/anthropic.key`) are wired so subagents dispatch against the real API, verified by one successful real subagent dispatch (smoke).
+### Run Integrity (INTEG)
 
-### Salvaged-Tree Import & Dry-Run
+- [ ] **INTEG-01**: Every Succeeded task's worktree branch is integrated into the run branch — including tasks in the final Kahn wave of a plan (today `plan_controller.go:1192` skips the last wave; a single-wave plan integrates nothing)
+- [ ] **INTEG-02**: Wave-parallel task integrations cannot race — tasks execute in parallel, run-branch merges are serialized and idempotent (cumulative Succeeded-branch set, kernel flock, safe re-merge on retry)
+- [ ] **INTEG-03**: Boundary push is gated on integration completeness verified from git (`git merge-base --is-ancestor` per Succeeded task); a miss raises a sticky `integration-incomplete` condition instead of pushing an incomplete run branch
+- [ ] **INTEG-04**: `status.git.lastPushedSHA` is stamped on successful boundary push (the push envelope's `HeadSHA` is read in the success arm), arming the force-with-lease fence
+- [ ] **INTEG-05**: A kind-suite regression test reproduces the 2-parallel-task final-wave integration miss and locks the fix
 
-- [ ] **IMPORT-01**: The salvaged tree (`salvage-20260618`, 3 Milestones / 15 Phases) is imported/adopted onto the fresh cluster via `tide import-envelopes`, validated (cycle-detection + completeness) before any dispatch.
-- [ ] **IMPORT-02**: A cost-projection / dry-run is produced before launch so expected spend against the cap is known, and `absoluteCapCents=10000` ($100) is set on the Project.
-- [ ] **IMPORT-03**: Effective dispatch concurrency (planner/executor pools, separately sized) is tuned to fit the node's memory ceiling so the cascade cannot OOM the single node; the chosen values are documented.
+### Budget Accuracy (COST)
 
-### Launch & Operate to Completion
+- [ ] **COST-01**: Claude 5 family models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) price at their real per-MTok rates via exact-ID lookup with a `-YYYYMMDD` normalizer
+- [ ] **COST-02**: An unknown-model pricing fallback is observable as a metric/condition, not only a GC'd pod log line
+- [ ] **COST-03**: The cache-write TTL multiplier is verified empirically (5m 1.25× vs 1h 2×) before the pricing table ships
 
-- [ ] **RUN-01**: Run #2 is launched and driven to `Project=Complete` on the single-node cluster without OOM.
-- [ ] **RUN-02**: Total spend stays within the $100 cap; if the cap halts the run, the human is asked before any cap raise / resume (no blind spend).
-- [ ] **RUN-03**: A mid-execution dashboard screenshot is captured and delivered to the user.
-- [ ] **RUN-04**: Orchestrator defects that surface during the run are root-fixed in-repo (the v1.0.6 D1–D4 pattern), each with a symptom-reproducing test, and the run relaunched/resumed — not worked around.
+### Git Base Ref (BASE)
 
-### Output Review & Extraction
+- [ ] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
+- [ ] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
+- [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
 
-- [ ] **REVIEW-01**: TIDE's authored OpenAI backend code is collected from the run output and code-reviewed for quality/correctness (expected *not* mergeable as-is).
-- [ ] **REVIEW-02**: Learnings from the run (what the paradigm got right/wrong, surfaced defects, cost/perf) are extracted into a retrospective artifact.
-- [ ] **REVIEW-03**: Cherry-pick candidates (what to keep vs rework) from TIDE's backend output are identified and recorded to seed a follow-up "extend TIDE" milestone.
+### Agent Identity (SIGN)
 
-### Release
+- [ ] **SIGN-01**: TIDE agent identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push — via `spec.git.agentName`/`agentEmail` → chart value → compiled-in default precedence (the tide-push hardcoded identity is removed; agent terminology replaces bot everywhere, including the compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`)
 
-- [ ] **RELEASE-01**: v1.0.7 is published (images + charts + binaries) carrying the PREFLIGHT tech-debt fixes, verified anonymously on ghcr.
+> **Descoped 2026-07-03 (Phase 36 discussion):** SIGN-02/03/04 (GPG signing, key validation, Verified-badge docs) are deferred out of v1.0.7 — the branch-protection payoff is hypothetical today and the cost (gpg-shim spike, signing-oracle key-exposure design, external UAT) is real. Moved to Future Requirements below; full analysis preserved in `.planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md`.
+
+### Prompt File (PROMPT)
+
+- [ ] **PROMPT-01**: Operator can pass `--prompt-file` to `tide apply` — the CLI inlines the file into `spec.outcomePrompt` (no CRD change; ConfigMap-ref union stays a compatible later addition)
+
+### Dashboard Visibility (DASH)
+
+- [ ] **DASH-01**: Clicking a Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); gate-parked nodes surface the artifact beside the approve action
+- [ ] **DASH-02**: Planning artifacts are persisted as size-capped, owner-ref'd ConfigMaps at reporter materialization time (display cache with truncation markers; PVC/git remain source of truth)
+- [ ] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
+- [ ] **DASH-04**: The log drawer renders explicit loading / streaming / pod-gone states (never silently empty)
+
+### Telemetry Setup (TELEM)
+
+- [ ] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
+- [ ] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
+- [ ] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
+
+### Tech-Debt Carry (DEBT)
+
+- [x] **DEBT-01**: Project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1). **Already satisfied — see PREFLIGHT-02 (Phase 39, completed 2026-06-29).**
+- [x] **DEBT-02**: Chart configmap `plannerConcurrency` default is 4, matching values.yaml (v1.0.6 audit W2). **Already satisfied — see PREFLIGHT-01 (Phase 39, completed 2026-06-29).**
+- [ ] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
 
 ## Future Requirements
 
-Deferred beyond v1.0.7. Tracked but not in this roadmap.
+Deferred. Tracked but not in the current roadmap.
 
-### Extend TIDE (follow-up milestone)
+### Subagent Stages
 
-- **EXTEND-01**: Rework TIDE's authored OpenAI backend into a mergeable, provider-agnostic `Subagent` implementation behind the interface.
-- **EXTEND-02**: Live functional parity — drive a real subagent dispatch through the OpenAI backend end-to-end (the CACHE-F1 direct-SDK path that realizes cross-pod prompt caching).
+- **STAGE-01**: Verify-tier LLM subagents (plan-check + level-verify) — seed `.planning/seeds/verify-level-subagent.md`; the mechanical case ships as INTEG-03
+- **STAGE-02**: `subagent.levels` semantic rename (each key names the artifact being planned) — DECIDED but breaking; needs SchemaRevision/v1alpha3 treatment
 
-### Deferred tech-debt
+### Provider/Caching
 
-- **DEBT-01**: Controller-envtest-suite tier split (the cosmetic v1.0.7 audit carry-in not folded into this milestone).
+- **CACHE-F1**: Direct-SDK subagent backend realizing cross-pod prompt caching — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md`
+- **PROV-01**: OpenAI/Codex backend + completing dogfood run #2 on multi-node infra. A detailed (but superseded on the single-node assumption) execution plan already exists from a parallel session — `.planning/milestones/v1.0.7-floodtide-REQUIREMENTS.md` and `-ROADMAP.md` (INFRA/IMPORT/RUN/REVIEW/RELEASE, 14 reqs) — re-validate infra sizing against the multi-node finding before reusing it when this milestone is planned.
+
+### Signed Commits (deferred from v1.0.7, 2026-07-03)
+
+- **SIGN-02**: With an optional signing-key Secret ref configured, commits at all three sites — including integrate merge commits — are GPG-signed; absent ref preserves current unsigned behavior. Requires the gpg-shim vs plumbing spike (go-git cannot sign three-way merges via `SignKey`) and the key-exposure decision (likely mount-everywhere + dedicated machine-account key) — see `36-CONTEXT.md` deferred section.
+- **SIGN-03**: Signing key validated at first reconcile (armored / no passphrase / email-match triple) with a clear failure condition
+- **SIGN-04**: Operator docs for the machine-account + keygen + public-key-upload Verified-badge recipe (GitHub/GitLab/Gitea); UAT is one manual push to a real GitHub repo including an integrate merge commit
 
 ## Out of Scope
 
+Explicitly excluded. Documented to prevent scope creep.
+
 | Feature | Reason |
 |---------|--------|
-| Hand-writing the OpenAI backend | The entire point is TIDE-on-TIDE — TIDE builds it; the human only operates TIDE. |
-| Merging TIDE's backend output as-is | Expected not mergeable; merge/rework is the follow-up "extend TIDE" milestone. |
-| Multi-node / cloud / ≥16GB infra | Explicitly rejected — fit a *slightly* bigger single node via the D3 concurrency cap, not RAM. |
-| Live OpenAI functional verification | The OpenAI backend is reviewed not run this milestone; live parity is EXTEND-02. |
-| Controller-envtest tier split | Cosmetic v1.0.7 audit carry-in, deferred (DEBT-01) — not load-bearing for run #2. |
-| New CRD schema / persistence changes | Persistence stays CRD-`.status`-only; resumption stays minimal/re-derivable. |
+| ConfigMap-ref promptFile union (`outcomePromptFrom`) | CLI-side inlining covers the need; union field is a compatible later addition |
+| SSH commit signing | GPG covers all three git hosts' Verified badges; go-git `Signer` seam keeps the door open |
+| Log archiving (post-GC log persistence) | Argo's multi-year bug tail; honest pod-gone state + envelope residue instead |
+| Verify-tier LLM subagents | Own milestone; this milestone ships only the mechanical completeness gate (INTEG-03) |
+| `subagent.levels` rename | Breaking semantic remap needs SchemaRevision/v1alpha3 treatment — own milestone |
+| Dashboard mutation auth hardening | Seed trigger (dashboard beyond trusted perimeter) has not fired |
 
 ## Traceability
 
-Each requirement maps to exactly one phase. Phase numbering continues from v1.0.6 (last phase was 33); v1.0.7's first phase is 34.
+Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PREFLIGHT-01 | Phase 34 | Complete |
-| PREFLIGHT-02 | Phase 34 | Complete |
-| INFRA-01 | Phase 35 | Pending |
-| INFRA-02 | Phase 35 | Pending |
-| INFRA-03 | Phase 35 | Pending |
-| IMPORT-01 | Phase 36 | Pending |
-| IMPORT-02 | Phase 36 | Pending |
-| IMPORT-03 | Phase 36 | Pending |
-| RUN-01 | Phase 37 | Pending |
-| RUN-02 | Phase 37 | Pending |
-| RUN-03 | Phase 37 | Pending |
-| RUN-04 | Phase 37 | Pending |
-| REVIEW-01 | Phase 38 | Pending |
-| REVIEW-02 | Phase 38 | Pending |
-| REVIEW-03 | Phase 38 | Pending |
-| RELEASE-01 | Phase 39 | Pending |
+| PREFLIGHT-01 | Phase 39 | Complete |
+| PREFLIGHT-02 | Phase 39 | Complete |
+| INTEG-01 | Phase 34 | Pending |
+| INTEG-02 | Phase 34 | Pending |
+| INTEG-03 | Phase 34 | Pending |
+| INTEG-04 | Phase 34 | Pending |
+| INTEG-05 | Phase 34 | Pending |
+| BASE-01 | Phase 35 | Pending |
+| BASE-02 | Phase 35 | Pending |
+| BASE-03 | Phase 35 | Pending |
+| SIGN-01 | Phase 36 | Pending |
+| DASH-01 | Phase 37 | Pending |
+| DASH-02 | Phase 37 | Pending |
+| DASH-03 | Phase 37 | Pending |
+| DASH-04 | Phase 37 | Pending |
+| COST-01 | Phase 38 | Pending |
+| COST-02 | Phase 38 | Pending |
+| COST-03 | Phase 38 | Pending |
+| PROMPT-01 | Phase 38 | Pending |
+| TELEM-01 | Phase 38 | Pending |
+| TELEM-02 | Phase 38 | Pending |
+| TELEM-03 | Phase 38 | Pending |
+| DEBT-01 | Phase 38 | Complete (Phase 39) |
+| DEBT-02 | Phase 38 | Complete (Phase 39) |
+| DEBT-03 | Phase 38 | Pending |
 
 **Coverage:**
-- v1.0.7 requirements: 16 total
-- Mapped to phases: 16 (100%)
+- v1.0.7 "First-Run Paper Cuts" requirements: 23 total, 100% mapped (2 — DEBT-01/DEBT-02 — already satisfied by the carried-in Phase 39)
+- Carried-in requirements (PREFLIGHT-01/02, Phase 39): 2 total, 2 complete
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-06-29*
-*Last updated: 2026-06-29 after roadmap creation (milestone v1.0.7 Flood Tide) — all 16 requirements mapped across Phases 34–39, 100% coverage.*
+*Requirements defined: 2026-07-03*
+*Last updated: 2026-07-04 — merged with a parallel session's independently-started v1.0.7 ("Flood Tide"): its completed Pre-flight Tech-Debt Hardening work carried in as Phase 39 (satisfies DEBT-01/DEBT-02 above); its unexecuted dogfood-run-#2/OpenAI-backend scope archived to `.planning/milestones/v1.0.7-floodtide-REQUIREMENTS.md` as superseded (single-node assumption contradicted by this milestone's first-run evidence) and referenced from PROV-01. Previously: 2026-07-03 after Phase 36 discussion (SIGN-02/03/04 descoped to Future Requirements; 26 → 23 active).*
