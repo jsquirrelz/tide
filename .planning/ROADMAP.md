@@ -258,9 +258,9 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
 
-### Phase 40: Deprecate v1alpha1 API
+### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
-**Goal:** Formally deprecate v1alpha1 — mark `+kubebuilder:deprecatedversion` warnings on all 6 CRD versions, migrate the ~36 remaining `internal/`/`cmd/` consumers (controllers, dispatch, credproxy, dashboard, tide-push, eval) to v1alpha2, and decide the served=false/removal timeline plus the stored-object migration story (no conversion webhooks exist today; dogfood cluster holds a v1alpha1-only Project).
+**Goal:** One full API-version crank: introduce v1alpha3 as the sole served+storage version for all 6 CRDs — carrying the folded `subagent.levels` semantic rename (DECIDED mapping in the 2026-07-03 todo) plus user-approved batchable schema fixes — then remove v1alpha1 AND v1alpha2 entirely (Go packages, CRD blocks, chart copies, scheme registrations, stale comments). Reinstall-only migration per Phase 23 D-09; SchemaRevision guard generalized as the permanent crank mechanism; owner-ref dual-accepts dropped; deep docs/samples sweep (INSTALL/gates/git-hosts/project-authoring examples are broken today); envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Decisions locked in `40-CONTEXT.md`.
 **Requirements**: TBD
 **Depends on:** Phase 39
 **Plans:** 0 plans

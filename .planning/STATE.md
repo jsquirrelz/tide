@@ -101,13 +101,13 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Phase 36 carries `research: true` (gpg-shim vs plumbing spike) and an ASK-FIRST key-exposure scope decision.
 - Phases 35, 37, 38 are order-independent; Phase 38 items can interleave anywhere.
 - **Phase 36 descoped 2026-07-03 (discussion):** SIGN-02/03/04 (GPG signing) deferred out of v1.0.7 — 26 → 23 active requirements. Phase 36 = SIGN-01 agent identity only (`spec.git.agentName`/`agentEmail` → chart → compiled-in `TIDE Agent <tide-agent@tideproject.k8s>`; full bot→agent rename). The `research: true` flag and ASK-FIRST decision above are void; the Phase 34 → 36 sequencing constraint no longer applies (Phase 35 batching stays).
-- Phase 40 added 2026-07-06: Deprecate v1alpha1 API — mark `+kubebuilder:deprecatedversion` warnings, migrate the ~36 remaining `internal/`/`cmd/` consumers to v1alpha2, decide the served=false/removal timeline and stored-object migration story (no conversion webhooks exist; dogfood cluster holds a v1alpha1-only Project). Note interaction with the decided-but-unscheduled `subagent.levels` rename that needs v1alpha3 (see Pending Todos).
+- Phase 40 added 2026-07-06; **rescoped same day by discussion (40-CONTEXT.md) into a full version-lifecycle turn:** introduce v1alpha3 (carrying the folded `subagent.levels` rename + user-approved batchable schema fixes), then remove v1alpha1 AND v1alpha2 — end state v1alpha3 sole served+storage version. Reinstall-only migration (D-09-consistent), SchemaRevision guard generalized, owner-ref dual-accepts dropped, deep docs/samples sweep, envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Scouting found v1alpha1 already served:false since Phase 23 and the INSTALL.md/gates.md quickstart examples broken today (v1alpha1 apiVersion rejected).
 - **Phases 40 + 41 appended to v1.0.7 (2026-07-11, operator decision):** Phase 40 = v1alpha1/v1alpha2 code removal + subagent.levels semantic rename (breaking migration; authoritative planning artifacts pending operator import from the other machine — wait for import, do not re-plan fresh). Phase 41 = 12-item non-breaking refactoring review (seed in-repo, file:line-verified), sequenced after 40.
 
 ### Pending Todos
 
 - All ten 2026-07-03 first-run todos are now covered by v1.0.7 requirements (see REQUIREMENTS.md traceability); their files remain under `.planning/todos/pending/` until their phases close.
-- `subagent.levels` semantic rename (DECIDED — breaking, needs SchemaRevision/v1alpha3; own milestone) — `.planning/todos/pending/2026-07-03-project-level-subagent-override-slot.md`.
+- `subagent.levels` semantic rename (DECIDED — breaking, needs SchemaRevision/v1alpha3) — **FOLDED into Phase 40 (2026-07-06 discussion; supersedes "own milestone" routing)** — `.planning/todos/pending/2026-07-03-project-level-subagent-override-slot.md`.
 - CACHE-F1 direct-SDK cross-pod caching backend — `.planning/todos/pending/cache-f1-direct-sdk-cross-pod-caching.md` (deferred; vNext or later).
 
 ### Blockers/Concerns
