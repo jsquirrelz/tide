@@ -41,6 +41,12 @@ Context that shaped scope: the operator is currently TIDE's only user, so no dep
 ### v1alpha3 schema content
 - **D-09: Research audits for batchable breaking changes.** The phase researcher inventories known v1alpha2 schema warts (deprecated fields, CEL validation gaps, naming inconsistencies) beyond the levels rename; the user picks what rides the crank at PLAN approval. This is an ASK-FIRST checkpoint — present the inventory, do not silently batch.
 
+### Plan-time decisions (D-09 ASK-FIRST resolved 2026-07-06, post-research)
+- **D-10: Drop the dead `ProjectSpec.ModelSelection` field in v1alpha3** (research wart W1 — zero readers outside `api/`; duplicates the wired `subagent.levels`). Document the removal in the migration guide. W3/W5 rejected as cosmetic; W4 was a false positive.
+- **D-11: The `levels.plan` collapse is accepted** — after the rename, PLAN.md-authoring (phase_controller dispatch) and task-DAG-authoring (plan_controller dispatch) both resolve `Subagent.Levels.Plan`. No 5th key; the 4-key operator ladder stands.
+- **D-12: Bonus staleness — fix living docs, preserve snapshots.** `SECURITY.md:40` and `docs/rbac.md:213` (stale conversion-webhook prose from pre-Phase-23) fold into the D-06 sweep; `docs/audit/*.md` stay untouched as dated historical records.
+- **Mandatory scope (not optional):** the `verify-no-aggregates` Makefile gate hardcodes `api/v1alpha1|v1alpha2` globs and silently stops checking anything once those packages are deleted — it MUST be repointed (harden to a version-agnostic `api/v1alpha*` glob) in the same plan that deletes the packages.
+
 ### Claude's Discretion
 - Envelope `Level` string values (whether `"project"` dispatch level is renamed as part of the mapping fix) — within the todo's decided mapping.
 - Plan sequencing/decomposition (v1alpha3-first then removals is the natural order; how many plans is the planner's call).
