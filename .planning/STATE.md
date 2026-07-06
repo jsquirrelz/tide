@@ -137,9 +137,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-08T06:11:02.654Z
-Stopped at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
-Resume file: None
+Last session: 2026-07-06T15:22:12.644Z
+Stopped at: Phase 40 context gathered
+Resume file: .planning/phases/40-deprecate-v1alpha1-api/40-CONTEXT.md
 
 ## Operator Next Steps
 
