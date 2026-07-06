@@ -258,15 +258,14 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
 
-### Phase 40: API-Version Code Removal + subagent.levels Semantic Rename
+### Phase 40: Deprecate v1alpha1 API
 
-**Goal:** The v1alpha1 (and eventually v1alpha2) API code is removed entirely — Go types, webhook, dual-version scaffolding — as one breaking migration bundled with the `subagent.levels` semantic rename (STAGE-02, SchemaRevision/v1alpha3 treatment so old manifests still admit). The SCHEMA-03 RequiresReinstall guard contract survives or is re-expressed, and surviving in-cluster v1alpha1 objects are converted or rejected before the types go.
-**Requirements**: STAGE-02 (+ TBD at planning; seed: `.planning/todos/pending/2026-07-09-phase-40-v1alpha-removal-semantic-rename.md`)
-**Depends on:** Phase 39 (authoritative planning artifacts pending operator import from another machine — import before planning fresh)
+**Goal:** Formally deprecate v1alpha1 — mark `+kubebuilder:deprecatedversion` warnings on all 6 CRD versions, migrate the ~36 remaining `internal/`/`cmd/` consumers (controllers, dispatch, credproxy, dashboard, tide-push, eval) to v1alpha2, and decide the served=false/removal timeline plus the stored-object migration story (no conversion webhooks exist today; dogfood cluster holds a v1alpha1-only Project).
+**Requirements**: TBD
+**Depends on:** Phase 39
 **Plans:** 0 plans
 
 Plans:
-
 - [ ] TBD (run /gsd-plan-phase 40 to break down)
 
 ### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)
