@@ -114,6 +114,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
 - **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
+- **Phase 40 execution HELD until last in v1.0.7 (user decision 2026-07-06):** execute 34–38 first; 40's crank runs after PR #3 lands and the other v1.0.7 phases complete. Rationale: 34–38's plans were authored against v1alpha2 (35's goal spans "both API versions"); 40's enumeration-driven plans absorb upstream drift, the reverse doesn't hold.
+- **Shared-.git hazard while the pr3-debug worktree session is live (2026-07-06):** something in that session's kind/fixture runs intermittently flips the shared `.git/config` `core.bare` to `true`, breaking ALL commits repo-wide ("fatal: this operation must be run in a work tree"). Flipped 3× on 2026-07-06. Containment: `git config core.bare false` and retry. Root cause not yet identified — if it recurs after the pr3 session ends, open a `/gsd:debug` session.
 
 ### Quick Tasks Completed
 
@@ -137,9 +139,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-06T15:22:12.644Z
-Stopped at: Phase 40 context gathered
-Resume file: .planning/phases/40-deprecate-v1alpha1-api/40-CONTEXT.md
+Last session: 2026-07-06T16:44:10.929Z
+Stopped at: Phase 40 planned (7 plans, gate-passed); execution HELD until last in v1.0.7
+Resume file: .planning/phases/40-deprecate-v1alpha1-api/40-01-PLAN.md
 
 ## Operator Next Steps
 
