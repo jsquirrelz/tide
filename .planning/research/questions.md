@@ -32,3 +32,21 @@ planning phase:
   profiles)?
 - CEL validation: can/should immutability of certain spec fields after leaving draft be
   enforced with `x-kubernetes-validations` (e.g. `oldSelf` transition rules)?
+
+## langchain-anthropic passthrough surface for the successor runtime (2026-07-06, from /gsd:explore specialist-agents-langgraph)
+
+The evidence-gated successor-runtime strategy (notes/langgraph-successor-runtime-strategy.md)
+consolidates CACHE-F1 and the dead `Provider.Params` allowlist onto the LangGraph runtime.
+Verify at specialist-image build time:
+
+- Does `langchain-anthropic` pass `cache_control` breakpoints through cleanly (content-block
+  level), so the image can place them on the shared stable prefix? This is CACHE-F1's fix
+  shape; the ADK eval marked it "possible via direct SDK use inside the image" — confirm it
+  works *without* dropping below the LangChain abstraction.
+- Which sampling/thinking params does it expose vs. the CLI's `--model`/`--effort`-only
+  surface — temperature, thinking budget, top_p, top_k (the `Provider.Params` allowlist),
+  and an effort-equivalent for Opus 4.8+?
+- Does `init_chat_model` degrade any of these (provider-specific kwargs may be
+  ChatAnthropic-only, forcing per-provider construction instead of the single-string path)?
+- Record which `langgraph`/`langchain-anthropic` patch versions were verified (the 1.x line
+  moves fast; polyglot doc's pinning rule applies).
