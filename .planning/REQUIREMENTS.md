@@ -63,6 +63,18 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 - [x] **DEBT-02**: Chart configmap `plannerConcurrency` default is 4, matching values.yaml (v1.0.6 audit W2). **Already satisfied — see PREFLIGHT-01 (Phase 39, completed 2026-06-29).**
 - [x] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
 
+### API Version Lifecycle — Phase 40 (CRANK)
+
+Added 2026-07-06 (Phase 40 rescope discussion; IDs minted at plan time per 40-CONTEXT.md Claude's Discretion). One full version-lifecycle turn: v1alpha3 in, v1alpha1 + v1alpha2 out. Decisions locked in `.planning/phases/40-deprecate-v1alpha1-api/40-CONTEXT.md` (D-01..D-12).
+
+- [ ] **CRANK-01**: `api/v1alpha3` exists as the copy-and-reshape of v1alpha2 — `SchemaRevision` enum `v1alpha3`, dead `ProjectSpec.ModelSelection` dropped (D-10), storageversion markers moved atomically, `LevelOverrides` docs carry the artifact-first semantics — with CRDs and the tide-crds chart regenerating reproducibly
+- [ ] **CRANK-02**: Envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1` (D-08, kubeadm pattern) — the old CRD-group string is rejected under test, the tide-push/tide-eval literal drift is closed, and doc.go's superseded v1beta1 bump plan is erased
+- [ ] **CRANK-03**: Every consumer (controllers, webhooks, dispatch, CLI, dashboard, Job images, tests, live fixtures) runs on v1alpha3; the SchemaRevision guard is generalized to a two-constant crank mechanism (D-04); owner-ref dual-accepts are dropped (D-05)
+- [ ] **CRANK-04**: `subagent.levels` semantics renamed per the DECIDED todo mapping (D-02/D-11) — each `levels.X` key resolves the model that plans level X, implemented as override-key mapping with dispatch identity (envelope Level, Job labels, subagent template selection) unchanged; the resolved model is logged at all 5 dispatch sites
+- [ ] **CRANK-05**: `api/v1alpha1` and `api/v1alpha2` deleted; 6 single-version CRD manifests; `verify-no-aggregates` hardened to a version-agnostic fail-closed glob in the same commit (D-12 mandatory); `PROJECT` metadata fixed; dogfood strict-decode coverage relocated, not lost
+- [ ] **CRANK-06**: Deep docs/samples accuracy pass (D-06): migration chapter with the levels-remap table; INSTALL/gates/git-hosts/project-authoring/README examples on v1alpha3 + `schemaRevision`; 12 samples renamed with kustomization in lockstep; SECURITY.md/rbac.md conversion-webhook staleness fixed while audit snapshots stay untouched (D-12)
+- [ ] **CRANK-07**: End state enforced: a CI-wired `verify-no-legacy-api-refs` gate (zero v1alpha1/v1alpha2 references outside the sanctioned exclusion set) proven alive by a seeded-failure check, and full `make test-int` green on the final tree
+
 ## Future Requirements
 
 Deferred. Tracked but not in the current roadmap.
@@ -70,7 +82,7 @@ Deferred. Tracked but not in the current roadmap.
 ### Subagent Stages
 
 - **STAGE-01**: Verify-tier LLM subagents (plan-check + level-verify) — seed `.planning/seeds/verify-level-subagent.md`; the mechanical case ships as INTEG-03
-- **STAGE-02**: `subagent.levels` semantic rename (each key names the artifact being planned) — DECIDED but breaking; needs SchemaRevision/v1alpha3 treatment
+- ~~**STAGE-02**: `subagent.levels` semantic rename~~ — **FOLDED INTO Phase 40 as CRANK-04 (2026-07-06 discussion; supersedes the "own milestone" routing)**
 
 ### Provider/Caching
 
@@ -93,8 +105,9 @@ Explicitly excluded. Documented to prevent scope creep.
 | SSH commit signing | GPG covers all three git hosts' Verified badges; go-git `Signer` seam keeps the door open |
 | Log archiving (post-GC log persistence) | Argo's multi-year bug tail; honest pod-gone state + envelope residue instead |
 | Verify-tier LLM subagents | Own milestone; this milestone ships only the mechanical completeness gate (INTEG-03) |
-| `subagent.levels` rename | Breaking semantic remap needs SchemaRevision/v1alpha3 treatment — own milestone |
+| ~~`subagent.levels` rename~~ | **No longer out of scope — folded into Phase 40 as CRANK-04 (2026-07-06)** |
 | Dashboard mutation auth hardening | Seed trigger (dashboard beyond trusted perimeter) has not fired |
+| Envelope stability declaration (`dispatch.tideproject.k8s/v1`) | Deliberately NOT taken in Phase 40 — revisit once the post-rename contract has soaked (40-CONTEXT.md deferred) |
 
 ## Traceability
 
@@ -127,13 +140,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
 | DEBT-03 | Phase 38 | Complete |
+| CRANK-01 | Phase 40 | Pending |
+| CRANK-02 | Phase 40 | Pending |
+| CRANK-03 | Phase 40 | Pending |
+| CRANK-04 | Phase 40 | Pending |
+| CRANK-05 | Phase 40 | Pending |
+| CRANK-06 | Phase 40 | Pending |
+| CRANK-07 | Phase 40 | Pending |
 
 **Coverage:**
 
-- v1.0.7 "First-Run Paper Cuts" requirements: 23 total, 100% mapped (2 — DEBT-01/DEBT-02 — already satisfied by the carried-in Phase 39)
+- v1.0.7 "First-Run Paper Cuts" requirements: 30 total (23 original + 7 CRANK minted 2026-07-06), 100% mapped (2 — DEBT-01/DEBT-02 — already satisfied by the carried-in Phase 39)
 - Carried-in requirements (PREFLIGHT-01/02, Phase 39): 2 total, 2 complete
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-07-03*
-*Last updated: 2026-07-04 — merged with a parallel session's independently-started v1.0.7 ("Flood Tide"): its completed Pre-flight Tech-Debt Hardening work carried in as Phase 39 (satisfies DEBT-01/DEBT-02 above); its unexecuted dogfood-run-#2/OpenAI-backend scope archived to `.planning/milestones/v1.0.7-floodtide-REQUIREMENTS.md` as superseded (single-node assumption contradicted by this milestone's first-run evidence) and referenced from PROV-01. Previously: 2026-07-03 after Phase 36 discussion (SIGN-02/03/04 descoped to Future Requirements; 26 → 23 active).*
+*Last updated: 2026-07-06 — minted CRANK-01..07 for Phase 40 (full API version-lifecycle turn; requirement IDs were TBD at roadmap time, minted at plan time per 40-CONTEXT.md). STAGE-02 and the "subagent.levels rename" out-of-scope row superseded by the Phase 40 fold. Previously: 2026-07-04 merge of the parallel "Flood Tide" session (PREFLIGHT carried in as Phase 39; dogfood-run-#2/OpenAI scope archived); 2026-07-03 Phase 36 descope (SIGN-02/03/04 → Future).*

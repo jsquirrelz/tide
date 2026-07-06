@@ -10,7 +10,7 @@
 - ✅ **v1.0.4 — tide-import image publish + release-matrix guardrail** — (shipped 2026-06-25, tag `v1.0.4`, published). Patch: publishes the `tide-import` image in the build-images matrix and adds the matrix↔chart image-coverage release gate.
 - ✅ **v1.0.5 — Resumable Import: Partial-Tree Resume** — Phase 30 (shipped 2026-06-27, tag `v1.0.5`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). adopt-complete + re-plan-incomplete: fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies → stall). Unblocked deferred dogfood run #2. Full archive: [milestones/v1.0.5-ROADMAP.md](milestones/v1.0.5-ROADMAP.md) · [milestones/v1.0.5-REQUIREMENTS.md](milestones/v1.0.5-REQUIREMENTS.md).
 - ✅ **v1.0.6 — Adoption-Path Correctness & Dispatch Safety** — Phases 31–33 (shipped 2026-06-29, tag `v1.0.6`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon). Corrective patch closing the four code-level defects dogfood run #2b surfaced on the adoption path: D1+D2 lifecycle/cost seam (Phase 31), D3 dispatch concurrency cap (Phase 32), D4 planner failure semantics (Phase 33). Audit: tech_debt (13/13 reqs, 0 blockers). Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md).
-- 🚧 **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–38 (in progress; started 2026-07-03). Closes what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss (run branch shipped incomplete yet stamped Complete), the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, agent identity, promptFile), dashboard blind spots (artifact view at approve gates, project view, empty log drawer), the Prometheus setup step, and the v1.0.6 audit tech-debt carry. 23 requirements (INTEG/COST/BASE/SIGN/PROMPT/DASH/TELEM/DEBT), 100% mapped — SIGN-02/03/04 (GPG signing) descoped 2026-07-03 at Phase 36 discussion.
+- 🚧 **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–38 + 40 (in progress; started 2026-07-03). Closes what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss (run branch shipped incomplete yet stamped Complete), the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, agent identity, promptFile), dashboard blind spots (artifact view at approve gates, project view, empty log drawer), the Prometheus setup step, and the v1.0.6 audit tech-debt carry. 23 requirements (INTEG/COST/BASE/SIGN/PROMPT/DASH/TELEM/DEBT), 100% mapped — SIGN-02/03/04 (GPG signing) descoped 2026-07-03 at Phase 36 discussion. **Phase 40 added 2026-07-06** (full API version-lifecycle turn; +7 CRANK requirements minted at plan time → 30 total).
 - 📋 **vNext — Specialist Verify Tier + LangGraph Beachhead** — (scoped 2026-07-06 via /gsd:explore; picks up after v1.0.7) — plan-check / level-verify / integration-check stages on a read-only LangGraph specialist image; first rung of the evidence-gated successor-runtime ladder — [framing doc](milestones/vnext-specialist-verify-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **v1.x — LangGraph Authoring Migration (evidence-gated)** — (backlog; reframed 2026-07-06 from "Polyglot Subagent Runtimes: LangGraph Strategy") — planner roles migrate first, executor last, each rung gated on eval-harness evidence; endgame = CLI-deprecation decision + multi-provider via `init_chat_model`, dissolving the standalone OpenAI backend — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **vLater — Dogfood Run #2 (retarget pending)** — (original deliverable — TIDE builds the OpenAI backend — dissolved by multi-provider-via-LangGraph; new build target chosen at scoping; still gated on multi-node infrastructure) — archived Flood Tide phase details remain a starting point: [milestones/v1.0.7-floodtide-ROADMAP.md](milestones/v1.0.7-floodtide-ROADMAP.md)
@@ -26,6 +26,7 @@
 - [x] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7 (completed 2026-07-08)
 - [x] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
 - [x] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed (completed 2026-07-11)
+- [ ] **Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)** - v1alpha3 becomes the sole served+storage version (carrying the `subagent.levels` semantic rename + ModelSelection drop), v1alpha1 AND v1alpha2 are removed end to end, the envelope contract decouples to `dispatch.tideproject.k8s/v1alpha1`, and the crank machinery (guard, tooling gates) generalizes for v1alpha4
 
 <details>
 <summary>✅ v1.0.0 — Self-Hosting MVP (Phases 1–11) — SHIPPED 2026-06-11</summary>
@@ -240,7 +241,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 
 ## Progress
 
-**Execution Order:** 39 -> 34 → 35 → 36 → 37 → 38 (35, 37, 38 are independent and may interleave; 36 requires 34 + 35)
+**Execution Order:** 39 -> 34 → 35 → 36 → 37 → 38 (35, 37, 38 are independent and may interleave; 36 requires 34 + 35) · Phase 40 depends only on Phase 39 (complete) and is independent of 34–38 — but as a repo-wide breaking crank it should NOT interleave with another in-flight phase's execution.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -257,16 +258,23 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
+| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 0/7 | Planned | - |
 
 ### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
 **Goal:** One full API-version crank: introduce v1alpha3 as the sole served+storage version for all 6 CRDs — carrying the folded `subagent.levels` semantic rename (DECIDED mapping in the 2026-07-03 todo) plus user-approved batchable schema fixes — then remove v1alpha1 AND v1alpha2 entirely (Go packages, CRD blocks, chart copies, scheme registrations, stale comments). Reinstall-only migration per Phase 23 D-09; SchemaRevision guard generalized as the permanent crank mechanism; owner-ref dual-accepts dropped; deep docs/samples sweep (INSTALL/gates/git-hosts/project-authoring examples are broken today); envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Decisions locked in `40-CONTEXT.md`.
-**Requirements**: TBD
+**Requirements**: CRANK-01, CRANK-02, CRANK-03, CRANK-04, CRANK-05, CRANK-06, CRANK-07
 **Depends on:** Phase 39
-**Plans:** 0 plans
+**Plans:** 7 plans in 4 waves (planned 2026-07-06)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 40 to break down)
+- [ ] 40-01-PLAN.md — Introduce api/v1alpha3 (copy-and-reshape, D-10 ModelSelection drop, storage flip, regen) — wave 1
+- [ ] 40-02-PLAN.md — Envelope group decoupling to dispatch.tideproject.k8s/v1alpha1 (D-08) — wave 1
+- [ ] 40-03-PLAN.md — Consumer migration crank: imports, webhooks, schemes, guard (D-04), owner-refs (D-05), fixtures — wave 2
+- [ ] 40-04-PLAN.md — subagent.levels semantic rename via levelOverrideKey mapping (D-02/D-11) + resolved-model logging — wave 3
+- [ ] 40-05-PLAN.md — Remove api/v1alpha1 + api/v1alpha2, relocate dogfood test, harden verify-no-aggregates (D-12), regen single-version CRDs — wave 3
+- [ ] 40-06-PLAN.md — Docs & samples deep accuracy pass (D-06/D-12): migration chapter + levels-remap table, quickstarts, 12 samples — wave 3
+- [ ] 40-07-PLAN.md — Closeout: verify-no-legacy-api-refs CI gate + full test-int phase gate — wave 4
 
 ### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)
 
