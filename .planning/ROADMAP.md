@@ -268,12 +268,23 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Plans:** 7 plans in 4 waves (planned 2026-07-06)
 
 Plans:
+**Wave 1**
+
 - [ ] 40-01-PLAN.md — Introduce api/v1alpha3 (copy-and-reshape, D-10 ModelSelection drop, storage flip, regen) — wave 1
 - [ ] 40-02-PLAN.md — Envelope group decoupling to dispatch.tideproject.k8s/v1alpha1 (D-08) — wave 1
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 40-03-PLAN.md — Consumer migration crank: imports, webhooks, schemes, guard (D-04), owner-refs (D-05), fixtures — wave 2
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 40-04-PLAN.md — subagent.levels semantic rename via levelOverrideKey mapping (D-02/D-11) + resolved-model logging — wave 3
 - [ ] 40-05-PLAN.md — Remove api/v1alpha1 + api/v1alpha2, relocate dogfood test, harden verify-no-aggregates (D-12), regen single-version CRDs — wave 3
 - [ ] 40-06-PLAN.md — Docs & samples deep accuracy pass (D-06/D-12): migration chapter + levels-remap table, quickstarts, 12 samples — wave 3
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 40-07-PLAN.md — Closeout: verify-no-legacy-api-refs CI gate + full test-int phase gate — wave 4
 
 ### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)

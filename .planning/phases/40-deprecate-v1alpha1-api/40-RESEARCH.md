@@ -621,9 +621,11 @@ Requirement IDs are TBD (see `<phase_requirements>`); this maps by work area ins
 scrutiny — all three are scope-boundary judgment calls, not factual claims about libraries or
 versions.**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should `docs/audit/README.md` and `docs/audit/operator.md` be updated, left as historical
+1. **RESOLVED — 40-CONTEXT.md D-12 (user decision 2026-07-06): docs/audit/*.md stay untouched as
+   dated historical records; only living docs (SECURITY.md, docs/rbac.md) fold into the D-06 sweep.**
+   **Should `docs/audit/README.md` and `docs/audit/operator.md` be updated, left as historical
    snapshots, or explicitly annotated as stale?**
    - What we know: both cite `api/v1alpha1/*.go:LINE` extensively and reference
      `internal/webhook/v1alpha1/plan_webhook.go`, which no longer exists (webhooks moved to
@@ -637,6 +639,9 @@ versions.**
 2. **Should the `verify-no-aggregates` glob be hardened to `api/v1alpha*/*_types.go` (durable
    across future cranks) or literally updated to `api/v1alpha3/*_types.go` (matches D-04's
    "generalize the crank mechanism" spirit less completely, but is a smaller diff)?**
+   **RESOLVED — 40-CONTEXT.md D-12 mandatory-scope note (user-confirmed 2026-07-06): harden to the
+   version-agnostic `api/v1alpha*` glob, in the SAME commit as the api/ package deletions
+   (implemented by plan 40-05).**
    - What we know: D-04 explicitly asks to generalize the SchemaRevision guard as "the
      permanent crank mechanism" — this Makefile target has the identical hardcoding problem but
      wasn't named in CONTEXT.md's decisions.
