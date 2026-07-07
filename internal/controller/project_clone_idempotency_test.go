@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -186,6 +187,36 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				return makeFakeJobTerminal(ctx, k8sClient, cloneJobName, "default", true)
 			}, 5*time.Second, 200*time.Millisecond).Should(Succeed(),
 				"clone Job should exist and be patchable to succeeded")
+
+			// Phase 35 read-before-flip (D-11): the set-on-success arm now reads
+			// the CloneResult envelope FIRST and stamps baseSHA in the same patch
+			// that flips CloneComplete. Provide a success envelope pod so the
+			// happy path flips immediately (without one it would requeue until the
+			// sub-TTL cutoff — covered by the baseref-halt suite's Spec E).
+			cloneEnv := pushResultEnvelope{Kind: "CloneResult", ProjectUID: string(p.UID), ExitCode: 0}
+			envRaw, mErr := json.Marshal(cloneEnv)
+			Expect(mErr).NotTo(HaveOccurred())
+			envPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      cloneJobName + "-pod",
+					Namespace: "default",
+					Labels:    map[string]string{"job-name": cloneJobName},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, envPod)).To(Succeed())
+			podPatch := client.MergeFrom(envPod.DeepCopy())
+			envPod.Status.Phase = corev1.PodSucceeded
+			envPod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: pushContainerName,
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 0, Reason: "Completed", Message: string(envRaw),
+				}},
+			}}
+			Expect(k8sClient.Status().Patch(ctx, envPod, podPatch)).To(Succeed())
 
 			// Drive a few more reconciles so the controller detects success and patches CloneComplete.
 			for range 5 {
