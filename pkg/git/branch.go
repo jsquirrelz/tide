@@ -154,7 +154,8 @@ func resolveBaseRef(repo *gogit.Repository, ref string) (plumbing.Hash, error) {
 
 	if !found {
 		return plumbing.ZeroHash, fmt.Errorf(
-			"unable to resolve %q to a commit SHA: baseRef must be an existing branch, tag, or full 40-hex commit SHA reachable from a branch or tag: %w",
+			"unable to resolve %q to a commit SHA: baseRef must be an existing branch, "+
+				"tag, or full 40-hex commit SHA reachable from a branch or tag: %w",
 			ref, ErrBaseRefUnresolvable)
 	}
 

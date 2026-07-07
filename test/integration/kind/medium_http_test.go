@@ -631,10 +631,10 @@ data:
 // prefix (e.g. "BASE_REF_TARGET_TIP=") in the given multi-line log, trimmed of
 // surrounding whitespace. Returns "" when the prefix is absent.
 func grepGreppedTip(log, prefix string) string {
-	for _, line := range strings.Split(log, "\n") {
+	for line := range strings.SplitSeq(log, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if after, ok := strings.CutPrefix(line, prefix); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	return ""

@@ -212,7 +212,8 @@ func main() {
 	runBranch := fs.String("run-branch", "",
 		"clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
 	baseRef := fs.String("base-ref", "",
-		"clone-mode: branch, tag, full 40-hex SHA, or refs/-qualified ref the run branch is created from; empty means remote HEAD (BASE-01)")
+		"clone-mode: branch, tag, full 40-hex SHA, or refs/-qualified ref the run branch "+
+			"is created from; empty means remote HEAD (BASE-01)")
 	integrateTaskBranches := fs.String("integrate-task-branches", "",
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
 	integrationOnly := fs.Bool("integration-only", false,

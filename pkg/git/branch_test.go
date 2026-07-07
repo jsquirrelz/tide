@@ -319,7 +319,6 @@ func TestEnsureRunBranch_RejectsDisallowedForms(t *testing.T) {
 	rr := seedResolvableClone(t)
 	shortSHA := rr.defaultHead.String()[:7]
 	for i, ref := range []string{"HEAD", shortSHA, "master~1", "master^"} {
-		ref := ref
 		t.Run(ref, func(t *testing.T) {
 			runBranch := "tide/run-reject-" + string(rune('a'+i))
 			_, err := EnsureRunBranch(rr.bareDir, runBranch, ref)
