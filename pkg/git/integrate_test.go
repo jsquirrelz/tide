@@ -32,7 +32,7 @@ func setupIntegrateFixture(t *testing.T) (bareDir, runBranch string) {
 	bareDir, _ = seedBareRepo(t, base)
 
 	runBranch = "tide/run-proj-test"
-	if err := EnsureRunBranch(bareDir, runBranch); err != nil {
+	if _, err := EnsureRunBranch(bareDir, runBranch, ""); err != nil {
 		t.Fatalf("EnsureRunBranch: %v", err)
 	}
 	return bareDir, runBranch
