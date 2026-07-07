@@ -30,8 +30,8 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Git Base Ref (BASE)
 
-- [ ] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
-- [ ] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
+- [x] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
+- [x] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
 - [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
 
 ### Agent Identity (SIGN)
@@ -109,8 +109,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTEG-03 | Phase 34 | Pending |
 | INTEG-04 | Phase 34 | Pending |
 | INTEG-05 | Phase 34 | Pending |
-| BASE-01 | Phase 35 | Pending |
-| BASE-02 | Phase 35 | Pending |
+| BASE-01 | Phase 35 | Complete |
+| BASE-02 | Phase 35 | Complete |
 | BASE-03 | Phase 35 | Pending |
 | SIGN-01 | Phase 36 | Pending |
 | DASH-01 | Phase 37 | Pending |
@@ -129,6 +129,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEBT-03 | Phase 38 | Pending |
 
 **Coverage:**
+
 - v1.0.7 "First-Run Paper Cuts" requirements: 23 total, 100% mapped (2 — DEBT-01/DEBT-02 — already satisfied by the carried-in Phase 39)
 - Carried-in requirements (PREFLIGHT-01/02, Phase 39): 2 total, 2 complete
 - Unmapped: 0 ✓
