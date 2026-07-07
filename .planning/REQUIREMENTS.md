@@ -32,7 +32,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 - [x] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
 - [x] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
-- [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
+- [x] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
 
 ### Agent Identity (SIGN)
 
@@ -111,7 +111,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTEG-05 | Phase 34 | Pending |
 | BASE-01 | Phase 35 | Complete |
 | BASE-02 | Phase 35 | Complete |
-| BASE-03 | Phase 35 | Pending |
+| BASE-03 | Phase 35 | Complete |
 | SIGN-01 | Phase 36 | Pending |
 | DASH-01 | Phase 37 | Pending |
 | DASH-02 | Phase 37 | Pending |
