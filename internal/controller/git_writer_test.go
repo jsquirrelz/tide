@@ -13,6 +13,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -107,6 +108,56 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 			branches, err := succeededTaskBranches(ctx, k8sClient, "default", projectName)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(branches).To(BeEmpty())
+		})
+
+		It("excludes Succeeded branches of a plan holding at a wave-pause boundary", func() {
+			makePlanTask := func(name, planRef, phase string, extraLabels map[string]string) *tideprojectv1alpha2.Task {
+				labels := map[string]string{gitWriterProjectLabelKey: projectName}
+				maps.Copy(labels, extraLabels)
+				tsk := &tideprojectv1alpha2.Task{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: labels},
+					Spec: tideprojectv1alpha2.TaskSpec{
+						PlanRef:             planRef,
+						FilesTouched:        []string{"file.go"},
+						PromptPath:          "envelopes/x/children/task-01.json",
+						DeclaredOutputPaths: []string{"file.go"},
+					},
+				}
+				Expect(k8sClient.Create(ctx, tsk)).To(Succeed())
+				waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
+				if phase != "" {
+					var got tideprojectv1alpha2.Task
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+					patch := client.MergeFrom(got.DeepCopy())
+					got.Status.Phase = phase
+					Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+					Eventually(func() string {
+						var g tideprojectv1alpha2.Task
+						if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
+							return ""
+						}
+						return g.Status.Phase
+					}, 5*time.Second, 50*time.Millisecond).Should(Equal(phase))
+					return &got
+				}
+				return tsk
+			}
+			defer cleanupTasks("gw-paused-done", "gw-paused-pending", "gw-free-done")
+
+			// plan-paused: wave-k task Succeeded, wave-k+1 task carries the
+			// wave-paused label — the operator has NOT approved boundary k,
+			// so the Succeeded branch is held by the plan's own integration
+			// gate and other writers must not scoop it.
+			held := makePlanTask("gw-paused-done", "gw-plan-paused", "Succeeded", nil)
+			_ = makePlanTask("gw-paused-pending", "gw-plan-paused", "",
+				map[string]string{"tideproject.k8s/wave-paused": "2"})
+			free := makePlanTask("gw-free-done", "gw-plan-free", "Succeeded", nil)
+
+			branches, err := succeededTaskBranches(ctx, k8sClient, "default", projectName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(branches).To(Equal([]string{pkggit.TaskBranchName(string(free.UID))}),
+				"a paused plan's Succeeded branches leaked into the cumulative set, bypassing the operator's wave hold")
+			Expect(branches).NotTo(ContainElement(pkggit.TaskBranchName(string(held.UID))))
 		})
 	})
 
@@ -230,6 +281,60 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 		It("returns (zero, false) when no pod exists for the Job", func() {
 			_, ok := readJobPushEnvelope(ctx, k8sClient, "default", "gw-no-such-job")
 			Expect(ok).To(BeFalse())
+		})
+
+		It("scans past a running pod to the pod that carries a termination message", func() {
+			const multiJob = "gw-multi-pod-job"
+			// Pod that sorts FIRST by name and has no terminated state — a
+			// BackoffLimit retry pod still running while the failed pod's
+			// envelope holds the real classification.
+			running := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gw-multi-aaa-running",
+					Namespace: "default",
+					Labels:    map[string]string{"job-name": multiJob},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: "push", Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, running)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, running) })
+
+			env := pushResultEnvelope{
+				APIVersion: "v1", Kind: "PushResult", ProjectUID: "proj-uid",
+				Branch: "tide/run-x-1", ExitCode: 15, Reason: "merge-conflict",
+				ConflictBranch: "tide/wt-conflict",
+			}
+			raw, err := json.Marshal(env)
+			Expect(err).NotTo(HaveOccurred())
+			done := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gw-multi-zzz-done",
+					Namespace: "default",
+					Labels:    map[string]string{"job-name": multiJob},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers:    []corev1.Container{{Name: "push", Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, done)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, done) })
+			sp := client.MergeFrom(done.DeepCopy())
+			done.Status.ContainerStatuses = []corev1.ContainerStatus{{
+				Name: "push",
+				State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+					ExitCode: 15, Reason: "Error", Message: string(raw),
+				}},
+			}}
+			Expect(k8sClient.Status().Patch(ctx, done, sp)).To(Succeed())
+
+			got, ok := readJobPushEnvelope(ctx, k8sClient, "default", multiJob)
+			Expect(ok).To(BeTrue(), "a running sibling pod must not hide the terminated pod's envelope")
+			Expect(got.Reason).To(Equal("merge-conflict"))
+			Expect(got.ConflictBranch).To(Equal("tide/wt-conflict"))
 		})
 	})
 

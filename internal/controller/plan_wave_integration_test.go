@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -399,7 +400,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		if attempt < maxWaveIntegrationAttempts {
 			// Below cap: Plan must stay non-terminal and the failed Job must
 			// have been deleted (Background propagation) so a fresh one can
-			// be dispatched on the next reconcile.
+			// be dispatched once the backoff window has passed.
 			if plan2Fresh.Status.Phase == "Failed" {
 				t.Fatalf("step (e) attempt %d: Plan prematurely Failed before the %d-attempt cap",
 					attempt, maxWaveIntegrationAttempts)
@@ -407,8 +408,16 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 			if result.RequeueAfter == 0 {
 				t.Errorf("step (e) attempt %d: expected RequeueAfter > 0 (bounded retry backoff)", attempt)
 			}
-			// Re-dispatch a fresh integration Job for the next iteration's
-			// terminal-Failed transition.
+			// The LastAttemptTime fence blocks an immediate re-dispatch (the
+			// Job DELETE event would otherwise re-enqueue with zero delay).
+			// Simulate the backoff window passing by rewinding the stamp past
+			// the max backoff, then re-dispatch for the next iteration.
+			rewound := metav1.NewTime(time.Now().Add(-16 * time.Minute))
+			rp := client.MergeFrom(plan2Fresh.DeepCopy())
+			plan2Fresh.Status.WaveIntegration.LastAttemptTime = &rewound
+			if err := fc.Status().Patch(context.Background(), &plan2Fresh, rp); err != nil {
+				t.Fatalf("step (e) attempt %d rewind LastAttemptTime: %v", attempt, err)
+			}
 			if _, err := reconcileWaveIntegPlan(t, r, plan2Name); err != nil {
 				t.Fatalf("step (e) attempt %d re-dispatch reconcile: %v", attempt, err)
 			}
@@ -497,6 +506,82 @@ func TestPlanReconcilerSingleWaveDispatchesIntegrationJob(t *testing.T) {
 		t.Fatalf("single-wave plan did not dispatch a wave-integration Job (INTEG-01 last-wave skip regressed); jobs: %v",
 			jobNames(jobs))
 	}
+}
+
+// TestPlanReconcilerPauseBetweenWavesFinalWaveStillIntegrates pins the
+// gated-project INTEG-01 contract: the wave-approved-<N> label range is
+// [1, len(layers)-1] (maybePauseForWaveApprove only pauses BETWEEN waves), so
+// the FINAL boundary can never be operator-approved — it must integrate
+// without requiring an approval label, for single-wave plans (waveNum 1,
+// nothing is ever stampable) and multi-wave plans (waveNum len(layers))
+// alike. Inter-wave boundaries stay gated: an unapproved non-final boundary
+// must NOT dispatch its integration Job.
+func TestPlanReconcilerPauseBetweenWavesFinalWaveStillIntegrates(t *testing.T) {
+	t.Run("single-wave plan integrates with no approval label", func(t *testing.T) {
+		const planName = "paused-single-wave-plan"
+		const projectName = "paused-single-wave-proj"
+		scheme := fakeSchemeForWaveInteg(t)
+
+		proj := waveIntegProject(t, projectName)
+		proj.Spec.Gates.PauseBetweenWaves = true
+		plan := &tideprojectv1alpha2.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: "default",
+				UID:       types.UID("plan-uid-paused-single"),
+				Labels:    map[string]string{"tideproject.k8s/project": projectName},
+			},
+			Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		}
+		task1 := makeWaveIntegTask("psw-task1", "uid-psw-task1", planName, "Succeeded", projectName, nil)
+		task2 := makeWaveIntegTask("psw-task2", "uid-psw-task2", planName, "Succeeded", projectName, nil)
+
+		r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2)
+
+		if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+
+		jobs := listWaveIntegJobs(t, fc)
+		if findIntegrationJobForWave(jobs, plan.UID, 1) == nil {
+			t.Fatalf("PauseBetweenWaves single-wave plan never integrated: wave-approved-1 is unstampable for a final boundary, so the gate must exempt it; jobs: %v",
+				jobNames(jobs))
+		}
+	})
+
+	t.Run("inter-wave boundary stays gated without approval", func(t *testing.T) {
+		const planName = "paused-two-wave-plan"
+		const projectName = "paused-two-wave-proj"
+		scheme := fakeSchemeForWaveInteg(t)
+
+		proj := waveIntegProject(t, projectName)
+		proj.Spec.Gates.PauseBetweenWaves = true
+		plan := &tideprojectv1alpha2.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: "default",
+				UID:       types.UID("plan-uid-paused-two"),
+				Labels:    map[string]string{"tideproject.k8s/project": projectName},
+			},
+			Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		}
+		// Wave 1: ptw-task1 Succeeded. Wave 2: ptw-task2 depends on ptw-task1.
+		task1 := makeWaveIntegTask("ptw-task1", "uid-ptw-task1", planName, "Succeeded", projectName, nil)
+		task2 := makeWaveIntegTask("ptw-task2", "uid-ptw-task2", planName, "Pending", projectName, []string{"ptw-task1"})
+
+		r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2)
+
+		if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+
+		jobs := listWaveIntegJobs(t, fc)
+		if findIntegrationJobForWave(jobs, plan.UID, 1) != nil {
+			t.Fatalf("unapproved INTER-wave boundary dispatched its integration Job — the operator hold must still gate non-final boundaries")
+		}
+	})
 }
 
 // TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded is the 2-wave
@@ -739,5 +824,130 @@ func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
 	}
 	if result.RequeueAfter != 0 {
 		t.Errorf("RequeueAfter = %v, want 0 (conflict fails immediately, no retry)", result.RequeueAfter)
+	}
+}
+
+// TestPlanReconcilerWaveRetryHonorsBackoffFence pins the capped-backoff
+// contract between wave-retry attempts: handleWaveIntegrationFailure deletes
+// the failed Job and returns RequeueAfter=boundaryPushRequeue(Attempts), but
+// the Job DELETE event re-enqueues the Plan immediately via Owns(Job) — so
+// the delay must be enforced by a LastAttemptTime fence at dispatch, not by
+// the requeue alone. A same-wave retry inside the window must wait; one past
+// the window (and any new wave) dispatches.
+func TestPlanReconcilerWaveRetryHonorsBackoffFence(t *testing.T) {
+	buildFixture := func(t *testing.T, planName, projectName string, lastAttempt time.Time, attempts int32) (*PlanReconciler, client.Client, types.UID) {
+		t.Helper()
+		scheme := fakeSchemeForWaveInteg(t)
+		proj := waveIntegProject(t, projectName)
+		at := metav1.NewTime(lastAttempt)
+		plan := &tideprojectv1alpha2.Plan{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      planName,
+				Namespace: "default",
+				UID:       types.UID("plan-uid-" + planName),
+				Labels:    map[string]string{"tideproject.k8s/project": projectName},
+			},
+			Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha2.PlanStatus{
+				ValidationState: "Validated",
+				WaveIntegration: tideprojectv1alpha2.WaveIntegrationStatus{
+					Wave: 1, Attempts: attempts, LastAttemptTime: &at, LastError: "integration-failed",
+				},
+			},
+		}
+		task1 := makeWaveIntegTask(planName+"-t1", "uid-"+planName+"-t1", planName, "Succeeded", projectName, nil)
+		r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1)
+		return r, fc, plan.UID
+	}
+
+	t.Run("inside the window: no dispatch, requeue for the remainder", func(t *testing.T) {
+		r, fc, uid := buildFixture(t, "fence-hot-plan", "fence-hot-proj", time.Now(), 2)
+		result, err := reconcileWaveIntegPlan(t, r, "fence-hot-plan")
+		if err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		if findIntegrationJobForWave(listWaveIntegJobs(t, fc), uid, 1) != nil {
+			t.Fatalf("retry dispatched immediately after a failure — the capped backoff (attempt 2 → %v) was bypassed",
+				boundaryPushRequeue(2))
+		}
+		if result.RequeueAfter == 0 {
+			t.Errorf("expected RequeueAfter > 0 while inside the backoff window")
+		}
+	})
+
+	t.Run("past the window: dispatches", func(t *testing.T) {
+		r, fc, uid := buildFixture(t, "fence-cold-plan", "fence-cold-proj", time.Now().Add(-30*time.Minute), 2)
+		if _, err := reconcileWaveIntegPlan(t, r, "fence-cold-plan"); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		if findIntegrationJobForWave(listWaveIntegJobs(t, fc), uid, 1) == nil {
+			t.Fatalf("retry past the backoff window did not dispatch")
+		}
+	})
+}
+
+// TestPlanReconcilerWaveJobPodFailureIsNotTerminal pins the terminal-Failed
+// contract: buildPushJob sets BackoffLimit=2, and batchv1 Job.Status.Failed
+// counts failed PODS — it is >0 after the first pod failure while the Job
+// controller still owes retries. Only the JobFailed CONDITION marks the Job
+// terminal (mirrors the project-side isJobFailed gate). A mid-retry Job must
+// be treated as still-running: no Attempts burned, no Job deletion.
+func TestPlanReconcilerWaveJobPodFailureIsNotTerminal(t *testing.T) {
+	const planName = "podfail-plan"
+	const projectName = "podfail-proj"
+	scheme := fakeSchemeForWaveInteg(t)
+
+	proj := waveIntegProject(t, projectName)
+	plan := &tideprojectv1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: "default",
+			UID:       types.UID("plan-uid-podfail"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+	}
+	task1 := makeWaveIntegTask("pf-task1", "uid-pf-task1", planName, "Succeeded", projectName, nil)
+
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1)
+
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("dispatch reconcile: %v", err)
+	}
+	integJobName := fmt.Sprintf("tide-push-wave-%s-1", plan.UID)
+
+	// First pod failed; NO JobFailed condition — the Job controller is still
+	// retrying (BackoffLimit budget remains).
+	var job batchv1.Job
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: integJobName, Namespace: "default"}, &job); err != nil {
+		t.Fatalf("get integ job: %v", err)
+	}
+	job.Status.Failed = 1
+	if err := fc.Status().Update(context.Background(), &job); err != nil {
+		t.Fatalf("mark pod failure: %v", err)
+	}
+
+	result, err := reconcileWaveIntegPlan(t, r, planName)
+	if err != nil {
+		t.Fatalf("mid-retry reconcile: %v", err)
+	}
+
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: integJobName, Namespace: "default"}, &job); err != nil {
+		t.Fatalf("mid-retry Job was deleted while the Job controller still owed pod retries: %v", err)
+	}
+	var planFresh tideprojectv1alpha2.Plan
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFresh); err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if planFresh.Status.WaveIntegration.Attempts != 0 {
+		t.Errorf("WaveIntegration.Attempts = %d, want 0 — a pod-level failure is not a terminal Job failure",
+			planFresh.Status.WaveIntegration.Attempts)
+	}
+	if planFresh.Status.Phase == "Failed" {
+		t.Errorf("Plan failed on a non-terminal (mid-retry) wave Job")
+	}
+	if result.RequeueAfter == 0 {
+		t.Errorf("expected RequeueAfter > 0 while the wave Job is still retrying pods")
 	}
 }

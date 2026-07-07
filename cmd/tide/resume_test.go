@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -210,6 +212,64 @@ func TestResumeWithoutFlagLeavesFailed(t *testing.T) {
 	}
 	if got.Status.Phase != "Failed" {
 		t.Errorf("expected Failed Plan untouched when flag absent; Status.Phase=%q", got.Status.Phase)
+	}
+}
+
+// TestResumeRetryFailedResetsWaveIntegration pins the Phase 34 recovery
+// contract for wave-integration failures: resetting a Failed Plan must also
+// zero Status.WaveIntegration (otherwise a plan parked at the Attempts cap
+// re-fails terminally after ONE fresh attempt instead of a full budget) and
+// delete the stale terminal-failed tide-push-wave-<plan.UID>-<N> Job
+// (otherwise, within its 300s TTL window, the resumed Plan's next reconcile
+// re-reads the stale envelope and instantly re-fails).
+func TestResumeRetryFailedResetsWaveIntegration(t *testing.T) {
+	p := makeProject("my-project")
+	pl := makeFailedPlan("pl-wave-parked", "my-project")
+	pl.UID = types.UID("plan-uid-wave-parked")
+	now := metav1.Now()
+	pl.Status.WaveIntegration = tidev1alpha2.WaveIntegrationStatus{
+		Wave:            1,
+		Attempts:        5,
+		LastAttemptTime: &now,
+		LastError:       "integration-failed",
+	}
+	staleJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-push-wave-plan-uid-wave-parked-1",
+			Namespace: "default",
+			Labels: map[string]string{
+				"tideproject.k8s/role":    "git-writer",
+				"tideproject.k8s/project": "my-project",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(p, pl, staleJob).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "my-project", true, nil); err != nil {
+		t.Fatalf("resumeRun(retryFailed=true): %v", err)
+	}
+
+	var got tidev1alpha2.Plan
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-wave-parked"}, &got); err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if got.Status.WaveIntegration.Attempts != 0 || got.Status.WaveIntegration.Wave != 0 ||
+		got.Status.WaveIntegration.LastError != "" || got.Status.WaveIntegration.LastAttemptTime != nil {
+		t.Errorf("Status.WaveIntegration not reset: %+v — a resumed plan must get a fresh retry budget",
+			got.Status.WaveIntegration)
+	}
+
+	var job batchv1.Job
+	err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: staleJob.Name}, &job)
+	if err == nil {
+		t.Errorf("stale wave-integration Job survived resume — within its TTL window it instantly re-fails the resumed Plan")
+	} else if !apierrors.IsNotFound(err) {
+		t.Fatalf("get stale wave job: %v", err)
 	}
 }
 

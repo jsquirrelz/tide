@@ -107,6 +107,12 @@ type pushConfig struct {
 	// worktree after clone.
 	RunBranch             string
 	IntegrateTaskBranches []string // push-mode: task branch names to merge before staging artifacts (D-04)
+	// IntegrationOnly marks a per-wave integration Job (D-02/D-04): merge +
+	// verify task branches into the LOCAL run branch and exit success without
+	// committing or pushing — the remote push belongs to boundary pushes.
+	// Boundary pushes carry the cumulative branch set too (D-03/D-07), so the
+	// no-push exit keys on this explicit flag, never on absent artifact paths.
+	IntegrationOnly bool
 }
 
 // pushResult is the small JSON envelope written to
@@ -184,6 +190,8 @@ func main() {
 		"clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
 	integrateTaskBranches := fs.String("integrate-task-branches", "",
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
+	integrationOnly := fs.Bool("integration-only", false,
+		"push-mode: per-wave integration Job — merge+verify locally, no commit/push (D-02)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -202,6 +210,7 @@ func main() {
 		ProjectUID:            *projectUID,
 		RunBranch:             *runBranch,
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
+		IntegrationOnly:       *integrationOnly,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -583,20 +592,21 @@ func runIntegrationPhase(cfg pushConfig, bareRepoPath string, stderr io.Writer) 
 		return exitIntegrationMiss, true
 	}
 
-	if len(cfg.IntegrateTaskBranches) > 0 && len(cfg.ArtifactPaths) == 0 {
-		// Per-wave integration-only mode: task branches were integrated (and
-		// verified complete above) but there are no planner artifacts to
-		// stage. The merge has already advanced the LOCAL run branch — the
-		// only thing the next wave's worktrees need, since they fork from it
-		// on the shared PVC. There is nothing to commit or push (attempting
-		// the boundary commit below would fail with "cannot create empty
-		// commit: clean working tree"). The remote push happens only at the
-		// final plan boundary, which carries planner artifacts. Exit
-		// success — and write a success envelope (Pitfall 3: today this path
-		// exits before ever calling writePushEnvelope, so wave-Job outcomes
-		// were invisible to the controller/metrics).
+	if cfg.IntegrationOnly {
+		// Per-wave integration-only mode (explicit --integration-only, set by
+		// triggerWaveIntegrationJob and nothing else): task branches were
+		// integrated (and verified complete above). The merge has already
+		// advanced the LOCAL run branch — the only thing the next wave's
+		// worktrees need, since they fork from it on the shared PVC. Nothing
+		// is committed or pushed; the remote push belongs to boundary pushes.
+		// A success envelope is written so wave-Job outcomes are visible to
+		// the controller/metrics (Pitfall 3). Boundary pushes also carry a
+		// non-empty --integrate-task-branches (the D-03/D-07 cumulative set)
+		// with no artifacts, so this exit MUST key on the explicit flag —
+		// keying on "branches set, no artifacts" would swallow every
+		// post-task boundary push and no work would ever reach the remote.
 		fmt.Fprintf(stderr,
-			"tide-push: integration-only run — merged %d task branch(es) into %s locally; no artifacts to commit/push\n",
+			"tide-push: integration-only run — merged %d task branch(es) into %s locally; skipping commit/push\n",
 			len(cfg.IntegrateTaskBranches), cfg.Branch)
 		writePushEnvelope(cfg, "", exitSuccess, "", nil, 0, "")
 		return exitSuccess, true

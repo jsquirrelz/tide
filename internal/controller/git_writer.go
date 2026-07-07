@@ -63,11 +63,28 @@ func succeededTaskBranches(ctx context.Context, c client.Client, ns, projectName
 	); err != nil {
 		return nil, err
 	}
+	// Respect PauseBetweenWaves holds across plans: a task carrying the
+	// tideproject.k8s/wave-paused label means its plan is holding at an
+	// unapproved wave boundary — that plan's own reconcileWaveBoundary gate
+	// refuses to integrate its Succeeded branches, and the cumulative set
+	// must not let another plan's writer (or a level boundary push) scoop
+	// them past the operator instead. Once approved, the labels clear and
+	// the branches join the next writer's set. Best-effort by design: the
+	// authoritative hold is the plan-local gate; this closes the cross-plan
+	// bypass for the durable (labeled) pause state.
+	pausedPlans := make(map[string]bool)
+	for i := range tasks.Items {
+		if _, paused := tasks.Items[i].Labels["tideproject.k8s/wave-paused"]; paused {
+			pausedPlans[tasks.Items[i].Spec.PlanRef] = true
+		}
+	}
 	var branches []string
 	for i := range tasks.Items {
-		if tasks.Items[i].Status.Phase == "Succeeded" {
-			branches = append(branches, pkggit.TaskBranchName(string(tasks.Items[i].UID)))
+		t := &tasks.Items[i]
+		if t.Status.Phase != "Succeeded" || pausedPlans[t.Spec.PlanRef] {
+			continue
 		}
+		branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
 	}
 	sort.Strings(branches)
 	return branches, nil
@@ -110,9 +127,18 @@ func gitWriterInFlightCount(ctx context.Context, c client.Client, ns, projectNam
 	return n, nil
 }
 
-// readJobPushEnvelope returns the parsed pushResultEnvelope from the FIRST
-// pod labeled job-name=jobName that has a terminated container carrying a
-// non-empty termination message; (zero, false) otherwise.
+// readJobPushEnvelope returns the parsed pushResultEnvelope from the pods
+// labeled job-name=jobName, scanning every pod for a terminated container
+// carrying a non-empty termination message and preferring the most recently
+// created one; (zero, false) when no pod carries a readable envelope.
+//
+// The scan matters because these Jobs run with BackoffLimit=2 and
+// deterministic names reused across delete-and-recreate retries: a running
+// retry pod (no termination message) can sort ahead of the failed pod whose
+// envelope holds the real classification, and a lingering pod from a prior
+// attempt can carry a stale envelope — latest CreationTimestamp (name as the
+// tie-break within the same second) picks the attempt that decided the Job's
+// terminal state.
 //
 // Termination-log only — NEVER the shared PVC envelope path (Pitfall 2: the
 // PVC copy is keyed by project UID and collides across every push-mode Job
@@ -131,19 +157,27 @@ func readJobPushEnvelope(ctx context.Context, c client.Client, namespace, jobNam
 	); err != nil {
 		return pushResultEnvelope{}, false
 	}
-	if len(pods.Items) == 0 {
-		return pushResultEnvelope{}, false
+	var best *corev1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if len(pod.Status.ContainerStatuses) == 0 {
+			continue
+		}
+		term := pod.Status.ContainerStatuses[0].State.Terminated
+		if term == nil || term.Message == "" {
+			continue
+		}
+		if best == nil ||
+			best.CreationTimestamp.Before(&pod.CreationTimestamp) ||
+			(best.CreationTimestamp.Equal(&pod.CreationTimestamp) && pod.Name > best.Name) {
+			best = pod
+		}
 	}
-	pod := &pods.Items[0]
-	if len(pod.Status.ContainerStatuses) == 0 {
-		return pushResultEnvelope{}, false
-	}
-	term := pod.Status.ContainerStatuses[0].State.Terminated
-	if term == nil || term.Message == "" {
+	if best == nil {
 		return pushResultEnvelope{}, false
 	}
 	var env pushResultEnvelope
-	if err := json.Unmarshal([]byte(term.Message), &env); err != nil {
+	if err := json.Unmarshal([]byte(best.Status.ContainerStatuses[0].State.Terminated.Message), &env); err != nil {
 		return pushResultEnvelope{}, false
 	}
 	return env, true

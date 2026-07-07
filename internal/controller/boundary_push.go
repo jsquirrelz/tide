@@ -17,6 +17,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,6 +103,18 @@ func triggerBoundaryPush(
 		// signals a chart/env misconfiguration (TIDE_PUSH_IMAGE env unset)
 		// and warrants attention even though it's not fatal.
 		logger.Info("skipping boundary push: TidePushImage not configured", "level", level, "project", project.Name)
+		return nil
+	}
+
+	// D-09: a merge-conflict park is a human-recovery halt — a level trigger
+	// must not recreate the doomed push after the failed Job's TTL GC. The
+	// miss-reason variant stays dispatchable (its cap arm bounds retries and
+	// a later success auto-clears the condition); `tide resume` clears the
+	// conflict park after a replan.
+	if cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete); cond != nil &&
+		cond.Status == metav1.ConditionTrue && cond.Reason == tideprojectv1alpha2.ReasonMergeConflict {
+		logger.Info("skipping boundary push: parked on a merge conflict awaiting `tide resume`",
+			"level", level, "project", project.Name)
 		return nil
 	}
 
@@ -200,9 +214,11 @@ func triggerWaveIntegrationJob(
 		LastPushedSHA:         project.Status.Git.LastPushedSHA,
 		CommitMessage:         commitMsg,
 		IntegrateTaskBranches: branches,
-		// ArtifactPaths intentionally empty — integration-only push; no planner
-		// artifacts are staged until the plan-boundary push fires.
-		LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+		// IntegrationOnly: merge+verify into the LOCAL run branch, no
+		// commit/push — the remote push belongs to boundary pushes, which
+		// carry the same cumulative branch set with IntegrationOnly false.
+		IntegrationOnly: true,
+		LeaksConfigMap:  project.Spec.Git.LeaksConfigRef,
 	}
 
 	job := buildPushJob(project, pvcName, pushOpts, scheme)

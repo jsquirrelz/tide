@@ -957,13 +957,14 @@ func TestRunPushIntegrationOnlyNoArtifacts(t *testing.T) {
 	taskBranch := "tide/wt-uidA"
 	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "taskA.txt", "task A content")
 
-	// Push with integration but NO artifacts — the per-wave integration case.
+	// Per-wave integration Job: --integration-only with the branch set.
 	pushCfg := pushConfig{
 		Mode:                  "push",
 		Branch:                branch,
 		CommitMessage:         "tide: integrate wave 1",
 		ArtifactPaths:         nil,
 		IntegrateTaskBranches: []string{taskBranch},
+		IntegrationOnly:       true,
 		Workspace:             ws,
 		ProjectUID:            "p-integ-only",
 	}
@@ -1025,6 +1026,7 @@ func TestRunPushBoundaryCleanTreePushesIntegratedBranch(t *testing.T) {
 		Branch:                branch,
 		CommitMessage:         "tide: integrate wave 1",
 		IntegrateTaskBranches: []string{taskBranch},
+		IntegrationOnly:       true,
 		Workspace:             ws,
 		ProjectUID:            "p-boundary-clean",
 	}
@@ -1092,6 +1094,74 @@ func TestRunPushBoundaryCleanTreePushesIntegratedBranch(t *testing.T) {
 	}
 	if pr.HeadSHA != ref.Hash().String() {
 		t.Errorf("envelope HeadSHA=%s but remote ref=%s", pr.HeadSHA, ref.Hash())
+	}
+}
+
+// TestRunPushBoundaryWithBranchesStillPushes pins the boundary-push contract
+// under the D-03/D-07 cumulative branch set: every controller-dispatched
+// boundary push now carries --integrate-task-branches (the cumulative
+// Succeeded set) and never --artifact-paths. Such a Job must integrate,
+// verify, and STILL push the run branch to the remote — only an explicit
+// --integration-only Job (the per-wave integration case) may exit without
+// pushing. Regression: the early exit previously keyed on "branches set, no
+// artifacts", which swallowed every post-task boundary push.
+func TestRunPushBoundaryWithBranchesStillPushes(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "boundary-branches")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	taskBranch := "tide/wt-uidC"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "taskC.txt", "task C content")
+
+	// The controller's boundary-push shape: cumulative branches, no artifacts,
+	// NOT integration-only.
+	boundaryCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: milestone milestone-01 authored + executed",
+		IntegrateTaskBranches: []string{taskBranch},
+		Workspace:             ws,
+		ProjectUID:            "p-boundary-branches",
+	}
+	exit, stderr := stderrAndRun(t, ctx, boundaryCfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("boundary push with branches exit=%d (want 0); stderr=%s", exit, stderr)
+	}
+
+	// The run branch must exist on the remote and carry the merged task file.
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("run branch %q not pushed to remote by boundary push carrying branches: %v", branch, err)
+	}
+	commit, err := bareRepo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	if _, err := commit.File("taskC.txt"); err != nil {
+		t.Errorf("taskC.txt not present on remote run branch: %v", err)
+	}
+
+	// Envelope must be a real push success: non-empty HeadSHA matching the
+	// remote tip (an empty HeadSHA would wipe the D-B6 lease fence upstream).
+	pr := readPushEnvelope(t, ws, "p-boundary-branches")
+	if pr.ExitCode != 0 || pr.Reason != "" {
+		t.Errorf("push envelope exitCode=%d reason=%q, want 0/empty", pr.ExitCode, pr.Reason)
+	}
+	if pr.HeadSHA != ref.Hash().String() {
+		t.Errorf("envelope HeadSHA=%q, want remote tip %s", pr.HeadSHA, ref.Hash())
 	}
 }
 
@@ -1417,6 +1487,7 @@ func TestRunPushIntegrationOnlySuccessWritesEnvelope(t *testing.T) {
 		Branch:                branch,
 		CommitMessage:         "tide: integrate wave 1",
 		IntegrateTaskBranches: []string{taskBranch},
+		IntegrationOnly:       true,
 		Workspace:             ws,
 		ProjectUID:            "p-wave-envelope",
 	}

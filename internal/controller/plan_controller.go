@@ -1032,7 +1032,15 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	// wave-paused label. Once the operator approves, the wave-approved-<N>
 	// label is stamped and integration proceeds on a later reconcile —
 	// integrate-then-dispatch ordering is preserved past the gate.
-	if project.Spec.Gates.PauseBetweenWaves &&
+	//
+	// The gate applies ONLY to inter-wave boundaries (waveNum < len(layers)):
+	// maybePauseForWaveApprove pauses BETWEEN waves, so its stampable label
+	// range is [1, len(layers)-1] — the final boundary (and a single-wave
+	// plan's only boundary) has no approvable pause and gating it on a label
+	// no code path can stamp deadlocks into a silent INTEG-01 skip. The
+	// final wave's dispatch was itself approved at the prior boundary;
+	// plan-level gates govern what happens after integration.
+	if project.Spec.Gates.PauseBetweenWaves && waveNum < len(layers) &&
 		plan.Labels[fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, waveNum)] != "true" {
 		return ctrl.Result{}, false, nil
 	}
@@ -1043,12 +1051,17 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	var integJob batchv1.Job
 	getErr := r.Get(ctx, types.NamespacedName{Name: integJobName, Namespace: plan.Namespace}, &integJob)
 	if getErr == nil {
-		// Job exists — check terminal status.
-		// IMPORTANT: check Failed BEFORE Succeeded==0 to avoid livelock.
-		if integJob.Status.Failed > 0 {
+		// Job exists — check terminal status via Job CONDITIONS (JobFailed /
+		// JobComplete), matching the project-side boundary-push gate.
+		// Status.Failed counts failed PODS: with BackoffLimit=2 it is >0
+		// after the first pod failure while the Job controller still owes
+		// retries — classifying (and deleting) at that point burns the
+		// bounded-retry budget on a Job that might still succeed.
+		// IMPORTANT: check Failed BEFORE the still-running arm to avoid livelock.
+		if isJobFailed(&integJob) {
 			return r.handleWaveIntegrationFailure(ctx, plan, project, &integJob, integJobName, waveNum)
 		}
-		if integJob.Status.Succeeded > 0 {
+		if isJobSucceeded(&integJob) {
 			// Integration complete — stamp IntegratedThroughWave and continue loop.
 			patch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.IntegratedThroughWave = waveNum
@@ -1071,6 +1084,21 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 		if t == nil || t.Status.Phase != "Succeeded" {
 			// Wave k not yet complete — nothing to integrate yet.
 			return ctrl.Result{}, false, nil
+		}
+	}
+
+	// Backoff fence between retry attempts for the SAME wave: the failure
+	// handler's RequeueAfter alone cannot enforce the capped backoff —
+	// deleting the failed Job re-enqueues the Plan immediately via
+	// Owns(&batchv1.Job{}), and without this fence all
+	// maxWaveIntegrationAttempts burn back-to-back against a condition that
+	// needed minutes to clear. A new wave (Wave != waveNum) starts unfenced.
+	if plan.Status.WaveIntegration.Wave == waveNum &&
+		plan.Status.WaveIntegration.Attempts > 0 &&
+		plan.Status.WaveIntegration.LastAttemptTime != nil {
+		wait := boundaryPushRequeue(plan.Status.WaveIntegration.Attempts)
+		if elapsed := time.Since(plan.Status.WaveIntegration.LastAttemptTime.Time); elapsed < wait {
+			return ctrl.Result{RequeueAfter: wait - elapsed}, true, nil
 		}
 	}
 

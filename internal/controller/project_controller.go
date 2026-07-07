@@ -488,6 +488,28 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Step -0.5: Bypass-annotation handling (D-B6 / D-D4 mirror). MUST run
+	// before BOTH routes into reconcileBoundaryPush — the Step-0 Complete
+	// fast-path and the Phase 34 mid-run push observation arm — because that
+	// state machine's sticky ConditionPushLeaseFailed guard returns early,
+	// making any consume placed after those routes unreachable while the
+	// classified terminal-failed push Job still exists (it outlives the
+	// failure by its 300s TTL). Keyed on the condition as well as the phase
+	// so a Complete project whose Phase was re-asserted past PushLeaseFailed
+	// still honors the operator's bypass.
+	leaseCond := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeaseFailed)
+	leaseFailed := project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed ||
+		(leaseCond != nil && leaseCond.Status == metav1.ConditionTrue)
+	if leaseFailed {
+		if v, ok := project.Annotations[bypassPushLeaseAnnotation]; ok && v == "true" {
+			return r.consumeBypassPushLeaseAnnotation(ctx, project)
+		}
+		if project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed {
+			// Halted at PushLeaseFailed until bypass annotation lands.
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// Step 0: Check if all owned Milestones have Succeeded → Complete.
 	// IMPORTANT (debug #13b): reaching Complete does NOT short-circuit the
 	// reconcile. Complete is the control-plane succession roll-up and is patched
@@ -556,40 +578,10 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Step 2: Bypass-annotation handling (D-B6 / D-D4 mirror).
-	if project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed {
-		if v, ok := project.Annotations[bypassPushLeaseAnnotation]; ok && v == "true" {
-			logger.Info("push-lease bypass annotation present; clearing PushLeaseFailed", "project", project.Name)
-			// Consume the annotation.
-			annotPatch := client.MergeFrom(project.DeepCopy())
-			newAnnotations := make(map[string]string, len(project.Annotations))
-			for k, v := range project.Annotations {
-				if k != bypassPushLeaseAnnotation {
-					newAnnotations[k] = v
-				}
-			}
-			project.Annotations = newAnnotations
-			if err := r.Patch(ctx, project, annotPatch); err != nil {
-				return ctrl.Result{}, fmt.Errorf("consume bypass annotation: %w", err)
-			}
-			// Clear PushLeaseFailed phase.
-			statusPatch := client.MergeFrom(project.DeepCopy())
-			project.Status.Phase = tidev1alpha2.PhaseRunning
-			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-				Type:               tidev1alpha2.ConditionPushLeaseFailed,
-				Status:             metav1.ConditionFalse,
-				Reason:             tidev1alpha2.ReasonBypassApplied,
-				Message:            "Push-lease failure bypassed by operator annotation",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, project, statusPatch); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{Requeue: true}, nil
-		}
-		// Halted at PushLeaseFailed until bypass annotation lands.
-		return ctrl.Result{}, nil
-	}
+	// Step 2 (bypass-annotation handling) moved to Step -0.5 above: it must
+	// precede the Complete fast-path and the mid-run push observation arm,
+	// both of which return into reconcileBoundaryPush before reaching here
+	// while the classified failed push Job still exists.
 
 	// Step 3: Clone Job dispatch (D-B4 PVC layout init).
 	pvcName := r.sharedPVCName()
@@ -713,26 +705,34 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		return ctrl.Result{}, nil
 	}
 
-	// Operator-recovery halt arms (leak / lease). These are distinct, sticky
-	// outcomes with their own recovery surfaces (remove the secret; clear the
-	// bypass-push-lease annotation). Once set, the boundary-push state machine
-	// must NOT re-process them every reconcile — the Step-0 Complete fast-path
-	// re-asserts Phase=Complete on each pass, so without this guard the lease
-	// arm would re-increment LeaseFailureCount in a loop.
+	// Operator-recovery halt arms (leak / lease / merge-conflict). These are
+	// distinct, sticky outcomes with their own recovery surfaces (remove the
+	// secret; clear the bypass-push-lease annotation; `tide resume` after a
+	// replan). Once set, the boundary-push state machine must NOT re-process
+	// them every reconcile — the Step-0 Complete fast-path re-asserts
+	// Phase=Complete on each pass, so without this guard the lease arm would
+	// re-increment LeaseFailureCount in a loop.
 	//
-	// ConditionIntegrationIncomplete is deliberately NOT an early-return guard
-	// here (unlike leak/lease): D-13 requires it to auto-clear the next time a
-	// verify+push succeeds (e.g. after `tide resume` resets Attempts, or via a
-	// mid-run observation of a Job dispatched by a different level's
-	// trigger). The Attempts>=cap arm below is what actually keeps a parked
-	// miss from re-dispatching; it re-asserts the sticky condition with its
-	// own once-only guard rather than blocking this whole function.
+	// A MISS-reason IntegrationIncomplete is deliberately NOT an early-return
+	// guard here: D-13 requires it to auto-clear the next time a verify+push
+	// succeeds (e.g. after `tide resume` resets Attempts, or via a mid-run
+	// observation of a Job dispatched by a different level's trigger). The
+	// Attempts>=cap arm below is what keeps a parked miss from re-dispatching.
+	// A CONFLICT-reason park IS a guard: retrying cannot fix a content
+	// conflict, and without it the failed Job's 300s TTL erases the only
+	// other obstacle to re-dispatch — the Complete fast-path would burn a
+	// fresh doomed push every TTL cycle until the generic cap flipped the
+	// terminal reason to PushFailed, losing the ConflictBranch detail.
 	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeakBlocked); c != nil &&
 		c.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
 	}
 	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeaseFailed); c != nil &&
 		c.Status == metav1.ConditionTrue {
+		return ctrl.Result{}, nil
+	}
+	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete); c != nil &&
+		c.Status == metav1.ConditionTrue && c.Reason == tidev1alpha2.ReasonMergeConflict {
 		return ctrl.Result{}, nil
 	}
 
@@ -748,10 +748,15 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			// captured at classification time into LastError (Job/pod may
 			// be TTL'd by the time the cap is reached).
 			if detail, ok := strings.CutPrefix(project.Status.BoundaryPush.LastError, integrationIncompleteLastErrorPrefix); ok {
-				if err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonIntegrationIncomplete, detail); err != nil {
+				changed, err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonIntegrationIncomplete, detail)
+				if err != nil {
 					return ctrl.Result{}, err
 				}
-				if r.Recorder != nil {
+				// Event only on the actual transition: this arm re-runs on
+				// every reconcile of the parked project (BoundaryPushed keeps
+				// Reason=Pushing here, so the outer once-only guard never
+				// closes for the miss path).
+				if changed && r.Recorder != nil {
 					r.Recorder.Eventf(project, corev1.EventTypeWarning, tidev1alpha2.ReasonIntegrationIncomplete,
 						"Boundary push exhausted %d/%d attempts on an integration-completeness miss: %s",
 						project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts, detail)
@@ -800,7 +805,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		project.Status.Git.LeaseFailureCount = 0
 		project.Status.BoundaryPush.LastError = ""
 		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
-		if haveEnv {
+		if haveEnv && env.HeadSHA != "" {
 			// D-14: the push envelope's HeadSHA arms the force-with-lease
 			// fence — stamped in the SAME patch that resets LeaseFailureCount
 			// (co-located with the condition transition per CONTEXT
@@ -809,12 +814,16 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			project.Status.Git.LastPushedSHA = env.HeadSHA
 		} else {
 			// Pitfall 4: TTLSecondsAfterFinished=300 can erase the pod
-			// before the controller observes it (e.g. after a restart).
-			// Do NOT block BoundaryPushed=True on envelope readability —
-			// the push DID succeed (Job Complete); only the SHA stamp is
-			// skipped this cycle. Surfaced via metric + log, not a condition.
+			// before the controller observes it (e.g. after a restart), and
+			// a success envelope may legitimately carry an empty HeadSHA (an
+			// integration-only wave Job pushes nothing). Do NOT block
+			// BoundaryPushed=True on envelope readability, and NEVER stamp an
+			// empty HeadSHA — with omitempty the merge patch would DELETE
+			// lastPushedSHA, disarming the D-B6 force-with-lease fence and
+			// letting a later push silently clobber a diverged remote.
+			// Surfaced via metric + log, not a condition.
 			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "stamp-skip").Inc()
-			logger.Info("boundary push succeeded but envelope unreadable; lastPushedSHA not stamped this cycle",
+			logger.Info("boundary push succeeded but envelope missing or SHA-less; lastPushedSHA not stamped this cycle",
 				"job", pushJobName)
 		}
 		meta.RemoveStatusCondition(&project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
@@ -893,7 +902,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			}
 			msg := fmt.Sprintf("merge conflict integrating %s into %s: content problem, human needed — replan, then `tide resume --retry-failed`",
 				env.ConflictBranch, project.Status.Git.BranchName)
-			if err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonMergeConflict, msg); err != nil {
+			if _, err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonMergeConflict, msg); err != nil {
 				return ctrl.Result{}, err
 			}
 			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "conflict").Inc()
@@ -957,11 +966,13 @@ const integrationIncompleteLastErrorPrefix = "integration-incomplete: "
 // setIntegrationIncompleteCondition sets the sticky ConditionIntegrationIncomplete
 // (Phase 34 D-08/D-09/D-11) with the given reason/message. Guards on
 // (status, reason, message) equality so reconciles do not churn
-// LastTransitionTime — mirrors setBoundaryPushedCondition's idiom.
-func (r *ProjectReconciler) setIntegrationIncompleteCondition(ctx context.Context, project *tidev1alpha2.Project, reason, message string) error {
+// LastTransitionTime — mirrors setBoundaryPushedCondition's idiom. Returns
+// whether the condition actually transitioned so callers can gate one-shot
+// side effects (the cap-arm Warning event) on the real change, not the pass.
+func (r *ProjectReconciler) setIntegrationIncompleteCondition(ctx context.Context, project *tidev1alpha2.Project, reason, message string) (bool, error) {
 	existing := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
 	if existing != nil && existing.Status == metav1.ConditionTrue && existing.Reason == reason && existing.Message == message {
-		return nil
+		return false, nil
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
@@ -971,7 +982,7 @@ func (r *ProjectReconciler) setIntegrationIncompleteCondition(ctx context.Contex
 		Message:            message,
 		LastTransitionTime: metav1.Now(),
 	})
-	return r.Status().Patch(ctx, project, patch)
+	return true, r.Status().Patch(ctx, project, patch)
 }
 
 // formatMissingBranchesMessage renders the D-12 condition message naming
@@ -1125,6 +1136,77 @@ func (r *ProjectReconciler) consumeResetBoundaryPushAnnotation(ctx context.Conte
 		return fmt.Errorf("consume reset-boundary-push annotation: %w", err)
 	}
 	return nil
+}
+
+// consumeBypassPushLeaseAnnotation implements the D-B6 operator recovery verb:
+// consume (delete) the bypass annotation, dispose of the classified
+// terminal-failed push Job, and clear the PushLeaseFailed phase + condition.
+//
+// Deleting the failed Job is load-bearing twice over:
+//   - the Phase 34 mid-run observation arm re-enters reconcileBoundaryPush
+//     whenever the deterministic tide-push-<uid> Job exists and is terminal —
+//     with the condition freshly cleared, the failure-classification arm would
+//     re-read the SAME lease-rejected envelope and re-enter PushLeaseFailed,
+//     undoing the bypass within one reconcile;
+//   - on a Complete project the fast-path's isJobFailed arm has always had the
+//     same re-classification loop (pre-Phase-34 latent defect) — the bypass
+//     only ever appeared to work because non-Complete projects never
+//     re-observed the Job.
+//
+// The delete is guarded on isJobTerminal: a level trigger (triggerBoundaryPush
+// has no lease-condition guard) may legitimately have a FRESH push Job in
+// flight under the same deterministic name — that one must survive the bypass
+// and be classified on its own terminal state.
+func (r *ProjectReconciler) consumeBypassPushLeaseAnnotation(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
+	logger := logf.FromContext(ctx)
+	logger.Info("push-lease bypass annotation present; clearing PushLeaseFailed", "project", project.Name)
+
+	// Consume the annotation.
+	annotPatch := client.MergeFrom(project.DeepCopy())
+	newAnnotations := make(map[string]string, len(project.Annotations))
+	for k, v := range project.Annotations {
+		if k != bypassPushLeaseAnnotation {
+			newAnnotations[k] = v
+		}
+	}
+	project.Annotations = newAnnotations
+	if err := r.Patch(ctx, project, annotPatch); err != nil {
+		return ctrl.Result{}, fmt.Errorf("consume bypass annotation: %w", err)
+	}
+
+	// Dispose of the classified terminal-failed push Job so neither the
+	// mid-run arm nor the Complete fast-path re-classifies the bypassed
+	// failure. Terminal-only: never delete a fresh in-flight push.
+	pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+	var pushJob batchv1.Job
+	getErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &pushJob)
+	switch {
+	case getErr == nil && isJobTerminal(&pushJob):
+		if err := r.Delete(ctx, &pushJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("delete bypassed push job %s: %w", pushJobName, err)
+		}
+	case getErr != nil && !apierrors.IsNotFound(getErr):
+		return ctrl.Result{}, getErr
+	}
+
+	// Clear PushLeaseFailed phase + condition. Preserve a non-lease phase
+	// (e.g. Complete re-asserted by checkProjectComplete) — only the failure
+	// phase itself transitions back to Running.
+	statusPatch := client.MergeFrom(project.DeepCopy())
+	if project.Status.Phase == tidev1alpha2.PhasePushLeaseFailed {
+		project.Status.Phase = tidev1alpha2.PhaseRunning
+	}
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionPushLeaseFailed,
+		Status:             metav1.ConditionFalse,
+		Reason:             tidev1alpha2.ReasonBypassApplied,
+		Message:            "Push-lease failure bypassed by operator annotation",
+		LastTransitionTime: metav1.Now(),
+	})
+	if err := r.Status().Patch(ctx, project, statusPatch); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{Requeue: true}, nil
 }
 
 // setBoundaryPushedCondition patches the non-terminal BoundaryPushed condition.

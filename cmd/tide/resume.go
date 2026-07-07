@@ -40,9 +40,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -281,9 +283,22 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 		patch := client.MergeFrom(orig)
 		item.Status.Phase = ""
 		item.Status.Conditions = nil
+		// Phase 34: a wave-integration failure parks retry state on the Plan
+		// (Wave/Attempts/LastError). Without zeroing it, a plan that failed
+		// at the Attempts cap re-fails terminally after ONE fresh attempt —
+		// the same-wave reset arm in handleWaveIntegrationFailure only zeroes
+		// the counter when the blocking wave CHANGES.
+		item.Status.WaveIntegration = tidev1alpha2.WaveIntegrationStatus{}
 		meta.SetStatusCondition(&item.Status.Conditions, resumedByUser)
 		if err := c.Status().Patch(ctx, item, patch); err != nil {
 			return fmt.Errorf("reset plan %s: %w", item.Name, err)
+		}
+		// Delete any stale terminal wave-integration Job for this Plan: its
+		// deterministic name (tide-push-wave-<plan.UID>-<N>) survives up to
+		// TTLSecondsAfterFinished, and the resumed Plan's next reconcile
+		// would re-read the stale failure envelope and instantly re-fail.
+		if err := deleteStaleWaveJobs(ctx, c, ns, string(item.UID), out); err != nil {
+			return fmt.Errorf("delete stale wave-integration jobs for plan %s: %w", item.Name, err)
 		}
 		printReset(out, "Plan", item.Name)
 		resetCount++
@@ -328,6 +343,35 @@ func printReset(out io.Writer, kind, name string) {
 		return
 	}
 	fmt.Fprintf(out, "tide: reset %s/%s for re-dispatch\n", kind, name)
+}
+
+// deleteStaleWaveJobs removes terminal wave-integration Jobs named
+// tide-push-wave-<planUID>-<N> (Phase 34). Their deterministic names live up
+// to TTLSecondsAfterFinished past failure, and a resumed Plan's reconcile
+// Gets the name first — a lingering failed Job re-fails the Plan from its
+// stale envelope before a fresh attempt can dispatch. Background propagation
+// mirrors the controller's own retry-path deletion.
+func deleteStaleWaveJobs(ctx context.Context, c client.Client, ns, planUID string, out io.Writer) error {
+	var jobs batchv1.JobList
+	if err := c.List(ctx, &jobs, client.InNamespace(ns)); err != nil {
+		return fmt.Errorf("list jobs: %w", err)
+	}
+	prefix := fmt.Sprintf("tide-push-wave-%s-", planUID)
+	policy := metav1.DeletePropagationBackground
+	for i := range jobs.Items {
+		job := &jobs.Items[i]
+		if !strings.HasPrefix(job.Name, prefix) {
+			continue
+		}
+		err := c.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &policy})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete job %s: %w", job.Name, err)
+		}
+		if out != nil {
+			fmt.Fprintf(out, "tide: deleted stale wave-integration job %s\n", job.Name)
+		}
+	}
+	return nil
 }
 
 // newResumeCmd constructs the cobra command for `tide resume`.

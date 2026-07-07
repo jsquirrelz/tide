@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,9 +22,11 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -560,6 +563,43 @@ var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observatio
 		})
 	})
 
+	Describe("Test 3b: an empty-HeadSHA success envelope must not wipe the lease fence", func() {
+		const name = "sha-empty-keeps-fence"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("keeps the previously-stamped LastPushedSHA and routes to stamp-skip", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
+
+			// A previous real push armed the D-B6 force-with-lease fence.
+			pre := getProject(name)
+			prePatch := client.MergeFrom(pre.DeepCopy())
+			pre.Status.Git.LastPushedSHA = "armed-fence-sha-111"
+			Expect(k8sClient.Status().Patch(ctx, &pre, prePatch)).To(Succeed())
+
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn)
+			attachEnvelopePod(jn, "") // success envelope with empty HeadSHA
+
+			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+
+			r := newReconcilerSHA("tide-projects-sha-3b")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("armed-fence-sha-111"),
+					"an empty envelope HeadSHA must never clear the force-with-lease anchor")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
 	Describe("Test 4: a later success auto-clears a sticky IntegrationIncomplete condition", func() {
 		const name = "sha-autoclear"
 		AfterEach(func() { cleanupSHA(name) })
@@ -846,6 +886,90 @@ var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failur
 
 			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "conflict"))
 			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
+	Describe("Test 3b (D-09 park is sticky): TTL-deleting the failed Job must not re-dispatch a doomed push", func() {
+		const name = "im-conflict-ttl"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("does not create a new push Job after the parked conflict Job is GC'd", func() {
+			proj := makeCompleteIM(name, 0)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachConflictEnvelope(jn, "tide/wt-uid-ttl-conflicter")
+
+			r := newReconcilerIM("tide-projects-im-3b")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonMergeConflict))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// TTLSecondsAfterFinished GC's the failed Job (and its pod).
+			var job batchv1.Job
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
+			policy := metav1.DeletePropagationBackground
+			Expect(k8sClient.Delete(ctx, &job, &client.DeleteOptions{PropagationPolicy: &policy})).To(Succeed())
+			Eventually(func() bool {
+				var j batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &j))
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			// A deterministic content conflict cannot be fixed by retrying:
+			// the Complete fast-path must NOT re-create the push Job while
+			// the MergeConflict park stands.
+			reconcileN(r, name, 3)
+			Consistently(func() bool {
+				var j batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &j))
+			}, 2*time.Second, 200*time.Millisecond).Should(BeTrue(),
+				"parked merge-conflict re-dispatched a doomed push Job after TTL GC")
+		})
+	})
+
+	Describe("Test 4b (D-08 cap event): the exhaustion Warning fires once, not per reconcile", func() {
+		const name = "im-cap-event"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("emits a single IntegrationIncomplete event at the cap", func() {
+			proj := makeCompleteIM(name, maxBoundaryPushAttempts-1)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachMissEnvelope(jn, []string{"tide/wt-uid-cap-missing"}, 1)
+
+			r := newReconcilerIM("tide-projects-im-4b")
+			rec := record.NewFakeRecorder(20)
+			r.Recorder = rec
+
+			// Classification pass takes Attempts to the cap, then several
+			// parked passes — the Warning must not repeat per pass.
+			reconcileN(r, name, 6)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			reconcileN(r, name, 3)
+
+			count := 0
+			for {
+				select {
+				case e := <-rec.Events:
+					if strings.Contains(e, tideprojectv1alpha2.ReasonIntegrationIncomplete) {
+						count++
+					}
+				default:
+					Expect(count).To(Equal(1), "cap-exhaustion Warning must fire exactly once, not per reconcile")
+					return
+				}
+			}
 		})
 	})
 })

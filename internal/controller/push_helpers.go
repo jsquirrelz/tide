@@ -70,6 +70,13 @@ type PushOptions struct {
 	// receives these as --integrate-task-branches=<CSV>.
 	// Empty means no integration step is run (milestone/phase boundaries).
 	IntegrateTaskBranches []string
+
+	// IntegrationOnly marks a per-wave integration Job: tide-push merges +
+	// verifies the branches into the LOCAL run branch and exits without
+	// committing or pushing (--integration-only). Boundary pushes leave this
+	// false — they carry the same cumulative branch set but MUST push the
+	// run branch to the remote.
+	IntegrationOnly bool
 }
 
 // CloneOptions carries the clone-mode arguments. Clone is a one-time op
@@ -165,6 +172,10 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 		// D-04: pass --integrate-task-branches=<CSV> so tide-push merges
 		// per-task branches into the run branch before staging planner artifacts.
 		args = append(args, "--integrate-task-branches="+strings.Join(opts.IntegrateTaskBranches, ","))
+	}
+	if opts.IntegrationOnly {
+		// D-02 per-wave integration Job: merge+verify locally, no commit/push.
+		args = append(args, "--integration-only")
 	}
 
 	volumes := []corev1.Volume{
