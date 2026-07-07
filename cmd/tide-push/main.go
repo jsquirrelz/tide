@@ -337,7 +337,10 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// runPush opens the run worktree with PlainOpenWithOptions(EnableDotGitCommonDir:true)
 	// so it correctly resolves HEAD through the commondir mechanism of linked worktrees.
 	if cfg.RunBranch != "" {
-		if err := pkggit.EnsureRunBranch(destDir, cfg.RunBranch); err != nil {
+		// Task 2 wires cfg.BaseRef + the clone envelope here; for now pass an
+		// empty baseRef (HEAD) and discard the resolved hash so the tree stays
+		// green after the signature change.
+		if _, err := pkggit.EnsureRunBranch(destDir, cfg.RunBranch, ""); err != nil {
 			fmt.Fprintf(stderr, "tide-push: EnsureRunBranch: %v\n", err)
 			return exitGenericFail
 		}
