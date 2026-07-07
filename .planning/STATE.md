@@ -6,15 +6,15 @@ current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-07T03:40:31.602Z"
+last_updated: "2026-07-07T03:53:50.075Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 34 executed end-to-end (API, controller, tide-push, CLI, unit/envtest coverage); draft PR opened
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 31
-  completed_plans: 6
-  percent: 19
+  completed_plans: 7
+  percent: 20
 ---
 
 # Project State
@@ -49,7 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 |-------|-------|--------|
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | 6/6 | Executed (PR pending review; kind-suite RED/GREEN evidence pending CI — see Blockers) |
-| 35. Git Base Ref | TBD | Not started |
+| 35. Git Base Ref | 1/4 | In progress — 35-01 CRD schema (spec.git.baseRef + status.git.baseSHA, both versions) + parity/round-trip/render locks landed |
 | 36. Signed Commits + Bot Identity | TBD | Not started |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
 | 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
@@ -88,6 +88,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - GPG signing is DESCOPED from v1.0.7 (2026-07-03, Phase 36 discussion) — SIGN-02/03/04 moved to REQUIREMENTS.md Future Requirements; Phase 36 delivers agent identity (SIGN-01) only. The gpg-shim spike and key-exposure analysis are preserved in `36-CONTEXT.md` `<deferred>`.
 - Artifact ConfigMaps are a size-capped display cache (owner-ref'd, ~512 KiB, truncation markers); PVC/git remain source of truth. The manager cannot mount project PVCs.
 - Dashboard stays read-only — no reader pods, no mutation surfaces.
+- [Phase ?]: Phase 35 baseRef ships Pattern charset + MaxLength=250, no default (P10), no XValidation (D-08); CRD chart version NOT bumped (batches with Phase 36)
 
 ### Roadmap Evolution
 
@@ -124,7 +125,7 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-04T00:45:55.389Z
+Last session: 2026-07-07T03:52:43.698Z
 Stopped at: Phase 38 context gathered
 Resume file: .planning/phases/38-small-independents-pricing-accuracy-promptfile-telemetry-nud/38-CONTEXT.md
 
