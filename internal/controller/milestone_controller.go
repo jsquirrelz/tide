@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -749,6 +750,11 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		}
 		if detected {
 			if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+				if errors.Is(err, errGitWriterBusy) {
+					// D-02: another git-writer Job is in flight — normal
+					// serialization, not a failure. Requeue and retry.
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
 				return ctrl.Result{}, err
 			}
 			return r.patchMilestoneSucceeded(ctx, ms)
@@ -771,6 +777,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	}
 	if detected {
 		if err := r.maybeTriggerBoundaryPush(ctx, ms, project); err != nil {
+			if errors.Is(err, errGitWriterBusy) {
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	} else if r.hasChildPhases(ctx, ms) {

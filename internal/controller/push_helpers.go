@@ -87,6 +87,12 @@ type CloneOptions struct {
 	RunBranch string
 }
 
+// pushEnvelopeReasonMergeConflict is the tide-push PushResult envelope's
+// Reason value for a genuine content merge conflict (cmd/tide-push/main.go's
+// exitMergeConflict path). Shared across boundary-push and wave-integration
+// envelope handling.
+const pushEnvelopeReasonMergeConflict = "merge-conflict"
+
 // pushSAName is the dedicated ServiceAccount for the tide-push Job pod.
 // Helm chart in plan 03-09 grants it `secrets get` on
 // project.Spec.Git.CredsSecretRef ONLY (D-B1 least-privilege).
@@ -206,6 +212,16 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("tide-push-%s", project.UID),
 			Namespace: project.Namespace,
+			// Phase 34 D-02: every Job that merges into or pushes the run
+			// branch carries these two labels so gitWriterInFlightCount can
+			// List in-flight writers project-wide before dispatching another
+			// (the single-flight gate). triggerWaveIntegrationJob reuses this
+			// builder and only overrides Name/OwnerReferences, so wave-
+			// integration Jobs inherit the same labels automatically.
+			Labels: map[string]string{
+				gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
+				gitWriterProjectLabelKey: project.Name,
+			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            new(int32(2)),

@@ -90,6 +90,14 @@ var PushJobsTotal *prometheus.CounterVec
 // events for Prometheus alerting. Label arity {project} = 1.
 var BudgetOverrunsTotal *prometheus.CounterVec
 
+// IntegrationOutcomesTotal counts terminal integration/verify outcomes for
+// wave-integration Jobs and boundary-push Jobs, with `outcome` ∈ {success,
+// miss, conflict, transient, stamp-skip} (Phase 34 D-12). Diagnosable
+// alongside PushJobsTotal from a Prometheus query; the sibling
+// ConditionIntegrationIncomplete condition covers the kubectl-describe path
+// (COST-02 lesson: pod logs get GC'd, so both surfaces matter).
+var IntegrationOutcomesTotal *prometheus.CounterVec
+
 // Six locked metrics for token, cost, and duration telemetry (Phase 16 TELEM-03).
 // Label set: {project, phase, plan, wave} — D-10. The wave and plan labels are
 // permitted by the metriccardinality analyzer; the task label is forbidden
@@ -186,6 +194,14 @@ func init() {
 		[]string{"project"},
 	)
 
+	IntegrationOutcomesTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_integration_outcomes_total",
+			Help: "Count of terminal integration/verify outcomes, with outcome ∈ {success, miss, conflict, transient, stamp-skip} (Phase 34 D-12).",
+		},
+		[]string{"project", "outcome"},
+	)
+
 	// Phase 16 TELEM-03: six locked metrics for token, cost, and duration telemetry.
 	// Label set {project, phase, plan, wave} on all six (D-10).
 	TokensInputTotal = prometheus.NewCounterVec(
@@ -247,6 +263,7 @@ func init() {
 		SecretLeakBlockedTotal,
 		PushJobsTotal,
 		BudgetOverrunsTotal,
+		IntegrationOutcomesTotal,
 		// Phase 16 TELEM-03:
 		TokensInputTotal,
 		TokensOutputTotal,

@@ -152,6 +152,39 @@ spec:
                 - CycleDetected
                 - FileTouchMismatch
                 type: string
+              waveIntegration:
+                description: |-
+                  WaveIntegration records the bounded auto-retry state of the current
+                  wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
+                  reconcileWaveBoundary advances to a new blocking wave.
+                properties:
+                  attempts:
+                    description: |-
+                      Attempts is the number of wave-integration Jobs dispatched so far for
+                      Wave. The controller stops dispatching once Attempts reaches
+                      maxWaveIntegrationAttempts (Phase 34 D-04) and marks the Plan Failed
+                      with ReasonWaveIntegrationFailed.
+                    format: int32
+                    type: integer
+                  lastAttemptTime:
+                    description: |-
+                      LastAttemptTime is the timestamp of the most recently dispatched
+                      wave-integration attempt. Drives the capped exponential requeue backoff
+                      (boundaryPushRequeue, shared with the #13b machine).
+                    format: date-time
+                    type: string
+                  lastError:
+                    description: |-
+                      LastError carries the most recent wave-integration failure reason (from
+                      the push-result envelope) for operator visibility. Cleared on success.
+                    type: string
+                  wave:
+                    description: |-
+                      Wave is the 0-indexed Kahn wave number this Attempts counter refers to.
+                      The counter resets to 0 whenever the blocking wave changes (a new wave's
+                      integration Job gets a fresh retry budget).
+                    type: integer
+                type: object
             type: object
         required:
         - spec
@@ -323,6 +356,39 @@ spec:
                 - CycleDetected
                 - FileTouchMismatch
                 type: string
+              waveIntegration:
+                description: |-
+                  WaveIntegration records the bounded auto-retry state of the current
+                  wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
+                  reconcileWaveBoundary advances to a new blocking wave.
+                properties:
+                  attempts:
+                    description: |-
+                      Attempts is the number of wave-integration Jobs dispatched so far for
+                      Wave. The controller stops dispatching once Attempts reaches
+                      maxWaveIntegrationAttempts (Phase 34 D-04) and marks the Plan Failed
+                      with ReasonWaveIntegrationFailed.
+                    format: int32
+                    type: integer
+                  lastAttemptTime:
+                    description: |-
+                      LastAttemptTime is the timestamp of the most recently dispatched
+                      wave-integration attempt. Drives the capped exponential requeue backoff
+                      (boundaryPushRequeue, shared with the #13b machine).
+                    format: date-time
+                    type: string
+                  lastError:
+                    description: |-
+                      LastError carries the most recent wave-integration failure reason (from
+                      the push-result envelope) for operator visibility. Cleared on success.
+                    type: string
+                  wave:
+                    description: |-
+                      Wave is the 0-indexed Kahn wave number this Attempts counter refers to.
+                      The counter resets to 0 whenever the blocking wave changes (a new wave's
+                      integration Job gets a fresh retry budget).
+                    type: integer
+                type: object
             type: object
         required:
         - spec

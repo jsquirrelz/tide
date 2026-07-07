@@ -77,9 +77,29 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	}
 
 	patch := client.MergeFrom(proj.DeepCopy())
-	proj.SetAnnotations(gates.ConsumeReject(&proj))
+	newAnnotations := gates.ConsumeReject(&proj)
+
+	// Phase 34 D-13: if the Project shows boundary-push retry state (a sticky
+	// IntegrationIncomplete condition, or a non-zero attempts tally even
+	// without the sticky condition yet), stamp the reset-boundary-push
+	// annotation so the controller resets Attempts/LastError and clears the
+	// condition on its next reconcile (consumeResetBoundaryPushAnnotation).
+	imCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
+	needsBoundaryPushReset := (imCond != nil && imCond.Status == metav1.ConditionTrue) ||
+		proj.Status.BoundaryPush.Attempts > 0
+	if needsBoundaryPushReset {
+		if newAnnotations == nil {
+			newAnnotations = make(map[string]string)
+		}
+		newAnnotations[gates.AnnotationResetBoundaryPush] = "true"
+	}
+	proj.SetAnnotations(newAnnotations)
 	if err := c.Patch(ctx, &proj, patch); err != nil {
 		return fmt.Errorf("patch project: %w", err)
+	}
+	if needsBoundaryPushReset && out != nil {
+		fmt.Fprintln(out, "tide: reset boundary-push retry state (tideproject.k8s/reset-boundary-push); "+
+			"the controller will clear Attempts/LastError and any sticky IntegrationIncomplete condition on its next reconcile")
 	}
 
 	// Phase 13 D-06: clear BillingHalt unconditionally (operator chose recovery
@@ -318,7 +338,12 @@ func newResumeCmd() *cobra.Command {
 		Short: "Clear a tideproject.k8s/reject annotation on a Project",
 		Long: "tide resume clears the tideproject.k8s/reject annotation via " +
 			"gates.ConsumeReject + client.Patch. The reconcilers re-enter the " +
-			"normal advance path.\n\n" +
+			"normal advance path. It also unconditionally resets any boundary-push " +
+			"bounded-retry state (Phase 34 D-13): a Project with a sticky " +
+			"IntegrationIncomplete condition or a non-zero BoundaryPush.Attempts " +
+			"tally is stamped with tideproject.k8s/reset-boundary-push=true, which " +
+			"the controller consumes to zero Attempts/LastError and clear the " +
+			"condition.\n\n" +
 			"With --retry-failed, also resets Status.Phase on every Failed level " +
 			"(Milestone/Phase/Plan/Task) of the project via the status subresource " +
 			"and stamps a ResumedByUser condition. This is the sanctioned replacement " +

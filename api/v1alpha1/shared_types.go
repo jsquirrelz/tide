@@ -213,6 +213,39 @@ const (
 	ReasonWaveIntegrationFailed = "WaveIntegrationFailed"
 )
 
+// Phase 34 condition + reason vocabulary — run-integrity integration-miss
+// gate (INTEG-01..05). ConditionIntegrationIncomplete lives on the Project
+// (D-11 — beside ConditionBoundaryPushed, since it's a push-gate outcome and
+// the Project is what operators watch) and is set sticky (True) once the
+// bounded boundary-push retry budget is exhausted on a completeness miss
+// (D-08) OR immediately on a same-wave merge conflict surfacing at the
+// project-boundary push (D-09). ReasonMergeConflict is also used on the
+// PLAN's own Failed condition when a wave-integration merge conflict fails
+// the Plan (D-10 — conflicting parallel tasks were not actually independent).
+const (
+	// ConditionIntegrationIncomplete — sticky push-gate-outcome condition on
+	// the Project. True means the run branch is missing at least one
+	// Succeeded task's worktree branch (a completeness miss, ReasonIntegrationIncomplete)
+	// or hit a genuine merge conflict integrating a task branch
+	// (ReasonMergeConflict). Cleared automatically the next time a verify+push
+	// succeeds, or explicitly via `tide resume` (D-13).
+	ConditionIntegrationIncomplete = "IntegrationIncomplete"
+
+	// ReasonIntegrationIncomplete — the in-Job verify gate (`git merge-base
+	// --is-ancestor` per expected branch, D-06) found at least one Succeeded
+	// task's branch missing from the run branch after the bounded retry
+	// budget (maxBoundaryPushAttempts) was exhausted (D-08). The condition
+	// message names each missing task + branch (truncated, D-12).
+	ReasonIntegrationIncomplete = "IntegrationIncomplete"
+
+	// ReasonMergeConflict — a genuine git merge conflict (not a transient
+	// infra failure) was hit integrating a task branch into the run branch.
+	// Distinguished from ReasonIntegrationIncomplete because it is a content
+	// problem requiring a human (D-09) — retries are NOT burned on a
+	// conflict; the push/wave-integration Job parks/fails immediately.
+	ReasonMergeConflict = "MergeConflict"
+)
+
 // Phase 13 condition + reason vocabulary — provider billing halt (HALT-01).
 // A provider credit-exhaustion 400 halts all new dispatch project-wide until
 // the operator refills credits and runs `tide resume`. BillingHalt is set on

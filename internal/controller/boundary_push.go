@@ -12,6 +12,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -24,8 +25,14 @@ import (
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
-	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
+
+// errGitWriterBusy is returned by triggerBoundaryPush when the D-02
+// single-flight gate finds another git-writer Job (wave-integration or
+// boundary-push) already in flight for this Project. Call sites translate
+// this into a short requeue (5s) rather than propagating it as a reconcile
+// error — a busy gate is normal serialization, not a failure (Pitfall 7).
+var errGitWriterBusy = errors.New("git-writer busy: another run-branch writer Job is in flight")
 
 // triggerBoundaryPush is the shared implementation invoked by every up-
 // stack reconciler's per-receiver maybeTriggerBoundaryPush. It dispatches
@@ -55,6 +62,15 @@ import (
 //
 // The Job's name carries Project.UID, so even a buildPushJob constructed
 // at Phase boundary lives in the Project's logical scope.
+//
+// Phase 34 D-02/D-03/D-07: the cumulative Succeeded-branch set is computed
+// HERE (via a live List), not passed in by the caller — the plan-level
+// caller fires pre-Tasks and every other level never collected branches at
+// all, so the only correct place to compute the set is inside the shared
+// trigger. D-02: before Create, a live List checks for any OTHER in-flight
+// git-writer Job (wave-integration or boundary-push); if one is active,
+// return errGitWriterBusy so the caller requeues instead of racing a second
+// writer onto the run branch.
 func triggerBoundaryPush(
 	ctx context.Context,
 	c client.Client,
@@ -63,8 +79,6 @@ func triggerBoundaryPush(
 	project *tideprojectv1alpha2.Project,
 	level string,
 	tidePushImage string,
-	sharedPVCName string,
-	integrateBranches []string,
 ) error {
 	logger := logf.FromContext(ctx)
 
@@ -102,14 +116,30 @@ func triggerBoundaryPush(
 		return fmt.Errorf("get push job %s: %w", pushJobName, getErr)
 	}
 
+	// D-02 single-flight gate: exclude pushJobName itself (it does not exist
+	// yet per the Get above, so this is belt-and-braces against a
+	// concurrent create) and check for any OTHER in-flight git-writer Job.
+	inFlight, gwErr := gitWriterInFlightCount(ctx, c, project.Namespace, project.Name, pushJobName)
+	if gwErr != nil {
+		return fmt.Errorf("check git-writer in-flight count: %w", gwErr)
+	}
+	if inFlight > 0 {
+		return errGitWriterBusy
+	}
+
 	msg, err := buildCommitMessage(level, parent.GetName())
 	if err != nil {
 		return fmt.Errorf("build commit message for %s boundary: %w", level, err)
 	}
 
-	pvcName := sharedPVCName
-	if pvcName == "" {
-		pvcName = defaultSharedPVCName
+	pvcName := defaultSharedPVCName
+
+	// D-03/D-07: cumulative Succeeded-branch set, recomputed via a live List
+	// every time — whichever level's trigger wins the deterministic
+	// tide-push-<project.UID> create race integrates identically.
+	branches, bErr := succeededTaskBranches(ctx, c, project.Namespace, project.Name)
+	if bErr != nil {
+		return fmt.Errorf("compute cumulative succeeded-task branches: %w", bErr)
 	}
 
 	pushOpts := PushOptions{
@@ -118,7 +148,7 @@ func triggerBoundaryPush(
 		LastPushedSHA:         project.Status.Git.LastPushedSHA,
 		CommitMessage:         msg,
 		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
-		IntegrateTaskBranches: integrateBranches,
+		IntegrateTaskBranches: branches,
 	}
 	pushJob := buildPushJob(project, pvcName, pushOpts, scheme)
 	if cErr := c.Create(ctx, pushJob); cErr != nil {
@@ -128,7 +158,7 @@ func triggerBoundaryPush(
 		// AlreadyExists: idempotent success — the D-B5 serialization race.
 	}
 
-	logger.Info("triggered boundary push", "level", level, "parent", parent.GetName(), "project", project.Name, "job", pushJobName, "message", msg)
+	logger.Info("triggered boundary push", "level", level, "parent", parent.GetName(), "project", project.Name, "job", pushJobName, "message", msg, "integrateTaskBranches", len(branches))
 	tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "dispatched").Inc()
 	return nil
 }
@@ -198,26 +228,24 @@ func triggerWaveIntegrationJob(
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
 func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, "", nil)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
 func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, "", nil)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage)
 }
 
 // maybeTriggerBoundaryPush is the PlanReconciler entry point. Plan boundary
 // commit messages carry the only D-B2 shape with `+ executed` suffix
-// because Tasks have already executed by the time the Plan boundary
-// fires. It collects the branch names of all Succeeded tasks and passes
-// them as IntegrateTaskBranches so the push Job runs D-04 integration
-// before staging planner artifacts.
-func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project, taskItems []tideprojectv1alpha2.Task) error {
-	var branches []string
-	for _, t := range taskItems {
-		if t.Status.Phase == "Succeeded" {
-			branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
-		}
-	}
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, "", branches)
+// because Tasks have already executed by the time the Plan boundary fires.
+//
+// Phase 34 D-03: the taskItems parameter is gone — the cumulative
+// Succeeded-branch set is now computed inside the shared triggerBoundaryPush
+// via a live List, not collected by the caller. The only live call site
+// (plan_controller.go, at planner-Job completion) fires BEFORE Tasks exist
+// anyway (CR-03 note), so the old per-caller collection here was always
+// dead code in practice.
+func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage)
 }

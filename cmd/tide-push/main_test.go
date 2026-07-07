@@ -37,6 +37,8 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // seedBareRepo creates a bare repository at <baseDir>/origin.git with one
@@ -1090,5 +1092,340 @@ func TestRunPushBoundaryCleanTreePushesIntegratedBranch(t *testing.T) {
 	}
 	if pr.HeadSHA != ref.Hash().String() {
 		t.Errorf("envelope HeadSHA=%s but remote ref=%s", pr.HeadSHA, ref.Hash())
+	}
+}
+
+// ---------- Phase 34 (D-06/INTEG-03): verifyIntegrationComplete unit tests ----------
+//
+// verifyIntegrationComplete is the pure predicate the D-06 verify gate is
+// built on. Testing it directly (rather than only through the full run(cfg)
+// integrate->verify->push flow) is deliberate: within a single Job execution
+// under the shared flock, a *successful* merge of every branch in
+// cfg.IntegrateTaskBranches makes each one an ancestor of the run branch by
+// git's own merge semantics — there is no way to reproduce a genuine post-
+// merge "miss" through the public run(cfg) entrypoint without fault-
+// injecting the merge step itself. verifyIntegrationComplete is exactly the
+// seam designed to catch that class of bug/race, so it is unit-tested here
+// directly against a real bare repo (no mocks).
+
+// verifyFixtureRepo builds a bare repo with a run branch and a task branch
+// that is NOT merged into it, returning (bareDir, runBranch, taskBranch).
+func verifyFixtureRepo(t *testing.T) (bareDir, runBranch, taskBranch string) {
+	t.Helper()
+	base := t.TempDir()
+	bareDir, _ = seedBareRepo(t, base)
+	runBranch = "tide/run-verify-1747200000"
+
+	repo, err := gogit.PlainOpen(bareDir)
+	if err != nil {
+		t.Fatalf("PlainOpen bareDir: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	// Run branch ref at the seed commit.
+	runRef := plumbing.NewBranchReferenceName(runBranch)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(runRef, head.Hash())); err != nil {
+		t.Fatalf("SetReference run branch: %v", err)
+	}
+
+	// Task branch: a clone that adds a commit, pushed back — never merged
+	// into runBranch.
+	taskBranch = "tide/wt-unmerged"
+	createTaskBranchWithFile(t, bareDir, taskBranch, "unmerged.txt", "never merged\n")
+	return bareDir, runBranch, taskBranch
+}
+
+func TestVerifyIntegrationCompleteDetectsMiss(t *testing.T) {
+	bareDir, runBranch, taskBranch := verifyFixtureRepo(t)
+
+	result := verifyIntegrationComplete(bareDir, runBranch, []string{taskBranch})
+	if result.infraErr != nil {
+		t.Fatalf("unexpected infra error: %v", result.infraErr)
+	}
+	if len(result.branches) != 1 || result.branches[0] != taskBranch {
+		t.Errorf("branches = %v, want exactly [%s]", result.branches, taskBranch)
+	}
+	if result.total != 1 {
+		t.Errorf("total = %d, want 1", result.total)
+	}
+}
+
+func TestVerifyIntegrationCompletePassesWhenMerged(t *testing.T) {
+	bareDir, runBranch, taskBranch := verifyFixtureRepo(t)
+
+	if err := pkggitIntegrateForTest(bareDir, runBranch, []string{taskBranch}); err != nil {
+		t.Fatalf("integrate: %v", err)
+	}
+
+	result := verifyIntegrationComplete(bareDir, runBranch, []string{taskBranch})
+	if result.infraErr != nil {
+		t.Fatalf("unexpected infra error: %v", result.infraErr)
+	}
+	if len(result.branches) != 0 {
+		t.Errorf("branches = %v, want none (already merged)", result.branches)
+	}
+}
+
+func TestVerifyIntegrationCompleteEmptyDiffPassesWithoutSpecialCase(t *testing.T) {
+	base := t.TempDir()
+	bareDir, _ := seedBareRepo(t, base)
+	runBranch := "tide/run-verify-emptydiff"
+
+	repo, err := gogit.PlainOpen(bareDir)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	runRef := plumbing.NewBranchReferenceName(runBranch)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(runRef, head.Hash())); err != nil {
+		t.Fatalf("SetReference: %v", err)
+	}
+	// A "task branch" whose tip IS the run branch's current tip (no unique
+	// commits — the empty-diff task case, INTEG-03 clarification).
+	emptyDiffBranch := "tide/wt-emptydiff"
+	branchRef := plumbing.NewBranchReferenceName(emptyDiffBranch)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(branchRef, head.Hash())); err != nil {
+		t.Fatalf("SetReference empty-diff branch: %v", err)
+	}
+
+	result := verifyIntegrationComplete(bareDir, runBranch, []string{emptyDiffBranch})
+	if result.infraErr != nil {
+		t.Fatalf("unexpected infra error: %v", result.infraErr)
+	}
+	if len(result.branches) != 0 {
+		t.Errorf("empty-diff branch flagged as missing (should pass naturally, no special case): %v", result.branches)
+	}
+}
+
+func TestVerifyIntegrationCompleteEmptyExpectedListVacuouslyPasses(t *testing.T) {
+	bareDir, runBranch, _ := verifyFixtureRepo(t)
+	result := verifyIntegrationComplete(bareDir, runBranch, nil)
+	if result.infraErr != nil {
+		t.Fatalf("unexpected infra error: %v", result.infraErr)
+	}
+	if len(result.branches) != 0 {
+		t.Errorf("branches = %v, want none for an empty expected list", result.branches)
+	}
+}
+
+// pkggitIntegrateForTest merges taskBranches into runBranch via the real
+// pkg/git.IntegrateTaskBranches, mirroring what runPush does internally.
+func pkggitIntegrateForTest(bareDir, runBranch string, taskBranches []string) error {
+	return pkggit.IntegrateTaskBranches(bareDir, runBranch, taskBranches)
+}
+
+// ---------- Phase 34 (D-12): truncation ----------
+
+func TestVerifyIntegrationCompleteTruncationAtEnvelopeWrite(t *testing.T) {
+	base := t.TempDir()
+	bareDir, _ := seedBareRepo(t, base)
+	runBranch := "tide/run-verify-truncate"
+
+	repo, err := gogit.PlainOpen(bareDir)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	runRef := plumbing.NewBranchReferenceName(runBranch)
+	if err := repo.Storer.SetReference(plumbing.NewHashReference(runRef, head.Hash())); err != nil {
+		t.Fatalf("SetReference: %v", err)
+	}
+
+	// 12 unmerged task branches — more than missingBranchesLimit (10).
+	branches := make([]string, 0, 12)
+	for i := range 12 {
+		name := "tide/wt-trunc-" + string(rune('a'+i))
+		createTaskBranchWithFile(t, bareDir, name, "trunc-"+string(rune('a'+i))+".txt", "content")
+		branches = append(branches, name)
+	}
+
+	result := verifyIntegrationComplete(bareDir, runBranch, branches)
+	if result.infraErr != nil {
+		t.Fatalf("unexpected infra error: %v", result.infraErr)
+	}
+	if result.total != 12 {
+		t.Fatalf("result.total = %d, want 12 (untruncated count)", result.total)
+	}
+
+	// writePushEnvelope applies the D-12 truncation; verify it end-to-end via
+	// the actual envelope written to the PVC path.
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, "envelopes", "push"), 0o755); err != nil {
+		t.Fatalf("mkdir envelopes/push: %v", err)
+	}
+	cfg := pushConfig{Branch: runBranch, Workspace: ws, ProjectUID: "p-trunc"}
+	writePushEnvelope(cfg, "", exitIntegrationMiss, "integration-incomplete", result.branches, result.total, "")
+
+	pr := readPushEnvelope(t, ws, "p-trunc")
+	if pr.ExitCode != exitIntegrationMiss {
+		t.Errorf("envelope.ExitCode = %d, want %d", pr.ExitCode, exitIntegrationMiss)
+	}
+	if pr.Reason != "integration-incomplete" {
+		t.Errorf("envelope.Reason = %q, want integration-incomplete", pr.Reason)
+	}
+	if len(pr.MissingBranches) != missingBranchesLimit {
+		t.Errorf("envelope.MissingBranches len = %d, want %d (truncated)", len(pr.MissingBranches), missingBranchesLimit)
+	}
+	if pr.MissingTotal != 12 {
+		t.Errorf("envelope.MissingTotal = %d, want 12 (untruncated)", pr.MissingTotal)
+	}
+}
+
+// ---------- Phase 34 (D-02): flock ----------
+
+func TestRunPushHoldsFlockAcrossIntegrateVerifyPush(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "flock")
+
+	ws := setupWorkspace(t, bareSrc, branch)
+	writeArtifact(t, ws, "artifacts/plan.md", "# plan\n")
+
+	cfg := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		CommitMessage: "tide: flock test",
+		ArtifactPaths: []string{"artifacts/plan.md"},
+		Workspace:     ws,
+		ProjectUID:    "p-flock",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	exit, stderr := stderrAndRun(t, ctx, cfg, "pat-flock")
+	if exit != 0 {
+		t.Fatalf("exit=%d stderr=%s", exit, stderr)
+	}
+
+	lockPath := filepath.Join(ws, "repo.git", "tide-integrate.lock")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("lockfile %s not created: %v", lockPath, err)
+	}
+}
+
+// ---------- Phase 34 (D-09): conflict classification + wave-success envelope ----------
+
+func TestRunPushIntegrateConflictReturnsMergeConflictEnvelope(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "conflict")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	// Two branches that both modify the same file/line — a genuine conflict.
+	branchA := "tide/wt-conflict-a"
+	branchB := "tide/wt-conflict-b"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), branchA, "conflict.txt", "side A\n")
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), branchB, "conflict.txt", "side B\n")
+
+	pushCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: integrate conflict test",
+		IntegrateTaskBranches: []string{branchA, branchB},
+		Workspace:             ws,
+		ProjectUID:            "p-conflict",
+	}
+	exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat")
+	if exit != exitMergeConflict {
+		t.Fatalf("exit=%d, want exitMergeConflict=%d; stderr=%s", exit, exitMergeConflict, stderr)
+	}
+
+	pr := readPushEnvelope(t, ws, "p-conflict")
+	if pr.Reason != "merge-conflict" {
+		t.Errorf("envelope.Reason = %q, want merge-conflict", pr.Reason)
+	}
+	if pr.ConflictBranch != branchB {
+		t.Errorf("envelope.ConflictBranch = %q, want %q", pr.ConflictBranch, branchB)
+	}
+
+	// Worktree must be left clean (no lingering MERGE_HEAD) — a follow-up Job
+	// must be able to merge cleanly.
+	integrationDir := filepath.Join(ws, "worktrees", "run-"+branch)
+	if _, err := os.Stat(filepath.Join(integrationDir, ".git", "MERGE_HEAD")); err == nil {
+		t.Errorf("MERGE_HEAD still present after conflict — worktree not cleaned up")
+	}
+}
+
+func TestRunPushIntegrateTransientFailureUnchangedReason(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "transient")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+
+	pushCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: integrate transient test",
+		IntegrateTaskBranches: []string{"tide/wt-does-not-exist"},
+		Workspace:             ws,
+		ProjectUID:            "p-transient",
+	}
+	exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat")
+	if exit != exitGenericFail {
+		t.Fatalf("exit=%d, want exitGenericFail=%d; stderr=%s", exit, exitGenericFail, stderr)
+	}
+	pr := readPushEnvelope(t, ws, "p-transient")
+	if pr.Reason != "integration-failed" {
+		t.Errorf("envelope.Reason = %q, want integration-failed (unchanged, not misclassified as conflict/miss)", pr.Reason)
+	}
+}
+
+func TestRunPushIntegrationOnlySuccessWritesEnvelope(t *testing.T) {
+	// Pitfall 3: today the integration-only success path exits before ever
+	// calling writePushEnvelope. Phase 34 adds a success envelope so wave-Job
+	// outcomes are observable.
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "wave-envelope")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+	taskBranch := "tide/wt-wave-envelope"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "wave.txt", "wave content")
+
+	pushCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		CommitMessage:         "tide: integrate wave 1",
+		IntegrateTaskBranches: []string{taskBranch},
+		Workspace:             ws,
+		ProjectUID:            "p-wave-envelope",
+	}
+	if exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat"); exit != 0 {
+		t.Fatalf("integration-only push exit=%d stderr=%s", exit, stderr)
+	}
+
+	pr := readPushEnvelope(t, ws, "p-wave-envelope")
+	if pr.ExitCode != exitSuccess || pr.Reason != "" {
+		t.Errorf("wave-success envelope = {exit:%d reason:%q}, want {0, \"\"}", pr.ExitCode, pr.Reason)
 	}
 }

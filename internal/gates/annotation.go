@@ -50,6 +50,16 @@ const (
 	// human-readable reason as the VALUE (D-G4). Reconciler halts dispatch
 	// and leaves resources in place for inspection. `tide resume` clears it.
 	AnnotationReject = "tideproject.k8s/reject"
+
+	// AnnotationResetBoundaryPush — Phase 34 D-13. `tide resume` writes this
+	// annotation (value "true") when the Project shows boundary-push retry
+	// state (a sticky IntegrationIncomplete condition, or a non-zero
+	// Attempts tally). The ProjectReconciler consumes it once: resets
+	// Status.BoundaryPush.Attempts/LastError, clears any sticky
+	// ConditionIntegrationIncomplete, then removes the annotation.
+	// `kubectl annotate project <name> tideproject.k8s/reset-boundary-push=true`
+	// is the sanctioned escape hatch when the CLI is unavailable.
+	AnnotationResetBoundaryPush = "tideproject.k8s/reset-boundary-push"
 )
 
 // CheckApprove returns true iff obj.GetAnnotations()[approve-<level>] equals

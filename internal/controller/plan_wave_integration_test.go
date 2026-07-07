@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -101,12 +102,16 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 
 // makeWaveIntegTask creates a Task with the given planRef, UID, and phase.
 // All Tasks in a Plan are executor tasks — no Role field exists on TaskSpec.
-func makeWaveIntegTask(name, uid, planRef, phase string, dependsOn []string) *tideprojectv1alpha2.Task {
+// Phase 34: labeled tideproject.k8s/project=projectName so
+// succeededTaskBranches (the D-03/D-07 cumulative-set helper) can find it —
+// the cumulative set is now a project-wide List, not a wave-local collection.
+func makeWaveIntegTask(name, uid, planRef, phase, projectName string, dependsOn []string) *tideprojectv1alpha2.Task {
 	task := &tideprojectv1alpha2.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID(uid),
+			Labels:    map[string]string{gitWriterProjectLabelKey: projectName},
 		},
 		Spec: tideprojectv1alpha2.TaskSpec{
 			PlanRef:             planRef,
@@ -181,10 +186,10 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	}
 
 	// Wave-0 tasks: both Succeeded.
-	task1 := makeWaveIntegTask("task1", "uid-task1", planName, "Succeeded", nil)
-	task2 := makeWaveIntegTask("task2", "uid-task2", planName, "Succeeded", nil)
+	task1 := makeWaveIntegTask("task1", "uid-task1", planName, "Succeeded", projectName, nil)
+	task2 := makeWaveIntegTask("task2", "uid-task2", planName, "Succeeded", projectName, nil)
 	// Wave-1 task: depends on task1, not yet Succeeded.
-	task3 := makeWaveIntegTask("task3", "uid-task3", planName, "Running", []string{"task1"})
+	task3 := makeWaveIntegTask("task3", "uid-task3", planName, "Running", projectName, []string{"task1"})
 
 	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2, task3)
 
@@ -260,14 +265,12 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	}
 
 	// --- Step (c): Integration complete ---
-	// Set Job Status.Succeeded=1 to simulate completion.
-	var integJobObj batchv1.Job
-	if err := fc.Get(context.Background(), types.NamespacedName{Name: integJobName, Namespace: "default"}, &integJobObj); err != nil {
-		t.Fatalf("step (c) get integration job: %v", err)
-	}
-	integJobObj.Status.Succeeded = 1
-	if err := fc.Status().Update(context.Background(), &integJobObj); err != nil {
-		t.Fatalf("step (c) update integration job status: %v", err)
+	// Set Job to terminal-Succeeded (Status.Succeeded=1 AND the JobComplete
+	// condition — Phase 34's D-02 gitWriterInFlightCount gate keys off
+	// isJobTerminal, which reads Job CONDITIONS, not the raw counts alone;
+	// a real cluster always sets both together, so tests must too).
+	if err := makeFakeJobTerminal(context.Background(), fc, integJobName, "default", true); err != nil {
+		t.Fatalf("step (c) mark integration job terminal-succeeded: %v", err)
 	}
 
 	_, err = reconcileWaveIntegPlan(t, r, planName)
@@ -316,8 +319,8 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 			ValidationState: "Validated",
 		},
 	}
-	task4 := makeWaveIntegTask("task4-e", "uid-task4", plan2Name, "Succeeded", nil)
-	task5 := makeWaveIntegTask("task5-e", "uid-task5", plan2Name, "Running", []string{"task4-e"})
+	task4 := makeWaveIntegTask("task4-e", "uid-task4", plan2Name, "Succeeded", projectName, nil)
+	task5 := makeWaveIntegTask("task5-e", "uid-task5", plan2Name, "Running", projectName, []string{"task4-e"})
 
 	if err := fc.Create(context.Background(), plan2); err != nil {
 		t.Fatalf("step (e) create plan2: %v", err)
@@ -361,54 +364,85 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		t.Fatalf("step (e-i): integration job %q not dispatched", integJobName2)
 	}
 
-	// Step (e-ii): set the Job to permanently failed (BackoffLimit exhausted).
-	var integJobObj2 batchv1.Job
-	if err := fc.Get(context.Background(), types.NamespacedName{Name: integJobName2, Namespace: "default"}, &integJobObj2); err != nil {
-		t.Fatalf("step (e-ii) get integration job2: %v", err)
-	}
-	integJobObj2.Status.Failed = 1
-	integJobObj2.Status.Active = 0
-	integJobObj2.Status.Succeeded = 0
-	if err := fc.Status().Update(context.Background(), &integJobObj2); err != nil {
-		t.Fatalf("step (e-ii) update integration job2 status: %v", err)
-	}
+	// Step (e-ii): Phase 34 D-04 bounded retry — a wave-integration Job
+	// failure no longer fails the Plan on the first observation. It rides
+	// the bounded-retry state machine (Plan.Status.WaveIntegration.Attempts,
+	// capped at maxWaveIntegrationAttempts) exactly like the #13b
+	// boundary-push machine. Drive maxWaveIntegrationAttempts-1 failed
+	// attempts and assert the Plan stays Running (not Failed) with the
+	// Attempts counter advancing; the final attempt crosses the cap and
+	// fails the Plan.
+	for attempt := 1; attempt <= maxWaveIntegrationAttempts; attempt++ {
+		// Mark the current integration Job terminal-Failed. No envelope pod
+		// exists in this fake-client test (no pods at all), so
+		// readJobPushEnvelope returns (zero, false) → classified as a
+		// transient failure (lastError="envelope-unreadable"), riding the
+		// bounded-retry default rather than the D-09 conflict path.
+		if err := makeFakeJobTerminal(context.Background(), fc, integJobName2, "default", false); err != nil {
+			t.Fatalf("step (e) attempt %d: mark integration job terminal-failed: %v", attempt, err)
+		}
 
-	// Step (e-iii): reconcile — should call patchPlanFailed with WaveIntegrationFailed.
-	result, err = reconcileWaveIntegPlan(t, r, plan2Name)
-	if err != nil {
-		t.Fatalf("step (e-iii) reconcile: %v", err)
-	}
+		result, err = reconcileWaveIntegPlan(t, r, plan2Name)
+		if err != nil {
+			t.Fatalf("step (e) attempt %d reconcile: %v", attempt, err)
+		}
 
-	// Assert: Plan.Status.Phase == "Failed".
-	var plan2Fresh tideprojectv1alpha2.Plan
-	if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &plan2Fresh); err != nil {
-		t.Fatalf("step (e-iii) get plan2: %v", err)
-	}
-	if plan2Fresh.Status.Phase != "Failed" {
-		t.Errorf("step (e): Plan.Status.Phase = %q, want \"Failed\"", plan2Fresh.Status.Phase)
-	}
-	// Assert: ConditionFailed condition with Reason WaveIntegrationFailed.
-	foundFailedCondition := false
-	for _, cond := range plan2Fresh.Status.Conditions {
-		if cond.Type == tideprojectv1alpha2.ConditionFailed &&
-			cond.Reason == tideprojectv1alpha2.ReasonWaveIntegrationFailed {
-			foundFailedCondition = true
-			break
+		var plan2Fresh tideprojectv1alpha2.Plan
+		if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &plan2Fresh); err != nil {
+			t.Fatalf("step (e) attempt %d get plan2: %v", attempt, err)
+		}
+		if plan2Fresh.Status.WaveIntegration.Attempts != int32(attempt) { //nolint:gosec // attempt is a small loop counter
+			t.Errorf("step (e) attempt %d: WaveIntegration.Attempts = %d, want %d",
+				attempt, plan2Fresh.Status.WaveIntegration.Attempts, attempt)
+		}
+
+		if attempt < maxWaveIntegrationAttempts {
+			// Below cap: Plan must stay non-terminal and the failed Job must
+			// have been deleted (Background propagation) so a fresh one can
+			// be dispatched on the next reconcile.
+			if plan2Fresh.Status.Phase == "Failed" {
+				t.Fatalf("step (e) attempt %d: Plan prematurely Failed before the %d-attempt cap",
+					attempt, maxWaveIntegrationAttempts)
+			}
+			if result.RequeueAfter == 0 {
+				t.Errorf("step (e) attempt %d: expected RequeueAfter > 0 (bounded retry backoff)", attempt)
+			}
+			// Re-dispatch a fresh integration Job for the next iteration's
+			// terminal-Failed transition.
+			if _, err := reconcileWaveIntegPlan(t, r, plan2Name); err != nil {
+				t.Fatalf("step (e) attempt %d re-dispatch reconcile: %v", attempt, err)
+			}
+			continue
+		}
+
+		// At the cap: Plan must now be terminal Failed with
+		// ReasonWaveIntegrationFailed, and no further requeue (no livelock).
+		if plan2Fresh.Status.Phase != "Failed" {
+			t.Errorf("step (e): Plan.Status.Phase = %q, want \"Failed\" after %d attempts",
+				plan2Fresh.Status.Phase, maxWaveIntegrationAttempts)
+		}
+		foundFailedCondition := false
+		for _, cond := range plan2Fresh.Status.Conditions {
+			if cond.Type == tideprojectv1alpha2.ConditionFailed &&
+				cond.Reason == tideprojectv1alpha2.ReasonWaveIntegrationFailed {
+				foundFailedCondition = true
+				break
+			}
+		}
+		if !foundFailedCondition {
+			t.Errorf("step (e): ConditionFailed with Reason %q not found; conditions: %v",
+				tideprojectv1alpha2.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
+		}
+		if result.RequeueAfter != 0 {
+			t.Errorf("step (e): RequeueAfter = %v, want 0 (permanently failed → no livelock)",
+				result.RequeueAfter)
 		}
 	}
-	if !foundFailedCondition {
-		t.Errorf("step (e): ConditionFailed with Reason %q not found; conditions: %v",
-			tideprojectv1alpha2.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
-	}
-	// Assert: no RequeueAfter (no livelock).
-	if result.RequeueAfter != 0 {
-		t.Errorf("step (e): RequeueAfter = %v, want 0 (permanently failed → no livelock)",
-			result.RequeueAfter)
-	}
-	// Assert: no wave-1 tasks/jobs for plan2 were dispatched.
+
+	// Assert: no wave-1 tasks/jobs for plan2 were ever dispatched.
 	jobs2After := listWaveIntegJobs(t, fc)
 	for _, j := range jobs2After {
-		// The only job should be the integration job; no executor job for task5-e.
+		// The only jobs should be integration jobs; no executor job for task5-e.
 		if strings.Contains(j.Name, "tide-task") || strings.Contains(j.Name, "task5") {
 			t.Errorf("step (e): unexpected executor job dispatched: %s", j.Name)
 		}
@@ -422,4 +456,288 @@ func jobNames(jobs []batchv1.Job) []string {
 		names[i] = j.Name
 	}
 	return names
+}
+
+// ---------- Phase 34 (INTEG-01/D-02/D-09/D-10): additional wave-integration tests ----------
+
+// TestPlanReconcilerSingleWaveDispatchesIntegrationJob is the cheapest
+// INTEG-01 regression: a Plan with exactly ONE wave (no dependencies among
+// its tasks) must dispatch a wave-integration Job for that only wave. Before
+// the Phase 34 fix, the wave-boundary loop ran `k < len(layers)-1`, so a
+// single-wave plan (len(layers)==1) iterated ZERO times and integrated
+// nothing — the cheapest RED repro of the last-wave skip.
+func TestPlanReconcilerSingleWaveDispatchesIntegrationJob(t *testing.T) {
+	const planName = "single-wave-plan"
+	const projectName = "single-wave-proj"
+	scheme := fakeSchemeForWaveInteg(t)
+
+	proj := waveIntegProject(t, projectName)
+	plan := &tideprojectv1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: "default",
+			UID:       types.UID("plan-uid-single-wave"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+	}
+	// Two tasks, NO dependsOn — a single Kahn wave.
+	task1 := makeWaveIntegTask("sw-task1", "uid-sw-task1", planName, "Succeeded", projectName, nil)
+	task2 := makeWaveIntegTask("sw-task2", "uid-sw-task2", planName, "Succeeded", projectName, nil)
+
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2)
+
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	jobs := listWaveIntegJobs(t, fc)
+	if findIntegrationJobForWave(jobs, plan.UID, 1) == nil {
+		t.Fatalf("single-wave plan did not dispatch a wave-integration Job (INTEG-01 last-wave skip regressed); jobs: %v",
+			jobNames(jobs))
+	}
+}
+
+// TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded is the 2-wave
+// INTEG-01 regression: BOTH wave boundaries (k=0 AND k=1, i.e. waveNum 1 AND
+// 2) must dispatch integration Jobs — including the FINAL one, which the
+// pre-fix `k < len(layers)-1` loop bound always skipped. Also asserts the
+// Pitfall-6 consequence: Plan does not stamp Succeeded until the final-wave
+// integration Job completes.
+func TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded(t *testing.T) {
+	const planName = "final-wave-plan"
+	const projectName = "final-wave-proj"
+	scheme := fakeSchemeForWaveInteg(t)
+
+	proj := waveIntegProject(t, projectName)
+	plan := &tideprojectv1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: "default",
+			UID:       types.UID("plan-uid-final-wave"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+	}
+	// wave-0: task1 (no deps). wave-1 (FINAL): task2 depends on task1.
+	// Owner refs are required for gates.BoundaryDetected(plan, "Task") to
+	// count these as the Plan's children when checking Plan=Succeeded.
+	trueVal := true
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+		Kind:               "Plan",
+		Name:               plan.Name,
+		UID:                plan.UID,
+		Controller:         &trueVal,
+		BlockOwnerDeletion: &trueVal,
+	}
+	task1 := makeWaveIntegTask("fw-task1", "uid-fw-task1", planName, "Succeeded", projectName, nil)
+	task1.OwnerReferences = []metav1.OwnerReference{ownerRef}
+	task2 := makeWaveIntegTask("fw-task2", "uid-fw-task2", planName, "Succeeded", projectName, []string{"fw-task1"})
+	task2.OwnerReferences = []metav1.OwnerReference{ownerRef}
+
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2)
+
+	// Reconcile 1: dispatches wave-0's integration Job (waveNum=1).
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("reconcile 1: %v", err)
+	}
+	jobs := listWaveIntegJobs(t, fc)
+	wave1Job := findIntegrationJobForWave(jobs, plan.UID, 1)
+	if wave1Job == nil {
+		t.Fatalf("wave-0 integration job not dispatched; jobs: %v", jobNames(jobs))
+	}
+	// Mark wave-0's Job terminal-succeeded.
+	if err := makeFakeJobTerminal(context.Background(), fc, wave1Job.Name, "default", true); err != nil {
+		t.Fatalf("mark wave-0 job succeeded: %v", err)
+	}
+
+	// Reconcile 2: stamps IntegratedThroughWave=1, then (RESPONSIBILITY B for
+	// k=1, the FINAL boundary) dispatches wave-1's integration Job.
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("reconcile 2: %v", err)
+	}
+	jobs = listWaveIntegJobs(t, fc)
+	wave2Job := findIntegrationJobForWave(jobs, plan.UID, 2)
+	if wave2Job == nil {
+		t.Fatalf("FINAL wave (wave-1, waveNum=2) integration job not dispatched — INTEG-01 last-wave skip regressed; jobs: %v",
+			jobNames(jobs))
+	}
+
+	// Plan must NOT be Succeeded yet — the final-wave integration Job is
+	// still running (Pitfall 6: Plan=Succeeded now implies all waves,
+	// including the last, are integrated).
+	var planMid tideprojectv1alpha2.Plan
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planMid); err != nil {
+		t.Fatalf("get plan mid: %v", err)
+	}
+	if planMid.Status.Phase == "Succeeded" {
+		t.Fatalf("Plan stamped Succeeded before the final-wave integration Job completed (Pitfall 6 ordering violated)")
+	}
+
+	// Complete the final wave's Job and reconcile again — NOW Plan may
+	// stamp Succeeded (all owned Tasks are Succeeded and both waves are
+	// integrated).
+	if err := makeFakeJobTerminal(context.Background(), fc, wave2Job.Name, "default", true); err != nil {
+		t.Fatalf("mark wave-1 job succeeded: %v", err)
+	}
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("reconcile 3: %v", err)
+	}
+	var planFinal tideprojectv1alpha2.Plan
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFinal); err != nil {
+		t.Fatalf("get plan final: %v", err)
+	}
+	if planFinal.Status.IntegratedThroughWave != 2 {
+		t.Errorf("IntegratedThroughWave = %d, want 2 (both waves integrated)", planFinal.Status.IntegratedThroughWave)
+	}
+	if planFinal.Status.Phase != "Succeeded" {
+		t.Errorf("Plan.Status.Phase = %q, want Succeeded once both waves are integrated and all Tasks Succeeded", planFinal.Status.Phase)
+	}
+}
+
+// TestPlanReconcilerWaveDispatchGatedByGitWriterBusy proves the D-02
+// single-flight gate applies at RESPONSIBILITY B: with another git-writer
+// Job already in flight for the same Project, the Plan reconciler must
+// requeue instead of creating a second run-branch-writer Job.
+func TestPlanReconcilerWaveDispatchGatedByGitWriterBusy(t *testing.T) {
+	const planName = "busy-gate-plan"
+	const projectName = "busy-gate-proj"
+	scheme := fakeSchemeForWaveInteg(t)
+
+	proj := waveIntegProject(t, projectName)
+	plan := &tideprojectv1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: "default",
+			UID:       types.UID("plan-uid-busy-gate"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+	}
+	task1 := makeWaveIntegTask("busy-task1", "uid-busy-task1", planName, "Succeeded", projectName, nil)
+
+	// A DIFFERENT, non-terminal git-writer Job already in flight for the
+	// same project (e.g. a boundary push mid-flight).
+	otherWriter := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-push-some-other-writer",
+			Namespace: "default",
+			Labels: map[string]string{
+				gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
+				gitWriterProjectLabelKey: projectName,
+			},
+		},
+	}
+
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, otherWriter)
+
+	result, err := reconcileWaveIntegPlan(t, r, planName)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Errorf("expected RequeueAfter > 0 while another git-writer Job is in flight (D-02 gate)")
+	}
+	jobs := listWaveIntegJobs(t, fc)
+	if findIntegrationJobForWave(jobs, plan.UID, 1) != nil {
+		t.Errorf("wave-integration Job created while another git-writer Job was in flight — D-02 gate did not block dispatch")
+	}
+}
+
+// TestPlanReconcilerWaveConflictFailsPlanImmediately verifies D-09/D-10: a
+// wave-integration Job whose envelope reason is "merge-conflict" fails the
+// Plan IMMEDIATELY (ReasonMergeConflict) — no retry budget burned, distinct
+// from the transient bounded-retry path.
+func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
+	const planName = "conflict-plan"
+	const projectName = "conflict-proj"
+	scheme := fakeSchemeForWaveInteg(t)
+
+	proj := waveIntegProject(t, projectName)
+	plan := &tideprojectv1alpha2.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planName,
+			Namespace: "default",
+			UID:       types.UID("plan-uid-conflict"),
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
+		},
+		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+	}
+	taskA := makeWaveIntegTask("conf-taskA", "uid-conf-taskA", planName, "Succeeded", projectName, nil)
+	taskB := makeWaveIntegTask("conf-taskB", "uid-conf-taskB", planName, "Succeeded", projectName, nil)
+
+	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, taskA, taskB)
+
+	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
+		t.Fatalf("dispatch reconcile: %v", err)
+	}
+	integJobName := fmt.Sprintf("tide-push-wave-%s-1", plan.UID)
+
+	// Mark the Job terminal-Failed AND write a merge-conflict envelope pod
+	// (mirrors the 34-02 test precedent: a Pod labeled job-name=<job> with a
+	// Terminated container carrying the JSON envelope).
+	if err := makeFakeJobTerminal(context.Background(), fc, integJobName, "default", false); err != nil {
+		t.Fatalf("mark job failed: %v", err)
+	}
+	envelopeJSON := `{"apiVersion":"tideproject.k8s/v1alpha1","kind":"PushResult","reason":"merge-conflict","conflictBranch":"tide/wt-uid-conf-taskB","exitCode":15}`
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      integJobName + "-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"job-name": integJobName},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers:    []corev1.Container{{Name: "push", Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+		},
+	}
+	if err := fc.Create(context.Background(), pod); err != nil {
+		t.Fatalf("create envelope pod: %v", err)
+	}
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+		Name: "push",
+		State: corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{ExitCode: 15, Reason: "Error", Message: envelopeJSON},
+		},
+	}}
+	if err := fc.Status().Update(context.Background(), pod); err != nil {
+		t.Fatalf("patch envelope pod status: %v", err)
+	}
+
+	result, err := reconcileWaveIntegPlan(t, r, planName)
+	if err != nil {
+		t.Fatalf("classify reconcile: %v", err)
+	}
+
+	var planFresh tideprojectv1alpha2.Plan
+	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFresh); err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if planFresh.Status.Phase != "Failed" {
+		t.Fatalf("Plan.Status.Phase = %q, want Failed immediately on merge-conflict (no retry)", planFresh.Status.Phase)
+	}
+	if planFresh.Status.WaveIntegration.Attempts != 0 {
+		t.Errorf("WaveIntegration.Attempts = %d, want 0 — a conflict must not burn the bounded-retry budget",
+			planFresh.Status.WaveIntegration.Attempts)
+	}
+	found := false
+	for _, cond := range planFresh.Status.Conditions {
+		if cond.Type == tideprojectv1alpha2.ConditionFailed && cond.Reason == tideprojectv1alpha2.ReasonMergeConflict {
+			found = true
+			if !strings.Contains(cond.Message, "tide/wt-uid-conf-taskB") {
+				t.Errorf("condition message %q does not name the conflicting branch", cond.Message)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no Failed condition with Reason=MergeConflict found; conditions: %v", planFresh.Status.Conditions)
+	}
+	if result.RequeueAfter != 0 {
+		t.Errorf("RequeueAfter = %v, want 0 (conflict fails immediately, no retry)", result.RequeueAfter)
+	}
 }

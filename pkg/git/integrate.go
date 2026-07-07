@@ -57,6 +57,16 @@ import (
 //   - TIDE_BOT_EMAIL env (default "tide-bot@tideproject.k8s")
 //
 // These match tideBotSignature() in cmd/tide-push/main.go (D-03).
+//
+// Phase 34 (D-09/D-10, Pitfall 1): on ANY merge failure, a defensive
+// `git merge --abort` runs before returning so a lingering MERGE_HEAD never
+// persists on the shared integration worktree (the worktree lives on the
+// project PVC and is reused by every subsequent Job — a leftover
+// in-progress merge would break the next retry with an unrelated "You have
+// not concluded your merge" error, silently reclassifying a conflict as a
+// generic failure). A genuine content conflict (verified marker strings,
+// git 2.54) returns the typed *MergeConflictError so callers (cmd/tide-push)
+// can classify conflict vs transient without re-parsing error text.
 func IntegrateTaskBranches(bareRepoPath, runBranch string, taskBranches []string) error {
 	if len(taskBranches) == 0 {
 		return nil
@@ -82,6 +92,12 @@ func IntegrateTaskBranches(bareRepoPath, runBranch string, taskBranches []string
 		}
 	}
 
+	// Defensive self-heal (Pitfall 1): a prior Job that crashed mid-merge may
+	// have left MERGE_HEAD set on the shared worktree. Clear it before this
+	// Job's own merges begin; failure here is expected+tolerated when there
+	// was nothing to abort.
+	_, _ = exec.Command("git", "-C", integrationDir, "merge", "--abort").CombinedOutput()
+
 	botName := os.Getenv("TIDE_BOT_NAME")
 	if botName == "" {
 		botName = "TIDE Bot"
@@ -101,10 +117,51 @@ func IntegrateTaskBranches(bareRepoPath, runBranch string, taskBranches []string
 		}
 		out, err := exec.Command("git", args...).CombinedOutput()
 		if err != nil {
+			outStr := string(out)
+			// ALWAYS abort before returning — a lingering in-progress merge
+			// breaks every subsequent Job differently (Pitfall 1). Error
+			// ignored: nothing to abort is the common non-conflict case.
+			_, _ = exec.Command("git", "-C", integrationDir, "merge", "--abort").CombinedOutput()
+
+			if isMergeConflictOutput(outStr) {
+				return &MergeConflictError{
+					TaskBranch: taskBranch,
+					RunBranch:  runBranch,
+					Output:     outStr,
+				}
+			}
 			return fmt.Errorf("IntegrateTaskBranches: merge %s → %s: %w: %s",
-				taskBranch, runBranch, err, string(out))
+				taskBranch, runBranch, err, outStr)
 		}
 	}
 
 	return nil
+}
+
+// MergeConflictError is returned by IntegrateTaskBranches when `git merge
+// --no-ff` fails with a genuine content conflict (as opposed to a transient
+// infra failure — network, permissions, missing ref). Phase 34 D-09/D-10:
+// callers classify on this type (errors.As) to distinguish "content problem,
+// human needed" from "retry me" without re-parsing error text.
+type MergeConflictError struct {
+	// TaskBranch is the branch that failed to merge cleanly.
+	TaskBranch string
+	// RunBranch is the branch it was being merged into.
+	RunBranch string
+	// Output is the combined stdout+stderr of the failed `git merge` command.
+	Output string
+}
+
+func (e *MergeConflictError) Error() string {
+	return fmt.Sprintf("merge conflict integrating %s into %s: %s", e.TaskBranch, e.RunBranch, e.Output)
+}
+
+// isMergeConflictOutput conservatively string-matches git's conflict markers
+// (verified on git 2.54, RESEARCH Pattern 5): "CONFLICT (" appears for every
+// conflict type (content/rename/modify-delete/etc.), and "Automatic merge
+// failed" is git's summary line printed alongside it. Matching either is
+// sufficient and mirrors the existing classifyPushError conservative
+// string-matching style in cmd/tide-push/main.go.
+func isMergeConflictOutput(output string) bool {
+	return strings.Contains(output, "CONFLICT (") || strings.Contains(output, "Automatic merge failed")
 }

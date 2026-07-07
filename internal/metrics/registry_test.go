@@ -61,6 +61,8 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 	tidemetrics.SecretLeakBlockedTotal.WithLabelValues("__seed__", "ph", "pl").Add(0)
 	tidemetrics.PushJobsTotal.WithLabelValues("__seed__", "success").Add(0)
 	tidemetrics.BudgetOverrunsTotal.WithLabelValues("__seed__").Add(0)
+	// Phase 34 D-12: seed the integration-outcome counter.
+	tidemetrics.IntegrationOutcomesTotal.WithLabelValues("__seed__", "success").Add(0)
 	// Phase 16 TELEM-03: seed six new metric families ({project, phase, plan, wave} = 4 args).
 	tidemetrics.TokensInputTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
 	tidemetrics.TokensOutputTotal.WithLabelValues("__seed__", "ph", "pl", "w").Add(0)
@@ -87,6 +89,7 @@ func TestRegistry_AllMetricFamiliesPresent(t *testing.T) {
 		"tide_secret_leak_blocked_total",
 		"tide_push_jobs_total",
 		"tide_budget_overruns_total",
+		"tide_integration_outcomes_total",
 		// Phase 16 TELEM-03 locked metrics:
 		"tide_tokens_input_total",
 		"tide_tokens_output_total",
@@ -180,6 +183,19 @@ func TestRegistry_BudgetOverrunsArity(t *testing.T) {
 	tidemetrics.BudgetOverrunsTotal.WithLabelValues("p").Inc()
 	if got := testutil.ToFloat64(tidemetrics.BudgetOverrunsTotal.WithLabelValues("p")); got < 1 {
 		t.Errorf("BudgetOverrunsTotal counter = %v, want >= 1", got)
+	}
+}
+
+// TestRegistry_IntegrationOutcomesArity asserts arity {project, outcome} = 2
+// and that it increments per outcome label independently (Phase 34 D-12).
+func TestRegistry_IntegrationOutcomesArity(t *testing.T) {
+	tidemetrics.IntegrationOutcomesTotal.WithLabelValues("p", "miss").Inc()
+	if got := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues("p", "miss")); got < 1 {
+		t.Errorf("IntegrationOutcomesTotal counter = %v, want >= 1", got)
+	}
+	tidemetrics.IntegrationOutcomesTotal.WithLabelValues("p", "conflict").Inc()
+	if got := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues("p", "conflict")); got < 1 {
+		t.Errorf("IntegrationOutcomesTotal counter (conflict) = %v, want >= 1", got)
 	}
 }
 

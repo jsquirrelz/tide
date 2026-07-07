@@ -78,6 +78,20 @@ func TestBuildPushJobName(t *testing.T) {
 	}
 }
 
+// ---------- Test 1b: buildPushJob git-writer labels (Phase 34 D-02) ----------
+
+func TestBuildPushJobGitWriterLabels(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	job := buildPushJob(project, "tide-projects", PushOptions{}, scheme)
+	if got := job.Labels[gitWriterRoleLabelKey]; got != gitWriterRoleLabelValue {
+		t.Errorf("Job.Labels[%q] = %q, want %q (D-02 List gate)", gitWriterRoleLabelKey, got, gitWriterRoleLabelValue)
+	}
+	if got := job.Labels[gitWriterProjectLabelKey]; got != project.Name {
+		t.Errorf("Job.Labels[%q] = %q, want %q", gitWriterProjectLabelKey, got, project.Name)
+	}
+}
+
 // ---------- Test 2: buildPushJob ServiceAccountName ----------
 
 func TestBuildPushJobServiceAccount(t *testing.T) {

@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 ## Current Position
 
 Phase: 34 of 34–39 (Run Integrity — Integration-Miss Gate + lastPushedSHA)
-Plan: — (not yet planned)
-Status: Ready to plan
-Last activity: 2026-07-03 — v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
+Plan: 34-01..34-06 executed (INTEG-01..05 implemented; see 34-0N-SUMMARY.md files)
+Status: Implemented, PR open for review; kind Layer B RED/GREEN evidence (34-01 Task 3, 34-06) not runnable in the executing sandbox (no Docker/kind) — deferred to CI's nightly-integration.yml or a follow-up session with kind access
+Last activity: 2026-07-04 — Phase 34 executed end-to-end (API, controller, tide-push, CLI, unit/envtest coverage); draft PR opened
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -48,7 +48,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Status |
 |-------|-------|--------|
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | 6/6 | Executed (PR pending review; kind-suite RED/GREEN evidence pending CI — see Blockers) |
 | 35. Git Base Ref | TBD | Not started |
 | 36. Signed Commits + Bot Identity | TBD | Not started |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
@@ -108,6 +108,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
 - **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
+- **Phase 34 kind-suite (INTEG-05) not yet run:** `test/integration/kind/integration_miss_test.go` was authored and compiles (`go vet`/`go build` green) but the executing sandbox has no Docker/kind, so the RED-before-fix and GREEN-after-fix evidence the plans call for was not captured this session. All unit + envtest (Layer A) coverage is green (`make test`, `make test-int-fast`). Run `make test-int` (or trigger `nightly-integration.yml` via workflow_dispatch) with kind access to close this out before treating Phase 34 as fully verified.
 
 ## Deferred Items
 
@@ -129,4 +130,5 @@ Resume file: .planning/phases/38-small-independents-pricing-accuracy-promptfile-
 
 ## Operator Next Steps
 
-- Plan the first phase: `/gsd-plan-phase 34`
+- Phase 34 executed (this session) — review/merge the draft PR, then run the kind Layer B suite (`make test-int` or `nightly-integration.yml`) to close out INTEG-05's RED/GREEN evidence before considering Phase 34 fully verified.
+- Plan the next phase: `/gsd-plan-phase 35` (or 37/38 — order-independent per Roadmap Evolution)

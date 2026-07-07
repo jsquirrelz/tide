@@ -18,9 +18,9 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	goErrors "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -72,6 +72,16 @@ type pushResultEnvelope struct {
 	HeadSHA    string `json:"headSHA"`
 	ExitCode   int    `json:"exitCode"`
 	Reason     string `json:"reason"`
+
+	// Phase 34 D-09/D-12: extended detail fields for the integration-miss
+	// gate. JSON tags MUST match cmd/tide-push/main.go's pushResult struct
+	// exactly (cross-binary contract). MissingBranches is truncated to the
+	// first 10 (sorted) with MissingTotal carrying the full count
+	// (termination-log 4096-byte cap). ConflictBranch names the task branch
+	// that hit a genuine merge conflict (reason="merge-conflict").
+	MissingBranches []string `json:"missingBranches,omitempty"`
+	MissingTotal    int      `json:"missingTotal,omitempty"`
+	ConflictBranch  string   `json:"conflictBranch,omitempty"`
 }
 
 // readPushEnvelope locates the first Pod belonging to the named push Job
@@ -84,29 +94,10 @@ type pushResultEnvelope struct {
 // W-1 exit-10 leak path depends on this surface returning
 // reason="leak-detected" so the leak-blocked metric fires.
 func (r *ProjectReconciler) readPushEnvelope(ctx context.Context, namespace, pushJobName string) (pushResultEnvelope, bool) {
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods,
-		client.InNamespace(namespace),
-		client.MatchingLabels{"job-name": pushJobName},
-	); err != nil {
-		return pushResultEnvelope{}, false
-	}
-	if len(pods.Items) == 0 {
-		return pushResultEnvelope{}, false
-	}
-	pod := &pods.Items[0]
-	if len(pod.Status.ContainerStatuses) == 0 {
-		return pushResultEnvelope{}, false
-	}
-	term := pod.Status.ContainerStatuses[0].State.Terminated
-	if term == nil || term.Message == "" {
-		return pushResultEnvelope{}, false
-	}
-	var env pushResultEnvelope
-	if err := json.Unmarshal([]byte(term.Message), &env); err != nil {
-		return pushResultEnvelope{}, false
-	}
-	return env, true
+	// Phase 34 plan 34-02: delegate to the package-level helper (git_writer.go)
+	// so PlanReconciler can reuse the identical termination-log-only read path
+	// (Pitfall 2) to classify wave-integration Job failures.
+	return readJobPushEnvelope(ctx, r.Client, namespace, pushJobName)
 }
 
 const (
@@ -470,9 +461,11 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 //     Milestone/Phase/Plan child status), build and create a push Job
 //     (deterministic name `tide-push-<project-uid>` — D-B5 serialization
 //     key; AlreadyExists is idempotent success / requeue trigger).
-//  5. Push Job completion: read the push-result envelope from PVC; on
-//     success, patch Status.Git.LastPushedSHA. On lease rejection,
-//     patch Status.Phase=PushLeaseFailed + increment LeaseFailureCount.
+//  5. Push Job completion: read the push-result envelope (termination log,
+//     never the PVC copy — Pitfall 2); on success, patch
+//     Status.Git.LastPushedSHA (Phase 34 D-14 — implemented in
+//     reconcileBoundaryPush's success arm). On lease rejection, patch
+//     Status.Phase=PushLeaseFailed + increment LeaseFailureCount.
 //
 // Plan 03-08 keeps the body skeletal — the production wiring for steps
 // 4-5 (level-boundary detection, push-result envelope schema) lands in
@@ -483,6 +476,17 @@ func (r *ProjectReconciler) handleInitJobCompletion(ctx context.Context, project
 //nolint:gocyclo // reconcile lifecycle is a flat sequence of state-transition arms; splitting would obscure the contract
 func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
+
+	// Step -1 (Phase 34 D-13): consume the reset-boundary-push annotation
+	// applied by `tide resume` (or directly via kubectl annotate). Runs
+	// before the Complete check so the reset takes effect regardless of
+	// which phase the Project is currently in.
+	if v, ok := project.Annotations[gates.AnnotationResetBoundaryPush]; ok && v == "true" {
+		if err := r.consumeResetBoundaryPushAnnotation(ctx, project); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
 
 	// Step 0: Check if all owned Milestones have Succeeded → Complete.
 	// IMPORTANT (debug #13b): reaching Complete does NOT short-circuit the
@@ -502,7 +506,36 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		// The control-plane succession is done. Run ONLY the bounded
 		// boundary-push retry state machine (debug #13b) — no further planner
 		// dispatch, branch init, or clone on a Complete project.
-		return r.reconcileBoundaryPush(ctx, project)
+		// dispatchIfMissing=true: this is the ONLY path allowed to CREATE the
+		// first/retry push Job (Phase 34 D-14/OQ2 option b).
+		return r.reconcileBoundaryPush(ctx, project, true)
+	}
+
+	// Phase 34 (RESEARCH Open Question 2, option b): observe a mid-run
+	// (pre-Complete) boundary-push Job's terminal state even though this
+	// Project has not reached Complete yet. Owns(&batchv1.Job{}) already
+	// re-enqueues the Project on Job completion (SetupWithManager), so this
+	// is cheap: Get the deterministic Job; if it exists and is terminal,
+	// classify success/failure via the SAME state machine used at Complete
+	// (dispatchIfMissing=false — a mid-run reconcile must never INITIATE a
+	// push; only a level trigger does that). If it exists and is still
+	// running, fall through — the Owns(Job) watch will re-enqueue on
+	// completion. If it does not exist yet, there is nothing to observe.
+	// Rationale: D-05 admits no unverified push class and a mid-run miss
+	// must be diagnosable (D-12) rather than silently surfacing only at
+	// Complete; a mid-run SUCCESS must also stamp LastPushedSHA (D-14)
+	// immediately rather than going stale until Complete.
+	if project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
+		midRunPushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+		var midRunPush batchv1.Job
+		midRunErr := r.Get(ctx, types.NamespacedName{Name: midRunPushJobName, Namespace: project.Namespace}, &midRunPush)
+		switch {
+		case midRunErr == nil && isJobTerminal(&midRunPush):
+			return r.reconcileBoundaryPush(ctx, project, false)
+		case midRunErr != nil && !apierrors.IsNotFound(midRunErr):
+			return ctrl.Result{}, midRunErr
+		}
+		// Job absent, or present-and-running: fall through to normal dispatch below.
 	}
 
 	// Step 0b: Dispatch project-level planner Job (D-A2 5th dispatch site).
@@ -666,7 +699,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 // converges — a re-push of an already-present HEAD is a no-op fast-forward.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive arms; splitting obscures the contract
-func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *tidev1alpha2.Project) (ctrl.Result, error) {
+func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *tidev1alpha2.Project, dispatchIfMissing bool) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// No git target → nothing to push; nothing to observe.
@@ -686,6 +719,14 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	// must NOT re-process them every reconcile — the Step-0 Complete fast-path
 	// re-asserts Phase=Complete on each pass, so without this guard the lease
 	// arm would re-increment LeaseFailureCount in a loop.
+	//
+	// ConditionIntegrationIncomplete is deliberately NOT an early-return guard
+	// here (unlike leak/lease): D-13 requires it to auto-clear the next time a
+	// verify+push succeeds (e.g. after `tide resume` resets Attempts, or via a
+	// mid-run observation of a Job dispatched by a different level's
+	// trigger). The Attempts>=cap arm below is what actually keeps a parked
+	// miss from re-dispatching; it re-asserts the sticky condition with its
+	// own once-only guard rather than blocking this whole function.
 	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionPushLeakBlocked); c != nil &&
 		c.Status == metav1.ConditionTrue {
 		return ctrl.Result{}, nil
@@ -696,11 +737,27 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	}
 
 	// Bounded-retry exhaustion arm. Re-derived from .status so the cap survives a
-	// controller restart (no in-memory counter). Only declare PushFailed once —
+	// controller restart (no in-memory counter). Only declare terminal once —
 	// guard on the existing condition reason so we don't re-emit the Event.
 	if project.Status.BoundaryPush.Attempts >= maxBoundaryPushAttempts {
 		if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionBoundaryPushed); c == nil ||
 			c.Reason != tidev1alpha2.ReasonPushFailed {
+			// D-08: an integration-completeness miss parks with the sticky
+			// IntegrationIncomplete condition (D-12 named detail) rather than
+			// the generic PushFailed reason — the detail message was
+			// captured at classification time into LastError (Job/pod may
+			// be TTL'd by the time the cap is reached).
+			if detail, ok := strings.CutPrefix(project.Status.BoundaryPush.LastError, integrationIncompleteLastErrorPrefix); ok {
+				if err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonIntegrationIncomplete, detail); err != nil {
+					return ctrl.Result{}, err
+				}
+				if r.Recorder != nil {
+					r.Recorder.Eventf(project, corev1.EventTypeWarning, tidev1alpha2.ReasonIntegrationIncomplete,
+						"Boundary push exhausted %d/%d attempts on an integration-completeness miss: %s",
+						project.Status.BoundaryPush.Attempts, maxBoundaryPushAttempts, detail)
+				}
+				return ctrl.Result{}, nil
+			}
 			if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
 				tidev1alpha2.ReasonPushFailed,
 				fmt.Sprintf("Boundary push did not land after %d attempts; last error: %q",
@@ -726,8 +783,14 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		return ctrl.Result{}, pErr
 	}
 
-	// No push Job yet — create the first attempt.
+	// No push Job yet — create the first attempt, but ONLY if this call site
+	// is allowed to initiate a push (Phase 34 D-14/OQ2 option b): the
+	// Complete fast-path always may; a mid-run observation never does — a
+	// level trigger (triggerBoundaryPush) owns initiation.
 	if apierrors.IsNotFound(pErr) {
+		if !dispatchIfMissing {
+			return ctrl.Result{}, nil
+		}
 		return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, project.Status.BoundaryPush.LastError)
 	}
 
@@ -736,6 +799,25 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		patch := client.MergeFrom(project.DeepCopy())
 		project.Status.Git.LeaseFailureCount = 0
 		project.Status.BoundaryPush.LastError = ""
+		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
+		if haveEnv {
+			// D-14: the push envelope's HeadSHA arms the force-with-lease
+			// fence — stamped in the SAME patch that resets LeaseFailureCount
+			// (co-located with the condition transition per CONTEXT
+			// specifics: BoundaryPushed=True and LastPushedSHA must move
+			// together).
+			project.Status.Git.LastPushedSHA = env.HeadSHA
+		} else {
+			// Pitfall 4: TTLSecondsAfterFinished=300 can erase the pod
+			// before the controller observes it (e.g. after a restart).
+			// Do NOT block BoundaryPushed=True on envelope readability —
+			// the push DID succeed (Job Complete); only the SHA stamp is
+			// skipped this cycle. Surfaced via metric + log, not a condition.
+			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "stamp-skip").Inc()
+			logger.Info("boundary push succeeded but envelope unreadable; lastPushedSHA not stamped this cycle",
+				"job", pushJobName)
+		}
+		meta.RemoveStatusCondition(&project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
 		if err := r.Status().Patch(ctx, project, patch); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -745,12 +827,13 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			return ctrl.Result{}, err
 		}
 		tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "success").Inc()
+		tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "success").Inc()
 		logger.Info("boundary push landed on remote", "job", pushJobName, "branch", project.Status.Git.BranchName)
 		return ctrl.Result{}, nil
 	}
 
-	// Push Job terminal-Failed — classify, then either halt (leak/lease operator
-	// recovery) or auto-retry (generic/BackoffLimitExceeded).
+	// Push Job terminal-Failed — classify, then either halt (leak/lease/
+	// conflict operator recovery) or auto-retry (generic/miss/BackoffLimitExceeded).
 	if isJobFailed(&existingPush) {
 		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
 		reason := ""
@@ -798,21 +881,51 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "lease").Inc()
 			return ctrl.Result{}, nil
 
+		case pushEnvelopeReasonMergeConflict:
+			// D-09: a genuine content conflict parks IMMEDIATELY — no retry
+			// budget burned on a problem retrying cannot fix. Mirrors the
+			// lease-rejected sticky-arm shape but on ConditionIntegrationIncomplete
+			// (D-11: push-gate outcome lives on the Project) with Reason=MergeConflict.
+			patch := client.MergeFrom(project.DeepCopy())
+			project.Status.BoundaryPush.LastError = pushEnvelopeReasonMergeConflict
+			if err := r.Status().Patch(ctx, project, patch); err != nil {
+				return ctrl.Result{}, err
+			}
+			msg := fmt.Sprintf("merge conflict integrating %s into %s: content problem, human needed — replan, then `tide resume --retry-failed`",
+				env.ConflictBranch, project.Status.Git.BranchName)
+			if err := r.setIntegrationIncompleteCondition(ctx, project, tidev1alpha2.ReasonMergeConflict, msg); err != nil {
+				return ctrl.Result{}, err
+			}
+			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "conflict").Inc()
+			return ctrl.Result{}, nil
+
 		default:
 			// Generic terminal failure (BackoffLimitExceeded / auth / transient
-			// remote). #13b bounded auto-retry: delete the failed Job and create
-			// a fresh one, incrementing the attempt tally. The cap guard at the
-			// top of this method stops the loop.
+			// remote / integration-incomplete miss). #13b bounded auto-retry:
+			// delete the failed Job and create a fresh one, incrementing the
+			// attempt tally. The cap guard at the top of this method stops
+			// the loop; an integration-incomplete miss parks sticky (D-08)
+			// at the cap instead of the generic PushFailed reason.
 			lastErr := reason
 			switch {
 			case !haveEnv:
 				lastErr = "envelope-unreadable"
+				tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "transient").Inc()
+			case lastErr == "integration-incomplete":
+				// D-12: capture the named detail NOW — the Job/pod may be
+				// TTL'd (300s) by the time the cap arm needs to render the
+				// sticky condition message.
+				lastErr = integrationIncompleteLastErrorPrefix + r.formatMissingBranchesMessage(ctx, project, env.MissingBranches, env.MissingTotal)
+				tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "miss").Inc()
 			case lastErr == "":
 				// Terminal failure with no specific reason — the
 				// BackoffLimitExceeded #13b class (e.g. empty commit / transient
 				// remote). Record a generic marker so the operator-visible
 				// LastError is never blank on a real failure.
 				lastErr = "push-failed"
+				tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "transient").Inc()
+			default:
+				tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "transient").Inc()
 			}
 			if delErr := r.deleteFailedPushJob(ctx, &existingPush); delErr != nil {
 				return ctrl.Result{}, delErr
@@ -835,6 +948,63 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 	return ctrl.Result{RequeueAfter: boundaryPushRequeue(project.Status.BoundaryPush.Attempts)}, nil
 }
 
+// integrationIncompleteLastErrorPrefix marks BoundaryPush.LastError as
+// carrying a pre-formatted D-12 detail message (captured at classification
+// time, since the Job/pod may be TTL'd by the time the cap-exhaustion arm
+// needs to render the sticky condition) rather than a plain keyword.
+const integrationIncompleteLastErrorPrefix = "integration-incomplete: "
+
+// setIntegrationIncompleteCondition sets the sticky ConditionIntegrationIncomplete
+// (Phase 34 D-08/D-09/D-11) with the given reason/message. Guards on
+// (status, reason, message) equality so reconciles do not churn
+// LastTransitionTime — mirrors setBoundaryPushedCondition's idiom.
+func (r *ProjectReconciler) setIntegrationIncompleteCondition(ctx context.Context, project *tidev1alpha2.Project, reason, message string) error {
+	existing := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
+	if existing != nil && existing.Status == metav1.ConditionTrue && existing.Reason == reason && existing.Message == message {
+		return nil
+	}
+	patch := client.MergeFrom(project.DeepCopy())
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionIntegrationIncomplete,
+		Status:             metav1.ConditionTrue,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
+	return r.Status().Patch(ctx, project, patch)
+}
+
+// formatMissingBranchesMessage renders the D-12 condition message naming
+// each missing task + branch (the envelope's already-truncated
+// MissingBranches list, plus the untruncated MissingTotal count). Best
+// effort: maps a branch name (tide/wt-<uid>) back to its Task's .metadata.name
+// by listing the project's Task CRs; if a Task can't be resolved (deleted,
+// GC'd), the branch name alone is used.
+func (r *ProjectReconciler) formatMissingBranchesMessage(ctx context.Context, project *tidev1alpha2.Project, missingBranches []string, missingTotal int) string {
+	byUID := make(map[string]string)
+	var taskList tidev1alpha2.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(project.Namespace),
+		client.MatchingLabels{gitWriterProjectLabelKey: project.Name}); err == nil {
+		for i := range taskList.Items {
+			byUID[string(taskList.Items[i].UID)] = taskList.Items[i].Name
+		}
+	}
+	parts := make([]string, 0, len(missingBranches))
+	for _, br := range missingBranches {
+		uid := strings.TrimPrefix(br, "tide/wt-")
+		if name, ok := byUID[uid]; ok {
+			parts = append(parts, fmt.Sprintf("task %s (branch %s)", name, br))
+		} else {
+			parts = append(parts, fmt.Sprintf("branch %s", br))
+		}
+	}
+	msg := fmt.Sprintf("%d branch(es) missing from the run branch: %s", missingTotal, strings.Join(parts, ", "))
+	if missingTotal > len(missingBranches) {
+		msg += fmt.Sprintf(" (showing first %d of %d)", len(missingBranches), missingTotal)
+	}
+	return msg
+}
+
 // dispatchBoundaryPush creates a fresh boundary-push Job, increments the bounded
 // attempt tally + stamps lastAttemptTime, sets BoundaryPushed=False/Pushing, and
 // requeues with capped exponential backoff. The Job pushes the already-
@@ -843,16 +1013,36 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tidev1alpha2.Project, pvcName, pushJobName, lastErr string) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
+	// D-02 single-flight gate: do not create a new git-writer Job while
+	// another (wave-integration or boundary-push) is in flight for this
+	// Project. Self-exclusion on pushJobName (Pitfall 7). Gate-wait is NOT
+	// an attempt (Assumption/discretion note in 34-05): requeue WITHOUT
+	// incrementing Attempts — attempts count dispatched Jobs, not waits.
+	inFlight, gwErr := gitWriterInFlightCount(ctx, r.Client, project.Namespace, project.Name, pushJobName)
+	if gwErr != nil {
+		return ctrl.Result{}, fmt.Errorf("check git-writer in-flight count: %w", gwErr)
+	}
+	if inFlight > 0 {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	msg, mErr := buildCommitMessage("project", "")
 	if mErr != nil {
 		return ctrl.Result{}, fmt.Errorf("build commit message: %w", mErr)
 	}
+	// D-03/D-07: cumulative Succeeded-branch set, recomputed via a live List
+	// — the project-level nil-branch site RESEARCH flagged.
+	branches, bErr := succeededTaskBranches(ctx, r.Client, project.Namespace, project.Name)
+	if bErr != nil {
+		return ctrl.Result{}, fmt.Errorf("compute cumulative succeeded-task branches: %w", bErr)
+	}
 	pushOpts := PushOptions{
-		TidePushImage:  r.TidePushImage,
-		Branch:         project.Status.Git.BranchName,
-		LastPushedSHA:  project.Status.Git.LastPushedSHA,
-		CommitMessage:  msg,
-		LeaksConfigMap: project.Spec.Git.LeaksConfigRef,
+		TidePushImage:         r.TidePushImage,
+		Branch:                project.Status.Git.BranchName,
+		LastPushedSHA:         project.Status.Git.LastPushedSHA,
+		CommitMessage:         msg,
+		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
+		IntegrateTaskBranches: branches,
 	}
 	pushJob := buildPushJob(project, pvcName, pushOpts, r.Scheme)
 	if cErr := r.Create(ctx, pushJob); cErr != nil {
@@ -880,7 +1070,7 @@ func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *t
 	}
 	tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "dispatched").Inc()
 	logger.Info("dispatched boundary push", "job", pushJobName,
-		"attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts)
+		"attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts, "integrateTaskBranches", len(branches))
 	return ctrl.Result{RequeueAfter: boundaryPushRequeue(project.Status.BoundaryPush.Attempts)}, nil
 }
 
@@ -900,6 +1090,39 @@ func (r *ProjectReconciler) deleteFailedPushJob(ctx context.Context, job *batchv
 			return nil
 		}
 		return fmt.Errorf("delete failed boundary push job %s: %w", job.Name, err)
+	}
+	return nil
+}
+
+// consumeResetBoundaryPushAnnotation implements the D-13 recovery verb: reset
+// Status.BoundaryPush.Attempts/LastError, remove a sticky
+// ConditionIntegrationIncomplete, then consume (delete) the annotation in a
+// SEPARATE metadata patch — mirrors the bypassPushLeaseAnnotation consumption
+// pattern (:527 region) and the resumeRun re-fetch-between-patches discipline
+// (annotations and status are different subresources with independent
+// resourceVersion windows).
+func (r *ProjectReconciler) consumeResetBoundaryPushAnnotation(ctx context.Context, project *tidev1alpha2.Project) error {
+	logger := logf.FromContext(ctx)
+	logger.Info("reset-boundary-push annotation present; resetting bounded-retry state", "project", project.Name)
+
+	statusPatch := client.MergeFrom(project.DeepCopy())
+	project.Status.BoundaryPush.Attempts = 0
+	project.Status.BoundaryPush.LastError = ""
+	meta.RemoveStatusCondition(&project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
+	if err := r.Status().Patch(ctx, project, statusPatch); err != nil {
+		return fmt.Errorf("reset boundary-push status: %w", err)
+	}
+
+	annotPatch := client.MergeFrom(project.DeepCopy())
+	newAnnotations := make(map[string]string, len(project.Annotations))
+	for k, v := range project.Annotations {
+		if k != gates.AnnotationResetBoundaryPush {
+			newAnnotations[k] = v
+		}
+	}
+	project.Annotations = newAnnotations
+	if err := r.Patch(ctx, project, annotPatch); err != nil {
+		return fmt.Errorf("consume reset-boundary-push annotation: %w", err)
 	}
 	return nil
 }
