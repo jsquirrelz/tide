@@ -106,6 +106,17 @@ const (
 	// instead of stalling on the clone Job's 300s TTL; this condition surfaces
 	// the failure+recovery so an operator can see the clone stall window.
 	ConditionCloneFailed = "CloneFailed"
+
+	// ReasonBaseRefUnresolvable — the ConditionCloneFailed Reason for a clone
+	// Job that terminal-failed with envelope reason "baseref-unresolvable"
+	// (Phase 35 BASE-02, D-06/D-07). Unlike the existing "CloneJobFailed" reason
+	// — which keeps its delete-and-re-dispatch meaning for transient/other clone
+	// failures — this reason HALTS re-dispatch for the current generation
+	// (classify-don't-retry): the condition is stamped with ObservedGeneration =
+	// project.Generation and the dispatch guard skips clone dispatch while the
+	// condition is True for that generation. An operator edit to spec.git.baseRef
+	// bumps metadata.generation and releases the halt (recovery = one kubectl edit).
+	ReasonBaseRefUnresolvable = "BaseRefUnresolvable"
 )
 
 // Debug defect #13b — boundary-push observability + bounded auto-retry.

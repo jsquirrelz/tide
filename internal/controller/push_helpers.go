@@ -92,6 +92,14 @@ type CloneOptions struct {
 	// calls EnsureRunBranch + provisions the run worktree after the bare clone.
 	// Empty means no run branch is provisioned (backward-compat).
 	RunBranch string
+
+	// BaseRef is the optional operator-selected ref the run branch is created
+	// from (Phase 35 D-01: branch, tag, full 40-hex SHA, or refs/-qualified
+	// path). When non-empty the clone Job passes --base-ref to tide-push, which
+	// resolves it inside EnsureRunBranch — the single resolution site (D-04);
+	// there is no controller-side ls-remote preflight. Empty means the remote
+	// default branch (HEAD), unchanged behavior.
+	BaseRef string
 }
 
 // pushEnvelopeReasonMergeConflict is the tide-push PushResult envelope's
@@ -321,12 +329,22 @@ func buildCloneJob(project *tideprojectv1alpha2.Project, pvcName string, opts Cl
 		"--mode=clone",
 		"--repo-url=" + project.Spec.Git.RepoURL,
 		"--workspace=/workspace",
+		// Phase 35 D-05: --project-uid keys the clone envelope's PVC path
+		// (<workspace>/envelopes/clone/<uid>.json). Passed unconditionally so
+		// tide-push always writes the provenance copy that carries baseSHA back.
+		"--project-uid=" + string(project.UID),
 	}
 	if opts.RunBranch != "" {
 		// B6: pass --run-branch so tide-push calls EnsureRunBranch + provisions
 		// the run worktree during the clone phase (B5). This ensures the run
 		// worktree exists before any executor wave is dispatched.
 		args = append(args, "--run-branch="+opts.RunBranch)
+	}
+	if opts.BaseRef != "" {
+		// Phase 35 D-01/D-04: base the run branch off this ref; tide-push
+		// resolves it inside EnsureRunBranch (the single resolution site). An
+		// unresolvable value surfaces as an exit-2 baseref-unresolvable envelope.
+		args = append(args, "--base-ref="+opts.BaseRef)
 	}
 
 	job := &batchv1.Job{
@@ -388,6 +406,16 @@ func buildCloneJob(project *tideprojectv1alpha2.Project, pvcName string, opts Cl
 									SubPath:   fmt.Sprintf("%s/workspace", project.UID),
 								},
 							},
+							// Phase 35 D-05: mirror buildPushJob's termination-message
+							// wiring (push_helpers.go:284-285). tide-push writes the
+							// CloneResult envelope to /dev/termination-log; the
+							// ProjectReconciler reads it off the pod's
+							// Terminated.Message to classify baseref-unresolvable and
+							// stamp baseSHA — without this the envelope never reaches
+							// the controller. FallbackToLogsOnError covers a container
+							// that died before writing the file.
+							TerminationMessagePath:   "/dev/termination-log",
+							TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 						},
 					},
 				},
