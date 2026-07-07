@@ -131,6 +131,18 @@ spec:
                   GitConfig{} would serialize as `git: {repoURL: ""}` and trip the
                   RepoURL pattern validation on existing Phase 2 test fixtures.
                 properties:
+                  baseRef:
+                    description: |-
+                      BaseRef optionally names the ref the run branch is created from: an
+                      existing branch name, tag name, full 40-hex commit SHA, or a fully
+                      qualified refs/... path. Absent means the remote default branch (HEAD).
+                      Resolution happens in the clone Job; an unresolvable value surfaces as
+                      CloneFailed/BaseRefUnresolvable. Edits after a successful clone are
+                      inert — the run branch is created once (see docs/project-authoring.md).
+                    maxLength: 250
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9._+@/-]*$
+                    type: string
                   credsSecretRef:
                     description: |-
                       CredsSecretRef is the K8s Secret name (same-namespace) carrying the
@@ -520,6 +532,11 @@ spec:
                   lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
                   per-project tally object, NOT an aggregate schedule.
                 properties:
+                  baseSHA:
+                    description: |-
+                      BaseSHA is the commit SHA the run branch was created from, stamped on
+                      every run (annotated tags record the peeled commit). Provenance only.
+                    type: string
                   branchName:
                     description: |-
                       BranchName is the lifetime branch fixed at Project creation.
@@ -682,6 +699,18 @@ spec:
                   GitConfig{} would serialize as `git: {repoURL: ""}` and trip the
                   RepoURL pattern validation on existing Phase 2 test fixtures.
                 properties:
+                  baseRef:
+                    description: |-
+                      BaseRef optionally names the ref the run branch is created from: an
+                      existing branch name, tag name, full 40-hex commit SHA, or a fully
+                      qualified refs/... path. Absent means the remote default branch (HEAD).
+                      Resolution happens in the clone Job; an unresolvable value surfaces as
+                      CloneFailed/BaseRefUnresolvable. Edits after a successful clone are
+                      inert — the run branch is created once (see docs/project-authoring.md).
+                    maxLength: 250
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9._+@/-]*$
+                    type: string
                   credsSecretRef:
                     description: |-
                       CredsSecretRef is the K8s Secret name (same-namespace) carrying the
@@ -1121,6 +1150,11 @@ spec:
                   lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
                   per-project tally object, NOT an aggregate schedule.
                 properties:
+                  baseSHA:
+                    description: |-
+                      BaseSHA is the commit SHA the run branch was created from, stamped on
+                      every run (annotated tags record the peeled commit). Provenance only.
+                    type: string
                   branchName:
                     description: |-
                       BranchName is the lifetime branch fixed at Project creation.
