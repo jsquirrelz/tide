@@ -28,6 +28,7 @@ limitations under the License.
 package kind_integration
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -176,6 +177,64 @@ spec:
       targetPort: 8080
       protocol: TCP
 `, ns, mediumHTTPServerImage, ns)
+}
+
+// mediumBaseRefSeedJobYAML returns a one-shot Job that seeds a NON-default
+// branch (base-ref-target) on the demo remote so the baseRef e2e can base a run
+// off a ref whose tip differs from the default branch.
+//
+// It reuses the git-http-server image (Alpine with a full `git` binary + shell,
+// already loaded into the cluster by BeforeAll) and drives the exact anonymous
+// smart-HTTP path the production clone/push Jobs use: clone over http://, branch
+// from the default HEAD, add one distinguishing commit, push the new branch
+// back. The default-branch HEAD (DEFAULT_TIP=) and the new branch tip
+// (BASE_REF_TARGET_TIP=) are echoed to the Job pod log for the spec to harvest.
+//
+// The demo remote's default branch is `master` (go-git PlainInit picks it —
+// cmd/tide-demo-init/main.go); the run branch created here therefore tips at a
+// commit unreachable from master, proving a run really based off the non-default
+// branch rather than silently falling back to HEAD.
+func mediumBaseRefSeedJobYAML(ns string) string {
+	script := strings.Join([]string{
+		"set -eu",
+		"export HOME=/tmp",
+		"cd /tmp",
+		"rm -rf work",
+		"git clone " + mediumHTTPTargetRepo + " work",
+		"cd work",
+		"git config user.email seed@tide.local",
+		"git config user.name tide-base-ref-seed",
+		`echo "DEFAULT_TIP=$(git rev-parse HEAD)"`,
+		"git checkout -b base-ref-target",
+		`printf 'phase35 base-ref-target distinguishing content\n' > BASE_REF_TARGET.md`,
+		"git add BASE_REF_TARGET.md",
+		"git commit -m 'phase35: base-ref-target distinguishing commit'",
+		"git push origin base-ref-target",
+		`echo "BASE_REF_TARGET_TIP=$(git rev-parse HEAD)"`,
+	}, "\n")
+	return fmt.Sprintf(`apiVersion: batch/v1
+kind: Job
+metadata:
+  name: base-ref-seed
+  namespace: %s
+  labels:
+    app.kubernetes.io/component: base-ref-seed
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: base-ref-seed
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: base-ref-seed
+          image: %s
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - %q
+`, ns, mediumHTTPServerImage, script)
 }
 
 // loadRequiredImage loads a REQUIRED Layer-B fixture image into the kind cluster.
@@ -443,7 +502,143 @@ data:
 
 		GinkgoWriter.Printf("medium-http-test: Project %s reached Complete\n", projName)
 	})
+
+	// -------------------------------------------------------------------------
+	// Spec 4 (Phase 35 BASE-01 e2e): a Project with spec.git.baseRef set to a
+	// non-default branch reaches cloneComplete with status.git.baseSHA stamped
+	// to that branch's tip — the whole chain against a real cluster and real
+	// git-http remote: chart-installed CRD → controller plumb-through → clone
+	// Job → refs/remotes/origin resolution → termination-message envelope →
+	// status stamp. envtest (plan 35-03) fabricates envelopes; only this Layer B
+	// spec proves the real clone Job resolves a real non-default branch.
+	//
+	// Runs LAST (single heavy run at a time on a constrained VM — CLAUDE.md
+	// recipe): Spec 3's Project has already reached Complete, the git-http
+	// server + tide-secrets are up, and this spec is clone-stage-scoped (it does
+	// NOT wait for Complete), so it adds only a short bounded run.
+	//
+	// Scope (binding): HAPPY path only. Halt/release mechanics for an
+	// unresolvable ref are fully locked at Layer A (plan 35-03,
+	// project_baseref_halt_test.go); a kind-level unresolvable case would double
+	// suite runtime for no new coverage.
+	It("stamps status.git.baseSHA from a non-default baseRef branch over http://", func() {
+		skipIfCRDsOnlyMode()
+
+		// Seed a non-default branch (base-ref-target) whose tip differs from the
+		// default branch, and harvest both tips from the seed Job's pod log.
+		By("Applying base-ref-seed Job into " + mediumHTTPNamespace)
+		Expect(applyYAML(mediumBaseRefSeedJobYAML(mediumHTTPNamespace))).To(Succeed(),
+			"base-ref-seed Job must be applied into "+mediumHTTPNamespace)
+
+		By("Waiting for base-ref-seed Job to reach Complete")
+		Eventually(func() error {
+			cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+				"wait", "--for=condition=Complete",
+				"job/base-ref-seed", "-n", mediumHTTPNamespace, "--timeout=10s")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("base-ref-seed Job not yet Complete: %w\n%s", err, out)
+			}
+			return nil
+		}, 2*time.Minute, 5*time.Second).Should(Succeed(),
+			"base-ref-seed Job must reach Complete within 2 minutes")
+
+		By("Harvesting DEFAULT_TIP and BASE_REF_TARGET_TIP from the seed Job log")
+		logsCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+			"logs", "job/base-ref-seed", "-n", mediumHTTPNamespace, "--tail=-1")
+		logOut, err := logsCmd.CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), "kubectl logs job/base-ref-seed failed:\n%s", logOut)
+		defaultTip := grepGreppedTip(string(logOut), "DEFAULT_TIP=")
+		targetTip := grepGreppedTip(string(logOut), "BASE_REF_TARGET_TIP=")
+		Expect(targetTip).To(MatchRegexp(`^[0-9a-f]{40}$`),
+			"seed Job must print a 40-hex BASE_REF_TARGET_TIP; got %q (log:\n%s)", targetTip, logOut)
+		Expect(defaultTip).To(MatchRegexp(`^[0-9a-f]{40}$`),
+			"seed Job must print a 40-hex DEFAULT_TIP; got %q (log:\n%s)", defaultTip, logOut)
+		Expect(targetTip).NotTo(Equal(defaultTip),
+			"base-ref-target tip must differ from the default branch tip (distinguishing commit)")
+		GinkgoWriter.Printf("medium-http-test: base-ref-target tip=%s default tip=%s\n", targetTip, defaultTip)
+
+		// tide-secrets (empty GIT_PAT for anonymous http) is required by the
+		// clone Job. Spec 3 creates it too; apply is idempotent.
+		By("Ensuring tide-secrets Secret exists in " + mediumHTTPNamespace)
+		tideSecretsYAML := fmt.Sprintf(`apiVersion: v1
+kind: Secret
+metadata:
+  name: tide-secrets
+  namespace: %s
+type: Opaque
+data:
+  ANTHROPIC_API_KEY: dGVzdC1hcGkta2V5LXN0dWItc3ViYWdlbnQtZG9lcy1ub3QtdXNlLWl0
+  GIT_PAT: ""
+`, mediumHTTPNamespace)
+		Expect(applyYAML(tideSecretsYAML)).To(Succeed(),
+			"tide-secrets Secret must exist in "+mediumHTTPNamespace)
+
+		// Create a bare-shape Project basing its run off base-ref-target.
+		projName := fmt.Sprintf("baseref-http-project-%d", GinkgoRandomSeed())
+		proj := newStubProject(mediumHTTPNamespace, projName,
+			withTargetRepo(mediumHTTPTargetRepo),
+			withProviderSecret("tide-secrets"),
+			withGit(mediumHTTPTargetRepo, "tide-secrets"),
+			withBaseRef("base-ref-target"))
+		By("Creating baseRef Project (baseRef=base-ref-target) in " + mediumHTTPNamespace)
+		Expect(createFixture(ctx, proj)).To(Succeed(),
+			"baseRef Project must be admitted (base-ref-target passes the charset Pattern)")
+
+		// Bound the extra load: once the clone-stage assertion passes, delete the
+		// Project so it does not keep reconciling the full hierarchy.
+		DeferCleanup(func() {
+			if CurrentSpecReport().Failed() {
+				dumpNamespaceState(mediumHTTPNamespace)
+			}
+			_ = k8sClient.Delete(context.Background(), proj)
+		})
+
+		By("Waiting for baseRef Project clone to complete and stamp baseSHA")
+		Eventually(func() error {
+			var current tideprojectv1alpha2.Project
+			if err := k8sClient.Get(ctx, client.ObjectKey{
+				Name:      projName,
+				Namespace: mediumHTTPNamespace,
+			}, &current); err != nil {
+				return err
+			}
+			if !current.Status.Git.CloneComplete {
+				return fmt.Errorf("baseRef Project %s: cloneComplete not yet true (last condition: %s)",
+					projName, mediumLastConditionMessage(current))
+			}
+			if current.Status.Git.BaseSHA == "" {
+				return fmt.Errorf("baseRef Project %s: cloneComplete true but baseSHA not yet stamped", projName)
+			}
+			return nil
+		}, 5*time.Minute, 5*time.Second).Should(Succeed(),
+			"baseRef Project must reach cloneComplete with baseSHA stamped within 5 minutes")
+
+		var final tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, client.ObjectKey{
+			Name:      projName,
+			Namespace: mediumHTTPNamespace,
+		}, &final)).To(Succeed())
+		Expect(final.Status.Git.BaseSHA).To(Equal(targetTip),
+			"status.git.baseSHA must equal the base-ref-target branch tip (real resolution, not HEAD fallback)")
+		Expect(final.Status.Git.BaseSHA).NotTo(Equal(defaultTip),
+			"status.git.baseSHA must NOT equal the default branch tip (proves the run based off the non-default branch)")
+		GinkgoWriter.Printf("medium-http-test: baseRef Project %s stamped baseSHA=%s\n", projName, final.Status.Git.BaseSHA)
+	})
 })
+
+// grepGreppedTip returns the value following the first line beginning with
+// prefix (e.g. "BASE_REF_TARGET_TIP=") in the given multi-line log, trimmed of
+// surrounding whitespace. Returns "" when the prefix is absent.
+func grepGreppedTip(log, prefix string) string {
+	for _, line := range strings.Split(log, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
+}
 
 // mediumChildSummary lists every child CRD in the medium namespace with its
 // phase — the progress line's pointer to WHICH level of the hierarchy a
