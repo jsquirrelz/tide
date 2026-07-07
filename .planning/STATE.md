@@ -6,15 +6,15 @@ current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-07T04:31:06.782Z"
+last_updated: "2026-07-07T04:49:34.626Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 34 executed end-to-end (API, controller, tide-push, CLI, unit/envtest coverage); draft PR opened
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 31
-  completed_plans: 9
-  percent: 20
+  completed_plans: 10
+  percent: 32
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 34 of 34–39 (Run Integrity — Integration-Miss Gate + lastPushedSHA)
-Plan: 34-01..34-06 executed (INTEG-01..05 implemented; see 34-0N-SUMMARY.md files)
-Status: Implemented, PR open for review; kind Layer B RED/GREEN evidence (34-01 Task 3, 34-06) not runnable in the executing sandbox (no Docker/kind) — deferred to CI's nightly-integration.yml or a follow-up session with kind access
-Last activity: 2026-07-04 — Phase 34 executed end-to-end (API, controller, tide-push, CLI, unit/envtest coverage); draft PR opened
+Phase: 35 of 34–39 (Git Base Ref) — COMPLETE
+Plan: 35-01..35-04 executed (BASE-01/02/03 met; see 35-0N-SUMMARY.md files). On worktree branch claude/git-base-ref, pending merge.
+Status: Complete — spec.git.baseRef ships end-to-end. Kind Layer B baseRef happy-path e2e verified green on a real cluster (baseSHA stamped from a non-default branch tip; focused 'Medium http transport' Describe 4/4 passed + helm-render contract test passed). Chart-version bump deferred to Phase 36's batch (FIXED-contract rule).
+Last activity: 2026-07-07 — Phase 35 executed end-to-end (CRD both versions, pkg/git resolution, controller stamp/classification, kind e2e + operator docs)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -49,7 +49,7 @@ Progress: [░░░░░░░░░░] 0%
 |-------|-------|--------|
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | 6/6 | Executed (PR pending review; kind-suite RED/GREEN evidence pending CI — see Blockers) |
-| 35. Git Base Ref | 1/4 | In progress — 35-01 CRD schema (spec.git.baseRef + status.git.baseSHA, both versions) + parity/round-trip/render locks landed |
+| 35. Git Base Ref | 4/4 | Complete — spec.git.baseRef end-to-end: CRD schema both versions (35-01), pkg/git resolution chain + clone envelope (35-02), controller classification + read-before-flip baseSHA stamp (35-03), kind Layer B happy-path e2e + operator docs (35-04). BASE-01/02/03 met; chart-version bump batched with Phase 36 |
 | 36. Signed Commits + Bot Identity | TBD | Not started |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
 | 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
@@ -125,7 +125,7 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-07T04:31:06.778Z
+Last session: 2026-07-07T04:49:34.620Z
 Stopped at: Phase 38 context gathered
 Resume file: .planning/phases/38-small-independents-pricing-accuracy-promptfile-telemetry-nud/38-CONTEXT.md
 
