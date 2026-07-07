@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-current_phase: 34
-current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
-status: planning
+current_phase: 35
+status: completed
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-07T04:49:34.626Z"
-last_activity: 2026-07-04
-last_activity_desc: Phase 34 executed end-to-end (API, controller, tide-push, CLI, unit/envtest coverage); draft PR opened
+last_updated: "2026-07-07T05:03:37.298Z"
+last_activity: 2026-07-07
+last_activity_desc: Phase 35 marked complete
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 31
   completed_plans: 10
   percent: 32
+current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 35 of 34–39 (Git Base Ref) — COMPLETE
+Phase: 35 — COMPLETE
 Plan: 35-01..35-04 executed (BASE-01/02/03 met; see 35-0N-SUMMARY.md files). On worktree branch claude/git-base-ref, pending merge.
-Status: Complete — spec.git.baseRef ships end-to-end. Kind Layer B baseRef happy-path e2e verified green on a real cluster (baseSHA stamped from a non-default branch tip; focused 'Medium http transport' Describe 4/4 passed + helm-render contract test passed). Chart-version bump deferred to Phase 36's batch (FIXED-contract rule).
-Last activity: 2026-07-07 — Phase 35 executed end-to-end (CRD both versions, pkg/git resolution, controller stamp/classification, kind e2e + operator docs)
+Status: Phase 35 complete
+Last activity: 2026-07-07 — Phase 35 marked complete
 
 Progress: [░░░░░░░░░░] 0%
 
