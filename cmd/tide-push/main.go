@@ -44,6 +44,16 @@ limitations under the License.
 //	11 — lease rejection (envelope.reason=lease-rejected)
 //	12 — auth failure (envelope.reason=auth-failed)
 //	13 — network/timeout (envelope.reason=network-timeout)
+//	14 — integration-completeness miss (Phase 34 D-06/INTEG-03; envelope.reason=
+//	     integration-incomplete, envelope.missingBranches/missingTotal set) — the
+//	     in-Job verify gate (`git merge-base --is-ancestor` per expected branch,
+//	     run after integrate and before push) found at least one expected task
+//	     branch not reachable from the run branch. Nothing is pushed.
+//	15 — merge conflict (Phase 34 D-09/D-10; envelope.reason=merge-conflict,
+//	     envelope.conflictBranch set) — a genuine content conflict (not a
+//	     transient failure) was hit integrating a task branch; distinct from
+//	     exit 1's undifferentiated "integration-failed" so the controller can
+//	     classify conflict (park immediately) vs transient (bounded retry).
 //
 // Credentials: GIT_PAT comes from the K8s Secret named in
 // project.Spec.Git.CredsSecretRef, wired as envFrom on the push Job pod
@@ -64,6 +74,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -72,6 +83,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
+	"golang.org/x/sys/unix"
 
 	"github.com/jsquirrelz/tide/internal/gitleaks"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -95,6 +107,12 @@ type pushConfig struct {
 	// worktree after clone.
 	RunBranch             string
 	IntegrateTaskBranches []string // push-mode: task branch names to merge before staging artifacts (D-04)
+	// IntegrationOnly marks a per-wave integration Job (D-02/D-04): merge +
+	// verify task branches into the LOCAL run branch and exit success without
+	// committing or pushing — the remote push belongs to boundary pushes.
+	// Boundary pushes carry the cumulative branch set too (D-03/D-07), so the
+	// no-push exit keys on this explicit flag, never on absent artifact paths.
+	IntegrationOnly bool
 }
 
 // pushResult is the small JSON envelope written to
@@ -110,6 +128,17 @@ type pushResult struct {
 	HeadSHA    string `json:"headSHA"`
 	ExitCode   int    `json:"exitCode"`
 	Reason     string `json:"reason"`
+
+	// Phase 34 D-09/D-12: extended detail fields for the integration-miss
+	// gate. JSON tags MUST match internal/controller/project_controller.go's
+	// pushResultEnvelope struct exactly (cross-binary contract).
+	// MissingBranches is truncated to the first missingBranchesLimit (sorted)
+	// with MissingTotal carrying the full count (termination-log 4096-byte
+	// cap). ConflictBranch names the task branch that hit a genuine merge
+	// conflict (set only when Reason == "merge-conflict").
+	MissingBranches []string `json:"missingBranches,omitempty"`
+	MissingTotal    int      `json:"missingTotal,omitempty"`
+	ConflictBranch  string   `json:"conflictBranch,omitempty"`
 }
 
 const (
@@ -123,6 +152,16 @@ const (
 	exitLeaseFailed = 11
 	exitAuthFailed  = 12
 	exitNetwork     = 13
+
+	// Phase 34 D-06/D-09: new terminal outcomes for the integration-miss gate.
+	exitIntegrationMiss = 14
+	exitMergeConflict   = 15
+
+	// missingBranchesLimit bounds the envelope's MissingBranches list (D-12):
+	// the termination-log surface is capped at 4096 bytes, so only the first
+	// N (sorted) missing branches are carried; MissingTotal always carries
+	// the full count.
+	missingBranchesLimit = 10
 )
 
 // tideBotSignature returns the fixed TIDE-bot author signature used for
@@ -151,6 +190,8 @@ func main() {
 		"clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
 	integrateTaskBranches := fs.String("integrate-task-branches", "",
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
+	integrationOnly := fs.Bool("integration-only", false,
+		"push-mode: per-wave integration Job — merge+verify locally, no commit/push (D-02)")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -169,6 +210,7 @@ func main() {
 		ProjectUID:            *projectUID,
 		RunBranch:             *runBranch,
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
+		IntegrationOnly:       *integrationOnly,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -330,53 +372,28 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 // diff via gitleaks (D-B3, W10), and on clean diff pushes with
 // --force-with-lease (D-B6).
 func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
-	// Invariant 1: D-B6 never-targets-main guard. The push Job is the
-	// policy enforcement point (per Phase 3 PATTERNS.md note).
-	if cfg.Branch == "main" || cfg.Branch == "master" {
-		writePushEnvelope(cfg, "", exitInvariant, "invalid-branch")
-		fmt.Fprintf(stderr, "tide-push: branch must not be %s (D-B6)\n", cfg.Branch)
-		return exitInvariant
-	}
-	if cfg.Branch == "" {
-		writePushEnvelope(cfg, "", exitInvariant, "invalid-branch")
-		fmt.Fprintf(stderr, "tide-push: push mode requires --branch\n")
-		return exitInvariant
+	if exit, failed := validatePushInvariants(cfg, stderr); failed {
+		return exit
 	}
 
-	// Invariant 3: commit message non-empty (W11 — orchestrator-supplied
-	// boundary message). Empty == programmer error in the calling
-	// reconciler. Checked before PlainOpen (cheap pre-condition).
-	if cfg.CommitMessage == "" {
-		writePushEnvelope(cfg, "", exitInvariant, "missing-commit-message")
-		fmt.Fprintf(stderr, "tide-push: push mode requires --commit-message (W11)\n")
-		return exitInvariant
+	// Phase 34 D-02 (belt-and-braces) / D-06: kernel flock held across
+	// integrate -> verify -> push. The control-plane single-flight gate
+	// (D-02, internal/controller/git_writer.go gitWriterInFlightCount) is the
+	// PRIMARY serializer; this lock is defense in depth against two Jobs
+	// somehow racing on the same shared-PVC integration worktree. Lockfile
+	// EXISTENCE carries no meaning — it is never deleted; the kernel releases
+	// the lock automatically on process exit, so a crashed Job can never
+	// wedge a successor (no lockfile-existence protocol — a locked
+	// constraint). Placed inside repo.git so no checkout ever cleans it.
+	bareRepoPath := filepath.Join(cfg.Workspace, "repo.git")
+	lockFile, exit, failed := acquireIntegrationLock(cfg, bareRepoPath, stderr)
+	if failed {
+		return exit
 	}
+	defer func() { _ = lockFile.Close() }()
 
-	// D-04: if --integrate-task-branches is set, merge each task branch into
-	// the run branch BEFORE staging planner artifacts. This ensures the
-	// boundary commit captures both executor-authored code and planner
-	// artifacts in one unified push.
-	if len(cfg.IntegrateTaskBranches) > 0 {
-		bareRepoPath := filepath.Join(cfg.Workspace, "repo.git")
-		if err := pkggit.IntegrateTaskBranches(bareRepoPath, cfg.Branch, cfg.IntegrateTaskBranches); err != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "integration-failed")
-			fmt.Fprintf(stderr, "tide-push: integrate task branches: %v\n", err)
-			return exitGenericFail
-		}
-
-		// Per-wave integration-only mode: task branches were integrated but there
-		// are no planner artifacts to stage. The merge has already advanced the
-		// LOCAL run branch — the only thing the next wave's worktrees need, since
-		// they fork from it on the shared PVC. There is nothing to commit or push
-		// (attempting the boundary commit below would fail with "cannot create
-		// empty commit: clean working tree"). The remote push happens only at the
-		// final plan boundary, which carries planner artifacts. Exit success.
-		if len(cfg.ArtifactPaths) == 0 {
-			fmt.Fprintf(stderr,
-				"tide-push: integration-only run — merged %d task branch(es) into %s locally; no artifacts to commit/push\n",
-				len(cfg.IntegrateTaskBranches), cfg.Branch)
-			return exitSuccess
-		}
+	if exit, done := runIntegrationPhase(cfg, bareRepoPath, stderr); done {
+		return exit
 	}
 
 	// Open the per-run worktree. The orchestrator's prior clone-mode Job
@@ -391,20 +408,229 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		EnableDotGitCommonDir: true,
 	})
 	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree")
+		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree", nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: PlainOpen %s failed: %v\n", worktreeDir, err)
 		return exitGenericFail
 	}
 
-	// Invariant 2 (D-B1): GIT_PAT required for authenticated remotes
-	// (https:// production, git@ SSH). Not required for anonymous in-cluster
-	// http:// push. Origin URL determines the requirement.
+	pat, exit, failed := resolveGitAuth(cfg, repo, stderr)
+	if failed {
+		return exit
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: Worktree() failed: %v\n", err)
+		return exitGenericFail
+	}
+
+	// Record the pre-commit HEAD so we can compute the new commit's diff
+	// against it after Commit() lands (W10 — unified-diff vs parent for
+	// gitleaks.ScanDiff).
+	headRef, err := repo.Head()
+	if err != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "no-head", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: Head() failed: %v\n", err)
+		return exitGenericFail
+	}
+	oldHash := headRef.Hash()
+
+	if exit, failed := stageArtifacts(cfg, wt, worktreeDir, stderr); failed {
+		return exit
+	}
+
+	newHash, scanBase, exit, failed := commitOrReuseHead(cfg, repo, wt, worktreeDir, oldHash, stderr)
+	if failed {
+		return exit
+	}
+
+	// W10: compute the unified diff of the pushed commit against scanBase via
+	// newCommit.Patch(oldCommit).String(). The Patch.String() output uses
+	// `+ ` / `- ` line prefixes that gitleaks rules can match. When
+	// newHash == scanBase (clean tree, no remote anchor) the diff is empty and
+	// the scan is a no-op — the push proceeds.
+	diff, err := computeUnifiedDiff(repo, scanBase, newHash)
+	if err != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "diff-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: compute diff %s..%s: %v\n", scanBase, newHash, err)
+		return exitGenericFail
+	}
+
+	// D-B3 / W10: scan the diff for secret-shaped patterns. A finding
+	// short-circuits the push so the secret never leaves the cluster.
+	found, _, scanErr := gitleaks.ScanDiff(diff)
+	if scanErr != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "gitleaks-error", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: gitleaks scan error: %v\n", scanErr)
+		return exitGenericFail
+	}
+	if found {
+		writePushEnvelope(cfg, newHash.String(), exitLeakBlocked, "leak-detected", nil, 0, "")
+		// IMPORTANT: do NOT log the diff or finding contents — they
+		// carry the matched secret value. Log only the count via the
+		// envelope reason field. The reconciler in plan 03-08 fires
+		// the tide_secret_leak_blocked_total counter on observation.
+		fmt.Fprintf(stderr, "tide-push: gitleaks: at least one finding; refusing push\n")
+		return exitLeakBlocked
+	}
+
+	// D-B6: push with --force-with-lease against cfg.LastPushedSHA.
+	// First push (lease="") omits the lease via pkggit.Push contract. The
+	// push is idempotent: re-pushing an already-present run branch HEAD is a
+	// no-op fast-forward, so a retried boundary-push Job converges safely.
+	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
+		exit, reason := classifyPushError(err)
+		writePushEnvelope(cfg, newHash.String(), exit, reason, nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: push failed (reason=%s): %v\n", reason, redactPAT(err.Error(), pat))
+		return exit
+	}
+
+	writePushEnvelope(cfg, newHash.String(), exitSuccess, "", nil, 0, "")
+	return exitSuccess
+}
+
+// validatePushInvariants checks the D-B6 never-targets-main guard, the
+// --branch presence invariant, and the W11 --commit-message presence
+// invariant. On any violation it writes the envelope + stderr message and
+// returns (exitCode, true); otherwise (0, false).
+func validatePushInvariants(cfg pushConfig, stderr io.Writer) (int, bool) {
+	// Invariant 1: D-B6 never-targets-main guard. The push Job is the
+	// policy enforcement point (per Phase 3 PATTERNS.md note).
+	if cfg.Branch == "main" || cfg.Branch == "master" {
+		writePushEnvelope(cfg, "", exitInvariant, "invalid-branch", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: branch must not be %s (D-B6)\n", cfg.Branch)
+		return exitInvariant, true
+	}
+	if cfg.Branch == "" {
+		writePushEnvelope(cfg, "", exitInvariant, "invalid-branch", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: push mode requires --branch\n")
+		return exitInvariant, true
+	}
+
+	// Invariant 3: commit message non-empty (W11 — orchestrator-supplied
+	// boundary message). Empty == programmer error in the calling
+	// reconciler. Checked before PlainOpen (cheap pre-condition).
 	//
-	// T-08-05-03 mitigation: production TIDE installations use https:// (CEL
-	// enforced at admission); the demo uses http://. The scheme-conditional
-	// guard makes the production contract explicit without blocking anonymous
-	// in-cluster demo pushes.
-	//
+	// Integration-only wave Jobs are EXEMPT: they never create the boundary
+	// staging commit this message is for — the merges carry their own
+	// generated messages (pkg/git IntegrateTaskBranches) and the Job exits
+	// after the verify gate, before staging/push. triggerWaveIntegrationJob
+	// dispatches with an empty message by design; enforcing W11 here killed
+	// every wave-integration Job at startup (PR #3 run 7: exit 2 in 5ms,
+	// envelope-unreadable — the stderr line became the termination message
+	// via FallbackToLogsOnError and failed JSON parsing), so the Phase 34
+	// integration gate never ran end-to-end.
+	if cfg.CommitMessage == "" && !cfg.IntegrationOnly {
+		writePushEnvelope(cfg, "", exitInvariant, "missing-commit-message", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: push mode requires --commit-message (W11)\n")
+		return exitInvariant, true
+	}
+	return 0, false
+}
+
+// acquireIntegrationLock opens (creating if needed) and flocks
+// <bareRepoPath>/tide-integrate.lock. On failure it writes the envelope +
+// stderr message and returns (nil, exitCode, true); otherwise the caller
+// owns the returned *os.File and must close it.
+func acquireIntegrationLock(cfg pushConfig, bareRepoPath string, stderr io.Writer) (*os.File, int, bool) {
+	lockPath := filepath.Join(bareRepoPath, "tide-integrate.lock")
+	lockFile, lockErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o664)
+	if lockErr != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "lock-open-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: open lockfile %s: %v\n", lockPath, lockErr)
+		return nil, exitGenericFail, true
+	}
+	if err := unix.Flock(int(lockFile.Fd()), unix.LOCK_EX); err != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "lock-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: flock %s: %v\n", lockPath, err)
+		_ = lockFile.Close()
+		return nil, exitGenericFail, true
+	}
+	return lockFile, 0, false
+}
+
+// runIntegrationPhase runs the D-04 task-branch merge, the D-06/INTEG-03
+// verify gate, and the per-wave integration-only early-success exit. The
+// returned bool is true whenever runPush should return immediately with the
+// returned exit code — for a success outcome (integration-only mode) as
+// well as any failure outcome.
+func runIntegrationPhase(cfg pushConfig, bareRepoPath string, stderr io.Writer) (int, bool) {
+	// D-04: if --integrate-task-branches is set, merge each task branch into
+	// the run branch BEFORE staging planner artifacts. This ensures the
+	// boundary commit captures both executor-authored code and planner
+	// artifacts in one unified push.
+	if len(cfg.IntegrateTaskBranches) > 0 {
+		if err := pkggit.IntegrateTaskBranches(bareRepoPath, cfg.Branch, cfg.IntegrateTaskBranches); err != nil {
+			// D-09: classify a genuine content conflict distinctly from a
+			// transient failure so the controller can park immediately
+			// (conflict) instead of burning the bounded-retry budget
+			// (transient). pkg/git already left the integration worktree
+			// clean (merge --abort) before returning this error.
+			var mce *pkggit.MergeConflictError
+			if errors.As(err, &mce) {
+				writePushEnvelope(cfg, "", exitMergeConflict, "merge-conflict", nil, 0, mce.TaskBranch)
+				fmt.Fprintf(stderr, "tide-push: merge conflict integrating %s into %s\n", mce.TaskBranch, mce.RunBranch)
+				return exitMergeConflict, true
+			}
+			writePushEnvelope(cfg, "", exitGenericFail, "integration-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: integrate task branches: %v\n", err)
+			return exitGenericFail, true
+		}
+	}
+
+	// D-06/INTEG-03 verify gate: recompute completeness from git — never
+	// trust controller bookkeeping (IntegratedThroughWave is progress
+	// tracking, not a completeness verdict). For every branch this Job was
+	// told to integrate, confirm it is NOW an ancestor of the run branch in
+	// the bare repo (the same repo the push reads). Runs unconditionally
+	// (D-05: no unverified push class) — an empty cfg.IntegrateTaskBranches
+	// vacuously passes, and a branch already integrated by an earlier
+	// wave/Job passes naturally (its tip is already an ancestor; no
+	// empty-diff special case needed, verified git semantics).
+	verify := verifyIntegrationComplete(bareRepoPath, cfg.Branch, cfg.IntegrateTaskBranches)
+	if verify.infraErr != nil {
+		writePushEnvelope(cfg, "", exitGenericFail, "integration-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: verify integration completeness: %v\n", verify.infraErr)
+		return exitGenericFail, true
+	}
+	if len(verify.branches) > 0 {
+		writePushEnvelope(cfg, "", exitIntegrationMiss, "integration-incomplete",
+			verify.branches, verify.total, "")
+		fmt.Fprintf(stderr, "tide-push: integration-incomplete: %d branch(es) not reachable from %s\n",
+			verify.total, cfg.Branch)
+		return exitIntegrationMiss, true
+	}
+
+	if cfg.IntegrationOnly {
+		// Per-wave integration-only mode (explicit --integration-only, set by
+		// triggerWaveIntegrationJob and nothing else): task branches were
+		// integrated (and verified complete above). The merge has already
+		// advanced the LOCAL run branch — the only thing the next wave's
+		// worktrees need, since they fork from it on the shared PVC. Nothing
+		// is committed or pushed; the remote push belongs to boundary pushes.
+		// A success envelope is written so wave-Job outcomes are visible to
+		// the controller/metrics (Pitfall 3). Boundary pushes also carry a
+		// non-empty --integrate-task-branches (the D-03/D-07 cumulative set)
+		// with no artifacts, so this exit MUST key on the explicit flag —
+		// keying on "branches set, no artifacts" would swallow every
+		// post-task boundary push and no work would ever reach the remote.
+		fmt.Fprintf(stderr,
+			"tide-push: integration-only run — merged %d task branch(es) into %s locally; skipping commit/push\n",
+			len(cfg.IntegrateTaskBranches), cfg.Branch)
+		writePushEnvelope(cfg, "", exitSuccess, "", nil, 0, "")
+		return exitSuccess, true
+	}
+
+	return 0, false
+}
+
+// resolveGitAuth reads GIT_PAT (Invariant 2 / D-B1) and determines whether
+// the origin remote requires authentication (HTTPS or SSH remotes do;
+// anonymous in-cluster http:// remotes do not). On a required-but-missing
+// PAT it writes the envelope + stderr message and returns ("", exitCode,
+// true); otherwise it returns (pat, 0, false).
+func resolveGitAuth(cfg pushConfig, repo *gogit.Repository, stderr io.Writer) (string, int, bool) {
 	// Read GIT_PAT once into a local variable; never log it.
 	pat := os.Getenv("GIT_PAT")
 
@@ -426,32 +652,17 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// If origin remote is missing or has no URLs: requirePAT stays true (safe default).
 
 	if requirePAT && pat == "" {
-		writePushEnvelope(cfg, "", exitInvariant, "missing-creds")
+		writePushEnvelope(cfg, "", exitInvariant, "missing-creds", nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: GIT_PAT env is empty (required for https:// and git@ remotes)\n")
-		return exitInvariant
+		return "", exitInvariant, true
 	}
+	return pat, 0, false
+}
 
-	wt, err := repo.Worktree()
-	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "no-worktree")
-		fmt.Fprintf(stderr, "tide-push: Worktree() failed: %v\n", err)
-		return exitGenericFail
-	}
-
-	// Record the pre-commit HEAD so we can compute the new commit's diff
-	// against it after Commit() lands (W10 — unified-diff vs parent for
-	// gitleaks.ScanDiff).
-	headRef, err := repo.Head()
-	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "no-head")
-		fmt.Fprintf(stderr, "tide-push: Head() failed: %v\n", err)
-		return exitGenericFail
-	}
-	oldHash := headRef.Hash()
-
-	// Stage each artifact path (D-B2 / W11). pkggit.AddPath wraps
-	// wt.Add; missing files surface as errors so the caller (reconciler)
-	// can correct the artifact-path list.
+// stageArtifacts copies each cfg.ArtifactPaths entry into the worktree (D-B2
+// / W11) and stages it via pkggit.AddPath. On any failure it writes the
+// envelope + stderr message and returns (exitCode, true).
+func stageArtifacts(cfg pushConfig, wt *gogit.Worktree, worktreeDir string, stderr io.Writer) (int, bool) {
 	for _, rel := range cfg.ArtifactPaths {
 		// Resolve relative-to-workspace path against the worktree. The
 		// push Job receives workspace-relative artifact paths
@@ -462,17 +673,30 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		src := filepath.Join(cfg.Workspace, rel)
 		dst := filepath.Join(worktreeDir, rel)
 		if err := copyIntoWorktree(src, dst); err != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "artifact-copy-failed")
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-copy-failed", nil, 0, "")
 			fmt.Fprintf(stderr, "tide-push: copy artifact %s -> worktree: %v\n", rel, err)
-			return exitGenericFail
+			return exitGenericFail, true
 		}
 		if err := pkggit.AddPath(wt, rel); err != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "stage-failed")
+			writePushEnvelope(cfg, "", exitGenericFail, "stage-failed", nil, 0, "")
 			fmt.Fprintf(stderr, "tide-push: stage %s: %v\n", rel, err)
-			return exitGenericFail
+			return exitGenericFail, true
 		}
 	}
+	return 0, false
+}
 
+// commitOrReuseHead determines whether the worktree has anything to commit
+// after staging. On a clean tree (nothing staged, or staged content was
+// byte-identical) it reuses the existing HEAD as newHash — attempting an
+// empty commit would fail — and computes scanBase from cfg.LastPushedSHA
+// when available (mirrors commit 8e57348's merge-only boundary handling).
+// Otherwise it creates the W11 boundary commit. On any failure it writes
+// the envelope + stderr message and returns exitCode/true.
+func commitOrReuseHead(
+	cfg pushConfig, repo *gogit.Repository, wt *gogit.Worktree, worktreeDir string,
+	oldHash plumbing.Hash, stderr io.Writer,
+) (plumbing.Hash, plumbing.Hash, int, bool) {
 	// Determine whether staging produced anything to commit. After the artifact
 	// copy+stage loop, the worktree may be clean for two reasons: (1) no
 	// --artifact-paths were supplied at all (a level boundary push whose only
@@ -487,9 +711,9 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// to the remote so the merged work actually leaves the cluster.
 	clean, err := worktreeClean(worktreeDir)
 	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "status-failed")
+		writePushEnvelope(cfg, "", exitGenericFail, "status-failed", nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: git status %s: %v\n", worktreeDir, err)
-		return exitGenericFail
+		return plumbing.ZeroHash, plumbing.ZeroHash, exitGenericFail, true
 	}
 
 	// newHash is the commit that will be pushed. On a clean tree it is the
@@ -520,56 +744,49 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		// commit per push). Author is the fixed TIDE-bot signature.
 		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, tideBotSignature())
 		if cErr != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "commit-failed")
+			writePushEnvelope(cfg, "", exitGenericFail, "commit-failed", nil, 0, "")
 			fmt.Fprintf(stderr, "tide-push: commit failed: %v\n", cErr)
-			return exitGenericFail
+			return plumbing.ZeroHash, plumbing.ZeroHash, exitGenericFail, true
 		}
 		newHash = h
 	}
+	return newHash, scanBase, 0, false
+}
 
-	// W10: compute the unified diff of the pushed commit against scanBase via
-	// newCommit.Patch(oldCommit).String(). The Patch.String() output uses
-	// `+ ` / `- ` line prefixes that gitleaks rules can match. When
-	// newHash == scanBase (clean tree, no remote anchor) the diff is empty and
-	// the scan is a no-op — the push proceeds.
-	diff, err := computeUnifiedDiff(repo, scanBase, newHash)
-	if err != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "diff-failed")
-		fmt.Fprintf(stderr, "tide-push: compute diff %s..%s: %v\n", scanBase, newHash, err)
-		return exitGenericFail
-	}
+// verifyResult carries the D-06/INTEG-03 verify gate's outcome: either an
+// infrastructure error (infraErr set — e.g. a corrupted bare repo; treated as
+// a generic/transient failure, NOT a completeness miss) or the list of
+// expected branches NOT reachable from the run branch (branches, sorted;
+// total is the untruncated count — writePushEnvelope applies the D-12
+// truncation separately).
+type verifyResult struct {
+	branches []string
+	total    int
+	infraErr error
+}
 
-	// D-B3 / W10: scan the diff for secret-shaped patterns. A finding
-	// short-circuits the push so the secret never leaves the cluster.
-	found, _, scanErr := gitleaks.ScanDiff(diff)
-	if scanErr != nil {
-		writePushEnvelope(cfg, "", exitGenericFail, "gitleaks-error")
-		fmt.Fprintf(stderr, "tide-push: gitleaks scan error: %v\n", scanErr)
-		return exitGenericFail
+// verifyIntegrationComplete runs `git merge-base --is-ancestor <branch>
+// <runBranch>` (RESEARCH Pattern 4, verified git 2.54 semantics: exit 0 =
+// ancestor — including an empty-diff branch whose tip is already an
+// ancestor, no special case needed; exit 1 = not an ancestor; any other exit
+// = infrastructure error) for every branch in expectedBranches against
+// bareRepoPath — the bare repo is the source of truth the push reads, not
+// the integration worktree. An empty expectedBranches list vacuously passes.
+func verifyIntegrationComplete(bareRepoPath, runBranch string, expectedBranches []string) verifyResult {
+	var missing []string
+	for _, br := range expectedBranches {
+		cmd := exec.Command("git", "-C", bareRepoPath, "merge-base", "--is-ancestor", br, runBranch)
+		if err := cmd.Run(); err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) && ee.ExitCode() == 1 {
+				missing = append(missing, br)
+				continue
+			}
+			return verifyResult{infraErr: fmt.Errorf("merge-base --is-ancestor %s %s: %w", br, runBranch, err)}
+		}
 	}
-	if found {
-		writePushEnvelope(cfg, newHash.String(), exitLeakBlocked, "leak-detected")
-		// IMPORTANT: do NOT log the diff or finding contents — they
-		// carry the matched secret value. Log only the count via the
-		// envelope reason field. The reconciler in plan 03-08 fires
-		// the tide_secret_leak_blocked_total counter on observation.
-		fmt.Fprintf(stderr, "tide-push: gitleaks: at least one finding; refusing push\n")
-		return exitLeakBlocked
-	}
-
-	// D-B6: push with --force-with-lease against cfg.LastPushedSHA.
-	// First push (lease="") omits the lease via pkggit.Push contract. The
-	// push is idempotent: re-pushing an already-present run branch HEAD is a
-	// no-op fast-forward, so a retried boundary-push Job converges safely.
-	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
-		exit, reason := classifyPushError(err)
-		writePushEnvelope(cfg, newHash.String(), exit, reason)
-		fmt.Fprintf(stderr, "tide-push: push failed (reason=%s): %v\n", reason, redactPAT(err.Error(), pat))
-		return exit
-	}
-
-	writePushEnvelope(cfg, newHash.String(), exitSuccess, "")
-	return exitSuccess
+	sort.Strings(missing)
+	return verifyResult{branches: missing, total: len(missing)}
 }
 
 // computeUnifiedDiff resolves both commit hashes and returns the unified
@@ -659,15 +876,31 @@ const terminationMessagePath = "/dev/termination-log"
 // /dev/termination-log (terminationMessagePath). Best-effort on both
 // writes: write failures are logged but do not change the exit code (the
 // caller has already decided what to return).
-func writePushEnvelope(cfg pushConfig, headSHA string, exit int, reason string) {
+//
+// missingBranches/missingTotal/conflictBranch are the Phase 34 D-09/D-12
+// detail fields; pass (nil, 0, "") when they do not apply to this outcome.
+// missingBranches is truncated to missingBranchesLimit here (sorted order is
+// the caller's responsibility — the verify gate already collects them in
+// scan order over the sorted --integrate-task-branches CSV).
+func writePushEnvelope(
+	cfg pushConfig, headSHA string, exit int, reason string,
+	missingBranches []string, missingTotal int, conflictBranch string,
+) {
+	truncated := missingBranches
+	if len(truncated) > missingBranchesLimit {
+		truncated = truncated[:missingBranchesLimit]
+	}
 	pr := pushResult{
-		APIVersion: envelopeAPIVersion,
-		Kind:       envelopeKind,
-		ProjectUID: cfg.ProjectUID,
-		Branch:     cfg.Branch,
-		HeadSHA:    headSHA,
-		ExitCode:   exit,
-		Reason:     reason,
+		APIVersion:      envelopeAPIVersion,
+		Kind:            envelopeKind,
+		ProjectUID:      cfg.ProjectUID,
+		Branch:          cfg.Branch,
+		HeadSHA:         headSHA,
+		ExitCode:        exit,
+		Reason:          reason,
+		MissingBranches: truncated,
+		MissingTotal:    missingTotal,
+		ConflictBranch:  conflictBranch,
 	}
 	data, err := json.Marshal(pr)
 	if err != nil {

@@ -68,9 +68,10 @@ func makeFakeJobTerminal(ctx context.Context, c client.Client, name, namespace s
 	}
 	now := metav1.Now()
 	job.Status.StartTime = &now
-	job.Status.CompletionTime = &now
 	job.Status.Conditions = []batchv1.JobCondition{}
 	if succeeded {
+		// completionTime is only API-valid alongside Complete=True.
+		job.Status.CompletionTime = &now
 		job.Status.Succeeded = 1
 		job.Status.Conditions = append(job.Status.Conditions,
 			batchv1.JobCondition{
@@ -84,12 +85,20 @@ func makeFakeJobTerminal(ctx context.Context, c client.Client, name, namespace s
 				LastTransitionTime: now,
 			})
 	} else {
+		// K8s 1.31+ status validation: Failed=True requires FailureTarget=True
+		// first, and completionTime must NOT be set on a failed Job.
 		job.Status.Failed = 1
-		job.Status.Conditions = append(job.Status.Conditions, batchv1.JobCondition{
-			Type:               batchv1.JobFailed,
-			Status:             corev1.ConditionTrue,
-			LastTransitionTime: now,
-		})
+		job.Status.Conditions = append(job.Status.Conditions,
+			batchv1.JobCondition{
+				Type:               batchv1.JobFailureTarget,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+			},
+			batchv1.JobCondition{
+				Type:               batchv1.JobFailed,
+				Status:             corev1.ConditionTrue,
+				LastTransitionTime: now,
+			})
 	}
 	return c.Status().Update(ctx, &job)
 }

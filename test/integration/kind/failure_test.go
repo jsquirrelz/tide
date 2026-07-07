@@ -150,6 +150,55 @@ metadata:
 	pvcPrewarmPod(ns)
 }
 
+// ensurePushSARBAC creates the tide-push ServiceAccount + Role + RoleBinding
+// in the given namespace — the manual equivalent of the chart's
+// push-rbac.yaml, which installs only into .Release.Namespace (the chart
+// documents that operators must replicate it per Project namespace).
+//
+// Every clone / wave-integration / boundary-push Job pod runs as
+// serviceAccountName: tide-push (push_helpers.go pushSAName); without the SA
+// the Job controller refuses pod creation ("serviceaccount tide-push not
+// found") and the Job sits non-terminal forever — the PR #3 CI failure mode:
+// the clone Job for integration-miss-test never got a pod, so CloneComplete
+// never flipped and the whole integrate/push chain was dead on arrival.
+// NOT wired into createNamespace: push_lease_test.go's mock choreography
+// (patch Job.Status + fake pod) depends on real push pods never running —
+// only namespaces that exercise REAL git-writer pods opt in.
+func ensurePushSARBAC(ns string) {
+	rbacYAML := fmt.Sprintf(`apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tide-push
+  namespace: %s
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tide-push
+  namespace: %s
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tide-push
+  namespace: %s
+subjects:
+  - kind: ServiceAccount
+    name: tide-push
+    namespace: %s
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tide-push
+`, ns, ns, ns, ns)
+	_ = applyYAML(rbacYAML)
+}
+
 // ensureImportSA creates the tide-import ServiceAccount in the given namespace.
 // The ImportController's import Job pod references it by name; the binary makes
 // no K8s API calls, so no Role/RoleBinding is needed (Phase 28/29 GAP-5).

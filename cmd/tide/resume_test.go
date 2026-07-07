@@ -15,9 +15,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -209,6 +212,64 @@ func TestResumeWithoutFlagLeavesFailed(t *testing.T) {
 	}
 	if got.Status.Phase != "Failed" {
 		t.Errorf("expected Failed Plan untouched when flag absent; Status.Phase=%q", got.Status.Phase)
+	}
+}
+
+// TestResumeRetryFailedResetsWaveIntegration pins the Phase 34 recovery
+// contract for wave-integration failures: resetting a Failed Plan must also
+// zero Status.WaveIntegration (otherwise a plan parked at the Attempts cap
+// re-fails terminally after ONE fresh attempt instead of a full budget) and
+// delete the stale terminal-failed tide-push-wave-<plan.UID>-<N> Job
+// (otherwise, within its 300s TTL window, the resumed Plan's next reconcile
+// re-reads the stale envelope and instantly re-fails).
+func TestResumeRetryFailedResetsWaveIntegration(t *testing.T) {
+	p := makeProject("my-project")
+	pl := makeFailedPlan("pl-wave-parked", "my-project")
+	pl.UID = types.UID("plan-uid-wave-parked")
+	now := metav1.Now()
+	pl.Status.WaveIntegration = tidev1alpha2.WaveIntegrationStatus{
+		Wave:            1,
+		Attempts:        5,
+		LastAttemptTime: &now,
+		LastError:       "integration-failed",
+	}
+	staleJob := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "tide-push-wave-plan-uid-wave-parked-1",
+			Namespace: "default",
+			Labels: map[string]string{
+				"tideproject.k8s/role":    "git-writer",
+				"tideproject.k8s/project": "my-project",
+			},
+		},
+	}
+
+	c := fake.NewClientBuilder().
+		WithScheme(testScheme(t)).
+		WithObjects(p, pl, staleJob).
+		WithStatusSubresource(&tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "my-project", true, nil); err != nil {
+		t.Fatalf("resumeRun(retryFailed=true): %v", err)
+	}
+
+	var got tidev1alpha2.Plan
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pl-wave-parked"}, &got); err != nil {
+		t.Fatalf("get plan: %v", err)
+	}
+	if got.Status.WaveIntegration.Attempts != 0 || got.Status.WaveIntegration.Wave != 0 ||
+		got.Status.WaveIntegration.LastError != "" || got.Status.WaveIntegration.LastAttemptTime != nil {
+		t.Errorf("Status.WaveIntegration not reset: %+v — a resumed plan must get a fresh retry budget",
+			got.Status.WaveIntegration)
+	}
+
+	var job batchv1.Job
+	err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: staleJob.Name}, &job)
+	if err == nil {
+		t.Errorf("stale wave-integration Job survived resume — within its TTL window it instantly re-fails the resumed Plan")
+	} else if !apierrors.IsNotFound(err) {
+		t.Fatalf("get stale wave job: %v", err)
 	}
 }
 
@@ -493,5 +554,81 @@ func TestResumeRetryFailedPlannerFailed(t *testing.T) {
 	}
 	if msCond.Reason != tidev1alpha2.ReasonResumedByUser {
 		t.Errorf("PLANFAIL-04: Milestone condition Reason=%q, want %q", msCond.Reason, tidev1alpha2.ReasonResumedByUser)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 34 plan 34-05 Task 3 — tide resume stamps reset-boundary-push (D-13)
+// ---------------------------------------------------------------------------
+
+// makeIntegrationIncompleteProject builds a Project fixture with a sticky
+// ConditionIntegrationIncomplete and a non-zero BoundaryPush.Attempts tally.
+func makeIntegrationIncompleteProject(name string) *tidev1alpha2.Project {
+	p := &tidev1alpha2.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Status:     tidev1alpha2.ProjectStatus{Phase: "Complete"},
+	}
+	p.Status.BoundaryPush.Attempts = 5
+	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+		Type:               tidev1alpha2.ConditionIntegrationIncomplete,
+		Status:             metav1.ConditionTrue,
+		Reason:             tidev1alpha2.ReasonIntegrationIncomplete,
+		Message:            "5 branch(es) missing",
+		LastTransitionTime: metav1.Now(),
+	})
+	return p
+}
+
+// TestResumeStampsResetBoundaryPushAnnotation asserts resumeRun stamps
+// tideproject.k8s/reset-boundary-push=true on a Project with a sticky
+// IntegrationIncomplete condition.
+func TestResumeStampsResetBoundaryPushAnnotation(t *testing.T) {
+	p := makeIntegrationIncompleteProject("im-reset-project")
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	var buf bytes.Buffer
+	if err := resumeRun(context.Background(), c, "default", "im-reset-project", false, &buf); err != nil {
+		t.Fatalf("resumeRun: %v", err)
+	}
+
+	var got tidev1alpha2.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "im-reset-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got.Annotations["tideproject.k8s/reset-boundary-push"] != "true" {
+		t.Errorf("expected tideproject.k8s/reset-boundary-push=true, got annotations: %v", got.Annotations)
+	}
+	if !strings.Contains(buf.String(), "reset boundary-push retry state") {
+		t.Errorf("expected a one-line reset notice in output, got: %s", buf.String())
+	}
+}
+
+// TestResumeDoesNotStampResetBoundaryPushWhenClean asserts resumeRun does NOT
+// stamp the annotation on a Project with no boundary-push retry state.
+func TestResumeDoesNotStampResetBoundaryPushWhenClean(t *testing.T) {
+	p := &tidev1alpha2.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "clean-project", Namespace: "default"},
+		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Status:     tidev1alpha2.ProjectStatus{Phase: "Running"},
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+		WithObjects(p).
+		WithStatusSubresource(p).
+		Build()
+
+	if err := resumeRun(context.Background(), c, "default", "clean-project", false, nil); err != nil {
+		t.Fatalf("resumeRun: %v", err)
+	}
+
+	var got tidev1alpha2.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "clean-project"}, &got); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if _, ok := got.Annotations["tideproject.k8s/reset-boundary-push"]; ok {
+		t.Errorf("reset-boundary-push annotation should not be stamped on a clean project; got annotations: %v", got.Annotations)
 	}
 }

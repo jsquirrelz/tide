@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,13 +22,18 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
 
 // Debug defect #13b — boundary-push observability + bounded controller-driven
@@ -350,3 +356,719 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		})
 	})
 })
+
+// Phase 34 plan 34-05 Task 1: LastPushedSHA stamp (D-14), Pitfall-4
+// stamp-skip tolerance, mid-run observation, and auto-clear.
+var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observation (Phase 34 D-14)", Label("envtest", "phase34", "lastpushedsha"), func() {
+	ctx := context.Background()
+
+	reconcileN := func(r *ProjectReconciler, name string, n int) {
+		for range n {
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: "default"}})
+		}
+	}
+	getProject := func(name string) tideprojectv1alpha2.Project {
+		var got tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		return got
+	}
+	pushJobName := func(uid types.UID) string { return fmt.Sprintf("tide-push-%s", uid) }
+
+	makeProjectAt := func(name string, phase string) *tideprojectv1alpha2.Project {
+		proj := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				TargetRepo: "https://github.com/example/test.git",
+				Git: &tideprojectv1alpha2.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		got := getProject(name)
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = phase
+		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
+		got.Status.Git.CloneComplete = true // skip clone dispatch for mid-run cases
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		return &got
+	}
+
+	makePushJobFor := func(jobName, projectName string, uid types.UID) {
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      jobName,
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					Kind:               "Project",
+					Name:               projectName,
+					UID:                uid,
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
+				}},
+			},
+			Spec: batchv1.JobSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						RestartPolicy: corev1.RestartPolicyNever,
+						Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, job)).To(Succeed())
+	}
+
+	markSucceeded := func(jobName string) {
+		var job batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)).To(Succeed())
+		now := metav1.Now()
+		job.Status.StartTime = &now
+		job.Status.Succeeded = 1
+		job.Status.CompletionTime = &now
+		job.Status.Conditions = []batchv1.JobCondition{
+			{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "CompletionsReached"},
+			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "CompletionsReached"},
+		}
+		Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+	}
+
+	attachEnvelopePod := func(jobName, headSHA string) {
+		env := pushResultEnvelope{APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult", HeadSHA: headSHA, ExitCode: 0}
+		raw, err := json.Marshal(env)
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      jobName + "-pod",
+				Namespace: "default",
+				Labels:    map[string]string{"job-name": jobName},
+			},
+			Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		sp := client.MergeFrom(pod.DeepCopy())
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: pushContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 0, Reason: "Completed", Message: string(raw),
+			}},
+		}}
+		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
+	}
+
+	cleanupSHA := func(name string) {
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			_ = k8sClient.Delete(ctx, &j)
+		}
+		var pods corev1.PodList
+		_ = k8sClient.List(ctx, &pods, client.InNamespace("default"))
+		for i := range pods.Items {
+			p := pods.Items[i]
+			_ = k8sClient.Delete(ctx, &p)
+		}
+		var p tideprojectv1alpha2.Project
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
+			p.Finalizers = nil
+			_ = k8sClient.Update(ctx, &p)
+			_ = k8sClient.Delete(ctx, &p)
+		}
+	}
+
+	newReconcilerSHA := func(pvc string) *ProjectReconciler {
+		r := newTestProjectReconciler()
+		r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+		r.SharedPVCName = pvc
+		ensurePVC(ctx, pvc, "default")
+		return r
+	}
+
+	Describe("Test 1: success arm stamps LastPushedSHA in the same pass as BoundaryPushed=True", func() {
+		const name = "sha-complete-success"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("stamps Status.Git.LastPushedSHA from the envelope HeadSHA", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn)
+			attachEnvelopePod(jn, "abc123def456")
+
+			r := newReconcilerSHA("tide-projects-sha-1")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("abc123def456"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Describe("Test 2 (Pitfall 4): unreadable envelope does not block BoundaryPushed=True", func() {
+		const name = "sha-stamp-skip"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("sets BoundaryPushed=True without an envelope and increments stamp-skip", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn) // NO envelope pod attached — simulates TTL'd/GC'd pod
+
+			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+
+			r := newReconcilerSHA("tide-projects-sha-2")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue), "BoundaryPushed=True must not block on envelope readability")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
+	Describe("Test 3: mid-run (pre-Complete) success also stamps the SHA", func() {
+		const name = "sha-midrun-success"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("stamps LastPushedSHA for a terminal push Job observed before Complete", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseRunning)
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn)
+			attachEnvelopePod(jn, "midrun-sha-789")
+
+			r := newReconcilerSHA("tide-projects-sha-3")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("midrun-sha-789"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Describe("Test 3b: an empty-HeadSHA success envelope must not wipe the lease fence", func() {
+		const name = "sha-empty-keeps-fence"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("keeps the previously-stamped LastPushedSHA and routes to stamp-skip", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
+
+			// A previous real push armed the D-B6 force-with-lease fence.
+			pre := getProject(name)
+			prePatch := client.MergeFrom(pre.DeepCopy())
+			pre.Status.Git.LastPushedSHA = "armed-fence-sha-111"
+			Expect(k8sClient.Status().Patch(ctx, &pre, prePatch)).To(Succeed())
+
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn)
+			attachEnvelopePod(jn, "") // success envelope with empty HeadSHA
+
+			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+
+			r := newReconcilerSHA("tide-projects-sha-3b")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("armed-fence-sha-111"),
+					"an empty envelope HeadSHA must never clear the force-with-lease anchor")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
+			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
+	Describe("Test 4: a later success auto-clears a sticky IntegrationIncomplete condition", func() {
+		const name = "sha-autoclear"
+		AfterEach(func() { cleanupSHA(name) })
+
+		It("removes ConditionIntegrationIncomplete once a push succeeds", func() {
+			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
+			// Pre-seed the sticky condition as if a prior cap-exhaustion parked it.
+			got := getProject(name)
+			patch := client.MergeFrom(got.DeepCopy())
+			meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha2.ConditionIntegrationIncomplete,
+				Status:             metav1.ConditionTrue,
+				Reason:             tideprojectv1alpha2.ReasonIntegrationIncomplete,
+				Message:            "stale miss from a prior attempt",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+
+			jn := pushJobName(proj.UID)
+			makePushJobFor(jn, proj.Name, proj.UID)
+			markSucceeded(jn)
+			attachEnvelopePod(jn, "cleared-sha")
+
+			r := newReconcilerSHA("tide-projects-sha-4")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				fresh := getProject(name)
+				c := meta.FindStatusCondition(fresh.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).To(BeNil(), "ConditionIntegrationIncomplete must auto-clear on a later successful push")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+})
+
+// Phase 34 plan 34-05 Task 2: failure arms — miss retry-then-stick (D-08)
+// and conflict park (D-09/D-11/D-12).
+var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failure arms (Phase 34)", Label("envtest", "phase34", "integrationincomplete"), func() {
+	ctx := context.Background()
+
+	reconcileN := func(r *ProjectReconciler, name string, n int) {
+		for range n {
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: "default"}})
+		}
+	}
+	getProject := func(name string) tideprojectv1alpha2.Project {
+		var got tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		return got
+	}
+	pushJobName := func(uid types.UID) string { return fmt.Sprintf("tide-push-%s", uid) }
+
+	makeCompleteIM := func(name string, attempts int32) *tideprojectv1alpha2.Project {
+		proj := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				TargetRepo: "https://github.com/example/test.git",
+				Git: &tideprojectv1alpha2.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		got := getProject(name)
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = tideprojectv1alpha2.PhaseComplete
+		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
+		got.Status.BoundaryPush.Attempts = attempts
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		return &got
+	}
+
+	makePushJobIM := func(jobName, projectName string, uid types.UID) {
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      jobName,
+				Namespace: "default",
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					Kind:               "Project",
+					Name:               projectName,
+					UID:                uid,
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
+				}},
+			},
+			Spec: batchv1.JobSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						RestartPolicy: corev1.RestartPolicyNever,
+						Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, job)).To(Succeed())
+	}
+
+	markFailedIM := func(jobName string) {
+		var job batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)).To(Succeed())
+		now := metav1.Now()
+		job.Status.StartTime = &now
+		job.Status.Failed = 1
+		job.Status.Conditions = []batchv1.JobCondition{
+			{Type: batchv1.JobFailureTarget, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "BackoffLimitExceeded"},
+			{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, LastTransitionTime: now, Reason: "BackoffLimitExceeded"},
+		}
+		Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+	}
+
+	attachMissEnvelope := func(jobName string, missing []string, total int) {
+		env := pushResultEnvelope{
+			APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult",
+			ExitCode: 14, Reason: "integration-incomplete",
+			MissingBranches: missing, MissingTotal: total,
+		}
+		raw, err := json.Marshal(env)
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: jobName + "-pod", Namespace: "default",
+				Labels: map[string]string{"job-name": jobName},
+			},
+			Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		sp := client.MergeFrom(pod.DeepCopy())
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: pushContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 14, Reason: "Error", Message: string(raw),
+			}},
+		}}
+		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
+	}
+
+	attachConflictEnvelope := func(jobName, conflictBranch string) {
+		env := pushResultEnvelope{
+			APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult",
+			ExitCode: 15, Reason: "merge-conflict", ConflictBranch: conflictBranch,
+		}
+		raw, err := json.Marshal(env)
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: jobName + "-pod", Namespace: "default",
+				Labels: map[string]string{"job-name": jobName},
+			},
+			Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		sp := client.MergeFrom(pod.DeepCopy())
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: pushContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 15, Reason: "Error", Message: string(raw),
+			}},
+		}}
+		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
+	}
+
+	cleanupIM := func(name string) {
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			_ = k8sClient.Delete(ctx, &j)
+		}
+		var pods corev1.PodList
+		_ = k8sClient.List(ctx, &pods, client.InNamespace("default"))
+		for i := range pods.Items {
+			p := pods.Items[i]
+			_ = k8sClient.Delete(ctx, &p)
+		}
+		var p tideprojectv1alpha2.Project
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
+			p.Finalizers = nil
+			_ = k8sClient.Update(ctx, &p)
+			_ = k8sClient.Delete(ctx, &p)
+		}
+	}
+
+	newReconcilerIM := func(pvc string) *ProjectReconciler {
+		r := newTestProjectReconciler()
+		r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+		r.SharedPVCName = pvc
+		ensurePVC(ctx, pvc, "default")
+		return r
+	}
+
+	Describe("Test 1 (D-08 retry): integration-incomplete rides bounded retry, no sticky condition yet", func() {
+		const name = "im-retry"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("increments Attempts and does not park sticky", func() {
+			proj := makeCompleteIM(name, 0)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachMissEnvelope(jn, []string{"tide/wt-uid-a"}, 1)
+
+			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "miss"))
+
+			r := newReconcilerIM("tide-projects-im-1")
+			reconcileN(r, name, 4)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1))
+				g.Expect(got.Status.BoundaryPush.LastError).To(HavePrefix(integrationIncompleteLastErrorPrefix))
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).To(BeNil(), "sticky condition must not appear before the retry cap")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "miss"))
+			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
+	Describe("Test 2 (D-08 stick at cap): sticky condition names missing task+branch after cap", func() {
+		const name = "im-stick"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("parks with ConditionIntegrationIncomplete naming the missing branch", func() {
+			proj := makeCompleteIM(name, maxBoundaryPushAttempts-1)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachMissEnvelope(jn, []string{"tide/wt-uid-missing"}, 1)
+
+			r := newReconcilerIM("tide-projects-im-2")
+			reconcileN(r, name, 4)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				g.Expect(got.Status.BoundaryPush.Attempts).To(Equal(int32(maxBoundaryPushAttempts)))
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonIntegrationIncomplete))
+				g.Expect(c.Message).To(ContainSubstring("tide/wt-uid-missing"))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// Parked: no further push Job dispatch attempts (Attempts stays at cap).
+			got := getProject(name)
+			Expect(got.Status.BoundaryPush.Attempts).To(Equal(int32(maxBoundaryPushAttempts)))
+		})
+	})
+
+	Describe("Test 3 (D-09 conflict park): merge-conflict parks immediately, zero retries burned", func() {
+		const name = "im-conflict"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("parks with ConditionIntegrationIncomplete/MergeConflict and does not increment Attempts", func() {
+			proj := makeCompleteIM(name, 0)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachConflictEnvelope(jn, "tide/wt-uid-conflicter")
+
+			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "conflict"))
+
+			r := newReconcilerIM("tide-projects-im-3")
+			reconcileN(r, name, 4)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonMergeConflict))
+				g.Expect(c.Message).To(ContainSubstring("tide/wt-uid-conflicter"))
+				g.Expect(got.Status.BoundaryPush.Attempts).To(Equal(int32(0)), "a conflict must not burn the retry budget")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "conflict"))
+			Expect(after).To(BeNumerically(">", before))
+		})
+	})
+
+	Describe("Test 3b (D-09 park is sticky): TTL-deleting the failed Job must not re-dispatch a doomed push", func() {
+		const name = "im-conflict-ttl"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("does not create a new push Job after the parked conflict Job is GC'd", func() {
+			proj := makeCompleteIM(name, 0)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachConflictEnvelope(jn, "tide/wt-uid-ttl-conflicter")
+
+			r := newReconcilerIM("tide-projects-im-3b")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonMergeConflict))
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// TTLSecondsAfterFinished GC's the failed Job (and its pod).
+			var job batchv1.Job
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
+			policy := metav1.DeletePropagationBackground
+			Expect(k8sClient.Delete(ctx, &job, &client.DeleteOptions{PropagationPolicy: &policy})).To(Succeed())
+			Eventually(func() bool {
+				var j batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &j))
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			// A deterministic content conflict cannot be fixed by retrying:
+			// the Complete fast-path must NOT re-create the push Job while
+			// the MergeConflict park stands.
+			reconcileN(r, name, 3)
+			Consistently(func() bool {
+				var j batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &j))
+			}, 2*time.Second, 200*time.Millisecond).Should(BeTrue(),
+				"parked merge-conflict re-dispatched a doomed push Job after TTL GC")
+		})
+	})
+
+	Describe("Test 4b (D-08 cap event): the exhaustion Warning fires once, not per reconcile", func() {
+		const name = "im-cap-event"
+		AfterEach(func() { cleanupIM(name) })
+
+		It("emits a single IntegrationIncomplete event at the cap", func() {
+			proj := makeCompleteIM(name, maxBoundaryPushAttempts-1)
+			jn := pushJobName(proj.UID)
+			makePushJobIM(jn, proj.Name, proj.UID)
+			markFailedIM(jn)
+			attachMissEnvelope(jn, []string{"tide/wt-uid-cap-missing"}, 1)
+
+			r := newReconcilerIM("tide-projects-im-4b")
+			rec := record.NewFakeRecorder(20)
+			r.Recorder = rec
+
+			// Classification pass takes Attempts to the cap, then several
+			// parked passes — the Warning must not repeat per pass.
+			reconcileN(r, name, 6)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).NotTo(BeNil())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			reconcileN(r, name, 3)
+
+			count := 0
+			for {
+				select {
+				case e := <-rec.Events:
+					if strings.Contains(e, tideprojectv1alpha2.ReasonIntegrationIncomplete) {
+						count++
+					}
+				default:
+					Expect(count).To(Equal(1), "cap-exhaustion Warning must fire exactly once, not per reconcile")
+					return
+				}
+			}
+		})
+	})
+})
+
+// Phase 34 plan 34-05 Task 3: controller-side consumption of the
+// reset-boundary-push annotation (D-13).
+var _ = Describe("ProjectReconciler — reset-boundary-push annotation consumption (Phase 34 D-13)", Label("envtest", "phase34", "resetboundarypush"), func() {
+	ctx := context.Background()
+
+	Describe("consuming the annotation resets Attempts, clears the condition, and re-dispatches", func() {
+		const name = "reset-bp-consume"
+
+		AfterEach(func() {
+			var jobs batchv1.JobList
+			_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+			for i := range jobs.Items {
+				j := jobs.Items[i]
+				_ = k8sClient.Delete(ctx, &j)
+			}
+			var p tideprojectv1alpha2.Project
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
+				p.Finalizers = nil
+				_ = k8sClient.Update(ctx, &p)
+				_ = k8sClient.Delete(ctx, &p)
+			}
+		})
+
+		It("resets BoundaryPush state, removes the condition, consumes the annotation once, and re-dispatches", func() {
+			proj := &tideprojectv1alpha2.Project{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+					TargetRepo: "https://github.com/example/test.git",
+					Git: &tideprojectv1alpha2.GitConfig{
+						RepoURL:        "https://github.com/example/test.git",
+						CredsSecretRef: "test-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+			waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+
+			var got tideprojectv1alpha2.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+			patch := client.MergeFrom(got.DeepCopy())
+			got.Status.Phase = tideprojectv1alpha2.PhaseComplete
+			got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
+			got.Status.BoundaryPush.Attempts = maxBoundaryPushAttempts
+			got.Status.BoundaryPush.LastError = integrationIncompleteLastErrorPrefix + "stale detail"
+			meta.SetStatusCondition(&got.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha2.ConditionIntegrationIncomplete,
+				Status:             metav1.ConditionTrue,
+				Reason:             tideprojectv1alpha2.ReasonIntegrationIncomplete,
+				Message:            "stale detail",
+				LastTransitionTime: metav1.Now(),
+			})
+			Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+
+			// Apply the reset annotation (the CLI's write-back surface).
+			var toAnnotate tideprojectv1alpha2.Project
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &toAnnotate)).To(Succeed())
+			annPatch := client.MergeFrom(toAnnotate.DeepCopy())
+			if toAnnotate.Annotations == nil {
+				toAnnotate.Annotations = map[string]string{}
+			}
+			toAnnotate.Annotations["tideproject.k8s/reset-boundary-push"] = "true"
+			Expect(k8sClient.Patch(ctx, &toAnnotate, annPatch)).To(Succeed())
+
+			r := newTestProjectReconciler()
+			r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+			r.SharedPVCName = "tide-projects-reset-bp"
+			ensurePVC(ctx, "tide-projects-reset-bp", "default")
+
+			for range 4 {
+				_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: "default"}})
+			}
+
+			Eventually(func(g Gomega) {
+				fresh := getProjectResetBP(ctx, name)
+				g.Expect(fresh.Annotations).NotTo(HaveKey("tideproject.k8s/reset-boundary-push"), "annotation must be consumed (removed)")
+				// The reset zeroes Attempts, but this same test loop lets the
+				// state machine re-dispatch immediately afterward (Complete +
+				// no Job yet), which increments Attempts back to 1 — so the
+				// observable post-loop value is <=1, not necessarily ==0.
+				// The reset itself is proven by: condition gone + a fresh Job
+				// dispatched + LastError cleared (not the stale pre-reset value).
+				g.Expect(fresh.Status.BoundaryPush.Attempts).To(BeNumerically("<=", 1))
+				g.Expect(fresh.Status.BoundaryPush.LastError).NotTo(ContainSubstring("stale detail"))
+				c := meta.FindStatusCondition(fresh.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete)
+				g.Expect(c).To(BeNil())
+				// Re-dispatch occurred: a fresh push Job exists.
+				var job batchv1.Job
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("tide-push-%s", fresh.UID), Namespace: "default"}, &job)).To(Succeed())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+})
+
+func getProjectResetBP(ctx context.Context, name string) tideprojectv1alpha2.Project {
+	var got tideprojectv1alpha2.Project
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+	return got
+}

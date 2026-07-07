@@ -71,7 +71,7 @@ jobs:
   kind-layer-b:
     name: Layer B kind suite (gated on Job/RBAC/PVC/uid diffs)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 42
     permissions:
       contents: read
     env:
@@ -116,8 +116,12 @@ jobs:
       # Layer B kind integration tier. test-int's internal `timeout` bounds only
       # the go test invocation; image builds + cluster create are bounded by the
       # job-level timeout-minutes.
+      # 28 → 35 (PR #3): the Phase 34 fixes make Layer B exercise REAL
+      # clone/wave-integration/boundary-push pods for the first time
+      # (medium_http spec 3 + the two integration-miss specs), adding a few
+      # minutes of genuine end-to-end git work to the green path.
       - name: Layer B kind integration suite (make test-int)
-        timeout-minutes: 28
+        timeout-minutes: 35
         run: |
           set -e
           time make test-int

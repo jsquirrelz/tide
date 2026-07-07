@@ -47,15 +47,24 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
+	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/internal/pool"
 	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
 	"github.com/jsquirrelz/tide/pkg/dag"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
-	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 const planFinalizer = "tideproject.k8s/plan-cleanup"
+
+// maxWaveIntegrationAttempts caps the controller-driven wave-integration
+// Job auto-retry (Phase 34 D-04), mirroring the #13b
+// maxBoundaryPushAttempts pattern exactly rather than inventing a second
+// curve. Once Plan.Status.WaveIntegration.Attempts reaches this constant for
+// the current blocking wave, the Plan is marked terminal Failed with
+// ReasonWaveIntegrationFailed. A merge conflict (D-09/D-10) skips this
+// budget entirely and fails the Plan immediately.
+const maxWaveIntegrationAttempts = 5
 
 // Note: ErrParentUnresolved is declared in task_controller.go (same package).
 // Phase 04.1 P1.4 — shared across TaskReconciler and PlanReconciler.
@@ -765,9 +774,17 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// materialization path on task-status updates (out of REVIEW-FIX scope).
 	// Documented in 04-REVIEW-FIX.md.
 	// At planner-Job completion time, Tasks do not yet exist (the planner just
-	// materialized them). Pass nil task branches — D-04 integration only runs
-	// after Tasks have Succeeded (handled in reconcileWaveMaterialization).
-	if err := r.maybeTriggerBoundaryPush(ctx, plan, project, nil); err != nil {
+	// materialized them). Phase 34 D-03: maybeTriggerBoundaryPush no longer
+	// takes a branches parameter — triggerBoundaryPush computes the
+	// cumulative Succeeded-branch set itself via a live List, which is
+	// naturally empty here (no Tasks yet) and self-heals on the next trigger
+	// once Tasks exist (handled in reconcileWaveMaterialization).
+	if err := r.maybeTriggerBoundaryPush(ctx, plan, project); err != nil {
+		if errors.Is(err, errGitWriterBusy) {
+			// D-02: another git-writer Job is in flight — normal
+			// serialization, not a failure. Requeue and retry.
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -1015,7 +1032,15 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	// wave-paused label. Once the operator approves, the wave-approved-<N>
 	// label is stamped and integration proceeds on a later reconcile —
 	// integrate-then-dispatch ordering is preserved past the gate.
-	if project.Spec.Gates.PauseBetweenWaves &&
+	//
+	// The gate applies ONLY to inter-wave boundaries (waveNum < len(layers)):
+	// maybePauseForWaveApprove pauses BETWEEN waves, so its stampable label
+	// range is [1, len(layers)-1] — the final boundary (and a single-wave
+	// plan's only boundary) has no approvable pause and gating it on a label
+	// no code path can stamp deadlocks into a silent INTEG-01 skip. The
+	// final wave's dispatch was itself approved at the prior boundary;
+	// plan-level gates govern what happens after integration.
+	if project.Spec.Gates.PauseBetweenWaves && waveNum < len(layers) &&
 		plan.Labels[fmt.Sprintf("%s%d", planWaveApprovedLabelPrefix, waveNum)] != "true" {
 		return ctrl.Result{}, false, nil
 	}
@@ -1026,22 +1051,24 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	var integJob batchv1.Job
 	getErr := r.Get(ctx, types.NamespacedName{Name: integJobName, Namespace: plan.Namespace}, &integJob)
 	if getErr == nil {
-		// Job exists — check terminal status.
-		// IMPORTANT: check Failed BEFORE Succeeded==0 to avoid livelock.
-		if integJob.Status.Failed > 0 {
-			// Permanently failed (BackoffLimit exhausted) → terminal Plan failure.
-			res, err := r.patchPlanFailed(ctx, plan,
-				tideprojectv1alpha2.ReasonWaveIntegrationFailed,
-				fmt.Sprintf("wave %d integration job %s failed (BackoffLimit exhausted)", waveNum, integJobName))
-			return res, true, err
+		// Job exists — check terminal status via Job CONDITIONS (JobFailed /
+		// JobComplete), matching the project-side boundary-push gate.
+		// Status.Failed counts failed PODS: with BackoffLimit=2 it is >0
+		// after the first pod failure while the Job controller still owes
+		// retries — classifying (and deleting) at that point burns the
+		// bounded-retry budget on a Job that might still succeed.
+		// IMPORTANT: check Failed BEFORE the still-running arm to avoid livelock.
+		if isJobFailed(&integJob) {
+			return r.handleWaveIntegrationFailure(ctx, plan, project, &integJob, integJobName, waveNum)
 		}
-		if integJob.Status.Succeeded > 0 {
+		if isJobSucceeded(&integJob) {
 			// Integration complete — stamp IntegratedThroughWave and continue loop.
 			patch := client.MergeFrom(plan.DeepCopy())
 			plan.Status.IntegratedThroughWave = waveNum
 			if err := r.Status().Patch(ctx, plan, patch); err != nil {
 				return ctrl.Result{}, true, fmt.Errorf("patch IntegratedThroughWave=%d: %w", waveNum, err)
 			}
+			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "success").Inc()
 			return ctrl.Result{}, false, nil
 		}
 		// Job is still running (Succeeded==0, Failed==0): block wave k+1 dispatch.
@@ -1060,12 +1087,43 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 		}
 	}
 
-	// Collect wave-k task branch names.
-	var branches []string
-	for _, name := range layers[k] {
-		if t := taskByName[name]; t != nil {
-			branches = append(branches, pkggit.TaskBranchName(string(t.UID)))
+	// Backoff fence between retry attempts for the SAME wave: the failure
+	// handler's RequeueAfter alone cannot enforce the capped backoff —
+	// deleting the failed Job re-enqueues the Plan immediately via
+	// Owns(&batchv1.Job{}), and without this fence all
+	// maxWaveIntegrationAttempts burn back-to-back against a condition that
+	// needed minutes to clear. A new wave (Wave != waveNum) starts unfenced.
+	if plan.Status.WaveIntegration.Wave == waveNum &&
+		plan.Status.WaveIntegration.Attempts > 0 &&
+		plan.Status.WaveIntegration.LastAttemptTime != nil {
+		wait := boundaryPushRequeue(plan.Status.WaveIntegration.Attempts)
+		if elapsed := time.Since(plan.Status.WaveIntegration.LastAttemptTime.Time); elapsed < wait {
+			return ctrl.Result{RequeueAfter: wait - elapsed}, true, nil
 		}
+	}
+
+	// D-02 single-flight gate: do not create a new git-writer Job while
+	// another (wave-integration or boundary-push) is in flight for this
+	// Project. Self-exclusion on integJobName (Pitfall 7) — this reconciler
+	// is about to create/observe that exact Job, so it must never count
+	// against itself.
+	inFlight, gwErr := gitWriterInFlightCount(ctx, r.Client, plan.Namespace, project.Name, integJobName)
+	if gwErr != nil {
+		return ctrl.Result{}, true, fmt.Errorf("check git-writer in-flight count: %w", gwErr)
+	}
+	if inFlight > 0 {
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+	}
+
+	// D-01 (cumulative everywhere): the wave-integration Job carries the
+	// CUMULATIVE Succeeded-branch set (every Succeeded task project-wide),
+	// not just wave-k's branches — re-merging an already-integrated branch
+	// is idempotent ("Already up to date"), and this is the self-healing
+	// defense-in-depth half of D-01 (structural fix = the full-range loop;
+	// this is the belt-and-braces half).
+	branches, bErr := succeededTaskBranches(ctx, r.Client, plan.Namespace, project.Name)
+	if bErr != nil {
+		return ctrl.Result{}, true, fmt.Errorf("compute cumulative succeeded-task branches: %w", bErr)
 	}
 
 	// Dispatch the integration Job.
@@ -1075,6 +1133,78 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).
 	// Do NOT stamp IntegratedThroughWave here — the Job has not yet completed.
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, true, nil
+}
+
+// handleWaveIntegrationFailure classifies a terminally-failed wave-
+// integration Job (Phase 34 D-04/D-09/D-10) and either:
+//   - fails the Plan immediately with ReasonMergeConflict (a genuine content
+//     conflict — conflicting parallel tasks were not actually independent,
+//     so the plan is defective; recovery is replan + `tide resume
+//     --retry-failed`), or
+//   - rides a bounded retry (Attempts counter on Plan.Status.WaveIntegration,
+//     capped at maxWaveIntegrationAttempts, Background-propagation Job
+//     delete + capped-backoff requeue), failing the Plan with
+//     ReasonWaveIntegrationFailed only after the cap.
+func (r *PlanReconciler) handleWaveIntegrationFailure(
+	ctx context.Context,
+	plan *tideprojectv1alpha2.Plan,
+	project *tideprojectv1alpha2.Project,
+	integJob *batchv1.Job,
+	integJobName string,
+	waveNum int,
+) (ctrl.Result, bool, error) {
+	env, haveEnv := readJobPushEnvelope(ctx, r.Client, plan.Namespace, integJobName)
+
+	if haveEnv && env.Reason == pushEnvelopeReasonMergeConflict {
+		tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "conflict").Inc()
+		res, err := r.patchPlanFailed(ctx, plan,
+			tideprojectv1alpha2.ReasonMergeConflict,
+			fmt.Sprintf("wave %d integration job %s hit a genuine merge conflict integrating %s into %s: content problem, human needed — replan, then `tide resume --retry-failed`",
+				waveNum, integJobName, env.ConflictBranch, project.Status.Git.BranchName))
+		return res, true, err
+	}
+
+	// Bounded retry (#13b pattern mirrored on Plan.Status.WaveIntegration):
+	// reset the counter when the blocking wave changed since the last
+	// attempt, then increment.
+	patch := client.MergeFrom(plan.DeepCopy())
+	if plan.Status.WaveIntegration.Wave != waveNum {
+		plan.Status.WaveIntegration.Wave = waveNum
+		plan.Status.WaveIntegration.Attempts = 0
+	}
+	plan.Status.WaveIntegration.Attempts++
+	now := metav1.Now()
+	plan.Status.WaveIntegration.LastAttemptTime = &now
+	lastErr := env.Reason
+	if !haveEnv {
+		lastErr = "envelope-unreadable"
+	} else if lastErr == "" {
+		lastErr = "integration-failed"
+	}
+	plan.Status.WaveIntegration.LastError = lastErr
+	if err := r.Status().Patch(ctx, plan, patch); err != nil {
+		return ctrl.Result{}, true, fmt.Errorf("patch WaveIntegration status: %w", err)
+	}
+
+	if plan.Status.WaveIntegration.Attempts >= maxWaveIntegrationAttempts {
+		tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "transient").Inc()
+		res, err := r.patchPlanFailed(ctx, plan,
+			tideprojectv1alpha2.ReasonWaveIntegrationFailed,
+			fmt.Sprintf("wave %d integration job %s failed after %d attempts (last error: %q)",
+				waveNum, integJobName, plan.Status.WaveIntegration.Attempts, lastErr))
+		return res, true, err
+	}
+
+	// Background propagation (not Foreground): Foreground leaves the Job
+	// lingering behind a foreground finalizer until GC runs — which never
+	// happens under envtest — wedging the deterministic name forever (the
+	// same verified footgun the #13b boundary-push retry avoids).
+	policy := metav1.DeletePropagationBackground
+	if err := r.Delete(ctx, integJob, &client.DeleteOptions{PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, true, fmt.Errorf("delete failed wave integration job %s: %w", integJobName, err)
+	}
+	tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "transient").Inc()
+	return ctrl.Result{RequeueAfter: boundaryPushRequeue(plan.Status.WaveIntegration.Attempts)}, true, nil
 }
 
 // reconcileWaveMaterialization implements the Wave materialization body inside the
@@ -1189,8 +1319,14 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		taskByName[taskList.Items[i].Name] = &taskList.Items[i]
 	}
 
-	// Iterate each wave boundary k → k+1. Skip the last wave (no k+1 to gate on).
-	for k := 0; k < len(layers)-1; k++ {
+	// Iterate EVERY wave boundary, including the final one (Phase 34
+	// INTEG-01 — closes the `k < len(layers)-1` skip that left a plan's
+	// final Kahn wave, and any single-wave plan, integrating nothing). The
+	// final boundary now gates Plan completion rather than wave k+1
+	// dispatch: patchPlanSucceeded below runs only after this loop, so
+	// Plan=Succeeded now implies every wave — including the last — has been
+	// integrated into the run branch.
+	for k := range layers {
 		res, handled, err := r.reconcileWaveBoundary(ctx, plan, project, taskByName, layers, k)
 		if handled || err != nil {
 			return res, err

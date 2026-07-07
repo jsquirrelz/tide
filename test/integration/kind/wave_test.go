@@ -26,6 +26,7 @@ package kind_integration
 // In CRDs-only mode (no controller Deployment), the tests are skipped gracefully.
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -150,6 +151,17 @@ func skipIfCRDsOnlyMode() {
 	// If the Project CRD is not installed (CRDs-only mode), we skip.
 	pl := &tideprojectv1alpha2.ProjectList{}
 	if err := k8sClient.List(ctx, pl); err != nil {
+		// Suite-ctx expiry is NOT CRDs-only mode: once kindTestTimeout
+		// elapses every List fails, and converting that into per-spec
+		// Skips turned exhausted-budget runs into silent greens (PR #3
+		// run 6: 12 specs — including one that had just spent 10 minutes
+		// failing — recorded Skipped, suite SUCCESS). A blown budget must
+		// be a red build, never a quiet one.
+		if ctx.Err() != nil {
+			Fail(fmt.Sprintf(
+				"suite context expired (kindTestTimeout %s) — failing instead of skipping so an exhausted budget cannot masquerade as green: %v",
+				kindTestTimeout, err))
+		}
 		Skip("CRDs not installed or controller not ready; skipping kind test")
 	}
 }

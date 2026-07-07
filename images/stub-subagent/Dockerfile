@@ -16,7 +16,11 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs (see .dockerignore for exclusions).
+# internal/harness + pkg/git back the executor git contract
+# (EnsureWorktree/CommitWorktree — mirrors cmd/claude-subagent).
 COPY pkg/dispatch/ pkg/dispatch/
+COPY pkg/git/ pkg/git/
+COPY internal/harness/ internal/harness/
 COPY cmd/stub-subagent/ cmd/stub-subagent/
 
 # Static binary: no CGO, stripped symbols for a smaller image.
@@ -26,12 +30,22 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
       -o /out/stub-subagent \
       ./cmd/stub-subagent
 
-# Stage 2: minimal runtime image.
-# scratch has no shell or CA bundle; the stub makes zero outbound calls so
-# neither is needed.  distroless/static:nonroot is used instead of scratch
-# because it ships a /etc/passwd and lets the container runtime enforce
-# USER 1000 cleanly across all OCI runtimes.
-FROM gcr.io/distroless/static:nonroot@sha256:963fa6c544fe5ce420f1f54fb88b6fb01479f054c8056d0f74cc2c6000df5240
+# Stage 2: minimal runtime image WITH the git binary.
+# The stub now mirrors the real executor's git contract
+# (harness.EnsureWorktree `git worktree add` + harness.CommitWorktree),
+# both of which shell out to the git CLI — same reason claude-subagent and
+# tide-push run on alpine + apk git (cascade-C fix, 314afd8). We recreate
+# uid 1000 to keep the D-G3 subagent harness UID + PVC fsGroup expectations
+# intact.
+FROM alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+
+RUN apk add --no-cache git \
+    # The per-run repo/worktree on the shared PVC may be owned by a different
+    # uid than 1000 (clone runs as 65532); git 2.35+ refuses such repos as
+    # "dubious ownership". Trust all paths at the system level (mirrors the
+    # claude-subagent cascade-D fix, 5b9d4ca).
+    && git config --system --add safe.directory '*' \
+    && adduser -D -H -u 1000 stub
 
 COPY --from=builder /out/stub-subagent /usr/local/bin/stub-subagent
 

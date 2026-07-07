@@ -70,6 +70,13 @@ type PushOptions struct {
 	// receives these as --integrate-task-branches=<CSV>.
 	// Empty means no integration step is run (milestone/phase boundaries).
 	IntegrateTaskBranches []string
+
+	// IntegrationOnly marks a per-wave integration Job: tide-push merges +
+	// verifies the branches into the LOCAL run branch and exits without
+	// committing or pushing (--integration-only). Boundary pushes leave this
+	// false — they carry the same cumulative branch set but MUST push the
+	// run branch to the remote.
+	IntegrationOnly bool
 }
 
 // CloneOptions carries the clone-mode arguments. Clone is a one-time op
@@ -86,6 +93,12 @@ type CloneOptions struct {
 	// Empty means no run branch is provisioned (backward-compat).
 	RunBranch string
 }
+
+// pushEnvelopeReasonMergeConflict is the tide-push PushResult envelope's
+// Reason value for a genuine content merge conflict (cmd/tide-push/main.go's
+// exitMergeConflict path). Shared across boundary-push and wave-integration
+// envelope handling.
+const pushEnvelopeReasonMergeConflict = "merge-conflict"
 
 // pushSAName is the dedicated ServiceAccount for the tide-push Job pod.
 // Helm chart in plan 03-09 grants it `secrets get` on
@@ -160,6 +173,10 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 		// per-task branches into the run branch before staging planner artifacts.
 		args = append(args, "--integrate-task-branches="+strings.Join(opts.IntegrateTaskBranches, ","))
 	}
+	if opts.IntegrationOnly {
+		// D-02 per-wave integration Job: merge+verify locally, no commit/push.
+		args = append(args, "--integration-only")
+	}
 
 	volumes := []corev1.Volume{
 		{
@@ -206,6 +223,16 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("tide-push-%s", project.UID),
 			Namespace: project.Namespace,
+			// Phase 34 D-02: every Job that merges into or pushes the run
+			// branch carries these two labels so gitWriterInFlightCount can
+			// List in-flight writers project-wide before dispatching another
+			// (the single-flight gate). triggerWaveIntegrationJob reuses this
+			// builder and only overrides Name/OwnerReferences, so wave-
+			// integration Jobs inherit the same labels automatically.
+			Labels: map[string]string{
+				gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
+				gitWriterProjectLabelKey: project.Name,
+			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            new(int32(2)),

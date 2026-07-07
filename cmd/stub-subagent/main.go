@@ -60,6 +60,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jsquirrelz/tide/internal/harness"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -129,6 +130,21 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 		return 2
 	}
 
+	// Executor git contract (mirrors cmd/claude-subagent/main.go): the real
+	// subagent calls harness.EnsureWorktree before running the model, so a
+	// Succeeded executor Task always leaves a tide/wt-<uid> branch behind.
+	// Phase 34's wave-integration gate verifies exactly that — every
+	// Succeeded task's branch must merge into the run branch — so a stub
+	// that skips worktree provisioning can never satisfy a git-configured
+	// Layer B flow (medium_http spec 3, integration_miss). Non-git fixtures
+	// set no spec.git → BranchName never stamped → envelope Branch empty →
+	// this block is skipped entirely (prior behavior preserved).
+	if env.Role == "executor" && env.Branch != "" {
+		if code := ensureExecutorWorktree(ctx, env, outPath, stderr); code != 0 {
+			return code
+		}
+	}
+
 	// Dispatch on TestMode.
 	testMode := ""
 	if env.Dev != nil {
@@ -164,6 +180,90 @@ func run(ctx context.Context, envelopePath string, stdout, stderr io.Writer) int
 		})
 		return 2
 	}
+}
+
+// repoWaitTimeout bounds the executor's wait for the clone Job to land
+// /workspace/repo.git on the shared PVC. Stub tasks can be dispatched within
+// the same second the Project is created (no LLM latency), racing the clone
+// Job — the real flow's planner latency masks this window.
+//
+// A BOUNDED wait with a NON-GIT FALLBACK, because envelope Branch presence
+// does not imply a git-configured Project: reconcilePhase3Lifecycle Step 1
+// stamps Status.Git.BranchName unconditionally (no Spec.Git guard), so
+// gitless fixtures (chaos-resume, bare-project) dispatch later-wave tasks
+// with Branch set and NO clone ever coming — failing hard there (the real
+// claude-subagent's behavior) would fail every such task after the wait.
+// 30s covers a kind-loaded image + tiny fixture clone with margin, while
+// staying well inside chaos-resume's 4-minute pre-kill/pillar budgets.
+const repoWaitTimeout = 30 * time.Second
+
+// ensureExecutorWorktree engages the real executor's git contract
+// (harness.EnsureWorktree — the identical call cmd/claude-subagent makes
+// before running the model) when the workspace repo is present, waiting up
+// to repoWaitTimeout for the clone Job to land it. Repo never appears →
+// non-git fallback (prior stub behavior; gitless fixtures). Returns 0 to
+// continue; on a real EnsureWorktree failure (repo present but worktree
+// provisioning broke) writes the same "worktree-setup-failed" envelope
+// shape as cmd/claude-subagent and returns 1.
+func ensureExecutorWorktree(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath string, stderr io.Writer) int {
+	repoPath := filepath.Join(workspaceRoot, "repo.git")
+	deadline := time.Now().Add(repoWaitTimeout)
+	for {
+		if _, err := os.Stat(repoPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			fmt.Fprintf(stderr,
+				"stub-subagent: workspace repo %s not present after %s; proceeding without git\n",
+				repoPath, repoWaitTimeout)
+			return 0
+		}
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(2 * time.Second):
+		}
+	}
+	if err := harness.EnsureWorktree(env, workspaceRoot, env.Branch); err != nil {
+		fmt.Fprintf(stderr, "stub-subagent: %v\n", err)
+		_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+			APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
+			TaskUID: env.TaskUID, ExitCode: 1, Result: "worktree-setup-failed", Reason: err.Error(),
+			CompletedAt: time.Now().UTC(),
+		})
+		return 1
+	}
+	return 0
+}
+
+// commitExecutorWorktree writes a distinct stub artifact into the Task's
+// worktree and commits it — the real executor's harness.CommitWorktree
+// effect — returning the GitOutput to stamp on the success envelope.
+// Returns (nil, nil) when no worktree was provisioned (the
+// ensureExecutorWorktree non-git fallback): the success envelope then
+// carries no Git output, exactly like the pre-git stub. The stub file
+// guarantees a non-empty diff so the commit always lands (the real
+// subagent treats an empty diff as a Task failure; the stub must not
+// manufacture that failure class).
+func commitExecutorWorktree(env pkgdispatch.EnvelopeIn, stderr io.Writer) (*pkgdispatch.GitOutput, error) {
+	worktreeDir := filepath.Join(workspaceRoot, "worktrees", env.TaskUID)
+	if _, err := os.Stat(filepath.Join(worktreeDir, ".git")); err != nil {
+		// Non-git fallback path: no worktree was provisioned.
+		return nil, nil
+	}
+	stubFile := filepath.Join(worktreeDir, "stub-task-"+env.TaskUID+".txt")
+	if err := os.WriteFile(stubFile, []byte("stub success\n"), 0o644); err != nil {
+		return nil, fmt.Errorf("write stub artifact into worktree: %w", err)
+	}
+	hash, isEmpty, err := harness.CommitWorktree(worktreeDir, env.TaskUID)
+	if err != nil {
+		return nil, fmt.Errorf("commit worktree: %w", err)
+	}
+	if isEmpty {
+		return nil, fmt.Errorf("commit worktree: unexpectedly empty diff after writing %s", stubFile)
+	}
+	fmt.Fprintf(stderr, "stub-subagent: committed worktree %s @ %s\n", worktreeDir, hash.String())
+	return &pkgdispatch.GitOutput{HeadSHA: hash.String()}, nil
 }
 
 // loadEnvelope opens path, parses it as JSON into EnvelopeIn, and validates
@@ -436,6 +536,26 @@ func dispatchSuccess(ctx context.Context, env pkgdispatch.EnvelopeIn, outPath st
 		Artifacts:   artifacts,
 		CompletedAt: time.Now().UTC(),
 	}
+
+	// Executor git contract, success half (mirrors cmd/claude-subagent's
+	// post-Run CommitWorktree): commit the worktree provisioned by
+	// ensureExecutorWorktree and stamp HeadSHA. Git-configured flows only —
+	// Branch empty means run() skipped worktree setup and there is nothing
+	// to commit.
+	if env.Role == "executor" && env.Branch != "" {
+		gitOut, gErr := commitExecutorWorktree(env, stderr)
+		if gErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: %v\n", gErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion: pkgdispatch.APIVersionV1Alpha1, Kind: pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID: env.TaskUID, ExitCode: 1, Result: "commit-failed", Reason: gErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 1
+		}
+		out.Git = gitOut
+	}
+
 	if err := writeEnvelope(outPath, out); err != nil {
 		fmt.Fprintf(stderr, "stub-subagent: write out.json: %v\n", err)
 		return 2

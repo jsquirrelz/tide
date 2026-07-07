@@ -12,8 +12,10 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,6 +31,7 @@ import (
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // Plan 04-06 Task 2: W-2 mid-stack boundary push triggers.
@@ -524,3 +528,162 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		})
 	})
 })
+
+// Phase 34 plan 34-04 Task 1: triggerBoundaryPush cumulative set (D-03/D-07)
+// + single-flight gate (D-02), tested directly against the shared function
+// rather than through a specific level reconciler.
+var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)", Label("envtest", "phase34", "boundarypush"), func() {
+	ctx := context.Background()
+
+	makeProjectTBP := func(name string) *tideprojectv1alpha2.Project {
+		proj := &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				TargetRepo: "https://github.com/example/test.git",
+				Git: &tideprojectv1alpha2.GitConfig{
+					RepoURL:        "https://github.com/example/test.git",
+					CredsSecretRef: "test-creds",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		var got tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		return &got
+	}
+
+	makeTaskTBP := func(name, projectName, phase string) *tideprojectv1alpha2.Task {
+		tsk := &tideprojectv1alpha2.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+				Labels:    map[string]string{"tideproject.k8s/project": projectName},
+			},
+			Spec: tideprojectv1alpha2.TaskSpec{
+				PlanRef:             "some-plan",
+				FilesTouched:        []string{"f.go"},
+				PromptPath:          "envelopes/x/children/task-01.json",
+				DeclaredOutputPaths: []string{"f.go"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tsk)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
+		var got tideprojectv1alpha2.Task
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = phase
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		return &got
+	}
+
+	cleanup := func(projectName string, taskNames []string, jobNames []string) {
+		for _, n := range taskNames {
+			tsk := &tideprojectv1alpha2.Task{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
+				_ = k8sClient.Delete(ctx, tsk)
+			}
+		}
+		for _, n := range jobNames {
+			j := &batchv1.Job{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, j); err == nil {
+				_ = k8sClient.Delete(ctx, j)
+			}
+		}
+		proj := &tideprojectv1alpha2.Project{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
+			_ = k8sClient.Delete(ctx, proj)
+		}
+	}
+
+	It("creates a push Job whose --integrate-task-branches arg carries exactly the sorted Succeeded branches", func() {
+		const projectName = "tbp-cumulative"
+		proj := makeProjectTBP(projectName)
+		t1 := makeTaskTBP("tbp-cum-t1", projectName, "Succeeded")
+		t2 := makeTaskTBP("tbp-cum-t2", projectName, "Succeeded")
+		t3 := makeTaskTBP("tbp-cum-t3", projectName, "Succeeded")
+		makeTaskTBP("tbp-cum-t4", projectName, "Failed")
+		defer cleanup(projectName, []string{"tbp-cum-t1", "tbp-cum-t2", "tbp-cum-t3", "tbp-cum-t4"},
+			[]string{fmt.Sprintf("tide-push-%s", proj.UID)})
+
+		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-cum-parent"}}
+		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
+			"ghcr.io/jsquirrelz/tide-push:test")
+		Expect(err).NotTo(HaveOccurred())
+
+		var job batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("tide-push-%s", proj.UID), Namespace: "default"}, &job)).To(Succeed())
+		args := job.Spec.Template.Spec.Containers[0].Args
+
+		want := []string{
+			pkggit.TaskBranchName(string(t1.UID)),
+			pkggit.TaskBranchName(string(t2.UID)),
+			pkggit.TaskBranchName(string(t3.UID)),
+		}
+		sort.Strings(want)
+		wantArg := "--integrate-task-branches=" + strings.Join(want, ",")
+		Expect(args).To(ContainElement(wantArg))
+	})
+
+	It("returns errGitWriterBusy and creates nothing when another git-writer Job is in flight", func() {
+		const projectName = "tbp-busy"
+		proj := makeProjectTBP(projectName)
+		defer cleanup(projectName, nil, []string{"tbp-busy-other-writer"})
+
+		otherJob := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "tbp-busy-other-writer",
+				Namespace: "default",
+				Labels: map[string]string{
+					gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
+					gitWriterProjectLabelKey: projectName,
+				},
+			},
+			Spec: batchv1.JobSpec{
+				Template: batchv1PodTemplateWithContainer(),
+			},
+		}
+		Expect(k8sClient.Create(ctx, otherJob)).To(Succeed())
+
+		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-busy-parent"}}
+		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
+			"ghcr.io/jsquirrelz/tide-push:test")
+		Expect(errors.Is(err, errGitWriterBusy)).To(BeTrue(), "expected errGitWriterBusy, got: %v", err)
+
+		var job batchv1.Job
+		getErr := k8sClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("tide-push-%s", proj.UID), Namespace: "default"}, &job)
+		Expect(apierrors.IsNotFound(getErr)).To(BeTrue(), "push Job must not be created while busy")
+	})
+
+	It("is idempotent when only its own deterministic Job pre-exists", func() {
+		const projectName = "tbp-idempotent"
+		proj := makeProjectTBP(projectName)
+		pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
+		defer cleanup(projectName, nil, []string{pushJobName})
+
+		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-idem-parent"}}
+		Expect(triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
+			"ghcr.io/jsquirrelz/tide-push:test")).To(Succeed())
+
+		// Second call: the Job already exists (deterministic name) — must
+		// return nil without erroring, and must NOT be blocked by its own
+		// Job showing up in the D-02 gate (self-exclusion, Pitfall 7).
+		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
+			"ghcr.io/jsquirrelz/tide-push:test")
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
+
+// batch1PodTemplateWithContainer returns a minimal valid PodTemplateSpec for
+// synthetic git-writer Job fixtures in this file.
+func batchv1PodTemplateWithContainer() corev1.PodTemplateSpec {
+	return corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers:    []corev1.Container{{Name: "push", Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+		},
+	}
+}

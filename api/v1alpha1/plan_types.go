@@ -34,6 +34,37 @@ type PlanSpec struct {
 	SharedContext string `json:"sharedContext,omitempty"`
 }
 
+// WaveIntegrationStatus records the bounded auto-retry state of a single
+// wave's integration Job (Phase 34 D-04). Mirrors BoundaryPushStatus's shape
+// (project_types.go) so a wave-integration Job failure rides the same
+// re-derived-from-.status bounded-retry pattern as the #13b boundary push —
+// no in-memory counter, survives a controller restart.
+type WaveIntegrationStatus struct {
+	// Wave is the 0-indexed Kahn wave number this Attempts counter refers to.
+	// The counter resets to 0 whenever the blocking wave changes (a new wave's
+	// integration Job gets a fresh retry budget).
+	// +optional
+	Wave int `json:"wave,omitempty"`
+
+	// Attempts is the number of wave-integration Jobs dispatched so far for
+	// Wave. The controller stops dispatching once Attempts reaches
+	// maxWaveIntegrationAttempts (Phase 34 D-04) and marks the Plan Failed
+	// with ReasonWaveIntegrationFailed.
+	// +optional
+	Attempts int32 `json:"attempts,omitempty"`
+
+	// LastAttemptTime is the timestamp of the most recently dispatched
+	// wave-integration attempt. Drives the capped exponential requeue backoff
+	// (boundaryPushRequeue, shared with the #13b machine).
+	// +optional
+	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
+
+	// LastError carries the most recent wave-integration failure reason (from
+	// the push-result envelope) for operator visibility. Cleared on success.
+	// +optional
+	LastError string `json:"lastError,omitempty"`
+}
+
 // PlanStatus defines the observed state of Plan.
 // PERSIST-02 / Pitfall 4: no aggregate wave list, no cached dag, no indegree
 // map — see `make verify-no-aggregates` for the enforced field-name denylist.
@@ -65,6 +96,12 @@ type PlanStatus struct {
 	// Zero means no waves have been integrated yet.
 	// +optional
 	IntegratedThroughWave int `json:"integratedThroughWave,omitempty"`
+
+	// WaveIntegration records the bounded auto-retry state of the current
+	// wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
+	// reconcileWaveBoundary advances to a new blocking wave.
+	// +optional
+	WaveIntegration WaveIntegrationStatus `json:"waveIntegration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

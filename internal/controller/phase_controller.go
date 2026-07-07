@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -668,6 +669,9 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		}
 		if detected {
 			if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+				if errors.Is(err, errGitWriterBusy) {
+					return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				}
 				return ctrl.Result{}, err
 			}
 			return r.patchPhaseSucceeded(ctx, ph)
@@ -690,6 +694,9 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	}
 	if detected {
 		if err := r.maybeTriggerBoundaryPush(ctx, ph, project); err != nil {
+			if errors.Is(err, errGitWriterBusy) {
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
 			return ctrl.Result{}, err
 		}
 	} else if r.hasChildPlans(ctx, ph) {
