@@ -1500,3 +1500,45 @@ func TestRunPushIntegrationOnlySuccessWritesEnvelope(t *testing.T) {
 		t.Errorf("wave-success envelope = {exit:%d reason:%q}, want {0, \"\"}", pr.ExitCode, pr.Reason)
 	}
 }
+
+func TestRunPushIntegrationOnlyEmptyCommitMessageSucceeds(t *testing.T) {
+	// Cross-binary contract regression (PR #3 run 7): triggerWaveIntegrationJob
+	// dispatches wave-integration Jobs with an EMPTY --commit-message —
+	// integration-only mode never creates the boundary staging commit, so it
+	// has no message to give. The W11 invariant rejected that as
+	// missing-commit-message (exit 2 in milliseconds), killing every
+	// wave-integration Job before the merge; the sibling test above always
+	// passed a message, so the controller's real dispatch shape was untested.
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "wave-no-msg")
+	ws := t.TempDir()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cloneCfg := pushConfig{Mode: "clone", RepoURL: "file://" + bareSrc, Workspace: ws, RunBranch: branch}
+	if exit, stderr := stderrAndRun(t, ctx, cloneCfg, ""); exit != 0 {
+		t.Fatalf("clone phase exit=%d stderr=%s", exit, stderr)
+	}
+	taskBranch := "tide/wt-wave-no-msg"
+	createTaskBranchWithFile(t, filepath.Join(ws, "repo.git"), taskBranch, "wave.txt", "wave content")
+
+	// The controller's EXACT dispatch shape: no CommitMessage.
+	pushCfg := pushConfig{
+		Mode:                  "push",
+		Branch:                branch,
+		IntegrateTaskBranches: []string{taskBranch},
+		IntegrationOnly:       true,
+		Workspace:             ws,
+		ProjectUID:            "p-wave-no-msg",
+	}
+	if exit, stderr := stderrAndRun(t, ctx, pushCfg, "test-pat"); exit != 0 {
+		t.Fatalf("integration-only push with empty commit message exit=%d stderr=%s", exit, stderr)
+	}
+
+	pr := readPushEnvelope(t, ws, "p-wave-no-msg")
+	if pr.ExitCode != exitSuccess || pr.Reason != "" {
+		t.Errorf("wave-success envelope = {exit:%d reason:%q}, want {0, \"\"}", pr.ExitCode, pr.Reason)
+	}
+}

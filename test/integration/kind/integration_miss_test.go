@@ -49,6 +49,7 @@ package kind_integration
 // miss" so `-ginkgo.focus='integration miss'` selects exactly these two specs.
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -59,6 +60,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,11 +88,19 @@ const (
 // BeforeAll below, mirroring medium_http_test.go).
 const integrationMissTargetRepo = "http://git-http-server.integration-miss-test.svc.cluster.local/demo-remote.git"
 
-var _ = Describe("Wave-parallel integration miss regression (Phase 34 INTEG-01..05)", Label("kind"), Ordered, func() {
+// FlakeAttempts(1): retrying these Ordered specs is pure noise — the
+// namespace persists across attempts, so recreating same-named fixtures
+// collides with deferred deletes and the retry's failure text buries the
+// real attempt-1 diagnostics (observed across three CI runs of PR #3).
+var _ = Describe("Wave-parallel integration miss regression (Phase 34 INTEG-01..05)", Label("kind"), Ordered, FlakeAttempts(1), func() {
 
 	BeforeAll(func() {
 		skipIfCRDsOnlyMode()
 		createNamespace(integrationMissNamespace)
+		// Real clone / wave-integration / boundary-push pods run here — their
+		// Jobs reference serviceAccountName tide-push, which the chart only
+		// installs in tide-system (push-rbac.yaml cross-namespace caveat).
+		ensurePushSARBAC(integrationMissNamespace)
 
 		By("Loading tide-demo-init image into kind cluster")
 		loadRequiredImage(mediumHTTPDemoInitImage)
@@ -130,10 +140,15 @@ data:
 	})
 
 	AfterAll(func() {
-		deleteNamespace(integrationMissNamespace)
 		if CurrentSpecReport().Failed() {
+			// Dump CRD + Job state BEFORE the namespace (and with it every
+			// object) is deleted — the kind-logs artifact carries node/pod
+			// logs only, and three CI iterations lost their diagnostics to
+			// this ordering.
+			dumpNamespaceState(integrationMissNamespace)
 			exportKindLogs()
 		}
+		deleteNamespace(integrationMissNamespace)
 	})
 
 	// -------------------------------------------------------------------
@@ -146,8 +161,17 @@ data:
 			withProviderSecret("tide-secrets"),
 			withGit(integrationMissTargetRepo, "tide-secrets"))
 		By("Creating single-wave Project " + projName)
-		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		defer func() { _ = k8sClient.Delete(ctx, proj) }()
+		Expect(createFixture(ctx, proj)).To(Succeed())
+		// No deferred Delete: cleanup belongs to AfterAll's deleteNamespace.
+		// A function-level defer fires BEFORE any failure diagnostics run
+		// (Ginkgo failure unwinds the It body first), cascading the whole
+		// hierarchy away and leaving nothing to dump. DeferCleanup runs
+		// after the attempt with the failure state still intact.
+		DeferCleanup(func() {
+			if CurrentSpecReport().Failed() {
+				dumpNamespaceState(integrationMissNamespace)
+			}
+		})
 
 		msName := projName + "-ms"
 		phName := projName + "-ph"
@@ -161,12 +185,48 @@ data:
 		}
 
 		// Two tasks, NO dependsOn — a single Kahn wave. Both wave index 0.
+		// wait-for-signal: the stub subagent creates no git branches, so the
+		// tasks must NOT report success until the branch-writer fixture Job
+		// has provisioned their tide/wt-<uid> branches (the real executor's
+		// observable git effect) — otherwise the wave-integration Job
+		// dispatches against branches that don't exist yet and burns its
+		// bounded-retry budget on integration-incomplete misses.
 		taskA := newStubTask(integrationMissNamespace, "sw-task-a", planName,
-			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-01.json"))
+			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-01.json"),
+			withTestMode("wait-for-signal"))
 		taskB := newStubTask(integrationMissNamespace, "sw-task-b", planName,
-			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-02.json"))
+			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-02.json"),
+			withTestMode("wait-for-signal"))
 		Expect(createFixture(ctx, taskA)).To(Succeed())
 		Expect(createFixture(ctx, taskB)).To(Succeed())
+
+		// The stub hierarchy bypasses every flow that stamps
+		// Plan.Status.ValidationState="Validated" (planner-Job completion,
+		// reporter follow-up, import). reconcileWaveMaterialization no-ops
+		// until Validated, so the fixture stamps it — mirroring
+		// import_controller.go's precedent for plans materialized without a
+		// planner Job. Milestone/Phase need the analogous Status.Phase=
+		// Running stamp (see stampMilestoneRunning/stampPhaseRunning) or the
+		// Project never learns its child Plan Succeeded.
+		By("Stamping Status.Phase=Running / ValidationState=Validated on the stub hierarchy")
+		stampMilestoneRunning(msName)
+		stampPhaseRunning(phName)
+		stampPlanValidated(planName)
+
+		By("Waiting for the workspace clone to complete (run branch + repo.git on the PVC)")
+		runBranchName := waitForCloneComplete(projName)
+
+		By("Provisioning task branches + release signals via the branch-writer Job")
+		var freshProj tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &freshProj)).To(Succeed())
+		// Re-fetch task UIDs from the cluster: on a flake-attempt re-run the
+		// createFixture calls hit AlreadyExists and leave the builder
+		// objects' UIDs empty.
+		var tA, tB tideprojectv1alpha2.Task
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-a", Namespace: integrationMissNamespace}, &tA)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-b", Namespace: integrationMissNamespace}, &tB)).To(Succeed())
+		provisionTaskBranchesAndSignal(projName+"-branch-writer", string(freshProj.UID), runBranchName,
+			[]string{string(tA.UID), string(tB.UID)})
 
 		By("Waiting for the Project to reach Complete")
 		Eventually(func() error {
@@ -206,8 +266,13 @@ data:
 			withProviderSecret("tide-secrets"),
 			withGit(integrationMissTargetRepo, "tide-secrets"))
 		By("Creating final-wave Project " + projName)
-		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		defer func() { _ = k8sClient.Delete(ctx, proj) }()
+		Expect(createFixture(ctx, proj)).To(Succeed())
+		// See spec 1: no deferred Delete; failure dump via DeferCleanup.
+		DeferCleanup(func() {
+			if CurrentSpecReport().Failed() {
+				dumpNamespaceState(integrationMissNamespace)
+			}
+		})
 
 		msName := projName + "-ms"
 		phName := projName + "-ph"
@@ -221,18 +286,43 @@ data:
 		}
 
 		// task A: wave 0, no deps. tasks B + C: wave 1 (FINAL), dependsOn A —
-		// the observed 2-parallel-task final-wave shape.
+		// the observed 2-parallel-task final-wave shape. wait-for-signal for
+		// the same reason as the single-wave spec: branches must exist before
+		// tasks report success. All three branches + release files are
+		// provisioned up-front — B/C's pods only dispatch after A succeeds
+		// and find their release signal immediately.
 		taskA := newStubTask(integrationMissNamespace, "fw-task-a", planName,
-			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-01.json"))
+			withTaskProjectLabel(projName), withWaveIndex("0"), withPromptPath("children/task-01.json"),
+			withTestMode("wait-for-signal"))
 		taskB := newStubTask(integrationMissNamespace, "fw-task-b", planName,
 			withTaskProjectLabel(projName), withWaveIndex("1"), withPromptPath("children/task-02.json"),
-			withTaskDependsOn("fw-task-a"))
+			withTaskDependsOn("fw-task-a"), withTestMode("wait-for-signal"))
 		taskC := newStubTask(integrationMissNamespace, "fw-task-c", planName,
 			withTaskProjectLabel(projName), withWaveIndex("1"), withPromptPath("children/task-03.json"),
-			withTaskDependsOn("fw-task-a"))
+			withTaskDependsOn("fw-task-a"), withTestMode("wait-for-signal"))
 		Expect(createFixture(ctx, taskA)).To(Succeed())
 		Expect(createFixture(ctx, taskB)).To(Succeed())
 		Expect(createFixture(ctx, taskC)).To(Succeed())
+
+		By("Stamping Status.Phase=Running / ValidationState=Validated on the stub hierarchy")
+		stampMilestoneRunning(msName)
+		stampPhaseRunning(phName)
+		stampPlanValidated(planName)
+
+		By("Waiting for the workspace clone to complete (run branch + repo.git on the PVC)")
+		runBranchName := waitForCloneComplete(projName)
+
+		By("Provisioning task branches + release signals via the branch-writer Job")
+		var freshProj tideprojectv1alpha2.Project
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &freshProj)).To(Succeed())
+		// Re-fetch task UIDs (see spec 1: flake-attempt AlreadyExists leaves
+		// the builder objects UID-less).
+		var tA, tB, tC tideprojectv1alpha2.Task
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-a", Namespace: integrationMissNamespace}, &tA)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-b", Namespace: integrationMissNamespace}, &tB)).To(Succeed())
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-c", Namespace: integrationMissNamespace}, &tC)).To(Succeed())
+		provisionTaskBranchesAndSignal(projName+"-branch-writer", string(freshProj.UID), runBranchName,
+			[]string{string(tA.UID), string(tB.UID), string(tC.UID)})
 
 		By("Waiting for the Project to reach Complete")
 		Eventually(func() error {
@@ -286,6 +376,300 @@ data:
 	})
 })
 
+// stampPlanValidated patches Plan.Status.ValidationState="Validated" on the
+// named stub Plan. Production stamps Validated from planner-Job completion
+// (plan_controller.go handlePlannerJobCompletion), the reporter follow-up, or
+// the import flow (import_controller.go) — a fixture-created Plan bypasses
+// all three, and reconcileWaveMaterialization is a silent no-op until the
+// stamp lands (its Step-1 gate). Retries on conflict: the PlanReconciler
+// patches status concurrently (finalizer/owner-ref passes).
+func stampPlanValidated(planName string) {
+	GinkgoHelper()
+	Eventually(func() error {
+		var pl tideprojectv1alpha2.Plan
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: integrationMissNamespace}, &pl); err != nil {
+			return err
+		}
+		if pl.Status.ValidationState == "Validated" {
+			return nil
+		}
+		patch := client.MergeFrom(pl.DeepCopy())
+		pl.Status.ValidationState = "Validated"
+		return k8sClient.Status().Patch(ctx, &pl, patch)
+	}, 30*time.Second, time.Second).Should(Succeed(),
+		"stub Plan %s must accept the ValidationState=Validated stamp", planName)
+}
+
+// stampMilestoneRunning and stampPhaseRunning mark the stub Milestone/Phase
+// Status.Phase="Running", mirroring what a real planner dispatch sets
+// (milestone_controller.go / phase_controller.go, both patch Status.Phase
+// "Running" before returning). The stub hierarchy creates Milestone and Phase
+// directly, bypassing planner dispatch entirely, so Status.Phase starts blank
+// — and MilestoneReconciler/PhaseReconciler's idempotency guard ("skip
+// dispatch when I already own >=1 child") only runs on that non-Running path,
+// short-circuiting to a silent no-op the instant it sees the fixture's
+// already-created child. Status.Phase never becomes "Running", so the
+// ChildCount-gated succession logic in handleJobCompletion — which only runs
+// on the Running branch — never fires: the Milestone/Phase never notice their
+// child Succeeded, and the whole Project stalls at phase=Running forever.
+func stampMilestoneRunning(name string) {
+	GinkgoHelper()
+	Eventually(func() error {
+		var ms tideprojectv1alpha2.Milestone
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: integrationMissNamespace}, &ms); err != nil {
+			return err
+		}
+		if ms.Status.Phase == tideprojectv1alpha2.PhaseRunning {
+			return nil
+		}
+		patch := client.MergeFrom(ms.DeepCopy())
+		ms.Status.Phase = tideprojectv1alpha2.PhaseRunning
+		return k8sClient.Status().Patch(ctx, &ms, patch)
+	}, 30*time.Second, time.Second).Should(Succeed(),
+		"stub Milestone %s must accept the Status.Phase=Running stamp", name)
+}
+
+func stampPhaseRunning(name string) {
+	GinkgoHelper()
+	Eventually(func() error {
+		var ph tideprojectv1alpha2.Phase
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: integrationMissNamespace}, &ph); err != nil {
+			return err
+		}
+		if ph.Status.Phase == tideprojectv1alpha2.PhaseRunning {
+			return nil
+		}
+		patch := client.MergeFrom(ph.DeepCopy())
+		ph.Status.Phase = tideprojectv1alpha2.PhaseRunning
+		return k8sClient.Status().Patch(ctx, &ph, patch)
+	}, 30*time.Second, time.Second).Should(Succeed(),
+		"stub Phase %s must accept the Status.Phase=Running stamp", name)
+}
+
+// waitForCloneComplete blocks until the Project's workspace clone finished
+// (Status.Git.CloneComplete=true — set-on-success by the ProjectReconciler)
+// and returns the stamped run branch name. The branch-writer Job needs
+// repo.git + the run branch present on the PVC before it can fork task
+// branches.
+func waitForCloneComplete(projName string) string {
+	GinkgoHelper()
+	var branch string
+	Eventually(func() error {
+		var p tideprojectv1alpha2.Project
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &p); err != nil {
+			return err
+		}
+		if p.Status.Git.BranchName == "" {
+			return fmt.Errorf("Project %s: run branch not yet stamped", projName)
+		}
+		if !p.Status.Git.CloneComplete {
+			return fmt.Errorf("Project %s: clone not yet complete", projName)
+		}
+		branch = p.Status.Git.BranchName
+		return nil
+	}, 4*time.Minute, 2*time.Second).Should(Succeed(),
+		"Project %s must stamp a run branch and finish its workspace clone", projName)
+	return branch
+}
+
+// provisionTaskBranchesAndSignal runs a fixture Job (tide-push image —
+// git-capable, chaos_resume release-writer + ancestry-assert Job pattern)
+// that reproduces the real executor's observable git effects the stub
+// subagent omits: for every task UID it forks tide/wt-<uid> from the run
+// branch in a worktree at /workspace/worktrees/<uid> (the exact
+// harness.EnsureWorktree layout) and adds one distinct commit
+// (harness.CommitWorktree's effect), then touches the
+// /workspace/envelopes/<uid>/release signal files so the wait-for-signal
+// stub tasks report success — strictly AFTER their branches exist.
+func provisionTaskBranchesAndSignal(jobName, projectUID, runBranch string, taskUIDs []string) {
+	GinkgoHelper()
+
+	// Branch-ownership split, decided per task off its IMMUTABLE dispatch
+	// envelope (in.json, written by the controller before the pod starts):
+	//   - envelope carries a "branch" key → the task won the BranchName race
+	//     and the stub executor's git contract (ensureExecutorWorktree +
+	//     commitExecutorWorktree) normally provisions tide/wt-<uid> — the
+	//     writer MUST NOT race it (two `git worktree add`s on the same
+	//     path). The writer polls up to 60s for the stub's branch ref: this
+	//     Job runs after CloneComplete, so a stub still inside its bounded
+	//     repo-wait exits it within one 2s poll — if the ref never appears
+	//     the stub took its non-git fallback and the writer provisions.
+	//   - no "branch" key (stub tasks dispatch within the same second the
+	//     Project is created, usually beating the BranchName stamp) → the
+	//     stub skips git entirely and the writer provisions immediately.
+	// The "branch" key is omitempty, so key-presence == Branch was set.
+	var sb strings.Builder
+	// safe.directory is already system-level in the tide-push image; the
+	// --global add is belt-and-braces and must never be fatal.
+	sb.WriteString("set -e; export HOME=/tmp; git config --global --add safe.directory '*' || true; ")
+	// Resolve the run branch FROM THE REPO, not from Project status: the two
+	// must agree, but if they ever diverge (e.g. a re-stamped BranchName) the
+	// repo ref is what the clone actually created — and the loud echo of
+	// both values is the diagnostic for that divergence.
+	fmt.Fprintf(&sb,
+		"RB=$(git -C /workspace/repo.git for-each-ref --format='%%(refname:short)' 'refs/heads/tide/run-*' | head -1); "+
+			"echo \"status-branch=%s repo-run-branch=$RB\"; "+
+			"git -C /workspace/repo.git branch -a; "+
+			"if [ -z \"$RB\" ]; then echo 'FATAL: no tide/run-* branch in repo.git'; exit 1; fi; ",
+		runBranch)
+	sb.WriteString("provision() { " +
+		"git -C /workspace/repo.git worktree add /workspace/worktrees/$1 -b \"$2\" \"$RB\"; " +
+		"echo \"stub task $1\" > /workspace/worktrees/$1/stub-task-$1.txt; " +
+		"git -C /workspace/worktrees/$1 add -A; " +
+		"git -C /workspace/worktrees/$1 -c user.name='TIDE Bot' -c user.email='tide-bot@tideproject.k8s' commit -m \"stub: task $1\"; }; ")
+	for _, uid := range taskUIDs {
+		branch := pkggit.TaskBranchName(uid)
+		fmt.Fprintf(&sb,
+			"if grep -q '\"branch\":' /workspace/envelopes/%[1]s/in.json; then "+
+				"i=0; while [ $i -lt 30 ] && ! git -C /workspace/repo.git show-ref --verify --quiet 'refs/heads/%[2]s'; do i=$((i+1)); sleep 2; done; "+
+				"if git -C /workspace/repo.git show-ref --verify --quiet 'refs/heads/%[2]s'; then "+
+				"echo 'stub executor provisioned %[2]s'; else "+
+				"echo 'stub fell back for task %[1]s; provisioning %[2]s'; provision %[1]s '%[2]s'; fi; "+
+				"elif git -C /workspace/repo.git show-ref --verify --quiet 'refs/heads/%[2]s'; then "+
+				"echo '%[2]s already provisioned (prior writer attempt); skipping'; else "+
+				"provision %[1]s '%[2]s'; fi; ",
+			uid, branch)
+	}
+	for _, uid := range taskUIDs {
+		fmt.Fprintf(&sb, "mkdir -p /workspace/envelopes/%[1]s; touch /workspace/envelopes/%[1]s/release; ", uid)
+	}
+	sb.WriteString("echo 'branches + release signals provisioned'")
+
+	ttl := int32(120)
+	backoff := int32(2)
+	// Worst case the ownership poll runs its full 60s per branch-key task
+	// (stub fallback); 240s covers three tasks plus git work.
+	deadline := int64(240)
+	fsGroup := int64(1000)
+	// uid 1000 — the SUBAGENT side of the two-uid PVC contract, same as
+	// chaos_resume's release-writer. Run-5 CI evidence: as 65532 every git
+	// step succeeded (repo.git is 65532-owned) but `touch .../release` hit
+	// Permission denied — the envelope dirs are created subagent-side
+	// (init container, uid 1000). The repo side is explicitly group-shared
+	// for uid-1000 writers (tide-push makeWorkspaceGroupShared: chgrp 1000
+	// + g+rwX + setgid at clone time), so 1000 satisfies BOTH sides.
+	runAsUser := int64(1000)
+	allowPrivEsc := false
+
+	job := &batchv1.Job{}
+	job.Name = jobName
+	job.Namespace = integrationMissNamespace
+	job.Spec.BackoffLimit = &backoff
+	job.Spec.TTLSecondsAfterFinished = &ttl
+	job.Spec.ActiveDeadlineSeconds = &deadline
+	job.Spec.Template.Spec = corev1.PodSpec{
+		RestartPolicy:      corev1.RestartPolicyNever,
+		ServiceAccountName: "tide-subagent",
+		SecurityContext: &corev1.PodSecurityContext{
+			FSGroup: &fsGroup,
+		},
+		Volumes: []corev1.Volume{
+			{
+				Name: "project-workspace",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "tide-projects",
+					},
+				},
+			},
+		},
+		Containers: []corev1.Container{
+			{
+				Name:    "branch-writer",
+				Image:   integrationMissTidePushImage,
+				Command: []string{"sh", "-c", sb.String()},
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser:                &runAsUser,
+					AllowPrivilegeEscalation: &allowPrivEsc,
+					Capabilities: &corev1.Capabilities{
+						Drop: []corev1.Capability{"ALL"},
+					},
+				},
+				VolumeMounts: []corev1.VolumeMount{
+					{
+						Name:      "project-workspace",
+						MountPath: "/workspace",
+						SubPath:   fmt.Sprintf("%s/workspace", projectUID),
+					},
+				},
+			},
+		},
+	}
+
+	// Flake-attempt hygiene: the suite-level -ginkgo.flake-attempts=3 re-runs
+	// a failed spec with the namespace intact, so a writer Job from the
+	// prior attempt may linger under this deterministic name. Delete it and
+	// recreate rather than failing on AlreadyExists.
+	if cErr := k8sClient.Create(ctx, job); cErr != nil {
+		Expect(apierrors.IsAlreadyExists(cErr)).To(BeTrue(), "create branch-writer Job %s: %v", jobName, cErr)
+		policy := metav1.DeletePropagationBackground
+		Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, job, &client.DeleteOptions{PropagationPolicy: &policy}))).To(Succeed())
+		Eventually(func() bool {
+			var stale batchv1.Job
+			return apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Name: jobName, Namespace: integrationMissNamespace}, &stale))
+		}, time.Minute, 2*time.Second).Should(BeTrue(), "stale branch-writer Job must be gone before recreate")
+		job.ResourceVersion = ""
+		Expect(k8sClient.Create(ctx, job)).To(Succeed(), "recreate branch-writer Job %s", jobName)
+	}
+
+	Eventually(func() (bool, error) {
+		var j batchv1.Job
+		if err := k8sClient.Get(ctx, client.ObjectKey{Name: jobName, Namespace: integrationMissNamespace}, &j); err != nil {
+			return false, err
+		}
+		if isJobSucceededShort(&j) {
+			return true, nil
+		}
+		jobTerminallyFailed := false
+		for _, c := range j.Status.Conditions {
+			if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+				jobTerminallyFailed = true
+			}
+		}
+		if jobTerminallyFailed {
+			// Terminal failure — abort NOW with the pod logs in the failure
+			// text (StopTrying, not a plain error: Gomega retries plain
+			// errors until timeout and a later flake-attempt's message would
+			// bury this one).
+			logsCmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+				"logs", "job/"+jobName, "-n", integrationMissNamespace, "-c", "branch-writer", "--tail=50")
+			logsOut, _ := logsCmd.CombinedOutput()
+			return false, StopTrying(fmt.Sprintf("branch-writer Job %s terminally failed; logs (best-effort): %s", jobName, string(logsOut)))
+		}
+		return false, nil
+	}, 5*time.Minute, 2*time.Second).Should(BeTrue(),
+		"branch-writer Job must provision task branches + release signals")
+}
+
+// dumpNamespaceState prints the live TIDE CRD + Job + Pod + Event state of
+// the namespace into the Ginkgo timeline — the post-mortem the kind-logs
+// artifact cannot provide once the namespace is deleted. Best-effort: every
+// kubectl error is printed rather than failing the (already-failed) spec.
+func dumpNamespaceState(ns string) {
+	// Fresh bounded context — NOT the suite ctx: the dump most often runs
+	// precisely when kindTestTimeout has expired, and run 6's dump produced
+	// six "context deadline exceeded" lines instead of state.
+	dumpCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	GinkgoWriter.Printf("\n===== namespace state dump: %s =====\n", ns)
+	for _, args := range [][]string{
+		{"get", "project,milestone,phase,plan,task,wave", "-n", ns, "-o", "wide"},
+		{"get", "project", "-n", ns, "-o", "yaml"},
+		{"get", "plan", "-n", ns, "-o", "yaml"},
+		{"get", "jobs", "-n", ns, "-o", "wide"},
+		{"get", "pods", "-n", ns, "-o", "wide"},
+		{"get", "events", "-n", ns, "--sort-by=.lastTimestamp"},
+	} {
+		cmd := exec.CommandContext(dumpCtx, "kubectl", append([]string{"--kubeconfig", kubeconfigPath}, args...)...)
+		out, err := cmd.CombinedOutput()
+		GinkgoWriter.Printf("--- kubectl %s ---\n%s", strings.Join(args, " "), string(out))
+		if err != nil {
+			GinkgoWriter.Printf("(kubectl error: %v)\n", err)
+		}
+	}
+	GinkgoWriter.Printf("===== end namespace state dump: %s =====\n\n", ns)
+}
+
 // kubectlWaitJobComplete waits (once, non-blocking on this call — callers
 // wrap in Eventually) for the named Job to reach condition=Complete.
 func kubectlWaitJobComplete(ns, jobName string, timeout time.Duration) error {
@@ -321,7 +705,14 @@ func kubectlWaitDeploymentAvailable(ns, deployName string, timeout time.Duration
 func assertBranchesAreAncestors(projectUID, runBranch string, taskBranches []string) {
 	GinkgoHelper()
 
-	jobName := fmt.Sprintf("integration-miss-assert-%d", GinkgoRandomSeed())
+	// projectUID (not GinkgoRandomSeed, which is shared across every spec in
+	// the run) keeps this Job name unique per spec — both specs in this
+	// Ordered container share a namespace and ran the same seed, so a
+	// seed-only name collided with spec 1's Job on spec 2's run (AlreadyExists).
+	// Truncated to 8 chars: the full 36-char UID would push the Job name to
+	// 60 chars, and the Job-generated Pod name (Job name + "-" + 5 random
+	// chars) would then exceed the 63-char Pod DNS-label limit.
+	jobName := fmt.Sprintf("integration-miss-assert-%.8s", projectUID)
 	subPath := fmt.Sprintf("%s/workspace", projectUID)
 
 	var scriptBuilder strings.Builder

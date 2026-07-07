@@ -511,7 +511,17 @@ func validatePushInvariants(cfg pushConfig, stderr io.Writer) (int, bool) {
 	// Invariant 3: commit message non-empty (W11 — orchestrator-supplied
 	// boundary message). Empty == programmer error in the calling
 	// reconciler. Checked before PlainOpen (cheap pre-condition).
-	if cfg.CommitMessage == "" {
+	//
+	// Integration-only wave Jobs are EXEMPT: they never create the boundary
+	// staging commit this message is for — the merges carry their own
+	// generated messages (pkg/git IntegrateTaskBranches) and the Job exits
+	// after the verify gate, before staging/push. triggerWaveIntegrationJob
+	// dispatches with an empty message by design; enforcing W11 here killed
+	// every wave-integration Job at startup (PR #3 run 7: exit 2 in 5ms,
+	// envelope-unreadable — the stderr line became the termination message
+	// via FallbackToLogsOnError and failed JSON parsing), so the Phase 34
+	// integration gate never ran end-to-end.
+	if cfg.CommitMessage == "" && !cfg.IntegrationOnly {
 		writePushEnvelope(cfg, "", exitInvariant, "missing-commit-message", nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: push mode requires --commit-message (W11)\n")
 		return exitInvariant, true

@@ -568,10 +568,23 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 
 	// Step 1: Branch-name init (D-B6). Format: tide/run-<project>-<unix>.
 	// Unix epoch only — refnames cannot contain ":" so RFC3339 is forbidden.
+	//
+	// WRITE-ONCE via optimistic lock: the name embeds the current unix
+	// second, so a reconcile acting on a STALE cached Project (BranchName
+	// still "" in the informer while the live object was already stamped)
+	// would coin a DIFFERENT name and a plain merge patch would silently
+	// overwrite the first — after which the clone Job (EnsureRunBranch on
+	// name-1), task envelopes, and every downstream git consumer disagree on
+	// the run branch. The optimistic lock turns the stale re-stamp into a
+	// Conflict; the requeued reconcile re-reads and sees the stamped value.
 	if project.Status.Git.BranchName == "" {
-		patch := client.MergeFrom(project.DeepCopy())
+		patch := client.MergeFromWithOptions(project.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		project.Status.Git.BranchName = fmt.Sprintf("tide/run-%s-%d", project.Name, time.Now().Unix())
 		if err := r.Status().Patch(ctx, project, patch); err != nil {
+			if apierrors.IsConflict(err) {
+				// Stale read — another reconcile already stamped BranchName.
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, fmt.Errorf("patch branch name: %w", err)
 		}
 		// Continue to clone dispatch on next reconcile.

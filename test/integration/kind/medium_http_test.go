@@ -36,6 +36,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
@@ -202,6 +204,10 @@ var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
 		// createNamespace provisions the namespace + tide-subagent SA + tide-projects
 		// PVC + tide-signing-key Secret + PVC prewarm (same helper used by other specs).
 		createNamespace(mediumHTTPNamespace)
+		// Spec 3 runs REAL clone / wave-integration / boundary-push pods —
+		// their Jobs reference serviceAccountName tide-push, which the chart
+		// only installs in tide-system (push-rbac.yaml cross-namespace caveat).
+		ensurePushSARBAC(mediumHTTPNamespace)
 
 		// Load the git-http-server and demo-init images into the kind cluster so
 		// the Deployment and Job Pods can pull them with IfNotPresent.
@@ -218,10 +224,14 @@ var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
 	})
 
 	AfterAll(func() {
-		deleteNamespace(mediumHTTPNamespace)
 		if CurrentSpecReport().Failed() {
+			// Dump CRD/Job/Pod/Event state BEFORE deleting the namespace —
+			// otherwise the failure diagnostics are unrecoverable (PR #3
+			// CI iterations lost the spec-3 stall point to this ordering).
+			dumpNamespaceState(mediumHTTPNamespace)
 			exportKindLogs()
 		}
+		deleteNamespace(mediumHTTPNamespace)
 	})
 
 	// -------------------------------------------------------------------------
@@ -391,12 +401,23 @@ data:
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed(),
 			"medium Project must be admitted (http:// targetRepo passes CEL rule)")
 
-		defer func() {
-			_ = k8sClient.Delete(ctx, proj)
-		}()
+		// Dump the namespace on failure BEFORE any teardown cascades the
+		// hierarchy away (a function-level defer would run ahead of this and
+		// destroy the evidence — why previous failures left no diagnosable
+		// state). Project cleanup itself belongs to AfterAll's
+		// deleteNamespace; this is the container's final spec.
+		DeferCleanup(func() {
+			if CurrentSpecReport().Failed() {
+				dumpNamespaceState(mediumHTTPNamespace)
+			}
+		})
 
-		// Wait for Project to reach Complete within 10 minutes.
+		// Wait for Project to reach Complete within 10 minutes. The periodic
+		// GinkgoWriter progress line lands in the live timeline, so the
+		// stall point survives even when a flake-retry or suite-teardown
+		// skip swallows the Eventually's final failure text.
 		By("Waiting for medium Project to reach Complete over http://")
+		lastProgress := time.Now()
 		Eventually(func() error {
 			var current tideprojectv1alpha2.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
@@ -406,6 +427,13 @@ data:
 				return err
 			}
 			if current.Status.Phase != "Complete" {
+				if time.Since(lastProgress) > 30*time.Second {
+					lastProgress = time.Now()
+					GinkgoWriter.Printf("medium-http progress: phase=%q branch=%q cloneComplete=%v lastCondition=%s children=[%s]\n",
+						current.Status.Phase, current.Status.Git.BranchName,
+						current.Status.Git.CloneComplete, mediumLastConditionMessage(current),
+						mediumChildSummary())
+				}
 				return fmt.Errorf("medium Project %s: want Status.Phase=Complete, got %q (last condition: %s)",
 					projName, current.Status.Phase, mediumLastConditionMessage(current))
 			}
@@ -416,6 +444,56 @@ data:
 		GinkgoWriter.Printf("medium-http-test: Project %s reached Complete\n", projName)
 	})
 })
+
+// mediumChildSummary lists every child CRD in the medium namespace with its
+// phase — the progress line's pointer to WHICH level of the hierarchy a
+// stalled run is stuck at (spec 3 exercises all five levels; the Project's
+// own conditions do not change while a mid-hierarchy level is wedged).
+func mediumChildSummary() string {
+	var parts []string
+	var msList tideprojectv1alpha2.MilestoneList
+	if err := k8sClient.List(ctx, &msList, client.InNamespace(mediumHTTPNamespace)); err == nil {
+		for i := range msList.Items {
+			parts = append(parts, fmt.Sprintf("ms/%s=%s", msList.Items[i].Name, msList.Items[i].Status.Phase))
+		}
+	}
+	var phList tideprojectv1alpha2.PhaseList
+	if err := k8sClient.List(ctx, &phList, client.InNamespace(mediumHTTPNamespace)); err == nil {
+		for i := range phList.Items {
+			parts = append(parts, fmt.Sprintf("ph/%s=%s", phList.Items[i].Name, phList.Items[i].Status.Phase))
+		}
+	}
+	var plList tideprojectv1alpha2.PlanList
+	if err := k8sClient.List(ctx, &plList, client.InNamespace(mediumHTTPNamespace)); err == nil {
+		for i := range plList.Items {
+			wi := plList.Items[i].Status.WaveIntegration
+			parts = append(parts, fmt.Sprintf("plan/%s=%s(integ=%d,val=%s,wiWave=%d,wiAttempts=%d,wiErr=%q)",
+				plList.Items[i].Name, plList.Items[i].Status.Phase,
+				plList.Items[i].Status.IntegratedThroughWave, plList.Items[i].Status.ValidationState,
+				wi.Wave, wi.Attempts, wi.LastError))
+		}
+	}
+	var tList tideprojectv1alpha2.TaskList
+	if err := k8sClient.List(ctx, &tList, client.InNamespace(mediumHTTPNamespace)); err == nil {
+		for i := range tList.Items {
+			parts = append(parts, fmt.Sprintf("task/%s=%s", tList.Items[i].Name, tList.Items[i].Status.Phase))
+		}
+	}
+	var jList batchv1.JobList
+	if err := k8sClient.List(ctx, &jList, client.InNamespace(mediumHTTPNamespace)); err == nil {
+		for i := range jList.Items {
+			state := "running"
+			for _, c := range jList.Items[i].Status.Conditions {
+				if c.Status == corev1.ConditionTrue &&
+					(c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) {
+					state = string(c.Type)
+				}
+			}
+			parts = append(parts, fmt.Sprintf("job/%s=%s(f=%d)", jList.Items[i].Name, state, jList.Items[i].Status.Failed))
+		}
+	}
+	return strings.Join(parts, " ")
+}
 
 // mediumLastConditionMessage returns the last condition message for a Project,
 // for diagnostic output in Eventually error messages.

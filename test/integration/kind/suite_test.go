@@ -93,7 +93,16 @@ const (
 	//     quick-task Cascade 9 recipe — see 04.1-12-SUMMARY.md Outstanding
 	//     Follow-up #2). 18m gives headroom for unexpected first-run
 	//     delays without re-tripping the cascade.
-	kindTestTimeout = 18 * time.Minute
+	//   - Phase 34 (PR #3) bump → 25m: Layer B now runs REAL
+	//     clone/wave-integration/boundary-push pods (medium_http spec 3,
+	//     the two integration-miss specs) — run 6 observed an 1185s inner
+	//     wall hitting the 18m ctx mid-suite, skipping 12 specs including
+	//     both integration-miss specs (which then never executed at all).
+	//     Budget stays inside the workflow step timeout (35m − ~7m
+	//     prep/LayerA). skipIfCRDsOnlyMode now FAILS (not skips) on ctx
+	//     expiry, so re-tripping this budget is loud instead of a silent
+	//     green.
+	kindTestTimeout = 25 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
 	// Deployment installs into (config/default Kustomize manifest target).
@@ -497,6 +506,16 @@ func helmControllerArgs(chartDir string, rolloutNonce string) []string {
 		// ImagePullBackoff -> imported envelopes never staged at new-UID paths).
 		"--set", "images.tideImport.tag=test",
 		"--set", "images.tideImport.pullPolicy=IfNotPresent",
+		// Phase 34 (PR #3 run 8): point TIDE_PUSH_IMAGE at the kind-loaded
+		// tide-push:test. The chart default tag is Chart.AppVersion — a
+		// PUBLISHED binary that predates --integration-only, so every
+		// wave-integration Job the manager dispatched died at flag parse
+		// (exit 2 in 5ms, envelope-unreadable) and the Phase 34 gate never
+		// ran branch code. Invisible before this PR: without the tide-push
+		// SA no clone/push/integration pod ever started, which hid the
+		// wrong image, which hid the unknown flag.
+		"--set", "images.tidePush.tag=test",
+		"--set", "images.tidePush.pullPolicy=IfNotPresent",
 		"--set-string", "controllerManager.manager.podAnnotations.tideproject\\.k8s/restart-nonce=" + rolloutNonce,
 		// Override the chart's default accessModes [ReadWriteMany] to [ReadWriteOnce]
 		// because kind's default rancher.io/local-path provisioner only supports
