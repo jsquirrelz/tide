@@ -469,6 +469,67 @@ func TestBuildCloneJobNoRunBranch(t *testing.T) {
 	}
 }
 
+// ---------- Plan 35-03 Task 1 TDD: buildCloneJob baseRef / project-uid / termination wiring ----------
+
+// TestBuildCloneJobBaseRefArg asserts that buildCloneJob with a non-empty
+// CloneOptions.BaseRef produces a --base-ref=<value> arg (35-01/D-01 forms,
+// resolved in the clone Job), and that an empty BaseRef adds no --base-ref arg.
+func TestBuildCloneJobBaseRefArg(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+
+	withRef := buildCloneJob(project, "tide-projects",
+		CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test", BaseRef: "v1.2.3"}, scheme)
+	args := withRef.Spec.Template.Spec.Containers[0].Args
+	if !slices.Contains(args, "--base-ref=v1.2.3") {
+		t.Errorf("buildCloneJob: args missing %q (got: %s)", "--base-ref=v1.2.3", strings.Join(args, " "))
+	}
+
+	noRef := buildCloneJob(project, "tide-projects",
+		CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}, scheme)
+	for _, arg := range noRef.Spec.Template.Spec.Containers[0].Args {
+		if strings.HasPrefix(arg, "--base-ref") {
+			t.Errorf("buildCloneJob with empty BaseRef: unexpected --base-ref arg (got: %s)",
+				strings.Join(noRef.Spec.Template.Spec.Containers[0].Args, " "))
+		}
+	}
+}
+
+// TestBuildCloneJobProjectUIDArg asserts buildCloneJob always passes
+// --project-uid=<project.UID> so tide-push keys the clone envelope PVC path
+// (the controller reads the termination-log copy, but the PVC copy is the
+// provenance-of-record for baseSHA — D-05/D-11).
+func TestBuildCloneJobProjectUIDArg(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	job := buildCloneJob(project, "tide-projects",
+		CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}, scheme)
+	args := job.Spec.Template.Spec.Containers[0].Args
+	want := "--project-uid=" + string(project.UID)
+	if !slices.Contains(args, want) {
+		t.Errorf("buildCloneJob: args missing %q (got: %s)", want, strings.Join(args, " "))
+	}
+}
+
+// TestBuildCloneJobTerminationWiring asserts the clone container carries the
+// same termination-message wiring as buildPushJob (push_helpers.go:284-285) —
+// without it the controller can never read the CloneResult envelope off the
+// pod's Terminated.Message, so baseSHA stamping and BaseRefUnresolvable
+// classification (35-03) would be silently unreachable.
+func TestBuildCloneJobTerminationWiring(t *testing.T) {
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	job := buildCloneJob(project, "tide-projects",
+		CloneOptions{TidePushImage: "ghcr.io/jsquirrelz/tide-push:test"}, scheme)
+	c := job.Spec.Template.Spec.Containers[0]
+	if c.TerminationMessagePath != "/dev/termination-log" {
+		t.Errorf("buildCloneJob: TerminationMessagePath = %q, want /dev/termination-log", c.TerminationMessagePath)
+	}
+	if c.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+		t.Errorf("buildCloneJob: TerminationMessagePolicy = %q, want FallbackToLogsOnError", c.TerminationMessagePolicy)
+	}
+}
+
 // TestBuildPushJobIntegrateTaskBranches asserts that buildPushJob with
 // PushOptions.IntegrateTaskBranches set produces a
 // --integrate-task-branches=<CSV> arg in the Job container.
