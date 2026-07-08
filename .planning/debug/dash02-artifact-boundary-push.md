@@ -1,5 +1,5 @@
 ---
-status: awaiting_human_verify
+status: investigating
 slug: dash02-artifact-boundary-push
 trigger: on the DASH-02 artifact-vs-boundary push interaction
 created: 2026-07-08
@@ -237,4 +237,20 @@ End-to-end code trace of the shared `tide-push-<project.UID>` Job lifecycle (no 
 - **Diagnostics (test/integration/kind/artifact_staging_test.go):** per-tick in-poll logging (push/clone pod phase, git-http `git-receive-pack` count, LastPushedSHA) via GinkgoWriter INSIDE the Eventually — fires WHILE the ns exists (fixes the run-4 DeferCleanup-after-teardown flaw).
 - **ENVTEST verdict (allowed surface): RED→GREEN.** New debug13b Test 6 (multi-pod mask) + Test 7 (unreadable-success re-dispatch). RED-before = 2 Failed against pre-fix controller code (tests present); GREEN-after = `Ran 8 of 170 debug13b specs, 8 Passed / 0 Failed`. Broader push/lease/leak/boundary specs pass (no regression). lint 0 / gofmt / vet clean; kind pkg compiles.
 - **LAYER-B: DEFERRED to the orchestrator.** No Layer-B green claimed. The in-poll diagnostics will decisively confirm on the next single run whether the shared push pod SUCCEEDS and a headSHA reaches the CR (this fix's target) or whether the live cause is a failing in-cluster push (would need a transport fix).
+
+## Run-5 (verify fix 01b5004, flake-attempts=1, in-poll diag) — STILL RED, and the diagnostics REVEAL THE REAL CAUSE
+
+status back to `investigating`. The correctly-placed in-poll diagnostics fired every tick and are unambiguous:
+```
+artifact-staging diag: push/clone pods=[tide-clone-<uid>=Pending tide-push-<uid>=Pending] git-receive-pack=0 LastPushedSHA=""
+```
+For the ENTIRE 5-min poll the clone AND push pods sit at **Pending** — they NEVER start (never ContainerCreating/Running/Succeeded/Failed). git-receive-pack=0, LastPushedSHA="" throughout.
+
+**THE REAL ROOT CAUSE IS UPSTREAM OF DEFECTS A/B/C:** the clone/push pods are **unschedulable (Pending)** — so no push ever runs, which is why LastPushedSHA never advances. Defects A (SA), B (write-back), C (capture wedge) are all REAL latent bugs and their fixes are correct + envtest-green, but NONE of them is the cause of this RED. The push never even starts.
+
+**Strong hypothesis (unconfirmed — needs `kubectl describe pod`):** Pending (not ContainerCreating) = a SCHEDULING block. On this memory-constrained dev host (8.3 GiB; kind node small), the likeliest cause is **insufficient allocatable node CPU/memory** — by the time the clone/push pods are created (after the stub subagent + reporter + init pods already reserved the node), the single kind node can't schedule them. i.e. an **ENVIRONMENT/resource artifact of this host, NOT a product bug** — DASH-02's push path may well be correct and would likely pass on a properly-resourced CI node. (Same env-gate theme that started this saga.) Alternative candidates: an unbound/RWO tide-projects PVC blocking the mount, or a nodeSelector/taint mismatch on the clone/push pod spec.
+
+### next_action_v4 (ONE more run, describe-instrumented — or run on a bigger host)
+- Add `kubectl describe pod <tide-push/clone pod>` (or dump `.status.conditions` + scheduler events) to the in-poll diagnostics so the NEXT run prints the exact Pending reason (`FailedScheduling: Insufficient cpu/memory` vs `unbound PVC` vs taint). OR simply run `make test-int` on an isolated, properly-resourced host (real CI / a bigger VM) — if it greens there, the RED was purely this host's kind-node resource starvation and DASH-02 is actually sound (fixes A/B/C are still worth keeping as latent hardening).
+- HALTED here: 5 Layer-B runs (~110 min), orchestrator context exhausted. Fixes 1bcbea6 + 01b5004 stay committed (real latent-bug hardening, envtest-green). DASH-02 remains RED/Pending pending confirmation of the Pending-pod cause.
 
