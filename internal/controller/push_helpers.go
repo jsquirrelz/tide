@@ -21,6 +21,7 @@ import (
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // PushOptions carries everything the ProjectReconciler (plan 03-08) supplies
@@ -77,6 +78,15 @@ type PushOptions struct {
 	// false — they carry the same cumulative branch set but MUST push the
 	// run branch to the remote.
 	IntegrationOnly bool
+
+	// AgentName / AgentEmail are the resolved committer/author identity
+	// (SIGN-01 / D-03) injected as TIDE_AGENT_NAME/TIDE_AGENT_EMAIL on the push
+	// container. Both in-pod commit sites read them: IntegrateTaskBranches merge
+	// commits and the tide-push boundary-commit signature (one injection covers
+	// both). The controller stamps resolved values here (never empty — compiled
+	// default backstops), so the Env injection is unconditional.
+	AgentName  string
+	AgentEmail string
 }
 
 // CloneOptions carries the clone-mode arguments. Clone is a one-time op
@@ -271,6 +281,16 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 							Name:  pushContainerName,
 							Image: opts.TidePushImage,
 							Args:  args,
+							// SIGN-01 / D-03: stamp the resolved agent identity so the
+							// in-pod integrate merge commits and the tide-push boundary
+							// commit read it via pkggit.AgentIdentity(). Unconditional —
+							// the controller resolves a non-empty value (compiled default
+							// backstops). Placed before EnvFrom; the creds SecretRef path
+							// (below) is untouched.
+							Env: []corev1.EnvVar{
+								{Name: pkggit.EnvAgentName, Value: opts.AgentName},
+								{Name: pkggit.EnvAgentEmail, Value: opts.AgentEmail},
+							},
 							EnvFrom: []corev1.EnvFromSource{
 								{
 									SecretRef: &corev1.SecretEnvSource{

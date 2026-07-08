@@ -1127,7 +1127,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	}
 
 	// Dispatch the integration Job.
-	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage); err != nil {
+	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage, r.HelmProviderDefaults); err != nil {
 		return ctrl.Result{}, true, err
 	}
 	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).
