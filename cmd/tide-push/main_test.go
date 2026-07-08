@@ -817,6 +817,10 @@ func createTaskBranchWithFile(t *testing.T, bareRepoPath, branchName, fileName, 
 }
 
 func TestRunPushModeWritesExactBoundaryCommitMessage(t *testing.T) {
+	// Ensure the agent env is unset so the compiled default identity applies.
+	t.Setenv("TIDE_AGENT_NAME", "")
+	t.Setenv("TIDE_AGENT_EMAIL", "")
+
 	base := t.TempDir()
 	bareSrc, _ := seedBareRepo(t, base)
 	bareRepo, err := gogit.PlainOpen(bareSrc)
@@ -867,12 +871,18 @@ func TestRunPushModeWritesExactBoundaryCommitMessage(t *testing.T) {
 	if !strings.Contains(commit.Message, msg) {
 		t.Errorf("remote commit message = %q, must contain %q", commit.Message, msg)
 	}
-	// Author is the fixed TIDE-bot signature.
-	if commit.Author.Name != "tide-bot" {
-		t.Errorf("commit author name = %q, want %q", commit.Author.Name, "tide-bot")
+	// Author is the env-sourced TIDE agent signature; with the agent env vars
+	// unset it resolves to the compiled default. go-git copies Author to
+	// Committer when Committer is unset, so both must match (Pitfall 8).
+	if commit.Author.Name != "TIDE Agent" {
+		t.Errorf("commit author name = %q, want %q", commit.Author.Name, "TIDE Agent")
 	}
-	if commit.Author.Email != "tide-bot@tideproject.k8s" {
-		t.Errorf("commit author email = %q, want %q", commit.Author.Email, "tide-bot@tideproject.k8s")
+	if commit.Author.Email != "tide-agent@tideproject.k8s" {
+		t.Errorf("commit author email = %q, want %q", commit.Author.Email, "tide-agent@tideproject.k8s")
+	}
+	if commit.Committer.Name != commit.Author.Name || commit.Committer.Email != commit.Author.Email {
+		t.Errorf("committer %q <%s> must equal author %q <%s>",
+			commit.Committer.Name, commit.Committer.Email, commit.Author.Name, commit.Author.Email)
 	}
 }
 

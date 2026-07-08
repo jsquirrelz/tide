@@ -27,8 +27,10 @@ limitations under the License.
 //	--mode=push    — level-boundary push (Phase 3 D-B2). Stages
 //	                 --artifact-paths into the per-run worktree at
 //	                 <workspace>/worktrees/run-<branch>, creates a single
-//	                 commit with --commit-message and the fixed TIDE-bot
-//	                 author signature (W11), computes a unified-diff of
+//	                 commit with --commit-message and the env-sourced TIDE
+//	                 agent author signature (W11 / D-05 — TIDE_AGENT_NAME /
+//	                 TIDE_AGENT_EMAIL, compiled default TIDE Agent
+//	                 <tide-agent@tideproject.k8s>), computes a unified-diff of
 //	                 the new commit, scans the diff with internal/gitleaks
 //	                 (D-B3), and on clean diff pushes with HTTPS+PAT and
 //	                 --force-with-lease against --last-pushed-sha (D-B6).
@@ -187,13 +189,17 @@ const (
 	missingBranchesLimit = 10
 )
 
-// tideBotSignature returns the fixed TIDE-bot author signature used for
-// every boundary commit (W11 — name+email are stable across runs; only
-// the timestamp varies).
-func tideBotSignature() object.Signature {
+// agentSignature returns the TIDE agent author signature used for every
+// boundary commit. Identity comes from pkggit.AgentIdentity() (TIDE_AGENT_NAME /
+// TIDE_AGENT_EMAIL env, compiled default "TIDE Agent <tide-agent@tideproject.k8s>",
+// D-04 / D-05). The W11 stability contract holds: name+email are stable across
+// runs because they come from install/Project config, not per-run state — only
+// the timestamp (When) varies from commit to commit.
+func agentSignature() object.Signature {
+	name, email := pkggit.AgentIdentity()
 	return object.Signature{
-		Name:  "tide-bot",
-		Email: "tide-bot@tideproject.k8s",
+		Name:  name,
+		Email: email,
 		When:  time.Now(),
 	}
 }
@@ -796,7 +802,7 @@ func commitOrReuseHead(
 	} else {
 		// Commit. pkggit.Commit returns the new hash (W11 — single boundary
 		// commit per push). Author is the fixed TIDE-bot signature.
-		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, tideBotSignature())
+		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, agentSignature())
 		if cErr != nil {
 			writePushEnvelope(cfg, "", exitGenericFail, "commit-failed", nil, 0, "")
 			fmt.Fprintf(stderr, "tide-push: commit failed: %v\n", cErr)
