@@ -17,6 +17,7 @@ import MilestoneNode, { type MilestoneNodeData } from "./MilestoneNode";
 import PhaseNode, { type PhaseNodeData } from "./PhaseNode";
 import PlanNode, { type PlanNodeData } from "./PlanNode";
 import { NodeClickContext } from "./NodeClickContext";
+import type { TideNodeKind } from "./TideNodeShell";
 import { applyDagreLayout } from "../lib/layout";
 import { fetchProject, type ProjectDetail } from "../lib/api";
 import { useSSEStream, type SSEState } from "../lib/sse";
@@ -45,6 +46,14 @@ export type PlanningDAGViewProps = {
   projectName: string;
   /** Click on a PlanNode swaps the right pane to that Plan's Execution DAG. */
   onPlanClick: (planName: string) => void;
+  /**
+   * Kind-aware click callback (37-08). When provided, it receives EVERY
+   * Planning-DAG node click (project/milestone/phase/plan) so the App can
+   * route each kind to its own surface. When omitted, only plan clicks fire
+   * (via `onPlanClick`) and other kinds are inert — preserving the exact
+   * pre-37-08 behavior for any caller that hasn't migrated.
+   */
+  onNodeClick?: (kind: TideNodeKind, name: string) => void;
   /** Optional initial data — primarily for tests to bypass fetch. */
   initialData?: ProjectDetail;
   /**
@@ -215,6 +224,7 @@ const PLANNING_KINDS = new Set(["Project", "Milestone", "Phase", "Plan"]);
 function PlanningDAGViewInner({
   projectName,
   onPlanClick,
+  onNodeClick,
   initialData,
   onConnectionStateChange,
 }: PlanningDAGViewProps) {
@@ -319,8 +329,22 @@ function PlanningDAGViewInner({
 
   const nodeTypes = useMemo(() => planningNodeTypes, []);
 
+  // Kind-aware click routing (37-08). When the App supplies `onNodeClick`,
+  // every node kind flows to it; otherwise only plan clicks fire (via
+  // `onPlanClick`) and non-plan kinds are inert — the exact pre-37-08 behavior.
+  const clickHandler = useCallback<(kind: TideNodeKind, name: string) => void>(
+    (kind, name) => {
+      if (onNodeClick) {
+        onNodeClick(kind, name);
+        return;
+      }
+      if (kind === "plan") onPlanClick(name);
+    },
+    [onNodeClick, onPlanClick],
+  );
+
   return (
-    <NodeClickContext.Provider value={onPlanClick}>
+    <NodeClickContext.Provider value={clickHandler}>
       <div
         data-testid="planning-dag-view"
         data-dagre-direction="LR"

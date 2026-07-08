@@ -35,8 +35,8 @@ export default function MilestoneNode({ data, selected }: NodeProps<MilestoneNod
       width={340}
       minHeight={84}
       handleAxis="horizontal"
-      /* CR-04 fix: Milestone nodes in Planning DAG are not clickable. */
-      clickable={false}
+      /* 37-08: Milestone nodes are clickable — a ("milestone", name) click
+       * routes to the ArtifactViewer (D-05) via the kind-aware context. */
     />
   );
 }

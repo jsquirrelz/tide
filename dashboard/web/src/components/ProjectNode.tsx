@@ -40,10 +40,10 @@ export default function ProjectNode({ data, selected }: NodeProps<ProjectNodeTyp
       width={360}
       minHeight={92}
       handleAxis="horizontal"
-      /* CR-04 fix: Project nodes in the Planning DAG are not clickable —
-       * clicking would call setSelectedPlan(projectName) which has no
-       * matching Plan and pollutes the right pane. */
-      clickable={false}
+      /* 37-08: Project nodes are clickable — the kind-aware NodeClickContext
+       * routes a ("project", name) click to the ProjectSettingsPanel rather
+       * than the old plan-only setSelectedPlan (which caused the CR-04
+       * pollution the previous clickable={false} guarded against). */
       /* 14-UI-SPEC §C3: pass blocking conditions through to TideNodeShell. */
       blockingConditions={data.blockingConditions}
     />

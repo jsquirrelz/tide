@@ -31,7 +31,10 @@ function makeProps<T>(data: T, selected = false) {
   return { id: "x", data, selected, type: "task", dragging: false } as any;
 }
 
-function renderWithCtx(node: React.ReactNode, onClick: (name: string) => void = () => undefined) {
+function renderWithCtx(
+  node: React.ReactNode,
+  onClick: (kind: string, name: string) => void = () => undefined,
+) {
   // <Handle> inside TideNodeShell reads the React Flow zustand store, so the
   // node tree must mount under a <ReactFlowProvider> even in isolation.
   return render(
@@ -204,8 +207,8 @@ describe("Custom Nodes — Test 3: failed border (UI-SPEC §5 failed family = 4p
   });
 });
 
-describe("Custom Nodes — Test 4: click handler via NodeClickContext", () => {
-  it("clicking a TaskNode invokes the onClick callback with the node's name", () => {
+describe("Custom Nodes — Test 4: kind-aware click handler via NodeClickContext", () => {
+  it("clicking a TaskNode invokes the onClick callback with (kind, name)", () => {
     const onClick = vi.fn();
     renderWithCtx(
       <TaskNode
@@ -219,10 +222,10 @@ describe("Custom Nodes — Test 4: click handler via NodeClickContext", () => {
       onClick,
     );
     fireEvent.click(screen.getByTestId("tide-node-task"));
-    expect(onClick).toHaveBeenCalledWith("t1");
+    expect(onClick).toHaveBeenCalledWith("task", "t1");
   });
 
-  it("clicking a PlanNode invokes the onClick callback with the plan's name", () => {
+  it("clicking a PlanNode invokes the onClick callback with (\"plan\", name)", () => {
     const onClick = vi.fn();
     renderWithCtx(
       <PlanNode
@@ -234,7 +237,67 @@ describe("Custom Nodes — Test 4: click handler via NodeClickContext", () => {
       onClick,
     );
     fireEvent.click(screen.getByTestId("tide-node-plan"));
-    expect(onClick).toHaveBeenCalledWith("04-13");
+    expect(onClick).toHaveBeenCalledWith("plan", "04-13");
+  });
+
+  it("clicking a MilestoneNode invokes the onClick callback with (\"milestone\", name)", () => {
+    const onClick = vi.fn();
+    renderWithCtx(
+      <MilestoneNode
+        {...makeProps({
+          name: "ship-v1",
+          status: "AwaitingApproval",
+          phasesCount: 2,
+          plansCount: 6,
+        })}
+      />,
+      onClick,
+    );
+    // 37-08: milestone nodes are now clickable in the Planning DAG.
+    const root = screen.getByTestId("tide-node-milestone");
+    expect(root.getAttribute("role")).toBe("button");
+    fireEvent.click(root);
+    expect(onClick).toHaveBeenCalledWith("milestone", "ship-v1");
+  });
+
+  it("clicking a PhaseNode invokes the onClick callback with (\"phase\", name)", () => {
+    const onClick = vi.fn();
+    renderWithCtx(
+      <PhaseNode
+        {...makeProps({
+          name: "04-dashboard",
+          status: "Running",
+          plansCount: 6,
+        })}
+      />,
+      onClick,
+    );
+    const root = screen.getByTestId("tide-node-phase");
+    expect(root.getAttribute("role")).toBe("button");
+    fireEvent.click(root);
+    expect(onClick).toHaveBeenCalledWith("phase", "04-dashboard");
+  });
+
+  it("clicking a ProjectNode invokes the onClick callback with (\"project\", name)", () => {
+    const onClick = vi.fn();
+    renderWithCtx(
+      <ProjectNode
+        {...makeProps({
+          name: "my-project",
+          status: "Running",
+          milestonesCount: 3,
+          phasesCount: 12,
+          plansCount: 24,
+          blockingConditions: [],
+        })}
+      />,
+      onClick,
+    );
+    // 37-08: project nodes are now clickable → route to the settings panel.
+    const root = screen.getByTestId("tide-node-project");
+    expect(root.getAttribute("role")).toBe("button");
+    fireEvent.click(root);
+    expect(onClick).toHaveBeenCalledWith("project", "my-project");
   });
 });
 
@@ -270,7 +333,7 @@ describe("Custom Nodes — Test 5: Accessibility (role=button, tabIndex=0, Enter
     );
     const root = screen.getByTestId("tide-node-task");
     fireEvent.keyDown(root, { key: "Enter" });
-    expect(onClick).toHaveBeenCalledWith("t1");
+    expect(onClick).toHaveBeenCalledWith("task", "t1");
   });
 
   it("TaskNode aria-label contains kind + name + status per UI-SPEC §Accessibility", () => {

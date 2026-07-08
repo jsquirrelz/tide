@@ -36,7 +36,8 @@ import { useNodeClick } from "./NodeClickContext";
  *     4px destructive border-left (Argo CD sidebar-accent style).
  *
  * Click routing: invokes the parent's `NodeClickContext` callback with the
- * node's `name`. Enter key activates (a11y).
+ * node's `(kind, name)` so the consumer can route per kind. Enter key
+ * activates (a11y).
  *
  * Phase 1 v1.0 — UI-SPEC §5 says PushLeaseFailed lives in the failed family
  * via "red/purple-adjacent" iconography. We treat it as failed-border too so
@@ -142,8 +143,8 @@ export default function TideNodeShell({
   const onNodeClick = useNodeClick();
 
   const fire = useCallback(() => {
-    onNodeClick(name);
-  }, [onNodeClick, name]);
+    onNodeClick(kind, name);
+  }, [onNodeClick, kind, name]);
 
   const onKey = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
