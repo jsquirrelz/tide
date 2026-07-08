@@ -168,10 +168,10 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   2. An unconfigured install commits as `TIDE Agent <tide-agent@tideproject.k8s>` at all three sites (one consistent compiled-in default; the `TIDE_BOT_*` env names are gone).
   3. The new `spec.git.agentName`/`agentEmail` CRD fields ride the same chart version bump as Phase 35's `baseRef` (FIXED-contract batching).
 
-**Plans**: 0/4 plans executed
+**Plans**: 2/4 plans executed
 
 - [x] 36-01-PLAN.md
-- [ ] 36-02-PLAN.md
+- [x] 36-02-PLAN.md
 - [ ] 36-03-PLAN.md
 - [ ] 36-04-PLAN.md
 
@@ -223,6 +223,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
 | 35. Git Base Ref | v1.0.7 | 0/TBD | Not started | - |
-| 36. Signed Commits + Bot Identity | v1.0.7 | 0/4 | Planned    |  |
+| 36. Signed Commits + Bot Identity | v1.0.7 | 2/4 | In Progress|  |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |

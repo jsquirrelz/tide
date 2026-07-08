@@ -6,15 +6,15 @@ current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-08T05:30:33.104Z"
+last_updated: "2026-07-08T05:42:30.736Z"
 last_activity: 2026-07-03
 last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 31
-  completed_plans: 0
-  percent: 0
+  completed_plans: 2
+  percent: 6
 ---
 
 # Project State
@@ -50,7 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
 | 35. Git Base Ref | TBD | Not started |
-| 36. Signed Commits + Bot Identity | 1/4 | In progress |
+| 36. Signed Commits + Bot Identity | 2/4 | In progress |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
 | 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
 
@@ -88,6 +88,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - GPG signing is DESCOPED from v1.0.7 (2026-07-03, Phase 36 discussion) — SIGN-02/03/04 moved to REQUIREMENTS.md Future Requirements; Phase 36 delivers agent identity (SIGN-01) only. The gpg-shim spike and key-exposure analysis are preserved in `36-CONTEXT.md` `<deferred>`.
 - Artifact ConfigMaps are a size-capped display cache (owner-ref'd, ~512 KiB, truncation markers); PVC/git remain source of truth. The manager cannot mount project PVCs.
 - Dashboard stays read-only — no reader pods, no mutation surfaces.
+- [Phase ?]: 36-02: resolveAgentIdentity is pure (no os.Getenv); resolver owns D-03 defaulting, manager transports chart tier via empty-is-unset ProviderDefaults
 
 ### Roadmap Evolution
 
@@ -123,8 +124,8 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-08T05:30Z
-Stopped at: Completed 36-01-PLAN.md (agent-identity source + all three commit sites)
+Last session: 2026-07-08T05:41:58.217Z
+Stopped at: Completed 36-02-PLAN.md (D-03 agent-identity config surface — CRD fields, resolveAgentIdentity, manager env wiring)
 Resume file: None
 
 ## Operator Next Steps
