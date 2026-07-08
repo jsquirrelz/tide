@@ -23,9 +23,19 @@ const mockUseTaskLog = vi.fn();
 
 import PodLogStreamer from "./PodLogStreamer";
 
+type TaskLogState =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "offline"
+  | "idle-closed"
+  | "pod-gone"
+  | "stream-error";
+
 type TaskLogReturn = {
   lines: string[];
-  state: "connecting" | "connected" | "reconnecting" | "offline" | "idle-closed";
+  state: TaskLogState;
+  reconnect?: () => void;
 };
 
 beforeEach(() => {
@@ -37,7 +47,7 @@ afterEach(() => {
 });
 
 function setHook(value: TaskLogReturn) {
-  mockUseTaskLog.mockReturnValue(value);
+  mockUseTaskLog.mockReturnValue({ reconnect: () => {}, ...value });
 }
 
 describe("PodLogStreamer (Test 1) — mount + lines rendered", () => {
@@ -186,5 +196,71 @@ describe("PodLogStreamer (Test 5) — connection state copy", () => {
     expect(
       screen.getByText(/Log stream closed by backend \(5 min idle\)\./i),
     ).toBeInTheDocument();
+  });
+});
+
+// Plan 37-01 Task 2 — DASH-04 four-state model (D-12..D-14). Every display
+// state must render explicit copy; no state may fall through to an empty
+// viewport.
+describe("PodLogStreamer (Plan 37-01 Task 2) — terminal state rendering", () => {
+  it("Test 1: state 'reconnecting' with 0 lines renders the (previously-missing) placeholder", () => {
+    setHook({ state: "reconnecting", lines: [] });
+    render(<PodLogStreamer taskName="t-recon" onClose={() => {}} />);
+    expect(
+      screen.getByText(/Reconnecting to log stream…/i),
+    ).toBeInTheDocument();
+  });
+
+  it("Test 2: state 'pod-gone' renders the garbage-collected message ONLY — no retry affordance", () => {
+    setHook({ state: "pod-gone", lines: [] });
+    render(<PodLogStreamer taskName="t-gone" onClose={() => {}} />);
+    expect(
+      screen.getByText("Logs no longer available — pod garbage-collected."),
+    ).toBeInTheDocument();
+    // D-13: message only — no Reconnect button in the pod-gone state.
+    expect(
+      screen.queryByRole("button", { name: /reconnect/i }),
+    ).toBeNull();
+  });
+
+  it("Test 3: state 'stream-error' renders heading + body + a Reconnect button that invokes reconnect()", () => {
+    const reconnect = vi.fn();
+    setHook({ state: "stream-error", lines: [], reconnect });
+    render(<PodLogStreamer taskName="t-err" onClose={() => {}} />);
+
+    expect(screen.getByText("Log stream error")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The stream failed unexpectedly — the pod may still be running.",
+      ),
+    ).toBeInTheDocument();
+
+    const btn = screen.getByRole("button", { name: /reconnect/i });
+    fireEvent.click(btn);
+    expect(reconnect).toHaveBeenCalledOnce();
+  });
+
+  it("Test 4: every state renders non-empty viewport content with 0 lines (no silent-empty)", () => {
+    const states: TaskLogState[] = [
+      "connecting",
+      "connected",
+      "reconnecting",
+      "offline",
+      "idle-closed",
+      "pod-gone",
+      "stream-error",
+    ];
+    for (const state of states) {
+      setHook({ state, lines: [] });
+      const { unmount } = render(
+        <PodLogStreamer taskName={`t-${state}`} onClose={() => {}} />,
+      );
+      const viewport = screen.getByTestId("pod-log-viewport");
+      expect(
+        viewport.textContent?.trim().length ?? 0,
+        `state "${state}" rendered an empty viewport`,
+      ).toBeGreaterThan(0);
+      unmount();
+    }
   });
 });
