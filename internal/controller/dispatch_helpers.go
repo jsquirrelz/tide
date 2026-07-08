@@ -53,6 +53,7 @@ import (
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // spawnReporterIfNeeded idempotently spawns the tide-reporter reader Job for a
@@ -120,6 +121,19 @@ type ProviderDefaults struct {
 	// Models maps levelâmodel. Missing key means "no Helm default for
 	// that level".
 	Models map[string]string
+
+	// AgentName is the chart-tier committer/author name (D-03 middle tier),
+	// populated at Manager startup from the TIDE_AGENT_NAME env var. Empty
+	// string means "no Helm default" — resolveAgentIdentity falls through to
+	// the pkg/git compiled default. The manager must NOT collapse an unset
+	// chart value into the compiled default; defaulting happens once, at
+	// resolve time.
+	AgentName string
+
+	// AgentEmail is the chart-tier committer/author email (D-03 middle tier),
+	// populated from TIDE_AGENT_EMAIL. Same "empty = no Helm default"
+	// convention as AgentName; resolves independently of it.
+	AgentEmail string
 }
 
 // ResolveProvider walks Project.Spec.Subagent precedence chain for the
@@ -288,6 +302,42 @@ func resolveImage(project *tideprojectv1alpha2.Project, level string, helmDefaul
 	default:
 		return helmDefaults.Image
 	}
+}
+
+// resolveAgentIdentity walks the D-03 precedence chain for the committer/author
+// identity TIDE stamps at all three commit sites (SIGN-01), returning the
+// resolved (name, email) pair. Each field resolves independently:
+//
+//	project.Spec.Git.AgentName  → helmDefaults.AgentName  → pkggit.DefaultAgentName
+//	project.Spec.Git.AgentEmail → helmDefaults.AgentEmail → pkggit.DefaultAgentEmail
+//
+// Resolution is pure — it never reads the environment (the manager's job is to
+// carry the chart tier into helmDefaults; see cmd/manager/env.go). Both
+// project and project.Spec.Git are nil-checked (Spec.Git is *GitConfig,
+// Pitfall 7), so a nil project or an absent GitConfig resolves cleanly to the
+// chart tier or the compiled default. Non-empty is the override signal at every
+// tier, matching resolveImage.
+func resolveAgentIdentity(project *tideprojectv1alpha2.Project, helmDefaults ProviderDefaults) (name, email string) {
+	name = pkggit.DefaultAgentName
+	email = pkggit.DefaultAgentEmail
+
+	if helmDefaults.AgentName != "" {
+		name = helmDefaults.AgentName
+	}
+	if helmDefaults.AgentEmail != "" {
+		email = helmDefaults.AgentEmail
+	}
+
+	if project != nil && project.Spec.Git != nil {
+		if project.Spec.Git.AgentName != "" {
+			name = project.Spec.Git.AgentName
+		}
+		if project.Spec.Git.AgentEmail != "" {
+			email = project.Spec.Git.AgentEmail
+		}
+	}
+
+	return name, email
 }
 
 // plannerInFlightCount returns the count of non-terminal planner Jobs currently
