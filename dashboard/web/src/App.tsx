@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 import AppShell from "./components/AppShell";
 import Header from "./components/Header";
@@ -19,10 +20,25 @@ import RunningWavesView from "./components/RunningWavesView";
 import TelemetryView from "./components/TelemetryView";
 import LoadingState from "./components/LoadingState";
 import ErrorState from "./components/ErrorState";
+import NodeDetailPanel, {
+  type PlanningNodeKind,
+} from "./components/NodeDetailPanel";
+import ProjectSettingsPanel from "./components/ProjectSettingsPanel";
+import ArtifactViewer from "./components/ArtifactViewer";
+import ApproveStrip from "./components/ApproveStrip";
+import { ResizeHandle, usePersistedSize } from "./components/ResizeHandle";
 import { useProjects } from "./lib/projects";
 import { useTaskDetail, useTasks } from "./lib/tasks";
+import { fetchProject, type ProjectDetail } from "./lib/api";
 import type { SSEState } from "./lib/sse";
+import type { TideNodeKind } from "./components/TideNodeShell";
 import { STATUS_TABLE, type StatusValue } from "./components/StatusBadge";
+
+// Log-area (D-06 second instance) clamps + chrome sizing.
+const LOG_HEIGHT_KEY = "tide.dashboard.log-height";
+const LOG_DEFAULT_PX = 240;
+const LOG_MIN_PX = 120;
+const LOG_BAR_PX = 36; // slim collapse/expand control bar height
 
 /**
  * Top-level dashboard component (plan 04-13 + plan 04-17 wiring).
@@ -182,6 +198,17 @@ export default function App() {
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [streamingTask, setStreamingTask] = useState<string | null>(null);
+  // Plan 37-08 (D-05/D-09): the Planning-DAG node whose detail panel is open
+  // (project → settings, milestone/phase → artifacts, plan → artifacts +
+  // preserved execution-pane swap). Distinct from selectedPlan/selectedTask so
+  // the existing plan/task flows are untouched.
+  const [selectedNode, setSelectedNode] = useState<{
+    kind: PlanningNodeKind;
+    name: string;
+  } | null>(null);
+  // Plan 37-08: full project detail (milestone/phase/plan lifecycle strings)
+  // used to derive a node's gate-parked state for ArtifactViewer + ApproveStrip.
+  const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
   // Plan 26-04 (D-07): global execution DAG pane state.
   const [showGlobalDAG, setShowGlobalDAG] = useState(false);
   const [globalExecutionDAG, setGlobalExecutionDAG] =
@@ -194,6 +221,27 @@ export default function App() {
   // Starts "connecting" so the header pill shows activity before the first
   // project resolves.
   const [connState, setConnState] = useState<SSEState>("connecting");
+
+  // Plan 37-08 (D-06 second instance): drag-to-resize + collapsible log area.
+  // The 70%-of-viewport ceiling is recomputed at drag time (window resize),
+  // mirroring NodeDetailPanel's width clamp — not frozen at mount.
+  const [maxLogH, setMaxLogH] = useState<number>(() =>
+    Math.round((typeof window !== "undefined" ? window.innerHeight : 800) * 0.7),
+  );
+  useEffect(() => {
+    const onResize = () => setMaxLogH(Math.round(window.innerHeight * 0.7));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const [logHeight, setLogHeight, commitLogHeight] = usePersistedSize(
+    LOG_HEIGHT_KEY,
+    LOG_DEFAULT_PX,
+    LOG_MIN_PX,
+    maxLogH,
+  );
+  // Collapse ≠ close: the collapsed panel keeps PodLogStreamer mounted so the
+  // SSE stream stays alive; only the close button (onCloseLogStream) unmounts.
+  const [logCollapsed, setLogCollapsed] = useState(false);
 
   // Plan 04-17 hook wiring (replaces the pre-04-17 placeholder defaults).
   const {
@@ -302,7 +350,32 @@ export default function App() {
     return () => window.removeEventListener("hashchange", apply);
   }, []);
 
-  // PlanNode click → swap right pane + update URL hash (deep-link).
+  // Plan 37-08: fetch the full project detail so a milestone/phase/plan node's
+  // lifecycle string is available to derive gate-parked state. Mirrors the
+  // globalExecutionDAG fetch pattern; PlanningDAGView fetches the same payload
+  // for the graph, but the App needs it locally to route clicks without a
+  // per-kind provider tree (the click callback is (kind, name) only).
+  useEffect(() => {
+    if (!selectedProject) {
+      setProjectDetail(null);
+      return;
+    }
+    let cancelled = false;
+    fetchProject(selectedProject, selectedNamespace ?? undefined)
+      .then((d) => {
+        if (!cancelled) setProjectDetail(d);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProject, selectedNamespace]);
+
+  // PlanNode click → swap right pane + update URL hash (deep-link). Used by
+  // RunningWavesView (wave-card navigation) and as PlanningDAGView's fallback;
+  // behavior unchanged from pre-37-08 (does NOT open the artifact panel).
   const onPlanClick = useCallback((name: string) => {
     setSelectedPlan(name);
     window.location.hash = `#/plan/${encodeURIComponent(name)}`;
@@ -310,6 +383,27 @@ export default function App() {
 
   const onTaskClick = useCallback((name: string) => {
     setSelectedTask(name);
+  }, []);
+
+  // Plan 37-08: kind-aware Planning-DAG click routing. Project/milestone/phase
+  // open the NodeDetailPanel; plan additionally preserves the existing
+  // execution-pane swap + #/plan/<name> deep link.
+  const onNodeClick = useCallback((kind: TideNodeKind, name: string) => {
+    if (kind === "task") {
+      // Defensive: the Planning DAG has no task nodes, but keep task routing
+      // consistent with the Execution DAGs if ever reached.
+      setSelectedTask(name);
+      return;
+    }
+    setSelectedNode({ kind, name });
+    if (kind === "plan") {
+      setSelectedPlan(name);
+      window.location.hash = `#/plan/${encodeURIComponent(name)}`;
+    }
+  }, []);
+
+  const onCloseNodePanel = useCallback(() => {
+    setSelectedNode(null);
   }, []);
 
   const onCloseDrawer = useCallback(() => {
@@ -374,6 +468,7 @@ export default function App() {
             <PlanningDAGView
               projectName={selectedProject ?? ""}
               onPlanClick={onPlanClick}
+              onNodeClick={onNodeClick}
               onConnectionStateChange={setConnState}
             />
           </div>
@@ -509,6 +604,56 @@ export default function App() {
     );
   }
 
+  // Plan 37-08: build the NodeDetailPanel content for the selected node.
+  //   project           → ProjectSettingsPanel (status-strip props from the
+  //                       already-fetched project summary; no refetch)
+  //   milestone / phase / plan → ArtifactViewer (+ ApproveStrip when the node
+  //                       is gate-parked / AwaitingApproval — D-08)
+  // Plan nodes ALSO keep the execution-pane swap (handled in onNodeClick); the
+  // artifacts render in this shared panel — the uniform artifact home across
+  // all kinds — while the execution DAG remains in the right pane underneath.
+  let nodePanelContent: React.ReactNode = null;
+  if (selectedNode) {
+    if (selectedNode.kind === "project") {
+      const summary = projects.find((p) => p.name === selectedNode.name) ?? null;
+      nodePanelContent = (
+        <ProjectSettingsPanel
+          projectName={selectedNode.name}
+          namespace={selectedNamespace ?? undefined}
+          statusPhase={summary?.phase ?? ""}
+          budgetSpentCents={summary?.budget.currentSpend ?? 0}
+          budgetCapCents={summary?.budget.capCents ?? 0}
+          conditions={summary?.blockingConditions ?? []}
+        />
+      );
+    } else {
+      // Derive the node's lifecycle string from the fetched project detail so
+      // gate-parked review (materializing state + ApproveStrip) is accurate.
+      const refs =
+        selectedNode.kind === "milestone"
+          ? projectDetail?.milestones
+          : selectedNode.kind === "phase"
+            ? projectDetail?.phases
+            : projectDetail?.plans;
+      const nodeStatus = refs?.find((r) => r.name === selectedNode.name)?.phase;
+      const gateParked = nodeStatus === "AwaitingApproval";
+      nodePanelContent = (
+        <>
+          <div className="min-h-0 flex-1">
+            <ArtifactViewer
+              kind={selectedNode.kind}
+              name={selectedNode.name}
+              project={selectedProject ?? ""}
+              namespace={selectedNamespace ?? undefined}
+              gateParked={gateParked}
+            />
+          </div>
+          {gateParked && <ApproveStrip projectName={selectedProject ?? ""} />}
+        </>
+      );
+    }
+  }
+
   return (
     <ToastProvider>
       <AppShell
@@ -529,16 +674,82 @@ export default function App() {
           onClose={onCloseDrawer}
           onOpenLogStream={onOpenLogStream}
         />
+        {selectedNode && (
+          <NodeDetailPanel
+            open
+            kind={selectedNode.kind}
+            name={selectedNode.name}
+            onClose={onCloseNodePanel}
+          >
+            {nodePanelContent}
+          </NodeDetailPanel>
+        )}
         {streamingTask !== null && (
           <div
             data-testid="streaming-task-panel"
             className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-border-subtle)]"
-            style={{ height: "240px", background: "var(--color-surface-raised)" }}
+            style={{
+              height: `${logCollapsed ? LOG_BAR_PX : logHeight}px`,
+              background: "var(--color-surface-raised)",
+            }}
           >
-            <PodLogStreamer
-              taskName={streamingTask}
-              onClose={onCloseLogStream}
-            />
+            {/* Top-edge drag-to-resize (D-06 second instance) — hidden while
+                collapsed. Persisted to tide.dashboard.log-height on release. */}
+            {!logCollapsed && (
+              <div className="absolute inset-x-0 top-0 z-10">
+                <ResizeHandle
+                  orientation="horizontal"
+                  value={logHeight}
+                  min={LOG_MIN_PX}
+                  max={maxLogH}
+                  onChange={setLogHeight}
+                  onCommit={commitLogHeight}
+                  label="Resize log area"
+                />
+              </div>
+            )}
+            <div className="flex h-full w-full flex-col">
+              {/* Slim control bar: collapse ⇄ expand. Collapse keeps the stream
+                  mounted (≠ close); the PodLogStreamer close button unmounts. */}
+              <div
+                className="flex shrink-0 items-center border-b border-[var(--color-border-subtle)] px-3"
+                style={{ height: `${LOG_BAR_PX}px` }}
+              >
+                <button
+                  type="button"
+                  data-testid="log-collapse-toggle"
+                  onClick={() => setLogCollapsed((c) => !c)}
+                  aria-label={
+                    logCollapsed ? "Expand log stream" : "Collapse log stream"
+                  }
+                  aria-expanded={!logCollapsed}
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-overlay)]"
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {logCollapsed ? (
+                    <ChevronUp size={14} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={14} aria-hidden="true" />
+                  )}
+                  {logCollapsed ? "Log stream" : "Collapse"}
+                </button>
+              </div>
+              {/* PodLogStreamer stays mounted while collapsed (hidden) so the
+                  SSE stream survives collapse/expand. */}
+              <div
+                className="min-h-0 flex-1"
+                style={{ display: logCollapsed ? "none" : "block" }}
+              >
+                <PodLogStreamer
+                  taskName={streamingTask}
+                  onClose={onCloseLogStream}
+                />
+              </div>
+            </div>
           </div>
         )}
       </AppShell>
