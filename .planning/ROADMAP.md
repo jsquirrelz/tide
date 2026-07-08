@@ -153,12 +153,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   3. `status.git.baseSHA` shows the resolved base SHA on a running Project.
   4. The new spec/status fields exist in both API versions, survive v1alpha1⇄v1alpha2 conversion round-trip, and survive a `tide-crds` chart upgrade without silent pruning — locked by conversion and CRD upgrade-path tests.
 
-**Plans**: 4/4 plans complete
-
-- [x] 35-01-PLAN.md
-- [x] 35-02-PLAN.md
-- [x] 35-03-PLAN.md
-- [x] 35-04-PLAN.md
+**Plans**: TBD
 
 ### Phase 36: Signed Commits + Bot Identity
 
@@ -173,7 +168,12 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   2. An unconfigured install commits as `TIDE Agent <tide-agent@tideproject.k8s>` at all three sites (one consistent compiled-in default; the `TIDE_BOT_*` env names are gone).
   3. The new `spec.git.agentName`/`agentEmail` CRD fields ride the same chart version bump as Phase 35's `baseRef` (FIXED-contract batching).
 
-**Plans**: TBD
+**Plans**: 0/4 plans executed
+
+- [x] 36-01-PLAN.md
+- [ ] 36-02-PLAN.md
+- [ ] 36-03-PLAN.md
+- [ ] 36-04-PLAN.md
 
 ### Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
 
@@ -222,7 +222,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
-| 35. Git Base Ref | v1.0.7 | 4/4 | Complete   | 2026-07-07 |
-| 36. Signed Commits + Bot Identity | v1.0.7 | 0/TBD | Not started | - |
+| 35. Git Base Ref | v1.0.7 | 0/TBD | Not started | - |
+| 36. Signed Commits + Bot Identity | v1.0.7 | 0/4 | Planned    |  |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |

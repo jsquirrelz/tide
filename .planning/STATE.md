@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-current_phase: 35
-status: completed
+current_phase: 34
+current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
+status: planning
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-07T05:03:37.298Z"
-last_activity: 2026-07-07
-last_activity_desc: Phase 35 marked complete
+last_updated: "2026-07-08T05:30:33.104Z"
+last_activity: 2026-07-03
+last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 0
   total_plans: 31
-  completed_plans: 10
-  percent: 32
-current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 35 — COMPLETE
-Plan: 35-01..35-04 executed (BASE-01/02/03 met; see 35-0N-SUMMARY.md files). On worktree branch claude/git-base-ref, pending merge.
-Status: Phase 35 complete
-Last activity: 2026-07-07 — Phase 35 marked complete
+Phase: 34 of 34–39 (Run Integrity — Integration-Miss Gate + lastPushedSHA)
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-07-03 — v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -48,9 +48,9 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Status |
 |-------|-------|--------|
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | 6/6 | Executed (PR pending review; kind-suite RED/GREEN evidence pending CI — see Blockers) |
-| 35. Git Base Ref | 4/4 | Complete — spec.git.baseRef end-to-end: CRD schema both versions (35-01), pkg/git resolution chain + clone envelope (35-02), controller classification + read-before-flip baseSHA stamp (35-03), kind Layer B happy-path e2e + operator docs (35-04). BASE-01/02/03 met; chart-version bump batched with Phase 36 |
-| 36. Signed Commits + Bot Identity | TBD | Not started |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
+| 35. Git Base Ref | TBD | Not started |
+| 36. Signed Commits + Bot Identity | 1/4 | In progress |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
 | 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
 
@@ -88,7 +88,6 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - GPG signing is DESCOPED from v1.0.7 (2026-07-03, Phase 36 discussion) — SIGN-02/03/04 moved to REQUIREMENTS.md Future Requirements; Phase 36 delivers agent identity (SIGN-01) only. The gpg-shim spike and key-exposure analysis are preserved in `36-CONTEXT.md` `<deferred>`.
 - Artifact ConfigMaps are a size-capped display cache (owner-ref'd, ~512 KiB, truncation markers); PVC/git remain source of truth. The manager cannot mount project PVCs.
 - Dashboard stays read-only — no reader pods, no mutation surfaces.
-- [Phase ?]: Phase 35 baseRef ships Pattern charset + MaxLength=250, no default (P10), no XValidation (D-08); CRD chart version NOT bumped (batches with Phase 36)
 
 ### Roadmap Evolution
 
@@ -109,7 +108,6 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
 - **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
-- **Phase 34 kind-suite (INTEG-05) not yet run:** `test/integration/kind/integration_miss_test.go` was authored and compiles (`go vet`/`go build` green) but the executing sandbox has no Docker/kind, so the RED-before-fix and GREEN-after-fix evidence the plans call for was not captured this session. All unit + envtest (Layer A) coverage is green (`make test`, `make test-int-fast`). Run `make test-int` (or trigger `nightly-integration.yml` via workflow_dispatch) with kind access to close this out before treating Phase 34 as fully verified.
 
 ## Deferred Items
 
@@ -125,11 +123,10 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-07T04:49:34.620Z
-Stopped at: Phase 38 context gathered
-Resume file: .planning/phases/38-small-independents-pricing-accuracy-promptfile-telemetry-nud/38-CONTEXT.md
+Last session: 2026-07-08T05:30Z
+Stopped at: Completed 36-01-PLAN.md (agent-identity source + all three commit sites)
+Resume file: None
 
 ## Operator Next Steps
 
-- Phase 34 executed (this session) — review/merge the draft PR, then run the kind Layer B suite (`make test-int` or `nightly-integration.yml`) to close out INTEG-05's RED/GREEN evidence before considering Phase 34 fully verified.
-- Plan the next phase: `/gsd-plan-phase 35` (or 37/38 — order-independent per Roadmap Evolution)
+- Plan the first phase: `/gsd-plan-phase 34`
