@@ -254,6 +254,74 @@ describe("useTaskLog (Test 2)", () => {
   });
 });
 
+// Plan 37-01 Task 1 — named terminal-event support on the task-log stream.
+// The backend (cmd/dashboard/api/logs_sse.go) emits NAMED terminal frames
+// (`pod-gone`, `error`, `idle-timeout`) then closes the stream. Before this
+// plan the hook registered none of them, so a pod-gone frame silently fell
+// through and EventSource auto-reconnected forever against a GC'd pod
+// (DASH-04). These tests pin the terminal state machine + reconnect
+// suppression.
+describe("useTaskLog terminal events (Plan 37-01 Task 1)", () => {
+  it("Test 1: a pod-gone frame sets state 'pod-gone' AND suppresses reconnect", () => {
+    const { result } = renderHook(() => useTaskLog("t-pod-gone"));
+    const es = FakeEventSource.instances[0];
+    act(() => es._emitOpen());
+    expect(result.current.state).toBe("connected");
+
+    act(() => es._emitNamed("pod-gone", { data: "{}" }));
+    expect(result.current.state).toBe("pod-gone");
+
+    // Server closes the stream after the terminal frame — the browser fires
+    // a transport error. Reconnect MUST NOT fire: no new EventSource, ever.
+    const callsAfterTerminal = FakeEventSource.constructorCalls.length;
+    act(() => es._emitError());
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(FakeEventSource.constructorCalls.length).toBe(callsAfterTerminal);
+    expect(result.current.state).toBe("pod-gone");
+  });
+
+  it("Test 2: an error frame sets 'stream-error'; reconnect() reopens + resets to connecting", () => {
+    const { result } = renderHook(() => useTaskLog("t-err"));
+    const es = FakeEventSource.instances[0];
+    act(() => es._emitOpen());
+
+    act(() => es._emitNamed("error", { data: '{"error":"boom"}' }));
+    expect(result.current.state).toBe("stream-error");
+
+    // No AUTOMATIC reconnect after a backend error frame.
+    const callsAfterError = FakeEventSource.constructorCalls.length;
+    act(() => es._emitError());
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(FakeEventSource.constructorCalls.length).toBe(callsAfterError);
+
+    // Manual reconnect() constructs a fresh EventSource + resets state.
+    act(() => result.current.reconnect());
+    expect(FakeEventSource.constructorCalls.length).toBe(callsAfterError + 1);
+    expect(result.current.state).toBe("connecting");
+  });
+
+  it("Test 3: an idle-timeout frame maps to the idle-closed state (regression guard)", () => {
+    const { result } = renderHook(() => useTaskLog("t-idle"));
+    const es = FakeEventSource.instances[0];
+    act(() => es._emitOpen());
+    act(() => es._emitNamed("idle-timeout", { data: "{}" }));
+    expect(result.current.state).toBe("idle-closed");
+  });
+
+  it("Test 4: a transport error with no prior terminal frame keeps auto-backoff + 'reconnecting'", () => {
+    const { result } = renderHook(() => useTaskLog("t-recon"));
+    const first = FakeEventSource.instances[0];
+    act(() => first._emitOpen());
+
+    act(() => first._emitError());
+    expect(result.current.state).toBe("reconnecting");
+
+    // Existing exponential-backoff loop still re-instantiates the stream.
+    act(() => vi.advanceTimersByTime(2000));
+    expect(FakeEventSource.constructorCalls.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe("Last-Event-ID reconnect (Test 3)", () => {
   it("re-instantiates EventSource on error after backoff (browser-native Last-Event-ID)", () => {
     const { unmount } = renderHook(() =>
