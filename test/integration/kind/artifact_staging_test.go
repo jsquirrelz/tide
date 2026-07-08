@@ -164,17 +164,31 @@ data:
 		}, 12*time.Minute, 5*time.Second).Should(Succeed(),
 			"stub Project must reach Complete within 12 minutes (stub + http:// transport)")
 
-		// Pitfall 2 guard: artifact pushes must NOT interfere with the boundary
-		// --force-with-lease machinery. Read the terminal push state off the CR.
+		// The run branch is stamped on Status well before Complete; read it off the
+		// Complete snapshot.
 		runBranch := completed.Status.Git.BranchName
 		Expect(runBranch).To(HavePrefix("tide/run-"),
 			"Project must carry a tide/run-<name>-<unix> run branch")
-		Expect(completed.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
-			"no push must have been rejected by --force-with-lease (Pitfall 2: artifact/boundary push must not interfere)")
-		Expect(completed.Status.Git.LeaseFailureCount).To(BeNumerically("==", int32(0)),
-			"LeaseFailureCount must be 0 — no lease-rejected pushes across artifact + boundary staging")
-		Expect(completed.Status.Git.LastPushedSHA).NotTo(BeEmpty(),
-			"lastPushedSHA must have advanced — the boundary-push machinery landed at least one push")
+
+		// Pitfall 2 guard: artifact pushes must NOT interfere with the boundary
+		// --force-with-lease machinery. The boundary push lands ASYNCHRONOUSLY
+		// AFTER Complete — #13b makes Complete the control-plane succession roll-up,
+		// NOT gated on the push outcome; reconcileBoundaryPush runs the bounded
+		// retry state machine post-Complete and only then advances LastPushedSHA
+		// (from the push-result envelope headSHA). So poll the LIVE CR until the
+		// push lands rather than asserting on the stale Complete snapshot.
+		By("Polling the Project CR until the boundary push lands and advances LastPushedSHA")
+		Eventually(func(g Gomega) {
+			var p tideprojectv1alpha2.Project
+			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: artifactStagingNS}, &p)).To(Succeed())
+			g.Expect(p.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
+				"no push must have been rejected by --force-with-lease (Pitfall 2: artifact/boundary push must not interfere)")
+			g.Expect(p.Status.Git.LeaseFailureCount).To(BeNumerically("==", int32(0)),
+				"LeaseFailureCount must be 0 — no lease-rejected pushes across artifact + boundary staging")
+			g.Expect(p.Status.Git.LastPushedSHA).NotTo(BeEmpty(),
+				"lastPushedSHA must have advanced — the boundary-push machinery landed at least one push")
+		}, 5*time.Minute, 5*time.Second).Should(Succeed(),
+			"the boundary push must land and advance Status.Git.LastPushedSHA after Complete")
 
 		pod := gitHTTPServerPod(artifactStagingNS)
 		GinkgoWriter.Printf("artifact-staging-test: git-http-server pod=%s, run branch=%s\n", pod, runBranch)

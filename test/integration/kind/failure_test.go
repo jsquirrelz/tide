@@ -146,6 +146,14 @@ metadata:
 	ensureSigningKeySecret(ns)
 	// Phase 09 plan 09-06: tide-reporter SA + Role + RoleBinding for the reader Job.
 	ensureReporterSARBAC(ns)
+	// Phase 3 plan 03-09: tide-push SA + Role + RoleBinding for the clone/push Jobs.
+	// Both buildCloneJob and buildPushJob set serviceAccountName: tide-push; without
+	// this SA the Job controller refuses to create the pod ("serviceaccount tide-push
+	// not found") and NO clone/push ever runs — the run branch never lands on the
+	// remote and Status.Git.LastPushedSHA never advances. The chart's push-rbac.yaml
+	// only templates this SA into .Release.Namespace (no projectNamespaces fan-out,
+	// unlike reporter-rbac.yaml), so per-test namespaces need the manual equivalent.
+	ensurePushSARBAC(ns)
 	// Cascade-11: pre-bind WaitForFirstConsumer PVC for Pod-less fixtures (push-lease).
 	pvcPrewarmPod(ns)
 }

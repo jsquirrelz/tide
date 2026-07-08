@@ -177,6 +177,42 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
 	}
 
+	// fakePushPodSuccess attaches a terminationMessage envelope for a SUCCESSFUL
+	// push (exit 0, empty reason) carrying the landed run-branch headSHA — the
+	// value the success arm reads to advance Status.Git.LastPushedSHA.
+	fakePushPodSuccess := func(jobName, headSHA string) {
+		env := pushResultEnvelope{
+			APIVersion: "tideproject.k8s/v1alpha1",
+			Kind:       "PushResult",
+			HeadSHA:    headSHA,
+			ExitCode:   0,
+			Reason:     "",
+		}
+		raw, err := json.Marshal(env)
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      jobName + "-pod",
+				Namespace: "default",
+				Labels:    map[string]string{"job-name": jobName},
+			},
+			Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		sp := client.MergeFrom(pod.DeepCopy())
+		pod.Status.Phase = corev1.PodSucceeded
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: pushContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: 0, Reason: "Completed", Message: string(raw),
+			}},
+		}}
+		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
+	}
+
 	cleanup := func(name string) {
 		var jobs batchv1.JobList
 		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
@@ -242,10 +278,14 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		const name = "bp13b-success"
 		AfterEach(func() { cleanup(name) })
 
-		It("marks Pushed and does not create another Job", func() {
+		It("marks Pushed, advances LastPushedSHA from the envelope, and does not create another Job", func() {
+			const landedSHA = "0123456789abcdef0123456789abcdef01234567"
 			proj := makeComplete(name, 1)
 			jn := pushJobName(proj.UID)
 			makePushJob(jn, proj.Name, proj.UID)
+			// Success pod carries the landed headSHA so the success arm can
+			// advance the --force-with-lease anchor (Status.Git.LastPushedSHA).
+			fakePushPodSuccess(jn, landedSHA)
 			markJobSucceeded(jn)
 
 			r := newReconciler("tide-projects-bp13b-2")
@@ -258,6 +298,10 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushed))
 				g.Expect(got.Status.BoundaryPush.LastError).To(BeEmpty(), "retry state cleared on success")
+				// Defect B fix: the lease anchor advances to the pushed SHA so the
+				// next push carries a real --force-with-lease fence (Pitfall 13).
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal(landedSHA),
+					"LastPushedSHA must advance to the push-result envelope headSHA on success")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// No SECOND push Job was created — the deterministic name is unique,
