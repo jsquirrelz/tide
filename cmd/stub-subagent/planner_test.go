@@ -263,6 +263,69 @@ func TestPlannerTaskLeaf(t *testing.T) {
 	}
 }
 
+// TestPlannerEmitsPlanningMarkdown asserts that each planner level writes its
+// canned planning *.md into the envelope root with the deterministic body
+// plannerDoc produces, and that the leaf "task" level writes none. This is the
+// stub-fidelity guarantee the 37-02/37-06 artifact-staging pipeline depends on:
+// tide-push --stage-envelopes globs envelopes/<uid>/*.md and fails the whole
+// cumulative push loud (37-02 D-03) when a planner-completed level lacks a *.md.
+func TestPlannerEmitsPlanningMarkdown(t *testing.T) {
+	cases := []struct {
+		level, parent, wantFile string
+	}{
+		{"project", "test-project", "MILESTONES.md"},
+		{"milestone", "test-milestone", "MILESTONE.md"},
+		{"phase", "test-phase", "PHASE.md"},
+		{"plan", "test-plan", "PLAN.md"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.level, func(t *testing.T) {
+			dir := t.TempDir()
+			withWorkspaceRoot(t, dir)
+
+			inPath := makePlannerEnvelope(t, dir, tc.level, tc.parent)
+			if code := run(context.Background(), inPath, io.Discard, io.Discard); code != 0 {
+				t.Fatalf("planner/%s: want exit 0, got %d", tc.level, code)
+			}
+
+			got, err := os.ReadFile(filepath.Join(dir, tc.wantFile))
+			if err != nil {
+				t.Fatalf("planner/%s: read %s: %v", tc.level, tc.wantFile, err)
+			}
+			wantName, wantBody, ok := plannerDoc(tc.level, tc.parent)
+			if !ok || wantName != tc.wantFile {
+				t.Fatalf("planner/%s: plannerDoc returned (%q, ok=%v), want (%q, true)", tc.level, wantName, ok, tc.wantFile)
+			}
+			if string(got) != wantBody {
+				t.Errorf("planner/%s: staged %s bytes != deterministic plannerDoc body\n got: %q\nwant: %q", tc.level, tc.wantFile, got, wantBody)
+			}
+		})
+	}
+}
+
+// TestPlannerTaskLeafEmitsNoMarkdown asserts the leaf "task" level writes no
+// planning *.md — leaf executors author no planning doc, and plannerMaterialized
+// (37-06) never stages a Task envelope.
+func TestPlannerTaskLeafEmitsNoMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	withWorkspaceRoot(t, dir)
+
+	inPath := makePlannerEnvelope(t, dir, "task", "test-plan")
+	if code := run(context.Background(), inPath, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("planner/task leaf: want exit 0, got %d", code)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read envelope dir: %v", err)
+	}
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".md" {
+			t.Errorf("planner/task leaf: unexpected planning markdown %q emitted (leaf authors none)", e.Name())
+		}
+	}
+}
+
 // TestExecutorPathUnchanged asserts that the existing executor dispatch path
 // (Role="" or Dev.TestMode="success") is unaffected by any planner branch
 // added in Plan 07-03. This is a no-regression guard.
