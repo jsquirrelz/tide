@@ -13,12 +13,14 @@
  *     spec — we simply re-instantiate `new EventSource(url)` on
  *     reconnect.
  *
- *   useTaskLog(taskName, opts?): per-task pod-log stream. Built on
+ *   useTaskLog(taskName, namespace?): per-task pod-log stream. Built on
  *     useSSEStream. Maintains a 5000-line ring buffer (UI-SPEC §8
  *     "ring-buffer-capped at 5000 lines" — bounds browser memory so a
  *     runaway log stream cannot DoS the tab; T-04-D-eventsource-leak
  *     mitigation). Subscribes to the URL shape
- *     `/api/v1/tasks/{name}/log`.
+ *     `/api/v1/tasks/{name}/log[?namespace=foo]` — the namespace query
+ *     param (DASH-04) routes the backend to the right pod; omitted, the
+ *     backend defaults to "default" (cmd/dashboard/api/logs_sse.go).
  *
  *   Reconnect strategy: exponential backoff capped at 30s, schedules a
  *   re-instantiation through window.setTimeout so the test's fake
@@ -448,13 +450,21 @@ const TERMINAL_STATE_BY_EVENT: Record<string, TaskLogState> = {
 
 /**
  * useTaskLog subscribes to the per-task pod-log SSE stream
- * (`/api/v1/tasks/{name}/log`). Wraps useSSEStream and transforms each
- * incoming `MessageEvent.data` into a single text line. Ring-buffer
- * caps at 5000 lines (oldest dropped) so a runaway log cannot exhaust
- * the tab's heap.
+ * (`/api/v1/tasks/{name}/log[?namespace=foo]`). Wraps useSSEStream and
+ * transforms each incoming `MessageEvent.data` into a single text line.
+ * Ring-buffer caps at 5000 lines (oldest dropped) so a runaway log cannot
+ * exhaust the tab's heap.
+ *
+ * DASH-04: `namespace` threads the selected project's namespace into the
+ * log URL so a pod outside "default" resolves. Mirrors api.ts's
+ * withNamespace idiom; omitting it keeps the back-compat default-namespace
+ * URL shape.
  */
-export function useTaskLog(taskName: string): TaskLogResult {
-  const url = `/api/v1/tasks/${encodeURIComponent(taskName)}/log`;
+export function useTaskLog(taskName: string, namespace?: string): TaskLogResult {
+  const base = `/api/v1/tasks/${encodeURIComponent(taskName)}/log`;
+  const url = namespace
+    ? `${base}?namespace=${encodeURIComponent(namespace)}`
+    : base;
 
   // CR-05 fix: derive lines from a per-event callback instead of polling
   // stream.events. The stream-level buffer is capped at MAX_SSE_EVENTS, so
@@ -491,12 +501,13 @@ export function useTaskLog(taskName: string): TaskLogResult {
     },
   });
 
-  // Reset the buffer + terminal state when the task name (and therefore url)
-  // changes.
+  // Reset the buffer + terminal state whenever the stream url changes —
+  // either the task name OR the namespace (DASH-04) shifts the target pod,
+  // so stale lines from the prior pod must not bleed through.
   useEffect(() => {
     setLines([]);
     setTerminalState(null);
-  }, [taskName]);
+  }, [url]);
 
   const streamReconnect = stream.reconnect;
   const reconnect = useCallback(() => {

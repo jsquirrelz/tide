@@ -254,6 +254,53 @@ describe("useTaskLog (Test 2)", () => {
   });
 });
 
+// DASH-04 (CR-01): the log stream must carry the Task's namespace so a pod
+// outside "default" (tide-sample-medium/small) resolves. Without the query
+// param the backend defaults to "default", NotFounds a live pod, and emits
+// pod-gone. These pin the namespace threading + back-compat default shape.
+describe("useTaskLog namespace threading (CR-01)", () => {
+  it("appends ?namespace= to the log URL when a namespace is provided", () => {
+    renderHook(() => useTaskLog("t-007", "tide-sample-medium"));
+
+    expect(FakeEventSource.constructorCalls[0].url).toBe(
+      "/api/v1/tasks/t-007/log?namespace=tide-sample-medium",
+    );
+  });
+
+  it("URL-encodes both the task name and the namespace", () => {
+    renderHook(() => useTaskLog("a b", "ns/x"));
+
+    expect(FakeEventSource.constructorCalls[0].url).toBe(
+      "/api/v1/tasks/a%20b/log?namespace=ns%2Fx",
+    );
+  });
+
+  it("omits the query param (back-compat) when no namespace is provided", () => {
+    renderHook(() => useTaskLog("t-007"));
+
+    expect(FakeEventSource.constructorCalls[0].url).toBe(
+      "/api/v1/tasks/t-007/log",
+    );
+  });
+
+  it("reopens against the new namespace when it changes", () => {
+    const { rerender } = renderHook(
+      ({ ns }: { ns?: string }) => useTaskLog("t-007", ns),
+      { initialProps: { ns: "default" as string | undefined } },
+    );
+
+    expect(FakeEventSource.constructorCalls[0].url).toBe(
+      "/api/v1/tasks/t-007/log?namespace=default",
+    );
+
+    act(() => rerender({ ns: "tide-sample-small" }));
+
+    expect(FakeEventSource.constructorCalls[1].url).toBe(
+      "/api/v1/tasks/t-007/log?namespace=tide-sample-small",
+    );
+  });
+});
+
 // Plan 37-01 Task 1 — named terminal-event support on the task-log stream.
 // The backend (cmd/dashboard/api/logs_sse.go) emits NAMED terminal frames
 // (`pod-gone`, `error`, `idle-timeout`) then closes the stream. Before this

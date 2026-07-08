@@ -746,6 +746,7 @@ export default function App() {
               >
                 <PodLogStreamer
                   taskName={streamingTask}
+                  namespace={selectedNamespace ?? undefined}
                   onClose={onCloseLogStream}
                 />
               </div>

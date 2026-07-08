@@ -70,6 +70,27 @@ describe("PodLogStreamer (Test 1) — mount + lines rendered", () => {
     fireEvent.click(screen.getByTestId("pod-log-close"));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  // DASH-04 (CR-01): the namespace prop must reach useTaskLog so the log
+  // SSE URL targets the right pod. Without it the backend defaults to
+  // "default" and a live pod outside it shows "pod garbage-collected".
+  it("forwards the namespace prop into useTaskLog", () => {
+    setHook({ state: "connected", lines: [] });
+    render(
+      <PodLogStreamer
+        taskName="t-1"
+        namespace="tide-sample-medium"
+        onClose={() => {}}
+      />,
+    );
+    expect(mockUseTaskLog).toHaveBeenCalledWith("t-1", "tide-sample-medium");
+  });
+
+  it("calls useTaskLog with undefined namespace when the prop is omitted", () => {
+    setHook({ state: "connected", lines: [] });
+    render(<PodLogStreamer taskName="t-1" onClose={() => {}} />);
+    expect(mockUseTaskLog).toHaveBeenCalledWith("t-1", undefined);
+  });
 });
 
 describe("PodLogStreamer (Test 2) — ring-buffer cap reflected in viewport", () => {

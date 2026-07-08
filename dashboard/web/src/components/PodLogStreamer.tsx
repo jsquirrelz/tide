@@ -36,6 +36,10 @@ import { type AnsiColor, type AnsiSegment, parseAnsi } from "../lib/ansi";
 
 export type PodLogStreamerProps = {
   taskName: string;
+  // DASH-04: the selected project's namespace, threaded into the log SSE
+  // URL so pods outside "default" resolve. Optional/back-compat — omitted,
+  // useTaskLog builds the default-namespace URL.
+  namespace?: string;
   onClose: () => void;
 };
 
@@ -85,9 +89,10 @@ function segmentStyle(seg: AnsiSegment): CSSProperties {
 
 export default function PodLogStreamer({
   taskName,
+  namespace,
   onClose,
 }: PodLogStreamerProps) {
-  const { lines, state, reconnect } = useTaskLog(taskName);
+  const { lines, state, reconnect } = useTaskLog(taskName, namespace);
   const [autoScroll, setAutoScroll] = useState(true);
   const [lineWrap, setLineWrap] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
