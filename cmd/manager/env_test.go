@@ -19,6 +19,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // TestEnvOrDefault_StringEnvSet verifies the env-set path returns the env value verbatim.
@@ -142,5 +144,35 @@ func TestResolveLeaderElectionTiming_EnvOverride(t *testing.T) {
 	}
 	if retry != 5*time.Second {
 		t.Errorf("retry: got %v, want 5s", retry)
+	}
+}
+
+// TestTideHelmProviderDefaults_AgentIdentitySet verifies the chart-tier agent
+// identity env vars (TIDE_AGENT_NAME/TIDE_AGENT_EMAIL) round-trip into
+// ProviderDefaults (SIGN-01 / D-03 middle tier).
+func TestTideHelmProviderDefaults_AgentIdentitySet(t *testing.T) {
+	t.Setenv(pkggit.EnvAgentName, "Chart Agent")
+	t.Setenv(pkggit.EnvAgentEmail, "chart@example.com")
+	got := tideHelmProviderDefaults("ghcr.io/test/claude:test")
+	if got.AgentName != "Chart Agent" {
+		t.Errorf("AgentName: got %q, want %q", got.AgentName, "Chart Agent")
+	}
+	if got.AgentEmail != "chart@example.com" {
+		t.Errorf("AgentEmail: got %q, want %q", got.AgentEmail, "chart@example.com")
+	}
+}
+
+// TestTideHelmProviderDefaults_AgentIdentityUnset verifies that an unset chart
+// tier stays EMPTY — the manager must not collapse it into the compiled
+// default. Defaulting happens exactly once, in resolveAgentIdentity (D-03).
+func TestTideHelmProviderDefaults_AgentIdentityUnset(t *testing.T) {
+	t.Setenv(pkggit.EnvAgentName, "")
+	t.Setenv(pkggit.EnvAgentEmail, "")
+	got := tideHelmProviderDefaults("ghcr.io/test/claude:test")
+	if got.AgentName != "" {
+		t.Errorf("AgentName: got %q, want empty (chart tier unset, NOT defaulted)", got.AgentName)
+	}
+	if got.AgentEmail != "" {
+		t.Errorf("AgentEmail: got %q, want empty (chart tier unset, NOT defaulted)", got.AgentEmail)
 	}
 }
