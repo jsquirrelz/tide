@@ -48,7 +48,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 - [x] **DASH-01**: Clicking a Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); gate-parked nodes surface the artifact beside the approve action
 - [ ] **DASH-02**: Planning artifacts are persisted as size-capped, owner-ref'd ConfigMaps at reporter materialization time (display cache with truncation markers; PVC/git remain source of truth)
-- [ ] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
+- [x] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
 - [x] **DASH-04**: The log drawer renders explicit loading / streaming / pod-gone states (never silently empty)
 
 ### Telemetry Setup (TELEM)
@@ -115,7 +115,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SIGN-01 | Phase 36 | Complete |
 | DASH-01 | Phase 37 | Complete |
 | DASH-02 | Phase 37 | Pending |
-| DASH-03 | Phase 37 | Pending |
+| DASH-03 | Phase 37 | Complete |
 | DASH-04 | Phase 37 | Complete |
 | COST-01 | Phase 38 | Pending |
 | COST-02 | Phase 38 | Pending |
