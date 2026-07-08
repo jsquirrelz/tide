@@ -78,6 +78,14 @@ type PushOptions struct {
 	// false — they carry the same cumulative branch set but MUST push the
 	// run branch to the remote.
 	IntegrationOnly bool
+	// StageEnvelopes is the cumulative <uid>:<destPrefix> map of planner-completed
+	// levels whose planning *.md + children/*.json are staged into
+	// .tide/planning/<destPrefix>/ on the run branch (37-06 / DASH-02). Rendered as
+	// a single --stage-envelopes=<CSV> arg (parsed by cmd/tide-push, plan 37-02) and
+	// appended only when non-empty. EVERY push — boundary or artifact-triggered —
+	// carries the full cumulative map (R-05): one push writer class, no second
+	// force-with-lease anchor path.
+	StageEnvelopes []string
 
 	// AgentName / AgentEmail are the resolved committer/author identity
 	// (SIGN-01 / D-03) injected as TIDE_AGENT_NAME/TIDE_AGENT_EMAIL on the push
@@ -194,6 +202,13 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 	if opts.IntegrationOnly {
 		// D-02 per-wave integration Job: merge+verify locally, no commit/push.
 		args = append(args, "--integration-only")
+	}
+	if len(opts.StageEnvelopes) > 0 {
+		// 37-06 / DASH-02: cumulative planner-artifact staging map. cmd/tide-push
+		// (plan 37-02) parses <uid>:<destPrefix> CSV and stages each level's *.md +
+		// children/*.json into .tide/planning/<destPrefix>/. Byte-identical restages
+		// are no-ops via the clean-tree skip, so re-emitting the full map is safe.
+		args = append(args, "--stage-envelopes="+strings.Join(opts.StageEnvelopes, ","))
 	}
 
 	volumes := []corev1.Volume{

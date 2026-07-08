@@ -161,6 +161,16 @@ func triggerBoundaryPush(
 	// into the push Job env (covers integrate merge commits + boundary commit).
 	agentName, agentEmail := resolveAgentIdentity(project, helmDefaults)
 
+	// R-05 (37-06): every push — boundary or artifact-triggered — carries the full
+	// cumulative planner-artifact map so a single writer class stages all completed
+	// levels. Best-effort: a boundary push MUST still land even if the map can't be
+	// computed, so a collection error degrades to an un-staged (but committed) push.
+	stageEnvs, seErr := collectStageEnvelopes(ctx, c, project)
+	if seErr != nil {
+		logger.Error(seErr, "collectStageEnvelopes for boundary push failed (non-fatal); pushing without artifact staging", "level", level, "project", project.Name)
+		stageEnvs = nil
+	}
+
 	pushOpts := PushOptions{
 		TidePushImage:         tidePushImage,
 		Branch:                project.Status.Git.BranchName,
@@ -168,6 +178,7 @@ func triggerBoundaryPush(
 		CommitMessage:         msg,
 		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
 		IntegrateTaskBranches: branches,
+		StageEnvelopes:        stageEnvs,
 		AgentName:             agentName,
 		AgentEmail:            agentEmail,
 	}
