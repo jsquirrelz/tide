@@ -280,7 +280,20 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 			// which owns the ChildCount-gated succession (D-03 invariant).
 			return ctrl.Result{Requeue: true}, nil
 		}
-		return ctrl.Result{}, nil
+		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
+		// AwaitingApproval early-return cannot permanently swallow it (e.g. the run
+		// branch was not yet provisioned, or a push was busy, at completion time).
+		// Re-triggers are harmless: single-flight no-ops while busy, clean-tree skips
+		// empty commits once staged.
+		if ms.Spec.ProjectRef != "" {
+			var p tideprojectv1alpha2.Project
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
+				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+					logf.FromContext(ctx).Info("artifact push trigger failed at parked milestone (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
+				}
+			}
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
@@ -691,6 +704,16 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			if !alreadyApproved {
 				if !gates.CheckApprove(ms, "milestone") {
 					// No annotation and not yet approved — park.
+					// 37-06 / DASH-02 (D-01): stage the cumulative planner-artifact map
+					// BEFORE the gate-park return, so artifacts land in git before the
+					// operator approves. Placed in the park arm ONLY (not the succeed arm)
+					// so it never preempts the boundary push's D-B2 commit + task-branch
+					// integration, which share the deterministic Job name (R-05 single-
+					// flight). The Step-1a parked-arm retry re-attempts until it lands.
+					// Log-and-continue — artifact-push failure must not fail the park.
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+						logger.Info("artifact push trigger failed at milestone park (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
+					}
 					return r.patchMilestoneAwaitingApproval(ctx, ms, policy)
 				}
 				// Annotation present at the hook (operator approved before the park fired):

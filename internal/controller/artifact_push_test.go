@@ -17,6 +17,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -222,4 +223,73 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 			t.Error("empty map must not create a push Job")
 		}
 	})
+}
+
+// ---------- Task 2: parked-arm trigger + Pitfall 8 requeue ----------
+
+// parkedMilestone returns an AwaitingApproval milestone owned by the artifact
+// test project, with no approve annotation (so reconcilePlannerDispatch takes the
+// parked branch). Its own AwaitingApproval phase makes collectStageEnvelopes
+// non-empty, so the trigger has something to stage.
+func parkedMilestone() *tideprojectv1alpha2.Milestone {
+	m := milestone("m-parked", "uid-parked", "AwaitingApproval")
+	m.Spec.ProjectRef = "proj"
+	return m
+}
+
+// Task 2 (a): a parked milestone triggers the artifact push (Job carries
+// --stage-envelopes) AND requeues on the 30s cadence — the completion→park path's
+// retry arm materializes artifacts before the operator approves (D-01).
+func TestArtifactPush_ParkedMilestoneTriggersAndRequeues(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+	ms := parkedMilestone()
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, ms).Build()
+
+	r := &MilestoneReconciler{Client: c, Scheme: s, TidePushImage: "tide-push:latest"}
+	res, err := r.reconcilePlannerDispatch(context.Background(), ms)
+	if err != nil {
+		t.Fatalf("reconcilePlannerDispatch (parked): %v", err)
+	}
+	if res.RequeueAfter != 30*time.Second {
+		t.Errorf("parked milestone RequeueAfter = %v, want 30s (Pitfall 8)", res.RequeueAfter)
+	}
+
+	var job batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tide-push-proj-uid", Namespace: "default"}, &job); err != nil {
+		t.Fatalf("parked milestone must trigger the artifact push: %v", err)
+	}
+	args := strings.Join(job.Spec.Template.Spec.Containers[0].Args, " ")
+	if !strings.Contains(args, "--stage-envelopes=uid-parked:milestone/m-parked") {
+		t.Errorf("push Job args missing parked milestone envelope; got: %s", args)
+	}
+}
+
+// Task 2 (b): Pitfall 8 regression guard — with the deterministic push Job already
+// busy, the parked milestone STILL requeues on the 30s cadence (so the trigger is
+// never permanently swallowed) and the single-flight no-op leaves the Job untouched.
+func TestArtifactPush_ParkedMilestoneRequeuesWhileBusy(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := artifactTestProject()
+	ms := parkedMilestone()
+	busy := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "tide-push-proj-uid", Namespace: "default"}}
+	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, ms, busy).Build()
+
+	r := &MilestoneReconciler{Client: c, Scheme: s, TidePushImage: "tide-push:latest"}
+	res, err := r.reconcilePlannerDispatch(context.Background(), ms)
+	if err != nil {
+		t.Fatalf("reconcilePlannerDispatch (parked, busy): %v", err)
+	}
+	if res.RequeueAfter != 30*time.Second {
+		t.Errorf("parked milestone RequeueAfter = %v, want 30s even while Job busy (Pitfall 8)", res.RequeueAfter)
+	}
+
+	// Single-flight: the pre-existing busy Job is untouched (no containers written).
+	var job batchv1.Job
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "tide-push-proj-uid", Namespace: "default"}, &job); err != nil {
+		t.Fatalf("get busy job: %v", err)
+	}
+	if len(job.Spec.Template.Spec.Containers) != 0 {
+		t.Errorf("single-flight must not overwrite the in-flight Job; containers=%d", len(job.Spec.Template.Spec.Containers))
+	}
 }

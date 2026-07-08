@@ -274,7 +274,15 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 			// which owns the ChildCount-gated succession (D-03 invariant).
 			return ctrl.Result{Requeue: true}, nil
 		}
-		return ctrl.Result{}, nil
+		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
+		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
+		// harmless (single-flight no-ops while busy; clean-tree skips empty commits).
+		if project := r.resolveProject(ctx, ph); project != nil {
+			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+				logger.Info("artifact push trigger failed at parked phase (non-fatal)", "phase", ph.Name, "error", apErr.Error())
+			}
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
 	jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
@@ -614,6 +622,13 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 			}
 			if !alreadyApproved {
 				if !gates.CheckApprove(ph, "phase") {
+					// 37-06 / DASH-02 (D-01): stage the cumulative planner-artifact map
+					// BEFORE the gate-park return. Park arm ONLY (not succeed) so it never
+					// preempts the boundary push, which shares the deterministic Job name
+					// (R-05). The parked-arm retry re-attempts until it lands.
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+						logger.Info("artifact push trigger failed at phase park (non-fatal)", "phase", ph.Name, "error", apErr.Error())
+					}
 					return r.patchPhaseAwaitingApproval(ctx, ph, policy)
 				}
 				// Annotation present at the hook (approved before park): consume +

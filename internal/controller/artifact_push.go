@@ -244,23 +244,3 @@ func triggerArtifactPush(
 	tidemetrics.PushJobsTotal.WithLabelValues(project.Name, "artifact-stage").Inc()
 	return nil
 }
-
-// maybeTriggerArtifactPush is the MilestoneReconciler entry point (37-06).
-func (r *MilestoneReconciler) maybeTriggerArtifactPush(ctx context.Context, project *tideprojectv1alpha2.Project) error {
-	return triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.TidePushImage, r.HelmProviderDefaults)
-}
-
-// maybeTriggerArtifactPush is the PhaseReconciler entry point (37-06).
-func (r *PhaseReconciler) maybeTriggerArtifactPush(ctx context.Context, project *tideprojectv1alpha2.Project) error {
-	return triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.TidePushImage, r.HelmProviderDefaults)
-}
-
-// maybeTriggerArtifactPush is the PlanReconciler entry point (37-06).
-func (r *PlanReconciler) maybeTriggerArtifactPush(ctx context.Context, project *tideprojectv1alpha2.Project) error {
-	return triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.TidePushImage, r.HelmProviderDefaults)
-}
-
-// maybeTriggerArtifactPush is the ProjectReconciler entry point (37-06).
-func (r *ProjectReconciler) maybeTriggerArtifactPush(ctx context.Context, project *tideprojectv1alpha2.Project) error {
-	return triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.TidePushImage, r.HelmProviderDefaults)
-}

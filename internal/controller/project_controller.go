@@ -1791,6 +1791,14 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		}
 	}
 
+	// 37-06 / DASH-02: request an artifact-stage push carrying the cumulative
+	// planner-completed map, immediately after the reporter spawn. The Project has no
+	// approve gate (D-02 auto-proceed), so the completion-site trigger suffices — no
+	// parked-arm retry. Log-and-continue: the next boundary push self-heals on failure.
+	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+		logger.Info("artifact push trigger failed at project completion (non-fatal)", "project", project.Name, "error", apErr.Error())
+	}
+
 	// Plan 09-08 Defect C / BYPASS-03: roll up planner-level Usage exactly once per
 	// planner Job, gated by the durable PlannerRolledUpUID marker. The old
 	// isFirstCompletion signal (reporter-Job-IsNotFound) flips true again after the
