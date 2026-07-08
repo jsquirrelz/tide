@@ -148,3 +148,33 @@ func TestPlanDependsOn(t *testing.T) {
 		t.Errorf("PlanSpec missing field PhaseRef — ownership field must be retained")
 	}
 }
+
+// TestGitConfigAgentIdentity asserts SIGN-01 / D-03: GitConfig carries the
+// agentName/agentEmail identity-override fields and they round-trip. The
+// admission-time Pattern/MaxLength markers are exercised by the envtest suite;
+// this test pins the Go-type shape the resolver reads.
+func TestGitConfigAgentIdentity(t *testing.T) {
+	git := tidev1alpha2.GitConfig{
+		RepoURL:        "https://github.com/owner/repo.git",
+		CredsSecretRef: "git-creds",
+		AgentName:      "Custom Agent",
+		AgentEmail:     "custom@example.com",
+	}
+
+	// Round-trip via DeepCopy.
+	copied := git.DeepCopy()
+	if copied.AgentName != "Custom Agent" {
+		t.Errorf("AgentName = %q, want %q", copied.AgentName, "Custom Agent")
+	}
+	if copied.AgentEmail != "custom@example.com" {
+		t.Errorf("AgentEmail = %q, want %q", copied.AgentEmail, "custom@example.com")
+	}
+
+	// Assert via reflect that both fields exist on GitConfig (SIGN-01).
+	gitConfigType := reflect.TypeFor[tidev1alpha2.GitConfig]()
+	for _, field := range []string{"AgentName", "AgentEmail"} {
+		if _, ok := gitConfigType.FieldByName(field); !ok {
+			t.Errorf("GitConfig missing field %s — SIGN-01 requires the identity override", field)
+		}
+	}
+}

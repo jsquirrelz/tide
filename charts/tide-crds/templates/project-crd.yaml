@@ -131,17 +131,28 @@ spec:
                   GitConfig{} would serialize as `git: {repoURL: ""}` and trip the
                   RepoURL pattern validation on existing Phase 2 test fixtures.
                 properties:
-                  baseRef:
+                  agentEmail:
                     description: |-
-                      BaseRef optionally names the ref the run branch is created from: an
-                      existing branch name, tag name, full 40-hex commit SHA, or a fully
-                      qualified refs/... path. Absent means the remote default branch (HEAD).
-                      Resolution happens in the clone Job; an unresolvable value surfaces as
-                      CloneFailed/BaseRefUnresolvable. Edits after a successful clone are
-                      inert — the run branch is created once (see docs/project-authoring.md).
-                    maxLength: 250
-                    minLength: 1
-                    pattern: ^[A-Za-z0-9][A-Za-z0-9._+@/-]*$
+                      AgentEmail is the committer/author email paired with AgentName at all
+                      three commit sites (SIGN-01). Precedence (D-03): this field → chart
+                      agent.email → the compiled-in "tide-agent@tideproject.k8s" default.
+                      Operators should choose a real, routable address: deferred commit
+                      signing will require the committer email to match a verified
+                      machine-account email, so picking one now avoids churn. Angle brackets,
+                      whitespace, and non x@y shapes are rejected (T-36-01).
+                    maxLength: 254
+                    pattern: ^[^<>@\s]+@[^<>@\s]+$
+                    type: string
+                  agentName:
+                    description: |-
+                      AgentName is the committer/author name TIDE stamps at all three commit
+                      sites — the harness task commit, the integrate merge commit, and the
+                      tide-push boundary commit (SIGN-01). Precedence (D-03): this field →
+                      chart agent.name → the compiled-in "TIDE Agent" default. Angle brackets
+                      and newlines are rejected because they corrupt git commit headers
+                      (T-36-01).
+                    maxLength: 100
+                    pattern: ^[^<>\r\n]+$
                     type: string
                   credsSecretRef:
                     description: |-
@@ -532,11 +543,6 @@ spec:
                   lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
                   per-project tally object, NOT an aggregate schedule.
                 properties:
-                  baseSHA:
-                    description: |-
-                      BaseSHA is the commit SHA the run branch was created from, stamped on
-                      every run (annotated tags record the peeled commit). Provenance only.
-                    type: string
                   branchName:
                     description: |-
                       BranchName is the lifetime branch fixed at Project creation.
@@ -699,17 +705,28 @@ spec:
                   GitConfig{} would serialize as `git: {repoURL: ""}` and trip the
                   RepoURL pattern validation on existing Phase 2 test fixtures.
                 properties:
-                  baseRef:
+                  agentEmail:
                     description: |-
-                      BaseRef optionally names the ref the run branch is created from: an
-                      existing branch name, tag name, full 40-hex commit SHA, or a fully
-                      qualified refs/... path. Absent means the remote default branch (HEAD).
-                      Resolution happens in the clone Job; an unresolvable value surfaces as
-                      CloneFailed/BaseRefUnresolvable. Edits after a successful clone are
-                      inert — the run branch is created once (see docs/project-authoring.md).
-                    maxLength: 250
-                    minLength: 1
-                    pattern: ^[A-Za-z0-9][A-Za-z0-9._+@/-]*$
+                      AgentEmail is the committer/author email paired with AgentName at all
+                      three commit sites (SIGN-01). Precedence (D-03): this field → chart
+                      agent.email → the compiled-in "tide-agent@tideproject.k8s" default.
+                      Operators should choose a real, routable address: deferred commit
+                      signing will require the committer email to match a verified
+                      machine-account email, so picking one now avoids churn. Angle brackets,
+                      whitespace, and non x@y shapes are rejected (T-36-01).
+                    maxLength: 254
+                    pattern: ^[^<>@\s]+@[^<>@\s]+$
+                    type: string
+                  agentName:
+                    description: |-
+                      AgentName is the committer/author name TIDE stamps at all three commit
+                      sites — the harness task commit, the integrate merge commit, and the
+                      tide-push boundary commit (SIGN-01). Precedence (D-03): this field →
+                      chart agent.name → the compiled-in "TIDE Agent" default. Angle brackets
+                      and newlines are rejected because they corrupt git commit headers
+                      (T-36-01).
+                    maxLength: 100
+                    pattern: ^[^<>\r\n]+$
                     type: string
                   credsSecretRef:
                     description: |-
@@ -1150,11 +1167,6 @@ spec:
                   lease failure counter (Phase 3 D-B6). PERSIST-02 / Pitfall 4: this is a
                   per-project tally object, NOT an aggregate schedule.
                 properties:
-                  baseSHA:
-                    description: |-
-                      BaseSHA is the commit SHA the run branch was created from, stamped on
-                      every run (annotated tags record the peeled commit). Provenance only.
-                    type: string
                   branchName:
                     description: |-
                       BranchName is the lifetime branch fixed at Project creation.
