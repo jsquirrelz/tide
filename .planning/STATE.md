@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-current_phase: 34
-current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
+current_phase: 37
+current_phase_name: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
 status: planning
-stopped_at: Phase 38 context gathered
-last_updated: "2026-07-08T06:12:14.116Z"
-last_activity: 2026-07-03
-last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
+stopped_at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
+last_updated: "2026-07-08T06:35:36.221Z"
+last_activity: 2026-07-08
+last_activity_desc: Phase 36 complete, transitioned to Phase 37
 progress:
   total_phases: 5
   completed_phases: 1
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 34 of 34–39 (Run Integrity — Integration-Miss Gate + lastPushedSHA)
-Plan: — (not yet planned)
+Phase: 37 of 34 (Dashboard Surfaces — Artifact View, Project View, Log-Drawer States)
+Plan: Not started
 Status: Ready to plan
-Last activity: 2026-07-03 — v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
+Last activity: 2026-07-08 — Phase 36 complete, transitioned to Phase 37
 
 Progress: [░░░░░░░░░░] 0%
 

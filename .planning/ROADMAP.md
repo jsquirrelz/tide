@@ -22,7 +22,7 @@
 
 - [ ] **Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA** - Every Succeeded task's worktree branch is provably merged into the run branch (final wave included), merges are serialized and idempotent, boundary push gates on git-verified completeness, and `status.git.lastPushedSHA` arms the force-with-lease fence
 - [ ] **Phase 35: Git Base Ref** - `spec.git.baseRef` bases a run on any branch/tag/SHA, unresolvable refs fail fast with a typed condition, and the resolved SHA is stamped in `status.git.baseSHA` across both API versions
-- [ ] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7
+- [x] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7 (completed 2026-07-08)
 - [ ] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
 - [ ] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed
 
@@ -223,6 +223,6 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
 | 35. Git Base Ref | v1.0.7 | 0/TBD | Not started | - |
-| 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete   | 2026-07-08 |
+| 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |
