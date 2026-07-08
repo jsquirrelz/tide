@@ -2,12 +2,15 @@
 created: 2026-07-03T21:00:00.000Z
 title: GPG-sign TIDE Bot commits so git hosts show them as Verified
 area: git
-resolves_phase: 36
 files:
   - internal/harness/commit.go:58
   - pkg/git/integrate.go:56
   - cmd/tide-push/main.go:134
 ---
+
+> **Update 2026-07-08 (Phase 36 closeout):** The identity-configurability portion of this todo landed in Phase 36 as **SIGN-01** (complete): `TIDE_AGENT_NAME`/`TIDE_AGENT_EMAIL` are uniform across all three commit sites, `cmd/tide-push` no longer hardcodes the identity, and the bot→agent rename shipped (compiled default `TIDE Agent <tide-agent@tideproject.k8s>`). The **GPG-signing / Verified-badge core remains deferred** out of v1.0.7 and is formally tracked as **SIGN-02/03/04** in `.planning/REQUIREMENTS.md` (Future Requirements); full analysis lives in `36-CONTEXT.md`. `resolves_phase: 36` was removed so an auto-close no longer misfiles this as done. Consider deleting this todo as redundant with SIGN-02/03/04, or keep it as the actionable scratch version.
+>
+> The file/line references and `TIDE_BOT_*` / `tide-bot@` names below predate Phase 36 and are now stale.
 
 ## Problem
 
