@@ -75,10 +75,13 @@ isolation (`*int64` → 100) and `go vet` passes clean on all changed packages.
 One blocking correctness defect: the pod-log stream does not forward the selected
 project's namespace, so the log drawer is broken for every project outside the
 `default` namespace — including the sample projects the product ships.
+**→ RESOLVED during the execute-phase code-review gate** (commit `3e90d6c` fix +
+`b92820d` embed-dist rebuild; freshness gate re-verified PASS, vitest 266 green).
+WR-01, WR-02, and IN-01 remain open as advisory findings for human judgment.
 
 ## Critical Issues
 
-### CR-01: Pod-log stream is namespace-blind — falsely reports "pod garbage-collected" for live pods in non-default namespaces
+### CR-01: Pod-log stream is namespace-blind — falsely reports "pod garbage-collected" for live pods in non-default namespaces  — ✅ RESOLVED (commits 3e90d6c + b92820d)
 
 **File:** `dashboard/web/src/lib/sse.ts:456-457`, `dashboard/web/src/components/PodLogStreamer.tsx:747-750` (App.tsx mount), `cmd/dashboard/api/logs_sse.go:167-170`
 
