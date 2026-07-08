@@ -816,6 +816,113 @@ func createTaskBranchWithFile(t *testing.T, bareRepoPath, branchName, fileName, 
 	}
 }
 
+// ---------- Task 1 (37-02): parseStageEnvelopes ----------
+
+// TestParseStageEnvelopes covers the --stage-envelopes CSV parser: happy-path
+// pairing + whitespace trimming + empty input (Test 1), and the full fail-closed
+// rejection set including traversal (Test 2). Validation must be pure (no I/O) so
+// bad args are rejected before any git operation.
+func TestParseStageEnvelopes(t *testing.T) {
+	t.Run("happy path pairs and trims", func(t *testing.T) {
+		got, err := parseStageEnvelopes("abc-123:milestone/m1, def-456 : phase/p2")
+		if err != nil {
+			t.Fatalf("parseStageEnvelopes: unexpected error: %v", err)
+		}
+		want := []EnvelopeStage{
+			{UID: "abc-123", DestPrefix: "milestone/m1"},
+			{UID: "def-456", DestPrefix: "phase/p2"},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("len = %d, want %d (%+v)", len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("pair[%d] = %+v, want %+v", i, got[i], want[i])
+			}
+		}
+	})
+
+	t.Run("empty input returns nil no error", func(t *testing.T) {
+		got, err := parseStageEnvelopes("")
+		if err != nil {
+			t.Fatalf("empty input error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("empty input = %+v, want nil", got)
+		}
+		got, err = parseStageEnvelopes("   ")
+		if err != nil {
+			t.Fatalf("whitespace input error: %v", err)
+		}
+		if got != nil {
+			t.Errorf("whitespace input = %+v, want nil", got)
+		}
+	})
+
+	rejects := []struct {
+		name string
+		in   string
+	}{
+		{"no colon", "abc-123"},
+		{"empty uid", ":milestone/m1"},
+		{"empty destPrefix", "abc-123:"},
+		{"destPrefix traversal dotdot", "abc-123:../escape"},
+		{"destPrefix nested traversal", "abc-123:milestone/../../etc"},
+		{"destPrefix absolute", "abc-123:/abs"},
+		{"destPrefix backslash", "abc-123:milestone\\m1"},
+		{"destPrefix leading dot", "abc-123:.hidden"},
+		{"destPrefix leading slash pattern", "abc-123:/milestone/m1"},
+		{"destPrefix trailing slash", "abc-123:milestone/"},
+	}
+	for _, tc := range rejects {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			if _, err := parseStageEnvelopes(tc.in); err == nil {
+				t.Errorf("parseStageEnvelopes(%q) = nil error, want rejection", tc.in)
+			}
+		})
+	}
+}
+
+// TestStageEnvelopesInvalidValueFailsLoud proves a rejected --stage-envelopes
+// value drives tide-push to a nonzero exit with envelope reason
+// "artifact-stage-failed" BEFORE any git operation (Task 1 Test 3). The bare
+// remote must be untouched — the per-run branch never appears.
+func TestStageEnvelopesInvalidValueFailsLoud(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "bad-stage")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: bad stage-envelopes",
+		StageEnvelopes: "abc-123:../escape",
+		Workspace:      ws,
+		ProjectUID:     "p-bad-stage",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit == 0 {
+		t.Fatalf("exit=0, want nonzero for invalid --stage-envelopes; stderr=%s", stderr)
+	}
+	pr := readPushEnvelope(t, ws, "p-bad-stage")
+	if pr.Reason != "artifact-stage-failed" {
+		t.Errorf("envelope.reason = %q, want %q", pr.Reason, "artifact-stage-failed")
+	}
+
+	// No git op happened: the per-run branch must not exist on the remote.
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	if _, refErr := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false); refErr == nil {
+		t.Errorf("bare repo has branch %s despite invalid stage-envelopes", branch)
+	}
+}
+
 func TestRunPushModeWritesExactBoundaryCommitMessage(t *testing.T) {
 	// Ensure the agent env is unset so the compiled default identity applies.
 	t.Setenv("TIDE_AGENT_NAME", "")

@@ -80,6 +80,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -125,6 +126,78 @@ type pushConfig struct {
 	// Boundary pushes carry the cumulative branch set too (D-03/D-07), so the
 	// no-push exit keys on this explicit flag, never on absent artifact paths.
 	IntegrationOnly bool
+	// StageEnvelopes is the raw --stage-envelopes flag value: a CSV of
+	// `<uid>:<destPrefix>` pairs (DASH-02). It is parsed and validated inside
+	// runPush (parseStageEnvelopes) so a malformed value fails loudly with the
+	// typed envelope reason "artifact-stage-failed" before any git operation —
+	// the same testable-through-run() convention the other push invariants use.
+	StageEnvelopes string
+}
+
+// EnvelopeStage maps one on-PVC envelope directory (UID-keyed, the same key the
+// dispatch/reporter path writes under envelopes/<uid>/) to the human-readable
+// destination prefix it lands at on the run branch: .tide/planning/<DestPrefix>/
+// (DASH-02, D-02). DestPrefix is `<kind>/<name>` with kind ∈
+// {project, milestone, phase, plan}.
+type EnvelopeStage struct {
+	UID        string
+	DestPrefix string
+}
+
+// destPrefixPattern constrains a --stage-envelopes destPrefix to a clean,
+// slash-nested relative path built from DNS-1123-style segments. It rejects a
+// leading dot/slash/dash and a trailing slash/dot, so bare "..", absolute "/abs",
+// and dotfile prefixes never match. Interior "." and "/" are allowed (real
+// prefixes look like "milestone/m1"), so nested traversal such as
+// "milestone/../../etc" still matches the pattern — the containment check in
+// parseStageEnvelopes is the second, load-bearing gate against escape (T-37-02-01).
+var destPrefixPattern = regexp.MustCompile(`^[a-z0-9]([a-zA-Z0-9._/-]*[a-zA-Z0-9])?$`)
+
+// parseStageEnvelopes parses the --stage-envelopes CSV (`<uid>:<destPrefix>`
+// pairs) into []EnvelopeStage with fail-closed validation (DASH-02, D-03).
+// Empty (or whitespace-only) input returns (nil, nil). Each token splits on its
+// FIRST colon into a non-empty UID and a non-empty destPrefix; destPrefix must
+// contain no backslash, must match destPrefixPattern, and — after
+// filepath.Clean — must still resolve strictly under .tide/planning/ (traversal
+// containment, T-37-02-01). Any violation returns an error; the caller maps it
+// to reason "artifact-stage-failed" + nonzero exit before touching git.
+func parseStageEnvelopes(s string) ([]EnvelopeStage, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	base := filepath.Join(".tide", "planning")
+	tokens := strings.Split(s, ",")
+	out := make([]EnvelopeStage, 0, len(tokens))
+	for _, tok := range tokens {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		idx := strings.Index(tok, ":")
+		if idx < 0 {
+			return nil, fmt.Errorf("stage-envelopes token %q missing ':' separator (want <uid>:<destPrefix>)", tok)
+		}
+		uid := strings.TrimSpace(tok[:idx])
+		destPrefix := strings.TrimSpace(tok[idx+1:])
+		if uid == "" {
+			return nil, fmt.Errorf("stage-envelopes token %q has an empty UID", tok)
+		}
+		if destPrefix == "" {
+			return nil, fmt.Errorf("stage-envelopes token %q has an empty destPrefix", tok)
+		}
+		if strings.ContainsRune(destPrefix, '\\') {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q contains a backslash", destPrefix)
+		}
+		if !destPrefixPattern.MatchString(destPrefix) {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q does not match %s", destPrefix, destPrefixPattern.String())
+		}
+		cleaned := filepath.Clean(filepath.Join(base, destPrefix))
+		if cleaned != base && !strings.HasPrefix(cleaned, base+string(filepath.Separator)) {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q escapes %s/", destPrefix, base)
+		}
+		out = append(out, EnvelopeStage{UID: uid, DestPrefix: destPrefix})
+	}
+	return out, nil
 }
 
 // pushResult is the small JSON envelope written to
@@ -224,6 +297,12 @@ func main() {
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
 	integrationOnly := fs.Bool("integration-only", false,
 		"push-mode: per-wave integration Job — merge+verify locally, no commit/push (D-02)")
+	stageEnvelopes := fs.String("stage-envelopes", "",
+		"push-mode: CSV of <uid>:<destPrefix> pairs. Copies each envelope's "+
+			"planning *.md + children/*.json from envelopes/<uid>/ (under the Job "+
+			"workspace root) into .tide/planning/<destPrefix>/ on the run branch "+
+			"(DASH-02, human-readable paths per D-02). out.json/in.json are never "+
+			"staged (D-04); failures are loud (D-03).")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -244,6 +323,7 @@ func main() {
 		BaseRef:               *baseRef,
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
 		IntegrationOnly:       *integrationOnly,
+		StageEnvelopes:        *stageEnvelopes,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -451,6 +531,18 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exit
 	}
 	defer func() { _ = lockFile.Close() }()
+
+	// DASH-02: parse --stage-envelopes up front, before any git operation, so a
+	// malformed map (traversal, empty UID/destPrefix, bad pattern) fails loudly
+	// with the typed reason "artifact-stage-failed" and never reaches integrate,
+	// clone-open, or push (D-03, T-37-02-01). Validation is fail-closed and pure.
+	stageEnvs, err := parseStageEnvelopes(cfg.StageEnvelopes)
+	if err != nil {
+		writePushEnvelope(cfg, "", exitInvariant, "artifact-stage-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: %v\n", err)
+		return exitInvariant
+	}
+	_ = stageEnvs // staged by stageEnvelopeArtifacts once the run worktree is open (Phase 37 envelope staging)
 
 	if exit, done := runIntegrationPhase(cfg, bareRepoPath, stderr); done {
 		return exit
