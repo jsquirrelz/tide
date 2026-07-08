@@ -542,7 +542,6 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "tide-push: %v\n", err)
 		return exitInvariant
 	}
-	_ = stageEnvs // staged by stageEnvelopeArtifacts once the run worktree is open (Phase 37 envelope staging)
 
 	if exit, done := runIntegrationPhase(cfg, bareRepoPath, stderr); done {
 		return exit
@@ -592,6 +591,20 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exit
 	}
 
+	// DASH-02: stage mapped envelope planning artifacts beside the ArtifactPaths
+	// staging (D-01/D-02). For each <uid>:<destPrefix>, stageEnvelopeArtifacts
+	// globs the level's planning *.md and children/*.json under envelopes/<uid>/
+	// (the same PVC key the dispatch/reporter path writes) and copies them into
+	// .tide/planning/<destPrefix>/ in the run worktree. out.json/in.json are never
+	// staged (D-04); a missing envelope dir or any copy/stage error is a loud
+	// failure (reason artifact-stage-failed, D-03). The staged files ride the same
+	// commit / gitleaks scan / force-with-lease push below; byte-identical
+	// restaging leaves the tree clean, which the clean-tree skip turns into an
+	// idempotent no-op push.
+	if code := stageEnvelopeArtifacts(cfg, stageEnvs, worktreeDir, wt, stderr); code != exitSuccess {
+		return code
+	}
+
 	newHash, scanBase, exit, failed := commitOrReuseHead(cfg, repo, wt, worktreeDir, oldHash, stderr)
 	if failed {
 		return exit
@@ -632,6 +645,16 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// push is idempotent: re-pushing an already-present run branch HEAD is a
 	// no-op fast-forward, so a retried boundary-push Job converges safely.
 	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
+		// DASH-02: an idempotent restage leaves the tree clean and HEAD already on
+		// the remote at the leased SHA, so the force-with-lease push is a no-op that
+		// go-git reports as NoErrAlreadyUpToDate. Treat it as success for cumulative
+		// envelope maps — the remote already carries this HEAD. Mirrors pkg/git
+		// Fetch, which swallows the same sentinel.
+		if errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+			fmt.Fprintf(stderr, "tide-push: remote already up-to-date for %s — nothing to push\n", cfg.Branch)
+			writePushEnvelope(cfg, newHash.String(), exitSuccess, "", nil, 0, "")
+			return exitSuccess
+		}
 		exit, reason := classifyPushError(err)
 		writePushEnvelope(cfg, newHash.String(), exit, reason, nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: push failed (reason=%s): %v\n", reason, redactPAT(err.Error(), pat))
@@ -984,6 +1007,70 @@ func worktreeClean(worktreeDir string) (bool, error) {
 		return false, fmt.Errorf("git status --porcelain: %w", err)
 	}
 	return len(strings.TrimSpace(string(out))) == 0, nil
+}
+
+// stageEnvelopeArtifacts copies each mapped envelope's planning *.md and
+// children/*.json into .tide/planning/<destPrefix>/ under worktreeDir and stages
+// them (DASH-02). It returns exitSuccess when every mapped envelope staged
+// cleanly, or a nonzero exit code after writing the push envelope with reason
+// "artifact-stage-failed" on the first failure (missing dir, no *.md, or a
+// copy/stage error) — the loud-failure convention (D-03). Only the two allowed
+// globs are read, so out.json/in.json are excluded by construction (D-04).
+func stageEnvelopeArtifacts(cfg pushConfig, stageEnvs []EnvelopeStage, worktreeDir string, wt *gogit.Worktree, stderr io.Writer) int {
+	for _, es := range stageEnvs {
+		srcDir := filepath.Join(cfg.Workspace, "envelopes", es.UID)
+		info, statErr := os.Stat(srcDir)
+		if statErr != nil || !info.IsDir() {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope dir %s missing or not a directory: %v\n", srcDir, statErr)
+			return exitGenericFail
+		}
+
+		mdMatches, gerr := filepath.Glob(filepath.Join(srcDir, "*.md"))
+		if gerr != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob *.md in %s: %v\n", srcDir, gerr)
+			return exitGenericFail
+		}
+		if len(mdMatches) == 0 {
+			// A planner-completed level always emits at least one planning *.md;
+			// an empty set means the envelope is incomplete — fail loudly (D-03).
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n", srcDir)
+			return exitGenericFail
+		}
+		childMatches, gerr := filepath.Glob(filepath.Join(srcDir, "children", "*.json"))
+		if gerr != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob children/*.json in %s: %v\n", srcDir, gerr)
+			return exitGenericFail
+		}
+
+		// rel is the worktree-relative destination; the children/ subdirectory is
+		// preserved so plan/task JSON lands under .tide/planning/<destPrefix>/children/.
+		rels := make([]struct{ src, rel string }, 0, len(mdMatches)+len(childMatches))
+		for _, m := range mdMatches {
+			rels = append(rels, struct{ src, rel string }{m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m))})
+		}
+		for _, m := range childMatches {
+			rels = append(rels, struct{ src, rel string }{m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m))})
+		}
+
+		for _, r := range rels {
+			dst := filepath.Join(worktreeDir, r.rel)
+			if err := copyIntoWorktree(r.src, dst); err != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: copy %s -> %s: %v\n", r.src, r.rel, err)
+				return exitGenericFail
+			}
+			if err := pkggit.AddPath(wt, r.rel); err != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: stage %s: %v\n", r.rel, err)
+				return exitGenericFail
+			}
+		}
+	}
+	return exitSuccess
 }
 
 // copyIntoWorktree copies src to dst, creating parent dirs as needed.

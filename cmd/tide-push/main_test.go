@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -920,6 +921,279 @@ func TestStageEnvelopesInvalidValueFailsLoud(t *testing.T) {
 	}
 	if _, refErr := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false); refErr == nil {
 		t.Errorf("bare repo has branch %s despite invalid stage-envelopes", branch)
+	}
+}
+
+// ---------- Task 2 (37-02): envelope staging step ----------
+
+// writeEnvelopeFile writes content to <workspace>/envelopes/<uid>/<rel>.
+func writeEnvelopeFile(t *testing.T, workspace, uid, rel string, content []byte) {
+	t.Helper()
+	full := filepath.Join(workspace, "envelopes", uid, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("MkdirAll %s: %v", filepath.Dir(full), err)
+	}
+	if err := os.WriteFile(full, content, 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", full, err)
+	}
+}
+
+// treePathsUnder returns the sorted set of tree paths on the bare branch whose
+// name starts with prefix.
+func treePathsUnder(t *testing.T, bareSrc, branch, prefix string) []string {
+	t.Helper()
+	repo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen %s: %v", bareSrc, err)
+	}
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference %s: %v", branch, err)
+	}
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		t.Fatalf("Tree: %v", err)
+	}
+	var paths []string
+	if err := tree.Files().ForEach(func(f *object.File) error {
+		if strings.HasPrefix(f.Name, prefix) {
+			paths = append(paths, f.Name)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk tree: %v", err)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// treeFileBytes returns the byte content of a file at path on the bare branch.
+func treeFileBytes(t *testing.T, bareSrc, branch, path string) []byte {
+	t.Helper()
+	repo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen %s: %v", bareSrc, err)
+	}
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference %s: %v", branch, err)
+	}
+	commit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		t.Fatalf("CommitObject: %v", err)
+	}
+	f, err := commit.File(path)
+	if err != nil {
+		t.Fatalf("commit.File %s: %v", path, err)
+	}
+	r, err := f.Reader()
+	if err != nil {
+		t.Fatalf("File.Reader %s: %v", path, err)
+	}
+	defer func() { _ = r.Close() }()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read blob %s: %v", path, err)
+	}
+	return data
+}
+
+// commitCount returns the number of commits reachable from the bare branch tip.
+func commitCount(t *testing.T, bareSrc, branch string) int {
+	t.Helper()
+	repo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen %s: %v", bareSrc, err)
+	}
+	ref, err := repo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference %s: %v", branch, err)
+	}
+	iter, err := repo.Log(&gogit.LogOptions{From: ref.Hash()})
+	if err != nil {
+		t.Fatalf("Log: %v", err)
+	}
+	n := 0
+	if err := iter.ForEach(func(*object.Commit) error { n++; return nil }); err != nil {
+		t.Fatalf("iterate log: %v", err)
+	}
+	return n
+}
+
+// TestStageEnvelopesHappyPath (Task 2 Test 1): an envelope with planning *.md +
+// children/*.json plus out.json/in.json stages EXACTLY the *.md and children
+// JSON under .tide/planning/<destPrefix>/ — D-04 exclusion proven by the full
+// listing (out.json/in.json never appear under .tide/).
+func TestStageEnvelopesHappyPath(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-happy")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	writeEnvelopeFile(t, ws, "u1", "MILESTONE.md", []byte("# milestone\n"))
+	writeEnvelopeFile(t, ws, "u1", "notes.md", []byte("some notes\n"))
+	writeEnvelopeFile(t, ws, "u1", "children/phase-1.json", []byte(`{"kind":"Phase"}`))
+	writeEnvelopeFile(t, ws, "u1", "out.json", []byte(`{"reason":""}`))
+	writeEnvelopeFile(t, ws, "u1", "in.json", []byte(`{"prompt":"x"}`))
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage milestone envelope",
+		StageEnvelopes: "u1:milestone/m1",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-happy",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+
+	got := treePathsUnder(t, bareSrc, branch, ".tide/")
+	want := []string{
+		".tide/planning/milestone/m1/MILESTONE.md",
+		".tide/planning/milestone/m1/children/phase-1.json",
+		".tide/planning/milestone/m1/notes.md",
+	}
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("under .tide/ got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf(".tide path[%d] = %q, want %q (full got=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// TestStageEnvelopesByteFidelity (Task 2 Test 2): staged bytes are identical to
+// source, including a *.md larger than 1 MiB — nothing trims or size-caps (D-03).
+func TestStageEnvelopesByteFidelity(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-bytes")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	// >1 MiB deterministic body.
+	big := bytes.Repeat([]byte("tidewater-0123456789\n"), (1<<20)/21+64)
+	if len(big) <= 1<<20 {
+		t.Fatalf("fixture not >1 MiB: %d", len(big))
+	}
+	writeEnvelopeFile(t, ws, "big", "PLAN.md", big)
+	childJSON := []byte(`{"kind":"Task","name":"t-1","big":true}`)
+	writeEnvelopeFile(t, ws, "big", "children/task-1.json", childJSON)
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage big envelope",
+		StageEnvelopes: "big:plan/big-plan",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-bytes",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat"); exit != 0 {
+		t.Fatalf("exit=%d, stderr=%s", exit, stderr)
+	}
+
+	gotMD := treeFileBytes(t, bareSrc, branch, ".tide/planning/plan/big-plan/PLAN.md")
+	if !bytes.Equal(gotMD, big) {
+		t.Errorf("PLAN.md bytes differ: got %d bytes, want %d bytes", len(gotMD), len(big))
+	}
+	gotJSON := treeFileBytes(t, bareSrc, branch, ".tide/planning/plan/big-plan/children/task-1.json")
+	if !bytes.Equal(gotJSON, childJSON) {
+		t.Errorf("child json bytes differ: got %q want %q", gotJSON, childJSON)
+	}
+}
+
+// TestStageEnvelopesMissingDirFailsLoud (Task 2 Test 3): a mapped envelope whose
+// directory does not exist exits nonzero with reason artifact-stage-failed and
+// pushes nothing (the per-run branch never appears on the remote).
+func TestStageEnvelopesMissingDirFailsLoud(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-missing")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage missing envelope",
+		StageEnvelopes: "does-not-exist:phase/p9",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-missing",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit == 0 {
+		t.Fatalf("exit=0, want nonzero for missing envelope dir; stderr=%s", stderr)
+	}
+	pr := readPushEnvelope(t, ws, "p-stage-missing")
+	if pr.Reason != "artifact-stage-failed" {
+		t.Errorf("envelope.reason = %q, want %q", pr.Reason, "artifact-stage-failed")
+	}
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	if _, refErr := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false); refErr == nil {
+		t.Errorf("bare repo has branch %s despite missing envelope dir", branch)
+	}
+}
+
+// TestStageEnvelopesIdempotentRestage (Task 2 Test 4): pushing the same
+// cumulative map twice succeeds both times; the second push takes the clean-tree
+// path and adds no second commit (remote commit count unchanged).
+func TestStageEnvelopesIdempotentRestage(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-idem")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	writeEnvelopeFile(t, ws, "u2", "PHASE.md", []byte("# phase\n"))
+	writeEnvelopeFile(t, ws, "u2", "children/plan-1.json", []byte(`{"kind":"Plan"}`))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage phase envelope",
+		StageEnvelopes: "u2:phase/p1",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-idem",
+	}
+
+	if exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat"); exit != 0 {
+		t.Fatalf("first push exit=%d, stderr=%s", exit, stderr)
+	}
+	firstCount := commitCount(t, bareSrc, branch)
+	pr1 := readPushEnvelope(t, ws, "p-stage-idem")
+
+	// Second push: byte-identical cumulative map. lastPushedSHA anchors the lease.
+	cfg.LastPushedSHA = pr1.HeadSHA
+	exit2, stderr2 := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit2 != 0 {
+		t.Fatalf("second push exit=%d, stderr=%s", exit2, stderr2)
+	}
+	if !bytes.Contains(stderr2, []byte("clean working tree")) {
+		t.Errorf("second push did not take the clean-tree path; stderr=%s", stderr2)
+	}
+	secondCount := commitCount(t, bareSrc, branch)
+	if secondCount != firstCount {
+		t.Errorf("commit count changed after idempotent restage: first=%d second=%d", firstCount, secondCount)
 	}
 }
 
