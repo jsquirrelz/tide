@@ -213,6 +213,47 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
 	}
 
+	// fakePushPodWith attaches a terminationMessage envelope to a NAMED pod of the
+	// given push Job, so a single Job can own MULTIPLE attempt pods (the push Job
+	// carries BackoffLimit>0). podName lets a test control List ordering; phase +
+	// exitCode + headSHA model a specific attempt's outcome.
+	fakePushPodWith := func(podName, jobName string, phase corev1.PodPhase, headSHA, reason string, exitCode int) {
+		env := pushResultEnvelope{
+			APIVersion: "tideproject.k8s/v1alpha1",
+			Kind:       "PushResult",
+			HeadSHA:    headSHA,
+			ExitCode:   exitCode,
+			Reason:     reason,
+		}
+		raw, err := json.Marshal(env)
+		Expect(err).NotTo(HaveOccurred())
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: "default",
+				Labels:    map[string]string{"job-name": jobName},
+			},
+			Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: pushContainerName, Image: "ghcr.io/jsquirrelz/tide-push:test"}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+		sp := client.MergeFrom(pod.DeepCopy())
+		pod.Status.Phase = phase
+		termReason := "Completed"
+		if exitCode != 0 {
+			termReason = "Error"
+		}
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: pushContainerName,
+			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+				ExitCode: int32(exitCode), Reason: termReason, Message: string(raw),
+			}},
+		}}
+		Expect(k8sClient.Status().Patch(ctx, pod, sp)).To(Succeed())
+	}
+
 	cleanup := func(name string) {
 		var jobs batchv1.JobList
 		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
@@ -397,6 +438,80 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 			Expect(c).NotTo(BeNil())
 			Expect(c.Status).To(Equal(metav1.ConditionFalse))
 			Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
+		})
+	})
+
+	// Test 6: DASH-02 — under the intentional D-B5/R-05 single-writer coupling, the
+	// shared tide-push-<uid> Job may own MULTIPLE attempt pods (BackoffLimit>0). A
+	// transient first-attempt FAILURE (empty headSHA) must not mask the SUCCEEDED
+	// attempt's landed headSHA when the boundary success-arm reads the envelope. This
+	// pins the readPushEnvelope succeeded-pod preference — without it, pods.Items[0]
+	// could surface the failed attempt's empty headSHA and freeze LastPushedSHA empty.
+	Describe("Test 6: multi-pod Job — a failed attempt pod must not mask the succeeded pod's headSHA", func() {
+		const name = "bp13b-multipod"
+		AfterEach(func() { cleanup(name) })
+
+		It("advances LastPushedSHA from the SUCCEEDED pod even when a failed-attempt pod sorts first", func() {
+			const landedSHA = "89abcdef0123456789abcdef0123456789abcdef"
+			proj := makeComplete(name, 1)
+			jn := pushJobName(proj.UID)
+			makePushJob(jn, proj.Name, proj.UID)
+			markJobSucceeded(jn)
+			// Two pods for the same (succeeded) Job. The FAILED attempt sorts FIRST
+			// alphabetically (…-a-attempt) so a naive pods.Items[0] read surfaces its
+			// empty headSHA; the SUCCEEDED attempt (…-z-attempt) carries the landed SHA.
+			fakePushPodWith(jn+"-a-attempt", jn, corev1.PodFailed, "", "artifact-stage-failed", 1)
+			fakePushPodWith(jn+"-z-attempt", jn, corev1.PodSucceeded, landedSHA, "", 0)
+
+			r := newReconciler("tide-projects-bp13b-6")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushed))
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal(landedSHA),
+					"LastPushedSHA must come from the SUCCEEDED pod, not a failed attempt's empty headSHA")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// Test 7: DASH-02 — a succeeded shared push Job whose headSHA is NOT readable (an
+	// earlier artifact/level-boundary push whose Pod was GC'd, or a not-yet-populated
+	// terminationMessage) must NOT be accepted as terminal success with an empty lease
+	// anchor. Going terminal (BoundaryPushed=True) would freeze Status.Git.LastPushedSHA
+	// empty forever (the terminal guard blocks all future capture). The success-arm must
+	// instead replace the stale Job with a fresh owned push whose envelope is readable.
+	Describe("Test 7: succeeded Job with an unreadable headSHA → re-dispatch, never wedge BoundaryPushed=True", func() {
+		const name = "bp13b-nocapture"
+		AfterEach(func() { cleanup(name) })
+
+		It("re-dispatches a fresh owned push instead of going terminal without capturing the SHA", func() {
+			proj := makeComplete(name, 0)
+			jn := pushJobName(proj.UID)
+			makePushJob(jn, proj.Name, proj.UID)
+			markJobSucceeded(jn) // Job Complete, but NO pod/terminationMessage → headSHA unreadable
+
+			r := newReconciler("tide-projects-bp13b-7")
+			reconcileN(r, name, 4) // delete-stale + re-dispatch convergence
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				// Must NOT have gone terminal-Pushed with an empty lease anchor.
+				g.Expect(got.Status.Git.LastPushedSHA).To(BeEmpty())
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionFalse),
+					"an uncaptured headSHA must not terminally mark BoundaryPushed=True")
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
+				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1),
+					"the stale succeeded Job must be replaced by a fresh owned dispatch")
+				// A push Job exists again (re-dispatched, not left as the stale one).
+				var job batchv1.Job
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 })

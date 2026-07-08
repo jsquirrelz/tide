@@ -178,9 +178,21 @@ data:
 		// (from the push-result envelope headSHA). So poll the LIVE CR until the
 		// push lands rather than asserting on the stale Complete snapshot.
 		By("Polling the Project CR until the boundary push lands and advances LastPushedSHA")
+		// In-poll diagnostics prerequisites, captured ONCE before the poll: the
+		// git-http-server pod (for the git-receive-pack request count) and the Project
+		// UID (the shared tide-push-<uid> / tide-clone-<uid> Job/pod name key).
+		diagPod := gitHTTPServerPod(artifactStagingNS)
+		diagUID := string(completed.UID)
 		Eventually(func(g Gomega) {
 			var p tideprojectv1alpha2.Project
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: artifactStagingNS}, &p)).To(Succeed())
+			// Per-tick diagnostics — fire WHILE the namespace still exists (run-4's
+			// DeferCleanup dump ran AFTER teardown and captured nothing). This yields the
+			// decisive evidence for the orchestrator's next single run: does the shared
+			// push pod SUCCEED, did a git-receive-pack reach the remote, and is a headSHA
+			// reaching the CR? A diagnostic error degrades to a logged marker — it never
+			// fails the poll.
+			logPushDiagnostics(artifactStagingNS, diagUID, diagPod, p.Status.Git.LastPushedSHA)
 			g.Expect(p.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
 				"no push must have been rejected by --force-with-lease (Pitfall 2: artifact/boundary push must not interfere)")
 			g.Expect(p.Status.Git.LeaseFailureCount).To(BeNumerically("==", int32(0)),
@@ -279,6 +291,53 @@ data:
 })
 
 // ---- helpers (artifact_staging_test.go-local) ----
+
+// logPushDiagnostics dumps, per poll tick and WHILE the namespace still exists, the
+// evidence needed to decide whether the shared tide-push-<uid> Job pod actually
+// SUCCEEDS and whether a headSHA reaches the CR (DASH-02 run-5 instrumentation): the
+// push/clone pod phases, the git-http-server git-receive-pack request count, and the
+// current Status.Git.LastPushedSHA. It writes to GinkgoWriter — NOT DeferCleanup /
+// AfterAll, which fire AFTER teardown (the run-4 flaw where the ns/CR were already
+// gone). Every exec failure degrades to a logged marker so a diagnostic error never
+// fails the enclosing poll.
+func logPushDiagnostics(ns, projUID, gitHTTPPod, lastPushedSHA string) {
+	// Push/clone pod phases (the Jobs are tide-push-<uid> / tide-clone-<uid>; their
+	// pods carry that name prefix). Proves whether the push/clone pods ran at all and
+	// their terminal phase (Succeeded/Failed/Running).
+	phases := "(no tide-push/tide-clone pods)"
+	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+		"get", "pods", "-n", ns, "-o",
+		`jsonpath={range .items[*]}{.metadata.name}={.status.phase} {end}`)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		var relevant []string
+		for tok := range strings.FieldsSeq(string(out)) {
+			if strings.Contains(tok, "tide-push-"+projUID) || strings.Contains(tok, "tide-clone-"+projUID) {
+				relevant = append(relevant, tok)
+			}
+		}
+		if len(relevant) > 0 {
+			phases = strings.Join(relevant, " ")
+		}
+	} else {
+		phases = fmt.Sprintf("(pod-get err: %v)", err)
+	}
+
+	// git-http-server git-receive-pack request count — direct proof a push actually
+	// reached the bare remote (vs. a push pod that failed before the transport).
+	recvCount := "(n/a)"
+	if gitHTTPPod != "" {
+		lc := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
+			"logs", gitHTTPPod, "-c", "git-http-server", "-n", ns)
+		if out, err := lc.CombinedOutput(); err == nil {
+			recvCount = fmt.Sprintf("%d", strings.Count(string(out), "git-receive-pack"))
+		} else {
+			recvCount = fmt.Sprintf("(logs err: %v)", err)
+		}
+	}
+
+	GinkgoWriter.Printf("artifact-staging diag: push/clone pods=[%s] git-receive-pack=%s LastPushedSHA=%q\n",
+		phases, recvCount, lastPushedSHA)
+}
 
 // gitHTTPServerPod returns the name of the running git-http-server Pod in ns.
 func gitHTTPServerPod(ns string) string {

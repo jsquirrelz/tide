@@ -1,5 +1,5 @@
 ---
-status: investigating
+status: awaiting_human_verify
 slug: dash02-artifact-boundary-push
 trigger: on the DASH-02 artifact-vs-boundary push interaction
 created: 2026-07-08
@@ -27,65 +27,81 @@ phase: 37-dashboard-surfaces-artifact-view-project-view-log-drawer-sta
 
 ## Current Focus
 
-CONFIRMED ROOT CAUSE (two independent defects). The Current-Focus shared-Job-name
-hypothesis is DISPROVEN by direct runtime evidence: neither the clone nor the push
-Job pods EVER RAN, so no artifact/boundary push executed and there was no
-`AlreadyExists` interaction at all.
+CONFIRMED ROOT CAUSE (run-5 code trace, post fix 1bcbea6). Both defect A (tide-push
+SA) and defect B (write-back exists at project_controller.go:748) landed, yet run-4
+CLEANLY confirms LastPushedSHA never advances. Full end-to-end code trace of the
+shared `tide-push-<project.UID>` Job lifecycle isolates the residual defect to the
+CAPTURE path in `reconcileBoundaryPush`, NOT the write-back's absence.
 
 reasoning_checkpoint:
   hypothesis: >
-    The Layer-B spec fails PRIMARILY because the `tide-push` ServiceAccount is
-    absent in the test namespace — the Job controller cannot admit the clone/push
-    pods, so nothing ever pushes and `LastPushedSHA` never advances. SECONDARILY,
-    even once a push Job succeeds, `reconcileBoundaryPush`'s success arm
-    (project_controller.go:734-750) never reads the push-result envelope's HeadSHA
-    nor writes `Status.Git.LastPushedSHA` — so the line-176 assertion would still
-    fail after the SA gap is closed.
+    The residual RED (LastPushedSHA stays empty even with the defect-B write-back) is
+    caused by the boundary success-arm failing to DURABLY CAPTURE the shared Job's
+    headSHA, then going TERMINAL. Two code defects, both downstream of the intentional
+    D-B5/R-05 shared-Job-name coupling: (1) `readPushEnvelope`
+    (project_controller.go:86) blindly reads `pods.Items[0]`, but a push Job has
+    BackoffLimit:2 (push_helpers.go:237), so a transient first-attempt FAILED pod
+    (envelope headSHA="") can be Items[0] and mask the SUCCEEDED pod's real headSHA.
+    (2) the success arm (project_controller.go:735-760) sets BoundaryPushed=True
+    TERMINALLY even when it captured NO headSHA; the terminal guard at line 678-681
+    then returns early on every subsequent reconcile, freezing LastPushedSHA empty
+    FOREVER. This is answer (c): the success-arm IS reached but does not capture.
   confirming_evidence:
     - >
-      kube-controller-manager Job controller logged, repeatedly, for BOTH
-      `tide-clone-<uid>-` and `tide-push-<uid>-`:
-      `forbidden: error looking up service account artifact-staging-test/tide-push:
-      serviceaccount "tide-push" not found` (kind-logs control-plane pod log).
+      cmd/tide-push/main.go emits headSHA on EVERY success path — line 697 (normal)
+      and line 688 (NoErrAlreadyUpToDate) — for BOTH the artifact-stage variant
+      (--stage-envelopes) and the boundary variant; both are the SAME `--mode=push`
+      binary via runPush. So option (b) "envelope lacks headSHA" is FALSE for a
+      successful push. The ONLY success-without-envelope path is the integration-only
+      early return (main.go:477), which requires --integrate-task-branches AND no
+      artifacts/envelopes — and that path is only taken by the wave-integration Job,
+      which uses a DISTINCT name (tide-push-wave-<plan.UID>-<waveIndex>,
+      boundary_push.go:183), never the shared tide-push-<uid> name.
     - >
-      git-http-server pod logs show ZERO git-receive-pack / git-upload-pack traffic
-      → no clone, no push ever reached the bare remote.
+      readPushEnvelope (project_controller.go:94-97) returns pods.Items[0] with no
+      preference for the succeeded pod; push Job BackoffLimit=2 means a Job can own
+      both a Failed attempt pod and a Succeeded pod. K8s List order is not defined,
+      so the failed attempt's empty-headSHA envelope can win.
     - >
-      Captured test-namespace pod inventory has tide-init / subagent / reporter /
-      task pods but NO tide-push-* and NO tide-clone-* pods.
+      success arm (project_controller.go:747-757): `if env, ok := readPushEnvelope();
+      ok && env.HeadSHA != "" { LastPushedSHA = env.HeadSHA }` then UNCONDITIONALLY
+      setBoundaryPushedCondition(ConditionTrue, ReasonPushed). The terminal guard at
+      678-681 (`if BoundaryPushed==True { return }`) blocks all future capture.
     - >
-      `createNamespace` (failure_test.go:130) provisions tide-subagent / tide-import
-      / tide-reporter SAs but NOT tide-push; the chart's push-rbac.yaml creates
-      tide-push only in .Release.Namespace (no projectNamespaces fan-out, unlike
-      reporter-rbac.yaml).
-    - >
-      reconcileBoundaryPush success arm patches LeaseFailureCount / LastError /
-      BoundaryPushed=True but never HeadSHA→LastPushedSHA; tide-push DOES emit
-      headSHA on exitSuccess (cmd/tide-push/main.go:697) and readPushEnvelope DOES
-      parse it — the success arm just never calls it. `grep -rnE '\.LastPushedSHA\s*=' internal/`
-      returns nothing.
+      The coupling itself is INTENTIONAL (R-05, artifact_push.go:158-164;
+      boundary_push.go:42-45): every push carries the cumulative artifact map so a
+      single writer class stages all levels behind ONE force-with-lease anchor.
+      Decoupling the names would reintroduce the concurrent-lease race the unification
+      deliberately solved — so the fix must live in the capture path, not the names.
   falsification_test: >
-    If the SA were present and the write-back implemented, git-http-server would log
-    a git-receive-pack POST and Status.Git.LastPushedSHA would carry a 40-hex SHA.
-    The run showed NEITHER — both predictions of the "it did push" alternative fail.
+    If capture were robust, an envtest with a succeeded Job whose Items[0] is a
+    failed-attempt pod would still advance LastPushedSHA to the succeeded pod's
+    headSHA; and a succeeded Job with an UNreadable envelope would NOT terminally set
+    BoundaryPushed=True with an empty anchor. Before the fix both wedge; after, both
+    behave. (Layer-B transport confirmation is DEFERRED — see blind_spots.)
   fix_rationale: >
-    (1) Provision tide-push SA+Role(secrets/get)+RoleBinding in the test namespace
-    (mirror chart push-rbac.yaml, same pattern as ensureReporterSARBAC) → clone/push
-    pods can be admitted and run. (2) In reconcileBoundaryPush's success arm, read
-    the push-result envelope and advance Status.Git.LastPushedSHA = env.HeadSHA →
-    satisfies the operator-facing lease-anchor contract the test asserts and the
-    #13b comment at project_controller.go:473-475 always intended. (3) Poll the CR
-    for the async boundary-push outcome instead of one-shot Expect on the Complete
-    snapshot — #13b makes Complete non-gated on the push, so the snapshot races.
+    (1) readPushEnvelope: prefer the SUCCEEDED pod (phase Succeeded / exit 0) among
+    the Job's pods; fall back to the first parseable envelope so the terminal-failure
+    classification arm still reads the failed pod's reason. (2) success arm: if the
+    succeeded Job's headSHA is NOT captured (unreadable or empty), do NOT go terminal
+    — delete the stale/foreign Job and re-dispatch a fresh project-boundary push the
+    state machine OWNS (bounded by maxBoundaryPushAttempts). Its fresh pod's envelope
+    is readable on the next observation; the re-push is an idempotent no-op
+    fast-forward of the already-landed run-branch HEAD. Both fixes preserve the D-B5
+    single-writer coupling — no name decoupling, no lease race.
   blind_spots: >
-    Full Layer-B kind run is DEFERRED (minikube-OOM + auto-mode gate). Envtest
-    verifies the controller write-back but not the real push transport or the
-    SA-admission path. medium_http_test.go likely shares the same SA gap but is not
-    re-run here (createNamespace fix covers it too, purely additively).
+    Full Layer-B kind run is DEFERRED (minikube-OOM + auto-mode gate). Envtest pins
+    the capture/terminality behavior but NOT the real in-cluster push transport. If
+    the true live cause is instead a FAILING in-cluster push (anonymous http
+    receive-pack rejected), this fix will not green Layer-B by itself — the added
+    in-poll diagnostics (artifact_staging_test.go) will surface that on the
+    orchestrator's next single run (push pod phase + receive-pack count + LastPushedSHA
+    per tick, WHILE the ns still exists).
 next_action: >
-  Implement (1) fixture SA helper, (2) controller LastPushedSHA write-back +
-  envtest, (3) kind-spec poll. Run the debug13b envtest package. Then commit and
-  return a human-verify checkpoint flagging the Layer-B run as DEFERRED.
+  Implement (1) readPushEnvelope succeeded-pod preference, (2) success-arm
+  no-terminal-without-capture + bounded re-dispatch, (3) in-poll kind diagnostics.
+  Add envtest Test 6 (multi-pod mask) + Test 7 (unreadable-success re-dispatch),
+  RED-before/GREEN-after. Run debug13b envtest package. Commit; flag Layer-B DEFERRED.
 tdd_checkpoint:
 
 ## Evidence
@@ -112,34 +128,65 @@ tdd_checkpoint:
 ## Resolution
 
 root_cause: >
-  TWO independent defects, both required for the RED. (A/primary) The `tide-push`
-  ServiceAccount is not provisioned in the Layer-B test namespace, so the Job
-  controller cannot admit the clone/push Job pods — no clone, no push ever runs,
-  nothing reaches the remote, and Status.Git.LastPushedSHA never advances.
-  (B/latent) reconcileBoundaryPush's success arm never patches
-  Status.Git.LastPushedSHA from the push-result envelope's HeadSHA, so even a
-  successful push would leave the lease anchor empty and fail the line-176 assertion.
-  A tertiary test defect (one-shot Expect on the Complete snapshot, which #13b makes
-  non-gated on the async push) is fixed alongside so the spec waits for the push to land.
+  Three defects total across the session. (A) tide-push SA absent in the Layer-B
+  namespace — FIXED in 1bcbea6 (ensurePushSARBAC); run-3 pod dirs confirm pods now
+  admitted. (B) reconcileBoundaryPush never wrote LastPushedSHA — write-back added in
+  1bcbea6, envtest-green. (C, THE RESIDUAL RED — run-5 code trace) even WITH the
+  write-back, LastPushedSHA never advances in the live kind run because the boundary
+  success-arm fails to DURABLY CAPTURE the shared `tide-push-<project.UID>` Job's
+  headSHA and then goes TERMINAL. Two code-level mechanisms, both downstream of the
+  INTENTIONAL D-B5/R-05 single-writer coupling (artifact + boundary pushes share the
+  Job name on purpose, behind one force-with-lease anchor):
+    (C1) readPushEnvelope (project_controller.go:86) read pods.Items[0] blindly.
+         A push Job has BackoffLimit:2, so a transient first-attempt FAILED pod
+         (envelope headSHA="") can be Items[0] and mask the SUCCEEDED pod's real
+         headSHA — leaving env.HeadSHA=="".
+    (C2) the success arm (project_controller.go:735-760) set BoundaryPushed=True
+         TERMINALLY even when it captured NO headSHA; the terminal guard at 678-681
+         then returns early on every subsequent reconcile, freezing LastPushedSHA
+         empty FOREVER.
+  This is answer (c): the boundary success-arm IS reached but does not capture the
+  shared Job's headSHA. Answer (b) is FALSE — cmd/tide-push emits headSHA on EVERY
+  success path (main.go:688,697) for BOTH the --stage-envelopes variant and the
+  --mode=push boundary variant (same runPush binary); the only no-envelope success is
+  the integration-only early return (main.go:477), reachable ONLY by the
+  distinctly-named tide-push-wave-<plan.UID>-<waveIndex> Job, never the shared name.
 fix: >
-  (1) internal/controller/project_controller.go — reconcileBoundaryPush success arm:
-  read the push-result envelope and set Status.Git.LastPushedSHA = env.HeadSHA
-  (best-effort; empty/unreadable envelope leaves the prior anchor untouched).
-  (2) test/integration/kind — new ensurePushSARBAC(ns) mirroring chart push-rbac.yaml
-  (SA tide-push + Role secrets/get + RoleBinding), called from createNamespace.
-  (3) test/integration/kind/artifact_staging_test.go — poll the live CR (Eventually)
-  for the terminal push state (LastPushedSHA non-empty, no PushLeaseFailed,
-  LeaseFailureCount==0) instead of asserting on the Complete snapshot.
+  Controller-only fix (preserves the D-B5 shared-name coupling — NO name decoupling,
+  which would reintroduce the concurrent-lease race the R-05 unification solved).
+  (C1) internal/controller/project_controller.go readPushEnvelope: prefer the
+  SUCCEEDED pod (phase Succeeded / exit 0) among the Job's pods; fall back to the
+  first parseable envelope so the leak/lease failure-classification arms still read
+  the failed pod's reason.
+  (C2) reconcileBoundaryPush success arm: if a succeeded Job's headSHA is unreadable
+  or empty, do NOT go terminal — delete the stale Job and re-dispatch a fresh
+  project-boundary push the state machine OWNS (fresh, readable Pod envelope; bounded
+  by maxBoundaryPushAttempts; idempotent no-op re-push of the already-landed HEAD).
+  (diagnostics) test/integration/kind/artifact_staging_test.go: per-tick in-poll
+  logging (push/clone pod phase, git-http git-receive-pack count, LastPushedSHA) via
+  GinkgoWriter INSIDE the Eventually — WHILE the ns exists, NOT in DeferCleanup/AfterAll
+  (the run-4 flaw), so the orchestrator's next single Layer-B run captures decisive
+  evidence.
 verification: >
-  Controller write-back (defect B) verified via envtest (debug13b Test 2 extended to
-  assert LastPushedSHA advances to the envelope HeadSHA). Fixture SA (A) + kind-spec
-  poll (tertiary) verification requires the full Layer-B kind run — DEFERRED
-  (minikube-OOM + auto-mode gate); flagged for the orchestrator to schedule.
+  ENVTEST (allowed surface) — GREEN. New debug13b Test 6 (multi-pod: a failed-attempt
+  pod must not mask the succeeded pod's headSHA → LastPushedSHA advances) and Test 7
+  (succeeded Job with unreadable headSHA → re-dispatch, never wedge BoundaryPushed=True
+  with an empty anchor). RED-before (2 Failed against pre-fix project_controller.go
+  with the new tests present), GREEN-after (Ran 8 of 170 debug13b specs, 8 Passed /
+  0 Failed). Existing Test 2 (single readable success) unchanged/passing; broader
+  push/lease/leak/boundary controller specs pass (no regression). golangci-lint 0
+  issues, gofmt clean, go vet clean, kind package compiles.
+  LAYER-B KIND RUN: DEFERRED to the orchestrator (live minikube blocks a 2nd kind
+  cluster; make test-int / test-int-kind-prep are orchestrator-gated). NO Layer-B
+  green is claimed. If the true live cause is instead a FAILING in-cluster push
+  (anonymous http receive-pack rejected) rather than the capture wedge, this fix will
+  not green Layer-B alone — the added in-poll diagnostics will surface that on the
+  next run.
 files_changed:
-  - internal/controller/project_controller.go
-  - internal/controller/project_boundary_push_test.go
-  - test/integration/kind/failure_test.go
-  - test/integration/kind/artifact_staging_test.go
+  - internal/controller/project_controller.go        # C1 readPushEnvelope + C2 success-arm (this session)
+  - internal/controller/project_boundary_push_test.go # debug13b Test 6 + Test 7 (this session)
+  - test/integration/kind/artifact_staging_test.go    # in-poll diagnostics (this session)
+  - test/integration/kind/failure_test.go             # ensurePushSARBAC (prior fix 1bcbea6)
 
 ## Run-3 (Layer-B confirmation of fix 1bcbea6) — STILL RED (reopened)
 
@@ -176,4 +223,18 @@ next_action_v2: >
 3. If the push pod fails → fix the in-cluster push (transport/creds/ordering). If it succeeds but no HeadSHA reaches the CR → the artifact-vs-boundary shared-Job-name coupling is the bug: decouple the two push Job names (or make the boundary success-arm read the shared Job's headSHA regardless of which path created it). This is a CODE fix in artifact_push.go / boundary_push.go / project_controller.go, NOT just a test fix.
 
 STATUS: 4 Layer-B runs done (~90 min cluster time); halting per stop-brute-forcing. Fix 1bcbea6 stays committed (defect A partial + defect B verified); DASH-02 remains RED/Pending. Resume with `/gsd-debug continue dash02-artifact-boundary-push`.
+
+## Run-5 (code-only, no cluster) — residual RED traced to the boundary success-arm CAPTURE path; controller fix applied, envtest RED→GREEN
+
+End-to-end code trace of the shared `tide-push-<project.UID>` Job lifecycle (no Layer-B run — orchestrator-gated). Findings and fix:
+
+- **Answer to (a)/(b)/(c): (c).** The boundary success-arm IS reached but does not durably capture the shared Job's headSHA, then goes terminal — freezing `LastPushedSHA` empty forever via the terminal guard (project_controller.go:678-681).
+  - (b) ruled out by code: cmd/tide-push emits headSHA on EVERY success path (main.go:688, 697) for BOTH the `--stage-envelopes` artifact variant and the `--mode=push` boundary variant (identical runPush binary). The only no-envelope success (integration-only, main.go:477) is reachable ONLY by the distinctly-named `tide-push-wave-<plan.UID>-<waveIndex>` Job, never the shared name.
+  - (a) is half-true and NOT the RED cause: the artifact-push variant wins the shared-name create and the D-B2-shaped boundary COMMIT is never authored, BUT the artifact variant DOES commit+push the run branch (with artifacts), so the run branch lands on the remote. The gap is purely capture, not "nothing pushed."
+- **Two enabling code defects, both fixed in `internal/controller/project_controller.go` (D-B5 coupling preserved — NO name decoupling):**
+  - **C1 — readPushEnvelope multi-pod mask:** read `pods.Items[0]` blindly; a `BackoffLimit:2` Job can own a failed-attempt pod (headSHA="") beside the succeeded pod. FIX: prefer the Succeeded/exit-0 pod; fall back to first parseable envelope (leak/lease arms still read the failed reason).
+  - **C2 — terminal-without-capture wedge:** the success arm set `BoundaryPushed=True` even with no captured headSHA. FIX: if a succeeded Job's headSHA is unreadable/empty, delete the stale Job and re-dispatch a fresh OWNED boundary push (bounded, idempotent no-op re-push) rather than wedging terminal.
+- **Diagnostics (test/integration/kind/artifact_staging_test.go):** per-tick in-poll logging (push/clone pod phase, git-http `git-receive-pack` count, LastPushedSHA) via GinkgoWriter INSIDE the Eventually — fires WHILE the ns exists (fixes the run-4 DeferCleanup-after-teardown flaw).
+- **ENVTEST verdict (allowed surface): RED→GREEN.** New debug13b Test 6 (multi-pod mask) + Test 7 (unreadable-success re-dispatch). RED-before = 2 Failed against pre-fix controller code (tests present); GREEN-after = `Ran 8 of 170 debug13b specs, 8 Passed / 0 Failed`. Broader push/lease/leak/boundary specs pass (no regression). lint 0 / gofmt / vet clean; kind pkg compiles.
+- **LAYER-B: DEFERRED to the orchestrator.** No Layer-B green claimed. The in-poll diagnostics will decisively confirm on the next single run whether the shared push pod SUCCEEDS and a headSHA reaches the CR (this fix's target) or whether the live cause is a failing in-cluster push (would need a transport fix).
 

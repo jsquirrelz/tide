@@ -928,8 +928,33 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, project.Status.BoundaryPush.LastError)
 	}
 
-	// Push Job Complete — terminal success.
+	// Push Job Complete — terminal success, but ONLY once the landed headSHA is
+	// durably captured into the --force-with-lease anchor (D-B6 / Pitfall 13).
 	if isJobSucceeded(&existingPush) {
+		env, ok := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
+		if !ok || env.HeadSHA == "" {
+			// The Job succeeded but its headSHA is not readable. Under the intentional
+			// D-B5 / R-05 single-writer coupling, the shared tide-push-<uid> Job may
+			// have been created by an EARLIER artifact- or level-boundary push whose
+			// Pod has since been GC'd (TTLSecondsAfterFinished), or whose
+			// terminationMessage is not yet populated at this tick. Going terminal
+			// (BoundaryPushed=True) now would freeze Status.Git.LastPushedSHA empty
+			// FOREVER — the terminal guard at the top of this method returns early on
+			// every subsequent reconcile, so the anchor could never be captured and
+			// every future push would degrade to a no-lease force push. Instead,
+			// replace the stale Job with a fresh project-boundary push the state
+			// machine OWNS: its Pod is fresh and its envelope headSHA is readable on
+			// the next observation. The re-push is idempotent — a re-push of the
+			// already-landed run-branch HEAD is a no-op fast-forward — and bounded by
+			// maxBoundaryPushAttempts (dispatchBoundaryPush increments the tally).
+			if delErr := r.deleteFailedPushJob(ctx, &existingPush); delErr != nil {
+				return ctrl.Result{}, delErr
+			}
+			logger.Info("boundary push Job succeeded but headSHA is unreadable; re-dispatching a fresh owned push to capture the lease anchor",
+				"job", pushJobName, "attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts)
+			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, "headsha-unreadable")
+		}
+
 		patch := client.MergeFrom(project.DeepCopy())
 		project.Status.Git.LeaseFailureCount = 0
 		project.Status.BoundaryPush.LastError = ""
