@@ -52,11 +52,11 @@ import (
 // conflict; CombinedOutput captures stderr; the error is returned to the
 // caller). The controller marks the push job Failed, blocking the push.
 //
-// The bot identity used for merge commits defaults to:
-//   - TIDE_BOT_NAME env (default "TIDE Bot")
-//   - TIDE_BOT_EMAIL env (default "tide-bot@tideproject.k8s")
-//
-// These match tideBotSignature() in cmd/tide-push/main.go (D-03).
+// The merge-commit identity comes from AgentIdentity() — read from
+// TIDE_AGENT_NAME / TIDE_AGENT_EMAIL env vars, falling back to the compiled
+// default "TIDE Agent <tide-agent@tideproject.k8s>". This is the same source
+// the harness task commit and the tide-push boundary commit use (D-04 /
+// SIGN-01).
 //
 // Phase 34 (D-09/D-10, Pitfall 1): on ANY merge failure, a defensive
 // `git merge --abort` runs before returning so a lingering MERGE_HEAD never
@@ -98,20 +98,13 @@ func IntegrateTaskBranches(bareRepoPath, runBranch string, taskBranches []string
 	// was nothing to abort.
 	_, _ = exec.Command("git", "-C", integrationDir, "merge", "--abort").CombinedOutput()
 
-	botName := os.Getenv("TIDE_BOT_NAME")
-	if botName == "" {
-		botName = "TIDE Bot"
-	}
-	botEmail := os.Getenv("TIDE_BOT_EMAIL")
-	if botEmail == "" {
-		botEmail = "tide-bot@tideproject.k8s"
-	}
+	agentName, agentEmail := AgentIdentity()
 
 	for _, taskBranch := range taskBranches {
 		msg := fmt.Sprintf("tide: integrate %s", taskBranch)
 		args := []string{
-			"-c", "user.name=" + botName,
-			"-c", "user.email=" + botEmail,
+			"-c", "user.name=" + agentName,
+			"-c", "user.email=" + agentEmail,
 			"-C", integrationDir,
 			"merge", "--no-ff", taskBranch, "-m", msg,
 		}

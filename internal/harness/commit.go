@@ -18,20 +18,23 @@ package harness
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing"
+
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
-// CommitWorktree stages all changes in worktreeDir and commits them under a
-// TIDE Bot identity. Returns the HEAD SHA after the commit, an isEmpty flag
+// CommitWorktree stages all changes in worktreeDir and commits them under the
+// TIDE agent identity. Returns the HEAD SHA after the commit, an isEmpty flag
 // (true when there are no changes to commit), and any error.
 //
-// Identity is read from TIDE_BOT_NAME / TIDE_BOT_EMAIL env vars, falling back
-// to "TIDE Bot" / "tide-bot@tideproject.k8s" (matching tideBotSignature() in
-// cmd/tide-push/main.go, per D-03).
+// Identity comes from pkggit.AgentIdentity — read from TIDE_AGENT_NAME /
+// TIDE_AGENT_EMAIL env vars, falling back to the compiled default
+// "TIDE Agent <tide-agent@tideproject.k8s>". This is the same source the
+// integrate merge commit and the tide-push boundary commit use, so the
+// default lives in exactly one place (D-04 / SIGN-01).
 //
 // Empty-diff policy (D-03 / SC-2): if git status --porcelain reports nothing,
 // CommitWorktree returns (ZeroHash, true, nil) — no empty commit is created.
@@ -52,20 +55,13 @@ func CommitWorktree(worktreeDir, taskUID string) (plumbing.Hash, bool, error) {
 		return plumbing.ZeroHash, false, fmt.Errorf("CommitWorktree: git add -A: %w: %s", addErr, addOut)
 	}
 
-	// Step 3: commit with TIDE identity.
-	botName := os.Getenv("TIDE_BOT_NAME")
-	if botName == "" {
-		botName = "TIDE Bot"
-	}
-	botEmail := os.Getenv("TIDE_BOT_EMAIL")
-	if botEmail == "" {
-		botEmail = "tide-bot@tideproject.k8s"
-	}
+	// Step 3: commit with the TIDE agent identity.
+	agentName, agentEmail := pkggit.AgentIdentity()
 	msg := fmt.Sprintf("tide: task %s authored", taskUID)
 	// Note: -c flags must precede -C and the subcommand.
 	commitArgs := []string{
-		"-c", "user.name=" + botName,
-		"-c", "user.email=" + botEmail,
+		"-c", "user.name=" + agentName,
+		"-c", "user.email=" + agentEmail,
 		"-C", worktreeDir,
 		"commit", "-m", msg,
 	}
