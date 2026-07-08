@@ -221,6 +221,18 @@ type GitConfig struct {
 	// when this is empty.
 	// +optional
 	LeaksConfigRef string `json:"leaksConfigRef,omitempty"`
+
+	// BaseRef optionally names the ref the run branch is created from: an
+	// existing branch name, tag name, full 40-hex commit SHA, or a fully
+	// qualified refs/... path. Absent means the remote default branch (HEAD).
+	// Resolution happens in the clone Job; an unresolvable value surfaces as
+	// CloneFailed/BaseRefUnresolvable. Edits after a successful clone are
+	// inert — the run branch is created once (see docs/project-authoring.md).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=250
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._+@/-]*$`
+	// +optional
+	BaseRef string `json:"baseRef,omitempty"`
 }
 
 // GitStatus records the per-Project git push state (Phase 3 D-B6).
@@ -253,6 +265,11 @@ type GitStatus struct {
 	// TTL-unreliable Job-existence check (BYPASS-02 / Phase 27).
 	// +optional
 	CloneComplete bool `json:"cloneComplete,omitempty"`
+
+	// BaseSHA is the commit SHA the run branch was created from, stamped on
+	// every run (annotated tags record the peeled commit). Provenance only.
+	// +optional
+	BaseSHA string `json:"baseSHA,omitempty"`
 }
 
 // BudgetStatus records running spend tallies for the Project (Phase 2+).

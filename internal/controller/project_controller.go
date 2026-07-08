@@ -82,6 +82,16 @@ type pushResultEnvelope struct {
 	MissingBranches []string `json:"missingBranches,omitempty"`
 	MissingTotal    int      `json:"missingTotal,omitempty"`
 	ConflictBranch  string   `json:"conflictBranch,omitempty"`
+
+	// Phase 35 (BASE-02/BASE-03): clone-mode envelope fields (CloneResult).
+	// BaseSHA is the resolved 40-hex commit the run branch was created from —
+	// stamped into status.git.baseSHA on clone success (D-11 provenance).
+	// BaseRef echoes the ref as given by the operator; the WR-03 classification
+	// branch compares it to the current spec.git.baseRef so a stale envelope
+	// (operator edited the spec while a failed Job still exists) does not halt
+	// on the old ref. JSON keys MUST match cmd/tide-push/main.go's pushResult.
+	BaseSHA string `json:"baseSHA,omitempty"`
+	BaseRef string `json:"baseRef,omitempty"`
 }
 
 // readPushEnvelope locates the first Pod belonging to the named push Job
@@ -135,6 +145,19 @@ const (
 	boundaryPushBaseBackoff = 2 * time.Minute
 	// boundaryPushMaxBackoff caps the capped-exponential requeue delay.
 	boundaryPushMaxBackoff = 15 * time.Minute
+
+	// cloneEnvelopeReadCutoff bounds the read-before-flip wait on the clone
+	// success arm (Phase 35 D-11, RESEARCH Pattern 2). When the clone Job has
+	// Succeeded but its CloneResult envelope is not yet readable (pod not
+	// observed, termination message empty), the controller requeues instead of
+	// flipping CloneComplete with a lost baseSHA. Once the Job's completionTime
+	// is older than this cutoff the controller flips anyway with an empty
+	// baseSHA and logs degraded provenance. This MUST stay well under the clone
+	// Job's 300s TTLSecondsAfterFinished: if the requeue loop outlived TTL GC,
+	// IsNotFound would fire, the dispatch guard would re-clone, and the retried
+	// clone would hit EnsureRunBranch's run-branch-exists early return (Pitfall
+	// 6) — producing a no-fresh-baseSHA envelope and stalling the flip forever.
+	cloneEnvelopeReadCutoff = 60 * time.Second
 )
 
 // ProjectReconciler reconciles a Project object at Standard depth (D-C1):
@@ -604,10 +627,25 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	if cloneErr != nil && !apierrors.IsNotFound(cloneErr) {
 		return ctrl.Result{}, cloneErr
 	}
+	// Phase 35 D-07 (Pattern 4): generation-scoped clone-dispatch halt. A prior
+	// clone Job that terminal-failed with an unresolvable baseRef stamps
+	// CloneFailed=True/BaseRefUnresolvable with ObservedGeneration = this
+	// generation. The halt is the CONDITION, not Job existence (Pitfall 2: the
+	// 300s TTL GCs the failed Job, so an IsNotFound-only guard would re-dispatch
+	// the same bad ref forever). A spec edit to baseRef bumps metadata.generation
+	// → ObservedGeneration no longer matches → the halt releases and a fresh
+	// clone dispatches (recovery = one kubectl edit, classify-don't-retry).
+	baseRefHalted := false
+	if cond := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionCloneFailed); cond != nil {
+		baseRefHalted = cond.Status == metav1.ConditionTrue &&
+			cond.Reason == tidev1alpha2.ReasonBaseRefUnresolvable &&
+			cond.ObservedGeneration == project.Generation
+	}
+
 	// D-02 / BYPASS-02: gate clone dispatch on the durable CloneComplete flag.
 	// IsNotFound alone is TTL-unreliable (clone Job TTL=300s; the Job may be GC'd
 	// before a resume, causing a destructive re-clone into an existing workspace).
-	if !project.Status.Git.CloneComplete && apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
+	if !project.Status.Git.CloneComplete && !baseRefHalted && apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
 		cloneOpts := CloneOptions{TidePushImage: r.TidePushImage}
 		// B6: wire the run branch name so tide-push calls EnsureRunBranch + provisions
 		// the run worktree during clone (B5). project.Status.Git.BranchName is set by
@@ -616,6 +654,10 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 		if project.Status.Git.BranchName != "" {
 			cloneOpts.RunBranch = project.Status.Git.BranchName
 		}
+		// Phase 35 D-01/D-04: plumb the operator-selected baseRef to the clone
+		// Job (Spec.Git is non-nil here per the guard above). tide-push resolves
+		// it inside EnsureRunBranch; empty preserves default-HEAD behavior.
+		cloneOpts.BaseRef = project.Spec.Git.BaseRef
 		cloneJob := buildCloneJob(project, pvcName, cloneOpts, r.Scheme)
 		if cErr := r.Create(ctx, cloneJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
@@ -628,13 +670,49 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 
 	// D-02 / BYPASS-02: set-on-success — flip CloneComplete when the clone Job
 	// reports terminal success. CloneComplete is NEVER set at dispatch time; a
-	// failed clone leaves it false so dispatch is retried. Mirror the BranchName
-	// patch idiom (client.MergeFrom + r.Status().Patch).
+	// failed clone leaves it false so dispatch is retried.
+	//
+	// Phase 35 D-11 (RESEARCH Pattern 2 — read-before-flip): the arm flips
+	// CloneComplete exactly once, so it must read the CloneResult envelope FIRST
+	// and stamp status.git.baseSHA in the SAME status patch — otherwise a
+	// success whose envelope is momentarily unreadable would flip CloneComplete
+	// and lose baseSHA permanently. On an unreadable envelope the arm requeues
+	// (bounded by cloneEnvelopeReadCutoff) rather than flipping with empty
+	// baseSHA on the first observation.
 	if cloneErr == nil && existingClone.Status.Succeeded > 0 && !project.Status.Git.CloneComplete {
-		patch := client.MergeFrom(project.DeepCopy())
-		project.Status.Git.CloneComplete = true
-		if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
-			return ctrl.Result{}, fmt.Errorf("patch CloneComplete: %w", pErr)
+		env, ok := r.readPushEnvelope(ctx, project.Namespace, cloneJobName)
+		if ok {
+			patch := client.MergeFrom(project.DeepCopy())
+			project.Status.Git.BaseSHA = env.BaseSHA
+			project.Status.Git.CloneComplete = true
+			// Clear any prior BaseRefUnresolvable halt: a spec edit released the
+			// generation-scoped gate, a fresh clone ran, and it succeeded.
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:               tidev1alpha2.ConditionCloneFailed,
+				Status:             metav1.ConditionFalse,
+				Reason:             "CloneSucceeded",
+				Message:            "Clone Job succeeded; run branch provisioned.",
+				ObservedGeneration: project.Generation,
+				LastTransitionTime: metav1.Now(),
+			})
+			if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+				return ctrl.Result{}, fmt.Errorf("patch CloneComplete: %w", pErr)
+			}
+		} else {
+			// Envelope not yet readable. If the Job completed longer ago than the
+			// sub-TTL cutoff, flip anyway with empty baseSHA and log degraded
+			// provenance (bounded); otherwise requeue and try again shortly.
+			if ct := existingClone.Status.CompletionTime; ct != nil && time.Since(ct.Time) > cloneEnvelopeReadCutoff {
+				logger.Info("clone Job succeeded but CloneResult envelope unreadable past cutoff; flipping CloneComplete with empty baseSHA (degraded provenance)",
+					"job", cloneJobName, "completionTime", ct.Time)
+				patch := client.MergeFrom(project.DeepCopy())
+				project.Status.Git.CloneComplete = true
+				if pErr := r.Status().Patch(ctx, project, patch); pErr != nil {
+					return ctrl.Result{}, fmt.Errorf("patch CloneComplete: %w", pErr)
+				}
+			} else {
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
 		}
 	}
 
@@ -647,6 +725,44 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	// Delete the failed Job so the next reconcile re-dispatches a fresh clone,
 	// and surface a CloneFailed condition so an operator sees the stall+recovery.
 	if cloneErr == nil && existingClone.Status.Failed > 0 && existingClone.Status.Succeeded == 0 && !project.Status.Git.CloneComplete {
+		// Phase 35 D-06/D-07 (BASE-02, RESEARCH Pattern 3): classify the failure
+		// BEFORE the generic delete-and-re-dispatch. An unresolvable baseRef is a
+		// config error, not a transient one — halt re-dispatch (classify-don't-
+		// retry) instead of hot-looping a bad ref through the 300s TTL.
+		if env, ok := r.readPushEnvelope(ctx, project.Namespace, cloneJobName); ok && env.Reason == "baseref-unresolvable" {
+			// Stale-envelope guard: only halt when the failed ref still matches
+			// the current spec. If the operator already edited spec.git.baseRef
+			// (a newer generation) while this stale failed Job lingers, fall
+			// through to delete-and-re-dispatch so the corrected spec gets a
+			// fresh clone rather than a halt keyed to the old ref.
+			currentBaseRef := ""
+			if project.Spec.Git != nil {
+				currentBaseRef = project.Spec.Git.BaseRef
+			}
+			if env.BaseRef == currentBaseRef {
+				condPatch := client.MergeFrom(project.DeepCopy())
+				meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+					Type:   tidev1alpha2.ConditionCloneFailed,
+					Status: metav1.ConditionTrue,
+					Reason: tidev1alpha2.ReasonBaseRefUnresolvable,
+					// D-06 Argo CD canonical wording; the ref reached the system
+					// only through the admission Pattern (no control chars), so
+					// the interpolated message is log/UI-safe (T-35-03).
+					Message:            fmt.Sprintf("unable to resolve '%s' to a commit SHA; fix spec.git.baseRef to re-attempt the clone", env.BaseRef),
+					ObservedGeneration: project.Generation,
+					LastTransitionTime: metav1.Now(),
+				})
+				if pErr := r.Status().Patch(ctx, project, condPatch); pErr != nil {
+					return ctrl.Result{}, fmt.Errorf("patch BaseRefUnresolvable condition: %w", pErr)
+				}
+				logger.Info("clone Job failed: baseRef unresolvable; halting re-dispatch (generation-scoped), Job left for TTL GC",
+					"job", cloneJobName, "baseRef", env.BaseRef, "generation", project.Generation)
+				// The halt is the CONDITION (Pitfall 2): do NOT delete the Job
+				// and do NOT requeue — a spec edit bumps the generation and the
+				// dispatch guard releases.
+				return ctrl.Result{}, nil
+			}
+		}
 		logger.Info("clone Job terminal-failed; deleting to re-dispatch", "job", cloneJobName, "failed", existingClone.Status.Failed)
 		if dErr := r.Delete(ctx, &existingClone, client.PropagationPolicy(metav1.DeletePropagationBackground)); dErr != nil && !apierrors.IsNotFound(dErr) {
 			return ctrl.Result{}, fmt.Errorf("delete failed clone job: %w", dErr)

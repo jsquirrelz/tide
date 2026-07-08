@@ -98,6 +98,8 @@ If `docker` reports no daemon, re-check the WSL2 integration toggle in Docker De
 
 The chart pair is intentionally **NOT** wired as a Helm dependency (per D-E1's upgrade safety rationale — splitting the CRDs into their own chart lets `helm upgrade tide ...` roll the controller without touching CRD storage). You must install both, in this exact order.
 
+**Upgrades follow the same order — `tide-crds` before `tide`.** When a release adds new `Project.Spec` fields (e.g. `spec.git.baseRef`), those fields only exist in the cluster once the `tide-crds` chart carrying the newer CRD schema is applied. If you `helm upgrade tide ...` against a stale CRD schema, the API server **silently prunes** the unknown fields on admission — no error, no warning. A Project authored with the new field is accepted with that field dropped, and the run quietly bases from `HEAD` as if `baseRef` were never set. Always `helm upgrade tide-crds ...` first, confirm the new field is present (`kubectl get crd projects.tideproject.k8s -o yaml | grep <field>`), then upgrade `tide`.
+
 ### cert-manager prerequisite
 
 The main `tide` chart's webhook and metrics Certificate resources — specifically `charts/tide/templates/serving-cert.yaml`, `charts/tide/templates/selfsigned-issuer.yaml`, and `charts/tide/templates/metrics-certs.yaml` — reference `cert-manager.io/v1` kinds. Helm refuses to apply custom resources whose CRDs are not registered in the cluster, so cert-manager **must be installed before the `tide` chart's helm-install step** below. The `tide-crds` subchart does **not** depend on cert-manager — only the main `tide` chart does — so cert-manager can install in either order relative to `tide-crds`, as long as it lands before `tide`.

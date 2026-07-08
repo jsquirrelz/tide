@@ -132,11 +132,13 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Depends on**: Nothing (first phase of milestone; headline. The former "before Phase 36's signing" sequencing constraint is void — signing was descoped 2026-07-03)
 **Requirements**: INTEG-01, INTEG-02, INTEG-03, INTEG-04, INTEG-05
 **Success Criteria** (what must be TRUE):
+
   1. Every Succeeded task's worktree branch has a merge commit reachable from the run branch — including tasks in a plan's final Kahn wave; a single-wave plan integrates its tasks (the `plan_controller.go:1192` last-wave skip is closed).
   2. Tasks still execute in parallel while run-branch merges are serialized and idempotent — a wave of 2+ parallel tasks integrates every branch (cumulative Succeeded-branch set), and a controller retry re-merges safely with no duplicate or dropped merges.
   3. A boundary push fires only when `git merge-base --is-ancestor` confirms every Succeeded task branch is integrated (always recomputed from git, never a cached verdict); on a miss the operator sees a sticky `integration-incomplete` condition instead of an incomplete run branch being pushed.
   4. After a successful boundary push, `status.git.lastPushedSHA` shows the push envelope's `HeadSHA` — arming the force-with-lease fence.
   5. A kind-suite regression test reproduces the 2-parallel-task final-wave integration miss (RED against the pre-fix code path) and locks the fix.
+
 **Plans**: TBD
 
 ### Phase 35: Git Base Ref
@@ -145,11 +147,18 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Depends on**: Nothing (independent of Phase 34; sequenced before Phase 36 so the two CRD/chart changes batch into one chart version bump per the FIXED-contract rule)
 **Requirements**: BASE-01, BASE-02, BASE-03
 **Success Criteria** (what must be TRUE):
+
   1. Applying a Project with `spec.git.baseRef` set to a branch, tag, or SHA produces a run branched from that ref; a Project without the field keeps current default-HEAD behavior (no default marker in the CRD — absent means HEAD, one encoding).
   2. An unresolvable baseRef fails fast with a typed condition naming the bad ref (classify-don't-retry) — no retry loop, no cryptic worktree-add failure to decode.
   3. `status.git.baseSHA` shows the resolved base SHA on a running Project.
   4. The new spec/status fields exist in both API versions, survive v1alpha1⇄v1alpha2 conversion round-trip, and survive a `tide-crds` chart upgrade without silent pruning — locked by conversion and CRD upgrade-path tests.
-**Plans**: TBD
+
+**Plans**: 4/4 plans complete
+
+- [x] 35-01-PLAN.md
+- [x] 35-02-PLAN.md
+- [x] 35-03-PLAN.md
+- [x] 35-04-PLAN.md
 
 ### Phase 36: Signed Commits + Bot Identity
 
@@ -159,9 +168,11 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Depends on**: Phase 35 (chart/CRD bumps batch into one version bump). The former Phase 34 dependency was signing-specific and no longer applies.
 **Requirements**: SIGN-01
 **Success Criteria** (what must be TRUE):
+
   1. Configuring the agent identity once (Project spec or chart value) changes the committer identity at all three commit sites — harness, integrate, tide-push — with Project spec taking precedence over the chart value, and the tide-push hardcoded `tideBotSignature()` removed.
   2. An unconfigured install commits as `TIDE Agent <tide-agent@tideproject.k8s>` at all three sites (one consistent compiled-in default; the `TIDE_BOT_*` env names are gone).
   3. The new `spec.git.agentName`/`agentEmail` CRD fields ride the same chart version bump as Phase 35's `baseRef` (FIXED-contract batching).
+
 **Plans**: TBD
 
 ### Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
@@ -170,10 +181,12 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Depends on**: Nothing (independent of Phases 34–36; sequenced last among the big items so the UI consumes a settled reporter ConfigMap contract, which this phase also delivers — DASH-02 lands before/with DASH-01)
 **Requirements**: DASH-01, DASH-02, DASH-03, DASH-04
 **Success Criteria** (what must be TRUE):
+
   1. Clicking any Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); on a gate-parked node the artifact renders beside the approve action — an approve decision needs no PVC reader pod.
   2. Planning artifacts persist as size-capped, owner-ref'd ConfigMaps written at reporter materialization time; an oversize artifact renders with a visible truncation marker, and deleting the owning CR garbage-collects its artifact ConfigMaps (PVC/git stay source of truth).
   3. The operator can read the outcome prompt and project settings in a dashboard project view.
   4. The log drawer always renders an explicit state — loading, streaming, or pod-gone — and is never silently empty.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -184,11 +197,13 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 **Requirements**: COST-01, COST-02, COST-03, PROMPT-01, TELEM-01, TELEM-02, TELEM-03, DEBT-01, DEBT-02, DEBT-03
 **Research flag**: COST-03 requires one empirical check before the pricing rows ship — tee a credproxy request to observe which cache-write TTL the `claude` CLI dispatch surface uses (5m → 1.25× vs 1h → 2× write multiplier).
 **Success Criteria** (what must be TRUE):
+
   1. A run on a Claude 5 family model (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) tallies `BudgetStatus.CostSpentCents` at the real per-MTok rates (exact-ID lookup with `-YYYYMMDD` normalizer; cache-write multiplier set from the empirically verified CLI TTL), and an unknown-model most-expensive fallback is observable as a metric/condition — not only a GC'd pod log line.
   2. `tide apply --prompt-file <path>` inlines the file into `spec.outcomePrompt` — no CRD change; the ConfigMap-ref union stays a compatible later addition.
   3. An operator following INSTALL.md's enable-telemetry step (including the kube-prometheus-stack `release:` label fix) ends at a Prometheus Targets page showing TIDE scraped; installing with `prometheus.enabled=false` prints a NOTES.txt warning that run telemetry beyond budget is unavailable, and the dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data.
   4. The project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1), and the rendered chart configmap defaults `plannerConcurrency` to 4, matching values.yaml (W2).
   5. Heavy controller envtest specs run in the integration tier instead of the TEST-01 unit tier, with total spec count conserved across the split (no specs lost).
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -207,7 +222,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
-| 35. Git Base Ref | v1.0.7 | 0/TBD | Not started | - |
+| 35. Git Base Ref | v1.0.7 | 4/4 | Complete   | 2026-07-07 |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 0/TBD | Not started | - |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |

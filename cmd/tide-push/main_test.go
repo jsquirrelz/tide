@@ -1542,3 +1542,277 @@ func TestRunPushIntegrationOnlyEmptyCommitMessageSucceeds(t *testing.T) {
 		t.Errorf("wave-success envelope = {exit:%d reason:%q}, want {0, \"\"}", pr.ExitCode, pr.Reason)
 	}
 }
+
+// ---------- Phase 35 (BASE-01/BASE-02): clone-mode envelope + --base-ref ----------
+
+// readCloneEnvelope reads <workspace>/envelopes/clone/<project-uid>.json,
+// returning the parsed struct and the raw bytes (for exact-key-spelling checks).
+func readCloneEnvelope(t *testing.T, workspace, projectUID string) (pushResult, []byte) {
+	t.Helper()
+	path := filepath.Join(workspace, "envelopes", "clone", projectUID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read clone envelope %s: %v", path, err)
+	}
+	var pr pushResult
+	if err := json.Unmarshal(data, &pr); err != nil {
+		t.Fatalf("unmarshal clone envelope: %v", err)
+	}
+	return pr, data
+}
+
+// seedSourceWithFeature builds a NON-bare source repo with a default branch and
+// a non-default branch feature/hotfix (distinct tip). Cloning it via file://
+// yields a production-shaped bare repo where feature/hotfix lives only under
+// refs/remotes/origin/* — the layout runClone resolves --base-ref against.
+func seedSourceWithFeature(t *testing.T) (workDir string, defaultHead, featureHead plumbing.Hash) {
+	t.Helper()
+	base := t.TempDir()
+	workDir = filepath.Join(base, "src-work")
+
+	repo, err := gogit.PlainInit(workDir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	mk := func(fname, content, msg string) plumbing.Hash {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(workDir, fname), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", fname, err)
+		}
+		if _, err := wt.Add(fname); err != nil {
+			t.Fatalf("Add %s: %v", fname, err)
+		}
+		h, err := wt.Commit(msg, &gogit.CommitOptions{
+			Author: &object.Signature{Name: "Seed", Email: "seed@example.com", When: time.Now()},
+		})
+		if err != nil {
+			t.Fatalf("Commit %s: %v", msg, err)
+		}
+		return h
+	}
+
+	defaultHead = mk("a.txt", "1\n", "commit 1")
+	headSym, err := repo.Reference(plumbing.HEAD, false)
+	if err != nil {
+		t.Fatalf("Reference HEAD: %v", err)
+	}
+	defaultBranch := headSym.Target()
+
+	if err := wt.Checkout(&gogit.CheckoutOptions{
+		Branch: plumbing.NewBranchReferenceName("feature/hotfix"),
+		Create: true,
+	}); err != nil {
+		t.Fatalf("Checkout feature/hotfix: %v", err)
+	}
+	featureHead = mk("b.txt", "feature\n", "feature commit")
+
+	if err := wt.Checkout(&gogit.CheckoutOptions{Branch: defaultBranch}); err != nil {
+		t.Fatalf("Checkout back to default: %v", err)
+	}
+	return workDir, defaultHead, featureHead
+}
+
+// TestRunCloneWritesSuccessEnvelopeDefaultHead covers D-11: clone with
+// --run-branch and NO --base-ref writes a CloneResult envelope whose baseSHA is
+// the source HEAD hash.
+func TestRunCloneWritesSuccessEnvelopeDefaultHead(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, srcHead := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:       "clone",
+		RepoURL:    "file://" + bareSrc,
+		Workspace:  ws,
+		RunBranch:  "tide/run-default-1",
+		ProjectUID: "c-default",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone exit=%d stderr=%s", exit, stderr)
+	}
+
+	pr, raw := readCloneEnvelope(t, ws, "c-default")
+	if pr.Kind != "CloneResult" {
+		t.Errorf("envelope.kind = %q, want CloneResult", pr.Kind)
+	}
+	if pr.ExitCode != 0 {
+		t.Errorf("envelope.exitCode = %d, want 0", pr.ExitCode)
+	}
+	if pr.Reason != "" {
+		t.Errorf("envelope.reason = %q, want empty", pr.Reason)
+	}
+	if pr.BaseSHA != srcHead.String() {
+		t.Errorf("envelope.baseSHA = %q, want source HEAD %s", pr.BaseSHA, srcHead)
+	}
+	// Exact key spelling locked to the objective contract.
+	for _, key := range []string{`"kind"`, `"reason"`, `"baseSHA"`, `"exitCode"`} {
+		if !bytes.Contains(raw, []byte(key)) {
+			t.Errorf("envelope JSON missing key %s: %s", key, raw)
+		}
+	}
+}
+
+// TestRunCloneWritesSuccessEnvelopeFeatureBranch covers the feature-branch
+// success path: run branch tip AND envelope baseSHA equal the feature tip.
+func TestRunCloneWritesSuccessEnvelopeFeatureBranch(t *testing.T) {
+	workDir, _, featureHead := seedSourceWithFeature(t)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:       "clone",
+		RepoURL:    "file://" + workDir,
+		Workspace:  ws,
+		RunBranch:  "tide/run-feature-1",
+		BaseRef:    "feature/hotfix",
+		ProjectUID: "c-feature",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone exit=%d stderr=%s", exit, stderr)
+	}
+
+	pr, raw := readCloneEnvelope(t, ws, "c-feature")
+	if pr.BaseSHA != featureHead.String() {
+		t.Errorf("envelope.baseSHA = %q, want feature tip %s", pr.BaseSHA, featureHead)
+	}
+	if pr.BaseRef != "feature/hotfix" {
+		t.Errorf("envelope.baseRef = %q, want feature/hotfix", pr.BaseRef)
+	}
+	if !bytes.Contains(raw, []byte(`"baseRef"`)) {
+		t.Errorf("envelope JSON missing baseRef key: %s", raw)
+	}
+
+	// Run branch tip in the cloned bare repo must equal the feature tip.
+	bareRepo, err := gogit.PlainOpen(filepath.Join(ws, "repo.git"))
+	if err != nil {
+		t.Fatalf("PlainOpen repo.git: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName("tide/run-feature-1"), false)
+	if err != nil {
+		t.Fatalf("run branch ref: %v", err)
+	}
+	if ref.Hash() != featureHead {
+		t.Errorf("run branch tip = %s, want feature tip %s", ref.Hash(), featureHead)
+	}
+}
+
+// TestRunCloneWritesFailureEnvelopeUnresolvable covers BASE-02/D-05: an
+// unresolvable --base-ref exits 2 with reason baseref-unresolvable and no
+// baseSHA, and does not create the run branch.
+func TestRunCloneWritesFailureEnvelopeUnresolvable(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:       "clone",
+		RepoURL:    "file://" + bareSrc,
+		Workspace:  ws,
+		RunBranch:  "tide/run-bad-1",
+		BaseRef:    "no-such-ref",
+		ProjectUID: "c-bad",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 2 {
+		t.Fatalf("clone exit=%d, want 2 (exitInvariant); stderr=%s", exit, stderr)
+	}
+
+	pr, _ := readCloneEnvelope(t, ws, "c-bad")
+	if pr.Reason != "baseref-unresolvable" {
+		t.Errorf("envelope.reason = %q, want baseref-unresolvable", pr.Reason)
+	}
+	if pr.ExitCode != 2 {
+		t.Errorf("envelope.exitCode = %d, want 2", pr.ExitCode)
+	}
+	if pr.BaseRef != "no-such-ref" {
+		t.Errorf("envelope.baseRef = %q, want no-such-ref", pr.BaseRef)
+	}
+	if pr.BaseSHA != "" {
+		t.Errorf("envelope.baseSHA = %q, want empty on failure", pr.BaseSHA)
+	}
+
+	// The run branch must NOT have been created in the bare repo.
+	bareRepo, err := gogit.PlainOpen(filepath.Join(ws, "repo.git"))
+	if err != nil {
+		t.Fatalf("PlainOpen repo.git: %v", err)
+	}
+	if _, err := bareRepo.Reference(plumbing.NewBranchReferenceName("tide/run-bad-1"), false); err == nil {
+		t.Error("run branch was created despite unresolvable baseRef")
+	}
+}
+
+// TestRunCloneNoRunBranchWritesSuccessEnvelope covers the legacy no-run-branch
+// path: clone still exits 0 and writes a CloneResult success envelope with an
+// empty baseSHA (the controller stamps empty — documented, not special-cased).
+func TestRunCloneNoRunBranchWritesSuccessEnvelope(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:       "clone",
+		RepoURL:    "file://" + bareSrc,
+		Workspace:  ws,
+		ProjectUID: "c-norb",
+		// RunBranch intentionally absent.
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone exit=%d stderr=%s", exit, stderr)
+	}
+
+	pr, _ := readCloneEnvelope(t, ws, "c-norb")
+	if pr.Kind != "CloneResult" {
+		t.Errorf("envelope.kind = %q, want CloneResult", pr.Kind)
+	}
+	if pr.ExitCode != 0 || pr.Reason != "" {
+		t.Errorf("envelope = {exit:%d reason:%q}, want {0, \"\"}", pr.ExitCode, pr.Reason)
+	}
+	if pr.BaseSHA != "" {
+		t.Errorf("envelope.baseSHA = %q, want empty on the no-run-branch path", pr.BaseSHA)
+	}
+}
+
+// TestRunCloneNoProjectUIDSkipsPVCEnvelope verifies the PVC envelope is skipped
+// (no error) when --project-uid is unset.
+func TestRunCloneNoProjectUIDSkipsPVCEnvelope(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	ws := t.TempDir()
+
+	cfg := pushConfig{
+		Mode:      "clone",
+		RepoURL:   "file://" + bareSrc,
+		Workspace: ws,
+		RunBranch: "tide/run-nouid-1",
+		// ProjectUID intentionally empty.
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "")
+	if exit != 0 {
+		t.Fatalf("clone exit=%d stderr=%s", exit, stderr)
+	}
+	// No clone envelope dir/file should exist when ProjectUID is empty.
+	if _, err := os.Stat(filepath.Join(ws, "envelopes", "clone")); err == nil {
+		t.Error("clone envelope dir created despite empty ProjectUID")
+	}
+}

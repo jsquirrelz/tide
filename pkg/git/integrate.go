@@ -36,9 +36,9 @@ import (
 //   - --no-ff produces a merge commit for every task branch, making the
 //     wave-parallelism topology explicit in the commit graph.
 //
-// Precondition: EnsureRunBranch(bareRepoPath, runBranch) must be called before
-// IntegrateTaskBranches so the run branch ref exists in the bare repo. If the
-// run branch does not exist, git worktree add will fail.
+// Precondition: EnsureRunBranch(bareRepoPath, runBranch, baseRef) must be
+// called before IntegrateTaskBranches so the run branch ref exists in the bare
+// repo. If the run branch does not exist, git worktree add will fail.
 //
 // The integration worktree at worktrees/run-<runBranch>/ is the same directory
 // that tide-push --mode=push opens via gogit.PlainOpen (cmd/tide-push/main.go).

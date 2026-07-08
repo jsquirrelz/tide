@@ -48,6 +48,7 @@ file wins — file a doc-drift issue.
 | `git.repoURL`               | `string` (URL)        | optional | (none)                        | The per-Project push target. CEL pattern requires `http(s)://`. Required for any Project whose lifecycle reaches push; optional for purely transient/test Projects (Phase 3 D-B6).              |
 | `git.credsSecretRef`        | `string` (Secret name) | optional | (none)                        | Same-namespace Secret carrying `GIT_PAT`. Cross-namespace refs are NOT permitted in v1.0. Read only by the push Job (`tide-push` ServiceAccount), never by the controller.                       |
 | `git.leaksConfigRef`        | `string` (ConfigMap)   | optional | embedded gitleaks defaults    | ConfigMap with gitleaks rule overrides per-Project. When empty, the push image's embedded ruleset applies.                                                                                       |
+| `git.baseRef`               | `string` (ref)         | optional | remote default branch (`HEAD`) | The ref the per-run branch is created from — a branch, tag, full 40-hex SHA, or `refs/`-qualified path. Resolution order is `refs/`-verbatim → branch → tag → full SHA (NOT git revision syntax); `HEAD`, short SHAs, and `~`/`^` suffixes are rejected. Absent = the remote default branch. An unresolvable value halts the clone with `CloneFailed`/`BaseRefUnresolvable`; edit the field to re-attempt. See [Basing a run on a branch, tag, or SHA](#basing-a-run-on-a-branch-tag-or-sha). |
 | `budget.absoluteCapCents`   | `int64` (USD cents)   | yes (set a real value for production) | `0` = **cap DISABLED / unlimited spend** (NOT a hard stop) | Hard lifetime cap on LLM spend in USD cents. `2500` = $25. **The cap is only enforced when `> 0`** (`internal/budget/cap.go`: "zero cap = unlimited") — `0` means UNLIMITED, so a real Project with a real subagent and `absoluteCapCents: 0` can spend without bound. Always set a real cap in production. When a non-zero cap is exceeded, `Status.phase=BudgetExceeded` fires and dispatch halts (Phase 2 D-D2 + Phase 04.1 P4.1).                              |
 | `budget.rollingWindowCapCents` | `int64` (USD cents) | optional | (no rolling window)           | Caps spending over the rolling window defined by `budget.rollingWindowDuration`. Window resets via `ProjectReconciler.handleBudgetGate` when `BudgetStatus.WindowStart + duration` elapses.       |
 | `budget.rollingWindowDuration` | `metav1.Duration`  | optional | `24h`                         | Window length over which `rollingWindowCapCents` applies. Must be ≥ 1h (semantic check; controller-gen Pattern markers can't enforce on struct-typed fields). Set explicitly to override default. |
@@ -85,6 +86,7 @@ operator-visible columns surfaced by `kubectl get project` are `Phase`,
 | `budget.costSpentCents`             | Cumulative cost in USD cents since `windowStart`. Compared against `Spec.budget.{absoluteCapCents,rollingWindowCapCents}`.      |
 | `budget.windowStart`                | Beginning of the current rolling budget window.                                                                                |
 | `git.branchName`                    | Lifetime per-run branch (`tide/run-<project>-<unix-epoch>`). Fixed at Project creation; never changes for the lifetime.        |
+| `git.baseSHA`                       | The commit SHA the run branch was created from — stamped on **every** run, including default-`HEAD` runs (no `baseRef` set). Reproducibility provenance: the ref can move after the run starts, so `baseSHA` pins the exact commit. Annotated tags stamp the peeled commit. |
 | `git.lastPushedSHA`                 | Head SHA recorded on the last successful push; used as the `--force-with-lease` lease for the next push.                       |
 | `git.leaseFailureCount`             | Consecutive push-lease rejections. Resets to 0 on success; trips `PhasePushLeaseFailed` when it exceeds the configured budget. |
 
@@ -580,6 +582,75 @@ See [`docs/git-hosts.md`](git-hosts.md) for per-host PAT creation recipes
 1. Generate a minimally-scoped PAT on the host.
 2. Wire it into a same-namespace Secret as data key `GIT_PAT`.
 3. Reference that Secret name from `Project.Spec.git.credsSecretRef`.
+
+### Basing a run on a branch, tag, or SHA
+
+By default TIDE bases the per-run branch on the remote's default branch — its
+`HEAD`. Set `Project.Spec.git.baseRef` to base the run on a specific branch, tag,
+or commit instead. This is the lever for driving a run off an **unmerged** hotfix
+branch, a release tag, or a pinned commit without first merging it to the default
+branch.
+
+**Accepted forms** — resolution walks these in order, first match wins:
+
+| Form | Example | Notes |
+| ---- | ------- | ----- |
+| Branch name | `release/1.2` | Resolved against `refs/heads/*`, then the fetched `refs/remotes/origin/*` — an unmerged branch that lives only on the remote resolves here. |
+| Tag name | `v1.2.0` | Annotated tags are peeled to the commit they point at; the peeled commit SHA is what lands in `status.git.baseSHA`. |
+| Full 40-hex commit SHA | `9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c` | Must be **reachable from a branch or tag** — the bare clone fetches all heads + tags, and a SHA outside that set is unresolvable (no targeted-SHA fetch; see the limit below). |
+| Fully qualified `refs/...` path | `refs/heads/release/1.2`, `refs/tags/v1.2.0` | Resolved **verbatim, before the chain above** — the explicit disambiguation escape hatch when a branch and a tag share a name. |
+
+**Rejected forms** — `HEAD`, short (abbreviated) SHAs, and `~`/`^` suffix
+expressions (e.g. `main~2`, `v1.2.0^`) are **not** accepted. Resolution is an
+explicit ref chain, not git revision syntax — there are exactly the three short
+forms above plus the `refs/`-qualified escape hatch. To say "use the default
+branch," leave `baseRef` **absent** — that is the only encoding of `HEAD`; there
+is no `baseRef: HEAD` sentinel.
+
+**The reachable-SHA limit.** A commit SHA that no fetched branch or tag reaches
+(a bare PR-head SHA, say) resolves to the same `BaseRefUnresolvable` halt, with a
+message noting SHAs must be reachable from a branch or tag. Targeted-SHA fetch is
+a documented non-goal for now — pin the branch or tag that carries the commit.
+
+**When the ref is unresolvable.** An unresolvable `baseRef` halts the clone
+before any subagent spend, surfacing a `CloneFailed` condition with reason
+`BaseRefUnresolvable` and a message naming the ref:
+
+```
+unable to resolve '<ref>' to a commit SHA; fix spec.git.baseRef to re-attempt the clone
+```
+
+The halt is deliberate — the same bad ref is **never** hot-looped. Recovery is a
+single edit: correct `spec.git.baseRef` (a typo costs one `kubectl edit`, not a
+Project recreate). The corrected spec is a new generation, which clears the halt
+and re-runs the clone automatically. There is no ls-remote preflight — the check
+fires in the clone Job only, so failure always surfaces the same way.
+
+**Edits after a successful clone are inert.** `baseRef` is read **once**, when the
+lifetime run branch is created. Editing it after the clone has succeeded changes
+nothing — the run branch already exists and is never re-based. The same is true
+for **adopted or imported Projects**, whose run branch already exists on the
+remote: `baseRef` has no effect there. If you need a different base, start a new
+Project. (This is documented behavior, not an enforced immutability rule — there
+is deliberately no CEL rule pinning the field, so the recovery edit above stays
+possible.)
+
+**Provenance on every run.** `status.git.baseSHA` records the resolved 40-hex
+commit the run branch was created from — stamped on every run, **including**
+default-`HEAD` runs with no `baseRef` set. Because a branch or tag can move after
+a run starts, `baseSHA` is the durable record of exactly which commit this run
+built on.
+
+Example — base a run on an unmerged hotfix branch:
+
+```yaml
+spec:
+  targetRepo: "https://github.com/acme/widgets.git"
+  git:
+    repoURL: "https://github.com/acme/widgets.git"
+    credsSecretRef: tide-secrets
+    baseRef: "hotfix/urgent-cve"   # unmerged branch — no merge-to-main first
+```
 
 ### Budget bypass (emergency lever — `tide approve --bypass-budget`)
 

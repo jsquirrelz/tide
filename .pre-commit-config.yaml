@@ -64,9 +64,19 @@ repos:
         pass_filenames: false
         stages: [pre-push]
 
+      # Two local-env neutralizations so the pre-push `make test` mirrors CI
+      # (which runs `make test` directly, not via a git hook):
+      #  1. git exports GIT_DIR (+ GIT_WORK_TREE/GIT_INDEX_FILE/…) into every hook's
+      #     environment, and GIT_DIR overrides `git -C <path>` repo discovery. The
+      #     pkg/git tests shell `git -C <tempRepo> worktree add …`; under a hook the
+      #     leaked GIT_DIR redirects those at THIS repo (no `master` ref) → "invalid
+      #     reference". `env -u GIT_DIR …` scrubs it so the tests run hermetically.
+      #  2. GOFLAGS=-buildvcs=false skips Go's VCS stamping during the test build.
+      #     Stamping shells git and can fail (exit 128) on some local toolchains;
+      #     test binaries are never shipped, so VCS stamps are pure overhead here.
       - id: make-test
         name: make test
-        entry: make test
+        entry: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR GOFLAGS=-buildvcs=false make test
         language: system
         pass_filenames: false
         stages: [pre-push]

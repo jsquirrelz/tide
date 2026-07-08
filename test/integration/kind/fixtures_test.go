@@ -93,6 +93,18 @@ func withGit(repoURL, credsSecretRef string) projectOpt {
 	}
 }
 
+// withBaseRef sets spec.git.baseRef — the ref the run branch is created from
+// (Phase 35 BASE-01). Nil-safe: it lazily creates the GitConfig so it composes
+// with or without withGit, and regardless of option order.
+func withBaseRef(ref string) projectOpt {
+	return func(p *tideprojectv1alpha2.Project) {
+		if p.Spec.Git == nil {
+			p.Spec.Git = &tideprojectv1alpha2.GitConfig{}
+		}
+		p.Spec.Git.BaseRef = ref
+	}
+}
+
 // withBudget overrides the default $0 absolute cap (hierarchy fixtures use a
 // non-zero cap so planner/executor dispatch is not budget-halted).
 func withBudget(cents int64) projectOpt {

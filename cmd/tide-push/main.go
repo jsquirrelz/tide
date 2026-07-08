@@ -39,7 +39,11 @@ limitations under the License.
 //	0  — success (push or clone succeeded)
 //	1  — generic git failure
 //	2  — invariant violation (envelope.reason=invalid-branch for D-B6
-//	     main-guard, missing-creds for absent GIT_PAT, or bad args)
+//	     main-guard, missing-creds for absent GIT_PAT, or bad args). Clone mode
+//	     also rides this code for an unresolvable --base-ref
+//	     (envelope.reason=baseref-unresolvable, Phase 35 D-05): the controller
+//	     classifies on the reason, not the exit code — exit 14 belongs to
+//	     Phase 34's integration-incomplete and must not be reused here.
 //	10 — gitleaks finding (envelope.reason=leak-detected)
 //	11 — lease rejection (envelope.reason=lease-rejected)
 //	12 — auth failure (envelope.reason=auth-failed)
@@ -105,7 +109,13 @@ type pushConfig struct {
 	// RunBranch is the clone-mode per-run branch for EnsureRunBranch + run
 	// worktree (D-B6/B5); if non-empty, EnsureRunBranch + provision run
 	// worktree after clone.
-	RunBranch             string
+	RunBranch string
+	// BaseRef is the clone-mode ref the run branch is created from (Phase 35
+	// BASE-01): a branch, tag, full 40-hex SHA, or refs/-qualified ref. Empty
+	// means the remote default branch (HEAD). Passed to EnsureRunBranch, which
+	// resolves it; an unresolvable value becomes the exit-2 baseref-unresolvable
+	// clone envelope.
+	BaseRef               string
 	IntegrateTaskBranches []string // push-mode: task branch names to merge before staging artifacts (D-04)
 	// IntegrationOnly marks a per-wave integration Job (D-02/D-04): merge +
 	// verify task branches into the LOCAL run branch and exit success without
@@ -139,11 +149,24 @@ type pushResult struct {
 	MissingBranches []string `json:"missingBranches,omitempty"`
 	MissingTotal    int      `json:"missingTotal,omitempty"`
 	ConflictBranch  string   `json:"conflictBranch,omitempty"`
+
+	// Phase 35 BASE-01/BASE-02: clone-mode fields (Kind == envelopeKindClone).
+	// One struct serves both modes (RESEARCH Open Q2). BaseSHA is the resolved
+	// commit the run branch was created from (success; empty on failure and on
+	// the no-run-branch legacy path). BaseRef echoes the ref as given so the
+	// controller can name it in the BaseRefUnresolvable condition. JSON keys are
+	// the plan 35-02 objective contract plan 35-03 parses.
+	BaseSHA string `json:"baseSHA,omitempty"`
+	BaseRef string `json:"baseRef,omitempty"`
 }
 
 const (
 	envelopeAPIVersion = "tideproject.k8s/v1alpha1"
 	envelopeKind       = "PushResult"
+	// envelopeKindClone is the Kind clone-mode envelopes carry (Phase 35 D-05).
+	// The controller parses by reason/fields, not Kind, but a distinct Kind
+	// keeps clone provenance legible.
+	envelopeKindClone = "CloneResult"
 
 	exitSuccess     = 0
 	exitGenericFail = 1
@@ -188,6 +211,9 @@ func main() {
 	projectUID := fs.String("project-uid", "", "push-mode: keys envelope output path")
 	runBranch := fs.String("run-branch", "",
 		"clone-mode: per-run branch for EnsureRunBranch + run worktree provision (B5/D-B6)")
+	baseRef := fs.String("base-ref", "",
+		"clone-mode: branch, tag, full 40-hex SHA, or refs/-qualified ref the run branch "+
+			"is created from; empty means remote HEAD (BASE-01)")
 	integrateTaskBranches := fs.String("integrate-task-branches", "",
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
 	integrationOnly := fs.Bool("integration-only", false,
@@ -209,6 +235,7 @@ func main() {
 		Workspace:             *workspace,
 		ProjectUID:            *projectUID,
 		RunBranch:             *runBranch,
+		BaseRef:               *baseRef,
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
 		IntegrationOnly:       *integrationOnly,
 	}
@@ -296,8 +323,11 @@ func makeWorkspaceGroupShared(root string) error {
 }
 
 // runClone performs the initial bare clone of cfg.RepoURL into
-// <workspace>/repo.git. No envelope is written — clone-mode is only ever
-// the Project's one-time setup.
+// <workspace>/repo.git. Every exit path writes a clone-result envelope
+// (Kind CloneResult) to /dev/termination-log + the PVC (Phase 35 D-05): a
+// success envelope carries the resolved base SHA (D-11), an unresolvable
+// --base-ref writes reason baseref-unresolvable at exit 2 (D-05), and any other
+// failure writes reason clone-failed at its existing exit code.
 func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	if cfg.RepoURL == "" {
 		fmt.Fprintf(stderr, "tide-push: clone mode requires --repo-url\n")
@@ -311,6 +341,7 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	destDir := filepath.Join(cfg.Workspace, "repo.git")
 	pat := os.Getenv("GIT_PAT") // empty PAT is fine for public repos
 	if _, err := pkggit.Clone(ctx, cfg.RepoURL, destDir, pat); err != nil {
+		writeCloneEnvelope(cfg, "", classifyGitError(err), "clone-failed")
 		fmt.Fprintf(stderr, "tide-push: clone failed: %v\n", redactPAT(err.Error(), pat))
 		return classifyGitError(err)
 	}
@@ -325,28 +356,47 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// "insufficient permission for adding an object to repository database".
 	shareCmd := exec.Command("git", "-C", destDir, "config", "core.sharedRepository", "group")
 	if out, err := shareCmd.CombinedOutput(); err != nil {
+		writeCloneEnvelope(cfg, "", exitGenericFail, "clone-failed")
 		fmt.Fprintf(stderr, "tide-push: set core.sharedRepository: %v: %s\n", err, string(out))
 		return exitGenericFail
 	}
 
 	// B5: if --run-branch is set, create the run branch ref in the bare repo
-	// via EnsureRunBranch and provision the run worktree via `git worktree add`.
-	// The linked worktree shares the object store with destDir so task branches
-	// pushed to destDir are visible for `git merge` in the integration step.
+	// via EnsureRunBranch (resolving cfg.BaseRef) and provision the run worktree
+	// via `git worktree add`. The linked worktree shares the object store with
+	// destDir so task branches pushed to destDir are visible for `git merge` in
+	// the integration step.
 	//
 	// runPush opens the run worktree with PlainOpenWithOptions(EnableDotGitCommonDir:true)
 	// so it correctly resolves HEAD through the commondir mechanism of linked worktrees.
+	//
+	// baseSHA is the resolved base commit the run branch was created from
+	// (D-11); it rides the success envelope back to the controller for the
+	// status.git.baseSHA stamp. On the no-run-branch legacy path it stays empty.
+	var baseSHA string
 	if cfg.RunBranch != "" {
-		if err := pkggit.EnsureRunBranch(destDir, cfg.RunBranch); err != nil {
-			fmt.Fprintf(stderr, "tide-push: EnsureRunBranch: %v\n", err)
+		h, err := pkggit.EnsureRunBranch(destDir, cfg.RunBranch, cfg.BaseRef)
+		if err != nil {
+			// BASE-02/D-05: an unresolvable baseRef fails fast, classified on the
+			// envelope reason (exit 2 — the controller keys on reason, not code).
+			if errors.Is(err, pkggit.ErrBaseRefUnresolvable) {
+				writeCloneEnvelope(cfg, "", exitInvariant, "baseref-unresolvable")
+				fmt.Fprintf(stderr, "tide-push: %v\n", redactPAT(err.Error(), pat))
+				return exitInvariant
+			}
+			writeCloneEnvelope(cfg, "", exitGenericFail, "clone-failed")
+			fmt.Fprintf(stderr, "tide-push: EnsureRunBranch: %v\n", redactPAT(err.Error(), pat))
 			return exitGenericFail
 		}
+		baseSHA = h.String()
+
 		runWorktreeDir := filepath.Join(cfg.Workspace, "worktrees", "run-"+cfg.RunBranch)
 		out, err := exec.Command("git", "-C", destDir, "worktree", "add", runWorktreeDir, cfg.RunBranch).CombinedOutput()
 		if err != nil {
 			// Idempotent: if worktree already exists, log and continue.
 			if !strings.Contains(string(out), "already") {
-				fmt.Fprintf(stderr, "tide-push: provision run worktree: %v: %s\n", err, string(out))
+				writeCloneEnvelope(cfg, "", exitGenericFail, "clone-failed")
+				fmt.Fprintf(stderr, "tide-push: provision run worktree: %v: %s\n", err, redactPAT(string(out), pat))
 				return exitGenericFail
 			}
 		}
@@ -359,11 +409,15 @@ func runClone(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		// fails first on "cannot lock ref 'refs/heads/tide/wt-<uid>'" and then on
 		// "could not create leading directories of '/workspace/worktrees/<uid>/.git'".
 		if err := makeWorkspaceGroupShared(cfg.Workspace); err != nil {
+			writeCloneEnvelope(cfg, "", exitGenericFail, "clone-failed")
 			fmt.Fprintf(stderr, "tide-push: share workspace group perms: %v\n", err)
 			return exitGenericFail
 		}
 	}
 
+	// Success on every clone path (with or without a run branch): the envelope
+	// carries the resolved baseSHA (empty on the legacy no-run-branch path).
+	writeCloneEnvelope(cfg, baseSHA, exitSuccess, "")
 	return exitSuccess
 }
 
@@ -932,6 +986,54 @@ func writePushEnvelope(
 	envPath := filepath.Join(envDir, cfg.ProjectUID+".json")
 	if err := os.WriteFile(envPath, data, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: write envelope %s: %v\n", envPath, err)
+	}
+}
+
+// writeCloneEnvelope writes the clone-result JSON (Kind CloneResult) to
+// /dev/termination-log (terminationMessagePath) AND, when cfg.ProjectUID is
+// non-empty, to <workspace>/envelopes/clone/<project-uid>.json. Best-effort on
+// both writes: failures are logged but do not change the exit code (the caller
+// has already decided what to return).
+//
+// The clone path is deliberately distinct from writePushEnvelope's
+// envelopes/push/ so a later boundary push never overwrites clone provenance.
+// baseSHA is the resolved base commit on success (empty on failure and on the
+// no-run-branch legacy path); reason is empty on success and
+// baseref-unresolvable / clone-failed on the failure paths (Phase 35 D-05/D-11).
+func writeCloneEnvelope(cfg pushConfig, baseSHA string, exit int, reason string) {
+	pr := pushResult{
+		APIVersion: envelopeAPIVersion,
+		Kind:       envelopeKindClone,
+		ProjectUID: cfg.ProjectUID,
+		ExitCode:   exit,
+		Reason:     reason,
+		BaseSHA:    baseSHA,
+		BaseRef:    cfg.BaseRef,
+	}
+	data, err := json.Marshal(pr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tide-push: marshal clone envelope: %v\n", err)
+		return
+	}
+
+	// W-1 surface: /dev/termination-log so the ProjectReconciler can read the
+	// reason without mounting the PVC. Best-effort (not writable off-cluster).
+	if err := os.WriteFile(terminationMessagePath, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "tide-push: write terminationMessage (best-effort): %v\n", err)
+	}
+
+	// PVC copy for consumers that mount the PVC. Skip when ProjectUID is unset.
+	if cfg.ProjectUID == "" {
+		return
+	}
+	envDir := filepath.Join(cfg.Workspace, "envelopes", "clone")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "tide-push: mkdir clone envelope dir %s: %v\n", envDir, err)
+		return
+	}
+	envPath := filepath.Join(envDir, cfg.ProjectUID+".json")
+	if err := os.WriteFile(envPath, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "tide-push: write clone envelope %s: %v\n", envPath, err)
 	}
 }
 
