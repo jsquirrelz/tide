@@ -101,6 +101,11 @@ spec:
         - name: TIDE_IMPORT_IMAGE
           value: "{{ .Values.images.tideImport.repository }}:{{ .Values.images.tideImport.tag | default .Chart.AppVersion }}"
         # phase28-import-env-injected
+        - name: TIDE_AGENT_NAME
+          value: "{{ .Values.agent.name }}"
+        - name: TIDE_AGENT_EMAIL
+          value: "{{ .Values.agent.email }}"
+        # phase36-agent-env-injected
 
         envFrom:
         - secretRef:

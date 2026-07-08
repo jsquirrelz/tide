@@ -274,6 +274,19 @@ gitleaks:
 signingKey:
   secretName: tide-signing-key
 
+# Agent commit identity (Phase 36 / SIGN-01 / D-03, D-04). Sets an install-wide
+# author/committer name+email for every TIDE commit site (harness task commits,
+# integrate merges, tide-push boundary commits) without per-Project config.
+# Precedence (highest wins):
+#   Project.spec.git.agentName / agentEmail (per-Project override)
+#   → these chart values (agent.name / agent.email — install-wide default)
+#   → compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`
+# Empty (default) → the compiled-in default wins. This is a DISTINCT namespace
+# from `signingKey` above (HMAC envelope-signing — unrelated to git identity).
+agent:
+  name: ""
+  email: ""
+
 # Budget defaults (D-D2 / FAIL-04). Helm-driven hard caps applied to all Projects that
 # do not specify per-Project caps in Project.Spec.Budget.
 budget:
