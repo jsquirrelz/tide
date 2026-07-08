@@ -29,7 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Copy, WrapText, X } from "lucide-react";
+import { AlertTriangle, Copy, Loader2, WrapText, X } from "lucide-react";
 
 import { useTaskLog } from "../lib/sse";
 import { type AnsiColor, type AnsiSegment, parseAnsi } from "../lib/ansi";
@@ -43,6 +43,13 @@ export type PodLogStreamerProps = {
 const COPY_CONNECTING = "Connecting to log stream…";
 const COPY_WAITING = "Waiting for output…";
 const COPY_DISCONNECTED = "Log stream closed by backend (5 min idle).";
+// DASH-04 four-state extension (D-12..D-14). Verbatim per UI-SPEC §Copywriting
+// Contract > Log drawer states.
+const COPY_RECONNECTING = "Reconnecting to log stream…";
+const COPY_POD_GONE = "Logs no longer available — pod garbage-collected.";
+const COPY_STREAM_ERROR_HEADING = "Log stream error";
+const COPY_STREAM_ERROR_BODY =
+  "The stream failed unexpectedly — the pod may still be running.";
 
 // SGR color name → CSS color value. We use Tailwind-aligned hex values
 // so the rendered text reads sanely against the --color-surface-overlay
@@ -80,7 +87,7 @@ export default function PodLogStreamer({
   taskName,
   onClose,
 }: PodLogStreamerProps) {
-  const { lines, state } = useTaskLog(taskName);
+  const { lines, state, reconnect } = useTaskLog(taskName);
   const [autoScroll, setAutoScroll] = useState(true);
   const [lineWrap, setLineWrap] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -231,6 +238,55 @@ export default function PodLogStreamer({
             style={{ color: "var(--color-status-warning)" }}
           >
             {COPY_DISCONNECTED}
+          </div>
+        )}
+        {/* DASH-04 D-12: the reconnecting state was the silently-empty
+            viewport — automatic backoff is in flight, so surface it. */}
+        {state === "reconnecting" && (
+          <div
+            data-testid="pod-log-placeholder-reconnecting"
+            className="flex items-center gap-2"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+            {COPY_RECONNECTING}
+          </div>
+        )}
+        {/* DASH-04 D-13: pod garbage-collected — honest message ONLY, no
+            retry affordance (the pod will not come back). */}
+        {state === "pod-gone" && (
+          <div
+            data-testid="pod-log-placeholder-pod-gone"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {COPY_POD_GONE}
+          </div>
+        )}
+        {/* DASH-04 D-14: stream error — distinct from pod-gone, carries a
+            manual Reconnect affordance and never claims the pod is gone. */}
+        {state === "stream-error" && (
+          <div data-testid="pod-log-placeholder-stream-error">
+            <div
+              className="flex items-center gap-2"
+              style={{ color: "var(--color-destructive)", fontWeight: 600 }}
+            >
+              <AlertTriangle size={14} aria-hidden="true" />
+              {COPY_STREAM_ERROR_HEADING}
+            </div>
+            <div
+              style={{ color: "var(--color-text-muted)", marginTop: "4px" }}
+            >
+              {COPY_STREAM_ERROR_BODY}
+            </div>
+            <button
+              type="button"
+              data-testid="pod-log-reconnect"
+              onClick={() => reconnect()}
+              className="mt-2 inline-flex items-center gap-1 rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[var(--color-text-primary)] hover:bg-[var(--color-surface-raised)]"
+              style={{ fontSize: "12px" }}
+            >
+              Reconnect
+            </button>
           </div>
         )}
 
