@@ -6,15 +6,15 @@ current_phase: 34
 current_phase_name: Run Integrity — Integration-Miss Gate + lastPushedSHA
 status: planning
 stopped_at: Phase 38 context gathered
-last_updated: "2026-07-08T05:59:44.560Z"
+last_updated: "2026-07-08T06:12:14.116Z"
 last_activity: 2026-07-03
 last_activity_desc: v1.0.7 roadmap created (Phases 34–38, 26/26 requirements mapped)
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 31
-  completed_plans: 3
-  percent: 10
+  completed_plans: 4
+  percent: 13
 ---
 
 # Project State
@@ -50,9 +50,10 @@ Progress: [░░░░░░░░░░] 0%
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
 | 35. Git Base Ref | TBD | Not started |
-| 36. Signed Commits + Bot Identity | 3/4 | In progress |
+| 36. Signed Commits + Bot Identity | 4/4 | Complete|
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
 | 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
+| Phase 36 P04 | 14min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Dashboard stays read-only — no reader pods, no mutation surfaces.
 - [Phase ?]: 36-02: resolveAgentIdentity is pure (no os.Getenv); resolver owns D-03 defaulting, manager transports chart tier via empty-is-unset ProviderDefaults
 - [Phase 36]: 36-03: agent identity injected UNCONDITIONALLY into both Job builders (subagent executor+planner, push boundary+wave-integration); podjob mirrors resolveAgentIdentity inline to avoid a controller import cycle. D-03 chain now reaches runtime end-to-end.
+- [Phase ?]: D-06 batched bump applied in 36-04: chart was still 1.0.6, single 1.0.6->1.0.7 bump across chart + crds-chart
 
 ### Roadmap Evolution
 
@@ -125,7 +127,7 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-08T05:59:44.560Z
+Last session: 2026-07-08T06:11:02.654Z
 Stopped at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
 Resume file: None
 
