@@ -1,5 +1,5 @@
 ---
-status: awaiting_human_verify
+status: investigating
 slug: dash02-artifact-boundary-push
 trigger: on the DASH-02 artifact-vs-boundary push interaction
 created: 2026-07-08
@@ -140,3 +140,27 @@ files_changed:
   - internal/controller/project_boundary_push_test.go
   - test/integration/kind/failure_test.go
   - test/integration/kind/artifact_staging_test.go
+
+## Run-3 (Layer-B confirmation of fix 1bcbea6) — STILL RED (reopened)
+
+Ran the full Layer-B `artifact_staging` spec against a fresh kind cluster built from HEAD (fix included). `KIND_EXIT=1`, spec RED (~1076s). Findings:
+
+- **Defect A fix WORKED (partial):** the run-3 export shows a `tide-push-<uid>` **and** a `tide-clone-<uid>` pod dir — the clone/push Job pods are now ADMITTED (previously rejected with `serviceaccount "tide-push" not found`). So the SA provisioning is effective.
+- **But `LastPushedSHA` still never advances within the 5-min poll** (all 3 flake-attempts run the full poll → never succeeds). So the fix is **insufficient end-to-end**: the push pod is created but its SHA never reaches `Status.Git.LastPushedSHA`. Unknown whether the push pod SUCCEEDS (lands the push + writes the envelope) or fails — **could not confirm** because the shared kind-logs path `/var/folders/.../kind-logs-tide-test` was NOT overwritten by run-3 (still holds run-1's logs; UTC 16:37 ≠ run-3's 18:04) — a stale-shared-logs analysis blocker.
+- **Tertiary test-harness bug (blocks green regardless):** the poll's `k8sClient.Get(ctx, …)` uses the suite `ctx = context.WithTimeout(..., kindTestTimeout=18m)` (suite_test.go:96). Because each attempt runs the FULL 5-min poll (LastPushedSHA never comes) and `flake-attempts=3`, the 3 attempts consume the 18-min ctx and the final poll dies on `client rate limiter Wait returned an error: context deadline exceeded` (artifact_staging_test.go:183) — masking the real LastPushedSHA state. The poll must use a FRESH context, not the expiring suite ctx.
+
+### Reopened focus — do NOT blind-re-run; instrument first
+next_action_v2: >
+  (1) TEST HARNESS: in artifact_staging_test.go, give the poll's Get a fresh context
+  (e.g. context.Background() or a new WithTimeout) so it survives the poll; and make
+  exportKindLogs write to a UNIQUE dir per run (or read logs BEFORE AfterAll deletes
+  the ns) so run-N logs are analyzable. (2) INSTRUMENT: log, per poll tick, the push
+  pod phase (Succeeded/Failed/Running) + Status.Git.LastPushedSHA + the git-http-server
+  receive-pack count, via GinkgoWriter — so the NEXT run yields the decisive evidence
+  in-band (does the push pod succeed? does readPushEnvelope find a HeadSHA? does the
+  write-back fire?) WITHOUT depending on the flaky shared kind-logs path. (3) Only then
+  re-run Layer-B. Likely remaining root cause candidates: the push pod fails in-cluster
+  (anonymous http receive-pack rejected, or clone/push ordering), OR readPushEnvelope
+  can't find/parse the envelope on the PVC at the path the write-back reads. Confirm
+  from the instrumented run, don't assume.
+
