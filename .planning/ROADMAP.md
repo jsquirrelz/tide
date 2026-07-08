@@ -187,7 +187,19 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   3. The operator can read the outcome prompt and project settings in a dashboard project view.
   4. The log drawer always renders an explicit state — loading, streaming, or pod-gone — and is never silently empty.
 
-**Plans**: TBD
+**Plans**: 5/10 plans executed
+
+- [x] 37-01-PLAN.md
+- [x] 37-02-PLAN.md
+- [x] 37-03-PLAN.md
+- [x] 37-04-PLAN.md
+- [x] 37-05-PLAN.md
+- [ ] 37-06-PLAN.md
+- [ ] 37-07-PLAN.md
+- [ ] 37-08-PLAN.md
+- [ ] 37-09-PLAN.md
+- [ ] 37-10-PLAN.md
+
 **UI hint**: yes
 
 ### Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry
@@ -224,5 +236,5 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
 | 35. Git Base Ref | v1.0.7 | 0/TBD | Not started | - |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
-| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
+| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 5/10 | In Progress|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |
