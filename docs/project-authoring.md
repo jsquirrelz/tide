@@ -49,6 +49,8 @@ file wins — file a doc-drift issue.
 | `git.credsSecretRef`        | `string` (Secret name) | optional | (none)                        | Same-namespace Secret carrying `GIT_PAT`. Cross-namespace refs are NOT permitted in v1.0. Read only by the push Job (`tide-push` ServiceAccount), never by the controller.                       |
 | `git.leaksConfigRef`        | `string` (ConfigMap)   | optional | embedded gitleaks defaults    | ConfigMap with gitleaks rule overrides per-Project. When empty, the push image's embedded ruleset applies.                                                                                       |
 | `git.baseRef`               | `string` (ref)         | optional | remote default branch (`HEAD`) | The ref the per-run branch is created from — a branch, tag, full 40-hex SHA, or `refs/`-qualified path. Resolution order is `refs/`-verbatim → branch → tag → full SHA (NOT git revision syntax); `HEAD`, short SHAs, and `~`/`^` suffixes are rejected. Absent = the remote default branch. An unresolvable value halts the clone with `CloneFailed`/`BaseRefUnresolvable`; edit the field to re-attempt. See [Basing a run on a branch, tag, or SHA](#basing-a-run-on-a-branch-tag-or-sha). |
+| `git.agentName`             | `string`              | optional | (none → compiled-in `TIDE Agent`) | Commit author/committer **name** stamped at all three TIDE commit sites — harness task commits, integrate merges, boundary pushes. Precedence: this field → chart `agent.name` → compiled-in default. Admission rejects angle brackets and newlines (`^[^<>\r\n]+$`, max 100 chars). |
+| `git.agentEmail`            | `string`              | optional | (none → compiled-in `tide-agent@tideproject.k8s`) | Commit author/committer **email**, same three sites and precedence (→ chart `agent.email` → compiled-in default). Must be a bare `local@domain` shape — angle brackets, `@`-in-parts, and whitespace are rejected at admission (max 254 chars). |
 | `budget.absoluteCapCents`   | `int64` (USD cents)   | yes (set a real value for production) | `0` = **cap DISABLED / unlimited spend** (NOT a hard stop) | Hard lifetime cap on LLM spend in USD cents. `2500` = $25. **The cap is only enforced when `> 0`** (`internal/budget/cap.go`: "zero cap = unlimited") — `0` means UNLIMITED, so a real Project with a real subagent and `absoluteCapCents: 0` can spend without bound. Always set a real cap in production. When a non-zero cap is exceeded, `Status.phase=BudgetExceeded` fires and dispatch halts (Phase 2 D-D2 + Phase 04.1 P4.1).                              |
 | `budget.rollingWindowCapCents` | `int64` (USD cents) | optional | (no rolling window)           | Caps spending over the rolling window defined by `budget.rollingWindowDuration`. Window resets via `ProjectReconciler.handleBudgetGate` when `BudgetStatus.WindowStart + duration` elapses.       |
 | `budget.rollingWindowDuration` | `metav1.Duration`  | optional | `24h`                         | Window length over which `rollingWindowCapCents` applies. Must be ≥ 1h (semantic check; controller-gen Pattern markers can't enforce on struct-typed fields). Set explicitly to override default. |
@@ -651,6 +653,22 @@ spec:
     credsSecretRef: tide-secrets
     baseRef: "hotfix/urgent-cve"   # unmerged branch — no merge-to-main first
 ```
+### Commit author identity
+
+Every TIDE commit — harness task commits, integrate merges, and boundary
+pushes — is authored under a configurable agent identity. Set it per-Project via
+`git.agentName` / `git.agentEmail`, or install-wide via the chart values
+`agent.name` / `agent.email` (`--set agent.name=... --set agent.email=...`) so a
+cluster runs one identity without per-Project config. Precedence is Project spec
+→ chart value → compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`;
+leaving all tiers empty uses the compiled default.
+
+Choose a **real, routable email**. It costs nothing today, but when commit
+signing lands (deferred out of v1.0.7) the committer email must match a verified
+email on the machine account that holds the signing public key — so picking a
+throwaway address now forces an identity change across existing history later.
+Pointing `git.agentEmail` at a dedicated machine-account address from the start
+avoids that churn.
 
 ### Budget bypass (emergency lever — `tide approve --bypass-budget`)
 
