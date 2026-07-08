@@ -164,3 +164,16 @@ next_action_v2: >
   can't find/parse the envelope on the PVC at the path the write-back reads. Confirm
   from the instrumented run, don't assume.
 
+## Run-4 (instrumented, flake-attempts=1) — STILL RED, but LastPushedSHA-empty now CLEANLY isolated
+
+- **ctx mask removed:** with `-ginkgo.flake-attempts=1` (single ~6-min attempt << 18-min suite ctx), the poll failed CLEANLY at line 229: `lastPushedSHA ... Expected <string>: (empty) not to be empty` after the full 300s poll — NOT a ctx-deadline error. So it is now CONFIRMED beyond doubt: **the boundary push never advances LastPushedSHA in the live kind run**, even with fix 1bcbea6 (defect A SA + defect B write-back).
+- **Instrumentation FLAW (mine):** the `DeferCleanup` diagnostic dump ran AFTER teardown (CR/ns already deleted — `project not found`, `namespaces "artifact-staging-test" not found`, 0 pods), so it captured nothing. The push-pod-level evidence (did the push pod Succeed/Fail? did git-http log a receive-pack? did readPushEnvelope find a HeadSHA?) was NOT obtained. To capture it, log INSIDE the Eventually poll (per tick, while the ns exists), NOT in DeferCleanup/AfterAll.
+- **Code-confirmed live suspect (IN-01, re-opened):** `internal/controller/artifact_push.go:212` and `internal/controller/boundary_push.go:94` build the IDENTICAL deterministic Job name `fmt.Sprintf("tide-push-%s", project.UID)`, and BOTH tolerate `AlreadyExists` as idempotent success. The artifact push fires FIRST (planner completion) and wins the create; the boundary push then hits `AlreadyExists` and NEVER creates its own Job. So the Job that runs is the ARTIFACT-push variant. The debugger disproved IN-01 on run-1 (no pods, SA missing) — but with the SA fix, pods run and this coupling is BACK as the prime suspect for why the boundary success-arm's `readPushEnvelope`→`HeadSHA` never yields a value. **Still unconfirmed** whether (a) the shared push pod FAILS in-cluster (anonymous http receive-pack rejected / clone fails), or (b) it succeeds but its envelope has no HeadSHA the boundary arm reads, or (c) the shared Job never reaches the boundary success-arm at all.
+
+### next_action_v3 (do NOT blind-re-run — instrument IN-POLL, then ONE run)
+1. Move the diagnostics INTO the poll's Eventually (log per tick: push/clone pod phase, git-http receive-pack count, LastPushedSHA) so they fire WHILE the ns exists.
+2. Run Layer-B once with `-ginkgo.flake-attempts=1`. The in-poll log will finally say whether the push pod SUCCEEDS and whether a HeadSHA envelope is produced/read.
+3. If the push pod fails → fix the in-cluster push (transport/creds/ordering). If it succeeds but no HeadSHA reaches the CR → the artifact-vs-boundary shared-Job-name coupling is the bug: decouple the two push Job names (or make the boundary success-arm read the shared Job's headSHA regardless of which path created it). This is a CODE fix in artifact_push.go / boundary_push.go / project_controller.go, NOT just a test fix.
+
+STATUS: 4 Layer-B runs done (~90 min cluster time); halting per stop-brute-forcing. Fix 1bcbea6 stays committed (defect A partial + defect B verified); DASH-02 remains RED/Pending. Resume with `/gsd-debug continue dash02-artifact-boundary-push`.
+
