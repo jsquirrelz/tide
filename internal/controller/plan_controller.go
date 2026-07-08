@@ -473,6 +473,11 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		projectUID = string(project.UID)
 	}
 
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// HelmProviderDefaults tier) and stamp it into the planner Job env. The
+	// resolver is nil-safe, so a nil project resolves to the chart tier /
+	// compiled default without a caller-side guard.
+	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            plan,
@@ -482,6 +487,8 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "plan", r.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",

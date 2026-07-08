@@ -476,6 +476,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// with podjob.BuildJobSpec(JobKindPlanner) which includes PVC subPath isolation,
 	// envelope-writer init container, credproxy native sidecar, signed-token env,
 	// bounded ActiveDeadline via DefaultCaps, and 3 SecurityContexts.
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// HelmProviderDefaults tier) and stamp it into the planner Job env.
+	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            ms,
@@ -485,6 +488,8 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "milestone", r.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",

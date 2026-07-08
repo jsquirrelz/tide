@@ -1669,6 +1669,9 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	}
 
 	// Step 9: Build + Create planner Job via shared BuildJobSpec.
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// HelmProviderDefaults tier) and stamp it into the planner Job env.
+	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            project,
@@ -1678,6 +1681,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "project", r.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
