@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // buildTestOptions constructs a minimal BuildOptions for executor Kind tests.
@@ -867,6 +868,55 @@ func TestBuildJobSpec_PricingOverridesJSON_PresentWhenSet(t *testing.T) {
 			}
 			if gotVal != pricingJSON {
 				t.Errorf("%s: TIDE_PRICING_OVERRIDES_JSON = %q; want %q", name, gotVal, pricingJSON)
+			}
+		})
+	}
+}
+
+// ---- Phase 36 SIGN-01 (D-03): agent-identity env transport ----
+
+// TestBuildJobSpec_AgentIdentityEnv verifies that BuildOptions.AgentName/AgentEmail
+// stamp TIDE_AGENT_NAME/TIDE_AGENT_EMAIL (via pkggit.EnvAgentName/EnvAgentEmail)
+// unconditionally on BOTH executor and planner subagent containers, with the exact
+// controller-resolved values. Non-default values are used deliberately — the compiled
+// default backstop silently masks a missed injection surface (Pitfall 3).
+func TestBuildJobSpec_AgentIdentityEnv(t *testing.T) {
+	const (
+		wantName  = "Custom Agent"
+		wantEmail = "custom@example.com"
+	)
+
+	cases := map[string]BuildOptions{
+		"executor": func() BuildOptions {
+			o := buildTestOptions()
+			o.AgentName = wantName
+			o.AgentEmail = wantEmail
+			return o
+		}(),
+		"planner": func() BuildOptions {
+			o := buildPlannerTestOptions()
+			o.AgentName = wantName
+			o.AgentEmail = wantEmail
+			return o
+		}(),
+	}
+
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			job := BuildJobSpec(opts)
+			containers := job.Spec.Template.Spec.Containers
+			if len(containers) == 0 {
+				t.Fatal("no containers in pod spec")
+			}
+			env := map[string]string{}
+			for _, e := range containers[0].Env {
+				env[e.Name] = e.Value
+			}
+			if got := env[pkggit.EnvAgentName]; got != wantName {
+				t.Errorf("%s: %s = %q; want %q", name, pkggit.EnvAgentName, got, wantName)
+			}
+			if got := env[pkggit.EnvAgentEmail]; got != wantEmail {
+				t.Errorf("%s: %s = %q; want %q", name, pkggit.EnvAgentEmail, got, wantEmail)
 			}
 		})
 	}

@@ -405,6 +405,10 @@ func main() {
 		EnvReader:            envReader,
 		PVCName:              sharedPVCName,
 		PricingOverridesJSON: pricingOverridesJSON,
+		// SIGN-01 / D-03: chart-tier agent identity for the fixture backend's
+		// inline precedence mirror (same source as the controllers' HelmProviderDefaults).
+		AgentName:  helmProviderDefaults.AgentName,
+		AgentEmail: helmProviderDefaults.AgentEmail,
 	}
 
 	// 7. Register all six reconcilers (CTRL-01).

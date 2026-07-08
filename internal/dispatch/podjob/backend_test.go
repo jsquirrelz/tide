@@ -35,6 +35,7 @@ import (
 
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // testScheme builds a runtime.Scheme with the types needed by PodJobBackend tests.
@@ -496,6 +497,118 @@ func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 	if !found {
 		t.Errorf("Job %q has no OwnerReference to Task UID %q", wantJobName, task.UID)
 	}
+}
+
+// TestPodJobBackend_Run_AgentIdentityPrecedence covers the SIGN-01 (D-03) inline
+// identity precedence mirror in Run: a Project's Spec.Git.AgentName/AgentEmail beats
+// the backend field, which beats the compiled default. Asserted via the rendered
+// subagent-container env on the created Job (the same chain resolveAgentIdentity walks
+// controller-side; podjob mirrors it inline to avoid an import cycle).
+func TestPodJobBackend_Run_AgentIdentityPrecedence(t *testing.T) {
+	// runAndReadIdentityEnv drives Run to completion and returns the
+	// TIDE_AGENT_NAME/TIDE_AGENT_EMAIL env values on the created Job's subagent.
+	runAndReadIdentityEnv := func(t *testing.T, project *tidev1alpha2.Project, backendName, backendEmail string) (string, string) {
+		t.Helper()
+		s := testScheme(t)
+		task := testTask("default", "task-id", "uid-id")
+
+		fakeClient := fake.NewClientBuilder().
+			WithScheme(s).
+			WithObjects(task, project).
+			WithStatusSubresource(task).
+			Build()
+
+		backend := &PodJobBackend{
+			Client:         fakeClient,
+			Scheme:         s,
+			SubagentImage:  "test-subagent:latest",
+			CredproxyImage: "test-credproxy:latest",
+			SigningKey:     []byte("test-signing-key"),
+			EnvReader:      &fakeEnvReader{out: pkgdispatch.EnvelopeOut{TaskUID: "uid-id", ExitCode: 0}},
+			PVCName:        "tide-projects",
+			AgentName:      backendName,
+			AgentEmail:     backendEmail,
+		}
+
+		in := pkgdispatch.EnvelopeIn{
+			APIVersion: pkgdispatch.APIVersionV1Alpha1,
+			Kind:       pkgdispatch.KindTaskEnvelopeIn,
+			TaskUID:    "uid-id",
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			var jobList batchv1.JobList
+			for range 20 {
+				if err := fakeClient.List(ctx, &jobList, client.InNamespace("default")); err == nil && len(jobList.Items) > 0 {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			if len(jobList.Items) == 0 {
+				return
+			}
+			job := jobList.Items[0].DeepCopy()
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			}
+			_ = fakeClient.Status().Update(ctx, job)
+		}()
+
+		if _, err := backend.Run(ctx, in); err != nil {
+			t.Fatalf("Run() error: %v", err)
+		}
+
+		var job batchv1.Job
+		if err := fakeClient.Get(ctx, client.ObjectKey{Namespace: "default", Name: JobName(task.UID, 1)}, &job); err != nil {
+			t.Fatalf("Get job: %v", err)
+		}
+		env := map[string]string{}
+		for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+			env[e.Name] = e.Value
+		}
+		return env[pkggit.EnvAgentName], env[pkggit.EnvAgentEmail]
+	}
+
+	t.Run("backend field beats compiled default", func(t *testing.T) {
+		project := testProject("default", "project-alpha", "project-uid-id")
+		name, email := runAndReadIdentityEnv(t, project, "Backend Agent", "backend@example.com")
+		if name != "Backend Agent" {
+			t.Errorf("name = %q; want %q", name, "Backend Agent")
+		}
+		if email != "backend@example.com" {
+			t.Errorf("email = %q; want %q", email, "backend@example.com")
+		}
+	})
+
+	t.Run("project Spec.Git beats backend field", func(t *testing.T) {
+		project := testProject("default", "project-alpha", "project-uid-id")
+		project.Spec.Git = &tidev1alpha2.GitConfig{
+			AgentName:  "Project Agent",
+			AgentEmail: "project@example.com",
+		}
+		name, email := runAndReadIdentityEnv(t, project, "Backend Agent", "backend@example.com")
+		if name != "Project Agent" {
+			t.Errorf("name = %q; want %q", name, "Project Agent")
+		}
+		if email != "project@example.com" {
+			t.Errorf("email = %q; want %q", email, "project@example.com")
+		}
+	})
+
+	t.Run("compiled default when nothing set", func(t *testing.T) {
+		project := testProject("default", "project-alpha", "project-uid-id")
+		name, email := runAndReadIdentityEnv(t, project, "", "")
+		if name != pkggit.DefaultAgentName {
+			t.Errorf("name = %q; want %q", name, pkggit.DefaultAgentName)
+		}
+		if email != pkggit.DefaultAgentEmail {
+			t.Errorf("email = %q; want %q", email, pkggit.DefaultAgentEmail)
+		}
+	})
 }
 
 // TestFilesystemEnvelopeReaderReadPrompt covers defect #10b: the prompt is read
