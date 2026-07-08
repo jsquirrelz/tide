@@ -13,6 +13,14 @@ updated: 2026-07-08T16:02:00Z
 - **Smoke clean:** `/` HTTP 200, `/api/v1/projects` → `[]`, `/healthz` 200, settings 404-for-missing. Empty-state renders ("No projects in this cluster"). The console SSE `text/html` errors are the pre-existing empty-cluster `/dev/null/no-project` sentinel (from Phase 15, `f374404`) — NOT a Phase-37 regression.
 - **Blocker for the 8 tests below:** the cluster has no project (tide-cashboard was removed). Tests 1/3/4/5/6 need a running/parked project run; a stub-subagent sample project (free, deterministic) can generate those states but needs the controller+tide-push+RBAC at Phase-37 (a fuller helm upgrade). Tests 2/7/8 are testable against any project.
 
+## DASH-02 Layer-B result — ⚠ FAILS (needs /gsd-debug)
+
+Ran 37-09's `artifact_staging_test` (Layer-B kind, first-ever execution — it was authored but env-gated) twice. **Both runs RED — DASH-02 is NOT verified.** Evidence:
+- Phase-37's artifact-push trigger **works** — controller logs show `"triggered artifact push", envelopes:1` creating a `tide-push-<uid>` Job.
+- But `Status.Git.LastPushedSHA` **never advances**, so the test's push precondition fails.
+- Two factors observed: (1) the test asserts `LastPushedSHA NotTo BeEmpty` with a direct `Expect` on the Complete-time snapshot, but per the controller's #13b contract (`project_controller.go:487-506`) `Complete` *precedes* the async `reconcileBoundaryPush` — a genuine test race; (2) even with an `Eventually` poll (5 min), `LastPushedSHA` still never advanced and no boundary-push/LastPushedSHA-patch activity appears in the logs — pointing at the **artifact/boundary shared `tide-push-<project-uid>` Job-name coupling** (code review **IN-01**, "mitigated but under-tested"). The poll also outran the suite's `kindTestTimeout` ctx.
+- Test left pristine (investigative Eventually edit reverted). **Hypothesis, not confirmed root cause** — needs a dedicated `/gsd-debug` session on the artifact-vs-boundary push interaction.
+
 ## Current Test
 
 number: 1
