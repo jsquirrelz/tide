@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 Phase: 37 of 34 (Dashboard Surfaces — Artifact View, Project View, Log-Drawer States)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-07-08 — Phase 36 complete, transitioned to Phase 37
+Last activity: 2026-07-09 — Completed quick task 260708-tv5: Defect E (DASH-02) boundary-push supersede fix (envtest-green)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -112,6 +112,12 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 - **Phase 38 empirical gate:** COST-03 — verify the `claude` CLI's cache-write TTL (5m 1.25× vs 1h 2×) via one teed credproxy request before the pricing rows ship.
 - **Repro evidence perishable:** the integration-miss evidence lives on the minikube `tide-projects` PVC; export before any namespace/cluster cleanup (Phase 34 kind-suite repro reduces dependence on it).
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260708-tv5 | Fix Defect E (DASH-02) — boundary push supersedes a stale-subset artifact Job so milestone/phase/plan artifacts stage on the run branch (envtest-green; Layer-B confirmation deferred) | 2026-07-09 | 6a65f4e | [260708-tv5-fix-defect-e-dash-02-follow-up-milestone](./quick/260708-tv5-fix-defect-e-dash-02-follow-up-milestone/) |
 
 ## Deferred Items
 
