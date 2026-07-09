@@ -1,5 +1,5 @@
 ---
-status: testing
+status: passed
 phase: 37-dashboard-surfaces-artifact-view-project-view-log-drawer-sta
 source: [37-10-PLAN.md, 37-01-SUMMARY.md, 37-05-SUMMARY.md, 37-07-SUMMARY.md, 37-08-SUMMARY.md, 37-09-SUMMARY.md]
 started: 2026-07-08T15:25:32Z
@@ -114,4 +114,4 @@ Operator (2026-07-09) selected two notes as fix-before-close gaps; Note 2 accept
 
 ## D-15 sign-off
 
-**Ready.** All eight surfaces are behavior-verified live, and both operator-selected gaps (37-11/37-12) are now landed AND re-verified against the same live cluster. The one blocking item that deferred the sign-off is resolved. Remaining step: the operator's D-15 confirmation (LOCKED human-in-the-loop) to close the 37-10 checkpoint and Phase 37 — this session does not self-approve the blocking gate.
+**APPROVED — 2026-07-09.** Operator gave the LOCKED D-15 sign-off after all eight surfaces + both gaps (37-11/37-12) were verified live on `tide-uat37`. The 37-10 checkpoint and Phase 37 are closed.
