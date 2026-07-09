@@ -248,13 +248,27 @@ export default function PodLogStreamer({
         {/* DASH-04 D-12: the reconnecting state was the silently-empty
             viewport — automatic backoff is in flight, so surface it. */}
         {state === "reconnecting" && (
-          <div
-            data-testid="pod-log-placeholder-reconnecting"
-            className="flex items-center gap-2"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            <Loader2 size={12} className="animate-spin" aria-hidden="true" />
-            {COPY_RECONNECTING}
+          <div data-testid="pod-log-placeholder-reconnecting">
+            <div
+              className="flex items-center gap-2"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+              {COPY_RECONNECTING}
+            </div>
+            {/* Gap 37-G2: the auto-backoff continues in parallel, but the
+                operator can force an immediate re-subscribe rather than wait
+                it out. Secondary variant (NOT accent) per UI-SPEC Color rule —
+                same styling as the stream-error Reconnect button. */}
+            <button
+              type="button"
+              data-testid="pod-log-reconnecting-reconnect"
+              onClick={() => reconnect()}
+              className="mt-2 inline-flex items-center gap-1 rounded border border-[var(--color-border-subtle)] px-2 py-1 text-[var(--color-text-primary)] hover:bg-[var(--color-surface-raised)]"
+              style={{ fontSize: "12px" }}
+            >
+              Reconnect
+            </button>
           </div>
         )}
         {/* DASH-04 D-13: pod garbage-collected — honest message ONLY, no

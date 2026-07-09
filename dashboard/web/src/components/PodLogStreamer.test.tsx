@@ -285,3 +285,59 @@ describe("PodLogStreamer (Plan 37-01 Task 2) — terminal state rendering", () =
     }
   });
 });
+
+// Gap 37-G2 — the reconnecting state must carry a manual Reconnect affordance
+// (D-14 UI-SPEC intent: a recoverable stream state offers an operator-triggered
+// reconnect) alongside the retained spinner + auto-backoff. pod-gone stays
+// message-only; stream-error is unchanged.
+describe("PodLogStreamer (Gap 37-G2) — reconnecting-state manual Reconnect", () => {
+  it("Test 1: state 'reconnecting' renders BOTH the copy AND a Reconnect button", () => {
+    setHook({ state: "reconnecting", lines: [] });
+    render(<PodLogStreamer taskName="t-recon-btn" onClose={() => {}} />);
+    expect(
+      screen.getByText(/Reconnecting to log stream…/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /reconnect/i }),
+    ).not.toBeNull();
+  });
+
+  it("Test 2: clicking the reconnecting-state Reconnect button invokes reconnect() exactly once", () => {
+    const reconnect = vi.fn();
+    setHook({ state: "reconnecting", lines: [], reconnect });
+    render(<PodLogStreamer taskName="t-recon-click" onClose={() => {}} />);
+    fireEvent.click(screen.getByTestId("pod-log-reconnecting-reconnect"));
+    expect(reconnect).toHaveBeenCalledOnce();
+  });
+
+  it("Test 3: the reconnecting placeholder still renders its Loader2 spinner (button is additive)", () => {
+    setHook({ state: "reconnecting", lines: [] });
+    render(<PodLogStreamer taskName="t-recon-spin" onClose={() => {}} />);
+    const placeholder = screen.getByTestId("pod-log-placeholder-reconnecting");
+    expect(placeholder.querySelector(".animate-spin")).not.toBeNull();
+  });
+
+  it("Test 4: pod-gone still renders NO Reconnect button (D-13 message-only preserved)", () => {
+    setHook({ state: "pod-gone", lines: [] });
+    render(<PodLogStreamer taskName="t-gone-regress" onClose={() => {}} />);
+    expect(
+      screen.queryByRole("button", { name: /reconnect/i }),
+    ).toBeNull();
+  });
+
+  it("Test 5: stream-error still renders heading + body + its Reconnect button wired to reconnect()", () => {
+    const reconnect = vi.fn();
+    setHook({ state: "stream-error", lines: [], reconnect });
+    render(<PodLogStreamer taskName="t-err-regress" onClose={() => {}} />);
+
+    expect(screen.getByText("Log stream error")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The stream failed unexpectedly — the pod may still be running.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("pod-log-reconnect"));
+    expect(reconnect).toHaveBeenCalledOnce();
+  });
+});
