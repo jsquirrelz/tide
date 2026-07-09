@@ -989,28 +989,12 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		patch := client.MergeFrom(project.DeepCopy())
 		project.Status.Git.LeaseFailureCount = 0
 		project.Status.BoundaryPush.LastError = ""
-		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
-		if haveEnv && env.HeadSHA != "" {
-			// D-14: the push envelope's HeadSHA arms the force-with-lease
-			// fence — stamped in the SAME patch that resets LeaseFailureCount
-			// (co-located with the condition transition per CONTEXT
-			// specifics: BoundaryPushed=True and LastPushedSHA must move
-			// together).
-			project.Status.Git.LastPushedSHA = env.HeadSHA
-		} else {
-			// Pitfall 4: TTLSecondsAfterFinished=300 can erase the pod
-			// before the controller observes it (e.g. after a restart), and
-			// a success envelope may legitimately carry an empty HeadSHA (an
-			// integration-only wave Job pushes nothing). Do NOT block
-			// BoundaryPushed=True on envelope readability, and NEVER stamp an
-			// empty HeadSHA — with omitempty the merge patch would DELETE
-			// lastPushedSHA, disarming the D-B6 force-with-lease fence and
-			// letting a later push silently clobber a diverged remote.
-			// Surfaced via metric + log, not a condition.
-			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "stamp-skip").Inc()
-			logger.Info("boundary push succeeded but envelope missing or SHA-less; lastPushedSHA not stamped this cycle",
-				"job", pushJobName)
-		}
+		// The unreadable / empty-headSHA case was already handled above by the
+		// re-dispatch guard (D-B6 / Pitfall 13), so env.HeadSHA is guaranteed
+		// readable and non-empty here. Arm the --force-with-lease fence (D-14) in
+		// the SAME patch that resets LeaseFailureCount — BoundaryPushed=True and
+		// LastPushedSHA move together.
+		project.Status.Git.LastPushedSHA = env.HeadSHA
 		meta.RemoveStatusCondition(&project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
 		if err := r.Status().Patch(ctx, project, patch); err != nil {
 			return ctrl.Result{}, err

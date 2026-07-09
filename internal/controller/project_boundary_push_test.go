@@ -699,8 +699,9 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 	})
 })
 
-// Phase 34 plan 34-05 Task 1: LastPushedSHA stamp (D-14), Pitfall-4
-// stamp-skip tolerance, mid-run observation, and auto-clear.
+// Phase 34 plan 34-05 Task 1: LastPushedSHA stamp (D-14), mid-run observation,
+// and auto-clear. (The Pitfall-4 stamp-skip tolerance was superseded by the
+// DASH-02 re-dispatch-on-unreadable-headSHA design — see Test 7 above.)
 var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observation (Phase 34 D-14)", Label("envtest", "phase34", "lastpushedsha"), func() {
 	ctx := context.Background()
 
@@ -857,33 +858,6 @@ var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observatio
 		})
 	})
 
-	Describe("Test 2 (Pitfall 4): unreadable envelope does not block BoundaryPushed=True", func() {
-		const name = "sha-stamp-skip"
-		AfterEach(func() { cleanupSHA(name) })
-
-		It("sets BoundaryPushed=True without an envelope and increments stamp-skip", func() {
-			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
-			jn := pushJobName(proj.UID)
-			makePushJobFor(jn, proj.Name, proj.UID)
-			markSucceeded(jn) // NO envelope pod attached — simulates TTL'd/GC'd pod
-
-			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
-
-			r := newReconcilerSHA("tide-projects-sha-2")
-			reconcileN(r, name, 3)
-
-			Eventually(func(g Gomega) {
-				got := getProject(name)
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
-				g.Expect(c).NotTo(BeNil())
-				g.Expect(c.Status).To(Equal(metav1.ConditionTrue), "BoundaryPushed=True must not block on envelope readability")
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-
-			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
-			Expect(after).To(BeNumerically(">", before))
-		})
-	})
-
 	Describe("Test 3: mid-run (pre-Complete) success also stamps the SHA", func() {
 		const name = "sha-midrun-success"
 		AfterEach(func() { cleanupSHA(name) })
@@ -902,43 +876,6 @@ var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observatio
 				got := getProject(name)
 				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("midrun-sha-789"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-		})
-	})
-
-	Describe("Test 3b: an empty-HeadSHA success envelope must not wipe the lease fence", func() {
-		const name = "sha-empty-keeps-fence"
-		AfterEach(func() { cleanupSHA(name) })
-
-		It("keeps the previously-stamped LastPushedSHA and routes to stamp-skip", func() {
-			proj := makeProjectAt(name, tideprojectv1alpha2.PhaseComplete)
-
-			// A previous real push armed the D-B6 force-with-lease fence.
-			pre := getProject(name)
-			prePatch := client.MergeFrom(pre.DeepCopy())
-			pre.Status.Git.LastPushedSHA = "armed-fence-sha-111"
-			Expect(k8sClient.Status().Patch(ctx, &pre, prePatch)).To(Succeed())
-
-			jn := pushJobName(proj.UID)
-			makePushJobFor(jn, proj.Name, proj.UID)
-			markSucceeded(jn)
-			attachEnvelopePod(jn, "") // success envelope with empty HeadSHA
-
-			before := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
-
-			r := newReconcilerSHA("tide-projects-sha-3b")
-			reconcileN(r, name, 3)
-
-			Eventually(func(g Gomega) {
-				got := getProject(name)
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
-				g.Expect(c).NotTo(BeNil())
-				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(got.Status.Git.LastPushedSHA).To(Equal("armed-fence-sha-111"),
-					"an empty envelope HeadSHA must never clear the force-with-lease anchor")
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-
-			after := testutil.ToFloat64(tidemetrics.IntegrationOutcomesTotal.WithLabelValues(name, "stamp-skip"))
-			Expect(after).To(BeNumerically(">", before))
 		})
 	})
 
