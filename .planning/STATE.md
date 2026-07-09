@@ -5,10 +5,10 @@ milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
 current_phase: 37
 current_phase_name: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
 status: planning
-stopped_at: Phase 37 COMPLETE — live UAT 8/8 + gaps 37-11/37-12 fixed & re-verified; operator approved D-15 (37-10 closed). Next unstarted v1.0.7 phases: 34, 35, 38
-last_updated: "2026-07-09T16:30:00.000Z"
+stopped_at: Phase 37 COMPLETE (D-15 approved). Reconciled stale 34/35 tracking to match tree. v1.0.7 status — 34 (6/6 executed, verify-close pending), 35/36/37 complete; only Phase 38 (7 plans, planned) remains to execute
+last_updated: "2026-07-09T17:00:00.000Z"
 last_activity: 2026-07-09
-last_activity_desc: Phase 37 complete (D-15 approved); milestone continues with phases 34/35/38
+last_activity_desc: Reconciled 34/35 tracking (were stale-Not-started); only Phase 38 remains to execute in v1.0.7
 progress:
   total_phases: 5
   completed_phases: 1
@@ -48,11 +48,11 @@ Progress: [░░░░░░░░░░] 0%
 | Phase | Plans | Status |
 |-------|-------|--------|
 | 39. Pre-flight Tech-Debt Hardening | 2/2 | Complete|
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | TBD | Not started |
-| 35. Git Base Ref | TBD | Not started |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | 6/6 | Complete (verify-close pending) |
+| 35. Git Base Ref | 4/4 | Complete |
 | 36. Signed Commits + Bot Identity | 4/4 | Complete|
-| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | TBD | Not started |
-| 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | TBD | Not started |
+| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | 12/12 | Complete |
+| 38. Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry | 7 | Planned, not executed |
 | Phase 36 P04 | 14min | 3 tasks | 8 files |
 
 ## Accumulated Context
