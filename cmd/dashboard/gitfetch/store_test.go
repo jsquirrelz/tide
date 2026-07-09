@@ -215,7 +215,7 @@ func TestStoreConcurrentArtifacts(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, n)
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		go func(i int) {
 			defer wg.Done()
 			sha, files, err := s.Artifacts(bg(), "repoA", "main", nil)

@@ -173,12 +173,12 @@ func parseStageEnvelopes(s string) ([]EnvelopeStage, error) {
 		if tok == "" {
 			continue
 		}
-		idx := strings.Index(tok, ":")
-		if idx < 0 {
+		rawUID, rawDest, found := strings.Cut(tok, ":")
+		if !found {
 			return nil, fmt.Errorf("stage-envelopes token %q missing ':' separator (want <uid>:<destPrefix>)", tok)
 		}
-		uid := strings.TrimSpace(tok[:idx])
-		destPrefix := strings.TrimSpace(tok[idx+1:])
+		uid := strings.TrimSpace(rawUID)
+		destPrefix := strings.TrimSpace(rawDest)
 		if uid == "" {
 			return nil, fmt.Errorf("stage-envelopes token %q has an empty UID", tok)
 		}
@@ -1016,7 +1016,13 @@ func worktreeClean(worktreeDir string) (bool, error) {
 // "artifact-stage-failed" on the first failure (missing dir, no *.md, or a
 // copy/stage error) — the loud-failure convention (D-03). Only the two allowed
 // globs are read, so out.json/in.json are excluded by construction (D-04).
-func stageEnvelopeArtifacts(cfg pushConfig, stageEnvs []EnvelopeStage, worktreeDir string, wt *gogit.Worktree, stderr io.Writer) int {
+func stageEnvelopeArtifacts(
+	cfg pushConfig,
+	stageEnvs []EnvelopeStage,
+	worktreeDir string,
+	wt *gogit.Worktree,
+	stderr io.Writer,
+) int {
 	for _, es := range stageEnvs {
 		srcDir := filepath.Join(cfg.Workspace, "envelopes", es.UID)
 		info, statErr := os.Stat(srcDir)
@@ -1036,7 +1042,9 @@ func stageEnvelopeArtifacts(cfg pushConfig, stageEnvs []EnvelopeStage, worktreeD
 			// A planner-completed level always emits at least one planning *.md;
 			// an empty set means the envelope is incomplete — fail loudly (D-03).
 			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr, "tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n", srcDir)
+			fmt.Fprintf(stderr,
+				"tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n",
+				srcDir)
 			return exitGenericFail
 		}
 		childMatches, gerr := filepath.Glob(filepath.Join(srcDir, "children", "*.json"))
@@ -1050,10 +1058,14 @@ func stageEnvelopeArtifacts(cfg pushConfig, stageEnvs []EnvelopeStage, worktreeD
 		// preserved so plan/task JSON lands under .tide/planning/<destPrefix>/children/.
 		rels := make([]struct{ src, rel string }, 0, len(mdMatches)+len(childMatches))
 		for _, m := range mdMatches {
-			rels = append(rels, struct{ src, rel string }{m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m))})
+			rels = append(rels, struct{ src, rel string }{
+				m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m)),
+			})
 		}
 		for _, m := range childMatches {
-			rels = append(rels, struct{ src, rel string }{m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m))})
+			rels = append(rels, struct{ src, rel string }{
+				m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m)),
+			})
 		}
 
 		for _, r := range rels {
