@@ -139,6 +139,17 @@ const pushContainerName = "push"
 // Matches the buildInitJob pattern in project_controller.go.
 const pushWorkspaceVolume = "project-workspace"
 
+// stagedEnvelopesAnnotation stamps the CSV of staged <uid>:<kind>/<name> entries
+// this push Job carried at create time (Defect E / DASH-02 follow-up). A later
+// boundary reconcile reads it back and compares against a fresh
+// collectStageEnvelopes call: if the current cumulative map is a STRICT SUPERSET
+// of what this Job staged, the Job is a stale artifact push (an early D-B5/R-05
+// single-flight winner that snapshotted a partial map) and must be superseded
+// rather than accepted as terminal. A Job with NO stamp is unknown provenance and
+// must NEVER be second-guessed — this keeps pre-fix / bare push Jobs behaving as
+// before.
+const stagedEnvelopesAnnotation = "tideproject.k8s/staged-envelopes"
+
 // buildPushJob constructs the K8s batchv1.Job that drives a single
 // level-boundary push for a Project.
 //
@@ -331,6 +342,18 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 				},
 			},
 		},
+	}
+
+	// Defect E / DASH-02: stamp the cumulative staged-envelope set onto the Job so
+	// a later boundary reconcile can detect a stale (subset) artifact push and
+	// supersede it. Gated on the SAME condition as the --stage-envelopes arg above
+	// so the annotation and the arg are always stamped together or not at all — a
+	// Job with no arg has no map to compare, and an absent stamp reads as unknown
+	// provenance (never stale) in isStaleArtifactPush.
+	if len(opts.StageEnvelopes) > 0 {
+		job.Annotations = map[string]string{
+			stagedEnvelopesAnnotation: strings.Join(opts.StageEnvelopes, ","),
+		}
 	}
 
 	// Owner ref: Project → Job. internal/owner.EnsureOwnerRef enforces
