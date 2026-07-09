@@ -17,6 +17,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -40,6 +41,11 @@ type fakeFetcher struct {
 	files    []gitfetch.File
 	tipErr   error
 	fetchErr error
+
+	// capturedAuth records the *gitfetch.Auth handed to Fetch so tests can
+	// assert credential pass-through (nil == anonymous) without a real remote.
+	fetchCalled  bool
+	capturedAuth *gitfetch.Auth
 }
 
 func (f *fakeFetcher) Tip(_ context.Context, _, _ string, _ *gitfetch.Auth) (string, error) {
@@ -49,7 +55,9 @@ func (f *fakeFetcher) Tip(_ context.Context, _, _ string, _ *gitfetch.Auth) (str
 	return f.sha, nil
 }
 
-func (f *fakeFetcher) Fetch(_ context.Context, _, _ string, _ *gitfetch.Auth) (string, []gitfetch.File, error) {
+func (f *fakeFetcher) Fetch(_ context.Context, _, _ string, auth *gitfetch.Auth) (string, []gitfetch.File, error) {
+	f.fetchCalled = true
+	f.capturedAuth = auth
 	if f.fetchErr != nil {
 		return "", nil, f.fetchErr
 	}
@@ -105,12 +113,49 @@ func gitProject() *tidev1alpha2.Project {
 	}
 }
 
+// httpGitProject builds a Project on an anonymous in-cluster http:// remote
+// (Gap 37-G1 repro) with a run branch + a credsSecretRef. The scheme is the
+// only difference from gitProject() (https://) — it gates the empty-PAT relax.
+func httpGitProject() *tidev1alpha2.Project {
+	return &tidev1alpha2.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
+		Spec: tidev1alpha2.ProjectSpec{
+			SchemaRevision: "v1alpha2",
+			TargetRepo:     "http://git-http-server.tide.svc/repo.git",
+			Git: &tidev1alpha2.GitConfig{
+				RepoURL:        "http://git-http-server.tide.svc/repo.git",
+				CredsSecretRef: "git-creds",
+			},
+		},
+		Status: tidev1alpha2.ProjectStatus{
+			Git: tidev1alpha2.GitStatus{BranchName: "tide/run-prj-1-1"},
+		},
+	}
+}
+
 const patSentinel = "ghp_SUPERSECRETPATVALUE_do_not_leak"
 
 func credsSecret() *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"},
 		Data:       map[string][]byte{"GIT_PAT": []byte(patSentinel)},
+	}
+}
+
+// emptyCredsSecret carries a GIT_PAT key whose value is an empty byte slice —
+// the exact shape an anonymous in-cluster creds Secret takes.
+func emptyCredsSecret() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"},
+		Data:       map[string][]byte{"GIT_PAT": []byte("")},
+	}
+}
+
+// noKeyCredsSecret has a Data map with no GIT_PAT key at all.
+func noKeyCredsSecret() *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "git-creds", Namespace: "default"},
+		Data:       map[string][]byte{"OTHER": []byte("x")},
 	}
 }
 
@@ -277,4 +322,81 @@ func TestArtifactsValidation(t *testing.T) {
 			t.Errorf("status=%d want 404", resp.StatusCode)
 		}
 	})
+}
+
+// TestArtifactsHTTPEmptyPATAvailable (Gap 37-G1): an anonymous http:// remote
+// whose creds Secret carries an EMPTY GIT_PAT renders artifacts (state:available,
+// NOT error) and the fetch is handed nil Auth (anonymous pass-through proven).
+func TestArtifactsHTTPEmptyPATAvailable(t *testing.T) {
+	f := &fakeFetcher{
+		sha:   "cafed00d",
+		files: []gitfetch.File{{Name: "MILESTONE.md", Path: ".tide/planning/milestone/m1/MILESTONE.md", Content: []byte("# M1\n")}},
+	}
+	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(emptyCredsSecret()), f, httpGitProject())
+	resp, body := doGet(t, router, "/api/v1/nodes/milestone/m1/artifacts?project=prj-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200; body=%s", resp.StatusCode, body)
+	}
+	var na nodeArtifacts
+	if err := json.Unmarshal(body, &na); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if na.State != "available" {
+		t.Fatalf("state=%q want available (Gap 37-G1: empty PAT on http:// must not error); error=%q", na.State, na.Error)
+	}
+	if !f.fetchCalled {
+		t.Fatalf("fetch was never called — cannot assert anonymous pass-through")
+	}
+	if f.capturedAuth != nil {
+		t.Errorf("Fetch auth=%+v want nil (anonymous pass-through)", f.capturedAuth)
+	}
+}
+
+// TestArtifactsHTTPNoKeyPATAvailable (Gap 37-G1): an anonymous http:// remote
+// whose creds Secret has NO GIT_PAT key at all → still state:available, nil Auth.
+func TestArtifactsHTTPNoKeyPATAvailable(t *testing.T) {
+	f := &fakeFetcher{
+		sha:   "beefcafe",
+		files: []gitfetch.File{{Name: "MILESTONE.md", Path: ".tide/planning/milestone/m1/MILESTONE.md", Content: []byte("# M1\n")}},
+	}
+	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(noKeyCredsSecret()), f, httpGitProject())
+	resp, body := doGet(t, router, "/api/v1/nodes/milestone/m1/artifacts?project=prj-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200; body=%s", resp.StatusCode, body)
+	}
+	var na nodeArtifacts
+	if err := json.Unmarshal(body, &na); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if na.State != "available" {
+		t.Fatalf("state=%q want available (absent GIT_PAT key on http:// must not error); error=%q", na.State, na.Error)
+	}
+	if !f.fetchCalled || f.capturedAuth != nil {
+		t.Errorf("want anonymous fetch (nil Auth); fetchCalled=%v auth=%+v", f.fetchCalled, f.capturedAuth)
+	}
+}
+
+// TestArtifactsHTTPSEmptyPATError (regression guard, T-37-11-01): an https://
+// remote with an empty GIT_PAT still returns state:error and the message names
+// the missing data key — the relaxation is scheme-gated, not blanket.
+func TestArtifactsHTTPSEmptyPATError(t *testing.T) {
+	f := &fakeFetcher{sha: "abc123", files: []gitfetch.File{{Name: "x", Path: ".tide/planning/milestone/m1/x", Content: []byte("x")}}}
+	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(emptyCredsSecret()), f, gitProject())
+	resp, body := doGet(t, router, "/api/v1/nodes/milestone/m1/artifacts?project=prj-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d want 200; body=%s", resp.StatusCode, body)
+	}
+	var na nodeArtifacts
+	if err := json.Unmarshal(body, &na); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if na.State != "error" {
+		t.Fatalf("state=%q want error (https:// still REQUIRES the PAT)", na.State)
+	}
+	if !strings.Contains(na.Error, gitPATKey) {
+		t.Errorf("error=%q must name the missing data key %q", na.Error, gitPATKey)
+	}
+	if f.fetchCalled {
+		t.Errorf("fetch must NOT run when creds resolution errors")
+	}
 }
