@@ -208,23 +208,41 @@ data:
 		// Materialization-time (D-01): poll the bare remote's run branch until the
 		// planning artifacts appear. The artifact push fires at planner completion
 		// (before/independent of any approve gate — this Project's gates are auto).
-		By("Polling the bare remote run branch for .tide/planning/ artifacts")
+		By("Polling the bare remote run branch until the milestone planning artifact materializes")
+		// The artifact push fires PER-LEVEL incrementally (milestone/phase/plan/project
+		// controllers each trigger their own cumulative push), so levels land on the run
+		// branch at different times. Waiting for the FIRST *.md (the old mdCount>=1 exit)
+		// raced: whichever level pushed first (observed: project) satisfied the poll, then
+		// Assertion 4's HaveKey("milestone") failed before the milestone artifact landed.
+		// Wait for the milestone level specifically (Assertion 4's floor), logging the
+		// evolving level set each tick so a genuine staging gap (a level that never lands)
+		// is decisive in-band rather than a bare timeout.
 		var tidePaths []string
 		Eventually(func() error {
 			all := lsTreeRunBranch(pod, artifactStagingNS, runBranch)
 			tidePaths = filterPrefix(all, ".tide/")
-			mdCount := 0
+			kinds := map[string]bool{}
 			for _, p := range tidePaths {
-				if strings.HasSuffix(p, ".md") {
-					mdCount++
+				if !strings.HasSuffix(p, ".md") {
+					continue
+				}
+				parts := strings.Split(p, "/")
+				if len(parts) >= 3 && parts[0] == ".tide" && parts[1] == "planning" {
+					kinds[parts[2]] = true
 				}
 			}
-			if mdCount == 0 {
-				return fmt.Errorf("no .tide/planning/*.md on run branch %s yet (paths: %v)", runBranch, tidePaths)
+			seen := make([]string, 0, len(kinds))
+			for k := range kinds {
+				seen = append(seen, k)
+			}
+			sort.Strings(seen)
+			GinkgoWriter.Printf("artifact-staging diag: staged planner levels so far: %v\n", seen)
+			if !kinds["milestone"] {
+				return fmt.Errorf("milestone-level artifact not yet on run branch %s (levels seen: %v; paths: %v)", runBranch, seen, tidePaths)
 			}
 			return nil
 		}, 5*time.Minute, 5*time.Second).Should(Succeed(),
-			"planning artifacts must materialize under .tide/planning/ on the run branch")
+			"the milestone planning artifact must materialize under .tide/planning/milestone/ on the run branch (levels stage incrementally)")
 
 		GinkgoWriter.Printf("artifact-staging-test: .tide/ paths on run branch: %v\n", tidePaths)
 
@@ -304,10 +322,15 @@ func logPushDiagnostics(ns, projUID, gitHTTPPod, lastPushedSHA string) {
 	// Push/clone pod phases (the Jobs are tide-push-<uid> / tide-clone-<uid>; their
 	// pods carry that name prefix). Proves whether the push/clone pods ran at all and
 	// their terminal phase (Succeeded/Failed/Running).
+	// DASH-02 run-6: emit phase + PodScheduled status + container waiting-reason so a
+	// bare phase=Pending is disambiguated at the source. sched=False => unschedulable
+	// (FailedScheduling); sched=True/wait=ImagePullBackOff => image gap; Running/Succeeded
+	// => the pod actually ran. Run-5 captured only .status.phase and misread an
+	// ImagePullBackOff as a scheduling/resource block.
 	phases := "(no tide-push/tide-clone pods)"
 	cmd := exec.CommandContext(ctx, "kubectl", "--kubeconfig", kubeconfigPath,
 		"get", "pods", "-n", ns, "-o",
-		`jsonpath={range .items[*]}{.metadata.name}={.status.phase} {end}`)
+		`jsonpath={range .items[*]}{.metadata.name}={.status.phase}|sched={.status.conditions[?(@.type=="PodScheduled")].status}|wait={.status.containerStatuses[0].state.waiting.reason} {end}`)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		var relevant []string
 		for tok := range strings.FieldsSeq(string(out)) {

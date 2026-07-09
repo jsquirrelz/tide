@@ -1,5 +1,5 @@
 ---
-status: investigating
+status: resolved
 slug: dash02-artifact-boundary-push
 trigger: on the DASH-02 artifact-vs-boundary push interaction
 created: 2026-07-08
@@ -8,6 +8,36 @@ phase: 37-dashboard-surfaces-artifact-view-project-view-log-drawer-sta
 ---
 
 # Debug: DASH-02 artifact-vs-boundary push interaction
+
+## SESSION OUTCOME (2026-07-08)
+
+**CHARTERED BUG — RESOLVED & LAYER-B GREEN.** The `LastPushedSHA`-stays-empty /
+boundary-push-never-lands RED was caused by a one-line TEST-FIXTURE gap: the kind suite
+never overrode `images.tidePush.tag`, so the manager's `TIDE_PUSH_IMAGE` resolved to the
+unloaded `.Chart.AppVersion` (1.0.7) instead of the kind-loaded `:test` tag → clone/push
+pods ImagePullBackOff (phase=Pending) forever. Fix: `--set images.tidePush.tag=test` +
+`pullPolicy=IfNotPresent` in `suite_test.go` (mirrors the existing tideImport override).
+VERIFIED live: pods Succeed, `LastPushedSHA` advances (4dccc52d…), the project artifact
+stages on the run branch. The 5 prior runs' resource-starvation / PVC / capture-wedge
+hypotheses were all wrong — fixes 1bcbea6 + 01b5004 remain as real latent-bug hardening
+(envtest-green), but NONE was the RED cause.
+
+**DEFECT E — ROOT-CAUSED, HANDED OFF (not fixed this session, per user).** A separate,
+narrower failure surfaced once the chartered bug was green: only the `project`-level
+planning artifact stages on the run branch; milestone/phase/plan never do (test
+Assertion 4 `HaveKey("milestone")` fails). Confirmed product bug in the D-B5/R-05 shared
+single-flight coupling — an EARLY project artifact push snapshots a `[project]`-only
+cumulative map and wins the shared `tide-push-<uid>` name; the later fuller-map pushes
+(including the authoritative boundary push at Complete) are suppressed by single-flight
+and the Job outlives the cascade. Full trace + recommended fix (Option A: boundary push
+supersedes a stale artifact Job, mirroring run-5 defect-C2) in "Run-9" below. Test
+Assertion 4 is correct per 37-06's cumulative-staging design — do NOT relax it. Handed to
+a planned fix (touches the deliberately-preserved coupling).
+
+**Test hardening applied this session (all in test/integration/kind/):** the tide-push
+tag fix; sched/wait disambiguation in the push diagnostic; the materialization poll now
+waits for the milestone level with per-tick level logging; unique-per-run kind-log export
+dir (fixes the run-3 stale-shared-logs blocker).
 
 ## Symptoms
 
@@ -253,4 +283,190 @@ For the ENTIRE 5-min poll the clone AND push pods sit at **Pending** — they NE
 ### next_action_v4 (ONE more run, describe-instrumented — or run on a bigger host)
 - Add `kubectl describe pod <tide-push/clone pod>` (or dump `.status.conditions` + scheduler events) to the in-poll diagnostics so the NEXT run prints the exact Pending reason (`FailedScheduling: Insufficient cpu/memory` vs `unbound PVC` vs taint). OR simply run `make test-int` on an isolated, properly-resourced host (real CI / a bigger VM) — if it greens there, the RED was purely this host's kind-node resource starvation and DASH-02 is actually sound (fixes A/B/C are still worth keeping as latent hardening).
 - HALTED here: 5 Layer-B runs (~110 min), orchestrator context exhausted. Fixes 1bcbea6 + 01b5004 stay committed (real latent-bug hardening, envtest-green). DASH-02 remains RED/Pending pending confirmation of the Pending-pod cause.
+
+## Run-6 (code-only, no cluster) — TRUE ROOT CAUSE: tide-push image-tag fixture gap → ImagePullBackOff (NOT scheduling)
+
+The run-5 "unschedulable → kind-node resource starvation" conclusion is **DISPROVEN by code**, and the actual cause is a one-line test-fixture gap. Confirmed statically (no Layer-B run) and verified via `helm template`.
+
+- **Resource starvation — REFUTED.** The clone/push Job pods set NO cpu/memory requests anywhere in `internal/controller` (`grep -rnE 'corev1.ResourceList|ResourceCPU|ResourceMemory|resource.MustParse' internal/` hits only a PVC `storage:1Gi` + test files). A request-less pod passes the scheduler's `NodeResourcesFit` unconditionally — it CANNOT fail on "Insufficient cpu/memory" no matter how tight the 8.32 GiB Docker VM is.
+- **PVC as scheduling blocker — REFUTED.** The `tide-projects` claim is a SHARED RWO PVC (WaitForFirstConsumer local-path, single-node kind: `cluster.yaml` has one control-plane node). The subagent/planner pods mount the IDENTICAL claim (`internal/dispatch/podjob/jobspec.go:441`, subPath `<uid>/...`) and scheduled + ran to `Complete`. Same claim + same node + same access mode ⇒ if the PVC blocked scheduling, the subagent pods would be blocked too. They weren't. So the PVC does not gate clone/push scheduling.
+- **The run-5 diagnostic conflated two different `Pending` states.** It captured only `pod.Status.Phase`, which is `Pending` for BOTH "unschedulable (FailedScheduling)" AND "scheduled but ContainerCreating/ImagePullBackOff." It never captured `.status.conditions[PodScheduled]` (would have been `True`) or `.status.containerStatuses[].state.waiting.reason` (would have said `ImagePullBackOff`). So "not ContainerCreating = scheduling block" was an unverified assertion.
+- **TRUE ROOT CAUSE — tide-push image-tag mismatch (cascade-12 shape).** The chart sets the manager env `TIDE_PUSH_IMAGE = {{ images.tidePush.repository }}:{{ images.tidePush.tag | default .Chart.AppVersion }}` (`charts/tide/templates/deployment.yaml:47`). `images.tidePush.tag` defaults to `""` and the kind suite's helm `--set` block (`test/integration/kind/suite_test.go`) overrides `.tag=test` for controller/stubSubagent/credProxy/tideReporter/tideImport — but **NOT for tidePush**. So it resolves to `.Chart.AppVersion` = `1.0.7` (`Chart.yaml:12`). `make test-int-kind-prep` builds+loads ONLY `ghcr.io/jsquirrelz/tide-push:test` (`Makefile:164,190`) — never `:1.0.7`. Result: the controller dispatches clone/push Jobs with `tide-push:1.0.7`, absent from the node; `pullPolicy:IfNotPresent` → pull from ghcr.io → fails (private/no-net) → **ImagePullBackOff → phase Pending** for the whole 5-min poll → `LastPushedSHA` never advances. Every OTHER image ran because it got both the load AND the `--set .tag=test` override; tide-push had only the load. (Makefile:194 even documents this exact trap for tideImport.)
+- **Defects A/B/C were real latent bugs but NONE was the RED cause.** The push pods never ran at all — no capture path was ever exercised in the live run.
+
+reasoning_checkpoint_v2:
+  hypothesis: >
+    Clone/push pods are ImagePullBackOff (phase=Pending) because the kind suite
+    never overrides images.tidePush.tag, so the manager's TIDE_PUSH_IMAGE resolves to
+    the unloaded Chart.AppVersion tag (1.0.7) instead of the loaded :test tag.
+  falsification_test: >
+    helm template with the suite's --set flags renders TIDE_PUSH_IMAGE. If the tag is
+    1.0.7 without the override and :test with it, the fixture-gap hypothesis holds.
+  confirming_evidence:
+    - >
+      helm template BEFORE (no tidePush override): TIDE_PUSH_IMAGE =
+      "ghcr.io/jsquirrelz/tide-push:1.0.7". AFTER (--set images.tidePush.tag=test):
+      "ghcr.io/jsquirrelz/tide-push:test". Decisive, no cluster.
+    - >
+      Makefile:164,190 build+load ONLY tide-push:test; no :1.0.7 image ever exists on
+      the node. suite_test.go grep for 'images.tidePush' tag override = EMPTY.
+
+### FIX APPLIED (test-fixture only — no product code, values.yaml untouched)
+- `test/integration/kind/suite_test.go`: added `--set images.tidePush.tag=test` +
+  `--set images.tidePush.pullPolicy=IfNotPresent` to the helm install block, mirroring
+  the existing tideImport override. `go vet ./test/integration/kind/...` = clean (exit 0).
+- VERIFIED (no spin): `helm template` confirms TIDE_PUSH_IMAGE now resolves to `:test`.
+- LAYER-B GREEN: still needs ONE kind run to prove end-to-end (minikube is currently
+  Stopped, so the 2nd-cluster gate is clear). NOT claimed green yet. But this is now a
+  targeted fix with render-level proof, not a blind re-run.
+
+## Eliminated (Run-6)
+
+- hypothesis: kind-node CPU/memory resource starvation (run-5's "strong hypothesis").
+  **DISPROVEN by code** — clone/push pods declare zero cpu/memory requests, so
+  NodeResourcesFit always passes; "Insufficient cpu/memory" is impossible for them.
+  evidence: `grep -rnE 'corev1.ResourceList|ResourceCPU|ResourceMemory' internal/` returns only a PVC storage request + test files; no pod resource requests exist.
+- hypothesis: shared RWO `tide-projects` PVC blocks clone/push scheduling (WFC / node
+  affinity / RWO multi-attach). **DISPROVEN** — subagent pods mount the identical claim
+  on the same single node and scheduled fine; a scheduling-level PVC gate would block
+  them equally.
+  evidence: internal/dispatch/podjob/jobspec.go:441 (subagents mount tide-projects); test/integration/kind/cluster.yaml (single control-plane node); subagent pods reached Complete in run-1.
+
+## Run-7 (Layer-B, fix applied, disambiguated diag) — ORIGINAL BUG GREEN; new narrower failure isolated
+
+Ran the focused artifact_staging spec against a fresh kind cluster with the tide-push
+image-tag fix + the sched/wait diagnostics. `KIND_EXIT=1`, but the RED moved PAST the
+original defect to a new, later assertion. Decisive evidence (all from this run's
+GinkgoWriter, not the stale logs):
+
+- **Image-tag fix CONFIRMED live.** Diag: `tide-clone-<uid>=Succeeded|sched=True|wait=
+  tide-push-<uid>=Succeeded|sched=True|wait=`. Both pods now SCHEDULE and SUCCEED — the
+  ImagePullBackOff is gone. Run-5's "Pending forever" is fully resolved.
+- **`LastPushedSHA` ADVANCES.** `LastPushedSHA="4dccc52d3986b65004083b3f26c96951017bd9f8"`.
+  The line-200/176 precondition that was RED for 5 runs now PASSES. The boundary push
+  lands, no lease failure, Phase != PushLeaseFailed. **The chartered DASH-02 bug
+  (artifact-vs-boundary push interaction → empty LastPushedSHA) is FIXED and GREEN.**
+- **Artifact stages on the run branch.** `.tide/ paths on run branch:
+  [.tide/planning/project/artifact-staging-project-1783542624/MILESTONES.md]`. The push
+  pipeline works end-to-end.
+- **NEW FAILURE (artifact_staging_test.go:281):** `kindsSeen = {"project": true}` but
+  Assertion 4 requires `HaveKey("milestone")`. Only the project-kind artifact is on the
+  branch when the assertion runs.
+
+### Root cause of the new failure (very likely a TEST-POLL RACE, not the chartered bug)
+- The materialization poll (artifact_staging_test.go:213-227) exits as soon as
+  `mdCount >= 1` — the FIRST *.md to appear. It caught `project/MILESTONES.md` and
+  stopped; Assertion 4 then demanded a `milestone` kind that had not landed yet.
+- Artifact pushes fire PER-LEVEL incrementally (milestone_controller.go:290/713, phase,
+  plan, project each call triggerArtifactPush), so levels materialize on the run branch
+  at DIFFERENT times. The poll's mdCount>=1 exit condition does not wait for the full
+  expected level set → it can (and did) exit with only one level present.
+- The test's own comment (line 275) assumed "milestone reaches Succeeded first and most
+  reliably" — but PROJECT landed first here, so that assumption is stale.
+- NOT yet fully distinguished from the alternative (milestone artifact never stages)
+  because the exported controller log is STALE (run-3 shared-kind-logs-path bug: mtime
+  12:39 ≠ this run's 16:32). The poll fix below is decisive for BOTH: it either waits
+  out the race → GREEN, or times out listing exactly which levels DID stage → proves a
+  real product gap in-band, no stale-log dependency.
+
+### next_action_v5 (test-harness fix, then ONE run — decisive either way)
+- artifact_staging_test.go materialization poll: replace the `mdCount >= 1` exit with a
+  wait for the EXPECTED level set (at minimum `milestone`, ideally all levels the stub
+  cascade emits), with a timeout message listing the levels seen so far. This removes the
+  race if it is one, and yields decisive in-band evidence of a real staging gap if it is
+  not. Also worth fixing the stale-shared-kind-logs export (unique dir per run) so the
+  controller log is analyzable next time.
+- SEPARATE from the chartered bug: this is artifact-staging COMPLETENESS across levels,
+  not the artifact-vs-boundary push interaction. The chartered bug is resolved.
+
+### Fixes to preserve (this session)
+- test/integration/kind/suite_test.go: `--set images.tidePush.tag=test` +
+  `pullPolicy=IfNotPresent` (THE fix — resolves the chartered RED; render-verified +
+  live-confirmed).
+- test/integration/kind/artifact_staging_test.go: sched/wait disambiguation in the
+  in-poll diagnostic (converted the ambiguous phase=Pending into decisive evidence).
+
+## Run-8 (Layer-B, poll waits for milestone level) — NOT a race: REAL multi-level staging gap
+
+Re-ran with the poll waiting for the `milestone` level + per-tick level logging + the
+unique-per-run log-dir fix. `KIND_EXIT=1`, timed out after the full 5-min poll (414s).
+
+- **DECISIVE — not a poll race.** The per-tick log printed `staged planner levels so
+  far: [project]` for ALL 59 ticks (5 min). `milestone` NEVER appeared. The old
+  mdCount>=1 exit was not the whole story — even waiting the full budget, only `project`
+  ever stages.
+- **Mechanism (fresh controller log — the unique-dir fix worked, mtime matches this run):**
+  exactly ONE `"triggered artifact push"` event, carrying `"level":"project"`. NO
+  milestone/phase/plan artifact push fires. The project push carries a single envelope
+  (`envelopes:1`), NOT a cumulative multi-level map. Then `"boundary push landed on
+  remote"`. So `.tide/planning/project/<proj>/MILESTONES.md` is the ONLY artifact staged.
+- **This is a SEPARATE issue from the chartered bug (which is fixed + green).** It is
+  artifact-staging COMPLETENESS: milestone/phase/plan level artifacts never reach the run
+  branch because their per-level artifact push is never triggered in this cascade. Open
+  question (needs artifact_push.go + 37-06/37-09 design intent): is multi-level staging
+  the intended contract (→ product bug: per-level triggers/cumulative map not firing) or
+  is only project-level staging intended (→ test Assertion 4 is over-strict)?
+- Minor diag caveat: git-receive-pack=0 in the push diag despite a landed push — the
+  receive-pack counter likely mis-targets the git-http-server container/log; not central.
+
+### next_action_v6 (NEW investigation — scope decision for the user)
+- Root-cause the milestone/phase/plan artifact-push non-trigger: read triggerArtifactPush
+  call sites (milestone_controller.go:290/713, phase, plan) and the cumulative
+  stage-envelopes map builder (artifact_push.go) against the 37-06/37-09 intent. Decide
+  product-bug (fix the triggers/map) vs test-over-strict (relax Assertion 4 to the
+  levels actually contracted). This is a fresh cascade, tracked separately from DASH-02's
+  chartered artifact-vs-boundary-push bug.
+
+## Run-9 (code + fresh-log trace) — DEFECT E ROOT-CAUSED: shared single-flight freezes an early [project]-only map
+
+Investigated the staging gap with the fresh (unique-dir) controller log + code trace.
+CONFIRMED product bug, not test-over-strict. Assertion 4 (milestone must stage) is
+correct per 37-06's cumulative multi-level staging design (collectStageEnvelopes lists
+all planner-materialized milestone/phase/plan children + project).
+
+**Mechanism (fresh log, chronological, project UID 08c196e0):**
+1. 22:49:35 — the PROJECT controller's triggerArtifactPush (project_controller.go:1418)
+   fires FIRST, before the milestone/phase/plan children materialize. collectStageEnvelopes
+   returns `[project]` only (a milestone exists → project included via len(msList)>0, but
+   no child is plannerMaterialized yet). It wins the shared `tide-push-<uid>` name.
+   Logged: `triggered artifact push level=project envelopes=1 job=tide-push-08c196e0`.
+2. 22:49:43-59 — children materialize (reporters spawn AFTER the push). Their per-level
+   triggerArtifactPush calls AND the project-Complete triggerBoundaryPush (which DOES
+   re-collect the full cumulative map at boundary_push.go:124) ALL hit the single-flight
+   guard (artifact_push.go:213-219 / boundary_push.go:99-101 `if getErr==nil {return nil}`)
+   because the early Job still exists → return early, NO push.
+3. 22:50:07 — `boundary push landed on remote`. DECISIVE: `triggered boundary push`
+   (boundary_push.go:149) count = **0** — the boundary push NEVER created its own Job.
+   The landed push is the STALE early artifact Job (StageEnvelopes=[project]) completing
+   under the shared D-B5 name.
+4. The shared Job lingers (TTLSecondsAfterFinished:300s) until ~22:54:35; the fast stub
+   cascade completes and CLEANS UP at 22:55:08 (project/milestone/phase/plan cleanup)
+   before any further trigger can fire. The `artifact_push.go:216` "self-heals on the
+   next push" assumption is DEFEATED — there is no next push.
+
+**Net:** only `.tide/planning/project/<proj>/MILESTONES.md` ever stages; milestone/phase/
+plan artifacts never reach the run branch. The bug is the D-B5/R-05 shared single-flight
+coupling (the SAME coupling run-5's defect-C fix deliberately preserved) exposing a second
+failure mode: an EARLY artifact push snapshots a `[project]`-only cumulative map and freezes
+it — every later fuller-map push (including the authoritative boundary push at Complete)
+is suppressed by single-flight, and the Job outlives the cascade.
+
+**E1 vs E2 resolved → E1.** The boundary push's collectStageEnvelopes at Complete WOULD
+carry the full map (children materialized by then), but it never ran (triggered boundary
+push=0). The blocker is the single-flight skip, not a never-materializing child.
+
+### FIX SHAPE (product code, touches the deliberately-preserved D-B5 coupling — needs a decision)
+- **Option A (recommended, mirrors run-5 defect-C2 pattern):** when the boundary push
+  fires at a terminal boundary (project Complete) and finds an existing `tide-push-<uid>`
+  Job that is a STALE ARTIFACT push (created with a smaller cumulative map than now
+  materialized), the state machine should OWN a fresh authoritative push: let the stale
+  Job finish, then re-dispatch the boundary push with the full collectStageEnvelopes map
+  (idempotent no-op restages for already-staged levels via the 37-02 clean-tree skip;
+  bounded like maxBoundaryPushAttempts). Preserves single-writer (one Job at a time) — no
+  name decoupling, no lease race.
+- Option C (weaker): shorten the artifact-push Job TTL so it clears fast enough for a
+  later re-trigger. Racy; doesn't guarantee the final push carries the full map.
+- Requires envtest RED-before/GREEN-after (the boundary push must supersede a stale
+  artifact Job and stage all materialized levels) + a Layer-B re-run to confirm the
+  milestone artifact reaches the run branch. Test Assertion 4 is correct as-is; do NOT relax it.
 
