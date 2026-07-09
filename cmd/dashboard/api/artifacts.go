@@ -159,7 +159,7 @@ func (h *ArtifactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// memory + privilege blowup). The typed clientset issues a one-shot GET with
 	// no informer. The PAT lives only in this call frame and the gitfetch call
 	// frame — never cached, never logged (T-37-03-01 / T-37-07-03).
-	auth, credErr := h.resolveAuth(ctx, namespace, proj.Spec.Git.CredsSecretRef)
+	auth, credErr := h.resolveAuth(ctx, namespace, proj.Spec.Git.CredsSecretRef, proj.Spec.Git.RepoURL)
 	if credErr != "" {
 		na := emptyState("error")
 		na.Error = credErr
@@ -210,10 +210,19 @@ func (h *ArtifactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // resolveAuth reads the per-project git creds Secret via the typed clientset and
 // returns the pass-through Auth. An empty credsSecretRef means anonymous access
-// (public / in-cluster http:// remote) → (nil, ""). A missing Secret or missing
-// GIT_PAT key returns a creds-shaped error MESSAGE (second return) that never
-// echoes any secret value — the caller renders it as state:"error".
-func (h *ArtifactsHandler) resolveAuth(ctx context.Context, namespace, credsSecretRef string) (*gitfetch.Auth, string) {
+// (public / in-cluster http:// remote) → (nil, "").
+//
+// A missing/empty GIT_PAT key is scheme-conditional (Gap 37-G1): it mirrors
+// cmd/tide-push/main.go resolveGitAuth's requirePAT rule — https:// and git@
+// remotes REQUIRE the PAT (missing → creds error), while anonymous http://
+// remotes proceed anonymously with nil Auth. This keeps the dashboard read path
+// in lockstep with the push path: an in-cluster http:// remote that pushed fine
+// without a PAT also renders its artifacts without one.
+//
+// A missing Secret (a set credsSecretRef pointing at a non-existent Secret)
+// stays a loud error for every scheme. The returned error MESSAGE never echoes
+// any secret value — the caller renders it as state:"error".
+func (h *ArtifactsHandler) resolveAuth(ctx context.Context, namespace, credsSecretRef, repoURL string) (*gitfetch.Auth, string) {
 	if credsSecretRef == "" {
 		return nil, ""
 	}
@@ -225,6 +234,12 @@ func (h *ArtifactsHandler) resolveAuth(ctx context.Context, namespace, credsSecr
 	}
 	pat, ok := sec.Data[gitPATKey]
 	if !ok || len(pat) == 0 {
+		// Same guard as tide-push resolveGitAuth: only https:// and git@ remotes
+		// require the PAT. Anonymous http:// remotes fetch without credentials.
+		requirePAT := strings.HasPrefix(repoURL, "https://") || strings.HasPrefix(repoURL, "git@")
+		if !requirePAT {
+			return nil, ""
+		}
 		return nil, fmt.Sprintf("git credentials secret %q is missing data key %s", credsSecretRef, gitPATKey)
 	}
 	// Username defaults to the x-access-token convention inside gitfetch.basicAuth.
