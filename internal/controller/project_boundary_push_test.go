@@ -116,6 +116,76 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 		Expect(k8sClient.Create(ctx, job)).To(Succeed())
 	}
 
+	// makeStampedPushJob creates a placeholder push Job like makePushJob, but
+	// stamps the staged-envelope CSV onto the Job's Annotations at create time —
+	// modeling the Defect E / DASH-02 shared single-flight winner that snapshotted
+	// a (possibly partial) cumulative map. Uses the LITERAL annotation key so this
+	// test file stays self-contained and independently compilable against the
+	// pre-fix controller (Task 2 introduces the matching stagedEnvelopesAnnotation
+	// const in push_helpers.go).
+	makeStampedPushJob := func(name, projectName string, uid types.UID, staged []string) {
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+				Annotations: map[string]string{
+					"tideproject.k8s/staged-envelopes": strings.Join(staged, ","),
+				},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					Kind:               "Project",
+					Name:               projectName,
+					UID:                uid,
+					Controller:         new(true),
+					BlockOwnerDeletion: new(true),
+				}},
+			},
+			Spec: batchv1.JobSpec{
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						RestartPolicy: corev1.RestartPolicyNever,
+						Containers: []corev1.Container{{
+							Name:  pushContainerName,
+							Image: "ghcr.io/jsquirrelz/tide-push:test",
+						}},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, job)).To(Succeed())
+	}
+
+	// makeMaterializedMilestone creates a Milestone child of the Project and patches
+	// its Status.Phase so collectStageEnvelopes counts it as planner-materialized —
+	// this is what makes the cumulative map grow past what an early artifact push
+	// stamped. Returns the created Milestone's UID for building the expected
+	// <uid>:milestone/<name> stage-envelope entry.
+	makeMaterializedMilestone := func(name, projectName, phase string) types.UID {
+		ms := &tideprojectv1alpha2.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(name, "default", &tideprojectv1alpha2.Milestone{})
+
+		var got tideprojectv1alpha2.Milestone
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
+		patch := client.MergeFrom(got.DeepCopy())
+		got.Status.Phase = phase
+		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
+		return got.UID
+	}
+
+	// deleteMilestone best-effort removes a Milestone the shared cleanup() helper
+	// does not touch — collectStageEnvelopes lists the WHOLE "default" namespace, so
+	// a leaked Milestone would bleed into unrelated specs.
+	deleteMilestone := func(name string) {
+		var ms tideprojectv1alpha2.Milestone
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &ms); err == nil {
+			_ = k8sClient.Delete(ctx, &ms)
+		}
+	}
+
 	markJobFailed := func(name string) {
 		var job batchv1.Job
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &job)).To(Succeed())
@@ -512,6 +582,119 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 				var job batchv1.Job
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// Test 8: DASH-02 Defect E — a succeeded shared push Job stamped (at create time)
+	// with a staged map covering ONLY the project entry, while a Milestone has since
+	// materialized, must NOT be accepted as the terminal boundary push even though its
+	// headSHA is perfectly readable. The D-B5/R-05 single-flight winner from an EARLY
+	// artifact push snapshotted a [project]-only cumulative map; the milestone/phase/plan
+	// artifacts never reached the run branch. The success arm must delete this stale Job
+	// and re-dispatch a fresh OWNED push whose OWN stamped map now carries the milestone
+	// entry too (the full cumulative map, not the stale subset).
+	Describe("Test 8: succeeded Job stamped with a partial (subset) staged map → supersede, not terminal", func() {
+		const name = "bp13b-stalemap"
+		const msName = "bp13b-stalemap-ms"
+		AfterEach(func() {
+			deleteMilestone(msName)
+			cleanup(name)
+		})
+
+		It("supersedes the stale partial-map push with a fresh owned push carrying the full map", func() {
+			const landedSHA = "aaaabbbbccccddddeeeeffff0000111122223333"
+			proj := makeComplete(name, 0)
+			jn := pushJobName(proj.UID)
+			// The early artifact-push winner stamped ONLY the project entry.
+			makeStampedPushJob(jn, proj.Name, proj.UID,
+				[]string{fmt.Sprintf("%s:project/%s", proj.UID, proj.Name)})
+			// Its headSHA is perfectly readable — the ONLY reason it must not go
+			// terminal is the stale (subset) staged map.
+			fakePushPodSuccess(jn, landedSHA)
+			markJobSucceeded(jn)
+			// A milestone child materialized AFTER the stale Job snapshotted its map,
+			// so collectStageEnvelopes' current result is now a strict superset.
+			makeMaterializedMilestone(msName, proj.Name, "Succeeded")
+
+			r := newReconciler("tide-projects-bp13b-8")
+			reconcileN(r, name, 4) // delete-stale + re-dispatch convergence
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				// The partial-map success must NOT be accepted as terminal.
+				g.Expect(got.Status.Git.LastPushedSHA).To(BeEmpty(),
+					"a strict-subset staged map must not be accepted as the terminal boundary push")
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
+				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1),
+					"the stale partial-map Job must be superseded by a fresh owned dispatch")
+				// A push Job exists again (re-dispatched, not left as the stale one)...
+				var job batchv1.Job
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jn, Namespace: "default"}, &job)).To(Succeed())
+				// ...and — the decisive Defect-E signal — the superseding push carries
+				// the FULL cumulative map, including the milestone that the stale subset
+				// omitted.
+				g.Expect(job.Annotations["tideproject.k8s/staged-envelopes"]).
+					To(ContainSubstring("milestone/"+msName),
+						"the superseding push must stage the full cumulative map, not just the stale subset")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	// Test 9 (regression guard): a succeeded shared push Job whose stamped map ALREADY
+	// matches the current full collectStageEnvelopes set (project + a materialized
+	// milestone, no further children appear) goes terminal (BoundaryPushed=True/Pushed,
+	// LastPushedSHA advances) with NO second Job created — proving the Defect E fix does
+	// not introduce needless churn on an already-complete stage.
+	Describe("Test 9: succeeded Job already stamped with the FULL cumulative map → terminal success, no re-dispatch", func() {
+		const name = "bp13b-fullmap"
+		const msName = "bp13b-fullmap-ms"
+		AfterEach(func() {
+			deleteMilestone(msName)
+			cleanup(name)
+		})
+
+		It("goes terminal with no extra Job churn when the stamp already covers the current full map", func() {
+			const landedSHA = "1111222233334444555566667777888899990000"
+			proj := makeComplete(name, 0)
+			jn := pushJobName(proj.UID)
+			// Materialize the milestone FIRST so the current cumulative map already
+			// includes it, then stamp the Job with the SAME full set (kind-then-name
+			// order: "milestone" sorts before "project").
+			msUID := makeMaterializedMilestone(msName, proj.Name, "Succeeded")
+			makeStampedPushJob(jn, proj.Name, proj.UID, []string{
+				fmt.Sprintf("%s:milestone/%s", msUID, msName),
+				fmt.Sprintf("%s:project/%s", proj.UID, proj.Name),
+			})
+			fakePushPodSuccess(jn, landedSHA)
+			markJobSucceeded(jn)
+
+			r := newReconciler("tide-projects-bp13b-9")
+			reconcileN(r, name, 3)
+
+			Eventually(func(g Gomega) {
+				got := getProject(name)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				g.Expect(c).NotTo(BeNil())
+				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushed))
+				g.Expect(got.Status.Git.LastPushedSHA).To(Equal(landedSHA),
+					"a full-map succeeded push must go terminal and advance the lease anchor")
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+			// No SECOND push Job — the stamp already covered the current full map, so
+			// there is nothing to supersede.
+			var jobs batchv1.JobList
+			Expect(k8sClient.List(ctx, &jobs, client.InNamespace("default"))).To(Succeed())
+			count := 0
+			for i := range jobs.Items {
+				if jobs.Items[i].Name == jn {
+					count++
+				}
+			}
+			Expect(count).To(Equal(1), "no new push Job when the stamped map already covers the current full map")
 		})
 	})
 })
