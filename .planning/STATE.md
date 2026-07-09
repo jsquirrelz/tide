@@ -118,6 +118,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260708-tv5 | Fix Defect E (DASH-02) — boundary push supersedes a stale-subset artifact Job so milestone/phase/plan artifacts stage on the run branch (envtest-green; Layer-B confirmation deferred) | 2026-07-09 | 6a65f4e | [260708-tv5-fix-defect-e-dash-02-follow-up-milestone](./quick/260708-tv5-fix-defect-e-dash-02-follow-up-milestone/) |
+| 260709-lint37 | Clear 7 golangci-lint findings (lll/modernize.stringscut/modernize.rangeint/prealloc) in cmd/tide-push + cmd/dashboard/gitfetch — no behavior change, `make lint` green — to unblock Phases 36–37 ship PR | 2026-07-09 | f71bdd7 | — |
 
 ## Deferred Items
 
