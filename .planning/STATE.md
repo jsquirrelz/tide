@@ -4,11 +4,11 @@ milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
 current_phase: 37
 current_phase_name: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
-status: planning
-stopped_at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
-last_updated: "2026-07-08T11:22:00.942Z"
-last_activity: 2026-07-08
-last_activity_desc: Phase 36 complete, transitioned to Phase 37
+status: executing
+stopped_at: Phase 37 gap plans 37-11 (gitfetch scheme-conditional PAT) + 37-12 (log-drawer Reconnect button) executed + re-verified live on kind tide-uat37; 37-10 D-15 human sign-off pending
+last_updated: "2026-07-09T16:00:00.000Z"
+last_activity: 2026-07-09
+last_activity_desc: Phase 37 live UAT 8/8 + 2 gaps closed & re-verified; awaiting D-15 sign-off
 progress:
   total_phases: 5
   completed_phases: 1

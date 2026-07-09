@@ -92,6 +92,10 @@ blocked: 0
 
 Operator (2026-07-09) selected two notes as fix-before-close gaps; Note 2 accepted as-is.
 
+**Resolution (2026-07-09) — both gaps CLOSED and re-verified live on `tide-uat37`:**
+- **37-G1 → 37-11 (RESOLVED):** `resolveAuth` made scheme-conditional (commits `9df7ee1` RED / `9ac856b` GREEN). Live re-verify: with `tide-secrets` `GIT_PAT` restored to empty (0 bytes), the anonymous `http://` project-node artifact fetch returns `state:available` (branch + commitSHA) instead of the pre-fix `missing data key GIT_PAT` error. `go test ./cmd/dashboard/api -run TestArtifacts` → ok.
+- **37-G2 → 37-12 (RESOLVED):** manual Reconnect button added to the `PodLogStreamer` reconnecting state (commits `5949f18` / dist rebuild `11d1335`). Live re-verify: killing the port-forward mid-stream now shows "Reconnecting to log stream…" **with a "Reconnect" button** (`pod-log-reconnecting-reconnect`); clicking it resumed streaming. `PodLogStreamer.test.tsx` 21/21, dist freshness gate exit 0, served bundle `index-CDj1PDD4.js`. Screenshot: `uat37-gap-37-12-reconnect-button-live.png`.
+
 ### Gap 37-G1 — Dashboard gitfetch rejects empty `GIT_PAT` for anonymous `http://` remotes (DASH-01)
 - **Severity:** medium. **Source:** UAT Note 3 (confirmed against source).
 - **Symptom:** `GET /api/v1/nodes/{kind}/{name}/artifacts` returns `{"state":"error","error":"git credentials secret \"…\" is missing data key GIT_PAT"}` when the project's `git.credsSecretRef` points at a Secret whose `GIT_PAT` is empty/absent AND the `repoURL` is an anonymous `http://` remote. Artifacts never render even though the run branch has them.
@@ -110,4 +114,4 @@ Operator (2026-07-09) selected two notes as fix-before-close gaps; Note 2 accept
 
 ## D-15 sign-off
 
-Not yet given — deferred pending the two gaps above. The eight surfaces are behavior-verified on a live cluster (screenshots), but per operator decision Phase 37 is not closed until 37-G1/37-G2 land; re-verify the two after the gap-closure plans execute, then take the D-15 sign-off.
+**Ready.** All eight surfaces are behavior-verified live, and both operator-selected gaps (37-11/37-12) are now landed AND re-verified against the same live cluster. The one blocking item that deferred the sign-off is resolved. Remaining step: the operator's D-15 confirmation (LOCKED human-in-the-loop) to close the 37-10 checkpoint and Phase 37 — this session does not self-approve the blocking gate.
