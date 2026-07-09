@@ -20,10 +20,10 @@
 
 **Milestone Goal:** Make a second external-repo run trustworthy and reviewable — a pushed run branch provably contains every Succeeded task's work, the budget tally matches the provider console, git ergonomics (baseRef, agent identity, promptFile) work, the dashboard is a sufficient approve-gate review surface, telemetry setup is guided, and the v1.0.6 audit tech-debt is retired.
 
-- [ ] **Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA** - Every Succeeded task's worktree branch is provably merged into the run branch (final wave included), merges are serialized and idempotent, boundary push gates on git-verified completeness, and `status.git.lastPushedSHA` arms the force-with-lease fence
-- [ ] **Phase 35: Git Base Ref** - `spec.git.baseRef` bases a run on any branch/tag/SHA, unresolvable refs fail fast with a typed condition, and the resolved SHA is stamped in `status.git.baseSHA` across both API versions
-- [ ] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7
-- [ ] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
+- [x] **Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA** - Every Succeeded task's worktree branch is provably merged into the run branch (final wave included), merges are serialized and idempotent, boundary push gates on git-verified completeness, and `status.git.lastPushedSHA` arms the force-with-lease fence
+- [x] **Phase 35: Git Base Ref** - `spec.git.baseRef` bases a run on any branch/tag/SHA, unresolvable refs fail fast with a typed condition, and the resolved SHA is stamped in `status.git.baseSHA` across both API versions
+- [x] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7 (completed 2026-07-08)
+- [x] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
 - [ ] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed
 
 <details>
@@ -153,12 +153,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   3. `status.git.baseSHA` shows the resolved base SHA on a running Project.
   4. The new spec/status fields exist in both API versions, survive v1alpha1⇄v1alpha2 conversion round-trip, and survive a `tide-crds` chart upgrade without silent pruning — locked by conversion and CRD upgrade-path tests.
 
-**Plans**: 4/4 plans complete
-
-- [x] 35-01-PLAN.md
-- [x] 35-02-PLAN.md
-- [x] 35-03-PLAN.md
-- [x] 35-04-PLAN.md
+**Plans**: TBD
 
 ### Phase 36: Signed Commits + Bot Identity
 
@@ -173,7 +168,12 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   2. An unconfigured install commits as `TIDE Agent <tide-agent@tideproject.k8s>` at all three sites (one consistent compiled-in default; the `TIDE_BOT_*` env names are gone).
   3. The new `spec.git.agentName`/`agentEmail` CRD fields ride the same chart version bump as Phase 35's `baseRef` (FIXED-contract batching).
 
-**Plans**: TBD
+**Plans**: 4/4 plans complete
+
+- [x] 36-01-PLAN.md
+- [x] 36-02-PLAN.md
+- [x] 36-03-PLAN.md
+- [x] 36-04-PLAN.md
 
 ### Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
 
@@ -187,7 +187,19 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   3. The operator can read the outcome prompt and project settings in a dashboard project view.
   4. The log drawer always renders an explicit state — loading, streaming, or pod-gone — and is never silently empty.
 
-**Plans**: TBD
+**Plans**: 9/10 plans executed
+
+- [x] 37-01-PLAN.md
+- [x] 37-02-PLAN.md
+- [x] 37-03-PLAN.md
+- [x] 37-04-PLAN.md
+- [x] 37-05-PLAN.md
+- [x] 37-06-PLAN.md
+- [x] 37-07-PLAN.md
+- [x] 37-08-PLAN.md
+- [x] 37-09-PLAN.md
+- [ ] 37-10-PLAN.md
+
 **UI hint**: yes
 
 ### Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry
@@ -221,8 +233,8 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 0/TBD | Not started | - |
-| 35. Git Base Ref | v1.0.7 | 4/4 | Complete   | 2026-07-07 |
-| 36. Signed Commits + Bot Identity | v1.0.7 | 0/TBD | Not started | - |
-| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 0/TBD | Not started | - |
-| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/TBD | Not started | - |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 6/6 | Complete (verify-close pending) | 2026-07-08 |
+| 35. Git Base Ref | v1.0.7 | 4/4 | Complete | 2026-07-08 |
+| 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
+| 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
+| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/7 | Planned, not executed | - |

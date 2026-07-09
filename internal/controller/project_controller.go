@@ -917,6 +917,19 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		return ctrl.Result{}, pErr
 	}
 
+	// Compute the cumulative planner-artifact staging map ONCE for this reconcile
+	// pass. Threaded into every (re)dispatch so the project-Complete boundary push
+	// always carries the freshest full map (closing the latent gap where
+	// dispatchBoundaryPush staged none), and read against the stamped map of a
+	// succeeded Job to detect a stale subset (Defect E / DASH-02). Best-effort:
+	// mirror triggerBoundaryPush's degrade — a list error must not wedge the push.
+	current, seErr := collectStageEnvelopes(ctx, r.Client, project)
+	if seErr != nil {
+		logger.Error(seErr, "collectStageEnvelopes failed during boundary push; proceeding without a staged map",
+			"job", pushJobName)
+		current = nil
+	}
+
 	// No push Job yet — create the first attempt, but ONLY if this call site
 	// is allowed to initiate a push (Phase 34 D-14/OQ2 option b): the
 	// Complete fast-path always may; a mid-run observation never does — a
@@ -925,36 +938,63 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		if !dispatchIfMissing {
 			return ctrl.Result{}, nil
 		}
-		return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, project.Status.BoundaryPush.LastError)
+		return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, project.Status.BoundaryPush.LastError, current)
 	}
 
-	// Push Job Complete — terminal success.
+	// Push Job Complete — terminal success, but ONLY once the landed headSHA is
+	// durably captured into the --force-with-lease anchor (D-B6 / Pitfall 13).
 	if isJobSucceeded(&existingPush) {
+		env, ok := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
+		if !ok || env.HeadSHA == "" {
+			// The Job succeeded but its headSHA is not readable. Under the intentional
+			// D-B5 / R-05 single-writer coupling, the shared tide-push-<uid> Job may
+			// have been created by an EARLIER artifact- or level-boundary push whose
+			// Pod has since been GC'd (TTLSecondsAfterFinished), or whose
+			// terminationMessage is not yet populated at this tick. Going terminal
+			// (BoundaryPushed=True) now would freeze Status.Git.LastPushedSHA empty
+			// FOREVER — the terminal guard at the top of this method returns early on
+			// every subsequent reconcile, so the anchor could never be captured and
+			// every future push would degrade to a no-lease force push. Instead,
+			// replace the stale Job with a fresh project-boundary push the state
+			// machine OWNS: its Pod is fresh and its envelope headSHA is readable on
+			// the next observation. The re-push is idempotent — a re-push of the
+			// already-landed run-branch HEAD is a no-op fast-forward — and bounded by
+			// maxBoundaryPushAttempts (dispatchBoundaryPush increments the tally).
+			if delErr := r.deleteFailedPushJob(ctx, &existingPush); delErr != nil {
+				return ctrl.Result{}, delErr
+			}
+			logger.Info("boundary push Job succeeded but headSHA is unreadable; re-dispatching a fresh owned push to capture the lease anchor",
+				"job", pushJobName, "attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts)
+			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, "headsha-unreadable", current)
+		}
+
+		// Defect E / DASH-02: the succeeded Job's headSHA is readable, but if it
+		// staged only a STRICT SUBSET of the current cumulative map (an early D-B5/R-05
+		// single-flight winner that snapshotted a [project]-only map before the
+		// milestone/phase/plan children materialized), accepting it as terminal would
+		// leave those levels off the run branch forever. Supersede it: delete the stale
+		// Job and re-dispatch a fresh OWNED push carrying the FULL current map. The
+		// restage is idempotent (37-02 clean-tree skip) and bounded by
+		// maxBoundaryPushAttempts. This MUST run before the terminal patch so a
+		// stale-map success never sets BoundaryPushed=True.
+		if isStaleArtifactPush(&existingPush, current) {
+			if delErr := r.deleteFailedPushJob(ctx, &existingPush); delErr != nil {
+				return ctrl.Result{}, delErr
+			}
+			logger.Info("boundary push Job succeeded but staged a partial (subset) map; superseding with a fresh owned push carrying the full cumulative map",
+				"job", pushJobName, "attempt", project.Status.BoundaryPush.Attempts, "cap", maxBoundaryPushAttempts)
+			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, "stale-artifact-map", current)
+		}
+
 		patch := client.MergeFrom(project.DeepCopy())
 		project.Status.Git.LeaseFailureCount = 0
 		project.Status.BoundaryPush.LastError = ""
-		env, haveEnv := r.readPushEnvelope(ctx, project.Namespace, pushJobName)
-		if haveEnv && env.HeadSHA != "" {
-			// D-14: the push envelope's HeadSHA arms the force-with-lease
-			// fence — stamped in the SAME patch that resets LeaseFailureCount
-			// (co-located with the condition transition per CONTEXT
-			// specifics: BoundaryPushed=True and LastPushedSHA must move
-			// together).
-			project.Status.Git.LastPushedSHA = env.HeadSHA
-		} else {
-			// Pitfall 4: TTLSecondsAfterFinished=300 can erase the pod
-			// before the controller observes it (e.g. after a restart), and
-			// a success envelope may legitimately carry an empty HeadSHA (an
-			// integration-only wave Job pushes nothing). Do NOT block
-			// BoundaryPushed=True on envelope readability, and NEVER stamp an
-			// empty HeadSHA — with omitempty the merge patch would DELETE
-			// lastPushedSHA, disarming the D-B6 force-with-lease fence and
-			// letting a later push silently clobber a diverged remote.
-			// Surfaced via metric + log, not a condition.
-			tidemetrics.IntegrationOutcomesTotal.WithLabelValues(project.Name, "stamp-skip").Inc()
-			logger.Info("boundary push succeeded but envelope missing or SHA-less; lastPushedSHA not stamped this cycle",
-				"job", pushJobName)
-		}
+		// The unreadable / empty-headSHA case was already handled above by the
+		// re-dispatch guard (D-B6 / Pitfall 13), so env.HeadSHA is guaranteed
+		// readable and non-empty here. Arm the --force-with-lease fence (D-14) in
+		// the SAME patch that resets LeaseFailureCount — BoundaryPushed=True and
+		// LastPushedSHA move together.
+		project.Status.Git.LastPushedSHA = env.HeadSHA
 		meta.RemoveStatusCondition(&project.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
 		if err := r.Status().Patch(ctx, project, patch); err != nil {
 			return ctrl.Result{}, err
@@ -1071,7 +1111,7 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 			logger.Info("boundary push attempt failed; retrying",
 				"job", pushJobName, "attempt", project.Status.BoundaryPush.Attempts,
 				"cap", maxBoundaryPushAttempts, "lastError", lastErr)
-			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, lastErr)
+			return r.dispatchBoundaryPush(ctx, project, pvcName, pushJobName, lastErr, current)
 		}
 	}
 
@@ -1150,7 +1190,7 @@ func (r *ProjectReconciler) formatMissingBranchesMessage(ctx context.Context, pr
 // requeues with capped exponential backoff. The Job pushes the already-
 // integrated run-branch HEAD (idempotent per #13), so a re-create after a
 // terminal failure converges.
-func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tidev1alpha2.Project, pvcName, pushJobName, lastErr string) (ctrl.Result, error) {
+func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *tidev1alpha2.Project, pvcName, pushJobName, lastErr string, stageEnvelopes []string) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// D-02 single-flight gate: do not create a new git-writer Job while
@@ -1183,6 +1223,10 @@ func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *t
 		CommitMessage:         msg,
 		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
 		IntegrateTaskBranches: branches,
+		// Defect E / DASH-02: thread the freshest cumulative staging map so the
+		// project-Complete boundary push stages every planner-materialized level
+		// (closing the latent gap where this dispatch carried no map at all).
+		StageEnvelopes: stageEnvelopes,
 	}
 	pushJob := buildPushJob(project, pvcName, pushOpts, r.Scheme)
 	if cErr := r.Create(ctx, pushJob); cErr != nil {
@@ -1669,6 +1713,9 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	}
 
 	// Step 9: Build + Create planner Job via shared BuildJobSpec.
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// HelmProviderDefaults tier) and stamp it into the planner Job env.
+	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            project,
@@ -1678,6 +1725,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "project", r.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
@@ -1784,6 +1833,14 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		} else {
 			logger.V(1).Info("reporter Job already exists; skipping spawn", "job", reporterJobName)
 		}
+	}
+
+	// 37-06 / DASH-02: request an artifact-stage push carrying the cumulative
+	// planner-completed map, immediately after the reporter spawn. The Project has no
+	// approve gate (D-02 auto-proceed), so the completion-site trigger suffices — no
+	// parked-arm retry. Log-and-continue: the next boundary push self-heals on failure.
+	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+		logger.Info("artifact push trigger failed at project completion (non-fatal)", "project", project.Name, "error", apErr.Error())
 	}
 
 	// Plan 09-08 Defect C / BYPASS-03: roll up planner-level Usage exactly once per
@@ -2087,6 +2144,48 @@ func isJobFailed(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+// isStaleArtifactPush reports whether a succeeded push Job staged a STRICT SUBSET
+// of what collectStageEnvelopes now returns (Defect E / DASH-02 follow-up). Such a
+// Job is an early D-B5/R-05 single-flight winner that snapshotted a partial
+// cumulative map (e.g. an artifact push fired before the milestone/phase/plan
+// children materialized); accepting it as the terminal boundary push would leave
+// the fuller-map levels off the run branch forever.
+//
+// It reads the stagedEnvelopesAnnotation the Job carried at create time:
+//   - No stamp → unknown provenance (a bare/pre-fix Job); return false so the
+//     existing Tests 1-7 bare Jobs go terminal exactly as before.
+//   - Stamp present but current is not strictly larger → false (nothing new
+//     materialized; monotonic map has not grown).
+//   - Stamp present, current strictly larger, and EVERY staged entry still appears
+//     in current → true (a genuine stale subset to supersede).
+//   - Any staged entry MISSING from current (an unexpected divergence — e.g. a
+//     level CR was deleted) → false; don't second-guess an already-succeeded push.
+func isStaleArtifactPush(job *batchv1.Job, current []string) bool {
+	raw, ok := job.Annotations[stagedEnvelopesAnnotation]
+	if !ok {
+		return false
+	}
+	staged := map[string]struct{}{}
+	if raw != "" {
+		for e := range strings.SplitSeq(raw, ",") {
+			staged[e] = struct{}{}
+		}
+	}
+	if len(current) <= len(staged) {
+		return false
+	}
+	currentSet := make(map[string]struct{}, len(current))
+	for _, e := range current {
+		currentSet[e] = struct{}{}
+	}
+	for e := range staged {
+		if _, present := currentSet[e]; !present {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------

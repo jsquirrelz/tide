@@ -306,6 +306,8 @@ func TestGitConfigRoundTrip(t *testing.T) {
 		RepoURL:        "https://github.com/owner/repo.git",
 		CredsSecretRef: "git-creds",
 		LeaksConfigRef: "gitleaks-rules",
+		AgentName:      "Custom Agent",
+		AgentEmail:     "custom@example.com",
 	}
 	copied := original.DeepCopy()
 	if copied.RepoURL != "https://github.com/owner/repo.git" {
@@ -316,5 +318,12 @@ func TestGitConfigRoundTrip(t *testing.T) {
 	}
 	if copied.LeaksConfigRef != "gitleaks-rules" {
 		t.Errorf("LeaksConfigRef copy mismatch: got %q", copied.LeaksConfigRef)
+	}
+	// SIGN-01 / D-03: agent-identity fields round-trip on GitConfig.
+	if copied.AgentName != "Custom Agent" {
+		t.Errorf("AgentName copy mismatch: got %q", copied.AgentName)
+	}
+	if copied.AgentEmail != "custom@example.com" {
+		t.Errorf("AgentEmail copy mismatch: got %q", copied.AgentEmail)
 	}
 }

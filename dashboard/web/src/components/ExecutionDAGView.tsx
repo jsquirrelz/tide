@@ -11,11 +11,12 @@ import {
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import TaskNode, { type TaskNodeData } from "./TaskNode";
 import WaveBackground from "./WaveBackground";
 import { NodeClickContext } from "./NodeClickContext";
+import type { TideNodeKind } from "./TideNodeShell";
 import { applyDagreLayout } from "../lib/layout";
 import type { StatusValue } from "./StatusBadge";
 
@@ -275,8 +276,15 @@ function ExecutionDAGViewInner({
 
   const nodeTypes = useMemo(() => executionNodeTypes, []);
 
+  // The Execution DAG holds only task nodes; adapt the kind-aware context
+  // signature (37-08) to the existing task-only consumer — behavior unchanged.
+  const clickHandler = useCallback(
+    (_kind: TideNodeKind, name: string) => onTaskClick(name),
+    [onTaskClick],
+  );
+
   return (
-    <NodeClickContext.Provider value={onTaskClick}>
+    <NodeClickContext.Provider value={clickHandler}>
       <div
         data-testid="execution-dag-view"
         data-dagre-direction="LR"

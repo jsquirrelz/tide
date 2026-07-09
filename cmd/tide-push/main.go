@@ -27,8 +27,10 @@ limitations under the License.
 //	--mode=push    — level-boundary push (Phase 3 D-B2). Stages
 //	                 --artifact-paths into the per-run worktree at
 //	                 <workspace>/worktrees/run-<branch>, creates a single
-//	                 commit with --commit-message and the fixed TIDE-bot
-//	                 author signature (W11), computes a unified-diff of
+//	                 commit with --commit-message and the env-sourced TIDE
+//	                 agent author signature (W11 / D-05 — TIDE_AGENT_NAME /
+//	                 TIDE_AGENT_EMAIL, compiled default TIDE Agent
+//	                 <tide-agent@tideproject.k8s>), computes a unified-diff of
 //	                 the new commit, scans the diff with internal/gitleaks
 //	                 (D-B3), and on clean diff pushes with HTTPS+PAT and
 //	                 --force-with-lease against --last-pushed-sha (D-B6).
@@ -78,6 +80,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -123,6 +126,78 @@ type pushConfig struct {
 	// Boundary pushes carry the cumulative branch set too (D-03/D-07), so the
 	// no-push exit keys on this explicit flag, never on absent artifact paths.
 	IntegrationOnly bool
+	// StageEnvelopes is the raw --stage-envelopes flag value: a CSV of
+	// `<uid>:<destPrefix>` pairs (DASH-02). It is parsed and validated inside
+	// runPush (parseStageEnvelopes) so a malformed value fails loudly with the
+	// typed envelope reason "artifact-stage-failed" before any git operation —
+	// the same testable-through-run() convention the other push invariants use.
+	StageEnvelopes string
+}
+
+// EnvelopeStage maps one on-PVC envelope directory (UID-keyed, the same key the
+// dispatch/reporter path writes under envelopes/<uid>/) to the human-readable
+// destination prefix it lands at on the run branch: .tide/planning/<DestPrefix>/
+// (DASH-02, D-02). DestPrefix is `<kind>/<name>` with kind ∈
+// {project, milestone, phase, plan}.
+type EnvelopeStage struct {
+	UID        string
+	DestPrefix string
+}
+
+// destPrefixPattern constrains a --stage-envelopes destPrefix to a clean,
+// slash-nested relative path built from DNS-1123-style segments. It rejects a
+// leading dot/slash/dash and a trailing slash/dot, so bare "..", absolute "/abs",
+// and dotfile prefixes never match. Interior "." and "/" are allowed (real
+// prefixes look like "milestone/m1"), so nested traversal such as
+// "milestone/../../etc" still matches the pattern — the containment check in
+// parseStageEnvelopes is the second, load-bearing gate against escape (T-37-02-01).
+var destPrefixPattern = regexp.MustCompile(`^[a-z0-9]([a-zA-Z0-9._/-]*[a-zA-Z0-9])?$`)
+
+// parseStageEnvelopes parses the --stage-envelopes CSV (`<uid>:<destPrefix>`
+// pairs) into []EnvelopeStage with fail-closed validation (DASH-02, D-03).
+// Empty (or whitespace-only) input returns (nil, nil). Each token splits on its
+// FIRST colon into a non-empty UID and a non-empty destPrefix; destPrefix must
+// contain no backslash, must match destPrefixPattern, and — after
+// filepath.Clean — must still resolve strictly under .tide/planning/ (traversal
+// containment, T-37-02-01). Any violation returns an error; the caller maps it
+// to reason "artifact-stage-failed" + nonzero exit before touching git.
+func parseStageEnvelopes(s string) ([]EnvelopeStage, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	base := filepath.Join(".tide", "planning")
+	tokens := strings.Split(s, ",")
+	out := make([]EnvelopeStage, 0, len(tokens))
+	for _, tok := range tokens {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		rawUID, rawDest, found := strings.Cut(tok, ":")
+		if !found {
+			return nil, fmt.Errorf("stage-envelopes token %q missing ':' separator (want <uid>:<destPrefix>)", tok)
+		}
+		uid := strings.TrimSpace(rawUID)
+		destPrefix := strings.TrimSpace(rawDest)
+		if uid == "" {
+			return nil, fmt.Errorf("stage-envelopes token %q has an empty UID", tok)
+		}
+		if destPrefix == "" {
+			return nil, fmt.Errorf("stage-envelopes token %q has an empty destPrefix", tok)
+		}
+		if strings.ContainsRune(destPrefix, '\\') {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q contains a backslash", destPrefix)
+		}
+		if !destPrefixPattern.MatchString(destPrefix) {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q does not match %s", destPrefix, destPrefixPattern.String())
+		}
+		cleaned := filepath.Clean(filepath.Join(base, destPrefix))
+		if cleaned != base && !strings.HasPrefix(cleaned, base+string(filepath.Separator)) {
+			return nil, fmt.Errorf("stage-envelopes destPrefix %q escapes %s/", destPrefix, base)
+		}
+		out = append(out, EnvelopeStage{UID: uid, DestPrefix: destPrefix})
+	}
+	return out, nil
 }
 
 // pushResult is the small JSON envelope written to
@@ -187,13 +262,17 @@ const (
 	missingBranchesLimit = 10
 )
 
-// tideBotSignature returns the fixed TIDE-bot author signature used for
-// every boundary commit (W11 — name+email are stable across runs; only
-// the timestamp varies).
-func tideBotSignature() object.Signature {
+// agentSignature returns the TIDE agent author signature used for every
+// boundary commit. Identity comes from pkggit.AgentIdentity() (TIDE_AGENT_NAME /
+// TIDE_AGENT_EMAIL env, compiled default "TIDE Agent <tide-agent@tideproject.k8s>",
+// D-04 / D-05). The W11 stability contract holds: name+email are stable across
+// runs because they come from install/Project config, not per-run state — only
+// the timestamp (When) varies from commit to commit.
+func agentSignature() object.Signature {
+	name, email := pkggit.AgentIdentity()
 	return object.Signature{
-		Name:  "tide-bot",
-		Email: "tide-bot@tideproject.k8s",
+		Name:  name,
+		Email: email,
 		When:  time.Now(),
 	}
 }
@@ -218,6 +297,12 @@ func main() {
 		"push-mode: CSV of task branch names to merge before staging (D-04)")
 	integrationOnly := fs.Bool("integration-only", false,
 		"push-mode: per-wave integration Job — merge+verify locally, no commit/push (D-02)")
+	stageEnvelopes := fs.String("stage-envelopes", "",
+		"push-mode: CSV of <uid>:<destPrefix> pairs. Copies each envelope's "+
+			"planning *.md + children/*.json from envelopes/<uid>/ (under the Job "+
+			"workspace root) into .tide/planning/<destPrefix>/ on the run branch "+
+			"(DASH-02, human-readable paths per D-02). out.json/in.json are never "+
+			"staged (D-04); failures are loud (D-03).")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "tide-push: flag parse: %v\n", err)
@@ -238,6 +323,7 @@ func main() {
 		BaseRef:               *baseRef,
 		IntegrateTaskBranches: splitCSV(*integrateTaskBranches),
 		IntegrationOnly:       *integrationOnly,
+		StageEnvelopes:        *stageEnvelopes,
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -446,6 +532,17 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	}
 	defer func() { _ = lockFile.Close() }()
 
+	// DASH-02: parse --stage-envelopes up front, before any git operation, so a
+	// malformed map (traversal, empty UID/destPrefix, bad pattern) fails loudly
+	// with the typed reason "artifact-stage-failed" and never reaches integrate,
+	// clone-open, or push (D-03, T-37-02-01). Validation is fail-closed and pure.
+	stageEnvs, err := parseStageEnvelopes(cfg.StageEnvelopes)
+	if err != nil {
+		writePushEnvelope(cfg, "", exitInvariant, "artifact-stage-failed", nil, 0, "")
+		fmt.Fprintf(stderr, "tide-push: %v\n", err)
+		return exitInvariant
+	}
+
 	if exit, done := runIntegrationPhase(cfg, bareRepoPath, stderr); done {
 		return exit
 	}
@@ -494,6 +591,20 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exit
 	}
 
+	// DASH-02: stage mapped envelope planning artifacts beside the ArtifactPaths
+	// staging (D-01/D-02). For each <uid>:<destPrefix>, stageEnvelopeArtifacts
+	// globs the level's planning *.md and children/*.json under envelopes/<uid>/
+	// (the same PVC key the dispatch/reporter path writes) and copies them into
+	// .tide/planning/<destPrefix>/ in the run worktree. out.json/in.json are never
+	// staged (D-04); a missing envelope dir or any copy/stage error is a loud
+	// failure (reason artifact-stage-failed, D-03). The staged files ride the same
+	// commit / gitleaks scan / force-with-lease push below; byte-identical
+	// restaging leaves the tree clean, which the clean-tree skip turns into an
+	// idempotent no-op push.
+	if code := stageEnvelopeArtifacts(cfg, stageEnvs, worktreeDir, wt, stderr); code != exitSuccess {
+		return code
+	}
+
 	newHash, scanBase, exit, failed := commitOrReuseHead(cfg, repo, wt, worktreeDir, oldHash, stderr)
 	if failed {
 		return exit
@@ -534,6 +645,16 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 	// push is idempotent: re-pushing an already-present run branch HEAD is a
 	// no-op fast-forward, so a retried boundary-push Job converges safely.
 	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
+		// DASH-02: an idempotent restage leaves the tree clean and HEAD already on
+		// the remote at the leased SHA, so the force-with-lease push is a no-op that
+		// go-git reports as NoErrAlreadyUpToDate. Treat it as success for cumulative
+		// envelope maps — the remote already carries this HEAD. Mirrors pkg/git
+		// Fetch, which swallows the same sentinel.
+		if errors.Is(err, gogit.NoErrAlreadyUpToDate) {
+			fmt.Fprintf(stderr, "tide-push: remote already up-to-date for %s — nothing to push\n", cfg.Branch)
+			writePushEnvelope(cfg, newHash.String(), exitSuccess, "", nil, 0, "")
+			return exitSuccess
+		}
 		exit, reason := classifyPushError(err)
 		writePushEnvelope(cfg, newHash.String(), exit, reason, nil, 0, "")
 		fmt.Fprintf(stderr, "tide-push: push failed (reason=%s): %v\n", reason, redactPAT(err.Error(), pat))
@@ -796,7 +917,7 @@ func commitOrReuseHead(
 	} else {
 		// Commit. pkggit.Commit returns the new hash (W11 — single boundary
 		// commit per push). Author is the fixed TIDE-bot signature.
-		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, tideBotSignature())
+		h, cErr := pkggit.Commit(wt, cfg.CommitMessage, agentSignature())
 		if cErr != nil {
 			writePushEnvelope(cfg, "", exitGenericFail, "commit-failed", nil, 0, "")
 			fmt.Fprintf(stderr, "tide-push: commit failed: %v\n", cErr)
@@ -886,6 +1007,82 @@ func worktreeClean(worktreeDir string) (bool, error) {
 		return false, fmt.Errorf("git status --porcelain: %w", err)
 	}
 	return len(strings.TrimSpace(string(out))) == 0, nil
+}
+
+// stageEnvelopeArtifacts copies each mapped envelope's planning *.md and
+// children/*.json into .tide/planning/<destPrefix>/ under worktreeDir and stages
+// them (DASH-02). It returns exitSuccess when every mapped envelope staged
+// cleanly, or a nonzero exit code after writing the push envelope with reason
+// "artifact-stage-failed" on the first failure (missing dir, no *.md, or a
+// copy/stage error) — the loud-failure convention (D-03). Only the two allowed
+// globs are read, so out.json/in.json are excluded by construction (D-04).
+func stageEnvelopeArtifacts(
+	cfg pushConfig,
+	stageEnvs []EnvelopeStage,
+	worktreeDir string,
+	wt *gogit.Worktree,
+	stderr io.Writer,
+) int {
+	for _, es := range stageEnvs {
+		srcDir := filepath.Join(cfg.Workspace, "envelopes", es.UID)
+		info, statErr := os.Stat(srcDir)
+		if statErr != nil || !info.IsDir() {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope dir %s missing or not a directory: %v\n", srcDir, statErr)
+			return exitGenericFail
+		}
+
+		mdMatches, gerr := filepath.Glob(filepath.Join(srcDir, "*.md"))
+		if gerr != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob *.md in %s: %v\n", srcDir, gerr)
+			return exitGenericFail
+		}
+		if len(mdMatches) == 0 {
+			// A planner-completed level always emits at least one planning *.md;
+			// an empty set means the envelope is incomplete — fail loudly (D-03).
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr,
+				"tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n",
+				srcDir)
+			return exitGenericFail
+		}
+		childMatches, gerr := filepath.Glob(filepath.Join(srcDir, "children", "*.json"))
+		if gerr != nil {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob children/*.json in %s: %v\n", srcDir, gerr)
+			return exitGenericFail
+		}
+
+		// rel is the worktree-relative destination; the children/ subdirectory is
+		// preserved so plan/task JSON lands under .tide/planning/<destPrefix>/children/.
+		rels := make([]struct{ src, rel string }, 0, len(mdMatches)+len(childMatches))
+		for _, m := range mdMatches {
+			rels = append(rels, struct{ src, rel string }{
+				m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m)),
+			})
+		}
+		for _, m := range childMatches {
+			rels = append(rels, struct{ src, rel string }{
+				m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m)),
+			})
+		}
+
+		for _, r := range rels {
+			dst := filepath.Join(worktreeDir, r.rel)
+			if err := copyIntoWorktree(r.src, dst); err != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: copy %s -> %s: %v\n", r.src, r.rel, err)
+				return exitGenericFail
+			}
+			if err := pkggit.AddPath(wt, r.rel); err != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: stage %s: %v\n", r.rel, err)
+				return exitGenericFail
+			}
+		}
+	}
+	return exitSuccess
 }
 
 // copyIntoWorktree copies src to dst, creating parent dirs as needed.

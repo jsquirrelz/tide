@@ -454,6 +454,59 @@ func TestLogsHandlerTaskNotFound(t *testing.T) {
 	}
 }
 
+// TestLogsResolvePodNameServesTerminatedPods covers the DASH-04 widening:
+// resolvePodName returns a pod that is Succeeded or Failed (terminated but
+// not yet garbage-collected) so its retained logs still stream, instead of
+// misreporting it as pod-gone. Running/Pending remain the control cases.
+func TestLogsResolvePodNameServesTerminatedPods(t *testing.T) {
+	scheme := testInformerScheme(t)
+	const podName = "term-task-pod"
+
+	cases := []struct {
+		name  string
+		phase corev1.PodPhase
+		want  string
+	}{
+		{"running serves", corev1.PodRunning, podName},
+		{"pending serves", corev1.PodPending, podName},
+		{"succeeded serves (DASH-04)", corev1.PodSucceeded, podName},
+		{"failed serves (DASH-04)", corev1.PodFailed, podName},
+		// Fully-absent phase that never serves logs → empty string, caller
+		// emits pod-gone. Guards the "truly gone" contract stays intact.
+		{"unknown does not serve", corev1.PodUnknown, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tk := &tidev1alpha2.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "term-task",
+					Namespace: "default",
+					UID:       types.UID("term-uid"),
+				},
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: "default",
+					Labels:    map[string]string{"tideproject.k8s/task-uid": "term-uid"},
+				},
+				Status: corev1.PodStatus{Phase: tc.phase},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tk, pod).Build()
+			lh := NewLogsHandler(c, fakeclientset.NewSimpleClientset(), testr.New(t))
+
+			got, err := lh.resolvePodName(context.Background(), "default", "term-task")
+			if err != nil {
+				t.Fatalf("resolvePodName(phase=%s): %v", tc.phase, err)
+			}
+			if got != tc.want {
+				t.Errorf("resolvePodName(phase=%s): got %q, want %q", tc.phase, got, tc.want)
+			}
+		})
+	}
+}
+
 // closeTrackingStream wraps an io.ReadCloser with an onClose callback.
 // Lets tests assert that defer stream.Close() actually ran.
 type closeTrackingStream struct {

@@ -34,8 +34,8 @@ export default function PhaseNode({ data, selected }: NodeProps<PhaseNodeType>) 
       width={320}
       minHeight={76}
       handleAxis="horizontal"
-      /* CR-04 fix: Phase nodes in Planning DAG are not clickable. */
-      clickable={false}
+      /* 37-08: Phase nodes are clickable — a ("phase", name) click routes to
+       * the ArtifactViewer (D-05) via the kind-aware context. */
     />
   );
 }

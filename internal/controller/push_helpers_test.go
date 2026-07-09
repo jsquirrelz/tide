@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // fixtureProject returns a hand-constructed Project for buildPushJob /
@@ -127,6 +128,52 @@ func TestBuildPushJobEnvFromCredsSecret(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Container envFrom does not contain SecretRef to %q (project.Spec.Git.CredsSecretRef)", project.Spec.Git.CredsSecretRef)
+	}
+}
+
+// ---------- Test 3b: buildPushJob agent-identity Env (SIGN-01 / D-03) ----------
+
+// TestBuildPushJob_AgentIdentityEnv verifies that PushOptions.AgentName/AgentEmail
+// render TIDE_AGENT_NAME/TIDE_AGENT_EMAIL on the push container with the exact
+// resolved values, alongside — and without disturbing — the existing creds EnvFrom.
+// Non-default values are used deliberately (the compiled default backstop would
+// mask a missed injection).
+func TestBuildPushJob_AgentIdentityEnv(t *testing.T) {
+	const (
+		wantName  = "Custom Agent"
+		wantEmail = "custom@example.com"
+	)
+	project := fixtureProject()
+	scheme := schemeForTest(t)
+	opts := PushOptions{
+		TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+		AgentName:     wantName,
+		AgentEmail:    wantEmail,
+	}
+	job := buildPushJob(project, "tide-projects", opts, scheme)
+	containers := job.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		t.Fatalf("Containers length = %d, want 1", len(containers))
+	}
+	env := map[string]string{}
+	for _, e := range containers[0].Env {
+		env[e.Name] = e.Value
+	}
+	if got := env[pkggit.EnvAgentName]; got != wantName {
+		t.Errorf("%s = %q; want %q", pkggit.EnvAgentName, got, wantName)
+	}
+	if got := env[pkggit.EnvAgentEmail]; got != wantEmail {
+		t.Errorf("%s = %q; want %q", pkggit.EnvAgentEmail, got, wantEmail)
+	}
+	// The creds EnvFrom SecretRef must remain intact (only Env added).
+	var credsFound bool
+	for _, ef := range containers[0].EnvFrom {
+		if ef.SecretRef != nil && ef.SecretRef.Name == project.Spec.Git.CredsSecretRef {
+			credsFound = true
+		}
+	}
+	if !credsFound {
+		t.Errorf("creds EnvFrom SecretRef to %q missing after adding Env block", project.Spec.Git.CredsSecretRef)
 	}
 }
 

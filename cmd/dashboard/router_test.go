@@ -25,9 +25,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-logr/logr/testr"
 	"k8s.io/apimachinery/pkg/runtime"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 )
 
 // newTestRouter builds a Dependencies with a fake client (zero objects)
@@ -265,6 +267,51 @@ func TestRouteTableContainsExpectedGETs(t *testing.T) {
 	for r := range want {
 		if !got[r] {
 			t.Errorf("missing expected route %q", r)
+		}
+	}
+}
+
+// TestArtifactsAndSettingsRoutesAreGET asserts the plan 37-07 routes register
+// as GET when their deps are present: the settings route needs only Client; the
+// artifacts route needs Client + Clientset + Store. Both must be seen by the
+// chi walker as GET (DASH-05 zero-mutation invariant).
+func TestArtifactsAndSettingsRoutesAreGET(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+		t.Fatalf("add scheme: %v", err)
+	}
+	store, err := gitfetch.NewStore(&gitfetch.GoGitFetcher{}, 4)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	spa := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html></html>")}}
+	r := RegisterRoutes(Dependencies{
+		Client:    fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Clientset: fakeclientset.NewSimpleClientset(),
+		Store:     store,
+		Log:       testr.New(t),
+		SPAFS:     spa,
+	})
+
+	methods := make(map[string]string)
+	err = chi.Walk(r, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		methods[route] = method
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("chi.Walk: %v", err)
+	}
+	for _, route := range []string{
+		"/api/v1/nodes/{kind}/{name}/artifacts",
+		"/api/v1/projects/{name}/settings",
+	} {
+		m, ok := methods[route]
+		if !ok {
+			t.Errorf("route %q not registered", route)
+			continue
+		}
+		if m != http.MethodGet {
+			t.Errorf("route %q registered as %s, want GET", route, m)
 		}
 	}
 }

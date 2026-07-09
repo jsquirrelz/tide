@@ -284,7 +284,15 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		}
 		// No annotation — keep parked; dispatched=true so reconcileWaveMaterialization
 		// never runs while parked (GATE-04: no executor Jobs, no Wave CRs).
-		return ctrl.Result{}, true, nil
+		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
+		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
+		// harmless (single-flight no-ops while busy; clean-tree skips empty commits).
+		if project := r.resolveProjectForPlan(ctx, plan); project != nil {
+			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+				logf.FromContext(ctx).Info("artifact push trigger failed at parked plan (non-fatal)", "plan", plan.Name, "error", apErr.Error())
+			}
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, true, nil
 	}
 
 	// If Tasks already exist for this Plan, skip planner dispatch — the
@@ -473,6 +481,11 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		projectUID = string(project.UID)
 	}
 
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// HelmProviderDefaults tier) and stamp it into the planner Job env. The
+	// resolver is nil-safe, so a nil project resolves to the chart tier /
+	// compiled default without a caller-side guard.
+	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            plan,
@@ -482,6 +495,8 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "plan", r.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
@@ -699,6 +714,14 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			if !alreadyApproved {
 				if !gates.CheckApprove(plan, "plan") {
 					// No annotation and not yet approved — park.
+					// 37-06 / DASH-02 (D-01): stage the cumulative planner-artifact map
+					// BEFORE the gate-park return. Park arm ONLY (not succeed) so it never
+					// preempts the plan boundary push, which carries the task-branch
+					// integration (D-04) and shares the deterministic Job name (R-05). The
+					// parked-arm retry re-attempts until it lands.
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+						logger.Info("artifact push trigger failed at plan park (non-fatal)", "plan", plan.Name, "error", apErr.Error())
+					}
 					return r.patchPlanAwaitingApproval(ctx, plan, policy)
 				}
 				// Annotation present at the hook (operator approved before the park fired):
@@ -1127,7 +1150,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	}
 
 	// Dispatch the integration Job.
-	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage); err != nil {
+	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage, r.HelmProviderDefaults); err != nil {
 		return ctrl.Result{}, true, err
 	}
 	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).

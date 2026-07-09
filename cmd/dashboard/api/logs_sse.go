@@ -175,7 +175,8 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve Task → Pod via label selector. Same heuristic as
 	// cmd/tide/tail.go: list Pods with tideproject.k8s/task-uid=<task.UID>
-	// and pick the first one in Running/Pending phase.
+	// and pick the first one that can still serve logs (Running/Pending or
+	// terminated-but-present Succeeded/Failed — DASH-04).
 	podName, err := h.resolvePodName(ctx, namespace, taskName)
 	if err != nil {
 		h.Log.V(1).Info("task or pod lookup failed; emitting pod-gone",
@@ -267,10 +268,15 @@ func (h *LogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// resolvePodName looks up the Task by name + lists pods with the
-// task-uid label, returning the first Running/Pending pod's name. Returns
-// an empty string + nil error when no matching pod exists (caller emits
-// pod-gone). Surfaces other errors directly.
+// resolvePodName looks up the Task by name + lists pods with the task-uid
+// label, returning the first pod that can still serve logs. DASH-04: the
+// phase set is Running/Pending AND the terminated-but-present phases
+// Succeeded/Failed — a finished pod that hasn't been garbage-collected yet
+// still serves its retained logs via pods/log; the stream then EOFs and the
+// linesChan-closed path emits the honest pod-gone frame. Only a truly-absent
+// pod (fully GC'd, or Task has no pods at all) yields an empty string + nil
+// error, and the caller emits pod-gone immediately. Surfaces other errors
+// directly.
 func (h *LogsHandler) resolvePodName(ctx context.Context, ns, taskName string) (string, error) {
 	var task tidev1alpha2.Task
 	if err := h.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &task); err != nil {
@@ -290,7 +296,10 @@ func (h *LogsHandler) resolvePodName(ctx context.Context, ns, taskName string) (
 	for i := range pods.Items {
 		p := &pods.Items[i]
 		switch p.Status.Phase {
-		case corev1.PodRunning, corev1.PodPending:
+		case corev1.PodRunning, corev1.PodPending,
+			corev1.PodSucceeded, corev1.PodFailed:
+			// DASH-04: Succeeded/Failed pods still hold retained logs until
+			// GC — serve them, then EOF → honest pod-gone.
 			return p.Name, nil
 		}
 	}

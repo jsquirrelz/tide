@@ -81,6 +81,7 @@ func triggerBoundaryPush(
 	project *tideprojectv1alpha2.Project,
 	level string,
 	tidePushImage string,
+	helmDefaults ProviderDefaults,
 ) error {
 	logger := logf.FromContext(ctx)
 
@@ -156,6 +157,20 @@ func triggerBoundaryPush(
 		return fmt.Errorf("compute cumulative succeeded-task branches: %w", bErr)
 	}
 
+	// SIGN-01 / D-03: resolve the agent identity once per dispatch and stamp it
+	// into the push Job env (covers integrate merge commits + boundary commit).
+	agentName, agentEmail := resolveAgentIdentity(project, helmDefaults)
+
+	// R-05 (37-06): every push — boundary or artifact-triggered — carries the full
+	// cumulative planner-artifact map so a single writer class stages all completed
+	// levels. Best-effort: a boundary push MUST still land even if the map can't be
+	// computed, so a collection error degrades to an un-staged (but committed) push.
+	stageEnvs, seErr := collectStageEnvelopes(ctx, c, project)
+	if seErr != nil {
+		logger.Error(seErr, "collectStageEnvelopes for boundary push failed (non-fatal); pushing without artifact staging", "level", level, "project", project.Name)
+		stageEnvs = nil
+	}
+
 	pushOpts := PushOptions{
 		TidePushImage:         tidePushImage,
 		Branch:                project.Status.Git.BranchName,
@@ -163,6 +178,9 @@ func triggerBoundaryPush(
 		CommitMessage:         msg,
 		LeaksConfigMap:        project.Spec.Git.LeaksConfigRef,
 		IntegrateTaskBranches: branches,
+		StageEnvelopes:        stageEnvs,
+		AgentName:             agentName,
+		AgentEmail:            agentEmail,
 	}
 	pushJob := buildPushJob(project, pvcName, pushOpts, scheme)
 	if cErr := c.Create(ctx, pushJob); cErr != nil {
@@ -196,6 +214,7 @@ func triggerWaveIntegrationJob(
 	waveIndex int,
 	branches []string,
 	tidePushImage string,
+	helmDefaults ProviderDefaults,
 ) error {
 	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
 		return nil
@@ -208,6 +227,10 @@ func triggerWaveIntegrationJob(
 	jobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveIndex)
 	commitMsg := fmt.Sprintf("tide: integrate wave %d", waveIndex)
 
+	// SIGN-01 / D-03: resolve identity once and stamp into the wave-integration
+	// push Job env so the in-pod merge commits carry the configured author.
+	agentName, agentEmail := resolveAgentIdentity(project, helmDefaults)
+
 	pushOpts := PushOptions{
 		TidePushImage:         tidePushImage,
 		Branch:                project.Status.Git.BranchName,
@@ -219,6 +242,8 @@ func triggerWaveIntegrationJob(
 		// carry the same cumulative branch set with IntegrationOnly false.
 		IntegrationOnly: true,
 		LeaksConfigMap:  project.Spec.Git.LeaksConfigRef,
+		AgentName:       agentName,
+		AgentEmail:      agentEmail,
 	}
 
 	job := buildPushJob(project, pvcName, pushOpts, scheme)
@@ -244,12 +269,12 @@ func triggerWaveIntegrationJob(
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
 func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, r.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
 func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, r.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PlanReconciler entry point. Plan boundary
@@ -263,5 +288,5 @@ func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent c
 // anyway (CR-03 note), so the old per-caller collection here was always
 // dead code in practice.
 func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, r.HelmProviderDefaults)
 }

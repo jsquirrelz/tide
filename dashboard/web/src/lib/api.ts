@@ -204,3 +204,131 @@ export async function fetchTask(
   }
   return (await res.json()) as TaskDetailJSON;
 }
+
+/**
+ * The artifact-fetch state discriminator (R-04). The backend NEVER returns
+ * an empty `files` list to mean "nothing here" — it returns one of these
+ * explicit states so the UI can render honest, differentiated copy:
+ *
+ *   available — files present on the run branch
+ *   absent    — pre-v1.0.7 run, or this node's planner hasn't committed yet
+ *   no-git    — the Project has no `spec.git`; nothing to fetch, ever
+ *   error     — fetch/creds/network failure reading the run branch
+ *
+ * The UI derives a fifth *display* state, `materializing` = (state absent AND
+ * node gate-parked), locally — it is not a wire value (see ArtifactViewer).
+ */
+export type ArtifactState = "available" | "absent" | "no-git" | "error";
+
+/** Mirrors cmd/dashboard/api/artifacts.go::artifactFile (plan 37-07). */
+export type ArtifactFile = {
+  name: string;
+  path: string;
+  content: string;
+  sizeBytes: number;
+};
+
+/**
+ * Mirrors cmd/dashboard/api/artifacts.go::nodeArtifacts (plan 37-07).
+ *
+ * `files` is always serialized as `[]` (never null) per the repo empty-array
+ * convention; consumers still default with `?? []` for legacy-payload safety.
+ * `branch`/`commitSHA` are present only when `state === "available"`; `error`
+ * carries the operator-facing message only when `state === "error"`.
+ */
+export type NodeArtifacts = {
+  state: ArtifactState;
+  branch?: string;
+  commitSHA?: string;
+  files: ArtifactFile[];
+  error?: string;
+};
+
+/**
+ * GET /api/v1/nodes/{kind}/{name}/artifacts?project={project}[&namespace=foo]
+ * (plan 37-07 registers this exact route).
+ *
+ * Returns the planning artifacts THIS node's planner produced (Pitfall 9
+ * semantic lock — never the parent artifact that specified it), wrapped in
+ * the R-04 state discriminator. Throws on non-2xx HTTP; a reachable backend
+ * that cannot read the branch returns `state: "error"` with a 2xx, so most
+ * failure surfaces arrive as data, not exceptions.
+ */
+export async function fetchNodeArtifacts(
+  kind: string,
+  name: string,
+  project: string,
+  namespace?: string,
+): Promise<NodeArtifacts> {
+  const base = `/api/v1/nodes/${encodeURIComponent(kind)}/${encodeURIComponent(
+    name,
+  )}/artifacts?project=${encodeURIComponent(project)}`;
+  const url = withNamespace(base, namespace);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(
+      `fetchNodeArtifacts(${kind}/${name}) failed: ${await readError(res)}`,
+    );
+  }
+  return (await res.json()) as NodeArtifacts;
+}
+
+/**
+ * Mirrors cmd/dashboard/api/settings.go::projectSettings (plan 37-07).
+ *
+ * The backend redacts secrets: only secret NAMES cross the wire, never
+ * values. Nested objects mirror the corresponding Go structs field-for-field
+ * so any backend rename surfaces as a compile-time error here.
+ */
+export type ProjectSettings = {
+  outcomePrompt: string;
+  repo: {
+    repoURL: string;
+    baseRef: string;
+    branchName: string;
+  };
+  models: {
+    milestone: string;
+    phase: string;
+    plan: string;
+    task: string;
+  };
+  budget: {
+    absoluteCapCents: number;
+    rollingWindowCapCents: number;
+    costSpentCents: number;
+  };
+  gates: {
+    milestone: string;
+    phase: string;
+    plan: string;
+    task: string;
+    pauseBetweenWaves: boolean;
+  };
+  /** Secret ref NAMES only — values are redacted server-side (never sent). */
+  secrets: { purpose: string; name: string }[];
+  rawSpecYAML: string;
+};
+
+/**
+ * GET /api/v1/projects/{name}/settings[?namespace=foo] (plan 37-07).
+ *
+ * Returns the redacted Project spec the settings panel renders (DASH-03).
+ * Throws on 404 / 500.
+ */
+export async function fetchProjectSettings(
+  name: string,
+  namespace?: string,
+): Promise<ProjectSettings> {
+  const url = withNamespace(
+    `/api/v1/projects/${encodeURIComponent(name)}/settings`,
+    namespace,
+  );
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(
+      `fetchProjectSettings(${name}) failed: ${await readError(res)}`,
+    );
+  }
+  return (await res.json()) as ProjectSettings;
+}

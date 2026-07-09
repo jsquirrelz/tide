@@ -330,6 +330,29 @@ if ENV28_MARKER not in content:
         count=1,
     )
 
+# ── 8e4: Phase 36 (SIGN-01 / D-03, D-04) — agent identity env injection ──────
+# Adds TIDE_AGENT_NAME / TIDE_AGENT_EMAIL env vars on the manager container.
+# Read by cmd/manager/env.go via envOrDefault and threaded into
+# ProviderDefaults.AgentName/AgentEmail (chart tier of the identity precedence
+# chain: Project.spec.git.agentName/agentEmail → these values → compiled default
+# `TIDE Agent <tide-agent@tideproject.k8s>`). Empty values fall through to the
+# compiled default (envOrDefault treats empty as unset). Anchored after the
+# phase28 import block so the env ordering matches the committed chart.
+ENV36_MARKER = "# phase36-agent-env-injected"
+ENV36_BLOCK = """        - name: TIDE_AGENT_NAME
+          value: "{{ .Values.agent.name }}"
+        - name: TIDE_AGENT_EMAIL
+          value: "{{ .Values.agent.email }}"
+        # phase36-agent-env-injected
+"""
+if ENV36_MARKER not in content:
+    content = re.sub(
+        r'(        # phase28-import-env-injected\n)',
+        r'\1' + ENV36_BLOCK,
+        content,
+        count=1,
+    )
+
 # ── 8f: Phase 4 plan 04-14 — OTel env-var injection ─────────────────────────
 # Adds OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG,
 # OTEL_SERVICE_NAME on the manager container. Read by internal/otelinit at boot

@@ -49,6 +49,10 @@ func TestCommitWorktree(t *testing.T) {
 	dir := t.TempDir()
 	initWorktreeRepo(t, dir)
 
+	// Ensure the agent env is unset so the compiled default identity applies.
+	t.Setenv("TIDE_AGENT_NAME", "")
+	t.Setenv("TIDE_AGENT_EMAIL", "")
+
 	// Drop an untracked file.
 	if err := os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -74,6 +78,28 @@ func TestCommitWorktree(t *testing.T) {
 		t.Errorf("HEAD mismatch: git says %q, CommitWorktree returned %q",
 			strings.TrimSpace(string(out)), hash.String())
 	}
+
+	// Default-fallback path: with the agent env vars unset (above), the commit
+	// author must be the compiled default "TIDE Agent <tide-agent@tideproject.k8s>".
+	name := gitLog1(t, dir, "%an")
+	email := gitLog1(t, dir, "%ae")
+	if name != "TIDE Agent" {
+		t.Errorf("default author name: got %q, want %q", name, "TIDE Agent")
+	}
+	if email != "tide-agent@tideproject.k8s" {
+		t.Errorf("default author email: got %q, want %q", email, "tide-agent@tideproject.k8s")
+	}
+}
+
+// gitLog1 returns the trimmed one-line git log output for the given format
+// specifier (e.g. "%an", "%ae") of the most recent commit at dir.
+func gitLog1(t *testing.T, dir, format string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--format="+format).Output()
+	if err != nil {
+		t.Fatalf("git log --format=%s: %v", format, err)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TestCommitWorktreeEmpty asserts that CommitWorktree returns (ZeroHash, true, nil)
@@ -95,8 +121,8 @@ func TestCommitWorktreeEmpty(t *testing.T) {
 	}
 }
 
-// TestCommitWorktreeEnvIdentity asserts that TIDE_BOT_NAME / TIDE_BOT_EMAIL
-// override the default bot identity in the committed author line.
+// TestCommitWorktreeEnvIdentity asserts that TIDE_AGENT_NAME / TIDE_AGENT_EMAIL
+// override the default agent identity in the committed author line.
 func TestCommitWorktreeEnvIdentity(t *testing.T) {
 	dir := t.TempDir()
 	initWorktreeRepo(t, dir)
@@ -105,8 +131,8 @@ func TestCommitWorktreeEnvIdentity(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	t.Setenv("TIDE_BOT_NAME", "Custom Bot")
-	t.Setenv("TIDE_BOT_EMAIL", "custom@example.com")
+	t.Setenv("TIDE_AGENT_NAME", "Custom Agent")
+	t.Setenv("TIDE_AGENT_EMAIL", "custom@example.com")
 
 	hash, isEmpty, err := CommitWorktree(dir, "task-id-01")
 	if err != nil {
@@ -132,8 +158,8 @@ func TestCommitWorktreeEnvIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git log name: %v", err)
 	}
-	if strings.TrimSpace(string(out)) != "Custom Bot" {
-		t.Errorf("author name: got %q, want Custom Bot", strings.TrimSpace(string(out)))
+	if strings.TrimSpace(string(out)) != "Custom Agent" {
+		t.Errorf("author name: got %q, want Custom Agent", strings.TrimSpace(string(out)))
 	}
 }
 

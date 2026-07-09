@@ -30,13 +30,13 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Git Base Ref (BASE)
 
-- [x] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
-- [x] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
-- [x] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
+- [ ] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
+- [ ] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
+- [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
 
 ### Agent Identity (SIGN)
 
-- [ ] **SIGN-01**: TIDE agent identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push — via `spec.git.agentName`/`agentEmail` → chart value → compiled-in default precedence (the tide-push hardcoded identity is removed; agent terminology replaces bot everywhere, including the compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`)
+- [x] **SIGN-01**: TIDE agent identity (name/email) is uniformly configurable across all three commit sites — harness, integrate, tide-push — via `spec.git.agentName`/`agentEmail` → chart value → compiled-in default precedence (the tide-push hardcoded identity is removed; agent terminology replaces bot everywhere, including the compiled-in default `TIDE Agent <tide-agent@tideproject.k8s>`)
 
 > **Descoped 2026-07-03 (Phase 36 discussion):** SIGN-02/03/04 (GPG signing, key validation, Verified-badge docs) are deferred out of v1.0.7 — the branch-protection payoff is hypothetical today and the cost (gpg-shim spike, signing-oracle key-exposure design, external UAT) is real. Moved to Future Requirements below; full analysis preserved in `.planning/phases/36-signed-commits-bot-identity/36-CONTEXT.md`.
 
@@ -46,10 +46,10 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Dashboard Visibility (DASH)
 
-- [ ] **DASH-01**: Clicking a Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); gate-parked nodes surface the artifact beside the approve action
+- [x] **DASH-01**: Clicking a Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); gate-parked nodes surface the artifact beside the approve action
 - [ ] **DASH-02**: Planning artifacts are persisted as size-capped, owner-ref'd ConfigMaps at reporter materialization time (display cache with truncation markers; PVC/git remain source of truth)
-- [ ] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
-- [ ] **DASH-04**: The log drawer renders explicit loading / streaming / pod-gone states (never silently empty)
+- [x] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
+- [x] **DASH-04**: The log drawer renders explicit loading / streaming / pod-gone states (never silently empty)
 
 ### Telemetry Setup (TELEM)
 
@@ -109,14 +109,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTEG-03 | Phase 34 | Pending |
 | INTEG-04 | Phase 34 | Pending |
 | INTEG-05 | Phase 34 | Pending |
-| BASE-01 | Phase 35 | Complete |
-| BASE-02 | Phase 35 | Complete |
-| BASE-03 | Phase 35 | Complete |
-| SIGN-01 | Phase 36 | Pending |
-| DASH-01 | Phase 37 | Pending |
+| BASE-01 | Phase 35 | Pending |
+| BASE-02 | Phase 35 | Pending |
+| BASE-03 | Phase 35 | Pending |
+| SIGN-01 | Phase 36 | Complete |
+| DASH-01 | Phase 37 | Complete |
 | DASH-02 | Phase 37 | Pending |
-| DASH-03 | Phase 37 | Pending |
-| DASH-04 | Phase 37 | Pending |
+| DASH-03 | Phase 37 | Complete |
+| DASH-04 | Phase 37 | Complete |
 | COST-01 | Phase 38 | Pending |
 | COST-02 | Phase 38 | Pending |
 | COST-03 | Phase 38 | Pending |

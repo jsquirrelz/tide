@@ -21,6 +21,7 @@ import (
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // PushOptions carries everything the ProjectReconciler (plan 03-08) supplies
@@ -77,6 +78,23 @@ type PushOptions struct {
 	// false — they carry the same cumulative branch set but MUST push the
 	// run branch to the remote.
 	IntegrationOnly bool
+	// StageEnvelopes is the cumulative <uid>:<destPrefix> map of planner-completed
+	// levels whose planning *.md + children/*.json are staged into
+	// .tide/planning/<destPrefix>/ on the run branch (37-06 / DASH-02). Rendered as
+	// a single --stage-envelopes=<CSV> arg (parsed by cmd/tide-push, plan 37-02) and
+	// appended only when non-empty. EVERY push — boundary or artifact-triggered —
+	// carries the full cumulative map (R-05): one push writer class, no second
+	// force-with-lease anchor path.
+	StageEnvelopes []string
+
+	// AgentName / AgentEmail are the resolved committer/author identity
+	// (SIGN-01 / D-03) injected as TIDE_AGENT_NAME/TIDE_AGENT_EMAIL on the push
+	// container. Both in-pod commit sites read them: IntegrateTaskBranches merge
+	// commits and the tide-push boundary-commit signature (one injection covers
+	// both). The controller stamps resolved values here (never empty — compiled
+	// default backstops), so the Env injection is unconditional.
+	AgentName  string
+	AgentEmail string
 }
 
 // CloneOptions carries the clone-mode arguments. Clone is a one-time op
@@ -120,6 +138,17 @@ const pushContainerName = "push"
 // pushWorkspaceVolume is the volume name for the per-Project PVC mount.
 // Matches the buildInitJob pattern in project_controller.go.
 const pushWorkspaceVolume = "project-workspace"
+
+// stagedEnvelopesAnnotation stamps the CSV of staged <uid>:<kind>/<name> entries
+// this push Job carried at create time (Defect E / DASH-02 follow-up). A later
+// boundary reconcile reads it back and compares against a fresh
+// collectStageEnvelopes call: if the current cumulative map is a STRICT SUPERSET
+// of what this Job staged, the Job is a stale artifact push (an early D-B5/R-05
+// single-flight winner that snapshotted a partial map) and must be superseded
+// rather than accepted as terminal. A Job with NO stamp is unknown provenance and
+// must NEVER be second-guessed — this keeps pre-fix / bare push Jobs behaving as
+// before.
+const stagedEnvelopesAnnotation = "tideproject.k8s/staged-envelopes"
 
 // buildPushJob constructs the K8s batchv1.Job that drives a single
 // level-boundary push for a Project.
@@ -184,6 +213,13 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 	if opts.IntegrationOnly {
 		// D-02 per-wave integration Job: merge+verify locally, no commit/push.
 		args = append(args, "--integration-only")
+	}
+	if len(opts.StageEnvelopes) > 0 {
+		// 37-06 / DASH-02: cumulative planner-artifact staging map. cmd/tide-push
+		// (plan 37-02) parses <uid>:<destPrefix> CSV and stages each level's *.md +
+		// children/*.json into .tide/planning/<destPrefix>/. Byte-identical restages
+		// are no-ops via the clean-tree skip, so re-emitting the full map is safe.
+		args = append(args, "--stage-envelopes="+strings.Join(opts.StageEnvelopes, ","))
 	}
 
 	volumes := []corev1.Volume{
@@ -271,6 +307,16 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 							Name:  pushContainerName,
 							Image: opts.TidePushImage,
 							Args:  args,
+							// SIGN-01 / D-03: stamp the resolved agent identity so the
+							// in-pod integrate merge commits and the tide-push boundary
+							// commit read it via pkggit.AgentIdentity(). Unconditional —
+							// the controller resolves a non-empty value (compiled default
+							// backstops). Placed before EnvFrom; the creds SecretRef path
+							// (below) is untouched.
+							Env: []corev1.EnvVar{
+								{Name: pkggit.EnvAgentName, Value: opts.AgentName},
+								{Name: pkggit.EnvAgentEmail, Value: opts.AgentEmail},
+							},
 							EnvFrom: []corev1.EnvFromSource{
 								{
 									SecretRef: &corev1.SecretEnvSource{
@@ -296,6 +342,18 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 				},
 			},
 		},
+	}
+
+	// Defect E / DASH-02: stamp the cumulative staged-envelope set onto the Job so
+	// a later boundary reconcile can detect a stale (subset) artifact push and
+	// supersede it. Gated on the SAME condition as the --stage-envelopes arg above
+	// so the annotation and the arg are always stamped together or not at all — a
+	// Job with no arg has no map to compare, and an absent stamp reads as unknown
+	// provenance (never stale) in isStaleArtifactPush.
+	if len(opts.StageEnvelopes) > 0 {
+		job.Annotations = map[string]string{
+			stagedEnvelopesAnnotation: strings.Join(opts.StageEnvelopes, ","),
+		}
 	}
 
 	// Owner ref: Project → Job. internal/owner.EnsureOwnerRef enforces

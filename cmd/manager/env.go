@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/jsquirrelz/tide/internal/controller"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // envOrDefault returns the value of the env var named key, or fallback when
@@ -97,6 +98,14 @@ func tideHelmProviderDefaults(claudeImage string) controller.ProviderDefaults {
 	return controller.ProviderDefaults{
 		Image:  claudeImage,
 		Models: resolvePerLevelModels(),
+		// Chart tier of the D-03 agent-identity chain. The "" fallback is
+		// load-bearing (envOrDefault empty-is-unset convention): an unset chart
+		// value must stay empty so resolveAgentIdentity falls through to the
+		// pkg/git compiled default — the manager must not collapse the chart
+		// tier into the compiled tier. Using the pkggit constants keeps the
+		// env-var names single-sourced with the commit sites.
+		AgentName:  envOrDefault(pkggit.EnvAgentName, ""),
+		AgentEmail: envOrDefault(pkggit.EnvAgentEmail, ""),
 	}
 }
 

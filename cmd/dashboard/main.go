@@ -64,6 +64,7 @@ import (
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
+	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -143,6 +144,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 4a. Build the gitfetch artifact Store (plan 37-03) that backs the node
+	//     artifacts endpoint (DASH-01). GoGitFetcher shallow-clones the run
+	//     branch tip; the bounded LRU (32 tip trees) keeps memory rederivable.
+	artifactStore, err := gitfetch.NewStore(&gitfetch.GoGitFetcher{}, gitfetch.DefaultMaxEntries)
+	if err != nil {
+		setupLog.Error(err, "unable to build gitfetch artifact store")
+		os.Exit(1)
+	}
+
 	// 5. Build the chi router. Same construction path tests use
 	//    (RegisterRoutes in router.go) so the route table is identical
 	//    between production and TestZeroMutationRoutes.
@@ -154,6 +164,7 @@ func main() {
 		Log:                setupLog.WithName("router"),
 		SPAFS:              spaFS,
 		PrometheusEndpoint: os.Getenv("PROM_ENDPOINT"),
+		Store:              artifactStore,
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the

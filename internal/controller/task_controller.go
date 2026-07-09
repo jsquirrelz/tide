@@ -750,6 +750,9 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 			secretUID = string(secret.UID)
 		}
 	}
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// r.Deps.HelmProviderDefaults tier) and stamp it into the subagent Job env.
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindExecutor,
 		Task:                 task,
@@ -760,6 +763,8 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		SignedToken:          spec.token,
 		EnvelopeInJSON:       spec.envInJSON,
 		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
@@ -1402,6 +1407,9 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 			secretUID = string(secret.UID)
 		}
 	}
+	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
+	// r.Deps.HelmProviderDefaults tier) and stamp it into the subagent Job env.
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindExecutor,
 		Task:                 task,
@@ -1412,6 +1420,8 @@ func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
 		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
+		AgentName:            agentName,
+		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",

@@ -37,6 +37,7 @@ import (
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // ErrParentUnresolved signals that PodJobBackend.Run could not locate the
@@ -203,6 +204,13 @@ type PodJobBackend struct {
 	// opaquely to executor Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
 	// Empty string means no overrides (manager default "").
 	PricingOverridesJSON string
+
+	// AgentName / AgentEmail are the chart-tier committer/author identity for the
+	// in-Job commit sites (SIGN-01 / D-03). Empty means "no chart default" and
+	// falls through to the compiled default at resolve time. Mirrors the
+	// ProviderDefaults.AgentName/AgentEmail chart tier the controller carries.
+	AgentName  string
+	AgentEmail string
 }
 
 // Run satisfies internal/dispatch.Dispatcher.
@@ -275,6 +283,27 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 		resolvedImage = project.Spec.Subagent.Levels.Task.Image
 	}
 
+	// Inline agent-identity precedence walk — mirrors controller.resolveAgentIdentity
+	// (SIGN-01 / D-03). PodJobBackend is fixture-only but must stay consistent with
+	// the chain: project.Spec.Git.Agent* → b.Agent* (chart tier) → pkggit.DefaultAgent*.
+	// podjob must NOT import the controller package (cycle) — hence the inline mirror.
+	resolvedAgentName := pkggit.DefaultAgentName
+	resolvedAgentEmail := pkggit.DefaultAgentEmail
+	if b.AgentName != "" {
+		resolvedAgentName = b.AgentName
+	}
+	if b.AgentEmail != "" {
+		resolvedAgentEmail = b.AgentEmail
+	}
+	if project.Spec.Git != nil {
+		if project.Spec.Git.AgentName != "" {
+			resolvedAgentName = project.Spec.Git.AgentName
+		}
+		if project.Spec.Git.AgentEmail != "" {
+			resolvedAgentEmail = project.Spec.Git.AgentEmail
+		}
+	}
+
 	opts := BuildOptions{
 		Task:                 task,
 		Project:              project,
@@ -287,6 +316,8 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 		PVCName:              pvcName,
 		ProjectUID:           string(project.UID),
 		PricingOverridesJSON: b.PricingOverridesJSON,
+		AgentName:            resolvedAgentName,
+		AgentEmail:           resolvedAgentEmail,
 	}
 
 	// 5. Build the Job spec.

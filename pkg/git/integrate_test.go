@@ -93,6 +93,31 @@ func TestIntegrateTaskBranches(t *testing.T) {
 	}
 }
 
+// TestIntegrateTaskBranchesMergeIdentity pins the merge-commit author/committer
+// identity to the compiled default (TIDE Agent <tide-agent@tideproject.k8s>)
+// when the agent env vars are unset. The merge identity was never asserted
+// before Phase 36 — the merge commit derives its identity from AgentIdentity()
+// exactly like the harness task commit and the tide-push boundary commit.
+func TestIntegrateTaskBranchesMergeIdentity(t *testing.T) {
+	// Ensure the agent env is unset so the compiled default applies.
+	t.Setenv(EnvAgentName, "")
+	t.Setenv(EnvAgentEmail, "")
+
+	bareDir, runBranch := setupIntegrateFixture(t)
+	branchA, _ := addTaskBranch(t, bareDir, runBranch, "uid-merge-id", "merge-id.txt", "merge id\n")
+
+	if err := IntegrateTaskBranches(bareDir, runBranch, []string{branchA}); err != nil {
+		t.Fatalf("IntegrateTaskBranches: %v", err)
+	}
+
+	integrationDir := filepath.Join(filepath.Dir(bareDir), "worktrees", "run-"+runBranch)
+	got := strings.TrimSpace(gitOut(t, integrationDir, "log", "--merges", "-1", "--format=%an <%ae>"))
+	want := "TIDE Agent <tide-agent@tideproject.k8s>"
+	if got != want {
+		t.Errorf("merge-commit identity: got %q, want %q", got, want)
+	}
+}
+
 // TestIntegrateTaskBranchesIdempotent ensures a second call on already-integrated
 // branches is a no-op and returns nil. The integration worktree already exists.
 func TestIntegrateTaskBranchesIdempotent(t *testing.T) {

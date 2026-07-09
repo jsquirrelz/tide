@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
+	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 	"github.com/jsquirrelz/tide/cmd/dashboard/hub"
 )
 
@@ -78,6 +79,12 @@ type Dependencies struct {
 	// routes are still registered, so the dashboard renders live-only CRD
 	// views without Prometheus. Graceful degradation is first-class.
 	PrometheusEndpoint string
+
+	// Store is the gitfetch artifact cache (plan 37-03) backing the node
+	// artifacts endpoint (DASH-01). The ArtifactsHandler is registered only
+	// when Client, Clientset, AND Store are all non-nil; tests pass nil to
+	// skip the /nodes/{kind}/{name}/artifacts route.
+	Store *gitfetch.Store
 }
 
 // RegisterRoutes builds the dashboard's chi.Mux. DASH-05 invariant: EVERY
@@ -93,9 +100,11 @@ type Dependencies struct {
 //	GET /api/v1/projects/{name}               — single
 //	GET /api/v1/projects/{name}/events        — SSE project events (plan 04-11)
 //	GET /api/v1/projects/{name}/execution-dag — global execution DAG (plan 26-04, D-07)
+//	GET /api/v1/projects/{name}/settings      — redacted project settings (plan 37-07, DASH-03)
 //	GET /api/v1/plans/{name}                  — single plan + task cards (plan 04-17)
 //	GET /api/v1/tasks/{name}                  — rich task detail (plan 04-17)
 //	GET /api/v1/tasks/{name}/log              — SSE pod-log (plan 04-11)
+//	GET /api/v1/nodes/{kind}/{name}/artifacts — node planning artifacts (plan 37-07, DASH-01)
 //	GET /api/v1/query                         — PromQL instant query proxy (Q1, plan-02)
 //	GET /api/v1/query_range                   — PromQL range query proxy (Q1, plan-02)
 //	GET /*                                    — SPA fallback (embed.FS)
@@ -160,6 +169,27 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	if deps.Clientset != nil {
 		lh = dashboardapi.NewLogsHandler(deps.Client, deps.Clientset, deps.Log)
 	}
+	// SettingsHandler (plan 37-07, DASH-03) — read-only project settings; needs
+	// only the CR client (secret refs are surfaced by NAME, never read).
+	var sh *dashboardapi.SettingsHandler
+	if deps.Client != nil {
+		sh = &dashboardapi.SettingsHandler{
+			Client: deps.Client,
+			Log:    deps.Log,
+		}
+	}
+	// ArtifactsHandler (plan 37-07, DASH-01) — needs the CR client, a typed
+	// clientset (fetch-time git creds Secret read), AND the gitfetch Store.
+	// Registered only when all three are present (mirrors the lh/eh pattern).
+	var ah *dashboardapi.ArtifactsHandler
+	if deps.Client != nil && deps.Clientset != nil && deps.Store != nil {
+		ah = &dashboardapi.ArtifactsHandler{
+			Client:    deps.Client,
+			Clientset: deps.Clientset,
+			Store:     deps.Store,
+			Log:       deps.Log,
+		}
+	}
 	// PromQL proxy handler (Q1: proxy, not a second browser datasource).
 	// Registered unconditionally — the handler self-degrades to an
 	// {status:unavailable} sentinel on an empty endpoint so the dashboard
@@ -174,6 +204,12 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		r.Get("/projects/{name}/execution-dag", execDagHandler.Get)
 		r.Get("/plans/{name}", plansHandler.Get)
 		r.Get("/tasks/{name}", tasksHandler.Get)
+		if sh != nil {
+			r.Get("/projects/{name}/settings", sh.Get)
+		}
+		if ah != nil {
+			r.Get("/nodes/{kind}/{name}/artifacts", ah.Get)
+		}
 		if eh != nil {
 			r.Get("/projects/{name}/events", eh.ServeHTTP)
 		}

@@ -1059,7 +1059,11 @@ func kubectlLogs(ns, podName, container string) string {
 
 // exportKindLogs dumps kind cluster logs for CI debugging on failure.
 func exportKindLogs() {
-	logsDir := filepath.Join(os.TempDir(), "kind-logs-"+kindClusterName)
+	// Unique-per-run dir: `kind export logs` does NOT reliably overwrite a reused
+	// path, so a fixed kind-logs-<cluster> dir served stale prior-run logs (the run-3
+	// stale-shared-kind-logs blocker — controller log mtime lagged the run). Stamp the
+	// export so each run's logs are analyzable on their own.
+	logsDir := filepath.Join(os.TempDir(), fmt.Sprintf("kind-logs-%s-%d", kindClusterName, time.Now().Unix()))
 	cmd := exec.CommandContext(context.Background(), "kind", "export", "logs",
 		"--name", kindClusterName, logsDir)
 	out, err := cmd.CombinedOutput()

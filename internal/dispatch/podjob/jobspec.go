@@ -29,6 +29,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // Note: JobKind type + JobKindExecutor/JobKindPlanner constants are defined in
@@ -153,6 +154,15 @@ type BuildOptions struct {
 	// sessions are the run-1 overshoot source; planner Jobs are gated via
 	// the BudgetBlocked condition).
 	EstimatedCostCents int64
+
+	// AgentName / AgentEmail are the committer/author identity the in-Job git
+	// commit sites stamp on every commit (SIGN-01 / D-03). The controller stamps
+	// RESOLVED values here (Project spec → chart value → compiled default) via
+	// resolveAgentIdentity — the values are never empty (the compiled default
+	// backstops), so injection into the subagent env is UNCONDITIONAL, unlike the
+	// operator-gated PricingOverridesJSON transport above.
+	AgentName  string
+	AgentEmail string
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -359,6 +369,12 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		// D-C1: signed token replaces the real API key in the subagent process.
 		{Name: "ANTHROPIC_API_KEY", Value: opts.SignedToken},
 		{Name: "ANTHROPIC_AUTH_TOKEN", Value: opts.SignedToken},
+		// SIGN-01 / D-03: stamp the resolved agent identity so the in-Job harness
+		// commit reads it via pkggit.AgentIdentity(). Unconditional — the controller
+		// resolves a non-empty value (compiled default backstops); planner Kinds
+		// carry it too (harmless, uniform injection beats kind-discrimination).
+		{Name: pkggit.EnvAgentName, Value: opts.AgentName},
+		{Name: pkggit.EnvAgentEmail, Value: opts.AgentEmail},
 	}
 	subagentMounts := []corev1.VolumeMount{
 		{

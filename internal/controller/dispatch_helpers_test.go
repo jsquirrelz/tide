@@ -527,3 +527,88 @@ func TestPlannerInFlightCount(t *testing.T) {
 		})
 	}
 }
+
+// ---------- resolveAgentIdentity tests (pure function — no envtest) ----------
+//
+// Precedence (D-03): project.Spec.Git.Agent* → helmDefaults.Agent* →
+// pkggit compiled default. Tests use NON-DEFAULT strings at every tier so the
+// compiled fallback cannot silently mask a missed wiring surface (Pitfall 3).
+
+// Test 1 (compiled tier): nil project + zero-value ProviderDefaults falls all
+// the way through to the pkg/git compiled default.
+func TestResolveAgentIdentity_CompiledDefault(t *testing.T) {
+	name, email := resolveAgentIdentity(nil, ProviderDefaults{})
+	if name != "TIDE Agent" {
+		t.Errorf("name = %q, want %q (compiled default)", name, "TIDE Agent")
+	}
+	if email != "tide-agent@tideproject.k8s" {
+		t.Errorf("email = %q, want %q (compiled default)", email, "tide-agent@tideproject.k8s")
+	}
+}
+
+// Test 2 (chart tier): chart-supplied identity wins over the compiled default
+// when the Project sets nothing (Spec.Git nil).
+func TestResolveAgentIdentity_ChartTier(t *testing.T) {
+	project := &tideprojectv1alpha2.Project{}
+	helm := ProviderDefaults{AgentName: "Chart Agent", AgentEmail: "chart@example.com"}
+	name, email := resolveAgentIdentity(project, helm)
+	if name != "Chart Agent" {
+		t.Errorf("name = %q, want %q (chart tier)", name, "Chart Agent")
+	}
+	if email != "chart@example.com" {
+		t.Errorf("email = %q, want %q (chart tier)", email, "chart@example.com")
+	}
+}
+
+// Test 3 (spec tier beats chart): Project spec identity overrides a non-empty
+// chart tier.
+func TestResolveAgentIdentity_SpecBeatsChart(t *testing.T) {
+	project := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
+			Git: &tideprojectv1alpha2.GitConfig{
+				AgentName:  "Spec Agent",
+				AgentEmail: "spec@example.com",
+			},
+		},
+	}
+	helm := ProviderDefaults{AgentName: "Chart Agent", AgentEmail: "chart@example.com"}
+	name, email := resolveAgentIdentity(project, helm)
+	if name != "Spec Agent" {
+		t.Errorf("name = %q, want %q (spec beats chart)", name, "Spec Agent")
+	}
+	if email != "spec@example.com" {
+		t.Errorf("email = %q, want %q (spec beats chart)", email, "spec@example.com")
+	}
+}
+
+// Test 4 (per-field independence): the two fields resolve independently — a
+// Project that sets only the name and a chart that sets only the email compose
+// across tiers.
+func TestResolveAgentIdentity_PerFieldIndependence(t *testing.T) {
+	project := &tideprojectv1alpha2.Project{
+		Spec: tideprojectv1alpha2.ProjectSpec{
+			Git: &tideprojectv1alpha2.GitConfig{AgentName: "Spec Agent"},
+		},
+	}
+	helm := ProviderDefaults{AgentEmail: "chart@example.com"}
+	name, email := resolveAgentIdentity(project, helm)
+	if name != "Spec Agent" {
+		t.Errorf("name = %q, want %q (spec name)", name, "Spec Agent")
+	}
+	if email != "chart@example.com" {
+		t.Errorf("email = %q, want %q (chart email)", email, "chart@example.com")
+	}
+}
+
+// Test 5 (nil safety): a non-nil Project whose Spec.Git is nil must not panic —
+// Spec.Git is a *GitConfig (Pitfall 7). Resolution falls to the chart tier.
+func TestResolveAgentIdentity_NilGitConfig(t *testing.T) {
+	project := &tideprojectv1alpha2.Project{}
+	if project.Spec.Git != nil {
+		t.Fatalf("test precondition: Spec.Git must be nil")
+	}
+	name, email := resolveAgentIdentity(project, ProviderDefaults{})
+	if name != "TIDE Agent" || email != "tide-agent@tideproject.k8s" {
+		t.Errorf("resolveAgentIdentity = (%q, %q), want compiled default", name, email)
+	}
+}

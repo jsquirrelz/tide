@@ -476,6 +476,33 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		children = []pkgdispatch.ChildCRDSpec{}
 	}
 
+	// Emit the level's canned planning *.md into the envelope root (the same dir
+	// as out.json — filepath.Dir(outPath) resolves to envelopes/<uid>/ under the
+	// per-Project PVC slice). The real planner subagents author a planning doc
+	// per level (MILESTONE.md, PLAN.md, ...); the artifact-staging pipeline
+	// (37-02 --stage-envelopes) globs envelopes/<uid>/*.md and FAILS THE ENTIRE
+	// cumulative push loud when a planner-completed level's envelope lacks a *.md
+	// (37-02 D-03). Without this, every stub-driven artifact push would be a loud
+	// no-push and nothing would land on the run branch (DASH-02). Leaf "task"
+	// executors author no planning markdown, so the doc is emitted only for the
+	// four planner levels — matching plannerMaterialized's inclusion set (37-06).
+	if docName, docBody, ok := plannerDoc(env.Level, parentName); ok {
+		docPath := filepath.Join(filepath.Dir(outPath), docName)
+		if wErr := os.WriteFile(docPath, []byte(docBody), 0o644); wErr != nil {
+			fmt.Fprintf(stderr, "stub-subagent: dispatchPlannerSuccess: write %s: %v\n", docName, wErr)
+			_ = writeEnvelope(outPath, pkgdispatch.EnvelopeOut{
+				APIVersion:  pkgdispatch.APIVersionV1Alpha1,
+				Kind:        pkgdispatch.KindTaskEnvelopeOut,
+				TaskUID:     env.TaskUID,
+				ExitCode:    2,
+				Result:      "internal-error",
+				Reason:      wErr.Error(),
+				CompletedAt: time.Now().UTC(),
+			})
+			return 2
+		}
+	}
+
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 		Kind:        pkgdispatch.KindTaskEnvelopeOut,
@@ -491,6 +518,41 @@ func dispatchPlannerSuccess(_ context.Context, env pkgdispatch.EnvelopeIn, outPa
 		return 2
 	}
 	return 0
+}
+
+// plannerDoc returns the canned planning-markdown filename and body a planner
+// level emits into its envelope root, plus ok=false for levels that author no
+// planning markdown (the leaf "task" executor and any unknown level).
+//
+// The body is a pure, deterministic function of (level, parentName) so Layer B
+// specs can reconstruct the exact bytes and assert full-fidelity staging
+// (37-09) without reading the PVC. Filenames mirror the real planner templates:
+// project → MILESTONES.md, milestone → MILESTONE.md, phase → PHASE.md,
+// plan → PLAN.md.
+func plannerDoc(level, parentName string) (name, body string, ok bool) {
+	switch level {
+	case "project":
+		name = "MILESTONES.md"
+	case "milestone":
+		name = "MILESTONE.md"
+	case "phase":
+		name = "PHASE.md"
+	case "plan":
+		name = "PLAN.md"
+	default:
+		return "", "", false
+	}
+	body = fmt.Sprintf(
+		"# %s planning artifact (stub-subagent)\n\n"+
+			"level: %s\n"+
+			"parent: %s\n\n"+
+			"Deterministic planning document emitted by the stub-subagent so the\n"+
+			"artifact-staging pipeline (37-02 --stage-envelopes / 37-06 trigger) has a\n"+
+			"full-fidelity *.md to commit onto the run branch under\n"+
+			".tide/planning/<kind>/<name>/ (DASH-02).\n",
+		level, level, parentName,
+	)
+	return name, body, true
 }
 
 // dispatchSuccess handles testMode == "success" (or empty). It writes a canned

@@ -233,6 +233,29 @@ type GitConfig struct {
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9._+@/-]*$`
 	// +optional
 	BaseRef string `json:"baseRef,omitempty"`
+
+	// AgentName is the committer/author name TIDE stamps at all three commit
+	// sites — the harness task commit, the integrate merge commit, and the
+	// tide-push boundary commit (SIGN-01). Precedence (D-03): this field →
+	// chart agent.name → the compiled-in "TIDE Agent" default. Angle brackets
+	// and newlines are rejected because they corrupt git commit headers
+	// (T-36-01).
+	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:Pattern=`^[^<>\r\n]+$`
+	// +optional
+	AgentName string `json:"agentName,omitempty"`
+
+	// AgentEmail is the committer/author email paired with AgentName at all
+	// three commit sites (SIGN-01). Precedence (D-03): this field → chart
+	// agent.email → the compiled-in "tide-agent@tideproject.k8s" default.
+	// Operators should choose a real, routable address: deferred commit
+	// signing will require the committer email to match a verified
+	// machine-account email, so picking one now avoids churn. Angle brackets,
+	// whitespace, and non x@y shapes are rejected (T-36-01).
+	// +kubebuilder:validation:MaxLength=254
+	// +kubebuilder:validation:Pattern=`^[^<>@\s]+@[^<>@\s]+$`
+	// +optional
+	AgentEmail string `json:"agentEmail,omitempty"`
 }
 
 // GitStatus records the per-Project git push state (Phase 3 D-B6).
