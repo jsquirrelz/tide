@@ -22,17 +22,27 @@ stages on the run branch. The 5 prior runs' resource-starvation / PVC / capture-
 hypotheses were all wrong — fixes 1bcbea6 + 01b5004 remain as real latent-bug hardening
 (envtest-green), but NONE was the RED cause.
 
-**DEFECT E — ROOT-CAUSED, HANDED OFF (not fixed this session, per user).** A separate,
-narrower failure surfaced once the chartered bug was green: only the `project`-level
-planning artifact stages on the run branch; milestone/phase/plan never do (test
-Assertion 4 `HaveKey("milestone")` fails). Confirmed product bug in the D-B5/R-05 shared
-single-flight coupling — an EARLY project artifact push snapshots a `[project]`-only
-cumulative map and wins the shared `tide-push-<uid>` name; the later fuller-map pushes
-(including the authoritative boundary push at Complete) are suppressed by single-flight
-and the Job outlives the cascade. Full trace + recommended fix (Option A: boundary push
-supersedes a stale artifact Job, mirroring run-5 defect-C2) in "Run-9" below. Test
-Assertion 4 is correct per 37-06's cumulative-staging design — do NOT relax it. Handed to
-a planned fix (touches the deliberately-preserved coupling).
+**DEFECT E — FIXED & LAYER-B GREEN.** A separate, narrower failure surfaced once the
+chartered bug was green: only the `project`-level planning artifact staged on the run
+branch; milestone/phase/plan never did (test Assertion 4 `HaveKey("milestone")` failed).
+Confirmed product bug in the D-B5/R-05 shared single-flight coupling — an EARLY project
+artifact push snapshotted a `[project]`-only cumulative map and won the shared
+`tide-push-<uid>` name; the later fuller-map pushes (including the authoritative boundary
+push at Complete) were suppressed by single-flight and the Job outlived the cascade (full
+trace + Option A in "Run-9" below). FIXED via quick task `260708-tv5` (commits `1b4bef8`
+RED → `6a65f4e` GREEN): `buildPushJob` stamps a `stagedEnvelopesAnnotation`; a new
+`isStaleArtifactPush` detects when a succeeded shared Job staged a strict subset of the
+current `collectStageEnvelopes`; `reconcileBoundaryPush` then deletes it and re-dispatches
+an OWNED push carrying the FULL map BEFORE the terminal patch (an absent stamp = unknown
+provenance = never stale, protecting Tests 1–7). Also closed a latent gap where
+`dispatchBoundaryPush` staged no map at all. D-B5 single-writer name untouched; Assertion 4
+left correct/unrelaxed. VERIFIED: envtest 9/9 debug13b (`make test` green) AND the FINAL
+Layer-B run — `Ran 1 of 23 … SUCCESS!`, run branch now carries all four levels
+(`.tide/planning/{milestone,phase,plan,project}/…`), pods Succeed, LastPushedSHA advances.
+
+**SAGA CLOSED.** The `artifact_staging` Layer-B spec — RED for 8 runs across this session —
+is GREEN end-to-end: the image-tag fixture fix (chartered) + the Defect E boundary-push
+supersede fix (follow-up) both proven live in one run.
 
 **Test hardening applied this session (all in test/integration/kind/):** the tide-push
 tag fix; sched/wait disambiguation in the push diagnostic; the materialization poll now
