@@ -39,6 +39,11 @@ jobs:
       # Phase 02.1 / WR-09 / D-03: CI MUST set =1 so install failures fail the
       # build loudly (dev runs leave it unset = soft-skip).
       TIDE_REQUIRE_CONTROLLER: "1"
+      # Base dir the in-suite exportKindLogs() writes per-spec subdirs into; the
+      # upload step ships this path. In-suite export is the only capture that runs
+      # while the cluster is still alive (post-run `kind export logs` finds nothing
+      # after AfterSuite tears the cluster down).
+      KIND_LOGS_DIR: /tmp/kind-logs-tide-test
     steps:
       - name: Clone the code
         uses: actions/checkout@v4

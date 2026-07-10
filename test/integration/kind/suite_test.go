@@ -1070,12 +1070,25 @@ func kubectlLogs(ns, podName, container string) string {
 }
 
 // exportKindLogs dumps kind cluster logs for CI debugging on failure.
+//
+// This in-suite export is the ONLY capture that runs while the cluster is still
+// alive: the CI workflows' own post-failure `kind export logs` step runs after
+// AfterSuite tears the cluster down and captures nothing ("No files were found").
+// So it must write somewhere the upload step ships. It writes per-spec subdirs
+// under KIND_LOGS_DIR (set by the workflows to the uploaded path); each call gets a
+// unique subdir so multiple spec failures in one run don't clobber each other's
+// logs (the run-3 stale-shared-kind-logs blocker). Locally, KIND_LOGS_DIR is unset
+// and it falls back to a per-cluster tmp base.
 func exportKindLogs() {
-	// Unique-per-run dir: `kind export logs` does NOT reliably overwrite a reused
-	// path, so a fixed kind-logs-<cluster> dir served stale prior-run logs (the run-3
-	// stale-shared-kind-logs blocker — controller log mtime lagged the run). Stamp the
-	// export so each run's logs are analyzable on their own.
-	logsDir := filepath.Join(os.TempDir(), fmt.Sprintf("kind-logs-%s-%d", kindClusterName, time.Now().Unix()))
+	base := os.Getenv("KIND_LOGS_DIR")
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "kind-logs-"+kindClusterName)
+	}
+	logsDir := filepath.Join(base, fmt.Sprintf("spec-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		GinkgoWriter.Printf("Warning: mkdir kind logs dir %s failed: %v\n", logsDir, err)
+		return
+	}
 	cmd := exec.CommandContext(context.Background(), "kind", "export", "logs",
 		"--name", kindClusterName, logsDir)
 	out, err := cmd.CombinedOutput()

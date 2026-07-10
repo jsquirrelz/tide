@@ -40,6 +40,8 @@ on:
       - 'cmd/tide-import/**'
       - 'cmd/tide/*envelopes*.go'
       - 'pkg/bundle/**'
+      # --- Boundary/artifact push binary the kind suite exercises via real push pods ---
+      - 'cmd/tide-push/**'
       # --- Images the kind suite builds + the kind test code itself ---
       - 'images/**'
       - 'test/integration/kind/**'
@@ -60,6 +62,7 @@ on:
       - 'cmd/tide-import/**'
       - 'cmd/tide/*envelopes*.go'
       - 'pkg/bundle/**'
+      - 'cmd/tide-push/**'
       - 'images/**'
       - 'test/integration/kind/**'
       - 'test/e2e/**'
@@ -81,6 +84,11 @@ jobs:
       # WR-09 / D-03: CI MUST set =1 so install failures fail loudly (dev runs
       # leave it unset = soft-skip).
       TIDE_REQUIRE_CONTROLLER: "1"
+      # Base dir the in-suite exportKindLogs() writes per-spec subdirs into. The
+      # upload step below ships this path. The in-suite export is the only capture
+      # that runs while the cluster is still alive — the post-run `kind export logs`
+      # step runs after teardown and finds nothing.
+      KIND_LOGS_DIR: /tmp/kind-logs-tide-test
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
