@@ -1036,7 +1036,8 @@ func stageEnvelopeArtifacts(
 				// A dir that EXISTS but is empty/corrupt remains a hard failure below (a
 				// genuinely incomplete envelope is a real bug, not a missing artifact).
 				fmt.Fprintf(stderr,
-					"tide-push: stage-envelopes: envelope dir %s absent — level %s has no staged artifact (roll-up completion?); skipping\n",
+					"tide-push: stage-envelopes: envelope dir %s absent — level %s "+
+						"has no staged artifact (roll-up completion?); skipping\n",
 					srcDir, es.DestPrefix)
 				continue
 			}
