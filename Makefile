@@ -114,7 +114,7 @@ test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-f
 
 ##@ Integration tests (TEST-02 — Phase 2)
 
-.PHONY: test-int test-int-fast test-int-kind-prep
+.PHONY: test-int test-int-kind test-int-fast test-int-kind-prep
 
 test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Requires Docker + kind.
 	# NO FLAKE TOLERANCE. Layer A and Layer B are invoked SEPARATELY (set -e, so a
@@ -136,6 +136,19 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	export TIDE_BINARY="$$(pwd)/bin/tide"; \
 	echo "=== Layer A (envtest, Ginkgo-only, no retries) ==="; \
 	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v --ginkgo.label-filter='envtest'; \
+	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, no retries) ==="; \
+	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
+
+test-int-kind: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ONLY the Layer B kind tier (no Layer A envtest). The kind-sensitive + nightly workflows use this so a Layer A envtest flake can't abort the ~40m kind setup before Layer B runs. Layer A stays covered per-push by test-int-fast / the ci + Tests workflows. Requires Docker + kind.
+	# NO FLAKE TOLERANCE (see test-int). Layer B only: Layer A envtest needs no kind,
+	# so running it inside the expensive kind job only couples Layer B to Layer A
+	# flakes and wastes the kind setup when one trips (run 29111456871 burned ~40m of
+	# kind setup then failed on a 2-min Layer A RESUME-01 flake, never reaching Layer
+	# B). bin/tide + the loaded images come from test-int-kind-prep; KUBEBUILDER_ASSETS
+	# is exported for parity with test-int (the kind suite talks to the real cluster).
+	@set -e; \
+	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
+	export TIDE_BINARY="$$(pwd)/bin/tide"; \
 	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, no retries) ==="; \
 	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 

@@ -133,15 +133,18 @@ jobs:
       # minutes of genuine end-to-end git work to the green path.
       # 35 → 60 (v1.0.7): Phases 36/37 grew Layer B again — the agent-identity
       # chart spec + the artifact-staging DASH-02 cascade (a live 4-level planner
-      # run with a ~12m Eventually tail). The 35m step was killing make test-int
-      # mid-suite ~30m in. 60m covers prep + Layer A + the 45m Ginkgo ctx
-      # (suite_test.go kindTestTimeout) so the internal timeouts fire loudly
-      # before the step does.
-      - name: Layer B kind integration suite (make test-int)
+      # run with a ~12m Eventually tail). The 35m step was killing the suite
+      # mid-run ~30m in. 60m covers prep + the 45m Ginkgo ctx (suite_test.go
+      # kindTestTimeout) so the internal timeouts fire loudly before the step does.
+      #
+      # make test-int-kind runs ONLY Layer B (not Layer A envtest): a Layer A flake
+      # must not abort the ~40m kind setup before Layer B runs (run 29111456871 did
+      # exactly that). Layer A is covered per-push by the ci + Tests workflows.
+      - name: Layer B kind integration suite (make test-int-kind)
         timeout-minutes: 60
         run: |
           set -e
-          time make test-int
+          time make test-int-kind
 
       - name: Collect kind cluster logs on failure
         if: failure()
