@@ -71,7 +71,10 @@ jobs:
   kind-layer-b:
     name: Layer B kind suite (gated on Job/RBAC/PVC/uid diffs)
     runs-on: ubuntu-latest
-    timeout-minutes: 42
+    # v1.0.7: raised 42 → 70 for the grown Layer B suite. The 60m test-int step
+    # plus ~5m of prep (checkout/setup-go/kind/helm/manifests) needs headroom
+    # above the step cap so the step timeout fires before the job timeout.
+    timeout-minutes: 70
     permissions:
       contents: read
     env:
@@ -120,8 +123,14 @@ jobs:
       # clone/wave-integration/boundary-push pods for the first time
       # (medium_http spec 3 + the two integration-miss specs), adding a few
       # minutes of genuine end-to-end git work to the green path.
+      # 35 → 60 (v1.0.7): Phases 36/37 grew Layer B again — the agent-identity
+      # chart spec + the artifact-staging DASH-02 cascade (a live 4-level planner
+      # run with a ~12m Eventually tail). The 35m step was killing make test-int
+      # mid-suite ~30m in. 60m covers prep + Layer A + the 45m Ginkgo ctx
+      # (suite_test.go kindTestTimeout) so the internal timeouts fire loudly
+      # before the step does.
       - name: Layer B kind integration suite (make test-int)
-        timeout-minutes: 35
+        timeout-minutes: 60
         run: |
           set -e
           time make test-int

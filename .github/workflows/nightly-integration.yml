@@ -28,7 +28,11 @@ jobs:
   kind-suites:
     name: Heavy kind suites (Layer B integration + kind_e2e e2e)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # v1.0.7: raised 45 → 110 to fit the grown Layer B suite. This job runs the
+    # SC-1 image smoke (~10m) + Layer B make test-int (60m step) + kind_e2e
+    # (25m step) sequentially; 45m could not cover all three once Phases 36/37
+    # pushed Layer B past ~30m (artifact-staging DASH-02 live cascade).
+    timeout-minutes: 110
     permissions:
       contents: read
     env:
@@ -128,11 +132,14 @@ jobs:
           echo "PASS: git present in tide-demo-init"
 
       # Layer B kind integration tier (the kind half of TEST-02). The
-      # `timeout 300s` inside `make test-int` bounds only the `go test`
-      # invocation; image builds + kind cluster create are unbounded by design.
-      # The job-level timeout-minutes: 45 is the genuine ceiling.
+      # `timeout $(INTEGRATION_TIMEOUT)` inside `make test-int` (55m) bounds only
+      # the `go test` invocation; image builds + kind cluster create are
+      # unbounded by design. 25 → 60 (v1.0.7): Phases 36/37 grew Layer B past
+      # ~30m (artifact-staging DASH-02 live cascade), so the old 25m step killed
+      # make test-int after 21m54s. 60m covers prep + Layer A + the 45m Ginkgo
+      # ctx; the job-level timeout-minutes: 110 is the genuine ceiling.
       - name: Layer B kind integration suite (make test-int)
-        timeout-minutes: 25
+        timeout-minutes: 60
         run: |
           set -e
           time make test-int
