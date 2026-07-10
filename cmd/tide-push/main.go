@@ -610,6 +610,22 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exit
 	}
 
+	// go-git commits through the linked run worktree (opened with
+	// EnableDotGitCommonDir above) land their loose objects 0600/owner-only:
+	// go-git skips its fixPermissions→0444 chmod when the commondir object
+	// filesystem lacks billy.Chmod, and core.sharedRepository=group (set by the
+	// clone Job) is a go-git no-op. The uid-1000 executor task then cannot read
+	// the run-branch tip this push just wrote when it `git worktree add`s off it
+	// ("unable to open loose object <sha>: Permission denied" → "fatal: invalid
+	// reference"). Re-share the bare repo so the new objects and refs are
+	// group-readable by any pod in sharedFSGroup, mirroring the clone Job's own
+	// makeWorkspaceGroupShared. Best-effort and only when a new commit landed.
+	if newHash != oldHash {
+		if err := makeWorkspaceGroupShared(bareRepoPath); err != nil {
+			fmt.Fprintf(stderr, "tide-push: group-share bare repo after commit: %v\n", err)
+		}
+	}
+
 	// W10: compute the unified diff of the pushed commit against scanBase via
 	// newCommit.Patch(oldCommit).String(). The Patch.String() output uses
 	// `+ ` / `- ` line prefixes that gitleaks rules can match. When
