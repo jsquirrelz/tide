@@ -123,12 +123,10 @@ jobs:
       # UNIT-ONLY: `make test-only` now excludes the test/integration tier
       # (its package selector greps out /test/integration). The envtest
       # integration suite moved to the TEST-02 step below, which runs it via
-      # `make test-int-fast` WITH `-ginkgo.flake-attempts=3` to absorb CI
-      # runner CPU contention (ResourceVersion-conflict / Eventually-timeout
-      # flakes on slow 2-core shared runners). The Ginkgo flake-attempts flag
-      # CANNOT live in the mixed `go test ./...` unit run — it breaks
-      # non-Ginkgo packages (pkg/dag, analyzers, jobspec_test, stub-subagent)
-      # with "flag provided but not defined" — hence the two-tier split.
+      # `make test-int-fast`. NO flake-attempts (v1.0.7): a non-deterministic
+      # envtest spec is a bug to fix at its root (timeout/race/ordering), not to
+      # retry — retries masked a real kind regression for days. If a Layer A spec
+      # flakes here, fix its determinism.
       #
       # Budget raised to 300s (v1.0.6): the internal/controller Ginkgo envtest
       # *unit* suite that dominates this tier has grown cumulatively across many
@@ -153,13 +151,13 @@ jobs:
           fi
 
       # TEST-02 (Layer A): envtest integration tier, moved out of TEST-01.
-      # Runs via `make test-int-fast` which passes -ginkgo.flake-attempts=3 so
-      # the contention-flaky envtest specs (budget/indegree/init/boundary_push)
-      # retry the whole class instead of requiring per-spec timeout bumps on
-      # CI's slow 2-core runners. Ginkgo-only package, so the flag is valid.
-      # test-int-fast re-runs manifests/generate/fmt/vet/setup-envtest as
-      # prereqs; the "Prepare test environment" step above already warmed those.
-      - name: Layer A envtest integration tier (TEST-02 — flake-attempts for CI runner contention)
+      # Runs via `make test-int-fast` with NO flake-attempts (v1.0.7). A
+      # contention-flaky envtest spec (budget/indegree/init/boundary_push) is a
+      # real bug — fix its determinism (deterministic slack on the Eventually, a
+      # proper wait, or the underlying race), never a retry. test-int-fast
+      # re-runs manifests/generate/fmt/vet/setup-envtest as prereqs; the
+      # "Prepare test environment" step above already warmed those.
+      - name: Layer A envtest integration tier (TEST-02 — no flake retries)
         run: make test-int-fast
 
   helm-lint:

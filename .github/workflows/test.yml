@@ -31,8 +31,8 @@ jobs:
 
       # `make test` is now UNIT-ONLY (its package selector excludes
       # /test/integration). Preserve Layer A coverage in the Tests job by
-      # running the envtest integration tier with -ginkgo.flake-attempts=3
-      # (set in the Makefile target) to absorb CI runner CPU contention.
+      # running the envtest integration tier. NO flake-attempts (v1.0.7): a
+      # non-deterministic envtest spec is a bug to fix at its root, not to retry.
       # Mirrors the TEST-02 step in ci.yaml.
-      - name: Layer A envtest integration tier (flake-attempts)
+      - name: Layer A envtest integration tier (no flake retries)
         run: make test-int-fast
