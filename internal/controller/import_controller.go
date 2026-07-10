@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -708,6 +709,37 @@ func (r *ImportReconciler) succeedImport(ctx context.Context, project *tideproje
 // SetupWithManager wires the ImportReconciler into the manager.
 // Watches Projects (GenerationChanged OR AnnotationChanged), Owns Jobs.
 // Named "import" to avoid conflicts with other controllers.
+// newImportCompleteReassertPredicate re-triggers the ImportReconciler when the
+// ImportComplete condition transitions from True to not-True. That clobber happens
+// when a concurrent, non-optimistic Project status patch (e.g. the ProjectController
+// churning conditions while it adopts a partial-import project and creates its first
+// wave) replaces the whole conditions array with a base read that predates the mark
+// and drops ImportComplete. GenerationChangedPredicate/AnnotationChangedPredicate do
+// NOT fire on a status-only change, so without this the clobber is invisible until
+// an unrelated generation/annotation change re-wakes the reconciler (in the
+// import-resume-partial flake, only teardown) — leaving ImportComplete=False for
+// minutes and failing waitForImportComplete. On re-trigger the idempotency guard
+// falls through and reconcileCopyingEnvelopes re-marks the (already-succeeded) import
+// True; it never re-runs the copy. OR'd with the generation/annotation predicates,
+// so Create/Delete/Generic stay owned by those.
+func newImportCompleteReassertPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldP, ok1 := e.ObjectOld.(*tideprojectv1alpha2.Project)
+			newP, ok2 := e.ObjectNew.(*tideprojectv1alpha2.Project)
+			if !ok1 || !ok2 {
+				return false
+			}
+			was := meta.IsStatusConditionTrue(oldP.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+			is := meta.IsStatusConditionTrue(newP.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+			return was && !is
+		},
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		DeleteFunc:  func(event.DeleteEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
 func (r *ImportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	nsPred := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		if r.WatchNamespace == "" {
@@ -720,6 +752,7 @@ func (r *ImportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(predicate.Or(
 				predicate.GenerationChangedPredicate{},
 				predicate.AnnotationChangedPredicate{},
+				newImportCompleteReassertPredicate(),
 			)),
 		).
 		Owns(&batchv1.Job{}).
