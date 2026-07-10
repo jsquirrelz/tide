@@ -747,8 +747,20 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 
 	// Step 10: Patch Status.Attempt BEFORE Create (Pitfall 2 mitigation — prevents
 	// drift if client.Create succeeds but the status patch fails on transient error).
+	//
+	// Optimistic lock (DISP-01/RESUME-01 dispatch-clobber fix): the dispatch
+	// decision above was made from a cache read of `task` that may be stale under
+	// informer lag. If a predecessor's completion (or, in the resume path, an
+	// out-of-band Succeeded write) has meanwhile driven THIS task to a terminal
+	// phase in etcd, a non-locked MergeFrom patch would blindly regress it back to
+	// a dispatch state — clobbering the terminal status and permanently stalling
+	// any dependent whose indegree can then never reach 0. Sending the read
+	// resourceVersion as a precondition makes that stale commit fail with Conflict
+	// instead; the reconcile requeues, re-reads the now-terminal phase, and
+	// gateChecks' terminal short-circuit halts the redundant dispatch. Deterministic:
+	// the illegal Succeeded→Running transition is refused at its source.
 	{
-		patch := client.MergeFrom(task.DeepCopy())
+		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		task.Status.Attempt = spec.attempt
 		now := metav1.Now()
 		task.Status.StartedAt = &now
@@ -806,8 +818,11 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	}
 
 	// Step 12: Patch Status.Phase=Running + Condition Running=True, Reason=Dispatched.
+	// Optimistic lock (same dispatch-clobber guard as Step 10): if the task reached
+	// a terminal phase between Step 10 and here, refuse the Running regression with
+	// Conflict rather than clobbering it; the reconcile requeues and short-circuits.
 	{
-		patch := client.MergeFrom(task.DeepCopy())
+		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		task.Status.Phase = "Running"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha2.ConditionRunning,
