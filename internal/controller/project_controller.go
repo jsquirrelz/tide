@@ -828,10 +828,38 @@ func (r *ProjectReconciler) reconcileBoundaryPush(ctx context.Context, project *
 		return ctrl.Result{}, nil
 	}
 
-	// Already confirmed pushed — terminal success arm. Nothing further to do.
+	// Already confirmed pushed — normally the terminal success arm. BUT a
+	// BoundaryPushed=True that latched on an early push carrying only a strict SUBSET
+	// of the cumulative artifact map (the [project]-only single-flight winner in a
+	// fast auto-approve cascade, snapshotted before milestone/phase/plan rolled up to
+	// Succeeded) would otherwise freeze those deeper levels off the run branch
+	// forever: the stale-artifact supersede below sits behind this return, and the
+	// staleness only becomes detectable AFTER the deeper levels materialize — by which
+	// point this arm blocks it (DASH-02 artifact_staging:244). Re-check the terminal
+	// push's staged map against the current one; stay terminal only when it carried
+	// the full map. On a stale subset, reopen the condition and fall through so the
+	// supersede re-dispatches a fresh full-map push whose landing re-captures
+	// LastPushedSHA (idempotent clean-tree skip; bounded by maxBoundaryPushAttempts).
 	if c := meta.FindStatusCondition(project.Status.Conditions, tidev1alpha2.ConditionBoundaryPushed); c != nil &&
 		c.Status == metav1.ConditionTrue {
-		return ctrl.Result{}, nil
+		pushJobName := fmt.Sprintf("tide-push-%s", project.UID)
+		var terminalPush batchv1.Job
+		switch gErr := r.Get(ctx, types.NamespacedName{Name: pushJobName, Namespace: project.Namespace}, &terminalPush); {
+		case apierrors.IsNotFound(gErr):
+			return ctrl.Result{}, nil // Job GC'd — nothing to supersede; stay terminal.
+		case gErr != nil:
+			return ctrl.Result{}, gErr
+		}
+		current, seErr := collectStageEnvelopes(ctx, r.Client, project)
+		if seErr != nil || !isStaleArtifactPush(&terminalPush, current) {
+			return ctrl.Result{}, nil
+		}
+		if err := r.setBoundaryPushedCondition(ctx, project, metav1.ConditionFalse,
+			tidev1alpha2.ReasonPushing,
+			"terminal push staged a subset of the cumulative artifact map; superseding with the full map"); err != nil {
+			return ctrl.Result{}, err
+		}
+		// fall through to the stale-artifact supersede below.
 	}
 
 	// Operator-recovery halt arms (leak / lease / merge-conflict). These are
