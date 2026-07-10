@@ -98,11 +98,23 @@ const (
 	//     the two integration-miss specs) — run 6 observed an 1185s inner
 	//     wall hitting the 18m ctx mid-suite, skipping 12 specs including
 	//     both integration-miss specs (which then never executed at all).
-	//     Budget stays inside the workflow step timeout (35m − ~7m
-	//     prep/LayerA). skipIfCRDsOnlyMode now FAILS (not skips) on ctx
-	//     expiry, so re-tripping this budget is loud instead of a silent
+	//     That budget then sat inside the Phase-34-era 35m workflow step
+	//     (−~7m prep/LayerA). skipIfCRDsOnlyMode now FAILS (not skips) on
+	//     ctx expiry, so re-tripping this budget is loud instead of a silent
 	//     green.
-	kindTestTimeout = 25 * time.Minute
+	//   - v1.0.7 (Phase 37) bump → 45m: Phases 36/37 grew Layer B again — the
+	//     agent-identity chart spec plus the artifact-staging DASH-02 spec, the
+	//     tail hog, which drives a LIVE 4-level planner cascade over a real
+	//     http:// transport (a single 12m Eventually for the Project to reach
+	//     Complete). The suite is slow-but-passing (Phase 37 UAT 8/8), not
+	//     hanging. kind-sensitive run 29037860740 had make test-int killed by
+	//     the 35m CI STEP mid-artifact-staging ~30m in; nightly run 29085603242
+	//     by its 25m step after 21m54s of Layer B. 45m gives the grown spec wall
+	//     (~6m kind setup + ~30m specs) real headroom. The CI step budgets were
+	//     raised in lockstep (kind-sensitive 35m→60m step / 42m→65m job; nightly
+	//     kind step 25m→60m / job 45m→110m) so this Ginkgo ctx (45m) < go-test
+	//     50m < outer-shell 55m < CI step 60m — the innermost fires loudly first.
+	kindTestTimeout = 45 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
 	// Deployment installs into (config/default Kustomize manifest target).

@@ -18,8 +18,8 @@ CONTAINER_TOOL ?= docker
 
 # Integration test budget knobs. The outer timeout protects the shell command;
 # KIND_GO_TEST_TIMEOUT must exceed the kind suite's helm --wait window.
-INTEGRATION_TIMEOUT ?= 2700s
-KIND_GO_TEST_TIMEOUT ?= 40m
+INTEGRATION_TIMEOUT ?= 3300s
+KIND_GO_TEST_TIMEOUT ?= 50m
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -139,9 +139,11 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	# Layer A.
 	# Both invocations run under one shell so a failure in EITHER fails the target
 	# (set -e); the kind go-test timeout still owns the helm --wait window, with
-	# ample headroom (KIND_GO_TEST_TIMEOUT=40m / INTEGRATION_TIMEOUT=45m cover Layer
-	# B's ~18m baseline (19 non-import specs) + 3 import resume tiers (~15m) plus
-	# up-to-3 retries of one flaked spec).
+	# ample headroom (KIND_GO_TEST_TIMEOUT=50m / INTEGRATION_TIMEOUT=55m cover Layer
+	# B's grown wall — Phases 36/37 added the agent-identity chart spec + the
+	# artifact-staging DASH-02 cascade (a live 4-level planner run, ~12m tail) — on
+	# top of the ~18m baseline + 3 import resume tiers plus up-to-3 retries of one
+	# flaked spec).
 	@set -e; \
 	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
 	export TIDE_BINARY="$$(pwd)/bin/tide"; \
