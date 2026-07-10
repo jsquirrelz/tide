@@ -1026,9 +1026,27 @@ func stageEnvelopeArtifacts(
 	for _, es := range stageEnvs {
 		srcDir := filepath.Join(cfg.Workspace, "envelopes", es.UID)
 		info, statErr := os.Stat(srcDir)
-		if statErr != nil || !info.IsDir() {
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				// A level can reach Succeeded via child roll-up (succession) without
+				// its OWN planner Job having run — that level legitimately produced no
+				// envelope on the PVC, so there is nothing to stage for it. Skip it with
+				// a loud warning rather than failing the whole boundary push; the run
+				// branch still pushes and the levels that DO have envelopes still stage.
+				// A dir that EXISTS but is empty/corrupt remains a hard failure below (a
+				// genuinely incomplete envelope is a real bug, not a missing artifact).
+				fmt.Fprintf(stderr,
+					"tide-push: stage-envelopes: envelope dir %s absent — level %s has no staged artifact (roll-up completion?); skipping\n",
+					srcDir, es.DestPrefix)
+				continue
+			}
 			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope dir %s missing or not a directory: %v\n", srcDir, statErr)
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: stat envelope dir %s: %v\n", srcDir, statErr)
+			return exitGenericFail
+		}
+		if !info.IsDir() {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope path %s exists but is not a directory\n", srcDir)
 			return exitGenericFail
 		}
 
