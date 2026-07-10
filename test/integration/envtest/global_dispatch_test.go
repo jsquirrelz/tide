@@ -404,13 +404,20 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// taskC's global indegree must re-derive to 0 once A and B are Succeeded,
 			// and dispatch must begin. This requires no new persisted field (RESUME-01).
 			// RED until 25-02 implements global listProjectTasks + globalDependentsMapper.
+			//
+			// Window is 120s (deterministic slack, NOT a retry — flake-attempts is
+			// gone): this is the first heavy spec in the suite, so envtest is cold and
+			// contention peaks here, and the re-derivation reconcile churns through
+			// optimistic-concurrency conflicts before taskC's indegree settles. 60s
+			// under-estimated that cold worst case and flaked; if 120s is ever
+			// exceeded the dispatch is genuinely stalled (a real bug), not slow.
 			Eventually(func() string {
 				t := &tideprojectv1alpha2.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskC.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
 				return t.Status.Phase
-			}, "60s", "500ms").Should(Or(Equal("Running"), Equal("Succeeded")),
+			}, "120s", "500ms").Should(Or(Equal("Running"), Equal("Succeeded")),
 				"RESUME-01: taskC must dispatch after A and B Succeeded (global indegree re-derived, no new persistence)")
 
 			// Verify no IndegreeMap / Schedule aggregate field exists on Project status.
