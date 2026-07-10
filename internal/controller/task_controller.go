@@ -504,7 +504,22 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
 			return taskGateResult{}, err
 		}
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		// Level-triggered re-check. This indegree gate is otherwise the ONLY dispatch
+		// gate that parks with a bare ctrl.Result{} (every other gate — rejected,
+		// parent-approval, budget, failure, reservation — carries a 5-30s
+		// RequeueAfter). Relying purely on the edge-triggered globalDependentsMapper
+		// stalls under cache lag: when a predecessor goes Succeeded, the mapper wakes
+		// this task once, but if the informer is still lagging the re-derived indegree
+		// is unchanged, the condition message is identical, meta.SetStatusCondition
+		// no-ops, the MergeFrom patch is empty → no resourceVersion bump → no watch
+		// event → no re-enqueue. The predecessor is now terminal (its watch never fires
+		// again) and there is no SyncPeriod (default 10h resync), so the task sat
+		// Pending until the 10h resync — the RESUME-01/DISP-01 flake. A bounded requeue
+		// re-derives the global indegree every 10s until the cache converges (idempotent
+		// no-op patch while still blocked), making dispatch deterministic under
+		// contention without depending on a single mapper edge landing against a fresh
+		// cache.
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 10 * time.Second}}, nil
 	}
 
 	// Plan 04-05 Task 2: PauseBetweenWaves dispatch block. PlanReconciler
