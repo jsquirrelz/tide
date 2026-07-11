@@ -12,6 +12,8 @@ relates_to:
 
 # Phase 40 (candidate) — API-version code removal + semantic rename
 
+> **✅ SUPERSEDED BY IMPORT (2026-07-11).** The authoritative Phase 40 planning artifacts landed via rebase from the operator's other machine: `.planning/phases/40-deprecate-v1alpha1-api/` (CONTEXT, RESEARCH, PATTERNS, VALIDATION, 7 plans, CRANK-01..07). Every scope item below maps into those plans — guard re-expression + owner-walk + scheme comment → 40-03; semantic rename → 40-04; removal → 40-05. This file remains as the capture record; close it when Phase 40 closes.
+
 **⚠ The authoritative Phase 40 planning artifacts were authored on the operator's other machine and were NEVER pushed to this `origin`.** Confirmed absent here 2026-07-09 via an exhaustive search: all four worktrees, every local + remote branch (incl. `backup/sounding-pre-rebase`), the stash stack, the reflog, and dangling/orphaned commits — zero `40-*` files ever added, zero "Phase 40"/v1alpha3/semantic-rename references. This file is a **scope capture** so the phase is tracked in-repo; the real artifacts still need to be **imported from the operator's machine** (or Phase 40 re-planned fresh).
 
 ## Scope (operator intent, 2026-07-09)
