@@ -93,6 +93,10 @@ test-only: ## Run the UNIT tier without re-running manifests/generate/fmt/vet/se
 test-leader-election: manifests generate fmt vet setup-envtest ## Run the slow CTRL-03 leader-election envtest (~60s; excluded from `make test`).
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test ./internal/controller/... -timeout 180s -v -ginkgo.focus="Leader Election"
 
+.PHONY: test-heavy
+test-heavy: manifests generate fmt vet setup-envtest ## Run the heavy controller envtests extracted from the unit tier (Phase 38 DEBT-03; selects Ginkgo Label("heavy")).
+	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test ./internal/controller/... -timeout 20m -v -ginkgo.v -ginkgo.label-filter='heavy'
+
 ##@ Phase 4 kind-harness E2E (plan 04-14)
 
 # test-e2e-kind builds the manager + dashboard + tide CLI binaries, spins up a
@@ -136,6 +140,8 @@ test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ful
 	export TIDE_BINARY="$$(pwd)/bin/tide"; \
 	echo "=== Layer A (envtest, Ginkgo-only, no retries) ==="; \
 	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v --ginkgo.label-filter='envtest'; \
+	echo "=== Layer A2 (heavy controller envtests, Phase 38 DEBT-03, no retries) ==="; \
+	go test ./internal/controller/... -timeout 20m -ginkgo.v -ginkgo.label-filter='heavy'; \
 	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, no retries) ==="; \
 	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 
@@ -155,6 +161,9 @@ test-int-kind: manifests generate fmt vet setup-envtest test-int-kind-prep ## Ru
 test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). ~90s clean locally; -timeout=10m gives headroom on slow/contended CI runners. NO flake-attempts — a non-deterministic envtest spec is a bug to fix, not retry.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v --ginkgo.label-filter='envtest'
+	@echo "=== Layer A2 (heavy controller envtests, Phase 38 DEBT-03, no retries) ==="
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test ./internal/controller/... -timeout 20m -ginkgo.v -ginkgo.label-filter='heavy'
 
 test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter + tide-import Docker images and load them into the tide-test kind cluster. Also builds bin/tide for the kind E2E (D-10, 29-04).
 	# Phase 29 plan 29-04 (D-10): build the tide CLI binary so the kind E2E can
