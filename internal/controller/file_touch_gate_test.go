@@ -339,7 +339,7 @@ var _ = Describe("PlanReconciler — file-touch dispatch gate (D-05, D-06)", Lab
 			cleanupFileTouchFixture(ctx, projectName, planName, []string{taskA, taskB})
 		})
 
-		It("does not park when mode is warn even with overlapping filesTouched", func() {
+		It("does not park when mode is warn even with overlapping filesTouched", Label("heavy"), func() {
 			plan := mkFileTouchPlan(planName, projectName)
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})

@@ -23,6 +23,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -116,6 +117,20 @@ func TestControllers(t *testing.T) {
 
 	RunSpecs(t, "Controller Suite")
 }
+
+// Phase 38 DEBT-03: the -short unit tier (TEST-01, `make test`) skips specs
+// carrying Label("heavy"). Labels are the single source of truth for the
+// heavy/unit split; this code-level guard exists because the umbrella
+// `make test` invocation spans non-Ginkgo packages, where a
+// -ginkgo.label-filter flag would be rejected as an unknown flag (RESEARCH Q4).
+// The heavy tier runs the labeled specs via `make test-heavy` and the
+// Layer A2 lines in test-int-fast / test-int. The leader-election spec keeps
+// its own testing.Short() guard + dedicated make test-leader-election target.
+var _ = BeforeEach(func() {
+	if testing.Short() && slices.Contains(CurrentSpecReport().Labels(), "heavy") {
+		Skip("heavy spec: excluded from the -short unit tier (Phase 38 DEBT-03); runs via make test-heavy / test-int")
+	}
+})
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))

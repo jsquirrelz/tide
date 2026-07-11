@@ -53,7 +53,7 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
-var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID stamp (PREFLIGHT-02 / DEBT-01 W1)", Label("envtest"), func() {
+var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID stamp (PREFLIGHT-02 / DEBT-01 W1)", Label("envtest", "heavy"), func() {
 	ctx := context.Background()
 
 	const (
