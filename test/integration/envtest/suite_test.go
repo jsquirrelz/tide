@@ -103,6 +103,17 @@ var (
 	// testSubagentImage and testCredproxyImage are placeholder images for tests.
 	testSubagentImage  = "tide-stub-subagent:test"
 	testCredproxyImage = "tide-credproxy:test"
+
+	// testTidePushImage is the placeholder tide-push image shared by the
+	// manager-registered and test-local level reconcilers. Both MUST carry the
+	// same value: a manager reconciler with an EMPTY TidePushImage that wins the
+	// race to a boundary transition (job terminal + all children Succeeded)
+	// SKIPS the push (boundary_push.go empty-image guard) and latches the level
+	// Succeeded — permanently consuming the one-shot transition the test-local
+	// push-capable reconciler was about to act on (PR #10 CI flake,
+	// boundary_push_test.go). Config symmetry makes the race outcome-invariant:
+	// whoever wins creates the same deterministic tide-push-<project-uid> Job.
+	testTidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 )
 
 // mapEnvReader is an in-memory EnvelopeReader implementation for tests.
@@ -284,6 +295,13 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		return fmt.Errorf("MilestoneReconciler: %w", err)
 	}
 
+	// TidePushImage on Phase/Plan mirrors the test-local reconcilers in
+	// boundary_push_test.go (see testTidePushImage doc comment): a
+	// push-incapable manager reconciler that wins the boundary-transition race
+	// skips the push and latches the level Succeeded, starving the test-local
+	// push. Milestone/Project deliberately stay push-incapable: no envtest spec
+	// asserts their pushes, and ProjectReconciler's bounded-retry push
+	// replacement would interfere with leak_blocked_test's hand-built push Jobs.
 	if err := (&controller.PhaseReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
@@ -291,6 +309,7 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		SubagentImage:        testSubagentImage,
 		CredproxyImage:       testCredproxyImage,
 		SigningKey:           testSigningKey,
+		TidePushImage:        testTidePushImage,
 		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PhaseReconciler: %w", err)
@@ -303,6 +322,7 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 		SubagentImage:        testSubagentImage,
 		CredproxyImage:       testCredproxyImage,
 		SigningKey:           testSigningKey,
+		TidePushImage:        testTidePushImage,
 		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PlanReconciler: %w", err)
