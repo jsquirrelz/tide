@@ -44,6 +44,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -70,8 +71,12 @@ func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *t
 	}
 	tidemetrics.PricingFallbackTotal.WithLabelValues(project.Name, fallbackModel).Inc()
 	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+	// Anchor the dedupe on the quoted form the Message embeds (%q below): a
+	// bare Contains false-positives on model IDs that are substrings of an
+	// already-surfaced one (claude-sonnet-6 vs claude-sonnet-6-1, or a dated
+	// alias of either), silently dropping the newer unknown model.
 	if existing != nil && existing.Status == metav1.ConditionTrue &&
-		strings.Contains(existing.Message, fallbackModel) {
+		strings.Contains(existing.Message, strconv.Quote(fallbackModel)) {
 		return nil // same unknown model already surfaced — no status churn
 	}
 	patch := client.MergeFrom(project.DeepCopy())
