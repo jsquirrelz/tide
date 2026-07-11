@@ -101,6 +101,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - Phase 36 carries `research: true` (gpg-shim vs plumbing spike) and an ASK-FIRST key-exposure scope decision.
 - Phases 35, 37, 38 are order-independent; Phase 38 items can interleave anywhere.
 - **Phase 36 descoped 2026-07-03 (discussion):** SIGN-02/03/04 (GPG signing) deferred out of v1.0.7 — 26 → 23 active requirements. Phase 36 = SIGN-01 agent identity only (`spec.git.agentName`/`agentEmail` → chart → compiled-in `TIDE Agent <tide-agent@tideproject.k8s>`; full bot→agent rename). The `research: true` flag and ASK-FIRST decision above are void; the Phase 34 → 36 sequencing constraint no longer applies (Phase 35 batching stays).
+- **Phases 40 + 41 appended to v1.0.7 (2026-07-11, operator decision):** Phase 40 = v1alpha1/v1alpha2 code removal + subagent.levels semantic rename (breaking migration; authoritative planning artifacts pending operator import from the other machine — wait for import, do not re-plan fresh). Phase 41 = 12-item non-breaking refactoring review (seed in-repo, file:line-verified), sequenced after 40.
 
 ### Pending Todos
 
