@@ -596,10 +596,9 @@ func provisionTaskBranchesAndSignal(jobName, projectUID, runBranch string, taskU
 		},
 	}
 
-	// Flake-attempt hygiene: the suite-level -ginkgo.flake-attempts=3 re-runs
-	// a failed spec with the namespace intact, so a writer Job from the
-	// prior attempt may linger under this deterministic name. Delete it and
-	// recreate rather than failing on AlreadyExists.
+	// Idempotent create: a writer Job may already exist under this deterministic
+	// name (e.g. a prior BeforeEach in the same namespace). Delete it and recreate
+	// rather than failing on AlreadyExists.
 	if cErr := k8sClient.Create(ctx, job); cErr != nil {
 		Expect(apierrors.IsAlreadyExists(cErr)).To(BeTrue(), "create branch-writer Job %s: %v", jobName, cErr)
 		policy := metav1.DeletePropagationBackground

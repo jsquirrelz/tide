@@ -40,6 +40,8 @@ on:
       - 'cmd/tide-import/**'
       - 'cmd/tide/*envelopes*.go'
       - 'pkg/bundle/**'
+      # --- Boundary/artifact push binary the kind suite exercises via real push pods ---
+      - 'cmd/tide-push/**'
       # --- Images the kind suite builds + the kind test code itself ---
       - 'images/**'
       - 'test/integration/kind/**'
@@ -60,6 +62,7 @@ on:
       - 'cmd/tide-import/**'
       - 'cmd/tide/*envelopes*.go'
       - 'pkg/bundle/**'
+      - 'cmd/tide-push/**'
       - 'images/**'
       - 'test/integration/kind/**'
       - 'test/e2e/**'
@@ -71,13 +74,21 @@ jobs:
   kind-layer-b:
     name: Layer B kind suite (gated on Job/RBAC/PVC/uid diffs)
     runs-on: ubuntu-latest
-    timeout-minutes: 42
+    # v1.0.7: raised 42 → 70 for the grown Layer B suite. The 60m test-int step
+    # plus ~5m of prep (checkout/setup-go/kind/helm/manifests) needs headroom
+    # above the step cap so the step timeout fires before the job timeout.
+    timeout-minutes: 70
     permissions:
       contents: read
     env:
       # WR-09 / D-03: CI MUST set =1 so install failures fail loudly (dev runs
       # leave it unset = soft-skip).
       TIDE_REQUIRE_CONTROLLER: "1"
+      # Base dir the in-suite exportKindLogs() writes per-spec subdirs into. The
+      # upload step below ships this path. The in-suite export is the only capture
+      # that runs while the cluster is still alive — the post-run `kind export logs`
+      # step runs after teardown and finds nothing.
+      KIND_LOGS_DIR: /tmp/kind-logs-tide-test
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -120,11 +131,20 @@ jobs:
       # clone/wave-integration/boundary-push pods for the first time
       # (medium_http spec 3 + the two integration-miss specs), adding a few
       # minutes of genuine end-to-end git work to the green path.
-      - name: Layer B kind integration suite (make test-int)
-        timeout-minutes: 35
+      # 35 → 60 (v1.0.7): Phases 36/37 grew Layer B again — the agent-identity
+      # chart spec + the artifact-staging DASH-02 cascade (a live 4-level planner
+      # run with a ~12m Eventually tail). The 35m step was killing the suite
+      # mid-run ~30m in. 60m covers prep + the 45m Ginkgo ctx (suite_test.go
+      # kindTestTimeout) so the internal timeouts fire loudly before the step does.
+      #
+      # make test-int-kind runs ONLY Layer B (not Layer A envtest): a Layer A flake
+      # must not abort the ~40m kind setup before Layer B runs (run 29111456871 did
+      # exactly that). Layer A is covered per-push by the ci + Tests workflows.
+      - name: Layer B kind integration suite (make test-int-kind)
+        timeout-minutes: 60
         run: |
           set -e
-          time make test-int
+          time make test-int-kind
 
       - name: Collect kind cluster logs on failure
         if: failure()

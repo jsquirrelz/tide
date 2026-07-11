@@ -1115,31 +1115,81 @@ func TestStageEnvelopesByteFidelity(t *testing.T) {
 	}
 }
 
-// TestStageEnvelopesMissingDirFailsLoud (Task 2 Test 3): a mapped envelope whose
-// directory does not exist exits nonzero with reason artifact-stage-failed and
-// pushes nothing (the per-run branch never appears on the remote).
-func TestStageEnvelopesMissingDirFailsLoud(t *testing.T) {
+// TestStageEnvelopesAbsentDirSkipped (v1.0.7 regression fix): a mapped level whose
+// envelope dir does NOT exist on the PVC — legitimate when a level reaches Succeeded
+// via child roll-up (succession / the integration_miss fixture) without its own
+// planner Job — is SKIPPED with a warning, not failed. The boundary push still lands
+// and the levels that DO have an envelope still stage.
+func TestStageEnvelopesAbsentDirSkipped(t *testing.T) {
 	base := t.TempDir()
 	bareSrc, _ := seedBareRepo(t, base)
-	branch := perRunBranch(t, "stage-missing")
+	branch := perRunBranch(t, "stage-skip-absent")
 	ws := setupWorkspace(t, bareSrc, branch)
+
+	// "present" has a real envelope; "absent" has no dir on the PVC (roll-up level).
+	writeEnvelopeFile(t, ws, "present", "PROJECT.md", []byte("# project\n"))
 
 	cfg := pushConfig{
 		Mode:           "push",
 		Branch:         branch,
-		CommitMessage:  "tide: stage missing envelope",
-		StageEnvelopes: "does-not-exist:phase/p9",
+		CommitMessage:  "tide: stage present, skip absent",
+		StageEnvelopes: "present:project/proj,absent:milestone/m9",
 		Workspace:      ws,
-		ProjectUID:     "p-stage-missing",
+		ProjectUID:     "p-stage-skip-absent",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("exit=%d, want 0 (an absent envelope dir must be skipped, not fail the push); stderr=%s", exit, stderr)
+	}
+	if se := string(stderr); !strings.Contains(se, "absent") || !strings.Contains(se, "skipping") {
+		t.Errorf("stderr must warn about the skipped absent level; got %s", se)
+	}
+	pr := readPushEnvelope(t, ws, "p-stage-skip-absent")
+	if pr.Reason == "artifact-stage-failed" {
+		t.Errorf("reason = %q, want NOT artifact-stage-failed (an absent dir is skipped, not a failure)", pr.Reason)
+	}
+	got := treePathsUnder(t, bareSrc, branch, ".tide/")
+	want := []string{".tide/planning/project/proj/PROJECT.md"}
+	if len(got) != len(want) {
+		t.Fatalf("under .tide/ got %v, want %v (present staged, absent skipped)", got, want)
+	}
+	if got[0] != want[0] {
+		t.Errorf(".tide path = %q, want %q", got[0], want[0])
+	}
+}
+
+// TestStageEnvelopesEmptyDirFailsLoud: the absent-dir skip only tolerates a wholly
+// missing dir. A dir that EXISTS but carries no top-level planning *.md is a
+// genuinely incomplete envelope (a real bug), so it still fails loud with reason
+// artifact-stage-failed (D-03) and pushes nothing.
+func TestStageEnvelopesEmptyDirFailsLoud(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-emptymd")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	// Dir exists (via a child json) but has NO top-level *.md → incomplete envelope.
+	writeEnvelopeFile(t, ws, "emptymd", "children/task-1.json", []byte(`{"kind":"Task"}`))
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage empty-md envelope",
+		StageEnvelopes: "emptymd:phase/p9",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-emptymd",
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
 	if exit == 0 {
-		t.Fatalf("exit=0, want nonzero for missing envelope dir; stderr=%s", stderr)
+		t.Fatalf("exit=0, want nonzero for an envelope dir with no *.md; stderr=%s", stderr)
 	}
-	pr := readPushEnvelope(t, ws, "p-stage-missing")
+	pr := readPushEnvelope(t, ws, "p-stage-emptymd")
 	if pr.Reason != "artifact-stage-failed" {
 		t.Errorf("envelope.reason = %q, want %q", pr.Reason, "artifact-stage-failed")
 	}
@@ -1148,7 +1198,7 @@ func TestStageEnvelopesMissingDirFailsLoud(t *testing.T) {
 		t.Fatalf("PlainOpen bareSrc: %v", err)
 	}
 	if _, refErr := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false); refErr == nil {
-		t.Errorf("bare repo has branch %s despite missing envelope dir", branch)
+		t.Errorf("bare repo has branch %s despite incomplete envelope", branch)
 	}
 }
 

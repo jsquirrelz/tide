@@ -269,8 +269,16 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			_, _ = reconcileN(r, nameA, 3)
 
 			// Drive B through its passes.
-			_, err := reconcileN(r, nameB, 4)
+			result, err := reconcileN(r, nameB, 4)
 			Expect(err).NotTo(HaveOccurred())
+
+			// The indegree-halt gate must park B with a BOUNDED RequeueAfter, not a
+			// bare ctrl.Result{}: relying purely on the edge-triggered dependents
+			// mapper stalls until the 10h resync when the informer cache lags (the
+			// RESUME-01/DISP-01 flake). A level-triggered requeue re-derives the
+			// global indegree until the cache converges.
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0),
+				"indegree-halt gate must requeue so a Pending task re-checks its predecessors deterministically")
 
 			var taskBObj tideprojectv1alpha2.Task
 			Expect(k8sClient.Get(ctx, nameB, &taskBObj)).To(Succeed())

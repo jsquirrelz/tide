@@ -28,13 +28,22 @@ jobs:
   kind-suites:
     name: Heavy kind suites (Layer B integration + kind_e2e e2e)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # v1.0.7: raised 45 → 110 to fit the grown Layer B suite. This job runs the
+    # SC-1 image smoke (~10m) + Layer B make test-int (60m step) + kind_e2e
+    # (25m step) sequentially; 45m could not cover all three once Phases 36/37
+    # pushed Layer B past ~30m (artifact-staging DASH-02 live cascade).
+    timeout-minutes: 110
     permissions:
       contents: read
     env:
       # Phase 02.1 / WR-09 / D-03: CI MUST set =1 so install failures fail the
       # build loudly (dev runs leave it unset = soft-skip).
       TIDE_REQUIRE_CONTROLLER: "1"
+      # Base dir the in-suite exportKindLogs() writes per-spec subdirs into; the
+      # upload step ships this path. In-suite export is the only capture that runs
+      # while the cluster is still alive (post-run `kind export logs` finds nothing
+      # after AfterSuite tears the cluster down).
+      KIND_LOGS_DIR: /tmp/kind-logs-tide-test
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
@@ -128,14 +137,21 @@ jobs:
           echo "PASS: git present in tide-demo-init"
 
       # Layer B kind integration tier (the kind half of TEST-02). The
-      # `timeout 300s` inside `make test-int` bounds only the `go test`
-      # invocation; image builds + kind cluster create are unbounded by design.
-      # The job-level timeout-minutes: 45 is the genuine ceiling.
-      - name: Layer B kind integration suite (make test-int)
-        timeout-minutes: 25
+      # `timeout $(INTEGRATION_TIMEOUT)` inside make test-int-kind (55m) bounds only
+      # the `go test` invocation; image builds + kind cluster create are
+      # unbounded by design. 25 → 60 (v1.0.7): Phases 36/37 grew Layer B past
+      # ~30m (artifact-staging DASH-02 live cascade), so the old 25m step killed it
+      # after 21m54s. 60m covers prep + the 45m Ginkgo ctx; the job-level
+      # timeout-minutes: 110 is the genuine ceiling.
+      #
+      # test-int-kind = Layer B only (no Layer A envtest) so a Layer A flake can't
+      # abort the kind setup before Layer B runs; Layer A is covered by the ci +
+      # Tests workflows on every push.
+      - name: Layer B kind integration suite (make test-int-kind)
+        timeout-minutes: 60
         run: |
           set -e
-          time make test-int
+          time make test-int-kind
 
       # TIDE's real e2e suite — kind_e2e-tagged specs (gate-flow + dashboard +
       # kind-setup) via helm chart install.

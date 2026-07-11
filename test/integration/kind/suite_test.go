@@ -98,11 +98,23 @@ const (
 	//     the two integration-miss specs) — run 6 observed an 1185s inner
 	//     wall hitting the 18m ctx mid-suite, skipping 12 specs including
 	//     both integration-miss specs (which then never executed at all).
-	//     Budget stays inside the workflow step timeout (35m − ~7m
-	//     prep/LayerA). skipIfCRDsOnlyMode now FAILS (not skips) on ctx
-	//     expiry, so re-tripping this budget is loud instead of a silent
+	//     That budget then sat inside the Phase-34-era 35m workflow step
+	//     (−~7m prep/LayerA). skipIfCRDsOnlyMode now FAILS (not skips) on
+	//     ctx expiry, so re-tripping this budget is loud instead of a silent
 	//     green.
-	kindTestTimeout = 25 * time.Minute
+	//   - v1.0.7 (Phase 37) bump → 45m: Phases 36/37 grew Layer B again — the
+	//     agent-identity chart spec plus the artifact-staging DASH-02 spec, the
+	//     tail hog, which drives a LIVE 4-level planner cascade over a real
+	//     http:// transport (a single 12m Eventually for the Project to reach
+	//     Complete). The suite is slow-but-passing (Phase 37 UAT 8/8), not
+	//     hanging. kind-sensitive run 29037860740 had make test-int killed by
+	//     the 35m CI STEP mid-artifact-staging ~30m in; nightly run 29085603242
+	//     by its 25m step after 21m54s of Layer B. 45m gives the grown spec wall
+	//     (~6m kind setup + ~30m specs) real headroom. The CI step budgets were
+	//     raised in lockstep (kind-sensitive 35m→60m step / 42m→65m job; nightly
+	//     kind step 25m→60m / job 45m→110m) so this Ginkgo ctx (45m) < go-test
+	//     50m < outer-shell 55m < CI step 60m — the innermost fires loudly first.
+	kindTestTimeout = 45 * time.Minute
 
 	// kindControllerNamespace is the namespace the tide-controller-manager
 	// Deployment installs into (config/default Kustomize manifest target).
@@ -1058,12 +1070,25 @@ func kubectlLogs(ns, podName, container string) string {
 }
 
 // exportKindLogs dumps kind cluster logs for CI debugging on failure.
+//
+// This in-suite export is the ONLY capture that runs while the cluster is still
+// alive: the CI workflows' own post-failure `kind export logs` step runs after
+// AfterSuite tears the cluster down and captures nothing ("No files were found").
+// So it must write somewhere the upload step ships. It writes per-spec subdirs
+// under KIND_LOGS_DIR (set by the workflows to the uploaded path); each call gets a
+// unique subdir so multiple spec failures in one run don't clobber each other's
+// logs (the run-3 stale-shared-kind-logs blocker). Locally, KIND_LOGS_DIR is unset
+// and it falls back to a per-cluster tmp base.
 func exportKindLogs() {
-	// Unique-per-run dir: `kind export logs` does NOT reliably overwrite a reused
-	// path, so a fixed kind-logs-<cluster> dir served stale prior-run logs (the run-3
-	// stale-shared-kind-logs blocker — controller log mtime lagged the run). Stamp the
-	// export so each run's logs are analyzable on their own.
-	logsDir := filepath.Join(os.TempDir(), fmt.Sprintf("kind-logs-%s-%d", kindClusterName, time.Now().Unix()))
+	base := os.Getenv("KIND_LOGS_DIR")
+	if base == "" {
+		base = filepath.Join(os.TempDir(), "kind-logs-"+kindClusterName)
+	}
+	logsDir := filepath.Join(base, fmt.Sprintf("spec-%d", time.Now().UnixNano()))
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		GinkgoWriter.Printf("Warning: mkdir kind logs dir %s failed: %v\n", logsDir, err)
+		return
+	}
 	cmd := exec.CommandContext(context.Background(), "kind", "export", "logs",
 		"--name", kindClusterName, logsDir)
 	out, err := cmd.CombinedOutput()

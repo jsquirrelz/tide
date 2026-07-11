@@ -610,6 +610,22 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exit
 	}
 
+	// go-git commits through the linked run worktree (opened with
+	// EnableDotGitCommonDir above) land their loose objects 0600/owner-only:
+	// go-git skips its fixPermissions→0444 chmod when the commondir object
+	// filesystem lacks billy.Chmod, and core.sharedRepository=group (set by the
+	// clone Job) is a go-git no-op. The uid-1000 executor task then cannot read
+	// the run-branch tip this push just wrote when it `git worktree add`s off it
+	// ("unable to open loose object <sha>: Permission denied" → "fatal: invalid
+	// reference"). Re-share the bare repo so the new objects and refs are
+	// group-readable by any pod in sharedFSGroup, mirroring the clone Job's own
+	// makeWorkspaceGroupShared. Best-effort and only when a new commit landed.
+	if newHash != oldHash {
+		if err := makeWorkspaceGroupShared(bareRepoPath); err != nil {
+			fmt.Fprintf(stderr, "tide-push: group-share bare repo after commit: %v\n", err)
+		}
+	}
+
 	// W10: compute the unified diff of the pushed commit against scanBase via
 	// newCommit.Patch(oldCommit).String(). The Patch.String() output uses
 	// `+ ` / `- ` line prefixes that gitleaks rules can match. When
@@ -1026,9 +1042,28 @@ func stageEnvelopeArtifacts(
 	for _, es := range stageEnvs {
 		srcDir := filepath.Join(cfg.Workspace, "envelopes", es.UID)
 		info, statErr := os.Stat(srcDir)
-		if statErr != nil || !info.IsDir() {
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				// A level can reach Succeeded via child roll-up (succession) without
+				// its OWN planner Job having run — that level legitimately produced no
+				// envelope on the PVC, so there is nothing to stage for it. Skip it with
+				// a loud warning rather than failing the whole boundary push; the run
+				// branch still pushes and the levels that DO have envelopes still stage.
+				// A dir that EXISTS but is empty/corrupt remains a hard failure below (a
+				// genuinely incomplete envelope is a real bug, not a missing artifact).
+				fmt.Fprintf(stderr,
+					"tide-push: stage-envelopes: envelope dir %s absent — level %s "+
+						"has no staged artifact (roll-up completion?); skipping\n",
+					srcDir, es.DestPrefix)
+				continue
+			}
 			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope dir %s missing or not a directory: %v\n", srcDir, statErr)
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: stat envelope dir %s: %v\n", srcDir, statErr)
+			return exitGenericFail
+		}
+		if !info.IsDir() {
+			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+			fmt.Fprintf(stderr, "tide-push: stage-envelopes: envelope path %s exists but is not a directory\n", srcDir)
 			return exitGenericFail
 		}
 

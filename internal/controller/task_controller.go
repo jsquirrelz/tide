@@ -504,7 +504,22 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 		if err := r.Status().Patch(ctx, task, patch); err != nil {
 			return taskGateResult{}, err
 		}
-		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
+		// Level-triggered re-check. This indegree gate is otherwise the ONLY dispatch
+		// gate that parks with a bare ctrl.Result{} (every other gate — rejected,
+		// parent-approval, budget, failure, reservation — carries a 5-30s
+		// RequeueAfter). Relying purely on the edge-triggered globalDependentsMapper
+		// stalls under cache lag: when a predecessor goes Succeeded, the mapper wakes
+		// this task once, but if the informer is still lagging the re-derived indegree
+		// is unchanged, the condition message is identical, meta.SetStatusCondition
+		// no-ops, the MergeFrom patch is empty → no resourceVersion bump → no watch
+		// event → no re-enqueue. The predecessor is now terminal (its watch never fires
+		// again) and there is no SyncPeriod (default 10h resync), so the task sat
+		// Pending until the 10h resync — the RESUME-01/DISP-01 flake. A bounded requeue
+		// re-derives the global indegree every 10s until the cache converges (idempotent
+		// no-op patch while still blocked), making dispatch deterministic under
+		// contention without depending on a single mapper edge landing against a fresh
+		// cache.
+		return taskGateResult{shouldHalt: true, result: ctrl.Result{RequeueAfter: 10 * time.Second}}, nil
 	}
 
 	// Plan 04-05 Task 2: PauseBetweenWaves dispatch block. PlanReconciler
@@ -732,8 +747,20 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 
 	// Step 10: Patch Status.Attempt BEFORE Create (Pitfall 2 mitigation — prevents
 	// drift if client.Create succeeds but the status patch fails on transient error).
+	//
+	// Optimistic lock (DISP-01/RESUME-01 dispatch-clobber fix): the dispatch
+	// decision above was made from a cache read of `task` that may be stale under
+	// informer lag. If a predecessor's completion (or, in the resume path, an
+	// out-of-band Succeeded write) has meanwhile driven THIS task to a terminal
+	// phase in etcd, a non-locked MergeFrom patch would blindly regress it back to
+	// a dispatch state — clobbering the terminal status and permanently stalling
+	// any dependent whose indegree can then never reach 0. Sending the read
+	// resourceVersion as a precondition makes that stale commit fail with Conflict
+	// instead; the reconcile requeues, re-reads the now-terminal phase, and
+	// gateChecks' terminal short-circuit halts the redundant dispatch. Deterministic:
+	// the illegal Succeeded→Running transition is refused at its source.
 	{
-		patch := client.MergeFrom(task.DeepCopy())
+		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		task.Status.Attempt = spec.attempt
 		now := metav1.Now()
 		task.Status.StartedAt = &now
@@ -791,8 +818,11 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	}
 
 	// Step 12: Patch Status.Phase=Running + Condition Running=True, Reason=Dispatched.
+	// Optimistic lock (same dispatch-clobber guard as Step 10): if the task reached
+	// a terminal phase between Step 10 and here, refuse the Running regression with
+	// Conflict rather than clobbering it; the reconcile requeues and short-circuits.
 	{
-		patch := client.MergeFrom(task.DeepCopy())
+		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		task.Status.Phase = "Running"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha2.ConditionRunning,

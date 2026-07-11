@@ -18,8 +18,8 @@ CONTAINER_TOOL ?= docker
 
 # Integration test budget knobs. The outer timeout protects the shell command;
 # KIND_GO_TEST_TIMEOUT must exceed the kind suite's helm --wait window.
-INTEGRATION_TIMEOUT ?= 2700s
-KIND_GO_TEST_TIMEOUT ?= 40m
+INTEGRATION_TIMEOUT ?= 3300s
+KIND_GO_TEST_TIMEOUT ?= 50m
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -114,45 +114,47 @@ test-e2e-kind: tide-cli ## Phase 4 plan 04-14 kind E2E suite (dashboard + gate-f
 
 ##@ Integration tests (TEST-02 — Phase 2)
 
-.PHONY: test-int test-int-fast test-int-kind-prep
+.PHONY: test-int test-int-kind test-int-fast test-int-kind-prep
 
 test-int: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run full integration test suite: Layer A (envtest) + Layer B (kind). Requires Docker + kind.
-	# Debug session nightly-int-flake-timeout — Failure 1 + Failure 8 fixes: Layer A
-	# and Layer B are invoked SEPARATELY, and BOTH carry -ginkgo.flake-attempts=3 to
-	# ride out the same contention-flaky class on a cold 2-core nightly runner
-	# (Layer A flaked on ART-01 init-Job creation; Layer B flaked on the ART-06 push
-	# lease spec — push-Job-create + Eventually status poll). The per-push
-	# `test-int-fast` already guards Layer A this way.
+	# NO FLAKE TOLERANCE. Layer A and Layer B are invoked SEPARATELY (set -e, so a
+	# failure in EITHER fails the target) and NEITHER retries. A "flake" is a bug: a
+	# non-deterministic spec masks a real defect and delays detection. The Phase
+	# 36/37 kind regression (tide-push artifact-stage-failed) hid for days behind
+	# -ginkgo.flake-attempts=3 — the retries re-ran each failing spec up to 3×, which
+	# tripled its wall time and blew the suite budget so tail specs expired too,
+	# turning a deterministic red into noise. If a spec is non-deterministic, fix its
+	# root cause (timeout, race, ordering); do not paper over it with a retry.
 	#
-	# Why the flag is VALID on the kind package (corrects the prior comment here):
-	# -ginkgo.flake-attempts is registered by Ginkgo's test binary, and
-	# ./test/integration/kind/... is a SINGLE package that imports Ginkgo
-	# (suite_test.go calls RunSpecs). The CLAUDE.md "mixed package" gotcha refers to
-	# MULTI-package `go test ./...` sweeps spanning packages that DON'T import Ginkgo
-	# — there the flag is unknown to those binaries and go test errors "flag provided
-	# but not defined". A single Ginkgo-importing package does not hit that. The
-	# plain go-test contract tests in this package (projects_pvc_test.go's
-	# helm-template assertions) are UNAFFECTED: flake-attempts only retries Ginkgo
-	# specs; plain go-tests run once. (Empirically: `go test
-	# ./test/integration/kind/... -ginkgo.flake-attempts=3 -run '^$$'` -> `ok ... [no
-	# tests to run]`.) This gives Layer B the same contention-flake protection as
-	# Layer A.
-	# Both invocations run under one shell so a failure in EITHER fails the target
-	# (set -e); the kind go-test timeout still owns the helm --wait window, with
-	# ample headroom (KIND_GO_TEST_TIMEOUT=40m / INTEGRATION_TIMEOUT=45m cover Layer
-	# B's ~18m baseline (19 non-import specs) + 3 import resume tiers (~15m) plus
-	# up-to-3 retries of one flaked spec).
+	# The kind go-test timeout still owns the helm --wait window, with ample headroom
+	# (KIND_GO_TEST_TIMEOUT=50m / INTEGRATION_TIMEOUT=55m cover Layer B's grown wall —
+	# Phases 36/37 added the agent-identity chart spec + the artifact-staging DASH-02
+	# cascade (a live 4-level planner run, ~12m tail) — on top of the ~18m baseline +
+	# 3 import resume tiers).
 	@set -e; \
 	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
 	export TIDE_BINARY="$$(pwd)/bin/tide"; \
-	echo "=== Layer A (envtest, Ginkgo-only, flake-attempts=3) ==="; \
-	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'; \
-	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, flake-attempts=3) ==="; \
-	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v -ginkgo.flake-attempts=3
+	echo "=== Layer A (envtest, Ginkgo-only, no retries) ==="; \
+	go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v --ginkgo.label-filter='envtest'; \
+	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, no retries) ==="; \
+	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
 
-test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). ~90s clean locally, but -timeout=10m gives headroom for -ginkgo.flake-attempts=3 retries on slow/contended CI runners (a 2m go-test timeout killed the suite mid-retry). The flag retries the contention-flaky class; Ginkgo-only pkg so the flag is valid here.
+test-int-kind: manifests generate fmt vet setup-envtest test-int-kind-prep ## Run ONLY the Layer B kind tier (no Layer A envtest). The kind-sensitive + nightly workflows use this so a Layer A envtest flake can't abort the ~40m kind setup before Layer B runs. Layer A stays covered per-push by test-int-fast / the ci + Tests workflows. Requires Docker + kind.
+	# NO FLAKE TOLERANCE (see test-int). Layer B only: Layer A envtest needs no kind,
+	# so running it inside the expensive kind job only couples Layer B to Layer A
+	# flakes and wastes the kind setup when one trips (run 29111456871 burned ~40m of
+	# kind setup then failed on a 2-min Layer A RESUME-01 flake, never reaching Layer
+	# B). bin/tide + the loaded images come from test-int-kind-prep; KUBEBUILDER_ASSETS
+	# is exported for parity with test-int (the kind suite talks to the real cluster).
+	@set -e; \
+	export KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)"; \
+	export TIDE_BINARY="$$(pwd)/bin/tide"; \
+	echo "=== Layer B (kind: Ginkgo specs + plain go-test contract tests, no retries) ==="; \
+	timeout $(INTEGRATION_TIMEOUT) go test ./test/integration/kind/... -v -timeout=$(KIND_GO_TEST_TIMEOUT) -ginkgo.v
+
+test-int-fast: manifests generate fmt vet setup-envtest ## Run Layer A integration tests only (envtest; no Docker/kind needed). ~90s clean locally; -timeout=10m gives headroom on slow/contended CI runners. NO flake-attempts — a non-deterministic envtest spec is a bug to fix, not retry.
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v -ginkgo.flake-attempts=3 --ginkgo.label-filter='envtest'
+		go test ./test/integration/envtest/... -v -timeout=10m -ginkgo.v --ginkgo.label-filter='envtest'
 
 test-int-kind-prep: ## Build manager + stub-subagent + credproxy + tide-push + tide-reporter + tide-import Docker images and load them into the tide-test kind cluster. Also builds bin/tide for the kind E2E (D-10, 29-04).
 	# Phase 29 plan 29-04 (D-10): build the tide CLI binary so the kind E2E can
