@@ -287,6 +287,152 @@ spec:
         - message: a phase cannot depend on itself
           rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
     served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha3
+    schema:
+      openAPIV3Schema:
+        description: Phase is the Schema for the phases API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Phase
+            properties:
+              dependsOn:
+                description: |-
+                  DependsOn lists any level node (Milestone/Phase/Plan/Task) in this Project
+                  that this Phase's execution depends on. Entries may target any node at any
+                  hierarchy level within the Project (any-level targets, D-02). Coarse scope
+                  refs are fan-out expanded by the Phase 24 assembler (D-06).
+                items:
+                  minLength: 1
+                  type: string
+                type: array
+                x-kubernetes-validations:
+                - message: dependsOn entries must not be empty strings
+                  rule: '!self.exists(d, d == '''')'
+              milestoneRef:
+                description: MilestoneRef is the name of the owning Milestone (same
+                  namespace).
+                minLength: 1
+                type: string
+              sharedContext:
+                description: |-
+                  SharedContext is the wave-scoped shared context string stamped by the
+                  orchestrator at object creation time (Phase 20 D-05). Byte-identical
+                  across all objects in the same wave. Read by BuildPlannerEnvelope when
+                  dispatching this object's planner Job (D-07 uniform path).
+                type: string
+            required:
+            - milestoneRef
+            type: object
+          status:
+            description: status defines the observed state of Phase
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              phase:
+                type: string
+              phaseRolledUpUID:
+                description: |-
+                  PhaseRolledUpUID is the name of this Phase's planner Job whose Usage
+                  was successfully rolled up into the Project budget. Prevents double-counting
+                  when the reporter Job has TTL-GC'd before a reconcile re-observes it.
+                  Mirrors the project-level budget rollup marker at the Phase level
+                  per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: a phase cannot depend on itself
+          rule: '!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)'
+    served: true
     storage: true
     subresources:
       status: {}

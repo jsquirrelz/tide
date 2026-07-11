@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -29,19 +29,6 @@ type SecretRefs struct {
 	// GitCredentials is the Secret name carrying git push credentials (PAT or SSH key).
 	// +optional
 	GitCredentials string `json:"gitCredentials,omitempty"`
-}
-
-// ModelSelection picks per-level model identifiers.
-// Phase 1 ships the field shape; Phase 2+ consumes.
-type ModelSelection struct {
-	// +optional
-	Milestone string `json:"milestone,omitempty"`
-	// +optional
-	Phase string `json:"phase,omitempty"`
-	// +optional
-	Plan string `json:"plan,omitempty"`
-	// +optional
-	Task string `json:"task,omitempty"`
 }
 
 // GatePolicy is one of "auto" | "approve" | "pause" — per-level human gate.
@@ -144,6 +131,20 @@ type PlanAdmissionConfig struct {
 // → Helm-chart default. Vendor + model are orthogonal axes — Image picks the
 // vendor (via the container image's bundled Subagent impl); Model picks the
 // model identifier passed to that vendor's CLI/SDK.
+//
+// Levels.{level} keys name the ARTIFACT the dispatch produces, not the CR
+// issuing the dispatch (D-02 artifact-first semantic rename, v1alpha3):
+// Levels.Milestone resolves the dispatch that authors MILESTONE.md (issued
+// from the Project reconciler); Levels.Phase resolves the dispatch that
+// authors phase briefs (issued from the Milestone reconciler); Levels.Plan
+// resolves the dispatch that authors PLAN.md and the task DAG (issued from
+// both the Phase and Plan reconcilers — two dispatches share this one slot);
+// Levels.Task resolves the task-executor dispatch (issued from the Task
+// reconciler). Prior schema revisions named each key after the CR issuing
+// the dispatch instead (e.g. the MILESTONE.md dispatch resolved under a
+// mismatched "project" level string that no Levels key ever named), which
+// read backwards from what operators expect — see
+// docs/migration/v1alpha2-to-v1alpha3.md.
 type SubagentConfig struct {
 	// Image is the default subagent image reference for all levels.
 	// Example: "ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0".
@@ -161,21 +162,27 @@ type SubagentConfig struct {
 }
 
 // LevelOverrides carries per-level provider/model overrides (Phase 3 D-C2).
-// Each pointer is nil when no override is set for that level.
+// Each pointer is nil when no override is set for that level. Keys name the
+// artifact each level's dispatch produces (D-02 artifact-first semantic
+// rename, v1alpha3) — the Go field names and JSON tags are unchanged from
+// v1alpha2; only the meaning attached to each key moved.
 type LevelOverrides struct {
-	// Milestone optionally overrides settings for the milestone planner.
+	// Milestone optionally overrides settings for the planner that authors
+	// MILESTONE.md (the Project-level planning dispatch).
 	// +optional
 	Milestone *LevelConfig `json:"milestone,omitempty"`
 
-	// Phase optionally overrides settings for the phase planner.
+	// Phase optionally overrides settings for the planner that authors phase
+	// briefs.
 	// +optional
 	Phase *LevelConfig `json:"phase,omitempty"`
 
-	// Plan optionally overrides settings for the plan planner.
+	// Plan optionally overrides settings for the planner that authors
+	// PLAN.md and the task DAG (two dispatches share this one slot).
 	// +optional
 	Plan *LevelConfig `json:"plan,omitempty"`
 
-	// Task optionally overrides settings for the task executor.
+	// Task optionally overrides settings for the task executor (diffs).
 	// +optional
 	Task *LevelConfig `json:"task,omitempty"`
 }
@@ -356,16 +363,18 @@ type BoundaryPushStatus struct {
 // ProjectSpec defines the desired state of Project.
 // +kubebuilder:validation:XValidation:rule="self.targetRepo.startsWith('http://') || self.targetRepo.startsWith('https://') || self.targetRepo.startsWith('git@')",message="targetRepo must be an http(s) or SSH (git@) URL; file:// is not a supported production transport (go-git's file:// transport requires a system git binary absent from production images)"
 type ProjectSpec struct {
-	// SchemaRevision identifies the v1alpha2 schema shape. Required in v1alpha2;
-	// its absence on a reconciled object signals a v1alpha1-authored Project that
-	// slipped into etcd before the CRD upgrade. The Plan-03 Project reconciler
-	// head guard checks this field: if SchemaRevision != "v1alpha2" the reconciler
-	// fail-closes with RequiresReinstall condition + reconcile.TerminalError (no
-	// requeue). Reinstall: kubectl delete project <name> && kubectl apply -f
-	// <project.yaml> (with SchemaRevision: v1alpha2 set). This field is absent in
-	// v1alpha1 ProjectSpec, making it the clean discriminator for D-09.
+	// SchemaRevision identifies the v1alpha3 schema shape. Required in
+	// v1alpha3; its absence on a reconciled object signals a Project
+	// authored under a prior schema revision that slipped into etcd before
+	// the CRD upgrade. The Project reconciler head guard checks this field:
+	// if SchemaRevision != "v1alpha3" the reconciler fail-closes with
+	// RequiresReinstall condition + reconcile.TerminalError (no requeue).
+	// Reinstall: kubectl delete project <name> && kubectl apply -f
+	// <project.yaml> (with SchemaRevision: v1alpha3 set). This field is
+	// absent from pre-v1alpha3 ProjectSpec shapes, making it the clean
+	// discriminator for D-09. See docs/migration/v1alpha2-to-v1alpha3.md.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=v1alpha2
+	// +kubebuilder:validation:Enum=v1alpha3
 	SchemaRevision string `json:"schemaRevision"`
 
 	// TargetRepo is the URL of the repo this Project operates on. Supports
@@ -387,10 +396,6 @@ type ProjectSpec struct {
 	// SecretRefs references K8s Secrets for credentials (AUTH-01 — Phase 3).
 	// +optional
 	SecretRefs SecretRefs `json:"secretRefs,omitempty"`
-
-	// ModelSelection picks per-level model identifiers (Phase 2+).
-	// +optional
-	ModelSelection ModelSelection `json:"modelSelection,omitempty"`
 
 	// Gates declares per-level human gate policy (Phase 4).
 	// +optional
@@ -513,6 +518,7 @@ type ProjectStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"

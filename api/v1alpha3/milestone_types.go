@@ -14,22 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PhaseSpec defines the desired state of Phase.
-type PhaseSpec struct {
-	// MilestoneRef is the name of the owning Milestone (same namespace).
+// MilestoneSpec defines the desired state of Milestone.
+type MilestoneSpec struct {
+	// ProjectRef is the name of the owning Project (same namespace).
 	// +kubebuilder:validation:MinLength=1
-	MilestoneRef string `json:"milestoneRef"`
+	ProjectRef string `json:"projectRef"`
 
 	// DependsOn lists any level node (Milestone/Phase/Plan/Task) in this Project
-	// that this Phase's execution depends on. Entries may target any node at any
-	// hierarchy level within the Project (any-level targets, D-02). Coarse scope
-	// refs are fan-out expanded by the Phase 24 assembler (D-06).
+	// that this Milestone's execution depends on. Entries may target any node at
+	// any hierarchy level within the Project (any-level targets, D-02). Coarse
+	// scope refs are fan-out expanded by the Phase 24 assembler (D-06).
+	// Progressive refinement (D-03) enables coarse-to-fine dependency narrowing
+	// as deeper structure materializes.
 	// +optional
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="!self.exists(d, d == '')",message="dependsOn entries must not be empty strings"
@@ -39,13 +41,15 @@ type PhaseSpec struct {
 	// orchestrator at object creation time (Phase 20 D-05). Byte-identical
 	// across all objects in the same wave. Read by BuildPlannerEnvelope when
 	// dispatching this object's planner Job (D-07 uniform path).
+	// Vestigial at the Milestone level (no parent planner above Project) but
+	// kept uniform to avoid a level-conditional branch (D-07).
 	// +optional
 	SharedContext string `json:"sharedContext,omitempty"`
 }
 
-// PhaseStatus defines the observed state of Phase.
+// MilestoneStatus defines the observed state of Milestone.
 // PERSIST-02 enforced: NO aggregate fields.
-type PhaseStatus struct {
+type MilestoneStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
@@ -54,49 +58,50 @@ type PhaseStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// PhaseRolledUpUID is the name of this Phase's planner Job whose Usage
+	// MilestoneRolledUpUID is the name of this Milestone's planner Job whose Usage
 	// was successfully rolled up into the Project budget. Prevents double-counting
 	// when the reporter Job has TTL-GC'd before a reconcile re-observes it.
-	// Mirrors the project-level budget rollup marker at the Phase level
+	// Mirrors the project-level budget rollup marker at the Milestone level
 	// per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
 	// +optional
-	PhaseRolledUpUID string `json:"phaseRolledUpUID,omitempty"`
+	MilestoneRolledUpUID string `json:"milestoneRolledUpUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a phase cannot depend on itself"
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.dependsOn) || !(self.metadata.name in self.spec.dependsOn)",message="a milestone cannot depend on itself"
 
-// Phase is the Schema for the phases API
-type Phase struct {
+// Milestone is the Schema for the milestones API
+type Milestone struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of Phase
+	// spec defines the desired state of Milestone
 	// +required
-	Spec PhaseSpec `json:"spec"`
+	Spec MilestoneSpec `json:"spec"`
 
-	// status defines the observed state of Phase
+	// status defines the observed state of Milestone
 	// +optional
-	Status PhaseStatus `json:"status,omitzero"`
+	Status MilestoneStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// PhaseList contains a list of Phase
-type PhaseList struct {
+// MilestoneList contains a list of Milestone
+type MilestoneList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []Phase `json:"items"`
+	Items           []Milestone `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Phase{}, &PhaseList{})
+	SchemeBuilder.Register(&Milestone{}, &MilestoneList{})
 }

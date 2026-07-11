@@ -104,17 +104,21 @@ func TestBaseRefHasNoDefaultMarker(t *testing.T) {
 }
 
 // TestProjectCRDSchemaHasBaseRefBothVersions asserts the generated CRD YAML
-// carries baseRef (under spec.git) and baseSHA (under status.git) in BOTH the
-// v1alpha1 and v1alpha2 version blocks — exactly one occurrence each per block,
-// so a count of 2 proves both-version presence (only the Project CRD declares
-// these fields).
+// carries baseRef (under spec.git) and baseSHA (under status.git) in every
+// version block — exactly one occurrence each per block, so the count must
+// equal the number of version blocks in the generated CRD to prove
+// all-version presence (only the Project CRD declares these fields).
+// v1alpha1/v1alpha2/v1alpha3 all carry the field during Phase 40's
+// transitional 3-version window (D-01); the count tracks that, not a
+// hardcoded 2.
 func TestProjectCRDSchemaHasBaseRefBothVersions(t *testing.T) {
 	crd := readProjectCRD(t)
-	if got := strings.Count(crd, "baseRef:"); got != 2 {
-		t.Errorf("config/crd baseRef: occurrences = %d, want 2 (one per version block); `make manifests` stale or a version block dropped it", got)
+	wantVersions := strings.Count(crd, "name: v1alpha")
+	if got := strings.Count(crd, "baseRef:"); got != wantVersions {
+		t.Errorf("config/crd baseRef: occurrences = %d, want %d (one per version block); `make manifests` stale or a version block dropped it", got, wantVersions)
 	}
-	if got := strings.Count(crd, "baseSHA:"); got != 2 {
-		t.Errorf("config/crd baseSHA: occurrences = %d, want 2 (one per version block)", got)
+	if got := strings.Count(crd, "baseSHA:"); got != wantVersions {
+		t.Errorf("config/crd baseSHA: occurrences = %d, want %d (one per version block)", got, wantVersions)
 	}
 }
 
@@ -122,12 +126,14 @@ func TestProjectCRDSchemaHasBaseRefBothVersions(t *testing.T) {
 // baseRef landed in the regenerated CRD YAML (analog to the repoURL pattern
 // test at phase3_schema_test.go:230). The pattern rejects leading '-' (argument
 // injection, T-35-01), spaces, and git-forbidden metacharacters. It must appear
-// once per version block.
+// once per version block (see TestProjectCRDSchemaHasBaseRefBothVersions for
+// why the count tracks the live version-block count rather than a hardcoded 2).
 func TestProjectCRDSchemaHasBaseRefPattern(t *testing.T) {
 	crd := readProjectCRD(t)
+	wantVersions := strings.Count(crd, "name: v1alpha")
 	const want = `pattern: ^[A-Za-z0-9][A-Za-z0-9._+@/-]*$`
-	if got := strings.Count(crd, want); got != 2 {
-		t.Errorf("config/crd baseRef pattern %q occurrences = %d, want 2 (one per version block); marker missing or stale", want, got)
+	if got := strings.Count(crd, want); got != wantVersions {
+		t.Errorf("config/crd baseRef pattern %q occurrences = %d, want %d (one per version block); marker missing or stale", want, got, wantVersions)
 	}
 	if !strings.Contains(crd, "maxLength: 250") {
 		t.Errorf("config/crd missing `maxLength: 250` bound on baseRef (T-35-04 regex-cost bound)")
