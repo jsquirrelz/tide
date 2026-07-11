@@ -42,7 +42,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Prompt File (PROMPT)
 
-- [ ] **PROMPT-01**: Operator can pass `--prompt-file` to `tide apply` — the CLI inlines the file into `spec.outcomePrompt` (no CRD change; ConfigMap-ref union stays a compatible later addition)
+- [x] **PROMPT-01**: Operator can pass `--prompt-file` to `tide apply` — the CLI inlines the file into `spec.outcomePrompt` (no CRD change; ConfigMap-ref union stays a compatible later addition)
 
 ### Dashboard Visibility (DASH)
 
@@ -53,8 +53,8 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Telemetry Setup (TELEM)
 
-- [ ] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
-- [ ] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
+- [x] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
+- [x] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
 - [x] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
 
 ### Tech-Debt Carry (DEBT)
@@ -120,9 +120,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COST-01 | Phase 38 | Complete |
 | COST-02 | Phase 38 | Complete |
 | COST-03 | Phase 38 | Complete |
-| PROMPT-01 | Phase 38 | Pending |
-| TELEM-01 | Phase 38 | Pending |
-| TELEM-02 | Phase 38 | Pending |
+| PROMPT-01 | Phase 38 | Complete |
+| TELEM-01 | Phase 38 | Complete |
+| TELEM-02 | Phase 38 | Complete |
 | TELEM-03 | Phase 38 | Complete |
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
