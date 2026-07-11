@@ -1913,6 +1913,12 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 					return ctrl.Result{}, fmt.Errorf("patch PlannerRolledUpUID: %w", mErr)
 				}
 			}
+			// Phase 38 COST-02: surface an unknown-model pricing fallback carried
+			// on the envelope — condition + metric, bounded by the same
+			// exactly-once rollup guards. Non-fatal: informational only.
+			if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+				logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "project", project.Name)
+			}
 		}
 	}
 
