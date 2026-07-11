@@ -236,7 +236,12 @@ type pushResult struct {
 }
 
 const (
-	envelopeAPIVersion = "tideproject.k8s/v1alpha1"
+	// envelopeAPIVersion is a hand-synced independent literal: tide-push
+	// deliberately does NOT import pkg/dispatch (documented independence).
+	// MUST be kept in sync with pkgdispatch.APIVersionV1Alpha1
+	// (dispatch.tideproject.k8s/v1alpha1, decoupled from the CRD group per
+	// D-08 — plan 40-02).
+	envelopeAPIVersion = "dispatch.tideproject.k8s/v1alpha1"
 	envelopeKind       = "PushResult"
 	// envelopeKindClone is the Kind clone-mode envelopes carry (Phase 35 D-05).
 	// The controller parses by reason/fields, not Kind, but a distinct Kind

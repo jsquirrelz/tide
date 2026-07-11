@@ -245,7 +245,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			pushJobName := fmt.Sprintf("tide-push-%s", got.UID)
 			createPushJob(pushJobName, "default", got.Name, got.UID)
 			createPushPodWithEnvelope(pushJobName, "default", pushResultMirror{
-				APIVersion: "tideproject.k8s/v1alpha1",
+				APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 				Kind:       "PushResult",
 				ProjectUID: string(got.UID),
 				ExitCode:   10,
@@ -315,7 +315,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			pushJobName := fmt.Sprintf("tide-push-%s", got.UID)
 			createPushJob(pushJobName, "default", got.Name, got.UID)
 			createPushPodWithEnvelope(pushJobName, "default", pushResultMirror{
-				APIVersion: "tideproject.k8s/v1alpha1",
+				APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 				Kind:       "PushResult",
 				ProjectUID: string(got.UID),
 				ExitCode:   11,

@@ -138,7 +138,7 @@ func TestSeedTagCompatibility(t *testing.T) {
 // TestSHA256Determinism verifies computeEnvelopeSHA256 returns lowercase hex
 // and is stable across repeated calls.
 func TestSHA256(t *testing.T) {
-	input := []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut"}`)
+	input := []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut"}`)
 
 	sum1 := computeEnvelopeSHA256(input)
 	sum2 := computeEnvelopeSHA256(input)
@@ -174,7 +174,7 @@ func TestSHA256(t *testing.T) {
 func TestStampChildCount(t *testing.T) {
 	t.Run("stamps legacy shape", func(t *testing.T) {
 		// Legacy: childCount absent (omitempty), 3 children present.
-		raw := []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t1","exitCode":0,"childCRDs":[{"apiVersion":"x","kind":"Milestone","name":"ms-01","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-02","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-03","spec":{}}]}`)
+		raw := []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t1","exitCode":0,"childCRDs":[{"apiVersion":"x","kind":"Milestone","name":"ms-01","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-02","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-03","spec":{}}]}`)
 
 		var warnBuf bytes.Buffer
 		repaired, err := stampChildCount(raw, &warnBuf)
@@ -201,7 +201,7 @@ func TestStampChildCount(t *testing.T) {
 
 	t.Run("leaves already-stamped unchanged", func(t *testing.T) {
 		// childCount=2, 2 children — correct, no repair needed.
-		raw := []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t2","exitCode":0,"childCount":2,"childCRDs":[{"apiVersion":"x","kind":"Milestone","name":"ms-01","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-02","spec":{}}]}`)
+		raw := []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t2","exitCode":0,"childCount":2,"childCRDs":[{"apiVersion":"x","kind":"Milestone","name":"ms-01","spec":{}},{"apiVersion":"x","kind":"Milestone","name":"ms-02","spec":{}}]}`)
 
 		var warnBuf bytes.Buffer
 		result, err := stampChildCount(raw, &warnBuf)
@@ -219,7 +219,7 @@ func TestStampChildCount(t *testing.T) {
 
 	t.Run("leaves executor shape unchanged", func(t *testing.T) {
 		// Executor: no childCRDs, childCount=0 — this is legitimate, not a legacy issue.
-		raw := []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t3","exitCode":0}`)
+		raw := []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"t3","exitCode":0}`)
 
 		var warnBuf bytes.Buffer
 		result, err := stampChildCount(raw, &warnBuf)

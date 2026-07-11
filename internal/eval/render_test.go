@@ -38,7 +38,7 @@ import (
 // with the (role, level) production actually dispatches it under, rather than a
 // single planner/plan body that production never sends.
 var baseEnvelope = pkgdispatch.EnvelopeIn{
-	APIVersion:          "tideproject.k8s/v1alpha1",
+	APIVersion:          pkgdispatch.APIVersionV1Alpha1,
 	Kind:                "TaskEnvelopeIn",
 	TaskUID:             "eval-fixture-uid-000",
 	Prompt:              "EVAL FIXTURE: do not submit",

@@ -80,7 +80,7 @@ var templates = []struct{ role, level, name string }{
 // production actually dispatches it under (e.g. the executor as
 // "executor"/"task"), matching the offline render_test.go fixture exactly.
 var baseEnvelope = pkgdispatch.EnvelopeIn{
-	APIVersion:          "tideproject.k8s/v1alpha1",
+	APIVersion:          pkgdispatch.APIVersionV1Alpha1,
 	Kind:                pkgdispatch.KindTaskEnvelopeIn,
 	TaskUID:             "eval-fixture-uid-000",
 	Prompt:              "EVAL FIXTURE: do not submit",

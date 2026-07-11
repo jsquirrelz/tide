@@ -191,7 +191,7 @@ var _ = Describe("Phase 9 — reporter materialize (envtest)", Label("envtest", 
 			// Fixture out.json that mirrors what both stub and real subagent write.
 			// Both serialize ChildCRDs as a JSON array of ChildCRDSpec objects with Kind/Name/Spec.
 			fixtureJSON := `{
-				"apiVersion": "tideproject.k8s/v1alpha1",
+				"apiVersion": "dispatch.tideproject.k8s/v1alpha1",
 				"kind": "TaskEnvelopeOut",
 				"taskUID": "task-uid-tc3",
 				"exitCode": 0,

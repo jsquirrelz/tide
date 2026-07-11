@@ -377,16 +377,39 @@ func TestValidateAPIVersionKind_AcceptsOut(t *testing.T) {
 }
 
 // TestEnvelopeIn_Constants asserts that the exported constants carry the
-// expected literal values per D-A3.
+// expected literal values per D-A3. D-08: the envelope contract group is
+// decoupled from the CRD group ("dispatch.tideproject.k8s" subdomain, not
+// "tideproject.k8s") — the version component stays v1alpha1.
 func TestEnvelopeIn_Constants(t *testing.T) {
-	if APIVersionV1Alpha1 != "tideproject.k8s/v1alpha1" {
-		t.Errorf("APIVersionV1Alpha1 = %q, want %q", APIVersionV1Alpha1, "tideproject.k8s/v1alpha1")
+	if APIVersionV1Alpha1 != "dispatch.tideproject.k8s/v1alpha1" {
+		t.Errorf("APIVersionV1Alpha1 = %q, want %q", APIVersionV1Alpha1, "dispatch.tideproject.k8s/v1alpha1")
 	}
 	if KindTaskEnvelopeIn != "TaskEnvelopeIn" {
 		t.Errorf("KindTaskEnvelopeIn = %q, want %q", KindTaskEnvelopeIn, "TaskEnvelopeIn")
 	}
 	if KindTaskEnvelopeOut != "TaskEnvelopeOut" {
 		t.Errorf("KindTaskEnvelopeOut = %q, want %q", KindTaskEnvelopeOut, "TaskEnvelopeOut")
+	}
+}
+
+// TestValidateAPIVersionKind_RejectsOldCRDGroupString is plan 40-02 Task 1
+// Test 2 (D-08): the pre-decoupling group string "tideproject.k8s/v1alpha1"
+// (the CRD group, not the dispatch-contract group) must be rejected by
+// ValidateAPIVersionKind now that the envelope contract lives at
+// "dispatch.tideproject.k8s/v1alpha1". This pins the drift boundary — a
+// stale subagent image or fixture using the old CRD-group string fails
+// closed instead of silently being accepted.
+func TestValidateAPIVersionKind_RejectsOldCRDGroupString(t *testing.T) {
+	err := ValidateAPIVersionKind("tideproject.k8s/v1alpha1", KindTaskEnvelopeIn, KindTaskEnvelopeIn)
+	if err == nil {
+		t.Fatal("expected error for old CRD-group apiVersion string, got nil")
+	}
+	var target *UnknownAPIVersionError
+	if !errors.As(err, &target) {
+		t.Fatalf("expected *UnknownAPIVersionError, got %T: %v", err, err)
+	}
+	if target.APIVersion != "tideproject.k8s/v1alpha1" {
+		t.Errorf("UnknownAPIVersionError.APIVersion = %q, want %q", target.APIVersion, "tideproject.k8s/v1alpha1")
 	}
 }
 

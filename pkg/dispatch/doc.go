@@ -20,16 +20,26 @@ limitations under the License.
 // envelope consumed by the controller on Job completion.
 //
 // The contract is versioned by the apiVersion / kind discriminator (D-A3):
-// every envelope JSON carries explicit "apiVersion: tideproject.k8s/v1alpha1"
-// and "kind: TaskEnvelopeIn | TaskEnvelopeOut". Consumers MUST call
+// every envelope JSON carries explicit
+// "apiVersion: dispatch.tideproject.k8s/v1alpha1" and
+// "kind: TaskEnvelopeIn | TaskEnvelopeOut". Consumers MUST call
 // [ValidateAPIVersionKind] before processing any field. Unknown apiVersion
 // values return [*UnknownAPIVersionError]; unknown kind values return
 // [*UnknownKindError].
 //
+// The group "dispatch.tideproject.k8s" is deliberately decoupled from the CRD
+// group "tideproject.k8s" (D-08): this is a K8s-shaped document that is not
+// itself a served API resource, so it gets its own subdomain group — the same
+// pattern kubeadm uses for its own config-file API group (kubeadm.k8s.io),
+// distinct from the core Kubernetes resource APIs it drives. Decoupling means
+// a CRD version crank (v1alpha1 -> v1alpha2 -> v1alpha3 -> ...) can never
+// collide with or accidentally bump the subagent-image envelope contract —
+// the two lifecycles are now independent by construction.
+//
 // JSON tag stability is the public contract. Field names under v1alpha1 are
 // frozen after this plan ships. Future breaking changes (e.g., new required
-// fields) ride a v1beta1 apiVersion bump via the same hub/spoke conversion
-// path the CRDs use (CRD-05 scaffold).
+// fields) bump the dispatch group's OWN version component instead — they do
+// not ride the CRD group's version cranks.
 //
 // Per SUB-01 / DAG-05-mirror, this package MUST NOT import:
 //   - sigs.k8s.io/controller-runtime/* (manager/client/reconcile/...)
