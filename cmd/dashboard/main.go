@@ -165,6 +165,7 @@ func main() {
 		SPAFS:              spaFS,
 		PrometheusEndpoint: os.Getenv("PROM_ENDPOINT"),
 		Store:              artifactStore,
+		TelemetryEnabled:   telemetryEnabledFromEnv(),
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the
@@ -236,6 +237,24 @@ func main() {
 	if err := mgr.Start(signalCtx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
+	}
+}
+
+// telemetryEnabledFromEnv resolves the Telemetry view's disabled-by-config
+// signal (Phase 38 TELEM-03). The chart passes prometheus.enabled into the
+// dashboard Pod as PROMETHEUS_ENABLED (D-14); a literal "true"/"false" is
+// authoritative — an explicit "false" wins even when PROM_ENDPOINT is set.
+// Unset or unrecognized values fall back to PROM_ENDPOINT presence so a
+// legacy chart without the env still behaves sensibly (D-13/D-14: the
+// binary catches up to the chart, never requires it).
+func telemetryEnabledFromEnv() bool {
+	switch os.Getenv("PROMETHEUS_ENABLED") {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return os.Getenv("PROM_ENDPOINT") != ""
 	}
 }
 
