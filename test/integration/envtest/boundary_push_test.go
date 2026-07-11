@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -50,19 +51,26 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 	ctx := context.Background()
 
 	markPlannerJobSucceeded := func(name, namespace string) error {
-		var job batchv1.Job
-		if err := mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &job); err != nil {
-			return err
-		}
-		now := metav1.Now()
-		job.Status.StartTime = &now
-		job.Status.CompletionTime = &now
-		job.Status.Succeeded = 1
-		job.Status.Conditions = []batchv1.JobCondition{
-			{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
-			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
-		}
-		return mgrClient.Status().Update(ctx, &job)
+		// RetryOnConflict + refetch inside the closure: the manager's cached client
+		// can serve a stale Job between the Get and the Status().Update while the
+		// auto-reconcilers churn the cluster; a 409 here is a benign lost race, not
+		// a failure (house optimistic-lock idiom, cf. gates_test.go
+		// makeFakeJobTerminalGates).
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var job batchv1.Job
+			if err := mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &job); err != nil {
+				return err
+			}
+			now := metav1.Now()
+			job.Status.StartTime = &now
+			job.Status.CompletionTime = &now
+			job.Status.Succeeded = 1
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+			return mgrClient.Status().Update(ctx, &job)
+		})
 	}
 
 	// drive calls Reconcile N times. On Conflict-class errors, retries up to
@@ -103,6 +111,9 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 
 	expectPushJobMessage := func(uid types.UID, expectedMessage string) {
 		pushJobName := fmt.Sprintf("tide-push-%s", uid)
+		// 15s: the push Job may be created by the manager-registered reconciler
+		// (event-driven, subject to workqueue backoff under CI contention), not
+		// only by the synchronous drive() calls above.
 		Eventually(func(g Gomega) {
 			args := pushArgsForJob(pushJobName)
 			g.Expect(args).NotTo(BeEmpty(), "expected push Job %s to exist", pushJobName)
@@ -110,7 +121,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 			g.Expect(found).To(BeTrue(),
 				"expected push Job args to contain --commit-message=%q; got: %s",
 				expectedMessage, strings.Join(args, " "))
-		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+		}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 	}
 
 	makeProjectBP := func(name string) *tideprojectv1alpha2.Project {
@@ -180,10 +191,19 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 	// suite-registered ProjectReconciler (Dispatcher=stubDispatcher) runs
 	// reconcileProjectPhase2 on every Milestone update — which races with
 	// our direct MilestoneReconciler.Reconcile through the Owns(Milestone)
-	// event handler. Phase and Plan boundary tests don't trip this because
-	// PhaseReconciler/PlanReconciler in the suite have no Dispatcher
-	// configured and Phase/Plan parents do not cascade reconciles the same
-	// way. Keeping the Phase and Plan integration scenarios is sufficient
+	// event handler. The Phase and Plan boundary tests below DO race the
+	// suite-registered PhaseReconciler/PlanReconciler (they carry
+	// Dispatcher=stubDispatcher and, since the PR #10 flake fix,
+	// TidePushImage=testTidePushImage): the manager's Owns(Job)/Owns(Plan)
+	// watches can reach handleJobCompletion first. That race is
+	// outcome-invariant BECAUSE both racers are push-capable with identical
+	// config — whichever wins creates the same deterministic
+	// tide-push-<project-uid> Job; the loser hits the exists-check /
+	// AlreadyExists idempotency in triggerBoundaryPush. Do NOT remove
+	// TidePushImage from the suite registration: a push-incapable manager
+	// reconciler that wins the race skips the push and latches the level
+	// Succeeded, permanently starving these specs (CI run 29161443508).
+	// Keeping the Phase and Plan integration scenarios is sufficient
 	// to prove the same shared triggerBoundaryPush path runs end-to-end
 	// inside the manager-watched control plane.
 
@@ -222,7 +242,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
-				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				TidePushImage:  testTidePushImage,
 			}
 			drive(r.Reconcile, phaseName, 5)
 			var got tideprojectv1alpha2.Phase
@@ -263,13 +283,24 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 					return ""
 				}
 				return g.Status.Phase
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+			}, 15*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
 
 			// ChildCount must match the authored child Plan above: the 09-08
 			// Defect B succession gate treats ChildCount==0 as a genuine leaf
 			// and succeeds WITHOUT a boundary push.
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0, ChildCount: 1})
-			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-phase-%s-1", got.UID), "default")).To(Succeed())
+			// Drive until the planner Job is observable before marking it terminal —
+			// the blind drives above can abort early while the manager caches are
+			// still syncing (this spec can run first in the suite), leaving the Job
+			// uncreated (house pattern, cf. gates_test.go planner-Job wait).
+			plannerJobName := fmt.Sprintf("tide-phase-%s-1", got.UID)
+			Eventually(func() error {
+				drive(r.Reconcile, phaseName, 1)
+				var job batchv1.Job
+				return mgrClient.Get(ctx, types.NamespacedName{Name: plannerJobName, Namespace: "default"}, &job)
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"planner Job %s must exist before it can be marked terminal", plannerJobName)
+			Expect(markPlannerJobSucceeded(plannerJobName, "default")).To(Succeed())
 
 			drive(r.Reconcile, phaseName, 3)
 
@@ -317,13 +348,22 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
-				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				TidePushImage:  testTidePushImage,
 			}
 			drive(r.Reconcile, planName, 5)
 			var got tideprojectv1alpha2.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
-			Expect(markPlannerJobSucceeded(fmt.Sprintf("tide-plan-%s-1", got.UID), "default")).To(Succeed())
+			// Drive until the planner Job is observable before marking it terminal
+			// (see the Phase boundary spec above for the rationale).
+			plannerJobName := fmt.Sprintf("tide-plan-%s-1", got.UID)
+			Eventually(func() error {
+				drive(r.Reconcile, planName, 1)
+				var job batchv1.Job
+				return mgrClient.Get(ctx, types.NamespacedName{Name: plannerJobName, Namespace: "default"}, &job)
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"planner Job %s must exist before it can be marked terminal", plannerJobName)
+			Expect(markPlannerJobSucceeded(plannerJobName, "default")).To(Succeed())
 			drive(r.Reconcile, planName, 3)
 
 			// Plan boundary is the only D-B2 shape with "+ executed" suffix.

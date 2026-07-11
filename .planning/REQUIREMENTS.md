@@ -16,11 +16,11 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Run Integrity (INTEG)
 
-- [ ] **INTEG-01**: Every Succeeded task's worktree branch is integrated into the run branch — including tasks in the final Kahn wave of a plan (today `plan_controller.go:1192` skips the last wave; a single-wave plan integrates nothing)
-- [ ] **INTEG-02**: Wave-parallel task integrations cannot race — tasks execute in parallel, run-branch merges are serialized and idempotent (cumulative Succeeded-branch set, kernel flock, safe re-merge on retry)
-- [ ] **INTEG-03**: Boundary push is gated on integration completeness verified from git (`git merge-base --is-ancestor` per Succeeded task); a miss raises a sticky `integration-incomplete` condition instead of pushing an incomplete run branch
-- [ ] **INTEG-04**: `status.git.lastPushedSHA` is stamped on successful boundary push (the push envelope's `HeadSHA` is read in the success arm), arming the force-with-lease fence
-- [ ] **INTEG-05**: A kind-suite regression test reproduces the 2-parallel-task final-wave integration miss and locks the fix
+- [x] **INTEG-01**: Every Succeeded task's worktree branch is integrated into the run branch — including tasks in the final Kahn wave of a plan (today `plan_controller.go:1192` skips the last wave; a single-wave plan integrates nothing)
+- [x] **INTEG-02**: Wave-parallel task integrations cannot race — tasks execute in parallel, run-branch merges are serialized and idempotent (cumulative Succeeded-branch set, kernel flock, safe re-merge on retry)
+- [x] **INTEG-03**: Boundary push is gated on integration completeness verified from git (`git merge-base --is-ancestor` per Succeeded task); a miss raises a sticky `integration-incomplete` condition instead of pushing an incomplete run branch
+- [x] **INTEG-04**: `status.git.lastPushedSHA` is stamped on successful boundary push (the push envelope's `HeadSHA` is read in the success arm), arming the force-with-lease fence
+- [x] **INTEG-05**: A kind-suite regression test reproduces the 2-parallel-task final-wave integration miss and locks the fix
 
 ### Budget Accuracy (COST)
 
@@ -104,11 +104,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | PREFLIGHT-01 | Phase 39 | Complete |
 | PREFLIGHT-02 | Phase 39 | Complete |
-| INTEG-01 | Phase 34 | Pending |
-| INTEG-02 | Phase 34 | Pending |
-| INTEG-03 | Phase 34 | Pending |
-| INTEG-04 | Phase 34 | Pending |
-| INTEG-05 | Phase 34 | Pending |
+| INTEG-01 | Phase 34 | Complete |
+| INTEG-02 | Phase 34 | Complete |
+| INTEG-03 | Phase 34 | Complete |
+| INTEG-04 | Phase 34 | Complete |
+| INTEG-05 | Phase 34 | Complete |
 | BASE-01 | Phase 35 | Pending |
 | BASE-02 | Phase 35 | Pending |
 | BASE-03 | Phase 35 | Pending |

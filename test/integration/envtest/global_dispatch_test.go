@@ -100,9 +100,10 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 				TargetRepo:     "https://github.com/example/global-dispatch-test.git",
 			},
 		}
-		if err := k8sClient.Create(ctx, project); err != nil {
-			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
-		}
+		// Create-or-wait (helpers_test.go): a bare Create + IgnoreAlreadyExists
+		// races the previous spec's asynchronous Project deletion — the
+		// still-terminating object swallows the create and vanishes mid-spec.
+		ensureLiveProject(ctx, project)
 	})
 
 	AfterEach(func() {

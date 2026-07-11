@@ -110,7 +110,7 @@ var _ = Describe("Plan 12-03 — GATE-04 descent hold envtest (run-1 finding-1 r
 					return ""
 				}
 				return got.Status.Phase
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("AwaitingApproval"))
+			}, 15*time.Second, 50*time.Millisecond).Should(Equal("AwaitingApproval"))
 
 			// 3. Materialize five Phase children (Status.Phase="" — the reporter path).
 			phaseReconcilers := make([]*controller.PhaseReconciler, len(phaseNames))
@@ -315,8 +315,12 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			Expect(makeFakeJobTerminalGates(jobName, "default")).To(Succeed())
 			driveMSReconcile(r, msName, 3)
 
-			// 4. Assert Milestone parked at AwaitingApproval.
+			// 4. Assert Milestone parked at AwaitingApproval. Drive-until-observable
+			// (house pattern, cf. the planner-Job wait above): blind drives can all
+			// run before the terminal Job status lands in the manager cache, and
+			// nothing else re-drives during a poll-only window (PR #10 flake class).
 			Eventually(func(g Gomega) {
+				driveMSReconcile(r, msName, 1)
 				var ms2 tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				g.Expect(ms2.Status.Phase).To(Equal("AwaitingApproval"))
@@ -324,7 +328,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonAwaitingApproval))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// 5. Apply approve-milestone annotation.
 			var current tideprojectv1alpha2.Milestone
@@ -346,21 +350,28 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// 6a. Intermediate: approve annotation must be consumed (D-04) and milestone
 			// must NOT still be AwaitingApproval. The ApprovedByUser condition may or may not
 			// be visible here depending on how far the burst progressed.
+			// Drive-until-observable: the 5 blind drives above can all run before the
+			// annotation patch reaches the manager cache; the parked arm then requeues
+			// at 30s — beyond any poll window — so a poll-only Eventually starves
+			// (the exact PR #10 base-run failure: parked for the full window with the
+			// manager silent). Re-drive on every poll until the approval is consumed.
 			Eventually(func(g Gomega) {
+				driveMSReconcile(r, msName, 1)
 				var ms2 tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				g.Expect(ms2.Status.Phase).NotTo(Equal("AwaitingApproval"),
 					"D-04: approval must lift the AwaitingApproval park")
 				_, has := ms2.Annotations[gates.AnnotationApprovePrefix+"milestone"]
 				g.Expect(has).To(BeFalse(), "approve-milestone annotation should be consumed")
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// 6b. Terminal: Succeeded via ChildCount-gated succession (leaf: ChildCount=0).
 			Eventually(func(g Gomega) {
+				driveMSReconcile(r, msName, 1)
 				var ms2 tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				g.Expect(ms2.Status.Phase).To(Equal("Succeeded"))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 
@@ -402,7 +413,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 					return ""
 				}
 				return pp.Annotations[gates.AnnotationReject]
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("operator stop"))
+			}, 15*time.Second, 50*time.Millisecond).Should(Equal("operator stop"))
 
 			ms := &tideprojectv1alpha2.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
@@ -423,7 +434,10 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			// D-05: park-not-fail. Status.Phase must NOT be "Failed".
 			// ConditionWaveOrLevelPaused must be True with Reason=RejectedByUser.
 			var msUID string
+			// Drive-until-observable (PR #10 flake class): the 3 blind drives above
+			// can precede cache convergence of the reject annotation / Milestone.
 			Eventually(func(g Gomega) {
+				driveMSReconcile(r, msName, 1)
 				var ms2 tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				msUID = string(ms2.UID)
@@ -434,7 +448,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("operator stop"))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// No new Jobs while rejected.
 			var jobsBefore batchv1.JobList
@@ -458,7 +472,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 					return "err"
 				}
 				return pp.Annotations[gates.AnnotationReject]
-			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
+			}, 15*time.Second, 50*time.Millisecond).Should(BeEmpty())
 
 			// After resume, park is lifted — re-driving dispatches the planner Job.
 			// Set the envelope so the completion path works for this leaf fixture.
@@ -470,7 +484,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms2)).To(Succeed())
 				g.Expect(ms2.Status.Phase).NotTo(Equal("Failed"),
 					"D-05: Milestone must not be Failed after reject annotation cleared")
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 
@@ -539,7 +553,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 					return ""
 				}
 				return pp.Status.Phase
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Failed"))
+			}, 15*time.Second, 50*time.Millisecond).Should(Equal("Failed"))
 
 			// 3. Drive PlanReconciler — terminal short-circuit must hold (no re-dispatch).
 			rPlan := &controller.PlanReconciler{
@@ -603,7 +617,11 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			drivePlanReconcile(rPlan, planName, 5)
 
 			// Assert: Status.Phase is no longer "Failed" (terminal short-circuit was bypassed).
+			// Drive-until-observable (PR #10 flake class): the 5 blind drives above can
+			// all short-circuit on the stale cached Failed status before the reset
+			// patch converges; re-drive on every poll.
 			Eventually(func(g Gomega) {
+				drivePlanReconcile(rPlan, planName, 1)
 				var pp tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp)).To(Succeed())
 				g.Expect(pp.Status.Phase).NotTo(Equal("Failed"),
@@ -617,7 +635,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				c := meta.FindStatusCondition(pp.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be present after reset")
 				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonResumedByUser))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 
@@ -676,7 +694,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 					return ""
 				}
 				return pp.Status.ValidationState
-			}, 5*time.Second, 50*time.Millisecond).Should(Equal("Validated"))
+			}, 15*time.Second, 50*time.Millisecond).Should(Equal("Validated"))
 
 			_ = makeGateITTask(planName+"-alpha", planName, projectName, nil)
 			_ = makeGateITTask(planName+"-beta", planName, projectName, nil)
@@ -690,10 +708,13 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			markGateITTaskSucceeded(planName + "-alpha")
 			markGateITTaskSucceeded(planName + "-beta")
 
-			// 6. Drive PlanReconciler — pause boundary detection.
+			// 6. Drive PlanReconciler — pause boundary detection. Drive-until-observable
+			// (PR #10 flake class): blind drives can precede the task-Succeeded statuses
+			// converging in the manager cache.
 			drivePlanReconcile(rPlan, planName, 3)
 
 			Eventually(func(g Gomega) {
+				drivePlanReconcile(rPlan, planName, 1)
 				var pp tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp)).To(Succeed())
 				c := meta.FindStatusCondition(pp.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
@@ -703,7 +724,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				var gammaObj tideprojectv1alpha2.Task
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: gamma.Name, Namespace: "default"}, &gammaObj)).To(Succeed())
 				g.Expect(gammaObj.Labels["tideproject.k8s/wave-paused"]).To(Equal("1"))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// 7. Annotate Plan with approve-wave-1=true.
 			var current tideprojectv1alpha2.Plan
@@ -716,9 +737,12 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			Expect(k8sClient.Patch(ctx, &current, apatch)).To(Succeed())
 
 			// 8. Drive PlanReconciler — consume annotation, clear labels, flip Condition.
+			// Drive-until-observable (PR #10 flake class): blind drives can precede the
+			// approve-wave annotation converging in the manager cache.
 			drivePlanReconcile(rPlan, planName, 3)
 
 			Eventually(func(g Gomega) {
+				drivePlanReconcile(rPlan, planName, 1)
 				var pp tideprojectv1alpha2.Plan
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &pp)).To(Succeed())
 				c := meta.FindStatusCondition(pp.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
@@ -730,7 +754,7 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: gamma.Name, Namespace: "default"}, &gammaObj)).To(Succeed())
 				_, hasLabel := gammaObj.Labels["tideproject.k8s/wave-paused"]
 				g.Expect(hasLabel).To(BeFalse(), "gamma wave-paused label should be cleared")
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 })
@@ -819,7 +843,7 @@ func markGateITTaskSucceeded(name string) {
 			return ""
 		}
 		return got.Status.Phase
-	}, 5*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
+	}, 15*time.Second, 50*time.Millisecond).Should(Equal("Succeeded"))
 }
 
 // waitITCacheSync mirrors internal/controller waitForCacheSync but uses
@@ -827,7 +851,7 @@ func markGateITTaskSucceeded(name string) {
 func waitITCacheSync(name string, obj client.Object) {
 	Eventually(func() error {
 		return mgrClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, obj)
-	}, 5*time.Second, 50*time.Millisecond).Should(Succeed(),
+	}, 15*time.Second, 50*time.Millisecond).Should(Succeed(),
 		"timed out waiting for cache to sync object default/%s", name)
 }
 

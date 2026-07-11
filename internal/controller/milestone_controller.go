@@ -934,7 +934,16 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 		reason = tideprojectv1alpha2.ReasonPausedAtBoundary
 		message = "Milestone paused at boundary; requires explicit resume"
 	}
-	patch := client.MergeFrom(ms.DeepCopy())
+	// Optimistic lock (WR-02 idiom): the park overwrites ConditionWaveOrLevelPaused —
+	// the very condition whose False/ApprovedByUser value is the gate hook's only
+	// re-park guard. A reconciler holding a stale pre-approval snapshot that walks
+	// handleJobCompletion → gate hook (!alreadyApproved, !CheckApprove on the stale
+	// copy) would blind-merge this park OVER a concurrent approve's
+	// Running+ApprovedByUser write, permanently consuming the one-shot approve
+	// annotation (already deleted) and wedging the level at AwaitingApproval
+	// (Layer A gate-flow CI flake). With the lock, the stale writer 409s; the
+	// requeued reconcile re-reads fresh state and sees alreadyApproved.
+	patch := client.MergeFromWithOptions(ms.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	ms.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,

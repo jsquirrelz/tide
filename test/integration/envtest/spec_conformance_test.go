@@ -179,9 +179,10 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				TargetRepo:     "https://github.com/example/spec-conformance.git",
 			},
 		}
-		if err := k8sClient.Create(ctx, project); err != nil {
-			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
-		}
+		// Create-or-wait (helpers_test.go): a bare Create + IgnoreAlreadyExists
+		// races the previous spec's asynchronous Project deletion — the
+		// still-terminating object swallows the create and vanishes mid-spec.
+		ensureLiveProject(ctx, project)
 	})
 
 	AfterEach(func() {

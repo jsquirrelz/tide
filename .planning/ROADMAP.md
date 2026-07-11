@@ -242,8 +242,30 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 6/6 | Complete (verify-close pending) | 2026-07-08 |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 6/6 | Complete    | 2026-07-08 |
 | 35. Git Base Ref | v1.0.7 | 4/4 | Complete | 2026-07-08 |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
+
+### Phase 40: API-Version Code Removal + subagent.levels Semantic Rename
+
+**Goal:** The v1alpha1 (and eventually v1alpha2) API code is removed entirely — Go types, webhook, dual-version scaffolding — as one breaking migration bundled with the `subagent.levels` semantic rename (STAGE-02, SchemaRevision/v1alpha3 treatment so old manifests still admit). The SCHEMA-03 RequiresReinstall guard contract survives or is re-expressed, and surviving in-cluster v1alpha1 objects are converted or rejected before the types go.
+**Requirements**: STAGE-02 (+ TBD at planning; seed: `.planning/todos/pending/2026-07-09-phase-40-v1alpha-removal-semantic-rename.md`)
+**Depends on:** Phase 39 (authoritative planning artifacts pending operator import from another machine — import before planning fresh)
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 40 to break down)
+
+### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)
+
+**Goal:** The 12-item operator-shared refactoring review lands as non-breaking cleanup: quick wins (typed Status.Phase constants, meta.IsStatusConditionTrue, stale scheme comment, dead code/fields, mojibake, test-helper unification) then structural extractions (shared dispatch-holds gate chain, PlannerDeps carrier, condition-polarity normalization, status-helper extraction, magic-literal centralization, log-style decision).
+**Requirements**: TBD at planning (seed: `.planning/todos/pending/2026-07-09-phase-41-refactoring-review.md` — file:line-verified against source)
+**Depends on:** Phase 40 (doing 40 first collapses the dual-version scaffolding items #1/#3 otherwise work around)
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 41 to break down)

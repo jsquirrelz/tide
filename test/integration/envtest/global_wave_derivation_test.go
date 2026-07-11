@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -132,44 +131,21 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 	BeforeEach(func() {
 		makeBoundPVC(ctx, "tide-projects", globalWaveNamespace)
-		// Create-or-wait: the previous spec's AfterEach deletes the Project
-		// asynchronously (finalizer removal happens on a later reconcile). A bare
-		// Create + IgnoreAlreadyExists can land on the still-terminating object,
-		// get silently swallowed, and leave the spec with NO Project once that
-		// deletion completes — the ProjectReconciler then drops every Task-mapped
-		// reconcile at the NotFound fetch and Wave CRs are never derived (CI
-		// flake: tide-wave-<project>-0 absent for the full 30s assert window).
-		// Retry until a live (non-terminating) Project exists.
-		Eventually(func() error {
-			project := &tideprojectv1alpha2.Project{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      globalWaveTestProject,
-					Namespace: globalWaveNamespace,
-				},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
-					TargetRepo:     "https://github.com/example/global-wave-test.git",
-				},
-			}
-			err := k8sClient.Create(ctx, project)
-			if apierrors.IsAlreadyExists(err) {
-				var existing tideprojectv1alpha2.Project
-				if getErr := k8sClient.Get(ctx, client.ObjectKey{
-					Name:      globalWaveTestProject,
-					Namespace: globalWaveNamespace,
-				}, &existing); getErr != nil {
-					// NotFound: deletion completed between Create and Get — the
-					// next attempt recreates it.
-					return getErr
-				}
-				if !existing.DeletionTimestamp.IsZero() {
-					return fmt.Errorf("project %s still terminating; waiting to recreate", globalWaveTestProject)
-				}
-				return nil // live Project exists
-			}
-			return err
-		}, "20s", "100ms").Should(Succeed(),
-			"a live (non-terminating) Project %s must exist before the spec body runs", globalWaveTestProject)
+		// Create-or-wait (see ensureLiveProject in helpers_test.go): the previous
+		// spec's AfterEach deletes the Project asynchronously; a bare Create +
+		// IgnoreAlreadyExists can be silently swallowed by the still-terminating
+		// object, leaving the spec with NO Project (CI flake: tide-wave-<project>-0
+		// absent for the full 30s assert window).
+		ensureLiveProject(ctx, &tideprojectv1alpha2.Project{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      globalWaveTestProject,
+				Namespace: globalWaveNamespace,
+			},
+			Spec: tideprojectv1alpha2.ProjectSpec{
+				SchemaRevision: "v1alpha2",
+				TargetRepo:     "https://github.com/example/global-wave-test.git",
+			},
+		})
 	})
 
 	AfterEach(func() {

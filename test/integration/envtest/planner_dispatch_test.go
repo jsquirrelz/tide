@@ -143,7 +143,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 					Name:      expectedJobName,
 					Namespace: "default",
 				}, &job)).To(Succeed())
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// --- JobKindPlanner label assertions ---
 			By("asserting role=planner label is set")
@@ -164,7 +164,7 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 				var msAfter tideprojectv1alpha2.Milestone
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: pdMilestoneName, Namespace: "default"}, &msAfter)).To(Succeed())
 				g.Expect(msAfter.Status.Phase).To(Equal("Running"))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			spec := job.Spec.Template.Spec
 

@@ -87,7 +87,7 @@ var _ = Describe("Annotation removal via MergeFrom is apiserver-observable (WR-0
 				g.Expect(has).To(BeFalse(), "annotation %q should be removed by MergeFrom patch (WR-03/WR-14 regression)", removedKey)
 				g.Expect(anno[preservedKey]).To(Equal(preservedVal),
 					"unrelated annotation %q should be preserved across the patch", preservedKey)
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 		}
 
 		Describe("WR-03: gates.ConsumeApprove on a Milestone", func() {
