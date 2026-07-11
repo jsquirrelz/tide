@@ -330,6 +330,60 @@ func TestRun_PromptViaStdinAndPermissionFlags(t *testing.T) {
 	}
 }
 
+// TestRun_PricingFallbackModel covers the D-02 provider side (Phase 38
+// COST-02): when the dispatch model misses the effective price table even
+// after the -YYYYMMDD normalizer, Run stamps Usage.PricingFallbackModel with
+// the unmatched model ID so the controller can roll it up into the
+// PricingFallbackActive condition and Prometheus counter. Priced models —
+// exact or date-suffixed — leave the field empty.
+func TestRun_PricingFallbackModel(t *testing.T) {
+	t.Run("unknown_model_stamped", func(t *testing.T) {
+		tmp := t.TempDir()
+		a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+		in := envelopeFixture("uid-fallback-unknown")
+		in.Provider.Model = "claude-nova-9"
+		out, err := a.Run(context.Background(), in)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if out.Usage.PricingFallbackModel != "claude-nova-9" {
+			t.Errorf("PricingFallbackModel: got %q, want %q (unknown model must be stamped)",
+				out.Usage.PricingFallbackModel, "claude-nova-9")
+		}
+	})
+
+	t.Run("known_model_empty", func(t *testing.T) {
+		tmp := t.TempDir()
+		a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+		in := envelopeFixture("uid-fallback-known") // claude-sonnet-4-6 — in the table
+		out, err := a.Run(context.Background(), in)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if out.Usage.PricingFallbackModel != "" {
+			t.Errorf("PricingFallbackModel: got %q, want empty for a priced model",
+				out.Usage.PricingFallbackModel)
+		}
+	})
+
+	t.Run("dated_known_model_empty", func(t *testing.T) {
+		// A normalizer hit is NOT a fallback — the date-suffixed ID resolved to
+		// a real row (D-01), so no flag.
+		tmp := t.TempDir()
+		a := newFakeExecAnthropic(t, tmp, fixtureStreamJSON)
+		in := envelopeFixture("uid-fallback-dated")
+		in.Provider.Model = "claude-sonnet-5-20260514"
+		out, err := a.Run(context.Background(), in)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if out.Usage.PricingFallbackModel != "" {
+			t.Errorf("PricingFallbackModel: got %q, want empty for a normalizer-resolved model",
+				out.Usage.PricingFallbackModel)
+		}
+	})
+}
+
 // containsArg reports whether want appears as a standalone element of args.
 func containsArg(args []string, want string) bool {
 	return slices.Contains(args, want)

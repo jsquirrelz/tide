@@ -308,4 +308,137 @@ func TestCacheSavingsCents(t *testing.T) {
 			t.Errorf("unknown model cacheRead=1M: want 900 cents (conservative tier), got %d", got)
 		}
 	})
+
+	t.Run("dated_sonnet5_shares_normalizer", func(t *testing.T) {
+		// D-01: cacheSavingsCents resolves through the same lookupPrice
+		// normalizer as estimatedCostCents — a dated sonnet-5 ID uses the
+		// sonnet-5 rates, not the conservative tier.
+		// sonnet-5: input=300, cacheRead=30 → savings = 1M × (300 − 30) / 1M = 270.
+		u := pkgdispatch.Usage{CacheReadTokens: 1_000_000}
+		got := a.cacheSavingsCents("claude-sonnet-5-20260514", u)
+		if got != 270 {
+			t.Errorf("dated sonnet-5 cacheRead=1M: want 270 cents (sonnet-5 rates via normalizer), got %d", got)
+		}
+	})
+}
+
+// TestEstimatedCostCents_Sonnet5Row pins the claude-sonnet-5 price row
+// (COST-01): the missing row behind the 2026-07-03 first-run 2.8× overcount.
+// Sticker rates: input=300, output=1500, cacheRead=30 cents/MTok;
+// cacheWrite=375 (input × 125/100, the D-08 probe-verified multiplier).
+func TestEstimatedCostCents_Sonnet5Row(t *testing.T) {
+	a := New(Options{})
+
+	cases := []struct {
+		name string
+		u    pkgdispatch.Usage
+		want int64
+	}{
+		{"input", pkgdispatch.Usage{InputTokens: 1_000_000}, 300},
+		{"output", pkgdispatch.Usage{OutputTokens: 1_000_000}, 1500},
+		{"cache_read", pkgdispatch.Usage{CacheReadTokens: 1_000_000}, 30},
+		{"cache_write", pkgdispatch.Usage{CacheCreationTokens: 1_000_000}, 375},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := a.estimatedCostCents("claude-sonnet-5", tc.u)
+			if got != tc.want {
+				t.Errorf("sonnet-5 %s=1M: want %d cents, got %d", tc.name, tc.want, got)
+			}
+		})
+	}
+}
+
+// TestLookupPriceNormalizer covers the D-01 date-suffix normalizer: exact
+// lookup first, then exactly one trailing -YYYYMMDD strip retry, then the
+// conservative tier. NO family prefix-matching — a genuinely unknown model
+// must never inherit an old cheaper family rate.
+func TestLookupPriceNormalizer(t *testing.T) {
+	a := New(Options{})
+
+	t.Run("dated_sonnet5_prices_as_sonnet5", func(t *testing.T) {
+		// "claude-sonnet-5-20260514" strips to "claude-sonnet-5" and must price
+		// identically for every token dimension.
+		u := pkgdispatch.Usage{
+			InputTokens:         500_000,
+			OutputTokens:        100_000,
+			CacheReadTokens:     800_000,
+			CacheCreationTokens: 200_000,
+		}
+		dated := a.estimatedCostCents("claude-sonnet-5-20260514", u)
+		bare := a.estimatedCostCents("claude-sonnet-5", u)
+		if dated != bare {
+			t.Errorf("dated sonnet-5: want %d cents (same as bare ID), got %d", bare, dated)
+		}
+	})
+
+	t.Run("dated_haiku_prices_as_haiku", func(t *testing.T) {
+		u := pkgdispatch.Usage{InputTokens: 1_000_000, OutputTokens: 1_000_000}
+		dated := a.estimatedCostCents("claude-haiku-4-5-20250101", u)
+		bare := a.estimatedCostCents("claude-haiku-4-5", u)
+		if dated != bare {
+			t.Errorf("dated haiku: want %d cents (same as bare ID), got %d", bare, dated)
+		}
+	})
+
+	t.Run("no_family_matching_sonnet6", func(t *testing.T) {
+		// D-01: "claude-sonnet-6" must NOT inherit any sonnet row — it prices
+		// at the conservative tier (fable-5 output = 5000 cents/MTok).
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := a.estimatedCostCents("claude-sonnet-6", u)
+		if got != 5000 {
+			t.Errorf("claude-sonnet-6 output=1M: want 5000 cents (conservative tier, no family matching), got %d", got)
+		}
+	})
+
+	t.Run("no_family_matching_bare_sonnet", func(t *testing.T) {
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := a.estimatedCostCents("claude-sonnet", u)
+		if got != 5000 {
+			t.Errorf("claude-sonnet output=1M: want 5000 cents (conservative tier, no family matching), got %d", got)
+		}
+	})
+
+	t.Run("unknown_model_with_date_suffix", func(t *testing.T) {
+		// The strip retry also misses for a genuinely unknown family →
+		// conservative tier.
+		u := pkgdispatch.Usage{OutputTokens: 1_000_000}
+		got := a.estimatedCostCents("claude-nova-9-20270101", u)
+		if got != 5000 {
+			t.Errorf("claude-nova-9-20270101 output=1M: want 5000 cents (conservative tier), got %d", got)
+		}
+	})
+
+	t.Run("override_resolves_through_normalizer", func(t *testing.T) {
+		// The normalizer resolves against a.prices (the per-instance merged
+		// clone, T-14-02) — so a dated ID picks up the sonnet-5 override.
+		aOverride := New(Options{
+			PricingOverrides: map[string]pkgdispatch.PriceOverride{
+				"claude-sonnet-5": {
+					InputCentsPerMTok:  700,
+					OutputCentsPerMTok: 3500,
+				},
+			},
+		})
+		u := pkgdispatch.Usage{InputTokens: 1_000_000}
+		got := aOverride.estimatedCostCents("claude-sonnet-5-20260514", u)
+		if got != 700 {
+			t.Errorf("dated sonnet-5 with override input=1M: want 700 cents (override rate via normalizer), got %d", got)
+		}
+	})
+}
+
+// TestCacheWriteMultiplierConsistency asserts every compiled price row derives
+// its cache-write rate from the single D-08 multiplier constant:
+// cacheWrite = input × cacheWriteMultNum / cacheWriteMultDen. One place to
+// change on the next TTL shift; this test catches any row drifting from it.
+func TestCacheWriteMultiplierConsistency(t *testing.T) {
+	for model, price := range priceTable {
+		want := price.inputCentsPerMTok * cacheWriteMultNum / cacheWriteMultDen
+		if price.cacheWriteCentsPerMTok != want {
+			t.Errorf("%s: cacheWriteCentsPerMTok=%d, want %d (input %d × %d/%d — D-08 multiplier drift)",
+				model, price.cacheWriteCentsPerMTok, want,
+				price.inputCentsPerMTok, cacheWriteMultNum, cacheWriteMultDen)
+		}
+	}
 }
