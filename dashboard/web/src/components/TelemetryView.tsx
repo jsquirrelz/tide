@@ -43,6 +43,8 @@ import {
   YAxis,
 } from "recharts";
 import type { ProjectSummary as Project } from "../lib/api";
+import TelemetryDisabledBanner from "./TelemetryDisabledBanner";
+import type { TelemetryDisabledBannerState } from "./TelemetryDisabledBanner";
 import TelemetryUnavailableNotice from "./TelemetryUnavailableNotice";
 
 // ─── Prometheus wire types ────────────────────────────────────────────────────
@@ -1102,6 +1104,30 @@ export default function TelemetryView({
     PANELS.map(() => ({ kind: "loading" })),
   );
 
+  // TELEM-03 (plan 38-05, D-14): one-shot fetch of GET /api/v1/config for
+  // the chart's prometheus.enabled toggle. null = unknown (fetch failed or
+  // pending) — the banner derivation then falls back to the panel
+  // unavailable-sentinel signal alone.
+  const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/config");
+        if (!res.ok) return;
+        const body = (await res.json()) as { telemetryEnabled?: unknown };
+        if (!cancelled && typeof body.telemetryEnabled === "boolean") {
+          setTelemetryEnabled(body.telemetryEnabled);
+        }
+      } catch {
+        // Config surface unreachable — stay null (unknown).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Track the current scope/range/project/breakdown in a ref so the polling callback
   // always reads the latest value without needing to re-register the interval.
   const scopeRef = useRef(scope);
@@ -1200,12 +1226,39 @@ export default function TelemetryView({
   }
   scopeOptions.push({ value: "all", label: "All projects" });
 
+  // TELEM-03 banner derivation — UI-SPEC Banner Contract precedence.
+  // Any panel with real data suppresses the banner outright (T-38-15: never
+  // claim "disabled" while data flows); then disabled-by-config when the
+  // config surface says false OR (defensively) every panel resolved the
+  // unavailable sentinel; then no-data when telemetry is confirmed enabled
+  // and every panel answered with zero points; hidden otherwise (loading /
+  // unreachable — the per-panel TelemetryUnavailableNotice owns connectivity).
+  const anyPanelData = panelStates.some(
+    (s) => s.kind === "data" && s.series.length > 0,
+  );
+  const allPanelsUnavailable = panelStates.every(
+    (s) => s.kind === "unavailable",
+  );
+  const allPanelsEmptyData = panelStates.every(
+    (s) => s.kind === "data" && s.series.length === 0,
+  );
+  let bannerState: TelemetryDisabledBannerState | null = null;
+  if (!anyPanelData) {
+    if (telemetryEnabled === false || allPanelsUnavailable) {
+      bannerState = "disabled-by-config";
+    } else if (telemetryEnabled === true && allPanelsEmptyData) {
+      bannerState = "no-data";
+    }
+  }
+
   return (
     <div
       data-testid="telemetry-view"
       className="flex flex-col gap-4 p-4"
       style={{ height: "100%", overflow: "auto" }}
     >
+      {/* TELEM-03 view-level banner — first child, above the toolbar */}
+      {bannerState !== null && <TelemetryDisabledBanner state={bannerState} />}
       {/* Toolbar: scope+level (left cluster) + range selector (right) — UI-SPEC C3, D-06 */}
       <div className="flex items-center justify-between">
         {/* Left cluster: scope toggle + level breakdown selector */}

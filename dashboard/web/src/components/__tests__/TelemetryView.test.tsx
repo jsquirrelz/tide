@@ -188,7 +188,11 @@ describe("TelemetryView — scope queries (D-02/D-04)", () => {
 
     expect(fetchFn).toHaveBeenCalled();
     const calls = (fetchFn as ReturnType<typeof vi.fn>).mock.calls as [string][];
-    calls.forEach(([url]) => {
+    // Scope to the PromQL panel fetches — the one-shot /api/v1/config fetch
+    // (TELEM-03, plan 38-05) carries no query param by design.
+    const queryCalls = calls.filter(([url]) => url.includes("query_range"));
+    expect(queryCalls.length).toBeGreaterThan(0);
+    queryCalls.forEach(([url]) => {
       const searchStr = url.split("?")[1] ?? "";
       const params = new URLSearchParams(searchStr);
       const query = params.get("query") ?? "";
