@@ -31,18 +31,46 @@ package anthropic
 //   - claude-opus-4-8:  $5/M input,  $25/M output
 //   - claude-opus-4-7:  $5/M input,  $25/M output
 //   - claude-opus-4-6:  $5/M input,  $25/M output
+//   - claude-sonnet-5:  $3/M input,  $15/M output (sticker; intro $2/$10 through 2026-08-31)
 //   - claude-sonnet-4-6: $3/M input, $15/M output
 //   - claude-haiku-4-5:  $1/M input,  $5/M output
 //
 // Cache pricing follows the Anthropic "Prompt Caching" rate schedule:
-//   - cacheWrite: 1.25× the base input price per model
+//   - cacheWrite: cacheWriteMultNum/cacheWriteMultDen × the base input price
+//     per model (currently 1.25× — the 5-minute-TTL rate, probe-verified; D-08)
 //   - cacheRead:  0.10× the base input price per model
+//
+// Model lookup is exact-ID first, then one trailing -YYYYMMDD strip retry
+// (lookupPrice, D-01). Anything still unmatched bills at conservativeTier.
 
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+)
+
+// cacheWriteMultNum / cacheWriteMultDen encode the prompt-cache write premium
+// as one exact rational: cacheWrite = input × cacheWriteMultNum / cacheWriteMultDen.
+// Every priceTable row's cacheWriteCentsPerMTok derives from this multiplier
+// (locked by TestCacheWriteMultiplierConsistency); it is the ONE place to flip
+// on the next TTL shift (D-08). Rule: 5m TTL → 1.25× input; 1h TTL → 2× input.
+//
+// Value 125/100 set from the COST-03 probe evidence, recorded verbatim in
+// .planning/phases/38-small-independents-pricing-accuracy-promptfile-telemetry-nud/38-01-PROBE-RESULT.md:
+//   - Probe date 2026-07-11; `claude --version`: 2.1.207 (Claude Code); model
+//     claude-haiku-4-5; host CLI dispatched with the production flag set
+//     (subagent.go:285-294) through a teed credproxy (--tee-body-dir).
+//   - Every distinct cache_control shape observed across the teed request
+//     bodies was `"cache_control":{"type":"ephemeral"}` — the ONLY shape;
+//     NO `"ttl":"1h"` appeared anywhere. Unambiguous 5-minute TTL.
+//   - Caveat: the probe exercised the host CLI 2.1.207, not the subagent
+//     image's pinned CLI (identical flag set); re-probe via the docker-image
+//     variant if the pinned CLI ever diverges in cache-TTL behavior.
+const (
+	cacheWriteMultNum = 125
+	cacheWriteMultDen = 100
 )
 
 // modelPrice holds per-model billing rates in US cents per one million tokens.
@@ -91,6 +119,19 @@ var priceTable = map[string]modelPrice{
 		cacheWriteCentsPerMTok: 625,
 	},
 
+	// Claude Sonnet 5 — the missing row behind the 2026-07-03 first-run 2.8×
+	// overcount ($10.86 TIDE tally vs $3.84 console actual — COST-01).
+	// Sticker rates $3/M input, $15/M output (claude-api skill model table,
+	// verified 2026-07-04). Intro pricing $2/M-in, $10/M-out runs through
+	// 2026-08-31; the sticker rate is compiled deliberately — it never
+	// under-counts and stays correct past the intro window (RESEARCH Pitfall 1).
+	"claude-sonnet-5": {
+		inputCentsPerMTok:      300,
+		outputCentsPerMTok:     1500,
+		cacheReadCentsPerMTok:  30,
+		cacheWriteCentsPerMTok: 300 * cacheWriteMultNum / cacheWriteMultDen, // 375 (D-08)
+	},
+
 	// Chart per-level defaults for phase, plan, and top-level fallback.
 	// $3/M input, $15/M output; cache rates follow the same 1.25×/0.10× rule.
 	"claude-sonnet-4-6": {
@@ -116,6 +157,33 @@ var priceTable = map[string]modelPrice{
 // most expensive entry — NOT opus-4-7 (now corrected to $25/MTok).
 var conservativeTier = priceTable["claude-fable-5"]
 
+// dateSuffixRe matches a trailing dash + 8-digit date suffix on a model ID
+// (e.g. "claude-sonnet-5-20260514" → strip "-20260514"). Anchored at end so
+// only one dated alias per row is ever implied (D-01).
+var dateSuffixRe = regexp.MustCompile(`-\d{8}$`)
+
+// lookupPrice resolves model against the per-instance effective price table
+// (a.prices — the New()-built merged clone, never the package-level priceTable;
+// T-14-02): exact hit first, then — if the ID carries a trailing -YYYYMMDD date
+// suffix — exactly one strip retry. Anything still unmatched returns
+// (conservativeTier, false).
+//
+// Deliberately NO prefix/family matching (D-01): a genuinely unknown model
+// (e.g. "claude-sonnet-6") must never silently inherit an older, cheaper
+// family rate — it falls to the most-expensive known tier so budget tracking
+// never under-counts spend (T-38-16).
+func (a *Anthropic) lookupPrice(model string) (modelPrice, bool) {
+	if price, ok := a.prices[model]; ok {
+		return price, true
+	}
+	if stripped := dateSuffixRe.ReplaceAllString(model, ""); stripped != model {
+		if price, ok := a.prices[stripped]; ok {
+			return price, true
+		}
+	}
+	return conservativeTier, false
+}
+
 // cacheSavingsCents returns the realized savings in US cents from prompt-cache
 // reads for the given model and token usage (Phase 21 OBSV-02).
 //
@@ -123,10 +191,11 @@ var conservativeTier = priceTable["claude-fable-5"]
 // Division is truncation (not ceiling) — conservative for savings, never
 // over-reports what was saved (Pitfall 3 / plan 21-01 action).
 //
-// It reads a.prices (per-instance clone) per T-14-02. On a table miss it falls
-// back silently to conservativeTier — the conservative fallback bounds the
-// savings estimate without alarming the operator (savings mis-estimate is less
-// critical than cost mis-estimate; stderr noise is reserved for estimatedCostCents).
+// It resolves via lookupPrice (exact → one date-strip retry — D-01; reads
+// a.prices per T-14-02). On a post-normalizer miss it falls back silently to
+// conservativeTier — the conservative fallback bounds the savings estimate
+// without alarming the operator (savings mis-estimate is less critical than
+// cost mis-estimate; stderr noise is reserved for estimatedCostCents).
 //
 // Returns 0 immediately when CacheReadTokens == 0 (the common case where no
 // cache reads occurred — omitempty on Usage.CacheSavingsCents keeps JSON clean).
@@ -135,10 +204,9 @@ func (a *Anthropic) cacheSavingsCents(model string, u pkgdispatch.Usage) int64 {
 		return 0
 	}
 
-	price, ok := a.prices[model]
-	if !ok {
-		price = conservativeTier
-	}
+	// lookupPrice already returns conservativeTier on a miss; the savings
+	// helper stays silent per its contract.
+	price, _ := a.lookupPrice(model)
 
 	// Net saving per million tokens: the gap between what was paid (cacheRead
 	// rate) vs what would have been paid (input rate).
@@ -152,23 +220,24 @@ func (a *Anthropic) cacheSavingsCents(model string, u pkgdispatch.Usage) int64 {
 // estimatedCostCents returns the estimated cost in US cents (rounded up to the
 // nearest whole cent) for the given model and token usage.
 //
-// It reads a.prices — the per-instance effective table built by New() as
-// maps.Clone(priceTable) merged with Options.PricingOverrides. The package-level
-// priceTable is never read here (T-14-02 / Pitfall 2).
+// It resolves via lookupPrice — exact hit against a.prices (the per-instance
+// effective table built by New() as maps.Clone(priceTable) merged with
+// Options.PricingOverrides — T-14-02 / Pitfall 2), then one trailing
+// -YYYYMMDD strip retry (D-01). Both cost paths (this method and
+// cacheSavingsCents) share the one normalizer.
 //
-// On a table miss the method:
+// On a post-normalizer miss the method:
 //  1. Logs a loud warning to stderr so the operator sees it in Pod logs.
 //  2. Falls back to the most-expensive known tier (conservativeTier) to
 //     ensure budget tracking never silently under-reports spend (T-09-01).
 //
 // A zero-token usage for a known model returns 0 (no spend).
 func (a *Anthropic) estimatedCostCents(model string, u pkgdispatch.Usage) int64 {
-	price, ok := a.prices[model]
+	price, ok := a.lookupPrice(model)
 	if !ok {
 		// Loud, operator-visible warning: unknown model → conservative default.
 		// Never return 0 silently (Pitfall 4 / T-09-01).
 		fmt.Fprintf(os.Stderr, "pricing: unknown model %q, using conservative default (most-expensive known tier)\n", model)
-		price = conservativeTier
 	}
 
 	// Sum cost across all four token dimensions.
