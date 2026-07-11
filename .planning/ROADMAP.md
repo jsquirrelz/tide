@@ -216,7 +216,16 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   4. The project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1), and the rendered chart configmap defaults `plannerConcurrency` to 4, matching values.yaml (W2).
   5. Heavy controller envtest specs run in the integration tier instead of the TEST-01 unit tier, with total spec count conserved across the split (no specs lost).
 
-**Plans**: TBD
+**Plans**: 5/7 plans executed
+
+- [x] 38-01-PLAN.md
+- [x] 38-02-PLAN.md
+- [x] 38-03-PLAN.md
+- [x] 38-04-PLAN.md
+- [x] 38-05-PLAN.md
+- [ ] 38-06-PLAN.md
+- [ ] 38-07-PLAN.md
+
 **UI hint**: yes
 
 ## Progress
@@ -237,4 +246,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 35. Git Base Ref | v1.0.7 | 4/4 | Complete | 2026-07-08 |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
-| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/7 | Planned, not executed | - |
+| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 5/7 | In Progress|  |
