@@ -55,7 +55,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 - [ ] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
 - [ ] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
-- [ ] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
+- [x] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
 
 ### Tech-Debt Carry (DEBT)
 
@@ -123,7 +123,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROMPT-01 | Phase 38 | Pending |
 | TELEM-01 | Phase 38 | Pending |
 | TELEM-02 | Phase 38 | Pending |
-| TELEM-03 | Phase 38 | Pending |
+| TELEM-03 | Phase 38 | Complete |
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
 | DEBT-03 | Phase 38 | Pending |
