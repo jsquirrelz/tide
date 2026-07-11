@@ -604,6 +604,138 @@ describe("TelemetryView — cache-efficiency panel (OBSV-03)", () => {
   });
 });
 
+// ─── 11. Telemetry disabled banner (TELEM-03, plan 38-05) ────────────────────
+//
+// The view fetches GET /api/v1/config once on mount and derives a single
+// view-level banner per the 38-UI-SPEC Banner Contract precedence:
+//   disabled-by-config → telemetryEnabled === false OR all panels unavailable
+//   no-data            → telemetryEnabled === true AND every panel resolved
+//                        kind:"data" with zero points
+//   hidden             → any data / any loading / any unreachable
+// The per-panel TelemetryUnavailableNotice remains untouched (EC-6).
+
+/**
+ * Stub fetch with URL routing: /api/v1/config gets configResponse (an Error
+ * rejects the fetch; "never" leaves it pending); everything else (the
+ * query_range panel fetches) gets panelResponse.
+ */
+function stubFetchWithConfig(
+  configResponse: unknown,
+  panelResponse: { ok: boolean; status: number; body: unknown } | "never",
+) {
+  const fetchFn = vi.fn((url: string) => {
+    if (url.startsWith("/api/v1/config")) {
+      if (configResponse instanceof Error) {
+        return Promise.reject(configResponse);
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => configResponse,
+      });
+    }
+    if (panelResponse === "never") {
+      return new Promise(() => {}); // panels stay loading
+    }
+    return Promise.resolve({
+      ok: panelResponse.ok,
+      status: panelResponse.status,
+      json: async () => panelResponse.body,
+    });
+  });
+  vi.stubGlobal("fetch", fetchFn as unknown as typeof fetch);
+  return fetchFn;
+}
+
+const PANEL_UNAVAILABLE = { ok: true, status: 200, body: { status: "unavailable" } };
+const PANEL_EMPTY_DATA = { ok: true, status: 200, body: EMPTY_SUCCESS_PAYLOAD };
+const PANEL_WITH_DATA = { ok: true, status: 200, body: SUCCESS_PAYLOAD };
+const PANEL_UNREACHABLE = {
+  ok: false,
+  status: 502,
+  body: { status: "error", message: "upstream unreachable" },
+};
+
+describe("TelemetryView — telemetry disabled banner (TELEM-03)", () => {
+  it("telemetryEnabled:false renders the disabled-by-config banner as first child; per-panel notices remain", async () => {
+    stubFetchWithConfig({ telemetryEnabled: false }, PANEL_UNAVAILABLE);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    const banner = screen.getByTestId("telemetry-disabled-banner");
+    expect(banner.getAttribute("data-state")).toBe("disabled-by-config");
+
+    // First child of the telemetry-view container, above the toolbar.
+    const view = screen.getByTestId("telemetry-view");
+    expect(view.firstElementChild).toBe(banner);
+
+    // Per-panel degradation is NOT replaced by the view-level banner.
+    const notices = screen.getAllByTestId("telemetry-unavailable-notice");
+    expect(notices.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("telemetryEnabled:true with all panels empty-data renders the no-data banner", async () => {
+    stubFetchWithConfig({ telemetryEnabled: true }, PANEL_EMPTY_DATA);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    const banner = screen.getByTestId("telemetry-disabled-banner");
+    expect(banner.getAttribute("data-state")).toBe("no-data");
+  });
+
+  it("telemetryEnabled:true with panel data renders NO banner", async () => {
+    stubFetchWithConfig({ telemetryEnabled: true }, PANEL_WITH_DATA);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    expect(
+      screen.queryByTestId("telemetry-disabled-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("telemetryEnabled:true with panels still loading renders NO banner", async () => {
+    stubFetchWithConfig({ telemetryEnabled: true }, "never");
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    expect(
+      screen.queryByTestId("telemetry-disabled-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("telemetryEnabled:true with unreachable panels renders NO banner (per-panel notice owns connectivity)", async () => {
+    stubFetchWithConfig({ telemetryEnabled: true }, PANEL_UNREACHABLE);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    expect(
+      screen.queryByTestId("telemetry-disabled-banner"),
+    ).not.toBeInTheDocument();
+    // The existing per-panel notice still carries the unreachable wording.
+    const notices = screen.getAllByTestId("telemetry-unavailable-notice");
+    expect(notices.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("config fetch failure with panel data renders NO banner", async () => {
+    stubFetchWithConfig(new Error("network down"), PANEL_WITH_DATA);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    expect(
+      screen.queryByTestId("telemetry-disabled-banner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("config fetch failure with every panel unavailable falls back to the disabled-by-config banner (defensive sentinel)", async () => {
+    stubFetchWithConfig(new Error("network down"), PANEL_UNAVAILABLE);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    const banner = screen.getByTestId("telemetry-disabled-banner");
+    expect(banner.getAttribute("data-state")).toBe("disabled-by-config");
+  });
+});
+
 // ─── 10. Per-level selector (D-06) ───────────────────────────────────────────
 
 describe("TelemetryView — per-level selector (D-06)", () => {
