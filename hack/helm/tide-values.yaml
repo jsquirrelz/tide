@@ -137,6 +137,13 @@ rateLimits:
 # a TIDE release. Keys are exact model ID strings; values are cents per million tokens.
 # Passed to the controller via --pricing-overrides-json flag (JSON-encoded map).
 #
+# Primary use case (Phase 38 D-03): correcting or adding rows for newly released
+# Claude models — e.g. a new claude-sonnet generation — without waiting for an
+# image rebuild. Overrides merge over the compiled table at manager startup and
+# reach subagents via TIDE_PRICING_OVERRIDES_JSON (plumbing landed Phase 14;
+# verified by pricing_test.go override cases and the render assertions in
+# test/integration/kind/projects_pvc_test.go).
+#
 # Example (all fields optional — omitted fields inherit compiled defaults):
 #   pricing:
 #     overrides:
@@ -343,6 +350,17 @@ dashboard:
 # Enable explicitly via `--set prometheus.serviceMonitor.enabled=true` once
 # the prometheus-operator CRDs (monitoring.coreos.com/v1) are installed.
 prometheus:
+  # Umbrella telemetry toggle (Phase 38 D-14 / TELEM). Declares whether run
+  # telemetry is wired for this install; drives the NOTES.txt warning and the
+  # dashboard's PROMETHEUS_ENABLED env (banner disabled-by-config signal).
+  # It does NOT flip serviceMonitor.enabled (the scrape gate, which stays
+  # default-off per the CLAUDE.md anti-pattern) and does NOT replace endpoint
+  # (the dashboard's PromQL proxy URL) — operators enabling telemetry set all
+  # three:
+  #   --set prometheus.enabled=true
+  #   --set prometheus.serviceMonitor.enabled=true
+  #   --set prometheus.endpoint=http://prometheus-operated.monitoring:9090
+  enabled: false
   # PromQL-proxy endpoint (Phase 4 telemetry surface -- milestone-01 Q1 lock-in).
   #
   # Q1 DECISION: PROXY, not a second browser-side datasource. This is a
