@@ -2,19 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-current_phase: 35
-current_phase_name: Git Base Ref
 status: executing
-stopped_at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
-last_updated: "2026-07-11T17:17:39.537Z"
-last_activity: 2026-07-11
-last_activity_desc: Phase 34 complete, transitioned to Phase 35
+stopped_at: Phase 40 planned (7 plans, gate-passed); execution HELD until last in v1.0.7
+last_updated: "2026-07-11T23:28:02.758Z"
+last_activity: 2026-07-11 -- Phase 40 execution started
 progress:
-  total_phases: 5
+  total_phases: 7
   completed_phases: 5
-  total_plans: 33
+  total_plans: 40
   completed_plans: 33
-  percent: 100
+  percent: 71
 ---
 
 # Project State
@@ -24,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-03)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 38 — small-independents-pricing-accuracy-promptfile-telemetry-nud
+**Current focus:** Phase 40 — deprecate-v1alpha1-api
 
 ## Current Position
 
-Phase: 35 — Git Base Ref
-Plan: Not started
-Status: Executing Phase 38
-Last activity: 2026-07-11 — Phase 34 complete, transitioned to Phase 35
+Phase: 40 (deprecate-v1alpha1-api) — EXECUTING
+Plan: 1 of 7
+Status: Executing Phase 40
+Last activity: 2026-07-11 -- Phase 40 execution started
 
 Progress: [░░░░░░░░░░] 0%
 

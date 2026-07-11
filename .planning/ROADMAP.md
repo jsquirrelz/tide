@@ -258,20 +258,20 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
-| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 0/7 | Planned | - |
+| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 2/7 | In Progress|  |
 
 ### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
 **Goal:** One full API-version crank: introduce v1alpha3 as the sole served+storage version for all 6 CRDs — carrying the folded `subagent.levels` semantic rename (DECIDED mapping in the 2026-07-03 todo) plus user-approved batchable schema fixes — then remove v1alpha1 AND v1alpha2 entirely (Go packages, CRD blocks, chart copies, scheme registrations, stale comments). Reinstall-only migration per Phase 23 D-09; SchemaRevision guard generalized as the permanent crank mechanism; owner-ref dual-accepts dropped; deep docs/samples sweep (INSTALL/gates/git-hosts/project-authoring examples are broken today); envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Decisions locked in `40-CONTEXT.md`.
 **Requirements**: CRANK-01, CRANK-02, CRANK-03, CRANK-04, CRANK-05, CRANK-06, CRANK-07
 **Depends on:** Phase 39
-**Plans:** 7 plans in 4 waves (planned 2026-07-06)
+**Plans:** 2/7 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 40-01-PLAN.md — Introduce api/v1alpha3 (copy-and-reshape, D-10 ModelSelection drop, storage flip, regen) — wave 1
-- [ ] 40-02-PLAN.md — Envelope group decoupling to dispatch.tideproject.k8s/v1alpha1 (D-08) — wave 1
+- [x] 40-01-PLAN.md — Introduce api/v1alpha3 (copy-and-reshape, D-10 ModelSelection drop, storage flip, regen) — wave 1
+- [x] 40-02-PLAN.md — Envelope group decoupling to dispatch.tideproject.k8s/v1alpha1 (D-08) — wave 1
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
