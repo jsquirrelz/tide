@@ -18,12 +18,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // newTestRoot returns a fresh root command tree for isolated testing — each
@@ -158,6 +161,256 @@ func TestApplyRequiresFFlag(t *testing.T) {
 	root.SetArgs([]string{"apply"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected `tide apply` (no -f) to error; got nil")
+	}
+}
+
+// writePromptFile drops content into a t.TempDir() file and returns its path.
+func writePromptFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "prompt.md")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write prompt file: %v", err)
+	}
+	return path
+}
+
+// TestLoadPromptFileTrimsOneTrailingNewline — D-11: content is inlined
+// verbatim except exactly one trailing newline (LF or CRLF) is trimmed.
+func TestLoadPromptFileTrimsOneTrailingNewline(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"single trailing LF trimmed", "Build the thing.\n", "Build the thing."},
+		{"trailing CRLF loses both bytes", "Build the thing.\r\n", "Build the thing."},
+		{"only one trailing newline trimmed", "line1\n\n", "line1\n"},
+		{"no trailing newline left verbatim", "no newline", "no newline"},
+		{"interior newlines preserved", "a\n\nb\n", "a\n\nb"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := loadPromptFile(writePromptFile(t, tc.content))
+			if err != nil {
+				t.Fatalf("loadPromptFile: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("loadPromptFile = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadPromptFileSizeCap — D-11: files over 256 KiB are rejected before
+// any apiserver contact; a file of exactly the cap is accepted.
+func TestLoadPromptFileSizeCap(t *testing.T) {
+	t.Run("one byte over cap rejected", func(t *testing.T) {
+		path := writePromptFile(t, strings.Repeat("a", maxPromptFileBytes+1))
+		_, err := loadPromptFile(path)
+		if err == nil {
+			t.Fatal("expected size-cap error; got nil")
+		}
+		for _, want := range []string{path, "262145", "262144"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("size-cap error missing %q: %v", want, err)
+			}
+		}
+	})
+	t.Run("exactly at cap accepted", func(t *testing.T) {
+		got, err := loadPromptFile(writePromptFile(t, strings.Repeat("a", maxPromptFileBytes)))
+		if err != nil {
+			t.Fatalf("expected 262144-byte file accepted; got %v", err)
+		}
+		if len(got) != maxPromptFileBytes {
+			t.Errorf("content length = %d, want %d", len(got), maxPromptFileBytes)
+		}
+	})
+}
+
+// TestLoadPromptFileRejectsEmptyAndWhitespace — D-11: an empty or
+// whitespace-only prompt is a mistake; fail loudly.
+func TestLoadPromptFileRejectsEmptyAndWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"empty file", ""},
+		{"whitespace-only file", "  \n\t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writePromptFile(t, tc.content)
+			_, err := loadPromptFile(path)
+			if err == nil {
+				t.Fatal("expected empty/whitespace error; got nil")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("error missing path %q: %v", path, err)
+			}
+			if !strings.Contains(err.Error(), "empty or whitespace-only") {
+				t.Errorf("error missing 'empty or whitespace-only': %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadPromptFileNonexistentPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.md")
+	_, err := loadPromptFile(path)
+	if err == nil {
+		t.Fatal("expected read error for nonexistent path; got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error missing path %q: %v", path, err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected error wrapping os.ErrNotExist; got %v", err)
+	}
+}
+
+const testProjectYAML = `apiVersion: tideproject.k8s/v1alpha2
+kind: Project
+metadata:
+  name: demo
+spec:
+  targetRepo: https://example.com/repo.git
+`
+
+const testConfigMapYAML = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extra
+data:
+  k: v
+`
+
+// TestApplyPromptFileInjectsIntoSingleProject — happy path: a single-Project
+// manifest without spec.outcomePrompt gets the loaded content injected.
+func TestApplyPromptFileInjectsIntoSingleProject(t *testing.T) {
+	promptPath := writePromptFile(t, "Build the thing.\n")
+	obj, err := prepareApplyObject([]byte(testProjectYAML), "m.yaml", promptPath)
+	if err != nil {
+		t.Fatalf("prepareApplyObject: %v", err)
+	}
+	got, found, err := unstructured.NestedString(obj.Object, "spec", "outcomePrompt")
+	if err != nil || !found {
+		t.Fatalf("spec.outcomePrompt not set (found=%v, err=%v)", found, err)
+	}
+	if got != "Build the thing." {
+		t.Errorf("spec.outcomePrompt = %q, want %q", got, "Build the thing.")
+	}
+	// Pre-existing spec fields survive the injection.
+	repo, _, _ := unstructured.NestedString(obj.Object, "spec", "targetRepo")
+	if repo != "https://example.com/repo.git" {
+		t.Errorf("spec.targetRepo clobbered: %q", repo)
+	}
+}
+
+// TestApplyPromptFileConflictErrors — D-09: a manifest that already sets
+// spec.outcomePrompt errors loudly; no silent override.
+func TestApplyPromptFileConflictErrors(t *testing.T) {
+	manifest := testProjectYAML + "  outcomePrompt: already here\n"
+	promptPath := writePromptFile(t, "Build the thing.\n")
+	_, err := prepareApplyObject([]byte(manifest), "m.yaml", promptPath)
+	if err == nil {
+		t.Fatal("expected D-09 conflict error; got nil")
+	}
+	for _, want := range []string{"spec.outcomePrompt", "--prompt-file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("conflict error missing %q: %v", want, err)
+		}
+	}
+}
+
+// TestApplyPromptFileDocumentCounting — D-10: exactly one Project document
+// required; zero, multiple, or extra non-Project docs all fail loudly.
+func TestApplyPromptFileDocumentCounting(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest string
+		wantErr  string
+	}{
+		{
+			name:     "zero Project documents",
+			manifest: testConfigMapYAML,
+			wantErr:  "0 Project documents",
+		},
+		{
+			name:     "two Project documents",
+			manifest: testProjectYAML + "---\n" + testProjectYAML,
+			wantErr:  "2 Project documents",
+		},
+		{
+			name:     "one Project plus one non-Project document",
+			manifest: testProjectYAML + "---\n" + testConfigMapYAML,
+			wantErr:  "single-document manifest",
+		},
+	}
+	promptContent := "Build the thing.\n"
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			promptPath := writePromptFile(t, promptContent)
+			_, err := prepareApplyObject([]byte(tc.manifest), "m.yaml", promptPath)
+			if err == nil {
+				t.Fatal("expected document-count error; got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error missing %q: %v", tc.wantErr, err)
+			}
+		})
+	}
+	// The mixed-doc error also names the total document count.
+	t.Run("mixed-doc error names the count", func(t *testing.T) {
+		promptPath := writePromptFile(t, promptContent)
+		_, err := prepareApplyObject([]byte(testProjectYAML+"---\n"+testConfigMapYAML), "m.yaml", promptPath)
+		if err == nil || !strings.Contains(err.Error(), "2 documents") {
+			t.Errorf("expected error naming '2 documents'; got %v", err)
+		}
+	})
+}
+
+// TestApplyPromptFileStillRequiresFFlag — the missing -f error fires
+// regardless of --prompt-file (flag order-independent).
+func TestApplyPromptFileStillRequiresFFlag(t *testing.T) {
+	promptPath := writePromptFile(t, "Build the thing.\n")
+	root := newTestRoot(t)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"apply", "--prompt-file", promptPath})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected `tide apply --prompt-file` (no -f) to error; got nil")
+	}
+	if !strings.Contains(err.Error(), "-f") {
+		t.Errorf("expected missing -f error; got %v", err)
+	}
+}
+
+// TestApplyPromptFileFlagRegistered — `tide apply --help` lists --prompt-file.
+func TestApplyPromptFileFlagRegistered(t *testing.T) {
+	root := newTestRoot(t)
+	apply, _, err := root.Find([]string{"apply"})
+	if err != nil {
+		t.Fatalf("find apply command: %v", err)
+	}
+	if apply.Flags().Lookup("prompt-file") == nil {
+		t.Error("expected --prompt-file flag on `tide apply`")
+	}
+}
+
+// TestApplyWithoutPromptFileKeepsFirstDocBehavior — without --prompt-file a
+// multi-doc manifest decodes the FIRST document exactly as before this change.
+func TestApplyWithoutPromptFileKeepsFirstDocBehavior(t *testing.T) {
+	manifest := testProjectYAML + "---\n" + testConfigMapYAML
+	obj, err := prepareApplyObject([]byte(manifest), "m.yaml", "")
+	if err != nil {
+		t.Fatalf("prepareApplyObject without --prompt-file: %v", err)
+	}
+	if obj.GetKind() != "Project" || obj.GetName() != "demo" {
+		t.Errorf("expected first doc (Project/demo); got %s/%s", obj.GetKind(), obj.GetName())
+	}
+	if _, found, _ := unstructured.NestedString(obj.Object, "spec", "outcomePrompt"); found {
+		t.Error("no --prompt-file given, but spec.outcomePrompt was set")
 	}
 }
 

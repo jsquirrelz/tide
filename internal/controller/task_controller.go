@@ -953,6 +953,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
 			}
+			// Phase 38 COST-02: surface an unknown-model pricing fallback carried
+			// on the envelope — condition + metric. Non-fatal: informational only.
+			if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+				logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "task", task.Name)
+			}
 			// Emit six locked metrics at the same once-only terminal commit point as
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
 			// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
@@ -985,6 +990,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			// pattern as the terminal roll-up below).
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "failed to roll up budget usage", "task", task.Name)
+			}
+			// Phase 38 COST-02: surface an unknown-model pricing fallback carried
+			// on the envelope — condition + metric. Non-fatal: informational only.
+			if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+				logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "task", task.Name)
 			}
 			// Emit six locked metrics at the same once-only terminal commit point as
 			// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from
@@ -1053,6 +1063,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	if err := budget.RollUpUsage(ctx, r.Client, project, out.Usage); err != nil {
 		// Log but do not fail the reconcile — the task is already in terminal state.
 		logger.Error(err, "failed to roll up budget usage", "task", task.Name)
+	}
+	// Phase 38 COST-02: surface an unknown-model pricing fallback carried on
+	// the envelope — condition + metric. Non-fatal: informational only.
+	if fbErr := setPricingFallbackIfNeeded(ctx, r.Client, project, out.Usage.PricingFallbackModel); fbErr != nil {
+		logger.Error(fbErr, "setPricingFallbackIfNeeded failed (non-fatal)", "task", task.Name)
 	}
 	// Emit six locked metrics at the same once-only terminal commit point as
 	// budget.RollUpUsage — guarantees Prometheus cost totals never diverge from

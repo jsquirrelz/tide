@@ -304,7 +304,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 		})
 
-		It("sets ReasonCyclicPlanDetected and creates ZERO child CRs (atomicity — no partial CRs)", func() {
+		It("sets ReasonCyclicPlanDetected and creates ZERO child CRs (atomicity — no partial CRs)", Label("heavy"), func() {
 			r := newImportReconciler()
 			projKey := types.NamespacedName{Name: projName, Namespace: ns}
 

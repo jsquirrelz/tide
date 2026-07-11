@@ -27,6 +27,11 @@
 #   B — Endpoint set: dashboard container MUST carry PROM_ENDPOINT with value.
 #   C — Retention set: render succeeds + values file documents storage.tsdb.retention.time.
 #   D — Lint: helm lint must exit 0.
+#   E — Default render: PROMETHEUS_ENABLED env entry present with value "false"
+#       (Phase 38 D-14 umbrella key — always rendered, explicit false is meaningful).
+#   F — prometheus.enabled=true: PROMETHEUS_ENABLED value is "true".
+#   G — NOTES.txt conditional (Phase 38 TELEM-02/D-12): warning present by
+#       default, absent with prometheus.enabled=true.
 #
 # Usage: ./hack/helm/assert-telemetry-render.sh
 # Requires: helm, grep (standard coreutils). No cluster connection needed.
@@ -160,7 +165,113 @@ ${LINT_OUT}"
 echo "PASS [D]: helm lint exits 0"
 
 # ---------------------------------------------------------------------------
+# Permutation E — PROMETHEUS_ENABLED default (Phase 38 D-14)
+#
+# The umbrella-key env entry is ALWAYS rendered on the dashboard container
+# (unlike PROM_ENDPOINT which is conditional). Default render must carry
+# `name: PROMETHEUS_ENABLED` followed by `value: "false"` — an explicit
+# "false" is the banner's disabled-by-config signal.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation E: default render — PROMETHEUS_ENABLED=false ---"
+
+RENDER_E="$(helm template "${CHART_DIR}" 2>&1)" \
+  || die "[E] helm template charts/tide (no overrides) exited non-zero:
+${RENDER_E}"
+
+if ! echo "${RENDER_E}" | grep -qE '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$'; then
+  die "[E] PROMETHEUS_ENABLED env entry not found in the default render.
+The dashboard Deployment must ALWAYS render PROMETHEUS_ENABLED (Phase 38 D-14) —
+an explicit \"false\" distinguishes disabled-by-config from a legacy chart lacking the key."
+fi
+
+if ! echo "${RENDER_E}" | grep -A1 -E '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$' \
+    | grep -qE '^[[:space:]]*value:[[:space:]]*"false"[[:space:]]*$'; then
+  die "[E] PROMETHEUS_ENABLED default value is not \"false\".
+prometheus.enabled defaults to false in values.yaml; the env must render value: \"false\"."
+fi
+
+echo "PASS [E]: default render carries PROMETHEUS_ENABLED with value \"false\""
+
+# ---------------------------------------------------------------------------
+# Permutation F — PROMETHEUS_ENABLED set true
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation F: prometheus.enabled=true — PROMETHEUS_ENABLED=true ---"
+
+RENDER_F="$(helm template "${CHART_DIR}" --set prometheus.enabled=true 2>&1)" \
+  || die "[F] helm template --set prometheus.enabled=true exited non-zero:
+${RENDER_F}"
+
+if ! echo "${RENDER_F}" | grep -A1 -E '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$' \
+    | grep -qE '^[[:space:]]*value:[[:space:]]*"true"[[:space:]]*$'; then
+  die "[F] PROMETHEUS_ENABLED value is not \"true\" when prometheus.enabled=true.
+The env must carry the quoted umbrella-key value verbatim."
+fi
+
+echo "PASS [F]: prometheus.enabled=true renders PROMETHEUS_ENABLED value \"true\""
+
+# ---------------------------------------------------------------------------
+# Permutation G — NOTES.txt conditional warning (Phase 38 TELEM-02 / D-12)
+#
+# NOTES rendering invocation: helm excludes templates/NOTES.txt from
+# `helm template` manifest output, and `helm install --dry-run=client` on the
+# CI-pinned helm (v3.16.x) still dials the cluster's /version endpoint — the
+# chart-pair-lint job runs clusterless, so an install-based probe can never
+# pass there. Instead, render the NOTES source through the identical template
+# engine and root context via `tpl` inside a throwaway ConfigMap in a temp
+# copy of the chart: same render semantics, valid YAML for `helm template`,
+# zero cluster dependency (verified under helm v3.16.3 and v4.2.0).
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation G: NOTES.txt telemetry warning conditional ---"
+
+WARNING_TEXT="run telemetry beyond the budget tally is unavailable"
+
+NOTES_PROBE_DIR="$(mktemp -d)"
+trap 'rm -rf "${NOTES_PROBE_DIR}"' EXIT
+cp -R "${CHART_DIR}" "${NOTES_PROBE_DIR}/chart"
+mkdir -p "${NOTES_PROBE_DIR}/chart/files"
+cp "${NOTES_PROBE_DIR}/chart/templates/NOTES.txt" "${NOTES_PROBE_DIR}/chart/files/NOTES.tpl"
+cat > "${NOTES_PROBE_DIR}/chart/templates/notes-probe.yaml" <<'PROBE'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes-probe
+data:
+  notes: |
+{{ tpl (.Files.Get "files/NOTES.tpl") . | indent 4 }}
+PROBE
+
+if ! NOTES_DEFAULT="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml 2>&1)"; then
+  die "[G] helm template notes-probe (default values) exited non-zero:
+${NOTES_DEFAULT}"
+fi
+
+if [ -z "${NOTES_DEFAULT}" ]; then
+  die "[G] Empty notes-probe render with default values — templates/NOTES.txt missing or empty."
+fi
+
+if ! echo "${NOTES_DEFAULT}" | grep -qF "${WARNING_TEXT}"; then
+  die "[G] Telemetry warning missing from NOTES with default values.
+prometheus.enabled defaults to false, so NOTES.txt must print:
+  '${WARNING_TEXT}'"
+fi
+
+if ! NOTES_ENABLED="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml --set prometheus.enabled=true 2>&1)"; then
+  die "[G] helm template notes-probe --set prometheus.enabled=true exited non-zero:
+${NOTES_ENABLED}"
+fi
+
+if echo "${NOTES_ENABLED}" | grep -qF "${WARNING_TEXT}"; then
+  die "[G] Telemetry warning leaked into NOTES with prometheus.enabled=true.
+The warning block must be gated on '{{ if not .Values.prometheus.enabled }}'."
+fi
+
+echo "PASS [G]: NOTES warning present by default, absent with prometheus.enabled=true"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "PASS: all 4 permutations passed — EC-7 render gate satisfied"
+echo "PASS: all 7 permutations passed — EC-7 render gate satisfied"

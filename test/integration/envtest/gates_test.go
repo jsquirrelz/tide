@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -217,19 +218,25 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 	ctx := context.Background()
 
 	makeFakeJobTerminalGates := func(name, namespace string) error {
-		var job batchv1.Job
-		if err := mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &job); err != nil {
-			return err
-		}
-		now := metav1.Now()
-		job.Status.StartTime = &now
-		job.Status.CompletionTime = &now
-		job.Status.Succeeded = 1
-		job.Status.Conditions = []batchv1.JobCondition{
-			{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
-			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
-		}
-		return mgrClient.Status().Update(ctx, &job)
+		// RetryOnConflict + refetch inside the closure: the manager's cached client
+		// can serve a stale Job between the Get and the Status().Update while the
+		// auto-reconcilers churn the cluster; a 409 here is a benign lost race, not
+		// a failure (house optimistic-lock idiom, cf. pricing_fallback.go).
+		return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			var job batchv1.Job
+			if err := mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &job); err != nil {
+				return err
+			}
+			now := metav1.Now()
+			job.Status.StartTime = &now
+			job.Status.CompletionTime = &now
+			job.Status.Succeeded = 1
+			job.Status.Conditions = []batchv1.JobCondition{
+				{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+			}
+			return mgrClient.Status().Update(ctx, &job)
+		})
 	}
 
 	driveMSReconcile := func(r *controller.MilestoneReconciler, name string, n int) {
@@ -292,7 +299,20 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 			var got tideprojectv1alpha2.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0})
-			Expect(makeFakeJobTerminalGates(fmt.Sprintf("tide-milestone-%s-1", got.UID), "default")).To(Succeed())
+			// The planner Job is created by whichever reconciler wins a clean pass —
+			// the manual drives above race the manager's auto-reconciler on the same
+			// Milestone, and any single pass can abort on a benign Update conflict
+			// (both write the object). Drive until the Job is observable instead of
+			// assuming a fixed number of blind passes reaches dispatch (CI flake:
+			// Job NotFound at the terminal patch below).
+			jobName := fmt.Sprintf("tide-milestone-%s-1", got.UID)
+			Eventually(func() error {
+				driveMSReconcile(r, msName, 1)
+				var job batchv1.Job
+				return mgrClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "default"}, &job)
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed(),
+				"planner Job %s must exist before it can be marked terminal", jobName)
+			Expect(makeFakeJobTerminalGates(jobName, "default")).To(Succeed())
 			driveMSReconcile(r, msName, 3)
 
 			// 4. Assert Milestone parked at AwaitingApproval.
@@ -727,6 +747,15 @@ func newMilestoneReconcilerForGateIT(envReader *mapEnvReader) *controller.Milest
 		Dispatcher:    &stubDispatcher{},
 		EnvReader:     envReader,
 		SubagentImage: testSubagentImage,
+		// SigningKey makes this driven reconciler dispatch-capable. Without it,
+		// reconcilePlannerDispatch aborts every pass at credproxy.Sign
+		// ("signingKey must not be empty") BEFORE Job creation, so the planner Job
+		// only ever appeared when the manager's auto-reconciler won the race —
+		// the CI flake where tide-milestone-<uid>-1 was NotFound at the terminal
+		// patch. Mirror the suite auto-reconciler's config (suite_test.go).
+		CredproxyImage:       testCredproxyImage,
+		SigningKey:           testSigningKey,
+		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
 	}
 }
 

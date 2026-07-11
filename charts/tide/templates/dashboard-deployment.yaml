@@ -66,6 +66,13 @@ spec:
         - name: PROM_ENDPOINT
           value: {{ quote .Values.prometheus.endpoint }}
         {{- end }}
+        {{- /* Umbrella telemetry signal (Phase 38 D-14). Always rendered:
+        read by cmd/dashboard/main.go to distinguish disabled-by-config (this
+        var "false") from no-data (enabled, queries return empty). An explicit
+        "false" is meaningful — legacy charts lacking prometheus.enabled leave
+        the var unset and the binary falls back to PROM_ENDPOINT presence. */}}
+        - name: PROMETHEUS_ENABLED
+          value: {{ quote .Values.prometheus.enabled }}
         ports:
         - containerPort: 8080
           name: http

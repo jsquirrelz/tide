@@ -24,7 +24,7 @@
 - [x] **Phase 35: Git Base Ref** - `spec.git.baseRef` bases a run on any branch/tag/SHA, unresolvable refs fail fast with a typed condition, and the resolved SHA is stamped in `status.git.baseSHA` across both API versions
 - [x] **Phase 36: Signed Commits + Bot Identity** - *(descoped 2026-07-03: identity only)* TIDE agent identity (name/email) is uniformly configurable across all three commit sites via `spec.git.agentName`/`agentEmail` → chart → compiled-in default, with the tide-push hardcoded identity removed — GPG signing (SIGN-02/03/04) deferred out of v1.0.7 (completed 2026-07-08)
 - [x] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** - Operators review planning artifacts at approve gates, read the outcome prompt and settings, and always see honest log-drawer states — no more PVC reader pods
-- [ ] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed
+- [x] **Phase 38: Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry** - Claude 5 pricing rows land verified, `tide apply --prompt-file` works, the telemetry-setup nudge triple ships, and the v1.0.6 audit debt is closed (completed 2026-07-11)
 
 <details>
 <summary>✅ v1.0.0 — Self-Hosting MVP (Phases 1–11) — SHIPPED 2026-06-11</summary>
@@ -216,7 +216,16 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   4. The project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1), and the rendered chart configmap defaults `plannerConcurrency` to 4, matching values.yaml (W2).
   5. Heavy controller envtest specs run in the integration tier instead of the TEST-01 unit tier, with total spec count conserved across the split (no specs lost).
 
-**Plans**: TBD
+**Plans**: 7/7 plans complete
+
+- [x] 38-01-PLAN.md
+- [x] 38-02-PLAN.md
+- [x] 38-03-PLAN.md
+- [x] 38-04-PLAN.md
+- [x] 38-05-PLAN.md
+- [x] 38-06-PLAN.md
+- [x] 38-07-PLAN.md
+
 **UI hint**: yes
 
 ## Progress
@@ -237,4 +246,4 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 35. Git Base Ref | v1.0.7 | 4/4 | Complete | 2026-07-08 |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
-| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 0/7 | Planned, not executed | - |
+| 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |

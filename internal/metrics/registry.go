@@ -90,6 +90,15 @@ var PushJobsTotal *prometheus.CounterVec
 // events for Prometheus alerting. Label arity {project} = 1.
 var BudgetOverrunsTotal *prometheus.CounterVec
 
+// PricingFallbackTotal counts dispatches priced at the conservative
+// (most-expensive) fallback tier because the model was missing from the
+// pricing table (Phase 38 COST-02 / D-02). Label arity {project, model} = 2;
+// model IDs originate from operator-authored specs/chart defaults so the set
+// is operator-config-bounded (RESEARCH A5 — drop the label if unbounded in
+// practice). Sibling surface: the PricingFallbackActive Project condition
+// covers Prometheus-less installs.
+var PricingFallbackTotal *prometheus.CounterVec
+
 // IntegrationOutcomesTotal counts terminal integration/verify outcomes for
 // wave-integration Jobs and boundary-push Jobs, with `outcome` ∈ {success,
 // miss, conflict, transient, stamp-skip} (Phase 34 D-12). Diagnosable
@@ -194,6 +203,14 @@ func init() {
 		[]string{"project"},
 	)
 
+	PricingFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tide_pricing_fallback_total",
+			Help: "Count of dispatches priced at the conservative fallback tier because the model was missing from the pricing table (Phase 38 COST-02). Labels: project, model.",
+		},
+		[]string{"project", "model"},
+	)
+
 	IntegrationOutcomesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tide_integration_outcomes_total",
@@ -263,6 +280,8 @@ func init() {
 		SecretLeakBlockedTotal,
 		PushJobsTotal,
 		BudgetOverrunsTotal,
+		// Phase 38 COST-02:
+		PricingFallbackTotal,
 		IntegrationOutcomesTotal,
 		// Phase 16 TELEM-03:
 		TokensInputTotal,

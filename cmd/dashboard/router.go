@@ -85,6 +85,13 @@ type Dependencies struct {
 	// when Client, Clientset, AND Store are all non-nil; tests pass nil to
 	// skip the /nodes/{kind}/{name}/artifacts route.
 	Store *gitfetch.Store
+
+	// TelemetryEnabled mirrors the chart's prometheus.enabled toggle (Phase
+	// 38 TELEM-03 / D-14). main.go resolves it from the PROMETHEUS_ENABLED
+	// env (falling back to PROM_ENDPOINT presence for legacy charts) and the
+	// ConfigHandler exposes it to the UI so the Telemetry view's banner can
+	// distinguish disabled-by-config from no-data.
+	TelemetryEnabled bool
 }
 
 // RegisterRoutes builds the dashboard's chi.Mux. DASH-05 invariant: EVERY
@@ -107,6 +114,7 @@ type Dependencies struct {
 //	GET /api/v1/nodes/{kind}/{name}/artifacts — node planning artifacts (plan 37-07, DASH-01)
 //	GET /api/v1/query                         — PromQL instant query proxy (Q1, plan-02)
 //	GET /api/v1/query_range                   — PromQL range query proxy (Q1, plan-02)
+//	GET /api/v1/config                        — telemetry-enabled flag (Phase 38 TELEM-03)
 //	GET /*                                    — SPA fallback (embed.FS)
 //
 // EventsHandler is registered only when deps.Hub is non-nil; LogsHandler
@@ -198,6 +206,13 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		Endpoint: deps.PrometheusEndpoint,
 		Log:      deps.Log,
 	}
+	// Config handler (Phase 38 TELEM-03 / D-14) — exposes the resolved
+	// telemetry-enabled boolean so the UI banner can distinguish
+	// disabled-by-config from no-data. Always registered; GET-only (DASH-05).
+	configHandler := &dashboardapi.ConfigHandler{
+		TelemetryEnabled: deps.TelemetryEnabled,
+		Log:              deps.Log,
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/projects", ph.List)
 		r.Get("/projects/{name}", ph.Get)
@@ -220,6 +235,8 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 		// Handler self-degrades to {status:unavailable} when endpoint is empty.
 		r.Get("/query", promHandler.Query)
 		r.Get("/query_range", promHandler.QueryRange)
+		// Composed path: "/api/v1/config" (Phase 38 TELEM-03).
+		r.Get("/config", configHandler.Get)
 	})
 
 	// SPA fallback (D-X2 single-image deploy). Serves the embedded

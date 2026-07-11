@@ -30,6 +30,11 @@ You may obtain a copy of the License at
 // and the BYPASS-03 test in project_planner_completion_test.go, but is distinct:
 // it validates the new RetryOnConflict + MergeFromWithOptimisticLock marker pattern
 // added in Phase 34 Plan 02 at the project level.
+//
+// Phase 38 DEBT-01 (v1.0.6 audit W1): this spec family is the envtest coverage for
+// the hardened project-level PlannerRolledUpUID stamp. The spec text names the
+// marker so the RESEARCH validation map's -ginkgo.focus='PlannerRolledUpUID'
+// selects it.
 package controller
 
 import (
@@ -48,7 +53,7 @@ import (
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
-var _ = Describe("ProjectRollupIdempotency — project level (PREFLIGHT-02)", Label("envtest"), func() {
+var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID stamp (PREFLIGHT-02 / DEBT-01 W1)", Label("envtest", "heavy"), func() {
 	ctx := context.Background()
 
 	const (

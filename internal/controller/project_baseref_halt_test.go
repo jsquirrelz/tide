@@ -238,7 +238,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 	Describe("Spec A: classify baseref-unresolvable → condition set, Job NOT deleted", func() {
 		const projectName = "baseref-halt-spec-a"
 
-		It("stamps CloneFailed=True/BaseRefUnresolvable with the ref-naming message and leaves the Job", func() {
+		It("stamps CloneFailed=True/BaseRefUnresolvable with the ref-naming message and leaves the Job", Label("heavy"), func() {
 			makeProject(projectName, "no-such-ref")
 			r := newReconciler()
 			p, cloneJobName := advanceToCloneJob(r, projectName)

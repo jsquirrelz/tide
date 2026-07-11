@@ -473,7 +473,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			cleanupBP(projectName, msName)
 		})
 
-		It("Project has reject annotation: push Job is NOT created", func() {
+		It("Project has reject annotation: push Job is NOT created", Label("heavy"), func() {
 			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Milestone: "auto"})
 
 			// Apply reject annotation on Project.

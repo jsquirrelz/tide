@@ -156,8 +156,9 @@ func New(opts Options) *Anthropic {
 		if override.CacheWriteCentsPerMTok > 0 {
 			base.cacheWriteCentsPerMTok = override.CacheWriteCentsPerMTok
 		} else if override.InputCentsPerMTok > 0 {
-			// Derive: cacheWrite = 1.25 × input.
-			base.cacheWriteCentsPerMTok = override.InputCentsPerMTok * 125 / 100
+			// Derive from the D-08 single-flip multiplier (currently 1.25×) so
+			// override-derived rows track a future TTL shift with the table.
+			base.cacheWriteCentsPerMTok = override.InputCentsPerMTok * cacheWriteMultNum / cacheWriteMultDen
 		}
 		effective[modelID] = base
 	}
@@ -344,6 +345,16 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	// never the package-level priceTable — T-14-02 race safety.
 	usage.EstimatedCostCents = a.estimatedCostCents(in.Provider.Model, usage)
 	usage.CacheSavingsCents = a.cacheSavingsCents(in.Provider.Model, usage)
+
+	// D-02 provider side (Phase 38 COST-02): when the model missed the
+	// effective price table even after the -YYYYMMDD normalizer (lookupPrice)
+	// and was billed at the conservative tier, stamp the unmatched ID onto the
+	// envelope. The controller rolls it up into the PricingFallbackActive
+	// Project condition and a Prometheus counter; empty in the priced case so
+	// pre-Phase-38 envelopes stay byte-compatible.
+	if _, ok := a.lookupPrice(in.Provider.Model); !ok {
+		usage.PricingFallbackModel = in.Provider.Model
+	}
 
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,

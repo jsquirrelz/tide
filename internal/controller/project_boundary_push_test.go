@@ -1172,7 +1172,7 @@ var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failur
 		const name = "im-conflict-ttl"
 		AfterEach(func() { cleanupIM(name) })
 
-		It("does not create a new push Job after the parked conflict Job is GC'd", func() {
+		It("does not create a new push Job after the parked conflict Job is GC'd", Label("heavy"), func() {
 			proj := makeCompleteIM(name, 0)
 			jn := pushJobName(proj.UID)
 			makePushJobIM(jn, proj.Name, proj.UID)

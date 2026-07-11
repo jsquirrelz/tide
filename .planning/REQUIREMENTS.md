@@ -24,9 +24,9 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Budget Accuracy (COST)
 
-- [ ] **COST-01**: Claude 5 family models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) price at their real per-MTok rates via exact-ID lookup with a `-YYYYMMDD` normalizer
-- [ ] **COST-02**: An unknown-model pricing fallback is observable as a metric/condition, not only a GC'd pod log line
-- [ ] **COST-03**: The cache-write TTL multiplier is verified empirically (5m 1.25× vs 1h 2×) before the pricing table ships
+- [x] **COST-01**: Claude 5 family models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) price at their real per-MTok rates via exact-ID lookup with a `-YYYYMMDD` normalizer
+- [x] **COST-02**: An unknown-model pricing fallback is observable as a metric/condition, not only a GC'd pod log line
+- [x] **COST-03**: The cache-write TTL multiplier is verified empirically (5m 1.25× vs 1h 2×) before the pricing table ships
 
 ### Git Base Ref (BASE)
 
@@ -42,7 +42,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Prompt File (PROMPT)
 
-- [ ] **PROMPT-01**: Operator can pass `--prompt-file` to `tide apply` — the CLI inlines the file into `spec.outcomePrompt` (no CRD change; ConfigMap-ref union stays a compatible later addition)
+- [x] **PROMPT-01**: Operator can pass `--prompt-file` to `tide apply` — the CLI inlines the file into `spec.outcomePrompt` (no CRD change; ConfigMap-ref union stays a compatible later addition)
 
 ### Dashboard Visibility (DASH)
 
@@ -53,15 +53,15 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Telemetry Setup (TELEM)
 
-- [ ] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
-- [ ] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
-- [ ] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
+- [x] **TELEM-01**: INSTALL.md has an enable-telemetry step including the kube-prometheus-stack `release:` label fix and ending with a Targets-page verification
+- [x] **TELEM-02**: Chart NOTES.txt warns when `prometheus.enabled=false` that run telemetry beyond budget is unavailable
+- [x] **TELEM-03**: Dashboard shows a "telemetry disabled" banner distinguishing disabled-by-config from no-data
 
 ### Tech-Debt Carry (DEBT)
 
 - [x] **DEBT-01**: Project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1). **Already satisfied — see PREFLIGHT-02 (Phase 39, completed 2026-06-29).**
 - [x] **DEBT-02**: Chart configmap `plannerConcurrency` default is 4, matching values.yaml (v1.0.6 audit W2). **Already satisfied — see PREFLIGHT-01 (Phase 39, completed 2026-06-29).**
-- [ ] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
+- [x] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
 
 ## Future Requirements
 
@@ -117,16 +117,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DASH-02 | Phase 37 | Pending |
 | DASH-03 | Phase 37 | Complete |
 | DASH-04 | Phase 37 | Complete |
-| COST-01 | Phase 38 | Pending |
-| COST-02 | Phase 38 | Pending |
-| COST-03 | Phase 38 | Pending |
-| PROMPT-01 | Phase 38 | Pending |
-| TELEM-01 | Phase 38 | Pending |
-| TELEM-02 | Phase 38 | Pending |
-| TELEM-03 | Phase 38 | Pending |
+| COST-01 | Phase 38 | Complete |
+| COST-02 | Phase 38 | Complete |
+| COST-03 | Phase 38 | Complete |
+| PROMPT-01 | Phase 38 | Complete |
+| TELEM-01 | Phase 38 | Complete |
+| TELEM-02 | Phase 38 | Complete |
+| TELEM-03 | Phase 38 | Complete |
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
-| DEBT-03 | Phase 38 | Pending |
+| DEBT-03 | Phase 38 | Complete |
 
 **Coverage:**
 

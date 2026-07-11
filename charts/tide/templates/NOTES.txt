@@ -1,0 +1,15 @@
+{{- /* charts/tide/templates/NOTES.txt — rendered post-install (Phase 38 TELEM-02 / D-12).
+Owned by hack/helm/augment-tide-chart.sh (step 4b) — edit the heredoc there,
+not only this file, or the next augment run reverts the change (Pitfall 3). */ -}}
+TIDE {{ .Chart.AppVersion }} installed in {{ .Release.Namespace }}.
+
+Dashboard:  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tide.fullname" . }}-dashboard 8080:80
+Docs:       https://github.com/jsquirrelz/tide/blob/main/docs/INSTALL.md
+
+{{- if not .Values.prometheus.enabled }}
+
+WARNING: run telemetry beyond the budget tally is unavailable —
+prometheus.enabled is false.
+Token spend over time, dispatch counts, and per-level durations will be dark.
+Enable: see the "Enable telemetry" step in docs/INSTALL.md.
+{{- end }}
