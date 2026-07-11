@@ -30,6 +30,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// maxPromptFileBytes is the D-11 cap on --prompt-file content.
+// spec.outcomePrompt has no CRD MaxLength, so this CLI cap is the only
+// guard; 256 KiB keeps the Project object comfortably under etcd's
+// ~1.5 MiB ceiling with headroom for the rest of the spec.
+const maxPromptFileBytes = 256 * 1024
+
+// loadPromptFile reads and validates a --prompt-file per D-11: size cap
+// enforced before any apiserver contact, exactly one trailing newline
+// (LF or CRLF) trimmed, empty/whitespace-only content rejected. Bytes are
+// otherwise returned verbatim — no templating or interpolation of any kind.
+func loadPromptFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %s: %w", path, err)
+	}
+	if len(raw) > maxPromptFileBytes {
+		return "", fmt.Errorf("prompt file %s is %d bytes; the limit is %d (256 KiB)", path, len(raw), maxPromptFileBytes)
+	}
+	content := strings.TrimSuffix(string(raw), "\n")
+	content = strings.TrimSuffix(content, "\r")
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("prompt file %s is empty or whitespace-only", path)
+	}
+	return content, nil
+}
+
 // newApplyCmd implements `tide apply -f <file>` — a server-side-apply wrapper
 // around the kubectl apply semantics. Reads a YAML manifest, unmarshals into
 // unstructured.Unstructured, calls client.Patch(client.Apply) with field
