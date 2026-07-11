@@ -55,7 +55,7 @@ func writeInJSON(t *testing.T, workspace, uid string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("MkdirAll %q: %v", dir, err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "in.json"), []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "in.json"), []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeIn"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile in.json: %v", err)
 	}
 }
@@ -231,7 +231,7 @@ func TestNoClobber(t *testing.T) {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll dst dir: %v", err)
 	}
-	preExistingContent := []byte(`{"apiVersion":"tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"pre-existing"}`)
+	preExistingContent := []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"TaskEnvelopeOut","taskUID":"pre-existing"}`)
 	if err := os.WriteFile(filepath.Join(dstDir, "out.json"), preExistingContent, 0o644); err != nil {
 		t.Fatalf("WriteFile pre-existing: %v", err)
 	}

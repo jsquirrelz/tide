@@ -217,7 +217,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 	// generic BackoffLimitExceeded #13b class) to the named push Job's pod.
 	fakePushPod := func(jobName, reason string, exitCode int) {
 		env := pushResultEnvelope{
-			APIVersion: "tideproject.k8s/v1alpha1",
+			APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 			Kind:       "PushResult",
 			ExitCode:   exitCode,
 			Reason:     reason,
@@ -252,7 +252,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 	// value the success arm reads to advance Status.Git.LastPushedSHA.
 	fakePushPodSuccess := func(jobName, headSHA string) {
 		env := pushResultEnvelope{
-			APIVersion: "tideproject.k8s/v1alpha1",
+			APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 			Kind:       "PushResult",
 			HeadSHA:    headSHA,
 			ExitCode:   0,
@@ -289,7 +289,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 	// exitCode + headSHA model a specific attempt's outcome.
 	fakePushPodWith := func(podName, jobName string, phase corev1.PodPhase, headSHA, reason string, exitCode int) {
 		env := pushResultEnvelope{
-			APIVersion: "tideproject.k8s/v1alpha1",
+			APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 			Kind:       "PushResult",
 			HeadSHA:    headSHA,
 			ExitCode:   exitCode,
@@ -780,7 +780,7 @@ var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observatio
 	}
 
 	attachEnvelopePod := func(jobName, headSHA string) {
-		env := pushResultEnvelope{APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult", HeadSHA: headSHA, ExitCode: 0}
+		env := pushResultEnvelope{APIVersion: "dispatch.tideproject.k8s/v1alpha1", Kind: "PushResult", HeadSHA: headSHA, ExitCode: 0}
 		raw, err := json.Marshal(env)
 		Expect(err).NotTo(HaveOccurred())
 		pod := &corev1.Pod{
@@ -994,7 +994,7 @@ var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failur
 
 	attachMissEnvelope := func(jobName string, missing []string, total int) {
 		env := pushResultEnvelope{
-			APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult",
+			APIVersion: "dispatch.tideproject.k8s/v1alpha1", Kind: "PushResult",
 			ExitCode: 14, Reason: "integration-incomplete",
 			MissingBranches: missing, MissingTotal: total,
 		}
@@ -1023,7 +1023,7 @@ var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failur
 
 	attachConflictEnvelope := func(jobName, conflictBranch string) {
 		env := pushResultEnvelope{
-			APIVersion: "tideproject.k8s/v1alpha1", Kind: "PushResult",
+			APIVersion: "dispatch.tideproject.k8s/v1alpha1", Kind: "PushResult",
 			ExitCode: 15, Reason: "merge-conflict", ConflictBranch: conflictBranch,
 		}
 		raw, err := json.Marshal(env)

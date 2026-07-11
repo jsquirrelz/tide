@@ -769,7 +769,7 @@ func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
 	if err := makeFakeJobTerminal(context.Background(), fc, integJobName, "default", false); err != nil {
 		t.Fatalf("mark job failed: %v", err)
 	}
-	envelopeJSON := `{"apiVersion":"tideproject.k8s/v1alpha1","kind":"PushResult","reason":"merge-conflict","conflictBranch":"tide/wt-uid-conf-taskB","exitCode":15}`
+	envelopeJSON := `{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"PushResult","reason":"merge-conflict","conflictBranch":"tide/wt-uid-conf-taskB","exitCode":15}`
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      integJobName + "-pod",

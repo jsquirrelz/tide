@@ -222,7 +222,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 			makePushJob(pushJobName, "default", proj.Name, proj.UID)
 			fakePushJobPod(pushJobName, "default", pushResultEnvelope{
-				APIVersion: "tideproject.k8s/v1alpha1",
+				APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 				Kind:       "PushResult",
 				ProjectUID: string(proj.UID),
 				ExitCode:   10,
@@ -269,7 +269,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 			makePushJob(pushJobName, "default", proj.Name, proj.UID)
 			fakePushJobPod(pushJobName, "default", pushResultEnvelope{
-				APIVersion: "tideproject.k8s/v1alpha1",
+				APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 				Kind:       "PushResult",
 				ProjectUID: string(proj.UID),
 				ExitCode:   11,
@@ -314,7 +314,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 			makePushJob(pushJobName, "default", proj.Name, proj.UID)
 			fakePushJobPod(pushJobName, "default", pushResultEnvelope{
-				APIVersion: "tideproject.k8s/v1alpha1",
+				APIVersion: "dispatch.tideproject.k8s/v1alpha1",
 				Kind:       "PushResult",
 				ProjectUID: string(proj.UID),
 				ExitCode:   1,
