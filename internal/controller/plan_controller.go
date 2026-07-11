@@ -955,7 +955,11 @@ func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *ti
 		reason = tideprojectv1alpha2.ReasonPausedAtBoundary
 		message = "Plan paused at boundary; requires explicit resume"
 	}
-	patch := client.MergeFrom(plan.DeepCopy())
+	// Optimistic lock: a stale-snapshot re-park must not blind-merge over a
+	// concurrent approve's Running+ApprovedByUser write — that clobber consumes
+	// the one-shot approve annotation and wedges the level at AwaitingApproval.
+	// See patchMilestoneAwaitingApproval for the full race description.
+	patch := client.MergeFromWithOptions(plan.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	plan.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,

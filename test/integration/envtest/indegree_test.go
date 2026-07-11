@@ -56,10 +56,11 @@ var _ = Describe("Task indegree and dependency semantics", Label("envtest"), fun
 				TargetRepo: "https://github.com/example/indegree-test.git",
 			},
 		}
-		// Idempotent across nested It blocks under flake-retry; ignore AlreadyExists.
-		if err := k8sClient.Create(ctx, project); err != nil {
-			Expect(client.IgnoreAlreadyExists(err)).To(Succeed())
-		}
+		// Create-or-wait (helpers_test.go): idempotent across nested It blocks AND
+		// safe against the previous spec's asynchronous Project deletion — a bare
+		// Create + IgnoreAlreadyExists lands on the still-terminating object and
+		// is silently swallowed.
+		ensureLiveProject(ctx, project)
 	})
 
 	AfterEach(func() {

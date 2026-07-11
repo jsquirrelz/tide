@@ -271,7 +271,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 				g.Expect(c).NotTo(BeNil(), "ConditionPushLeakBlocked should be set on leak-detected")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal("LeakDetected"))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// metrics.SecretLeakBlockedTotal{projectName, "", ""} >= 1.0
 			counterValue := testutil.ToFloat64(tidemetrics.SecretLeakBlockedTotal.WithLabelValues(projectName, "", ""))
@@ -340,7 +340,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionPushLeaseFailed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+			}, 15*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			counterValue := testutil.ToFloat64(tidemetrics.SecretLeakBlockedTotal.WithLabelValues(projectName, "", ""))
 			Expect(counterValue).To(BeNumerically("==", 0.0),

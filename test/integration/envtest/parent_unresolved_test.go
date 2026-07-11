@@ -69,19 +69,16 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 
 	BeforeEach(func() {
 		// Two Projects in default — the prior projectList.Items[0] fallback would
-		// silently adopt whichever sorted first. Idempotent (other specs may leave
-		// projects behind if AfterEach cleanup raced).
+		// silently adopt whichever sorted first. Create-or-wait (helpers_test.go):
+		// idempotent AND safe against this Describe's own AfterEach deletion still
+		// terminating when the next It's BeforeEach runs.
 		for _, name := range []string{projectA, projectB} {
-			proj := &tideprojectv1alpha2.Project{
+			ensureLiveProject(ctx, &tideprojectv1alpha2.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
 					TargetRepo: fmt.Sprintf("https://github.com/example/%s.git", name),
 				},
-			}
-			if err := k8sClient.Create(ctx, proj); err != nil {
-				Expect(client.IgnoreAlreadyExists(err)).To(Succeed(),
-					"create project %s", name)
-			}
+			})
 		}
 
 		// Task with NO tideproject.k8s/project label and NO owner-ref to either Project.
