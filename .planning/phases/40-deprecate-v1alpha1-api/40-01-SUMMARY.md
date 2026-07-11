@@ -148,3 +148,7 @@ None - no external service configuration required.
 ---
 *Phase: 40-deprecate-v1alpha1-api*
 *Completed: 2026-07-11*
+
+## Self-Check: PASSED
+
+All 11 created/modified files verified present on disk; all 4 commit hashes (`bd480b7`, `ee24b57`, `16c5f45`, `27c6e33`) verified in `git log --oneline --all`.
