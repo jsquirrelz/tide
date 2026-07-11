@@ -18,7 +18,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +160,109 @@ func TestApplyRequiresFFlag(t *testing.T) {
 	root.SetArgs([]string{"apply"})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected `tide apply` (no -f) to error; got nil")
+	}
+}
+
+// writePromptFile drops content into a t.TempDir() file and returns its path.
+func writePromptFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "prompt.md")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write prompt file: %v", err)
+	}
+	return path
+}
+
+// TestLoadPromptFileTrimsOneTrailingNewline — D-11: content is inlined
+// verbatim except exactly one trailing newline (LF or CRLF) is trimmed.
+func TestLoadPromptFileTrimsOneTrailingNewline(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"single trailing LF trimmed", "Build the thing.\n", "Build the thing."},
+		{"trailing CRLF loses both bytes", "Build the thing.\r\n", "Build the thing."},
+		{"only one trailing newline trimmed", "line1\n\n", "line1\n"},
+		{"no trailing newline left verbatim", "no newline", "no newline"},
+		{"interior newlines preserved", "a\n\nb\n", "a\n\nb"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := loadPromptFile(writePromptFile(t, tc.content))
+			if err != nil {
+				t.Fatalf("loadPromptFile: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("loadPromptFile = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadPromptFileSizeCap — D-11: files over 256 KiB are rejected before
+// any apiserver contact; a file of exactly the cap is accepted.
+func TestLoadPromptFileSizeCap(t *testing.T) {
+	t.Run("one byte over cap rejected", func(t *testing.T) {
+		path := writePromptFile(t, strings.Repeat("a", maxPromptFileBytes+1))
+		_, err := loadPromptFile(path)
+		if err == nil {
+			t.Fatal("expected size-cap error; got nil")
+		}
+		for _, want := range []string{path, "262145", "262144"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("size-cap error missing %q: %v", want, err)
+			}
+		}
+	})
+	t.Run("exactly at cap accepted", func(t *testing.T) {
+		got, err := loadPromptFile(writePromptFile(t, strings.Repeat("a", maxPromptFileBytes)))
+		if err != nil {
+			t.Fatalf("expected 262144-byte file accepted; got %v", err)
+		}
+		if len(got) != maxPromptFileBytes {
+			t.Errorf("content length = %d, want %d", len(got), maxPromptFileBytes)
+		}
+	})
+}
+
+// TestLoadPromptFileRejectsEmptyAndWhitespace — D-11: an empty or
+// whitespace-only prompt is a mistake; fail loudly.
+func TestLoadPromptFileRejectsEmptyAndWhitespace(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"empty file", ""},
+		{"whitespace-only file", "  \n\t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writePromptFile(t, tc.content)
+			_, err := loadPromptFile(path)
+			if err == nil {
+				t.Fatal("expected empty/whitespace error; got nil")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("error missing path %q: %v", path, err)
+			}
+			if !strings.Contains(err.Error(), "empty or whitespace-only") {
+				t.Errorf("error missing 'empty or whitespace-only': %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadPromptFileNonexistentPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.md")
+	_, err := loadPromptFile(path)
+	if err == nil {
+		t.Fatal("expected read error for nonexistent path; got nil")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error missing path %q: %v", path, err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected error wrapping os.ErrNotExist; got %v", err)
 	}
 }
 
