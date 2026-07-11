@@ -156,8 +156,9 @@ func New(opts Options) *Anthropic {
 		if override.CacheWriteCentsPerMTok > 0 {
 			base.cacheWriteCentsPerMTok = override.CacheWriteCentsPerMTok
 		} else if override.InputCentsPerMTok > 0 {
-			// Derive: cacheWrite = 1.25 × input.
-			base.cacheWriteCentsPerMTok = override.InputCentsPerMTok * 125 / 100
+			// Derive from the D-08 single-flip multiplier (currently 1.25×) so
+			// override-derived rows track a future TTL shift with the table.
+			base.cacheWriteCentsPerMTok = override.InputCentsPerMTok * cacheWriteMultNum / cacheWriteMultDen
 		}
 		effective[modelID] = base
 	}

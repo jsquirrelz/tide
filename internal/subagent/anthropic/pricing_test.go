@@ -432,6 +432,10 @@ func TestLookupPriceNormalizer(t *testing.T) {
 // its cache-write rate from the single D-08 multiplier constant:
 // cacheWrite = input × cacheWriteMultNum / cacheWriteMultDen. One place to
 // change on the next TTL shift; this test catches any row drifting from it.
+// The override derive-path case guards New()'s merge logic against the same
+// drift: an override omitting cache fields must derive from the constant, not
+// a hardcoded ratio, so a future flip moves compiled and override-derived
+// rows together.
 func TestCacheWriteMultiplierConsistency(t *testing.T) {
 	for model, price := range priceTable {
 		want := price.inputCentsPerMTok * cacheWriteMultNum / cacheWriteMultDen
@@ -441,4 +445,23 @@ func TestCacheWriteMultiplierConsistency(t *testing.T) {
 				price.inputCentsPerMTok, cacheWriteMultNum, cacheWriteMultDen)
 		}
 	}
+
+	t.Run("override_derive_path", func(t *testing.T) {
+		const overrideInput = int64(700)
+		a := New(Options{
+			PricingOverrides: map[string]pkgdispatch.PriceOverride{
+				"claude-derive-check": {
+					InputCentsPerMTok:  overrideInput,
+					OutputCentsPerMTok: 3500,
+					// CacheWrite omitted → must derive from the D-08 constant.
+				},
+			},
+		})
+		got := a.prices["claude-derive-check"].cacheWriteCentsPerMTok
+		want := overrideInput * cacheWriteMultNum / cacheWriteMultDen
+		if got != want {
+			t.Errorf("override-derived cacheWriteCentsPerMTok=%d, want %d (input %d × %d/%d — D-08 multiplier drift in New())",
+				got, want, overrideInput, cacheWriteMultNum, cacheWriteMultDen)
+		}
+	})
 }
