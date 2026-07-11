@@ -651,7 +651,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 		// BYPASS-04: raise-absolute-cap-alone resume sticks (D-04 acknowledged-spend baseline).
 		// After a bypass, raising only the absolute cap (leaving rolling-window numerically
 		// exceeded by already-incurred spend) should NOT immediately re-halt on the next reconcile.
-		It("BYPASS-04: raise-absolute-cap-alone resume stays Running (no re-halt on old spend)", Label("envtest"), func() {
+		It("BYPASS-04: raise-absolute-cap-alone resume stays Running (no re-halt on old spend)", Label("envtest", "heavy"), func() {
 			ns := "default"
 			pvcName := "tide-projects-bypass04-raise-abs"
 			makeTestBoundPVC(ctx, pvcName, ns)

@@ -149,7 +149,7 @@ var _ = Describe("BudgetBlocked run-1 regression (a): cap trips → Project carr
 // ---- Scenario 1b: run-1 regression — no Job created; Task NOT Failed ----
 
 var _ = Describe("BudgetBlocked run-1 regression (b): no Job created; Task NOT Failed",
-	Label("envtest", "phase14", "budget-blocked", "regression"), func() {
+	Label("envtest", "phase14", "budget-blocked", "regression", "heavy"), func() {
 		ctx := context.Background()
 		const (
 			projName   = "bb-run1-b-proj"

@@ -78,7 +78,7 @@ func refetchProject(ctx context.Context, name string) *tideprojectv1alpha2.Proje
 
 // ─── Milestone level ─────────────────────────────────────────────────────────
 
-var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-04)", Label("envtest"), func() {
+var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-04)", Label("envtest", "heavy"), func() {
 	ctx := context.Background()
 
 	const (
@@ -193,7 +193,7 @@ var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-0
 
 // ─── Phase level ─────────────────────────────────────────────────────────────
 
-var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)", Label("envtest"), func() {
+var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)", Label("envtest", "heavy"), func() {
 	ctx := context.Background()
 
 	const (
@@ -319,7 +319,7 @@ var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)",
 
 // ─── Plan level (D-03a — no prior marker) ────────────────────────────────────
 
-var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new marker)", Label("envtest"), func() {
+var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new marker)", Label("envtest", "heavy"), func() {
 	ctx := context.Background()
 
 	const (

@@ -61,7 +61,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 - [x] **DEBT-01**: Project-level `PlannerRolledUpUID` stamp uses the hardened RetryOnConflict + optimistic-lock pattern (v1.0.6 audit W1). **Already satisfied — see PREFLIGHT-02 (Phase 39, completed 2026-06-29).**
 - [x] **DEBT-02**: Chart configmap `plannerConcurrency` default is 4, matching values.yaml (v1.0.6 audit W2). **Already satisfied — see PREFLIGHT-01 (Phase 39, completed 2026-06-29).**
-- [ ] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
+- [x] **DEBT-03**: Heavy controller envtest specs move out of the TEST-01 unit tier into the integration tier, with spec-count conservation (no specs lost in the split)
 
 ## Future Requirements
 
@@ -126,7 +126,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TELEM-03 | Phase 38 | Complete |
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
-| DEBT-03 | Phase 38 | Pending |
+| DEBT-03 | Phase 38 | Complete |
 
 **Coverage:**
 

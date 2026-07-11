@@ -203,7 +203,7 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			cleanupWavepauseFixture(projectName, msName, phaseName, planName)
 		})
 
-		It("No WaveOrLevelPaused condition is set (today's behavior preserved)", func() {
+		It("No WaveOrLevelPaused condition is set (today's behavior preserved)", Label("heavy"), func() {
 			r := newPlanReconciler()
 			planNS := types.NamespacedName{Name: planName, Namespace: "default"}
 
