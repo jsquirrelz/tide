@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,6 +31,32 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// maxPromptFileBytes is the D-11 cap on --prompt-file content.
+// spec.outcomePrompt has no CRD MaxLength, so this CLI cap is the only
+// guard; 256 KiB keeps the Project object comfortably under etcd's
+// ~1.5 MiB ceiling with headroom for the rest of the spec.
+const maxPromptFileBytes = 256 * 1024
+
+// loadPromptFile reads and validates a --prompt-file per D-11: size cap
+// enforced before any apiserver contact, exactly one trailing newline
+// (LF or CRLF) trimmed, empty/whitespace-only content rejected. Bytes are
+// otherwise returned verbatim — no templating or interpolation of any kind.
+func loadPromptFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read prompt file %s: %w", path, err)
+	}
+	if len(raw) > maxPromptFileBytes {
+		return "", fmt.Errorf("prompt file %s is %d bytes; the limit is %d (256 KiB)", path, len(raw), maxPromptFileBytes)
+	}
+	content := strings.TrimSuffix(string(raw), "\n")
+	content = strings.TrimSuffix(content, "\r")
+	if strings.TrimSpace(content) == "" {
+		return "", fmt.Errorf("prompt file %s is empty or whitespace-only", path)
+	}
+	return content, nil
+}
+
 // newApplyCmd implements `tide apply -f <file>` — a server-side-apply wrapper
 // around the kubectl apply semantics. Reads a YAML manifest, unmarshals into
 // unstructured.Unstructured, calls client.Patch(client.Apply) with field
@@ -40,7 +67,8 @@ import (
 // scraping a raw apiserver response.
 func newApplyCmd() *cobra.Command {
 	var (
-		file string
+		file       string
+		promptFile string
 	)
 	c := &cobra.Command{
 		Use:   "apply",
@@ -51,28 +79,102 @@ func newApplyCmd() *cobra.Command {
 			if file == "" {
 				return fmt.Errorf("--file/-f is required")
 			}
-			return runApply(cmd.Context(), file, cmd.OutOrStdout())
+			return runApply(cmd.Context(), file, promptFile, cmd.OutOrStdout())
 		},
 	}
 	c.Flags().StringVarP(&file, "file", "f", "", "Path to YAML manifest (required)")
+	c.Flags().StringVar(&promptFile, "prompt-file", "",
+		"Inline this file into spec.outcomePrompt of the manifest's single Project document")
 	return c
 }
 
+// prepareApplyObject is the cluster-free seam runApply calls BEFORE
+// constructing the Kubernetes client, so every --prompt-file validation
+// error fires without any apiserver contact.
+//
+// Without --prompt-file the first document decodes exactly as before this
+// flag existed — behavior byte-identical. With --prompt-file, D-10 requires
+// the manifest to contain exactly one Project document; refusing extra
+// non-Project documents (rather than silently dropping them) is the
+// fail-loud reading consistent with apply's single-object SSA semantics.
+// D-09 refuses to override an existing spec.outcomePrompt.
+func prepareApplyObject(raw []byte, path, promptFile string) (*unstructured.Unstructured, error) {
+	if promptFile == "" {
+		obj := &unstructured.Unstructured{}
+		dec := yaml.NewYAMLOrJSONDecoder(bytesReader(raw), 4096)
+		if err := dec.Decode(obj); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if obj.GetKind() == "" || obj.GetAPIVersion() == "" {
+			return nil, fmt.Errorf("%s: missing kind/apiVersion", path)
+		}
+		return obj, nil
+	}
+
+	// Fail fast on prompt content errors before touching the manifest.
+	content, err := loadPromptFile(promptFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var docs []*unstructured.Unstructured
+	dec := yaml.NewYAMLOrJSONDecoder(bytesReader(raw), 4096)
+	for {
+		obj := &unstructured.Unstructured{}
+		if err := dec.Decode(obj); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		// Bare `---` separators decode to empty objects — skip them.
+		if len(obj.Object) == 0 {
+			continue
+		}
+		docs = append(docs, obj)
+	}
+
+	projectCount := 0
+	var prj *unstructured.Unstructured
+	for _, d := range docs {
+		if d.GetKind() == "Project" {
+			projectCount++
+			prj = d
+		}
+	}
+	if projectCount != 1 {
+		return nil, fmt.Errorf("%s contains %d Project documents; --prompt-file requires exactly 1", path, projectCount)
+	}
+	if len(docs) > 1 {
+		return nil, fmt.Errorf("--prompt-file requires a single-document manifest; %s has %d documents", path, len(docs))
+	}
+
+	// D-09: no silent override of an authored prompt.
+	existing, found, _ := unstructured.NestedString(prj.Object, "spec", "outcomePrompt")
+	if found && strings.TrimSpace(existing) != "" {
+		return nil, fmt.Errorf(
+			"%s already sets spec.outcomePrompt; remove it from the manifest or drop --prompt-file (no silent override)", path)
+	}
+	if err := unstructured.SetNestedField(prj.Object, content, "spec", "outcomePrompt"); err != nil {
+		return nil, fmt.Errorf("inject prompt file %s into %s: %w", promptFile, path, err)
+	}
+	if prj.GetKind() == "" || prj.GetAPIVersion() == "" {
+		return nil, fmt.Errorf("%s: missing kind/apiVersion", path)
+	}
+	return prj, nil
+}
+
 // runApply is the testable seam — reads the YAML, builds an unstructured
-// object, and patches it server-side.
-func runApply(ctx context.Context, path string, out io.Writer) error {
+// object via prepareApplyObject, and patches it server-side.
+func runApply(ctx context.Context, path, promptFile string, out io.Writer) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 
-	obj := &unstructured.Unstructured{}
-	dec := yaml.NewYAMLOrJSONDecoder(bytesReader(raw), 4096)
-	if err := dec.Decode(obj); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
-	}
-	if obj.GetKind() == "" || obj.GetAPIVersion() == "" {
-		return fmt.Errorf("%s: missing kind/apiVersion", path)
+	obj, err := prepareApplyObject(raw, path, promptFile)
+	if err != nil {
+		return err
 	}
 
 	c, err := K8sClient()
