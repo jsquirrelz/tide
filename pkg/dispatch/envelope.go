@@ -312,6 +312,15 @@ type Usage struct {
 	// CacheReadTokens is zero — omitted from JSON in the common zero case.
 	CacheSavingsCents int64 `json:"cacheSavingsCents,omitempty"`
 
+	// PricingFallbackModel carries the unmatched model ID when this dispatch's
+	// model missed the effective price table even after normalization and was
+	// billed at the conservative (most-expensive) tier. Set by the provider
+	// (provider firewall — Phase 38 COST-02 / D-02); the controller rolls it up
+	// into a PricingFallbackActive Project condition and a Prometheus counter.
+	// Empty in the common priced case — omitted from JSON so pre-Phase-38
+	// envelopes stay byte-compatible.
+	PricingFallbackModel string `json:"pricingFallbackModel,omitempty"`
+
 	// Iterations is the actual number of agent loop iterations completed.
 	Iterations int `json:"iterations"`
 
