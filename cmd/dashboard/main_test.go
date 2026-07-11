@@ -38,23 +38,23 @@ func TestTelemetryEnabledFromEnv(t *testing.T) {
 		promEndpoint *string // nil = unset
 		want         bool
 	}{
-		{name: "explicit true", promEnabled: ptr("true"), want: true},
+		{name: "explicit true", promEnabled: new("true"), want: true},
 		{
 			name:         "explicit false wins over set PROM_ENDPOINT",
-			promEnabled:  ptr("false"),
-			promEndpoint: ptr("http://prometheus:9090"),
+			promEnabled:  new("false"),
+			promEndpoint: new("http://prometheus:9090"),
 			want:         false,
 		},
 		{
 			name:         "unset falls back to PROM_ENDPOINT presence",
-			promEndpoint: ptr("http://x"),
+			promEndpoint: new("http://x"),
 			want:         true,
 		},
 		{name: "unset with no PROM_ENDPOINT is disabled", want: false},
 		{
 			name:         "unrecognized value falls back to PROM_ENDPOINT presence",
-			promEnabled:  ptr("yes"),
-			promEndpoint: ptr("http://x"),
+			promEnabled:  new("yes"),
+			promEndpoint: new("http://x"),
 			want:         true,
 		},
 	}
@@ -68,9 +68,6 @@ func TestTelemetryEnabledFromEnv(t *testing.T) {
 		})
 	}
 }
-
-// ptr returns a pointer to v — table-test helper for optional env values.
-func ptr(v string) *string { return &v }
 
 // setOrUnsetEnv sets the env var when v is non-nil, otherwise guarantees it
 // is unset. t.Setenv registers restoration either way (its cleanup restores
