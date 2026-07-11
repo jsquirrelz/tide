@@ -214,23 +214,42 @@ echo "PASS [F]: prometheus.enabled=true renders PROMETHEUS_ENABLED value \"true\
 # ---------------------------------------------------------------------------
 # Permutation G — NOTES.txt conditional warning (Phase 38 TELEM-02 / D-12)
 #
-# NOTES rendering invocation: `helm template --show-only templates/NOTES.txt`
-# does NOT emit NOTES.txt on this repo's helm (verified against helm v4.2.0 —
-# NOTES is excluded from manifest output), so the codified invocation is the
-# client-side dry-run install, which prints the rendered NOTES block without
-# needing a cluster connection.
+# NOTES rendering invocation: helm excludes templates/NOTES.txt from
+# `helm template` manifest output, and `helm install --dry-run=client` on the
+# CI-pinned helm (v3.16.x) still dials the cluster's /version endpoint — the
+# chart-pair-lint job runs clusterless, so an install-based probe can never
+# pass there. Instead, render the NOTES source through the identical template
+# engine and root context via `tpl` inside a throwaway ConfigMap in a temp
+# copy of the chart: same render semantics, valid YAML for `helm template`,
+# zero cluster dependency (verified under helm v3.16.3 and v4.2.0).
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- Permutation G: NOTES.txt telemetry warning conditional ---"
 
 WARNING_TEXT="run telemetry beyond the budget tally is unavailable"
 
-NOTES_DEFAULT="$(helm install tide-notes "${CHART_DIR}" --dry-run=client 2>&1 | sed -n '/^NOTES:/,$p')" \
-  || die "[G] helm install --dry-run=client (default values) exited non-zero:
+NOTES_PROBE_DIR="$(mktemp -d)"
+trap 'rm -rf "${NOTES_PROBE_DIR}"' EXIT
+cp -R "${CHART_DIR}" "${NOTES_PROBE_DIR}/chart"
+mkdir -p "${NOTES_PROBE_DIR}/chart/files"
+cp "${NOTES_PROBE_DIR}/chart/templates/NOTES.txt" "${NOTES_PROBE_DIR}/chart/files/NOTES.tpl"
+cat > "${NOTES_PROBE_DIR}/chart/templates/notes-probe.yaml" <<'PROBE'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notes-probe
+data:
+  notes: |
+{{ tpl (.Files.Get "files/NOTES.tpl") . | indent 4 }}
+PROBE
+
+if ! NOTES_DEFAULT="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml 2>&1)"; then
+  die "[G] helm template notes-probe (default values) exited non-zero:
 ${NOTES_DEFAULT}"
+fi
 
 if [ -z "${NOTES_DEFAULT}" ]; then
-  die "[G] No NOTES: block in the default dry-run output — templates/NOTES.txt missing or empty."
+  die "[G] Empty notes-probe render with default values — templates/NOTES.txt missing or empty."
 fi
 
 if ! echo "${NOTES_DEFAULT}" | grep -qF "${WARNING_TEXT}"; then
@@ -239,9 +258,10 @@ prometheus.enabled defaults to false, so NOTES.txt must print:
   '${WARNING_TEXT}'"
 fi
 
-NOTES_ENABLED="$(helm install tide-notes "${CHART_DIR}" --dry-run=client --set prometheus.enabled=true 2>&1 | sed -n '/^NOTES:/,$p')" \
-  || die "[G] helm install --dry-run=client --set prometheus.enabled=true exited non-zero:
+if ! NOTES_ENABLED="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml --set prometheus.enabled=true 2>&1)"; then
+  die "[G] helm template notes-probe --set prometheus.enabled=true exited non-zero:
 ${NOTES_ENABLED}"
+fi
 
 if echo "${NOTES_ENABLED}" | grep -qF "${WARNING_TEXT}"; then
   die "[G] Telemetry warning leaked into NOTES with prometheus.enabled=true.
