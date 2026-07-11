@@ -100,6 +100,29 @@ data:
       enabled: {{ .Values.leaderElection.enabled | default true }}
 EOF
 
+# 4b. NOTES.txt — post-install summary + telemetry nudge (Phase 38 TELEM-02/D-12).
+#     Hand-authored like configmap.yaml above: helmify does not emit NOTES.txt,
+#     and this script owning the file means a future augment run regenerates it
+#     instead of deleting it (Pitfall 3). The conditional warning fires when the
+#     prometheus.enabled umbrella key (Phase 38 D-14) is false — the default.
+cat > "${CHART_DIR}/templates/NOTES.txt" <<'EOF'
+{{- /* charts/tide/templates/NOTES.txt — rendered post-install (Phase 38 TELEM-02 / D-12).
+Owned by hack/helm/augment-tide-chart.sh (step 4b) — edit the heredoc there,
+not only this file, or the next augment run reverts the change (Pitfall 3). */ -}}
+TIDE {{ .Chart.AppVersion }} installed in {{ .Release.Namespace }}.
+
+Dashboard:  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tide.fullname" . }}-dashboard 8080:80
+Docs:       https://github.com/jsquirrelz/tide/blob/main/docs/INSTALL.md
+
+{{- if not .Values.prometheus.enabled }}
+
+WARNING: run telemetry beyond the budget tally is unavailable —
+prometheus.enabled is false.
+Token spend over time, dispatch counts, and per-level durations will be dark.
+Enable: see the "Enable telemetry" step in docs/INSTALL.md.
+{{- end }}
+EOF
+
 # Phase 2 additions (Plan 12):
 # 5. signing-secret.yaml — HMAC signing key auto-generated on first install via Helm
 #    lookup + resource-policy: keep (D-C3 / Blocker #1 fix). Data key TIDE_SIGNING_KEY

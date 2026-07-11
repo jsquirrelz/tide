@@ -27,6 +27,11 @@
 #   B — Endpoint set: dashboard container MUST carry PROM_ENDPOINT with value.
 #   C — Retention set: render succeeds + values file documents storage.tsdb.retention.time.
 #   D — Lint: helm lint must exit 0.
+#   E — Default render: PROMETHEUS_ENABLED env entry present with value "false"
+#       (Phase 38 D-14 umbrella key — always rendered, explicit false is meaningful).
+#   F — prometheus.enabled=true: PROMETHEUS_ENABLED value is "true".
+#   G — NOTES.txt conditional (Phase 38 TELEM-02/D-12): warning present by
+#       default, absent with prometheus.enabled=true.
 #
 # Usage: ./hack/helm/assert-telemetry-render.sh
 # Requires: helm, grep (standard coreutils). No cluster connection needed.
@@ -160,7 +165,93 @@ ${LINT_OUT}"
 echo "PASS [D]: helm lint exits 0"
 
 # ---------------------------------------------------------------------------
+# Permutation E — PROMETHEUS_ENABLED default (Phase 38 D-14)
+#
+# The umbrella-key env entry is ALWAYS rendered on the dashboard container
+# (unlike PROM_ENDPOINT which is conditional). Default render must carry
+# `name: PROMETHEUS_ENABLED` followed by `value: "false"` — an explicit
+# "false" is the banner's disabled-by-config signal.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation E: default render — PROMETHEUS_ENABLED=false ---"
+
+RENDER_E="$(helm template "${CHART_DIR}" 2>&1)" \
+  || die "[E] helm template charts/tide (no overrides) exited non-zero:
+${RENDER_E}"
+
+if ! echo "${RENDER_E}" | grep -qE '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$'; then
+  die "[E] PROMETHEUS_ENABLED env entry not found in the default render.
+The dashboard Deployment must ALWAYS render PROMETHEUS_ENABLED (Phase 38 D-14) —
+an explicit \"false\" distinguishes disabled-by-config from a legacy chart lacking the key."
+fi
+
+if ! echo "${RENDER_E}" | grep -A1 -E '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$' \
+    | grep -qE '^[[:space:]]*value:[[:space:]]*"false"[[:space:]]*$'; then
+  die "[E] PROMETHEUS_ENABLED default value is not \"false\".
+prometheus.enabled defaults to false in values.yaml; the env must render value: \"false\"."
+fi
+
+echo "PASS [E]: default render carries PROMETHEUS_ENABLED with value \"false\""
+
+# ---------------------------------------------------------------------------
+# Permutation F — PROMETHEUS_ENABLED set true
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation F: prometheus.enabled=true — PROMETHEUS_ENABLED=true ---"
+
+RENDER_F="$(helm template "${CHART_DIR}" --set prometheus.enabled=true 2>&1)" \
+  || die "[F] helm template --set prometheus.enabled=true exited non-zero:
+${RENDER_F}"
+
+if ! echo "${RENDER_F}" | grep -A1 -E '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*PROMETHEUS_ENABLED[[:space:]]*$' \
+    | grep -qE '^[[:space:]]*value:[[:space:]]*"true"[[:space:]]*$'; then
+  die "[F] PROMETHEUS_ENABLED value is not \"true\" when prometheus.enabled=true.
+The env must carry the quoted umbrella-key value verbatim."
+fi
+
+echo "PASS [F]: prometheus.enabled=true renders PROMETHEUS_ENABLED value \"true\""
+
+# ---------------------------------------------------------------------------
+# Permutation G — NOTES.txt conditional warning (Phase 38 TELEM-02 / D-12)
+#
+# NOTES rendering invocation: `helm template --show-only templates/NOTES.txt`
+# does NOT emit NOTES.txt on this repo's helm (verified against helm v4.2.0 —
+# NOTES is excluded from manifest output), so the codified invocation is the
+# client-side dry-run install, which prints the rendered NOTES block without
+# needing a cluster connection.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation G: NOTES.txt telemetry warning conditional ---"
+
+WARNING_TEXT="run telemetry beyond the budget tally is unavailable"
+
+NOTES_DEFAULT="$(helm install tide-notes "${CHART_DIR}" --dry-run=client 2>&1 | sed -n '/^NOTES:/,$p')" \
+  || die "[G] helm install --dry-run=client (default values) exited non-zero:
+${NOTES_DEFAULT}"
+
+if [ -z "${NOTES_DEFAULT}" ]; then
+  die "[G] No NOTES: block in the default dry-run output — templates/NOTES.txt missing or empty."
+fi
+
+if ! echo "${NOTES_DEFAULT}" | grep -qF "${WARNING_TEXT}"; then
+  die "[G] Telemetry warning missing from NOTES with default values.
+prometheus.enabled defaults to false, so NOTES.txt must print:
+  '${WARNING_TEXT}'"
+fi
+
+NOTES_ENABLED="$(helm install tide-notes "${CHART_DIR}" --dry-run=client --set prometheus.enabled=true 2>&1 | sed -n '/^NOTES:/,$p')" \
+  || die "[G] helm install --dry-run=client --set prometheus.enabled=true exited non-zero:
+${NOTES_ENABLED}"
+
+if echo "${NOTES_ENABLED}" | grep -qF "${WARNING_TEXT}"; then
+  die "[G] Telemetry warning leaked into NOTES with prometheus.enabled=true.
+The warning block must be gated on '{{ if not .Values.prometheus.enabled }}'."
+fi
+
+echo "PASS [G]: NOTES warning present by default, absent with prometheus.enabled=true"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "PASS: all 4 permutations passed — EC-7 render gate satisfied"
+echo "PASS: all 7 permutations passed — EC-7 render gate satisfied"
