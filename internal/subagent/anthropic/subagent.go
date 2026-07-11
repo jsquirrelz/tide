@@ -345,6 +345,16 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	usage.EstimatedCostCents = a.estimatedCostCents(in.Provider.Model, usage)
 	usage.CacheSavingsCents = a.cacheSavingsCents(in.Provider.Model, usage)
 
+	// D-02 provider side (Phase 38 COST-02): when the model missed the
+	// effective price table even after the -YYYYMMDD normalizer (lookupPrice)
+	// and was billed at the conservative tier, stamp the unmatched ID onto the
+	// envelope. The controller rolls it up into the PricingFallbackActive
+	// Project condition and a Prometheus counter; empty in the priced case so
+	// pre-Phase-38 envelopes stay byte-compatible.
+	if _, ok := a.lookupPrice(in.Provider.Model); !ok {
+		usage.PricingFallbackModel = in.Provider.Model
+	}
+
 	out := pkgdispatch.EnvelopeOut{
 		APIVersion:  pkgdispatch.APIVersionV1Alpha1,
 		Kind:        pkgdispatch.KindTaskEnvelopeOut,
