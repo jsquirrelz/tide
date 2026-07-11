@@ -24,9 +24,9 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Budget Accuracy (COST)
 
-- [ ] **COST-01**: Claude 5 family models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) price at their real per-MTok rates via exact-ID lookup with a `-YYYYMMDD` normalizer
+- [x] **COST-01**: Claude 5 family models (claude-fable-5, claude-opus-4-8, claude-sonnet-5, claude-haiku-4.5) price at their real per-MTok rates via exact-ID lookup with a `-YYYYMMDD` normalizer
 - [x] **COST-02**: An unknown-model pricing fallback is observable as a metric/condition, not only a GC'd pod log line
-- [ ] **COST-03**: The cache-write TTL multiplier is verified empirically (5m 1.25× vs 1h 2×) before the pricing table ships
+- [x] **COST-03**: The cache-write TTL multiplier is verified empirically (5m 1.25× vs 1h 2×) before the pricing table ships
 
 ### Git Base Ref (BASE)
 
@@ -117,9 +117,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DASH-02 | Phase 37 | Pending |
 | DASH-03 | Phase 37 | Complete |
 | DASH-04 | Phase 37 | Complete |
-| COST-01 | Phase 38 | Pending |
+| COST-01 | Phase 38 | Complete |
 | COST-02 | Phase 38 | Complete |
-| COST-03 | Phase 38 | Pending |
+| COST-03 | Phase 38 | Complete |
 | PROMPT-01 | Phase 38 | Pending |
 | TELEM-01 | Phase 38 | Pending |
 | TELEM-02 | Phase 38 | Pending |
