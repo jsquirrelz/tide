@@ -1229,10 +1229,13 @@ export default function TelemetryView({
   // TELEM-03 banner derivation — UI-SPEC Banner Contract precedence.
   // Any panel with real data suppresses the banner outright (T-38-15: never
   // claim "disabled" while data flows); then disabled-by-config when the
-  // config surface says false OR (defensively) every panel resolved the
-  // unavailable sentinel; then no-data when telemetry is confirmed enabled
-  // and every panel answered with zero points; hidden otherwise (loading /
-  // unreachable — the per-panel TelemetryUnavailableNotice owns connectivity).
+  // config surface says false OR (defensively) the config fetch failed
+  // (null) while every panel resolved the unavailable sentinel; then no-data
+  // when telemetry is confirmed enabled and every panel answered with zero
+  // points; hidden otherwise (loading / unreachable / enabled-but-unavailable
+  // — the per-panel TelemetryUnavailableNotice owns connectivity, and a
+  // confirmed telemetryEnabled:true must never render the "prometheus.enabled
+  // is false" copy, e.g. when prometheus.endpoint was left unset).
   const anyPanelData = panelStates.some(
     (s) => s.kind === "data" && s.series.length > 0,
   );
@@ -1244,7 +1247,10 @@ export default function TelemetryView({
   );
   let bannerState: TelemetryDisabledBannerState | null = null;
   if (!anyPanelData) {
-    if (telemetryEnabled === false || allPanelsUnavailable) {
+    if (
+      telemetryEnabled === false ||
+      (telemetryEnabled === null && allPanelsUnavailable)
+    ) {
       bannerState = "disabled-by-config";
     } else if (telemetryEnabled === true && allPanelsEmptyData) {
       bannerState = "no-data";

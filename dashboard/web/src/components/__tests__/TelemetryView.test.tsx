@@ -612,10 +612,13 @@ describe("TelemetryView — cache-efficiency panel (OBSV-03)", () => {
 //
 // The view fetches GET /api/v1/config once on mount and derives a single
 // view-level banner per the 38-UI-SPEC Banner Contract precedence:
-//   disabled-by-config → telemetryEnabled === false OR all panels unavailable
+//   disabled-by-config → telemetryEnabled === false OR (config fetch failed
+//                        (null) AND all panels unavailable)
 //   no-data            → telemetryEnabled === true AND every panel resolved
 //                        kind:"data" with zero points
-//   hidden             → any data / any loading / any unreachable
+//   hidden             → any data / any loading / any unreachable / confirmed
+//                        enabled with all panels unavailable (per-panel
+//                        notices own that degradation)
 // The per-panel TelemetryUnavailableNotice remains untouched (EC-6).
 
 /**
@@ -716,6 +719,19 @@ describe("TelemetryView — telemetry disabled banner (TELEM-03)", () => {
       screen.queryByTestId("telemetry-disabled-banner"),
     ).not.toBeInTheDocument();
     // The existing per-panel notice still carries the unreachable wording.
+    const notices = screen.getAllByTestId("telemetry-unavailable-notice");
+    expect(notices.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("telemetryEnabled:true with all panels unavailable renders NO banner (endpoint misconfig must not claim prometheus.enabled is false)", async () => {
+    stubFetchWithConfig({ telemetryEnabled: true }, PANEL_UNAVAILABLE);
+    render(<TelemetryView projects={[PROJECT_P1]} selectedProject="p1" />);
+    await flushInitialFetch();
+
+    expect(
+      screen.queryByTestId("telemetry-disabled-banner"),
+    ).not.toBeInTheDocument();
+    // The per-panel notices still surface the degradation.
     const notices = screen.getAllByTestId("telemetry-unavailable-notice");
     expect(notices.length).toBeGreaterThanOrEqual(4);
   });
