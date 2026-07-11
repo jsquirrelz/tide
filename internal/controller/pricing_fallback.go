@@ -49,6 +49,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
@@ -70,25 +71,38 @@ func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *t
 		return nil
 	}
 	tidemetrics.PricingFallbackTotal.WithLabelValues(project.Name, fallbackModel).Inc()
-	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
-	// Anchor the dedupe on the quoted form the Message embeds (%q below): a
-	// bare Contains false-positives on model IDs that are substrings of an
-	// already-surfaced one (claude-sonnet-6 vs claude-sonnet-6-1, or a dated
-	// alias of either), silently dropping the newer unknown model.
-	if existing != nil && existing.Status == metav1.ConditionTrue &&
-		strings.Contains(existing.Message, strconv.Quote(fallbackModel)) {
-		return nil // same unknown model already surfaced — no status churn
-	}
-	patch := client.MergeFrom(project.DeepCopy())
-	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:   tideprojectv1alpha2.ConditionPricingFallbackActive,
-		Status: metav1.ConditionTrue,
-		Reason: tideprojectv1alpha2.ReasonUnknownModelPriced,
-		// %q keeps envelope-derived content inert — the model ID lands as a
-		// quoted string only, never as formatting directives (T-38-06).
-		Message: fmt.Sprintf("pricing: model %q missing from the price table; dispatches billed at the conservative (most-expensive) tier. "+
-			"Fix the table or set pricing.overrides in values.yaml.", fallbackModel),
-		LastTransitionTime: metav1.Now(),
+	// Re-fetch + RetryOnConflict + MergeFromWithOptimisticLock (mirrors the
+	// marker-stamp pattern at every call site): a plain merge patch against
+	// the caller's cache-stale snapshot replaces the ENTIRE conditions array,
+	// silently erasing conditions written concurrently (BillingHalt,
+	// FailureHalt, BudgetBlocked, BoundaryPushed, ImportComplete) — the
+	// condition-clobber class fixed in d864860/91a67c2/957fbc1. The lock makes
+	// a concurrent write a retryable conflict instead of a silent erase.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &tideprojectv1alpha2.Project{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+			return err
+		}
+		existing := meta.FindStatusCondition(latest.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+		// Anchor the dedupe on the quoted form the Message embeds (%q below): a
+		// bare Contains false-positives on model IDs that are substrings of an
+		// already-surfaced one (claude-sonnet-6 vs claude-sonnet-6-1, or a dated
+		// alias of either), silently dropping the newer unknown model.
+		if existing != nil && existing.Status == metav1.ConditionTrue &&
+			strings.Contains(existing.Message, strconv.Quote(fallbackModel)) {
+			return nil // same unknown model already surfaced — no status churn
+		}
+		patch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
+			Type:   tideprojectv1alpha2.ConditionPricingFallbackActive,
+			Status: metav1.ConditionTrue,
+			Reason: tideprojectv1alpha2.ReasonUnknownModelPriced,
+			// %q keeps envelope-derived content inert — the model ID lands as a
+			// quoted string only, never as formatting directives (T-38-06).
+			Message: fmt.Sprintf("pricing: model %q missing from the price table; dispatches billed at the conservative (most-expensive) tier. "+
+				"Fix the table or set pricing.overrides in values.yaml.", fallbackModel),
+			LastTransitionTime: metav1.Now(),
+		})
+		return c.Status().Patch(ctx, latest, patch)
 	})
-	return c.Status().Patch(ctx, project, patch)
 }
