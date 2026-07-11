@@ -148,6 +148,15 @@ None - no external service configuration required.
 - `examples/projects/dogfood/salvage-20260618/` envelope JSON fixtures were deliberately left untouched per the plan's boundary notes — owned by plan 40-03's coherent regeneration alongside the CRD schemaRevision bump.
 - No blockers for downstream plans in this phase.
 
+## Self-Check: PASSED
+
+- FOUND: pkg/dispatch/envelope.go
+- FOUND: pkg/dispatch/doc.go
+- FOUND: .planning/phases/40-deprecate-v1alpha1-api/40-02-SUMMARY.md
+- FOUND: commit 712964c (RED)
+- FOUND: commit dfb8d58 (GREEN, Task 1)
+- FOUND: commit b78f8ca (Task 2)
+
 ---
 *Phase: 40-deprecate-v1alpha1-api*
 *Completed: 2026-07-11*
