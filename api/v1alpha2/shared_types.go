@@ -275,6 +275,22 @@ const (
 	AnnotationBillingResumedAt = "tideproject.k8s/billing-resumed-at"
 )
 
+// Phase 38 condition + reason vocabulary — unknown-model pricing fallback (COST-02).
+const (
+	// ConditionPricingFallbackActive — informational condition: a dispatch was
+	// priced at the conservative (most-expensive) fallback tier because its
+	// model was absent from the pricing table. Unlike BillingHalt it gates
+	// NOTHING — dispatch continues; the condition exists so the fallback
+	// survives pod GC and shows on Prometheus-less installs (Phase 38 COST-02
+	// / D-02). Sticky for the run's lifetime (no clearer in v1.0.7).
+	ConditionPricingFallbackActive = "PricingFallbackActive"
+
+	// ReasonUnknownModelPriced — the dispatch's model missed the effective
+	// price table even after date-suffix normalization; tokens were billed at
+	// the conservative tier. Set on Project by setPricingFallbackIfNeeded.
+	ReasonUnknownModelPriced = "UnknownModelPriced"
+)
+
 // Phase 14 condition + reason vocabulary — operator budget cap blocked (BUDGET-02).
 const (
 	// ConditionBudgetBlocked — operator's budget cap has been reached; new dispatch
