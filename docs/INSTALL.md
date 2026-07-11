@@ -172,6 +172,48 @@ open http://localhost:8080
 
 If any of these fail, see [docs/troubleshooting.md](troubleshooting.md) for canonical recipes (CRDs not registered → forgot the subchart; dashboard 404 → port-forward not running; `ImagePullBackoff` → image pull secret missing).
 
+### Enable telemetry (Prometheus)
+
+By default TIDE's run telemetry beyond the budget tally is **dark** — `prometheus.enabled` is `false`, no ServiceMonitor is shipped, and the dashboard's cost-over-time charts fall back to live-only CRD views. This step wires the full telemetry path: a Prometheus install, TIDE's scrape target, and the dashboard's PromQL proxy.
+
+**1. Install kube-prometheus-stack** (skip if your cluster already runs a prometheus-operator — see the existing-Prometheus note below):
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install kps prometheus-community/kube-prometheus-stack \
+    -n monitoring --create-namespace
+```
+
+**2. Enable TIDE's telemetry surfaces.** Three values, three roles: `prometheus.enabled` declares telemetry wired (drives the NOTES.txt warning and the dashboard banner), `prometheus.serviceMonitor.enabled` ships the scrape target (default-off to avoid CRD-not-found on plain clusters), and `prometheus.endpoint` points the dashboard's PromQL proxy at your Prometheus:
+
+```bash
+helm upgrade tide oci://ghcr.io/jsquirrelz/tide-charts/tide \
+    -n tide-system --reuse-values \
+    --set prometheus.enabled=true \
+    --set prometheus.serviceMonitor.enabled=true \
+    --set prometheus.endpoint=http://prometheus-operated.monitoring:9090
+```
+
+**3. Label the ServiceMonitor.** kube-prometheus-stack's Prometheus selects only ServiceMonitors carrying `release: <its-release-name>`; TIDE's ServiceMonitor ships without that label, so a default kube-prometheus-stack install silently ignores it. Add the label (matching the `kps` release name from step 1):
+
+```bash
+kubectl -n tide-system label servicemonitor -l control-plane=controller-manager release=kps
+```
+
+Alternative: set `prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false` on the kube-prometheus-stack install so it selects all ServiceMonitors regardless of label.
+
+**4. Verify at the Targets page** — this is the done signal:
+
+```bash
+kubectl -n monitoring port-forward svc/prometheus-operated 9090:9090
+open http://localhost:9090
+```
+
+Navigate to **Status → Targets** and confirm the `tide-...-metrics` endpoint shows **UP**. Once it's green, the dashboard's Telemetry tab serves token spend over time, dispatch counts, and per-level durations.
+
+**Existing Prometheus (not kube-prometheus-stack):** your prometheus-operator must select the `tide-system` namespace and the ServiceMonitor's labels (`control-plane: controller-manager` plus the chart's standard labels) — or add whatever label your `serviceMonitorSelector` requires, as in step 3. Then set `prometheus.endpoint` to your Prometheus service URL instead of `http://prometheus-operated.monitoring:9090`.
+
 ## Provider Secret (`ANTHROPIC_API_KEY`)
 
 The medium and large sample Projects drive real Claude calls and require an `ANTHROPIC_API_KEY`. The small sample uses the stub-subagent and skips this entirely.
