@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-current_phase: 38
+current_phase: 35
+current_phase_name: Git Base Ref
 status: executing
 stopped_at: Completed 36-03-PLAN.md (agent-identity Job-env injection — both builders, all six subagent sites + both push sites; D-03 chain reaches runtime)
-last_updated: "2026-07-11T14:33:23.715Z"
+last_updated: "2026-07-11T17:17:39.537Z"
 last_activity: 2026-07-11
-last_activity_desc: Phase 38 complete
+last_activity_desc: Phase 34 complete, transitioned to Phase 35
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 33
   completed_plans: 33
   percent: 100
-current_phase_name: small-independents-pricing-accuracy-promptfile-telemetry-nud
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 38
+Phase: 35 — Git Base Ref
 Plan: Not started
 Status: Executing Phase 38
-Last activity: 2026-07-11 — Phase 38 complete
+Last activity: 2026-07-11 — Phase 34 complete, transitioned to Phase 35
 
 Progress: [░░░░░░░░░░] 0%
 

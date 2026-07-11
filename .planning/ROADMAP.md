@@ -242,7 +242,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 39. Pre-flight Tech-Debt Hardening | v1.0.7 | 2/2 | Complete | 2026-07-04 |
-| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 6/6 | Complete (verify-close pending) | 2026-07-08 |
+| 34. Run Integrity — Integration-Miss Gate + lastPushedSHA | v1.0.7 | 6/6 | Complete    | 2026-07-08 |
 | 35. Git Base Ref | v1.0.7 | 4/4 | Complete | 2026-07-08 |
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
