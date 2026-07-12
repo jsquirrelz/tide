@@ -140,3 +140,7 @@ None - no external service configuration required.
 ---
 *Phase: 41-refactoring-review-non-breaking-cleanup-12-items*
 *Completed: 2026-07-12*
+
+## Self-Check: PASSED
+
+All 4 modified/deleted-from source files and the SUMMARY.md exist on disk; all 3 commit hashes (fb90a8d, 089f1b9, 5136d18) are present in `git log --oneline --all`.
