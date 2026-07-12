@@ -108,7 +108,7 @@ func readAndRender(ctx context.Context, k client.Client, ns, name string) string
 	}
 	phase := p.Status.Phase
 	if phase == "" {
-		phase = "Pending"
+		phase = tidev1alpha3.PhasePending
 	}
 
 	// Count active Milestones (child CRDs) to match the dashboard-grammar
@@ -121,7 +121,7 @@ func readAndRender(ctx context.Context, k client.Client, ns, name string) string
 			m := &msList.Items[i]
 			if metav1.IsControlledBy(m, &p) {
 				switch m.Status.Phase {
-				case "Running", "Pending", "AwaitingApproval", "":
+				case tidev1alpha3.LevelPhaseRunning, tidev1alpha3.LevelPhasePending, tidev1alpha3.LevelPhaseAwaitingApproval, "":
 					activeMs++
 				}
 			}

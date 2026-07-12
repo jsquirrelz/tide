@@ -152,7 +152,7 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	status := tk.Status.Phase
 	if status == "" {
-		status = "Pending"
+		status = tidev1alpha3.LevelPhasePending
 	}
 
 	writeJSON(w, http.StatusOK, taskDetail{

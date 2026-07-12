@@ -135,7 +135,7 @@ func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName
 		for _, tk := range tasks {
 			phase := tk.Status.Phase
 			if phase == "" {
-				phase = "Pending"
+				phase = tidev1alpha3.LevelPhasePending
 			}
 			runningTasks = append(runningTasks, RunningWaveTask{
 				Name:   tk.Name,
@@ -179,5 +179,5 @@ func anyRunning(tasks []tidev1alpha3.Task) bool {
 // isRunningPhase reports whether the given phase is one of the phases that
 // make a wave "running" per UI-SPEC C3 semantics.
 func isRunningPhase(phase string) bool {
-	return phase == "Running" || phase == "Dispatching"
+	return phase == tidev1alpha3.LevelPhaseRunning || phase == "Dispatching"
 }

@@ -177,7 +177,7 @@ func (h *ProjectsHandler) activeMilestoneCountsByProject(ctx context.Context, op
 	out := make(map[string]int, len(ms.Items))
 	for i := range ms.Items {
 		m := &ms.Items[i]
-		if m.Status.Phase == "Succeeded" || m.Status.Phase == "Failed" {
+		if m.Status.Phase == tidev1alpha3.LevelPhaseSucceeded || m.Status.Phase == tidev1alpha3.LevelPhaseFailed {
 			continue
 		}
 		out[projectKey(m.Namespace, m.Spec.ProjectRef)]++
@@ -323,7 +323,7 @@ func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1al
 		if m.Spec.ProjectRef != p.Name {
 			continue
 		}
-		if m.Status.Phase != "Succeeded" && m.Status.Phase != "Failed" {
+		if m.Status.Phase != tidev1alpha3.LevelPhaseSucceeded && m.Status.Phase != tidev1alpha3.LevelPhaseFailed {
 			count++
 		}
 	}
