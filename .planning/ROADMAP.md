@@ -258,14 +258,14 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
-| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 3/7 | In Progress|  |
+| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 6/7 | In Progress|  |
 
 ### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
 **Goal:** One full API-version crank: introduce v1alpha3 as the sole served+storage version for all 6 CRDs — carrying the folded `subagent.levels` semantic rename (DECIDED mapping in the 2026-07-03 todo) plus user-approved batchable schema fixes — then remove v1alpha1 AND v1alpha2 entirely (Go packages, CRD blocks, chart copies, scheme registrations, stale comments). Reinstall-only migration per Phase 23 D-09; SchemaRevision guard generalized as the permanent crank mechanism; owner-ref dual-accepts dropped; deep docs/samples sweep (INSTALL/gates/git-hosts/project-authoring examples are broken today); envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Decisions locked in `40-CONTEXT.md`.
 **Requirements**: CRANK-01, CRANK-02, CRANK-03, CRANK-04, CRANK-05, CRANK-06, CRANK-07
 **Depends on:** Phase 39
-**Plans:** 3/7 plans executed
+**Plans:** 6/7 plans executed
 
 Plans:
 **Wave 1**
@@ -279,9 +279,9 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 40-04-PLAN.md — subagent.levels semantic rename via levelOverrideKey mapping (D-02/D-11) + resolved-model logging — wave 3
-- [ ] 40-05-PLAN.md — Remove api/v1alpha1 + api/v1alpha2, relocate dogfood test, harden verify-no-aggregates (D-12), regen single-version CRDs — wave 3
-- [ ] 40-06-PLAN.md — Docs & samples deep accuracy pass (D-06/D-12): migration chapter + levels-remap table, quickstarts, 12 samples — wave 3
+- [x] 40-04-PLAN.md — subagent.levels semantic rename via levelOverrideKey mapping (D-02/D-11) + resolved-model logging — wave 3
+- [x] 40-05-PLAN.md — Remove api/v1alpha1 + api/v1alpha2, relocate dogfood test, harden verify-no-aggregates (D-12), regen single-version CRDs — wave 3
+- [x] 40-06-PLAN.md — Docs & samples deep accuracy pass (D-06/D-12): migration chapter + levels-remap table, quickstarts, 12 samples — wave 3
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
