@@ -101,3 +101,11 @@ None - no external service configuration required.
 ---
 *Phase: 41-refactoring-review-non-breaking-cleanup-12-items*
 *Completed: 2026-07-12*
+
+## Self-Check: PASSED
+
+- FOUND: `.planning/phases/41-refactoring-review-non-breaking-cleanup-12-items/41-08-SUMMARY.md`
+- FOUND: commit `831d231` (fix: normalize polarity + add ReasonParentResolved)
+- FOUND: commit `b3e7155` (test: sweep assertions + clear-on-resolve coverage)
+- FOUND: `ReasonParentResolved` constant in `api/v1alpha3/shared_types.go`
+- FOUND: `ConditionTrue // True == parent unresolved` in both `milestone_controller.go` and `phase_controller.go`
