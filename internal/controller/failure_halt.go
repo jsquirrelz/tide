@@ -57,13 +57,7 @@ func checkFailureHalt(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
-	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha3.ConditionFailureHalt &&
-			c.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 }
 
 // setFailureHaltIfNeeded stamps FailureHalt=True on project when the Project's
@@ -90,11 +84,8 @@ func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 		return nil // strict profile (or unset default): no-op
 	}
 	// Already halted: idempotent no-op.
-	for _, cond := range project.Status.Conditions {
-		if cond.Type == tideprojectv1alpha3.ConditionFailureHalt &&
-			cond.Status == metav1.ConditionTrue {
-			return nil
-		}
+	if meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt) {
+		return nil
 	}
 	// CR-02 resume time-fence: refuse to re-stamp a halt for a failure that
 	// predates the operator's `tide resume --retry-failed`. Mirrors
