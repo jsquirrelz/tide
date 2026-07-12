@@ -449,19 +449,19 @@ func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, p
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ms); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
-		return ms.Status.Phase == "AwaitingApproval", nil
+		return ms.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil
 	case "Phase":
 		var ph tideprojectv1alpha3.Phase
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &ph); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
-		return ph.Status.Phase == "AwaitingApproval", nil
+		return ph.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil
 	case "Plan":
 		var plan tideprojectv1alpha3.Plan
 		if err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: parentName}, &plan); err != nil {
 			return false, client.IgnoreNotFound(err)
 		}
-		return plan.Status.Phase == "AwaitingApproval", nil
+		return plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil
 	}
 	return false, nil
 }

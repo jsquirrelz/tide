@@ -231,7 +231,7 @@ func (r *PhaseReconciler) resolveProjectNameForPhase(ctx context.Context, ph *ti
 //nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
 func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tideprojectv1alpha3.Phase) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
-	if ph.Status.Phase == "Succeeded" || ph.Status.Phase == "Failed" {
+	if ph.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded || ph.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		return ctrl.Result{}, nil
 	}
 
@@ -244,7 +244,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	//       patch Status.Phase=Running + ApprovedByUser condition, then Requeue.
 	//       Succeeded fires ONLY via ChildCount-gated succession in handleJobCompletion.
 	// Phase 12 D-01/D-04: approval never jumps a level to Succeeded past its children.
-	if ph.Status.Phase == "AwaitingApproval" {
+	if ph.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(ph, "phase") {
 			// Consume annotation (T-04-G2 one-shot).
 			newAnno := gates.ConsumeApprove(ph, "phase")
@@ -255,7 +255,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 			}
 			// Return to Running + record ApprovedByUser condition (D-04).
 			statusPatch := client.MergeFrom(ph.DeepCopy())
-			ph.Status.Phase = "Running"
+			ph.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 			meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 				Status:             metav1.ConditionFalse,
@@ -283,7 +283,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 
 	jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
 
-	if ph.Status.Phase == "Running" {
+	if ph.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: jobName}, &job); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -480,7 +480,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	}
 
 	patch := client.MergeFrom(ph.DeepCopy())
-	ph.Status.Phase = "Running"
+	ph.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
@@ -646,7 +646,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 					return ctrl.Result{}, err
 				}
 				statusPatch := client.MergeFrom(ph.DeepCopy())
-				ph.Status.Phase = "Running"
+				ph.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 				meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 					Status:             metav1.ConditionFalse,
@@ -772,7 +772,7 @@ func (r *PhaseReconciler) countChildPlans(ctx context.Context, ph *tideprojectv1
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchPhaseFailed(...)` in the reconcile chain
 func (r *PhaseReconciler) patchPhaseFailed(ctx context.Context, ph *tideprojectv1alpha3.Phase, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(ph.DeepCopy())
-	ph.Status.Phase = "Failed"
+	ph.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionFailed,
 		Status:             metav1.ConditionTrue,
@@ -788,7 +788,7 @@ func (r *PhaseReconciler) patchPhaseFailed(ctx context.Context, ph *tideprojectv
 
 func (r *PhaseReconciler) patchPhaseSucceeded(ctx context.Context, ph *tideprojectv1alpha3.Phase) (ctrl.Result, error) {
 	patch := client.MergeFrom(ph.DeepCopy())
-	ph.Status.Phase = "Succeeded"
+	ph.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
@@ -843,7 +843,7 @@ func (r *PhaseReconciler) patchPhaseAwaitingApproval(ctx context.Context, ph *ti
 	// the one-shot approve annotation and wedges the level at AwaitingApproval.
 	// See patchMilestoneAwaitingApproval for the full race description.
 	patch := client.MergeFromWithOptions(ph.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	ph.Status.Phase = "AwaitingApproval"
+	ph.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
 	meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,

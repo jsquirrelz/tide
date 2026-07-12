@@ -158,10 +158,10 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	allSucceeded := len(members) > 0
 	for _, m := range members {
 		taskRefs = append(taskRefs, m.Name)
-		if m.Status.Phase != "Succeeded" {
+		if m.Status.Phase != tideprojectv1alpha3.LevelPhaseSucceeded {
 			allSucceeded = false
 		}
-		if m.Status.Phase == "Failed" && failedTask == "" {
+		if m.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed && failedTask == "" {
 			failedTask = m.Name
 		}
 	}
@@ -169,16 +169,16 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	var phase, message string
 	switch {
 	case len(members) == 0:
-		phase = "ZeroMembers"
+		phase = tideprojectv1alpha3.LevelPhaseZeroMembers
 		message = "No tasks assigned to this wave"
 	case allSucceeded:
-		phase = "Succeeded"
+		phase = tideprojectv1alpha3.LevelPhaseSucceeded
 		message = fmt.Sprintf("All %d member task(s) succeeded", len(members))
 	case failedTask != "":
-		phase = "Failed"
+		phase = tideprojectv1alpha3.LevelPhaseFailed
 		message = fmt.Sprintf("Member task %q failed", failedTask)
 	default:
-		phase = "Running"
+		phase = tideprojectv1alpha3.LevelPhaseRunning
 		message = fmt.Sprintf("%d member task(s); awaiting completion", len(members))
 	}
 
@@ -190,10 +190,10 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	condStatus := metav1.ConditionTrue
 	reason := "Aggregating"
 	switch phase {
-	case "Succeeded":
+	case tideprojectv1alpha3.LevelPhaseSucceeded:
 		condType = tideprojectv1alpha3.ConditionSucceeded
 		reason = "AllTasksSucceeded"
-	case "Failed":
+	case tideprojectv1alpha3.LevelPhaseFailed:
 		condType = tideprojectv1alpha3.ConditionFailed
 		reason = "MemberTaskFailed"
 	}
@@ -218,7 +218,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	// NOTE(phase-25+): the authoritative fix is ProjectReconciler-owned Task→Wave
 	// fan-out where the reconciler holds the live wave assignment; this resync is the
 	// cheap mitigation until that seam is built.
-	if phase == "Running" {
+	if phase == tideprojectv1alpha3.LevelPhaseRunning {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 	return ctrl.Result{}, nil
