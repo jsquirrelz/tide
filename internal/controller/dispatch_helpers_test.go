@@ -31,20 +31,24 @@ import (
 // ---------- ResolveProvider tests (pure function — no envtest) ----------
 
 // Test 1: per-level model override wins over Project default + Helm default.
+// D-02: dispatch level "milestone" (authors phase briefs) maps via
+// levelOverrideKey to the Levels.Phase override slot — NOT Levels.Milestone
+// (that slot now belongs to dispatch level "project", which authors
+// MILESTONE.md). See levelOverrideKey's doc comment for the full table.
 func TestResolveProviderPerLevelWins(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
 		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Model: "claude-sonnet-4-6",
 				Levels: tideprojectv1alpha3.LevelOverrides{
-					Milestone: &tideprojectv1alpha3.LevelConfig{
+					Phase: &tideprojectv1alpha3.LevelConfig{
 						Model: "claude-opus-4-7",
 					},
 				},
 			},
 		},
 	}
-	defaults := ProviderDefaults{Models: map[string]string{"milestone": "claude-haiku-4-5"}}
+	defaults := ProviderDefaults{Models: map[string]string{"phase": "claude-haiku-4-5"}}
 	spec := ResolveProvider(project, "milestone", defaults)
 	if spec.Vendor != "anthropic" {
 		t.Errorf("Vendor = %q, want %q (v1.0 always anthropic)", spec.Vendor, "anthropic")
@@ -71,9 +75,10 @@ func TestResolveProviderProjectDefaultWinsOverHelm(t *testing.T) {
 }
 
 // Test 3: Helm default applies when Project has nothing set.
+// D-02: dispatch level "milestone" maps to the Levels.Phase / helm "phase" slot.
 func TestResolveProviderHelmDefaultFallback(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{}
-	defaults := ProviderDefaults{Models: map[string]string{"milestone": "claude-opus-4-7"}}
+	defaults := ProviderDefaults{Models: map[string]string{"phase": "claude-opus-4-7"}}
 	spec := ResolveProvider(project, "milestone", defaults)
 	if spec.Model != "claude-opus-4-7" {
 		t.Errorf("Model = %q, want %q (Helm default fallback)", spec.Model, "claude-opus-4-7")
@@ -81,19 +86,21 @@ func TestResolveProviderHelmDefaultFallback(t *testing.T) {
 }
 
 // Test 3b: Params merge — level Params override Project-level Params on key conflict.
+// D-02: dispatch level "phase" (authors PLAN.md) maps to the Levels.Plan
+// override slot (D-11 collapse — shared with dispatch level "plan").
 func TestResolveProviderParamsMerge(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
 		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Levels: tideprojectv1alpha3.LevelOverrides{
-					Phase: &tideprojectv1alpha3.LevelConfig{
+					Plan: &tideprojectv1alpha3.LevelConfig{
 						Params: map[string]string{"thinking-budget": "high", "level-only": "yes"},
 					},
 				},
 			},
 		},
 	}
-	defaults := ProviderDefaults{Models: map[string]string{"phase": "claude-sonnet-4-6"}}
+	defaults := ProviderDefaults{Models: map[string]string{"plan": "claude-sonnet-4-6"}}
 	spec := ResolveProvider(project, "phase", defaults)
 	if got := spec.Params["thinking-budget"]; got != "high" {
 		t.Errorf("Params[thinking-budget] = %q, want %q (level Params)", got, "high")
@@ -245,8 +252,9 @@ func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
 	}
 }
 
-// TestResolveImage_ProjectLevel_NoLevelTier: level "project" has no level-config case;
-// Spec.Subagent.Image is returned directly.
+// TestResolveImage_ProjectLevel_NoLevelTier: dispatch level "project" maps
+// (D-02) to the Levels.Milestone override slot; with that slot unset here,
+// resolution falls through to Spec.Subagent.Image directly.
 func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
 		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
