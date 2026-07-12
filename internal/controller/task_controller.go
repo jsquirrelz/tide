@@ -93,11 +93,8 @@ type TaskReconcilerDeps struct {
 	Defaults       budget.Limits
 	SigningKey     []byte
 	CredproxyImage string
-	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
-	// retained for legacy test wiring, ignored at dispatch.
-	SubagentImage string
-	EnvReader     podjob.EnvelopeReader
-	Recorder      record.EventRecorder
+	EnvReader      podjob.EnvelopeReader
+	Recorder       record.EventRecorder
 	// HelmProviderDefaults carry Helm-chart provider/model defaults, mirroring
 	// the Milestone/Phase/Plan reconcilers. buildEnvelopeIn uses them to resolve
 	// the executor task's ProviderSpec (Vendor "anthropic" + the task-level model).
@@ -1424,77 +1421,6 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 		}
 	}
 	return maxAttempt + 1, nil
-}
-
-// gateDispatch handles the rate-limit gate using Pattern 1.
-// Returns a non-zero delay when the bucket is exhausted (caller must RequeueAfter).
-// Standalone helper satisfying plan's "helpers named in <interfaces>" requirement (grep target).
-//
-//nolint:unused // intentionally retained per plan <interfaces> grep contract; wired by a later phase
-func (r *TaskReconciler) gateDispatch(projectName, secretUID string, limits budget.Limits) time.Duration {
-	lim := r.Deps.Budget.ForSecret(secretUID, limits)
-	if lim == nil {
-		return 0
-	}
-	rsv := lim.Reserve()
-	d := rsv.Delay()
-	if d > 0 {
-		rsv.Cancel()
-		budget.ProviderRateLimitHitsTotal.WithLabelValues(projectName).Inc()
-	}
-	return d
-}
-
-// ensureJob builds and creates the Job for a Task dispatch.
-// This is the helper referenced by the plan's grep contract.
-//
-//nolint:unused // intentionally retained per plan grep contract; wired by a later phase
-func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token string, envInJSON []byte) (*batchv1.Job, error) {
-	var secretUID string
-	if project.Spec.ProviderSecretRef != "" {
-		var secret corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: project.Spec.ProviderSecretRef}, &secret); err == nil {
-			secretUID = string(secret.UID)
-		}
-	}
-	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
-	// r.Deps.HelmProviderDefaults tier) and stamp it into the subagent Job env.
-	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
-	opts := podjob.BuildOptions{
-		Kind:                 podjob.JobKindExecutor,
-		Task:                 task,
-		ParentObj:            task,
-		Level:                "task",
-		Project:              project,
-		Attempt:              attempt,
-		SignedToken:          token,
-		EnvelopeInJSON:       envInJSON,
-		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
-		AgentName:            agentName,
-		AgentEmail:           agentEmail,
-		CredproxyImage:       r.Deps.CredproxyImage,
-		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
-		ProjectUID:           string(project.UID),
-		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
-		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
-	}
-	job := podjob.BuildJobSpec(opts)
-	if err := owner.EnsureOwnerRef(job, task, r.Scheme); err != nil {
-		return nil, fmt.Errorf("ensure owner ref on job: %w", err)
-	}
-	if err := r.Create(ctx, job); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("create job: %w", err)
-		}
-		// AlreadyExists: idempotent success — watch-lag race (Pitfall F / SUB-03).
-	}
-	// D-05: pre-charge the reservation after successful Job creation (including
-	// AlreadyExists-as-success). Reserve only when a non-zero estimate is configured.
-	if r.Deps.ReserveEstimateCents > 0 {
-		r.Deps.Reservations.Reserve(string(task.UID), r.Deps.ReserveEstimateCents)
-	}
-	return job, nil
 }
 
 // defaultsForSecret derives the effective Limits for a Secret.

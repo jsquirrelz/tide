@@ -43,7 +43,6 @@ func fileTouchGateReconciler() *PlanReconciler {
 		Dispatcher:           &stubDispatcher{},
 		PlannerPool:          newPlannerPoolForTest(),
 		EnvReader:            newMapEnvReader(),
-		SubagentImage:        testSubagentImage,
 		CredproxyImage:       testCredproxyImage,
 		SigningKey:           testSigningKey,
 		DefaultFileTouchMode: "warn",

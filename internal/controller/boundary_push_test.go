@@ -239,7 +239,6 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
@@ -310,7 +309,6 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
@@ -387,7 +385,6 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				EnvReader:      envReader,
 				PlannerPool:    newPlannerPoolForTest(),
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
@@ -438,7 +435,6 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
@@ -500,7 +496,6 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",

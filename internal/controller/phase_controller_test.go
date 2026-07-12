@@ -147,7 +147,6 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
@@ -248,7 +247,6 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      newMapEnvReader(),
-			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
@@ -336,7 +334,6 @@ var _ = Describe("PhaseReconciler — DEBT-02 reject short-circuit before report
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
@@ -522,7 +519,6 @@ var _ = Describe("PhaseReconciler — PLANFAIL D4 false-leaf guard (Phase 33)", 
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
@@ -589,7 +585,6 @@ var _ = Describe("PhaseReconciler — PLANFAIL D4 false-leaf guard (Phase 33)", 
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      envReader,
-			SubagentImage:  testSubagentImage,
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{

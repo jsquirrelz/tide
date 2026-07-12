@@ -139,7 +139,6 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -181,7 +180,6 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -259,7 +257,6 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -360,7 +357,6 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -526,7 +522,6 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
