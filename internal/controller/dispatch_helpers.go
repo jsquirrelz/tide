@@ -136,24 +136,64 @@ type ProviderDefaults struct {
 	AgentEmail string
 }
 
-// ResolveProvider walks Project.Spec.Subagent precedence chain for the
-// given level (D-C2). Returns a ProviderSpec with Vendor pinned to
-// "anthropic" in v1.0 (per-vendor selection deferred â CONTEXT.md
+// levelOverrideKey maps a dispatch level (the 5-valued identity string
+// carried in EnvelopeIn.Level, the tideproject.k8s/level Job label, and the
+// subagent template-selection switch) to the Subagent.Levels override slot it
+// resolves against (D-02 semantic rename, folded todo
+// 2026-07-03-project-level-subagent-override-slot.md). Each Levels.X key now
+// means "level X is planned by this model" (the reading operators already
+// had) rather than "the model the X-named CR's OWN dispatch uses":
+//
+//	project   (authors MILESTONE.md) -> Levels.Milestone
+//	milestone (authors phase briefs) -> Levels.Phase
+//	phase     (authors PLAN.md)      -> Levels.Plan
+//	plan      (authors the task DAG) -> Levels.Plan (D-11 collapse: same slot
+//	                                     as "phase" -- both are "planning the
+//	                                     plan's content")
+//	task      (task execution)       -> Levels.Task (unchanged -- was never
+//	                                     off-by-one)
+//
+// This is an override-key remap only -- dispatch identity (the level string
+// itself) is untouched; every call site keeps passing its existing literal.
+// Any level not in this table (none exist in production) resolves to itself.
+func levelOverrideKey(level string) string {
+	switch level {
+	case "project":
+		return "milestone"
+	case "milestone":
+		return "phase"
+	case "phase":
+		return "plan"
+	case "plan":
+		return "plan"
+	case "task":
+		return "task"
+	default:
+		return level
+	}
+}
+
+// ResolveProvider walks Project.Spec.Subagent precedence chain for the given
+// dispatch level (D-C2), first mapping it to its Levels.<overrideKey> slot via
+// levelOverrideKey (D-02). Returns a ProviderSpec with Vendor pinned to
+// "anthropic" in v1.0 (per-vendor selection deferred -- CONTEXT.md
 // "Deferred Ideas"). Model and Params resolve via:
 //
-//	project.Spec.Subagent.Levels.<level>.Model â
-//	project.Spec.Subagent.Model â
-//	helmDefaults.Models[<level>] â
+//	project.Spec.Subagent.Levels.<overrideKey>.Model ->
+//	project.Spec.Subagent.Model ->
+//	helmDefaults.Models[<overrideKey>] ->
 //	"" (caller surfaces missing-config error)
 //
 // Params merge: level Params copied first, then Project-level Params
-// inserted only for keys NOT already set at the level â i.e., level
+// inserted only for keys NOT already set at the level -- i.e., level
 // wins on key conflict.
 func ResolveProvider(project *tideprojectv1alpha3.Project, level string, helmDefaults ProviderDefaults) pkgdispatch.ProviderSpec {
+	key := levelOverrideKey(level)
+
 	// Helper to read per-level overrides.
 	var levelCfg *tideprojectv1alpha3.LevelConfig
 	if project != nil {
-		switch level {
+		switch key {
 		case "milestone":
 			levelCfg = project.Spec.Subagent.Levels.Milestone
 		case "phase":
@@ -174,7 +214,7 @@ func ResolveProvider(project *tideprojectv1alpha3.Project, level string, helmDef
 		model = project.Spec.Subagent.Model
 	default:
 		if helmDefaults.Models != nil {
-			model = helmDefaults.Models[level]
+			model = helmDefaults.Models[key]
 		}
 	}
 
@@ -272,18 +312,22 @@ func MaterializeChildCRDs(ctx context.Context, c client.Client, scheme *runtime.
 }
 
 // resolveImage walks Project.Spec.Subagent precedence chain for the given
-// level, returning the resolved subagent container image reference.
+// dispatch level, first mapping it to its Levels.<overrideKey> slot via
+// levelOverrideKey (D-02), and returns the resolved subagent container image
+// reference.
 //
-//	Levels.<level>.Image → Spec.Subagent.Image → helmDefaults.Image → ""
+//	Levels.<overrideKey>.Image → Spec.Subagent.Image → helmDefaults.Image → ""
 //
 // An empty return means no image was configured; callers must surface this
 // as a config error rather than dispatching a Job with an empty image field.
-// Level "project" has no entry in the switch (the CRD has no Levels.Project);
-// resolution falls straight to Spec.Subagent.Image, then helmDefaults.Image.
+// Post-D-02, every dispatch level maps to a real Levels.<overrideKey> slot —
+// the "project" level's prior silent fall-through (the CRD had no
+// Levels.Project) is dead: it now resolves via the Levels.Milestone slot.
 func resolveImage(project *tideprojectv1alpha3.Project, level string, helmDefaults ProviderDefaults) string {
+	key := levelOverrideKey(level)
 	var levelCfg *tideprojectv1alpha3.LevelConfig
 	if project != nil {
-		switch level {
+		switch key {
 		case "milestone":
 			levelCfg = project.Spec.Subagent.Levels.Milestone
 		case "phase":

@@ -1716,7 +1716,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// Step 5: Build planner envelope.
 	// For ProjectReconciler: level="project", parent=project, project=project (same object).
 	attempt := 1
-	_, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
+	envIn, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
@@ -1743,6 +1743,10 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
 	// HelmProviderDefaults tier) and stamp it into the planner Job env.
 	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "project", r.HelmProviderDefaults)
+	// D-02 / T-40-12: log the resolved model at dispatch — previously the
+	// resolved model appeared nowhere outside the PVC envelope.
+	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "project", "model", envIn.Provider.Model, "image", resolvedImage)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            project,
@@ -1751,7 +1755,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		Project:              project,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
-		SubagentImage:        resolveImage(project, "project", r.HelmProviderDefaults),
+		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,

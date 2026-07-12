@@ -92,8 +92,14 @@ type BuildOptions struct {
 	// Used for Job name + label derivation (Phase 04.1 P1.2).
 	ParentObj metav1.Object
 
-	// Level is the dispatch level string: "milestone"|"phase"|"plan"|"task".
-	// Drives the planner Job name format + level label (Phase 04.1 P1.2).
+	// Level is the dispatch level string: "project"|"milestone"|"phase"|"plan"|"task".
+	// Drives the planner Job name format + level label (Phase 04.1 P1.2). "project"
+	// predates this phase (project-level planner dispatch that authors
+	// MILESTONE.md) and is documented here rather than left out-of-spec; the D-02
+	// subagent.levels rename (internal/controller/dispatch_helpers.go
+	// levelOverrideKey) remaps which Levels.<X> override slot each of these five
+	// values resolves against — this Level string itself is unchanged by that
+	// rename.
 	Level string
 
 	// Project is the owning Project (for namespace + ProviderSecretRef).

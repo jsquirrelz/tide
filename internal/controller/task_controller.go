@@ -780,6 +780,11 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
 	// r.Deps.HelmProviderDefaults tier) and stamp it into the subagent Job env.
 	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "task", r.Deps.HelmProviderDefaults)
+	resolvedModel := ResolveProvider(project, "task", r.Deps.HelmProviderDefaults).Model
+	// D-02 / T-40-12: log the resolved model at dispatch — previously the
+	// resolved model appeared nowhere outside the PVC envelope.
+	logger.Info("resolved subagent dispatch", "level", "task", "model", resolvedModel, "image", resolvedImage)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindExecutor,
 		Task:                 task,
@@ -789,7 +794,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		Attempt:              spec.attempt,
 		SignedToken:          spec.token,
 		EnvelopeInJSON:       spec.envInJSON,
-		SubagentImage:        resolveImage(project, "task", r.Deps.HelmProviderDefaults),
+		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,

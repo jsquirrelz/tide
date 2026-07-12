@@ -454,7 +454,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		plannerCaps.Iterations = 20
 	}
 	plannerPrompt := outcomePromptOf(project)
-	_, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
+	envIn, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, plan.Spec.SharedContext)
@@ -486,6 +486,10 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// resolver is nil-safe, so a nil project resolves to the chart tier /
 	// compiled default without a caller-side guard.
 	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "plan", r.HelmProviderDefaults)
+	// D-02 / T-40-12: log the resolved model at dispatch — previously the
+	// resolved model appeared nowhere outside the PVC envelope.
+	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "plan", "model", envIn.Provider.Model, "image", resolvedImage)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            plan,
@@ -494,7 +498,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		Project:              project,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
-		SubagentImage:        resolveImage(project, "plan", r.HelmProviderDefaults),
+		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
