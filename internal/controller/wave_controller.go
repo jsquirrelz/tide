@@ -38,7 +38,6 @@ import (
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/owner"
-	"github.com/jsquirrelz/tide/internal/pool"
 )
 
 const waveFinalizer = "tideproject.k8s/wave-cleanup"
@@ -54,10 +53,6 @@ type WaveReconciler struct {
 	Scheme *runtime.Scheme
 
 	MaxConcurrentReconciles int
-
-	PlannerPool *pool.Pool
-	// ExecutorPool — Wave reconcile dispatches executor-pool Tasks in Phase 2.
-	ExecutorPool *pool.Pool
 
 	Dispatcher dispatch.Dispatcher
 

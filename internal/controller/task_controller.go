@@ -93,11 +93,8 @@ type TaskReconcilerDeps struct {
 	Defaults       budget.Limits
 	SigningKey     []byte
 	CredproxyImage string
-	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
-	// retained for legacy test wiring, ignored at dispatch.
-	SubagentImage string
-	EnvReader     podjob.EnvelopeReader
-	Recorder      record.EventRecorder
+	EnvReader      podjob.EnvelopeReader
+	Recorder       record.EventRecorder
 	// HelmProviderDefaults carry Helm-chart provider/model defaults, mirroring
 	// the Milestone/Phase/Plan reconcilers. buildEnvelopeIn uses them to resolve
 	// the executor task's ProviderSpec (Vendor "anthropic" + the task-level model).

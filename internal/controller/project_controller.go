@@ -196,12 +196,9 @@ type ProjectReconciler struct {
 	TidePushImage string
 
 	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
-	EnvReader      podjob.EnvelopeReader
-	SigningKey     []byte
-	CredproxyImage string
-	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
-	// retained for legacy test wiring, ignored at dispatch.
-	SubagentImage        string
+	EnvReader            podjob.EnvelopeReader
+	SigningKey           []byte
+	CredproxyImage       string
 	HelmProviderDefaults ProviderDefaults
 
 	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).

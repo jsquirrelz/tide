@@ -72,10 +72,6 @@ type PhaseReconciler struct {
 	// EnvReader reads EnvelopeOut from PVC after planner Job completes.
 	EnvReader podjob.EnvelopeReader
 
-	// SubagentImage is dead since Phase 13 — resolveImage owns resolution;
-	// retained for legacy test wiring, ignored at dispatch.
-	SubagentImage string
-
 	// CredproxyImage is the image ref for the tide-credproxy sidecar.
 	// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
 	CredproxyImage string

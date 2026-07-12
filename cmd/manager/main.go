@@ -430,7 +430,6 @@ func main() {
 		// Values are the same variables already computed above for MilestoneReconciler.
 		EnvReader:            envReader,
 		SigningKey:           signingKey,
-		SubagentImage:        subagentImage,
 		CredproxyImage:       credproxyImage,
 		HelmProviderDefaults: helmProviderDefaults,
 		// Phase 09 plan 09-06: reader Job image.
@@ -462,7 +461,6 @@ func main() {
 		// signing key mints a token the sidecar validates before forwarding.
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
-		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
 		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
@@ -488,7 +486,6 @@ func main() {
 		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
-		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
 		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
@@ -513,7 +510,6 @@ func main() {
 		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
 		SigningKey:     signingKey,
 		CredproxyImage: credproxyImage,
-		SubagentImage:  subagentImage,
 		// Phase 09 plan 09-06: reader Job image.
 		ReporterImage: reporterImage,
 		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
@@ -529,7 +525,6 @@ func main() {
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Wave,
-		ExecutorPool:            executorPool,
 		WatchNamespace:          watchNamespace,
 		// CR-01 fix (debug #16): Dispatcher must be assigned for the observational
 		// roll-up to fire — wave_controller.go:125 gates reconcileObservational on
@@ -556,7 +551,6 @@ func main() {
 			Budget:               budgetStore,
 			Defaults:             defaults,
 			SigningKey:           signingKey,
-			SubagentImage:        subagentImage,
 			CredproxyImage:       credproxyImage,
 			EnvReader:            envReader,
 			HelmProviderDefaults: helmProviderDefaults,
