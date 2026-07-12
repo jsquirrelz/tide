@@ -92,6 +92,19 @@ type PlanReconciler struct {
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
+
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *PlanReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=plans,verbs=get;list;watch;create;update;patch;delete
@@ -426,7 +439,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,

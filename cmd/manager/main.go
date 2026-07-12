@@ -436,6 +436,12 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project,
 		WatchNamespace:          watchNamespace,
 		Deps:                    plannerDeps,
+		// SharedPVCName reads the same sharedPVCName source as the other
+		// reconcilers (mirrors ImportReconciler's WR-03 wiring). Previously
+		// unwired here despite the field existing on ProjectReconciler — its
+		// own sharedPVCName() accessor always fell back to
+		// defaultSharedPVCName regardless of --workspaces-pvc-name.
+		SharedPVCName: sharedPVCName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
@@ -447,6 +453,10 @@ func main() {
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
 		Deps:                    plannerDeps,
+		// SharedPVCName reads the same sharedPVCName source as ProjectReconciler
+		// so the planner dispatch Job mounts the PVC the rest of the controller
+		// writes to (mirrors ImportReconciler's WR-03 wiring).
+		SharedPVCName: sharedPVCName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -458,6 +468,10 @@ func main() {
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
 		Deps:                    plannerDeps,
+		// SharedPVCName reads the same sharedPVCName source as ProjectReconciler
+		// so the planner dispatch Job mounts the PVC the rest of the controller
+		// writes to (mirrors ImportReconciler's WR-03 wiring).
+		SharedPVCName: sharedPVCName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -472,6 +486,10 @@ func main() {
 		// Phase 15 D-05: same cluster-level default as the webhook so the reconciler
 		// gate uses the same baseline mode when no Project.Spec overrides it.
 		DefaultFileTouchMode: defaultFileTouchMode,
+		// SharedPVCName reads the same sharedPVCName source as ProjectReconciler
+		// so the planner dispatch Job mounts the PVC the rest of the controller
+		// writes to (mirrors ImportReconciler's WR-03 wiring).
+		SharedPVCName: sharedPVCName,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Plan")
 		os.Exit(1)
@@ -499,6 +517,10 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Task,
 		ExecutorPool:            executorPool,
 		WatchNamespace:          watchNamespace,
+		// SharedPVCName reads the same sharedPVCName source as ProjectReconciler
+		// so the executor dispatch Job mounts the PVC the rest of the controller
+		// writes to (mirrors ImportReconciler's WR-03 wiring).
+		SharedPVCName: sharedPVCName,
 		// Phase 04.1 P3.2 — dispatch-tier deps consolidated into a carrier struct.
 		// Mirrors HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
 		Deps: controller.TaskReconcilerDeps{

@@ -133,9 +133,22 @@ type TaskReconciler struct {
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+
 	// Deps carries the dispatch-tier dependencies. Phase 04.1 P3.2 — mirrors the
 	// HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
 	Deps TaskReconcilerDeps
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *TaskReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -817,7 +830,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           string(project.UID),
 		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
