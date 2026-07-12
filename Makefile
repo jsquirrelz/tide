@@ -617,12 +617,12 @@ verify-no-aggregates: ## Assert api/v1alpha* declares no aggregate schedule fiel
 verify-no-legacy-api-refs: ## Assert zero legacy CRD schema-revision references outside the sanctioned set (CRANK-07).
 	@echo "verifying no legacy API-version references outside the sanctioned set (CRANK-07)..."
 	@PAT=v1alpha; \
-	MATCHES=$$(grep -rnE "$${PAT}1|$${PAT}2" . \
-		--exclude-dir=.git --exclude-dir=.planning --exclude-dir=.worktrees \
-		--exclude-dir=node_modules --exclude-dir=bin --exclude-dir=dist \
-		--exclude-dir=migration --exclude-dir=audit --exclude-dir=superpowers \
-		--exclude-dir=salvage-20260618 --exclude-dir=salvage-20260628 \
-		--exclude=AGENTS.md \
+	MATCHES=$$(git grep -nIE "$${PAT}1|$${PAT}2" -- . \
+		':(exclude,glob)**/.planning/**' ':(exclude,glob)**/.worktrees/**' \
+		':(exclude,glob)**/node_modules/**' ':(exclude,glob)**/bin/**' ':(exclude,glob)**/dist/**' \
+		':(exclude,glob)**/migration/**' ':(exclude,glob)**/audit/**' ':(exclude,glob)**/superpowers/**' \
+		':(exclude,glob)**/salvage-20260618/**' ':(exclude,glob)**/salvage-20260628/**' \
+		':(exclude,glob)**/AGENTS.md' \
 		2>/dev/null \
 		| grep -v "dispatch\.tideproject\.k8s/$${PAT}1" \
 		| grep -v "$${PAT}2-to-$${PAT}3" \
