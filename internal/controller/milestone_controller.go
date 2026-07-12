@@ -401,17 +401,15 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// Project.Spec does not carry per-project Caps (only Task does) — pass nil
 	// to let DefaultCaps apply the 600s planner floor unconditionally.
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
-	// If operator has not set Iterations, apply the 20-iteration planner default
-	// inline (the Caps type doesn't carry per-Kind iteration defaults; only the
-	// wall-clock floor differs by Kind via DefaultCaps).
+	// If operator has not set Iterations, apply the planner default.
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 	plannerPrompt := outcomePromptOf(project)
 	envIn, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, ms.Spec.SharedContext)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, ms.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}

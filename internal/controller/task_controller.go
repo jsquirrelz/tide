@@ -1509,7 +1509,7 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		// ("refusing vendor=\"\""). Latent until a run first reached real task
 		// execution (the planner paths set Provider; this builder never did).
 		Provider:      ResolveProvider(project, "task", r.Deps.HelmProviderDefaults),
-		ProxyEndpoint: "https://127.0.0.1:8443",
+		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
 		Dev:           dev,
 	}

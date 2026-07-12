@@ -1680,7 +1680,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// Step 4: Build caps.
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 
 	// Step 5: Build planner envelope.
@@ -1689,7 +1689,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	envIn, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build project planner envelope: %w", err)
 	}

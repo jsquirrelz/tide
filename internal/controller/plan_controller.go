@@ -387,13 +387,13 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 	plannerPrompt := outcomePromptOf(project)
 	envIn, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
 	}
