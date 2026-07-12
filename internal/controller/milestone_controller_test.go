@@ -13,7 +13,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -21,6 +20,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,19 +43,32 @@ func newPlannerPoolForTest() *pool.Pool {
 type reconcilerFunc func(context.Context, reconcile.Request) (ctrl.Result, error)
 
 func reconcileWithRetry(r reconcilerFunc, name types.NamespacedName, n int) error {
+	_, err := reconcileWithRetryResult(r, name, n)
+	return err
+}
+
+// reconcileWithRetryResult drives a Reconcile call N times, retrying on 409
+// Conflict, and returns the last ctrl.Result alongside the final error.
+func reconcileWithRetryResult(r reconcilerFunc, name types.NamespacedName, n int) (ctrl.Result, error) {
+	var result ctrl.Result
+	var err error
 	for range n {
 		for range 5 {
-			_, err := r(context.Background(), reconcile.Request{NamespacedName: name})
+			result, err = r(context.Background(), reconcile.Request{NamespacedName: name})
 			if err == nil {
 				break
 			}
-			if strings.Contains(err.Error(), "the object has been modified") || strings.Contains(err.Error(), "Conflict") {
+			if apierrors.IsConflict(err) {
+				err = nil
 				continue
 			}
-			return err
+			return result, err
+		}
+		if err != nil {
+			return result, err
 		}
 	}
-	return nil
+	return result, err
 }
 
 // makeFakeJobTerminal patches a Job to a terminal state (Complete or Failed)
