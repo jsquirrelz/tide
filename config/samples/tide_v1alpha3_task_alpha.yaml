@@ -1,9 +1,9 @@
-# tide_v1alpha1_task_beta.yaml — β (Wave 1, no dependencies).
+# tide_v1alpha3_task_alpha.yaml — α (Wave 1, no dependencies).
 # Pinned to pkg/dag/kahn_test.go TestComputeWaves_AlphaThroughTheta fixture.
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Task
 metadata:
-  name: beta
+  name: alpha
   namespace: tide-samples
   labels:
     app.kubernetes.io/name: tide
@@ -13,6 +13,6 @@ metadata:
 spec:
   planRef: sample-plan
   filesTouched:
-    - pkg/example/beta.go
+    - pkg/example/alpha.go
   declaredOutputPaths:
-    - artifacts/beta.json
+    - artifacts/alpha.json

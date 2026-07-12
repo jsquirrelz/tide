@@ -1,6 +1,6 @@
-# tide_v1alpha1_task_gamma.yaml — γ (Wave 1, no dependencies).
+# tide_v1alpha3_task_gamma.yaml — γ (Wave 1, no dependencies).
 # Pinned to pkg/dag/kahn_test.go TestComputeWaves_AlphaThroughTheta fixture.
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Task
 metadata:
   name: gamma

@@ -1,6 +1,6 @@
-# tide_v1alpha1_task_delta.yaml — δ (Wave 2, depends on α and β).
+# tide_v1alpha3_task_delta.yaml — δ (Wave 2, depends on α and β).
 # Edge set: α→δ, β→δ — matches pkg/dag/kahn_test.go alphaThroughThetaFixture.
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Task
 metadata:
   name: delta
