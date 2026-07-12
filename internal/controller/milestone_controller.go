@@ -222,29 +222,10 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// Phase 12 D-04: approve never jumps a level to Succeeded past its children.
 	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(ms, "milestone") {
-			// Consume annotation (T-04-G2 one-shot).
-			newAnno := gates.ConsumeApprove(ms, "milestone")
-			annoPatch := client.MergeFrom(ms.DeepCopy())
-			ms.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, ms, annoPatch); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Return to Running + record ApprovedByUser condition (D-04).
-			statusPatch := client.MergeFrom(ms.DeepCopy())
-			ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-			meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-				Message:            "Milestone approved; children will dispatch",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
-				return ctrl.Result{}, err
-			}
+			// Consume annotation + return to Running + record ApprovedByUser (D-04).
 			// Requeue immediately — the Running branch (below) calls handleJobCompletion
 			// which owns the ChildCount-gated succession (D-03 invariant).
-			return ctrl.Result{Requeue: true}, nil
+			return consumeApproveAndResume(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, "milestone", "Milestone approved; children will dispatch")
 		}
 		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
 		// AwaitingApproval early-return cannot permanently swallow it (e.g. the run
@@ -667,22 +648,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				// consume it and write Running+ApprovedByUser so the condition is recorded
 				// for future reconciles — otherwise the next reconcile would re-park because
 				// the annotation is gone but no approval record exists.
-				newAnno := gates.ConsumeApprove(ms, "milestone")
-				annoPatch := client.MergeFrom(ms.DeepCopy())
-				ms.SetAnnotations(newAnno)
-				if err := r.Patch(ctx, ms, annoPatch); err != nil {
-					return ctrl.Result{}, err
-				}
-				statusPatch := client.MergeFrom(ms.DeepCopy())
-				ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-				meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-					Message:            "Milestone approved; children will dispatch",
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
+				if _, err := consumeApproveAndResume(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, "milestone", "Milestone approved; children will dispatch"); err != nil {
 					return ctrl.Result{}, err
 				}
 				// Fall through to ChildCount-gated succession (D-03).

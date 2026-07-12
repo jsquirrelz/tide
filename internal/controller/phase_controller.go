@@ -220,29 +220,10 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	// Phase 12 D-01/D-04: approval never jumps a level to Succeeded past its children.
 	if ph.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(ph, "phase") {
-			// Consume annotation (T-04-G2 one-shot).
-			newAnno := gates.ConsumeApprove(ph, "phase")
-			annoPatch := client.MergeFrom(ph.DeepCopy())
-			ph.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, ph, annoPatch); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Return to Running + record ApprovedByUser condition (D-04).
-			statusPatch := client.MergeFrom(ph.DeepCopy())
-			ph.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-			meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-				Message:            "Phase approved; children will dispatch",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, ph, statusPatch); err != nil {
-				return ctrl.Result{}, err
-			}
+			// Consume annotation + return to Running + record ApprovedByUser (D-04).
 			// Requeue immediately — the Running branch calls handleJobCompletion
 			// which owns the ChildCount-gated succession (D-03 invariant).
-			return ctrl.Result{Requeue: true}, nil
+			return consumeApproveAndResume(ctx, r.Client, ph, &ph.Status.Conditions, &ph.Status.Phase, "phase", "Phase approved; children will dispatch")
 		}
 		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
 		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
@@ -584,22 +565,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 				}
 				// Annotation present at the hook (approved before park): consume +
 				// write Running+ApprovedByUser so the condition is recorded.
-				newAnno := gates.ConsumeApprove(ph, "phase")
-				annoPatch := client.MergeFrom(ph.DeepCopy())
-				ph.SetAnnotations(newAnno)
-				if err := r.Patch(ctx, ph, annoPatch); err != nil {
-					return ctrl.Result{}, err
-				}
-				statusPatch := client.MergeFrom(ph.DeepCopy())
-				ph.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-				meta.SetStatusCondition(&ph.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-					Message:            "Phase approved; children will dispatch",
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, ph, statusPatch); err != nil {
+				if _, err := consumeApproveAndResume(ctx, r.Client, ph, &ph.Status.Conditions, &ph.Status.Phase, "phase", "Phase approved; children will dispatch"); err != nil {
 					return ctrl.Result{}, err
 				}
 				// Fall through to ChildCount-gated succession (D-03).

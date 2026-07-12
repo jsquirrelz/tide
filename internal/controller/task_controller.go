@@ -560,6 +560,13 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 			result, err := r.patchTaskAwaitingApproval(ctx, task, policy)
 			return taskGateResult{shouldHalt: true, result: result}, err
 		}
+		// NOT migrated to consumeApproveAndResume (level_status.go, Phase 41 item 10):
+		// this guard is inverted (annotation-present is the fallthrough arm here, not
+		// the early-return arm) and, unlike the six planner-tier sites, Task never
+		// wrote Status.Phase=Running/ConditionWaveOrLevelPaused=False here — a Task
+		// gated at AwaitingApproval never reaches this point without also being
+		// dispatch-ready, so only the annotation needs consuming. Not byte-equivalent
+		// to the shared two-step; kept inline per plan 41-07 Task 2 discretion.
 		newAnno := gates.ConsumeApprove(task, "task")
 		patch := client.MergeFrom(task.DeepCopy())
 		task.SetAnnotations(newAnno)

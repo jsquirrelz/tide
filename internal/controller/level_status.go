@@ -106,13 +106,13 @@ func patchLevelStatus(
 // consumeApproveAndResume performs the approve-annotation consume-and-resume
 // two-step shared by the six planner-tier gate hooks (Milestone/Phase/Plan,
 // each at their AwaitingApproval early-return AND their handleJobCompletion
-// gate-policy hook): (a) gates.ConsumeApprove + SetAnnotations + a plain
-// MergeFrom annotation Patch FIRST — T-04-G2: the one-shot annotation must be
-// consumed before any status write, so a crash between the two steps cannot
-// double-fire approval — then (b) a status patch (via patchLevelStatus)
-// setting the level's phase field to LevelPhaseRunning and
-// ConditionWaveOrLevelPaused=False/ReasonApprovedByUser with the caller's
-// resumeMessage.
+// gate-policy hook): (a) consume the one-shot approve annotation via the
+// gates package + SetAnnotations + a plain MergeFrom annotation Patch FIRST —
+// T-04-G2: the one-shot annotation must be consumed before any status write,
+// so a crash between the two steps cannot double-fire approval — then (b) a
+// status patch (via patchLevelStatus) setting the level's phase field to
+// LevelPhaseRunning and ConditionWaveOrLevelPaused=False/ReasonApprovedByUser
+// with the caller's resumeMessage.
 //
 // D-04 invariant: this helper NEVER advances a level to Succeeded — it always
 // returns to Running. Succession past children is exclusively the

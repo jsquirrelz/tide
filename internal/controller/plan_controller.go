@@ -228,29 +228,11 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// bool, error) signature: dispatched=true suppresses reconcileWaveMaterialization.
 	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(plan, "plan") {
-			// Consume annotation (T-04-G2 one-shot).
-			newAnno := gates.ConsumeApprove(plan, "plan")
-			annoPatch := client.MergeFrom(plan.DeepCopy())
-			plan.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, plan, annoPatch); err != nil {
-				return ctrl.Result{}, true, err
-			}
-			// Return to Running + record ApprovedByUser condition (D-04).
-			statusPatch := client.MergeFrom(plan.DeepCopy())
-			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-				Message:            "Plan approved; Tasks will dispatch",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
-				return ctrl.Result{}, true, err
-			}
+			// Consume annotation + return to Running + record ApprovedByUser (D-04).
 			// Requeue immediately — the Running branch (below) calls
 			// handlePlannerJobCompletion which owns ChildCount-gated succession (D-03).
-			return ctrl.Result{Requeue: true}, true, nil
+			res, err := consumeApproveAndResume(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", "Plan approved; Tasks will dispatch")
+			return res, true, err
 		}
 		// No annotation — keep parked; dispatched=true so reconcileWaveMaterialization
 		// never runs while parked (GATE-04: no executor Jobs, no Wave CRs).
@@ -679,22 +661,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				// consume it and write Running+ApprovedByUser so the condition is recorded
 				// for future reconciles — otherwise the next reconcile would re-park because
 				// the annotation is gone but no approval record exists.
-				newAnno := gates.ConsumeApprove(plan, "plan")
-				annoPatch := client.MergeFrom(plan.DeepCopy())
-				plan.SetAnnotations(newAnno)
-				if err := r.Patch(ctx, plan, annoPatch); err != nil {
-					return ctrl.Result{}, err
-				}
-				statusPatch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-					Message:            "Plan approved; Tasks will dispatch",
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+				if _, err := consumeApproveAndResume(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", "Plan approved; Tasks will dispatch"); err != nil {
 					return ctrl.Result{}, err
 				}
 				// Fall through to ChildCount-gated succession (D-03).
