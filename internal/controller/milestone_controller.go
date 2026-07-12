@@ -43,7 +43,6 @@ import (
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
-	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
@@ -74,38 +73,9 @@ type MilestoneReconciler struct {
 	PlannerPool  *pool.Pool
 	ExecutorPool *pool.Pool
 
-	Dispatcher dispatch.Dispatcher
-
-	// EnvReader reads the EnvelopeOut from the per-Project PVC after the
-	// planner Job completes (Phase 2 D-A2 path).
-	EnvReader podjob.EnvelopeReader
-
-	// CredproxyImage is the image ref for the tide-credproxy sidecar.
-	// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
-	CredproxyImage string
-
-	// SigningKey is the HMAC signing key used to mint per-dispatch tokens
-	// for the credproxy sidecar (Phase 04.1 P1.2 fix).
-	// Phase 04.1 P1.2 fix: each planner reconciler gains a SigningKey field,
-	// wired in cmd/manager/main.go, so planner Jobs can authenticate with
-	// the credproxy sidecar (mirrors TaskReconciler.SigningKey).
-	SigningKey []byte
-
-	// TidePushImage is the image ref for the tide-push container used by
-	// the W-2 boundary push trigger (plan 04-06).
-	TidePushImage string
-
-	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
-	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
-	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
-	ReporterImage string
-
-	// HelmProviderDefaults carry Helm-chart provider/model defaults.
-	HelmProviderDefaults ProviderDefaults
-
-	// PricingOverridesJSON is the validated D-02 override JSON forwarded
-	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
-	PricingOverridesJSON string
+	// Deps carries the dispatch-tier dependencies shared with the
+	// Phase/Plan/Project reconcilers (plan 41-06 consolidation).
+	Deps PlannerReconcilerDeps
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
@@ -192,7 +162,7 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// 5. Phase 3: planner dispatch body (REQ-SUB-01, D-A2).
-	if r.Dispatcher != nil {
+	if r.Deps.Dispatcher != nil {
 		return r.reconcilePlannerDispatch(ctx, &milestone)
 	}
 
@@ -284,7 +254,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		if ms.Spec.ProjectRef != "" {
 			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
-				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
 					logf.FromContext(ctx).Info("artifact push trigger failed at parked milestone (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
 				}
 			}
@@ -431,13 +401,13 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	envIn, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, ms.Spec.SharedContext)
+	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, ms.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}
 
 	// Mint a signed token for the credproxy sidecar (mirrors task_controller.go Step 8).
-	token, err := credproxy.Sign(r.SigningKey, string(ms.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	token, err := credproxy.Sign(r.Deps.SigningKey, string(ms.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("mint planner signed token: %w", err)
 	}
@@ -458,8 +428,8 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// bounded ActiveDeadline via DefaultCaps, and 3 SecurityContexts.
 	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
 	// HelmProviderDefaults tier) and stamp it into the planner Job env.
-	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
-	resolvedImage := resolveImage(project, "milestone", r.HelmProviderDefaults)
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "milestone", r.Deps.HelmProviderDefaults)
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "milestone", "model", envIn.Provider.Model, "image", resolvedImage)
@@ -474,12 +444,12 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
-		CredproxyImage:       r.CredproxyImage,
+		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
-		PricingOverridesJSON: r.PricingOverridesJSON,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
@@ -556,10 +526,10 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// still fire BoundaryDetected succession when children ARE all done.
 	var out pkgdispatch.EnvelopeOut
 	envReadOK := false
-	envReaderPresent := r.EnvReader != nil
-	if r.EnvReader != nil {
+	envReaderPresent := r.Deps.EnvReader != nil
+	if r.Deps.EnvReader != nil {
 		var readErr error
-		out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
+		out, readErr = r.Deps.EnvReader.ReadOut(ctx, projectUID, string(ms.UID))
 		if readErr != nil {
 			// Non-fatal: log and defer to the hasChildPhases fallback below.
 			// The fallback uses BoundaryDetected (all-children-Succeeded) as the succession
@@ -581,7 +551,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// isFirstCompletion tracks whether this is the initial observation of the planner
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.ReporterImage)
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage)
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}
@@ -688,7 +658,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 					// integration, which share the deterministic Job name (R-05 single-
 					// flight). The Step-1a parked-arm retry re-attempts until it lands.
 					// Log-and-continue — artifact-push failure must not fail the park.
-					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
 						logger.Info("artifact push trigger failed at milestone park (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
 					}
 					return r.patchMilestoneAwaitingApproval(ctx, ms, policy)

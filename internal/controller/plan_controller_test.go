@@ -120,7 +120,7 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 	}
 	p := &tideprojectv1alpha3.Plan{}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, p); err == nil {
-		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Dispatcher: &stubDispatcher{}, SigningKey: testSigningKey, CredproxyImage: testCredproxyImage}
+		r := &PlanReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Deps: PlannerReconcilerDeps{Dispatcher: &stubDispatcher{}, SigningKey: testSigningKey, CredproxyImage: testCredproxyImage}}
 		_ = k8sClient.Delete(context.Background(), p)
 		for range 3 {
 			_, _ = r.Reconcile(context.Background(), reconcile.Request{
@@ -136,13 +136,15 @@ func cleanupPlanFixture(planName string, taskNames []string) {
 // Phase 04.1 P1.2: CredproxyImage and SigningKey are required for reconcilePlannerDispatch.
 func newPlanReconciler() *PlanReconciler {
 	return &PlanReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		CredproxyImage: testCredproxyImage,
-		SigningKey:     testSigningKey,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		},
 	}
 }
@@ -355,9 +357,11 @@ var _ = Describe("PlanReconciler — DEBT-04 envelope-read error is non-fatal (P
 		envReader.SetErr(string(plan.UID), fmt.Errorf("simulated transient read error for DEBT-04"))
 
 		r := &PlanReconciler{
-			Client:    mgrClient,
-			Scheme:    k8sClient.Scheme(),
-			EnvReader: envReader,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				EnvReader: envReader,
+			},
 			// No Dispatcher or ReporterImage — we call handlePlannerJobCompletion directly.
 		}
 

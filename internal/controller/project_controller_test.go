@@ -42,9 +42,11 @@ import (
 // stubDispatcher is defined in task_controller_test.go (same package).
 func newTestProjectReconciler() *ProjectReconciler {
 	return &ProjectReconciler{
-		Client:                  k8sClient,
-		Scheme:                  k8sClient.Scheme(),
-		Dispatcher:              &stubDispatcher{},
+		Client: k8sClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher: &stubDispatcher{},
+		},
 		MaxConcurrentReconciles: 1,
 	}
 }
@@ -1161,11 +1163,13 @@ func buildFailedInitJob(project *tideprojectv1alpha3.Project, _ string) *batchv1
 // dispatch is attempted.
 func newDispatchReadyReconciler() *ProjectReconciler {
 	return &ProjectReconciler{
-		Client:                  k8sClient,
-		Scheme:                  k8sClient.Scheme(),
-		Dispatcher:              &stubDispatcher{},
+		Client: k8sClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher: &stubDispatcher{},
+			SigningKey: []byte("test-signing-key-for-import-guard"),
+		},
 		MaxConcurrentReconciles: 1,
-		SigningKey:              []byte("test-signing-key-for-import-guard"),
 	}
 }
 

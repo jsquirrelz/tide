@@ -87,14 +87,16 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 		}).
 		Build()
 	r := &PlanReconciler{
-		Client:         fc,
-		Scheme:         scheme,
-		Dispatcher:     &stubDispatcher{},
-		CredproxyImage: testCredproxyImage,
-		SigningKey:     testSigningKey,
-		TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: fc,
+		Scheme: scheme,
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		},
 	}
 	return r, fc

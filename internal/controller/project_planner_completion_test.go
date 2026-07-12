@@ -50,18 +50,20 @@ const (
 // ReporterImage, and PlannerPool, which are all required for dispatch and completion.
 func qqhBuildReconciler(envReader *mapEnvReader) *ProjectReconciler {
 	return &ProjectReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		PlannerPool:    newPlannerPoolForTest(),
-		EnvReader:      envReader,
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		ReporterImage:  qqhReporterImg,
-		SharedPVCName:  qqhPVCName,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			EnvReader:      envReader,
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			ReporterImage:  qqhReporterImg,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		},
+		PlannerPool:   newPlannerPoolForTest(),
+		SharedPVCName: qqhPVCName,
 	}
 }
 

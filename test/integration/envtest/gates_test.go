@@ -557,12 +557,14 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 
 			// 3. Drive PlanReconciler — terminal short-circuit must hold (no re-dispatch).
 			rPlan := &controller.PlanReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    pool.New(16, "planner"),
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+				},
+				PlannerPool: pool.New(16, "planner"),
 			}
 
 			// The background PlanReconciler from BeforeSuite may have dispatched the Plan
@@ -765,19 +767,21 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 // gate-policy hook lives).
 func newMilestoneReconcilerForGateIT(envReader *mapEnvReader) *controller.MilestoneReconciler {
 	return &controller.MilestoneReconciler{
-		Client:     mgrClient,
-		Scheme:     k8sClient.Scheme(),
-		Dispatcher: &stubDispatcher{},
-		EnvReader:  envReader,
-		// SigningKey makes this driven reconciler dispatch-capable. Without it,
-		// reconcilePlannerDispatch aborts every pass at credproxy.Sign
-		// ("signingKey must not be empty") BEFORE Job creation, so the planner Job
-		// only ever appeared when the manager's auto-reconciler won the race —
-		// the CI flake where tide-milestone-<uid>-1 was NotFound at the terminal
-		// patch. Mirror the suite auto-reconciler's config (suite_test.go).
-		CredproxyImage:       testCredproxyImage,
-		SigningKey:           testSigningKey,
-		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher: &stubDispatcher{},
+			EnvReader:  envReader,
+			// SigningKey makes this driven reconciler dispatch-capable. Without it,
+			// reconcilePlannerDispatch aborts every pass at credproxy.Sign
+			// ("signingKey must not be empty") BEFORE Job creation, so the planner Job
+			// only ever appeared when the manager's auto-reconciler won the race —
+			// the CI flake where tide-milestone-<uid>-1 was NotFound at the terminal
+			// patch. Mirror the suite auto-reconciler's config (suite_test.go).
+			CredproxyImage:       testCredproxyImage,
+			SigningKey:           testSigningKey,
+			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		},
 	}
 }
 
@@ -785,12 +789,14 @@ func newMilestoneReconcilerForGateIT(envReader *mapEnvReader) *controller.Milest
 // seam wired for the Plan 12-03 GATE-04 descent-hold integration test.
 func newPhaseReconcilerForGateIT() *controller.PhaseReconciler {
 	return &controller.PhaseReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		PlannerPool:    pool.New(16, "planner"),
-		CredproxyImage: testCredproxyImage,
-		SigningKey:     testSigningKey,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+		},
+		PlannerPool: pool.New(16, "planner"),
 	}
 }
 
@@ -798,9 +804,11 @@ func newPhaseReconcilerForGateIT() *controller.PhaseReconciler {
 // seam wired.
 func newPlanReconcilerForGateIT() *controller.PlanReconciler {
 	return &controller.PlanReconciler{
-		Client:     mgrClient,
-		Scheme:     k8sClient.Scheme(),
-		Dispatcher: &stubDispatcher{},
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher: &stubDispatcher{},
+		},
 	}
 }
 

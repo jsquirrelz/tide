@@ -88,12 +88,14 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 		r := &ProjectReconciler{
-			Client:                  k8sClient,
-			Scheme:                  k8sClient.Scheme(),
-			Dispatcher:              &stubDispatcher{},
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:    &stubDispatcher{},
+				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+			},
 			MaxConcurrentReconciles: 1,
 			SharedPVCName:           pvcName,
-			TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 		}
 
 		// Drive reconciles: finalizer, init job, init completion, then phase 3.
@@ -164,12 +166,14 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		Expect(k8sClient.Patch(ctx, &p, annotPatch)).To(Succeed())
 
 		r := &ProjectReconciler{
-			Client:                  k8sClient,
-			Scheme:                  k8sClient.Scheme(),
-			Dispatcher:              &stubDispatcher{},
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:    &stubDispatcher{},
+				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+			},
 			MaxConcurrentReconciles: 1,
 			SharedPVCName:           pvcName,
-			TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 		}
 
 		// Reconcile to process the annotation.
@@ -257,12 +261,14 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		Expect(k8sClient.Patch(ctx, &p, annotPatch)).To(Succeed())
 
 		r := &ProjectReconciler{
-			Client:                  k8sClient,
-			Scheme:                  k8sClient.Scheme(),
-			Dispatcher:              &stubDispatcher{},
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:    &stubDispatcher{},
+				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+			},
 			MaxConcurrentReconciles: 1,
 			SharedPVCName:           pvcName,
-			TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 		}
 		for range 5 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})

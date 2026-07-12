@@ -115,13 +115,15 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 			// Drive reconciliation with an explicit reconciler instance
 			// (not the manager's cached reconciler) so field injection is precise.
 			r := &controller.MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    pool.New(16, "planner"),
-				EnvReader:      newMapEnvReader(),
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      newMapEnvReader(),
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+				},
+				PlannerPool: pool.New(16, "planner"),
 			}
 
 			// Drive 5 reconcile passes to get past: finalizer-add → owner-ref → dispatch.
@@ -353,12 +355,14 @@ var _ = Describe("Phase 40-04 D-02 — subagent.levels override-key mapping reso
 		// so it never reaches project-level planner dispatch — an explicit instance
 		// is required for Test 1, mirroring this file's existing Milestone pattern.
 		rProject := &controller.ProjectReconciler{
-			Client:               mgrClient,
-			Scheme:               k8sClient.Scheme(),
-			Dispatcher:           &stubDispatcher{},
-			SigningKey:           testSigningKey,
-			CredproxyImage:       testCredproxyImage,
-			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: controller.PlannerReconcilerDeps{
+				Dispatcher:           &stubDispatcher{},
+				SigningKey:           testSigningKey,
+				CredproxyImage:       testCredproxyImage,
+				HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			},
 		}
 
 		// --- Test 1: Project-CR planner dispatch (authors MILESTONE.md, dispatch
@@ -394,14 +398,16 @@ var _ = Describe("Phase 40-04 D-02 — subagent.levels override-key mapping reso
 		}, "5s", "100ms").Should(Succeed())
 
 		rMilestone := &controller.MilestoneReconciler{
-			Client:               mgrClient,
-			Scheme:               k8sClient.Scheme(),
-			Dispatcher:           &stubDispatcher{},
-			PlannerPool:          pool.New(16, "planner"),
-			EnvReader:            newMapEnvReader(),
-			CredproxyImage:       testCredproxyImage,
-			SigningKey:           testSigningKey,
-			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: controller.PlannerReconcilerDeps{
+				Dispatcher:           &stubDispatcher{},
+				EnvReader:            newMapEnvReader(),
+				CredproxyImage:       testCredproxyImage,
+				SigningKey:           testSigningKey,
+				HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			},
+			PlannerPool: pool.New(16, "planner"),
 		}
 		msJobName := fmt.Sprintf("tide-milestone-%s-1", gotMs.UID)
 		var msJob batchv1.Job
@@ -433,7 +439,7 @@ var _ = Describe("Phase 40-04 D-02 — subagent.levels override-key mapping reso
 		}, "5s", "100ms").Should(Succeed())
 
 		rPhase := newPhaseReconcilerForGateIT()
-		rPhase.HelmProviderDefaults = controller.ProviderDefaults{Image: testSubagentImage}
+		rPhase.Deps.HelmProviderDefaults = controller.ProviderDefaults{Image: testSubagentImage}
 		phJobName := fmt.Sprintf("tide-phase-%s-1", gotPh.UID)
 		var phJob batchv1.Job
 		Eventually(func(g Gomega) {
@@ -465,13 +471,15 @@ var _ = Describe("Phase 40-04 D-02 — subagent.levels override-key mapping reso
 		}, "5s", "100ms").Should(Succeed())
 
 		rPlan := &controller.PlanReconciler{
-			Client:               mgrClient,
-			Scheme:               k8sClient.Scheme(),
-			Dispatcher:           &stubDispatcher{},
-			PlannerPool:          pool.New(16, "planner"),
-			CredproxyImage:       testCredproxyImage,
-			SigningKey:           testSigningKey,
-			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: controller.PlannerReconcilerDeps{
+				Dispatcher:           &stubDispatcher{},
+				CredproxyImage:       testCredproxyImage,
+				SigningKey:           testSigningKey,
+				HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+			},
+			PlannerPool: pool.New(16, "planner"),
 		}
 		planJobName := fmt.Sprintf("tide-plan-%s-1", gotPlan.UID)
 		var planJob batchv1.Job

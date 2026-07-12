@@ -235,13 +235,15 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 
 			envReader := newMapEnvReader()
 			r := &controller.PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				TidePushImage:  testTidePushImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					TidePushImage:  testTidePushImage,
+				},
 			}
 			drive(r.Reconcile, phaseName, 5)
 			var got tideprojectv1alpha3.Phase
@@ -340,13 +342,15 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 
 			envReader := newMapEnvReader()
 			r := &controller.PlanReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				TidePushImage:  testTidePushImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					TidePushImage:  testTidePushImage,
+				},
 			}
 			drive(r.Reconcile, planName, 5)
 			var got tideprojectv1alpha3.Plan

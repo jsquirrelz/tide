@@ -281,15 +281,17 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	envReader := suiteEnvReader
 
 	if err := (&controller.MilestoneReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		EnvReader:      envReader,
-		Dispatcher:     &stubDispatcher{},
-		CredproxyImage: testCredproxyImage,
-		SigningKey:     testSigningKey,
-		// Phase 13: resolveImage reads the helm-default tier; the legacy
-		// SubagentImage field is ignored at dispatch (mirrors main.go's shim).
-		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			EnvReader:      envReader,
+			Dispatcher:     &stubDispatcher{},
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			// Phase 13: resolveImage reads the helm-default tier; the legacy
+			// SubagentImage field is ignored at dispatch (mirrors main.go's shim).
+			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("MilestoneReconciler: %w", err)
 	}
@@ -302,25 +304,29 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	// asserts their pushes, and ProjectReconciler's bounded-retry push
 	// replacement would interfere with leak_blocked_test's hand-built push Jobs.
 	if err := (&controller.PhaseReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		Dispatcher:           &stubDispatcher{},
-		CredproxyImage:       testCredproxyImage,
-		SigningKey:           testSigningKey,
-		TidePushImage:        testTidePushImage,
-		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher:           &stubDispatcher{},
+			CredproxyImage:       testCredproxyImage,
+			SigningKey:           testSigningKey,
+			TidePushImage:        testTidePushImage,
+			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PhaseReconciler: %w", err)
 	}
 
 	if err := (&controller.PlanReconciler{
-		Client:               mgrClient,
-		Scheme:               mgr.GetScheme(),
-		Dispatcher:           &stubDispatcher{},
-		CredproxyImage:       testCredproxyImage,
-		SigningKey:           testSigningKey,
-		TidePushImage:        testTidePushImage,
-		HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		Client: mgrClient,
+		Scheme: mgr.GetScheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher:           &stubDispatcher{},
+			CredproxyImage:       testCredproxyImage,
+			SigningKey:           testSigningKey,
+			TidePushImage:        testTidePushImage,
+			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("PlanReconciler: %w", err)
 	}
@@ -350,11 +356,13 @@ func newPhase2ReconcilersForTest(mgr ctrl.Manager) error {
 	}
 
 	if err := (&controller.ProjectReconciler{
-		Client:                  mgr.GetClient(),
-		Scheme:                  mgr.GetScheme(),
-		Dispatcher:              &stubDispatcher{},
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Deps: controller.PlannerReconcilerDeps{
+			Dispatcher:           &stubDispatcher{},
+			HelmProviderDefaults: controller.ProviderDefaults{Image: testSubagentImage},
+		},
 		MaxConcurrentReconciles: 1,
-		HelmProviderDefaults:    controller.ProviderDefaults{Image: testSubagentImage},
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("ProjectReconciler: %w", err)
 	}

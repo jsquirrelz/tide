@@ -116,18 +116,20 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 		// Construct a ProjectReconciler with ReporterImage="" so spawnReporterIfNeeded
 		// returns (true, nil) — isFirstCompletion=true on every call without a PVC.
 		r := &ProjectReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			SigningKey:     testSigningKey,
-			CredproxyImage: testCredproxyImage,
-			// ReporterImage deliberately empty: spawnReporterIfNeeded returns
-			// (true, nil) → isFirstCompletion=true on every call without a PVC.
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				SigningKey:     testSigningKey,
+				CredproxyImage: testCredproxyImage,
+				// ReporterImage deliberately empty: spawnReporterIfNeeded returns
+				// (true, nil) → isFirstCompletion=true on every call without a PVC.
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		// First call: PREFLIGHT-02 accrual.

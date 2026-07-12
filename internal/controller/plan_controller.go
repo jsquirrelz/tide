@@ -43,7 +43,6 @@ import (
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
-	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
@@ -81,34 +80,9 @@ type PlanReconciler struct {
 	PlannerPool  *pool.Pool
 	ExecutorPool *pool.Pool
 
-	Dispatcher dispatch.Dispatcher
-
-	// EnvReader reads EnvelopeOut from PVC after planner Job completes (Phase 3).
-	EnvReader podjob.EnvelopeReader
-
-	// CredproxyImage is the image ref for the tide-credproxy sidecar.
-	// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
-	CredproxyImage string
-
-	// SigningKey is the HMAC signing key used to mint per-dispatch tokens
-	// for the credproxy sidecar (Phase 04.1 P1.2 fix).
-	SigningKey []byte
-
-	// TidePushImage is the image ref for the tide-push container used by
-	// the W-2 boundary push trigger (plan 04-06).
-	TidePushImage string
-
-	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
-	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
-	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
-	ReporterImage string
-
-	// HelmProviderDefaults carry Helm-chart provider/model defaults (Phase 3).
-	HelmProviderDefaults ProviderDefaults
-
-	// PricingOverridesJSON is the validated D-02 override JSON forwarded
-	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
-	PricingOverridesJSON string
+	// Deps carries the dispatch-tier dependencies shared with the
+	// Milestone/Phase/Project reconcilers (plan 41-06 consolidation).
+	Deps PlannerReconcilerDeps
 
 	// DefaultFileTouchMode is the cluster-level file-touch validation default from
 	// the Helm chart (typically "warn"). Matches the PlanCustomValidator field so
@@ -201,7 +175,7 @@ func (r *PlanReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// 5a. Planner dispatch — fires when Plan has no Tasks yet (D-A2).
 	// 5b. Wave materialization — Phase 2 logic; runs once Tasks exist and
 	//     admission webhook stamps Validated.
-	if r.Dispatcher != nil {
+	if r.Deps.Dispatcher != nil {
 		res, dispatched, err := r.reconcilePlannerDispatch(ctx, &plan)
 		if err != nil {
 			return res, err
@@ -284,7 +258,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
 		// harmless (single-flight no-ops while busy; clean-tree skips empty commits).
 		if project := r.resolveProjectForPlan(ctx, plan); project != nil {
-			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
 				logf.FromContext(ctx).Info("artifact push trigger failed at parked plan (non-fatal)", "plan", plan.Name, "error", apErr.Error())
 			}
 		}
@@ -424,13 +398,13 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	envIn, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, plan.Spec.SharedContext)
+	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
 	}
 
 	// Mint a signed token for the credproxy sidecar.
-	token, err := credproxy.Sign(r.SigningKey, string(plan.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	token, err := credproxy.Sign(r.Deps.SigningKey, string(plan.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("mint planner signed token: %w", err)
 	}
@@ -452,8 +426,8 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// HelmProviderDefaults tier) and stamp it into the planner Job env. The
 	// resolver is nil-safe, so a nil project resolves to the chart tier /
 	// compiled default without a caller-side guard.
-	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
-	resolvedImage := resolveImage(project, "plan", r.HelmProviderDefaults)
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "plan", r.Deps.HelmProviderDefaults)
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "plan", "model", envIn.Provider.Model, "image", resolvedImage)
@@ -468,12 +442,12 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
-		CredproxyImage:       r.CredproxyImage,
+		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
-		PricingOverridesJSON: r.PricingOverridesJSON,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, plan, r.Scheme); err != nil {
@@ -543,8 +517,8 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// from read-error (transient); envReadOK gates the envelope-dependent downstream.
 	var out pkgdispatch.EnvelopeOut
 	envReadOK := false
-	envReaderPresent := r.EnvReader != nil
-	if r.EnvReader == nil {
+	envReaderPresent := r.Deps.EnvReader != nil
+	if r.Deps.EnvReader == nil {
 		// Fallback: no EnvReader (non-Option-C / unit-test path). Clear Running phase
 		// immediately and let the Wave path take over, mirroring prior behavior.
 		logger.Info("no env reader; clearing Running phase to let Wave path proceed")
@@ -555,7 +529,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	}
 
 	var readErr error
-	out, readErr = r.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
+	out, readErr = r.Deps.EnvReader.ReadOut(ctx, projectUID, string(plan.UID))
 	if readErr != nil {
 		// Non-fatal: log and defer to children-based succession (Pitfall-1 parity with
 		// milestone_controller.go:535-539 and phase_controller.go:476-479). A transient
@@ -572,7 +546,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	isFirstCompletion := false
-	if r.ReporterImage != "" && project != nil {
+	if r.Deps.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
 		pvcName := defaultSharedPVCName
 		var existingReporterJob batchv1.Job
@@ -582,7 +556,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
-				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
@@ -593,7 +567,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		} else {
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
-	} else if r.ReporterImage == "" {
+	} else if r.Deps.ReporterImage == "" {
 		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
 	}
@@ -696,7 +670,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					// preempts the plan boundary push, which carries the task-branch
 					// integration (D-04) and shares the deterministic Job name (R-05). The
 					// parked-arm retry re-attempts until it lands.
-					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
 						logger.Info("artifact push trigger failed at plan park (non-fatal)", "plan", plan.Name, "error", apErr.Error())
 					}
 					return r.patchPlanAwaitingApproval(ctx, plan, policy)
@@ -1025,7 +999,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	// dispatch (otherwise the no-op triggerWaveIntegrationJob would requeue
 	// forever and IntegratedThroughWave would never advance). Fall through to
 	// the normal label-stamp + Task-dispatch path below.
-	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" || r.TidePushImage == "" {
+	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" || r.Deps.TidePushImage == "" {
 		return ctrl.Result{}, false, nil
 	}
 
@@ -1131,7 +1105,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	}
 
 	// Dispatch the integration Job.
-	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.TidePushImage, r.HelmProviderDefaults); err != nil {
+	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); err != nil {
 		return ctrl.Result{}, true, err
 	}
 	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).

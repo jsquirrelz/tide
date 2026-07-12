@@ -254,12 +254,14 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			markPushJobFailed(pushJobName, "default")
 
 			r := &controller.ProjectReconciler{
-				Client:                  k8sClient,
-				Scheme:                  k8sClient.Scheme(),
-				Dispatcher:              &stubDispatcher{},
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:    &stubDispatcher{},
+					TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				},
 				MaxConcurrentReconciles: 1,
 				SharedPVCName:           pvcName,
-				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			driveProjectReconcile(r, projectName, 5)
 
@@ -324,12 +326,14 @@ var _ = Describe("Plan 04-06 Task 3 — W-1 leak-blocked integration envtest", L
 			markPushJobFailed(pushJobName, "default")
 
 			r := &controller.ProjectReconciler{
-				Client:                  k8sClient,
-				Scheme:                  k8sClient.Scheme(),
-				Dispatcher:              &stubDispatcher{},
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: controller.PlannerReconcilerDeps{
+					Dispatcher:    &stubDispatcher{},
+					TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				},
 				MaxConcurrentReconciles: 1,
 				SharedPVCName:           pvcName,
-				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 			}
 			driveProjectReconcile(r, projectName, 5)
 

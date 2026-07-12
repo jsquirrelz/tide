@@ -45,7 +45,6 @@ import (
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
-	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/gates"
@@ -164,8 +163,9 @@ const (
 // fetch, finalizer-on-delete, finalizer-ensure-on-create, owner-ref-on-children
 // (Project has no parent), status condition propagation, Status().Update.
 //
-// The Dispatcher field is nil in Phase 1; Phase 2 (REQ-SUB-01) injects a real
-// dispatch.Dispatcher and fills the `if r.Dispatcher != nil { ... }` body.
+// The Deps.Dispatcher field is nil in Phase 1; Phase 2 (REQ-SUB-01) injects a
+// real dispatch.Dispatcher and fills the `if r.Deps.Dispatcher != nil { ... }`
+// body.
 type ProjectReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -179,9 +179,11 @@ type ProjectReconciler struct {
 	PlannerPool  *pool.Pool
 	ExecutorPool *pool.Pool
 
-	// Dispatcher is the Phase 2 subagent-dispatch seam (REQ-SUB-01).
-	// Nil in Phase 1; Phase 2's main.go injects a concrete impl.
-	Dispatcher dispatch.Dispatcher
+	// Deps carries the dispatch-tier dependencies shared with the
+	// Milestone/Phase/Plan reconcilers (plan 41-06 consolidation; RESEARCH
+	// Pitfall 2 — Project is included to avoid repeating the forgotten-
+	// Dispatcher bug class).
+	Deps PlannerReconcilerDeps
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
@@ -190,25 +192,6 @@ type ProjectReconciler struct {
 	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
 	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
 	SharedPVCName string
-
-	// TidePushImage is the image ref for the tide-push container used by
-	// both clone- and push-mode Jobs (Phase 3 plan 03-06).
-	TidePushImage string
-
-	// Phase 7 (D-06): dispatch deps for project-level planner Job (mirrors MilestoneReconciler).
-	EnvReader            podjob.EnvelopeReader
-	SigningKey           []byte
-	CredproxyImage       string
-	HelmProviderDefaults ProviderDefaults
-
-	// ReporterImage is the image ref for the tide-reporter reader Job (Phase 09 plan 09-06).
-	// When empty, spawning the reader Job is skipped (mirrors TidePushImage skip in
-	// boundary_push.go:80-88). Set via TIDE_REPORTER_IMAGE env from Helm values.
-	ReporterImage string
-
-	// PricingOverridesJSON is the validated D-02 override JSON forwarded
-	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON. Wired in Plan 14-05.
-	PricingOverridesJSON string
 
 	// Recorder emits K8s Events for observable budget and bypass transitions
 	// (T-02-10-05 — audit trail for AbsoluteCapReached; T-02-10-01 — bypass).
@@ -297,7 +280,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// 5. Phase 2: dispatcher seam — init Job + budget gate + bypass watch (REQ-SUB-01).
-	if r.Dispatcher != nil {
+	if r.Deps.Dispatcher != nil {
 		return r.reconcileProjectPhase2(ctx, &project)
 	}
 
@@ -642,7 +625,7 @@ func (r *ProjectReconciler) reconcilePhase3Lifecycle(ctx context.Context, projec
 	// IsNotFound alone is TTL-unreliable (clone Job TTL=300s; the Job may be GC'd
 	// before a resume, causing a destructive re-clone into an existing workspace).
 	if !project.Status.Git.CloneComplete && !baseRefHalted && apierrors.IsNotFound(cloneErr) && project.Spec.Git != nil && project.Spec.Git.RepoURL != "" {
-		cloneOpts := CloneOptions{TidePushImage: r.TidePushImage}
+		cloneOpts := CloneOptions{TidePushImage: r.Deps.TidePushImage}
 		// B6: wire the run branch name so tide-push calls EnsureRunBranch + provisions
 		// the run worktree during clone (B5). project.Status.Git.BranchName is set by
 		// the ProjectReconciler before dispatching the clone Job (reconcilePhase3Lifecycle
@@ -1241,7 +1224,7 @@ func (r *ProjectReconciler) dispatchBoundaryPush(ctx context.Context, project *t
 		return ctrl.Result{}, fmt.Errorf("compute cumulative succeeded-task branches: %w", bErr)
 	}
 	pushOpts := PushOptions{
-		TidePushImage:         r.TidePushImage,
+		TidePushImage:         r.Deps.TidePushImage,
 		Branch:                project.Status.Git.BranchName,
 		LastPushedSHA:         project.Status.Git.LastPushedSHA,
 		CommitMessage:         msg,
@@ -1494,7 +1477,7 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 // Level string: "project". Project IS both the parent and the project parameter.
 // No AwaitingApproval check (D-02: no gate at Project→Milestone level).
 //
-// Gated on len(r.SigningKey) > 0 — when SigningKey is not wired (test mode
+// Gated on len(r.Deps.SigningKey) > 0 — when SigningKey is not wired (test mode
 // that doesn't configure dispatch), the function is a no-op so existing tests
 // that only exercise clone/push lifecycle are unaffected.
 //
@@ -1502,7 +1485,7 @@ func (r *ProjectReconciler) checkProjectComplete(ctx context.Context, project *t
 func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context, project *tidev1alpha3.Project) (ctrl.Result, error) {
 	// Guard: SigningKey is required to mint credproxy tokens — if not wired
 	// (e.g. unit tests that only test clone/push lifecycle), skip dispatch.
-	if len(r.SigningKey) == 0 {
+	if len(r.Deps.SigningKey) == 0 {
 		return ctrl.Result{}, nil
 	}
 
@@ -1716,13 +1699,13 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	envIn, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
+	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build project planner envelope: %w", err)
 	}
 
 	// Step 6: Mint signed token for the credproxy sidecar.
-	token, err := credproxy.Sign(r.SigningKey, string(project.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
+	token, err := credproxy.Sign(r.Deps.SigningKey, string(project.UID), time.Duration(plannerCaps.WallClockSeconds+podjob.DefaultWallClockGraceSeconds)*time.Second)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("mint project planner signed token: %w", err)
 	}
@@ -1739,8 +1722,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// Step 9: Build + Create planner Job via shared BuildJobSpec.
 	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
 	// HelmProviderDefaults tier) and stamp it into the planner Job env.
-	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
-	resolvedImage := resolveImage(project, "project", r.HelmProviderDefaults)
+	agentName, agentEmail := resolveAgentIdentity(project, r.Deps.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "project", r.Deps.HelmProviderDefaults)
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "project", "model", envIn.Provider.Model, "image", resolvedImage)
@@ -1755,12 +1738,12 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
-		CredproxyImage:       r.CredproxyImage,
+		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
 		PVCName:              "tide-projects",
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
-		PricingOverridesJSON: r.PricingOverridesJSON,
+		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {
@@ -1812,12 +1795,12 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Plan 09-08: capture out so we can gate on out.ChildCount below.
 	var out pkgdispatch.EnvelopeOut
 	envReadOK := false
-	if r.EnvReader != nil {
+	if r.Deps.EnvReader != nil {
 		// project is both the top-level object and its own "parent" at this level;
 		// use project.UID as both projectUID and parentUID (the envelope is keyed by
 		// the parent's UID, and the Project IS the parent at the project level).
 		var readErr error
-		out, readErr = r.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID))
+		out, readErr = r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(project.UID))
 		if readErr != nil {
 			logger.Error(readErr, "project planner envelope tiny-status read failed (non-fatal)", "project", project.Name)
 		} else {
@@ -1832,7 +1815,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// children via the K8s API. Children arrive via the Owns(&Milestone{}) watch.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	isFirstCompletion := false
-	if r.ReporterImage == "" {
+	if r.Deps.ReporterImage == "" {
 		logger.Info("skipping reporter Job spawn: ReporterImage not configured", "project", project.Name)
 		// No reporter → treat as first completion for budget rollup.
 		isFirstCompletion = true
@@ -1849,7 +1832,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
-				ReporterOptions{ReporterImage: r.ReporterImage}, r.Scheme)
+				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
@@ -1867,7 +1850,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// planner-completed map, immediately after the reporter spawn. The Project has no
 	// approve gate (D-02 auto-proceed), so the completion-site trigger suffices — no
 	// parked-arm retry. Log-and-continue: the next boundary push self-heals on failure.
-	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
+	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
 		logger.Info("artifact push trigger failed at project completion (non-fatal)", "project", project.Name, "error", apErr.Error())
 	}
 

@@ -18,3 +18,22 @@ environmental gap, not introduced by this plan. Plan verification instead uses t
 commands `go build ./... && go vet ./internal/controller/...` (Task 1/2) and
 `go test ./internal/controller/... ./cmd/manager/... -count=1` (Task 3), consistent with the
 plan's own `<verify>` blocks — both pass clean on the touched packages.
+
+## Update (Plan 41-06)
+
+Still present, still unrelated — confirmed again during 41-06's Task 3 acceptance-criteria run
+(`go build ./...` fails identically at `cmd/tide-demo-init/main.go:112:12`; `.gitignore:56`
+confirms `cmd/tide-demo-init/fixture/` is intentionally untracked and materialized by
+`go:generate` from `examples/tide-demo-fixture/`). 41-06 verified with
+`go build ./... 2>&1 | grep -v tide-demo-init` plus explicit scoped builds of every touched
+package (`internal/controller`, `cmd/manager`, `test/integration/envtest`), all clean.
+
+## `internal/controller/dispatch_helpers.go:551,559,566` logcheck findings (pre-existing, Plan 41-05)
+
+`golangci-lint run ./internal/controller/...` reports 3 `logcheck` findings ("Key positional
+arguments are expected to be inlined constant strings... Please replace level provided with
+string value") inside `checkDispatchHolds` (added by Plan 41-05, commit `96dd23b`). Confirmed via
+`git show 9217126...:internal/controller/dispatch_helpers.go` that this exact code (and finding)
+predates any Plan 41-06 commit — 41-06 never touches lines 480-570 of this file (its own edit to
+`dispatch_helpers.go` is the `PlannerReconcilerDeps` struct added near the top of the file, Task
+1). Out of scope for 41-06's test-fixture-sweep task; not fixed here.
