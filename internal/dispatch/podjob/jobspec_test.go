@@ -25,34 +25,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
 // buildTestOptions constructs a minimal BuildOptions for executor Kind tests.
 func buildTestOptions() BuildOptions {
-	task := &tidev1alpha2.Task{
+	task := &tidev1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-alpha",
 			Namespace: "default",
 			UID:       types.UID("task-uid-test"),
 		},
-		Spec: tidev1alpha2.TaskSpec{
+		Spec: tidev1alpha3.TaskSpec{
 			PlanRef:             "plan-alpha",
 			FilesTouched:        []string{"foo.go"},
 			DeclaredOutputPaths: []string{"out.json"},
-			Caps: &tidev1alpha2.Caps{
+			Caps: &tidev1alpha3.Caps{
 				WallClockSeconds: 300,
 			},
 		},
 	}
-	project := &tidev1alpha2.Project{
+	project := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "project-alpha",
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},
@@ -77,20 +77,20 @@ func buildTestOptions() BuildOptions {
 // buildPlannerTestOptions constructs a minimal BuildOptions for planner Kind tests.
 // Covers milestone-level dispatch (Phase 04.1 P1.2).
 func buildPlannerTestOptions() BuildOptions {
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "milestone-alpha",
 			Namespace: "default",
 			UID:       types.UID("milestone-uid-test"),
 		},
 	}
-	project := &tidev1alpha2.Project{
+	project := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "project-alpha",
 			Namespace: "default",
 			UID:       types.UID("project-uid-test"),
 		},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret-alpha",
 		},

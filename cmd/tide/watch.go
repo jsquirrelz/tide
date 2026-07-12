@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // pollInterval is the live-status refresh cadence for `tide watch`. The watch
@@ -99,7 +99,7 @@ func runWatch(ctx context.Context, name string, out io.Writer) error {
 // readAndRender fetches the Project and formats a single status line. Returns
 // "" on transient errors so the loop continues without spamming the operator.
 func readAndRender(ctx context.Context, k client.Client, ns, name string) string {
-	var p tidev1alpha2.Project
+	var p tidev1alpha3.Project
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Sprintf("project/%s/%s: not found", ns, name)
@@ -115,7 +115,7 @@ func readAndRender(ctx context.Context, k client.Client, ns, name string) string
 	// "live status" expectation from CONTEXT.md "tide watch should render
 	// the live state as it would appear in the dashboard's left pane".
 	activeMs := 0
-	var msList tidev1alpha2.MilestoneList
+	var msList tidev1alpha3.MilestoneList
 	if err := k.List(ctx, &msList, client.InNamespace(ns)); err == nil {
 		for i := range msList.Items {
 			m := &msList.Items[i]

@@ -21,7 +21,7 @@ import (
 	"maps"
 	"time"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // IsCapExceeded returns true iff the Project's cumulative cost spend exceeds a
@@ -46,7 +46,7 @@ import (
 // Status.Budget.BypassBaselineCents. The acknowledged-spend baseline logic
 // (BYPASS-04 / D-04) lives in ProjectReconciler.handleBudgetGate, scoped to the
 // bypass/resume path, so the TaskReconciler dispatch gate is unaffected.
-func IsCapExceeded(project *tidev1alpha2.Project) bool {
+func IsCapExceeded(project *tidev1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
@@ -73,7 +73,7 @@ func IsCapExceeded(project *tidev1alpha2.Project) bool {
 // The TTL form is recommended (RESEARCH.md Pitfall 7 — TTL is raceless).
 //
 // Returns false if project is nil or neither annotation is set / valid.
-func IsBypassed(project *tidev1alpha2.Project, now time.Time) bool {
+func IsBypassed(project *tidev1alpha3.Project, now time.Time) bool {
 	if project == nil {
 		return false
 	}
@@ -100,7 +100,7 @@ func IsBypassed(project *tidev1alpha2.Project, now time.Time) bool {
 //
 // The caller is responsible for Patching the Project with the returned annotations
 // map. Returns nil if project is nil.
-func ConsumeBypass(project *tidev1alpha2.Project) map[string]string {
+func ConsumeBypass(project *tidev1alpha3.Project) map[string]string {
 	if project == nil {
 		return nil
 	}

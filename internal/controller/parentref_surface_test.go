@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TestPhaseReconciler_ParentRefNotFound_Surfaces verifies that a Phase whose
@@ -40,21 +40,21 @@ import (
 // finalizer is pre-set so reconcile reaches step 4 (parent-ref resolution).
 func TestPhaseReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	phase := &tideprojectv1alpha2.Phase{
+	phase := &tideprojectv1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "phase-01",
 			Namespace:  "default",
 			UID:        types.UID("phase-uid-17"),
 			Finalizers: []string{phaseFinalizer},
 		},
-		Spec: tideprojectv1alpha2.PhaseSpec{
+		Spec: tideprojectv1alpha3.PhaseSpec{
 			// Mismatched parent-ref: no such Milestone exists.
 			MilestoneRef: "milestone-02-does-not-exist",
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(phase).
-		WithStatusSubresource(&tideprojectv1alpha2.Phase{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Phase{}).
 		Build()
 	r := &PhaseReconciler{Client: c, Scheme: s}
 
@@ -69,19 +69,19 @@ func TestPhaseReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 		t.Errorf("expected Requeue=true so it self-heals when the parent appears, got %+v", res)
 	}
 
-	var got tideprojectv1alpha2.Phase
+	var got tideprojectv1alpha3.Phase
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "phase-01"}, &got); err != nil {
 		t.Fatalf("Get phase: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionParentUnresolved)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
 	if cond == nil {
 		t.Fatalf("expected ConditionParentUnresolved to be set; conditions=%+v", got.Status.Conditions)
 	}
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("condition Status = %q, want False", cond.Status)
 	}
-	if cond.Reason != tideprojectv1alpha2.ReasonParentRefNotFound {
-		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha2.ReasonParentRefNotFound)
+	if cond.Reason != tideprojectv1alpha3.ReasonParentRefNotFound {
+		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentRefNotFound)
 	}
 	if !strings.Contains(cond.Message, "milestone-02-does-not-exist") {
 		t.Errorf("condition Message %q should name the missing parent-ref", cond.Message)
@@ -93,20 +93,20 @@ func TestPhaseReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 // requeues AND surfaces ConditionParentUnresolved.
 func TestMilestoneReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "milestone-01",
 			Namespace:  "default",
 			UID:        types.UID("ms-uid-17"),
 			Finalizers: []string{milestoneFinalizer},
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{
+		Spec: tideprojectv1alpha3.MilestoneSpec{
 			ProjectRef: "project-99-does-not-exist",
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(ms).
-		WithStatusSubresource(&tideprojectv1alpha2.Milestone{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Milestone{}).
 		Build()
 	r := &MilestoneReconciler{Client: c, Scheme: s}
 
@@ -121,16 +121,16 @@ func TestMilestoneReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 		t.Errorf("expected Requeue=true, got %+v", res)
 	}
 
-	var got tideprojectv1alpha2.Milestone
+	var got tideprojectv1alpha3.Milestone
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "milestone-01"}, &got); err != nil {
 		t.Fatalf("Get milestone: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionParentUnresolved)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
 	if cond == nil {
 		t.Fatalf("expected ConditionParentUnresolved to be set; conditions=%+v", got.Status.Conditions)
 	}
-	if cond.Reason != tideprojectv1alpha2.ReasonParentRefNotFound {
-		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha2.ReasonParentRefNotFound)
+	if cond.Reason != tideprojectv1alpha3.ReasonParentRefNotFound {
+		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentRefNotFound)
 	}
 	if !strings.Contains(cond.Message, "project-99-does-not-exist") {
 		t.Errorf("condition Message %q should name the missing parent-ref", cond.Message)

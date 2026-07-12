@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
@@ -42,8 +42,8 @@ import (
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(s); err != nil {
-		t.Fatalf("AddToScheme tidev1alpha2: %v", err)
+	if err := tidev1alpha3.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tidev1alpha3: %v", err)
 	}
 	if err := batchv1.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme batchv1: %v", err)
@@ -69,8 +69,8 @@ func (f *fakeEnvReader) ReadOut(_ context.Context, _, _ string) (pkgdispatch.Env
 // PodJobBackend.resolveProject can use the label fast-path (the prior
 // projectList.Items[0] fallback was removed). In production, PlanReconciler
 // stamps this label; in tests we set it at construction time.
-func testTask(ns, name string, uid types.UID) *tidev1alpha2.Task {
-	return &tidev1alpha2.Task{
+func testTask(ns, name string, uid types.UID) *tidev1alpha3.Task {
+	return &tidev1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
@@ -79,11 +79,11 @@ func testTask(ns, name string, uid types.UID) *tidev1alpha2.Task {
 				"tideproject.k8s/project": "project-alpha",
 			},
 		},
-		Spec: tidev1alpha2.TaskSpec{
+		Spec: tidev1alpha3.TaskSpec{
 			PlanRef:             "plan-alpha",
 			FilesTouched:        []string{"foo.go"},
 			DeclaredOutputPaths: []string{"out.json"},
-			Caps: &tidev1alpha2.Caps{
+			Caps: &tidev1alpha3.Caps{
 				WallClockSeconds: 60,
 			},
 		},
@@ -91,14 +91,14 @@ func testTask(ns, name string, uid types.UID) *tidev1alpha2.Task {
 }
 
 // testProject constructs a minimal Project for backend tests.
-func testProject(ns, name string, uid types.UID) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func testProject(ns, name string, uid types.UID) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 			UID:       uid,
 		},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo:        "https://github.com/example/repo",
 			ProviderSecretRef: "provider-secret",
 		},
@@ -507,7 +507,7 @@ func TestPodJobBackend_Run_OwnerRefCascades_Task(t *testing.T) {
 func TestPodJobBackend_Run_AgentIdentityPrecedence(t *testing.T) {
 	// runAndReadIdentityEnv drives Run to completion and returns the
 	// TIDE_AGENT_NAME/TIDE_AGENT_EMAIL env values on the created Job's subagent.
-	runAndReadIdentityEnv := func(t *testing.T, project *tidev1alpha2.Project, backendName, backendEmail string) (string, string) {
+	runAndReadIdentityEnv := func(t *testing.T, project *tidev1alpha3.Project, backendName, backendEmail string) (string, string) {
 		t.Helper()
 		s := testScheme(t)
 		task := testTask("default", "task-id", "uid-id")
@@ -586,7 +586,7 @@ func TestPodJobBackend_Run_AgentIdentityPrecedence(t *testing.T) {
 
 	t.Run("project Spec.Git beats backend field", func(t *testing.T) {
 		project := testProject("default", "project-alpha", "project-uid-id")
-		project.Spec.Git = &tidev1alpha2.GitConfig{
+		project.Spec.Git = &tidev1alpha3.GitConfig{
 			AgentName:  "Project Agent",
 			AgentEmail: "project@example.com",
 		}

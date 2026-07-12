@@ -49,7 +49,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // tailOptions carries the parsed flag set for `tide tail`.
@@ -78,7 +78,7 @@ var tailStreamer = defaultTailStreamer
 func defaultTailPodPicker(
 	ctx context.Context, k client.Client, ns, taskName string, opt tailOptions,
 ) (string, string, error) {
-	var task tidev1alpha2.Task
+	var task tidev1alpha3.Task
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &task); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", "", fmt.Errorf("tide: task %q not found in namespace %q", taskName, ns)

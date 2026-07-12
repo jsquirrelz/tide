@@ -35,30 +35,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
 
 // pricingFallbackProject creates a minimal auto-gated Project and waits for
 // cache sync (mirrors childRollupProject in child_rollup_idempotency_test.go).
-func pricingFallbackProject(ctx context.Context, name string) *tideprojectv1alpha2.Project {
-	proj := &tideprojectv1alpha2.Project{
+func pricingFallbackProject(ctx context.Context, name string) *tideprojectv1alpha3.Project {
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://github.com/example/pricing-fallback.git",
-			Subagent:       tideprojectv1alpha2.SubagentConfig{Model: "claude-sonnet-4-6"},
-			Gates:          tideprojectv1alpha2.Gates{Milestone: tideprojectv1alpha2.GatePolicy("auto")},
+			Subagent:       tideprojectv1alpha3.SubagentConfig{Model: "claude-sonnet-4-6"},
+			Gates:          tideprojectv1alpha3.Gates{Milestone: tideprojectv1alpha3.GatePolicy("auto")},
 		},
 	}
 	Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 	return proj
 }
 
 // cleanupPricingFallbackProject deletes the project (best-effort, finalizers first).
 func cleanupPricingFallbackProject(ctx context.Context, name string) {
-	p := &tideprojectv1alpha2.Project{}
+	p := &tideprojectv1alpha3.Project{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(ctx, p)
@@ -77,12 +77,12 @@ var _ = Describe("PricingFallback condition + metric (Phase 38 COST-02)", Label(
 		Expect(setPricingFallbackIfNeeded(ctx, k8sClient, proj, "claude-mystery-9")).To(Succeed())
 
 		Eventually(func(g Gomega) {
-			got := &tideprojectv1alpha2.Project{}
+			got := &tideprojectv1alpha3.Project{}
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, got)).To(Succeed())
-			cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+			cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionPricingFallbackActive)
 			g.Expect(cond).NotTo(BeNil())
 			g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			g.Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonUnknownModelPriced))
+			g.Expect(cond.Reason).To(Equal(tideprojectv1alpha3.ReasonUnknownModelPriced))
 			g.Expect(cond.Message).To(ContainSubstring("claude-mystery-9"))
 		}).Should(Succeed())
 	})
@@ -95,9 +95,9 @@ var _ = Describe("PricingFallback condition + metric (Phase 38 COST-02)", Label(
 		Expect(setPricingFallbackIfNeeded(ctx, k8sClient, proj, "")).To(Succeed())
 
 		Consistently(func(g Gomega) {
-			got := &tideprojectv1alpha2.Project{}
+			got := &tideprojectv1alpha3.Project{}
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, got)).To(Succeed())
-			cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+			cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionPricingFallbackActive)
 			g.Expect(cond).To(BeNil())
 		}, "1s", "200ms").Should(Succeed())
 	})
@@ -120,7 +120,7 @@ var _ = Describe("PricingFallback condition + metric (Phase 38 COST-02)", Label(
 		// Second rollup of the same unknown model: refetch so the helper sees
 		// the already-stamped condition (the call-site shape — each rollup
 		// operates on a freshly reconciled Project).
-		refreshed := &tideprojectv1alpha2.Project{}
+		refreshed := &tideprojectv1alpha3.Project{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, refreshed)).To(Succeed())
 		Expect(setPricingFallbackIfNeeded(ctx, k8sClient, refreshed, model)).To(Succeed())
 
@@ -129,16 +129,16 @@ var _ = Describe("PricingFallback condition + metric (Phase 38 COST-02)", Label(
 		Expect(after - before).To(Equal(2.0))
 
 		// Condition present exactly once (deduped, still True).
-		got := &tideprojectv1alpha2.Project{}
+		got := &tideprojectv1alpha3.Project{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, got)).To(Succeed())
 		count := 0
 		for _, c := range got.Status.Conditions {
-			if c.Type == tideprojectv1alpha2.ConditionPricingFallbackActive {
+			if c.Type == tideprojectv1alpha3.ConditionPricingFallbackActive {
 				count++
 			}
 		}
 		Expect(count).To(Equal(1))
-		cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+		cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionPricingFallbackActive)
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 	})
 })

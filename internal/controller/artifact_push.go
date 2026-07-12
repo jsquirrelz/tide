@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
 
@@ -54,7 +54,7 @@ import (
 // levels, before approve gates, single writer class) is what this predicate holds.
 func plannerMaterialized(phase string) bool {
 	switch phase {
-	case "AwaitingApproval", "Succeeded", tideprojectv1alpha2.PhaseComplete:
+	case "AwaitingApproval", "Succeeded", tideprojectv1alpha3.PhaseComplete:
 		return true
 	default:
 		return false
@@ -81,7 +81,7 @@ func plannerMaterialized(phase string) bool {
 //
 // Ordering is by (kind, name) so byte-identical restages are no-ops through the
 // 37-02 clean-tree skip.
-func collectStageEnvelopes(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project) ([]string, error) {
+func collectStageEnvelopes(ctx context.Context, c client.Client, project *tideprojectv1alpha3.Project) ([]string, error) {
 	if project == nil {
 		return nil, nil
 	}
@@ -91,7 +91,7 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 
 	inNS := client.InNamespace(project.Namespace)
 
-	var msList tideprojectv1alpha2.MilestoneList
+	var msList tideprojectv1alpha3.MilestoneList
 	if err := c.List(ctx, &msList, inNS); err != nil {
 		return nil, fmt.Errorf("list milestones: %w", err)
 	}
@@ -102,7 +102,7 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 		}
 	}
 
-	var phList tideprojectv1alpha2.PhaseList
+	var phList tideprojectv1alpha3.PhaseList
 	if err := c.List(ctx, &phList, inNS); err != nil {
 		return nil, fmt.Errorf("list phases: %w", err)
 	}
@@ -113,7 +113,7 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 		}
 	}
 
-	var planList tideprojectv1alpha2.PlanList
+	var planList tideprojectv1alpha3.PlanList
 	if err := c.List(ctx, &planList, inNS); err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
@@ -128,7 +128,7 @@ func collectStageEnvelopes(ctx context.Context, c client.Client, project *tidepr
 	// completed. Any materialized child Milestone proves that (reporter output), and
 	// a Complete project always qualifies. The project has no approve gate (D-02),
 	// so early inclusion is a pure fidelity win — never a correctness risk.
-	if project.Status.Phase == tideprojectv1alpha2.PhaseComplete || len(msList.Items) > 0 {
+	if project.Status.Phase == tideprojectv1alpha3.PhaseComplete || len(msList.Items) > 0 {
 		entries = append(entries, entry{"project", project.Name, string(project.UID)})
 	}
 
@@ -176,7 +176,7 @@ func triggerArtifactPush(
 	ctx context.Context,
 	c client.Client,
 	scheme *runtime.Scheme,
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	level string,
 	tidePushImage string,
 	helmDefaults ProviderDefaults,

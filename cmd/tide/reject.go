@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -45,7 +45,7 @@ func rejectRun(ctx context.Context, c client.Client, ns, projectName, reason str
 		reason = "rejected by operator"
 	}
 
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)

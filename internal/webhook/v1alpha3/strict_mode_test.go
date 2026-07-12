@@ -14,14 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TestResolveFileTouchMode verifies the D-E3 mode precedence resolution:
@@ -34,23 +34,23 @@ func TestResolveFileTouchMode(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		plan       *tidev1alpha2.Plan
-		project    *tidev1alpha2.Project
+		plan       *tidev1alpha3.Plan
+		project    *tidev1alpha3.Project
 		clusterDef string
 		wantMode   string
 	}{
 		{
 			name: "annotation strict wins over project default warn",
-			plan: &tidev1alpha2.Plan{
+			plan: &tidev1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						"tideproject.k8s/file-touch-mode": "strict",
 					},
 				},
 			},
-			project: &tidev1alpha2.Project{
-				Spec: tidev1alpha2.ProjectSpec{
-					PlanAdmission: tidev1alpha2.PlanAdmissionConfig{FileTouchMode: "warn"},
+			project: &tidev1alpha3.Project{
+				Spec: tidev1alpha3.ProjectSpec{
+					PlanAdmission: tidev1alpha3.PlanAdmissionConfig{FileTouchMode: "warn"},
 				},
 			},
 			clusterDef: "warn",
@@ -58,12 +58,12 @@ func TestResolveFileTouchMode(t *testing.T) {
 		},
 		{
 			name: "project spec strict wins over cluster default warn when no annotation",
-			plan: &tidev1alpha2.Plan{
+			plan: &tidev1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{},
 			},
-			project: &tidev1alpha2.Project{
-				Spec: tidev1alpha2.ProjectSpec{
-					PlanAdmission: tidev1alpha2.PlanAdmissionConfig{FileTouchMode: "strict"},
+			project: &tidev1alpha3.Project{
+				Spec: tidev1alpha3.ProjectSpec{
+					PlanAdmission: tidev1alpha3.PlanAdmissionConfig{FileTouchMode: "strict"},
 				},
 			},
 			clusterDef: "warn",
@@ -71,12 +71,12 @@ func TestResolveFileTouchMode(t *testing.T) {
 		},
 		{
 			name: "cluster default warn when no annotation and project has empty mode",
-			plan: &tidev1alpha2.Plan{
+			plan: &tidev1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{},
 			},
-			project: &tidev1alpha2.Project{
-				Spec: tidev1alpha2.ProjectSpec{
-					PlanAdmission: tidev1alpha2.PlanAdmissionConfig{FileTouchMode: ""},
+			project: &tidev1alpha3.Project{
+				Spec: tidev1alpha3.ProjectSpec{
+					PlanAdmission: tidev1alpha3.PlanAdmissionConfig{FileTouchMode: ""},
 				},
 			},
 			clusterDef: "warn",
@@ -91,16 +91,16 @@ func TestResolveFileTouchMode(t *testing.T) {
 		},
 		{
 			name: "bogus annotation value falls through to next precedence layer",
-			plan: &tidev1alpha2.Plan{
+			plan: &tidev1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						"tideproject.k8s/file-touch-mode": "bogus-value",
 					},
 				},
 			},
-			project: &tidev1alpha2.Project{
-				Spec: tidev1alpha2.ProjectSpec{
-					PlanAdmission: tidev1alpha2.PlanAdmissionConfig{FileTouchMode: "warn"},
+			project: &tidev1alpha3.Project{
+				Spec: tidev1alpha3.ProjectSpec{
+					PlanAdmission: tidev1alpha3.PlanAdmissionConfig{FileTouchMode: "warn"},
 				},
 			},
 			clusterDef: "warn",
@@ -108,7 +108,7 @@ func TestResolveFileTouchMode(t *testing.T) {
 		},
 		{
 			name: "resolved-cache annotation wins when direct annotation absent",
-			plan: &tidev1alpha2.Plan{
+			plan: &tidev1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
 						"tideproject.k8s/file-touch-mode-resolved": "strict",

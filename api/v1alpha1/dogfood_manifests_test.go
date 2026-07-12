@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
@@ -33,6 +33,10 @@ import (
 // schema it actually targets. The dogfood set is mixed-version: the
 // codex-runtime project was intentionally converted to v1alpha2 (commit
 // dcd7069), so unconditionally strict-decoding every doc as v1alpha1 is wrong.
+// The "tideproject.k8s/v1alpha2" case decodes into the current Go package
+// (tideprojectv1alpha3.Project as of Phase 40 Plan 40-03's crank — the on-disk
+// dogfood apiVersion strings bump to v1alpha3 in this same phase's Task 2,
+// at which point this case label moves with them).
 func projectAPIVersion(t *testing.T, doc []byte) string {
 	t.Helper()
 	var meta struct {
@@ -138,7 +142,7 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 						t.Errorf("UnmarshalStrict (v1alpha1) failed for Project doc in %s: %v", path, err)
 					}
 				case "tideproject.k8s/v1alpha2":
-					var proj tideprojectv1alpha2.Project
+					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
 						t.Errorf("UnmarshalStrict (v1alpha2) failed for Project doc in %s: %v", path, err)
 					}
@@ -189,7 +193,7 @@ func TestDogfoodManifests_RequiredFields(t *testing.T) {
 						gitNil, gitCredsRef = false, proj.Spec.Git.CredsSecretRef
 					}
 				case "tideproject.k8s/v1alpha2":
-					var proj tideprojectv1alpha2.Project
+					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
 						t.Fatalf("UnmarshalStrict (v1alpha2): %v", err)
 					}

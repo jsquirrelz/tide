@@ -45,7 +45,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // checkFailureHalt returns true if the Project has a FailureHalt=True condition,
@@ -53,12 +53,12 @@ import (
 // dispatch should be parked until the operator runs `tide resume --retry-failed`.
 //
 // Nil-safe: a nil project returns false.
-func checkFailureHalt(project *tideprojectv1alpha2.Project) bool {
+func checkFailureHalt(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
 	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha2.ConditionFailureHalt &&
+		if c.Type == tideprojectv1alpha3.ConditionFailureHalt &&
 			c.Status == metav1.ConditionTrue {
 			return true
 		}
@@ -82,16 +82,16 @@ func checkFailureHalt(project *tideprojectv1alpha2.Project) bool {
 // Called from TaskReconciler.handleJobCompletion on task execution failure only
 // (not on planning Job failures — FailureHalt is an execution-layer signal).
 // Nil project is a safe no-op.
-func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project, taskCompletedAt time.Time) error {
+func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha3.Project, taskCompletedAt time.Time) error {
 	if project == nil {
 		return nil
 	}
-	if project.Spec.FailureProfile != tideprojectv1alpha2.FailureProfileConservative {
+	if project.Spec.FailureProfile != tideprojectv1alpha3.FailureProfileConservative {
 		return nil // strict profile (or unset default): no-op
 	}
 	// Already halted: idempotent no-op.
 	for _, cond := range project.Status.Conditions {
-		if cond.Type == tideprojectv1alpha2.ConditionFailureHalt &&
+		if cond.Type == tideprojectv1alpha3.ConditionFailureHalt &&
 			cond.Status == metav1.ConditionTrue {
 			return nil
 		}
@@ -101,7 +101,7 @@ func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 	// setBillingHaltIfNeeded (billing_halt.go). Fail-closed on zero timestamp or
 	// unparseable annotation → fall through and stamp.
 	if !taskCompletedAt.IsZero() {
-		if resumeVal, ok := project.Annotations[tideprojectv1alpha2.AnnotationFailureResumedAt]; ok {
+		if resumeVal, ok := project.Annotations[tideprojectv1alpha3.AnnotationFailureResumedAt]; ok {
 			if resumedAt, err := time.Parse(time.RFC3339, resumeVal); err == nil {
 				if taskCompletedAt.Before(resumedAt) {
 					return nil // stale pre-resume straggler; no-op
@@ -112,9 +112,9 @@ func setFailureHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:   tideprojectv1alpha2.ConditionFailureHalt,
+		Type:   tideprojectv1alpha3.ConditionFailureHalt,
 		Status: metav1.ConditionTrue,
-		Reason: tideprojectv1alpha2.ReasonTaskFailedHalt,
+		Reason: tideprojectv1alpha3.ReasonTaskFailedHalt,
 		Message: "A task failed under conservative FailureProfile. New dispatch halted project-wide. " +
 			"Run `tide resume --retry-failed` after addressing the failure.",
 		LastTransitionTime: metav1.Now(),

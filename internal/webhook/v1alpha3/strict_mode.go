@@ -14,10 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ResolveFileTouchMode returns the active file-touch validation mode per D-E3 precedence:
@@ -33,7 +33,7 @@ import (
 // ignored and fall through to the next precedence layer.
 //
 // Returns "warn" if no value is set anywhere (defense-in-depth — Helm chart default).
-func ResolveFileTouchMode(plan *tideprojectv1alpha2.Plan, project *tideprojectv1alpha2.Project, clusterDefault string) string {
+func ResolveFileTouchMode(plan *tideprojectv1alpha3.Plan, project *tideprojectv1alpha3.Project, clusterDefault string) string {
 	if plan != nil {
 		// Precedence 1: direct annotation on Plan.
 		if v, ok := plan.Annotations["tideproject.k8s/file-touch-mode"]; ok {

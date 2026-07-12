@@ -20,7 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ensureLiveProject creates the given Project, tolerating the previous spec's
@@ -36,12 +36,12 @@ import (
 //
 // The prototype is deep-copied per attempt so a partially-mutated object from
 // a failed Create (e.g. a stamped resourceVersion) never poisons the retry.
-func ensureLiveProject(ctx context.Context, proto *tideprojectv1alpha2.Project) {
+func ensureLiveProject(ctx context.Context, proto *tideprojectv1alpha3.Project) {
 	GinkgoHelper()
 	Eventually(func() error {
 		err := k8sClient.Create(ctx, proto.DeepCopy())
 		if apierrors.IsAlreadyExists(err) {
-			var existing tideprojectv1alpha2.Project
+			var existing tideprojectv1alpha3.Project
 			if getErr := k8sClient.Get(ctx, client.ObjectKeyFromObject(proto), &existing); getErr != nil {
 				// NotFound: deletion completed between Create and Get — the
 				// next attempt recreates it.

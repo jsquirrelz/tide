@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // phaseSucceeded is the canonical Status.Phase value the four reconcilers
@@ -73,7 +73,7 @@ func BoundaryDetected(ctx context.Context, c client.Client, parent client.Object
 
 	switch childKind {
 	case "Milestone":
-		var list tideprojectv1alpha2.MilestoneList
+		var list tideprojectv1alpha3.MilestoneList
 		if err := c.List(ctx, &list, client.InNamespace(parent.GetNamespace())); err != nil {
 			return false, fmt.Errorf("BoundaryDetected: list Milestones: %w", err)
 		}
@@ -91,7 +91,7 @@ func BoundaryDetected(ctx context.Context, c client.Client, parent client.Object
 		return matched > 0, nil
 
 	case "Phase":
-		var list tideprojectv1alpha2.PhaseList
+		var list tideprojectv1alpha3.PhaseList
 		if err := c.List(ctx, &list, client.InNamespace(parent.GetNamespace())); err != nil {
 			return false, fmt.Errorf("BoundaryDetected: list Phases: %w", err)
 		}
@@ -109,7 +109,7 @@ func BoundaryDetected(ctx context.Context, c client.Client, parent client.Object
 		return matched > 0, nil
 
 	case "Plan":
-		var list tideprojectv1alpha2.PlanList
+		var list tideprojectv1alpha3.PlanList
 		if err := c.List(ctx, &list, client.InNamespace(parent.GetNamespace())); err != nil {
 			return false, fmt.Errorf("BoundaryDetected: list Plans: %w", err)
 		}
@@ -127,7 +127,7 @@ func BoundaryDetected(ctx context.Context, c client.Client, parent client.Object
 		return matched > 0, nil
 
 	case "Task":
-		var list tideprojectv1alpha2.TaskList
+		var list tideprojectv1alpha3.TaskList
 		if err := c.List(ctx, &list, client.InNamespace(parent.GetNamespace())); err != nil {
 			return false, fmt.Errorf("BoundaryDetected: list Tasks: %w", err)
 		}

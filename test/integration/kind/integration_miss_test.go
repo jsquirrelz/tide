@@ -65,7 +65,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -217,12 +217,12 @@ data:
 		runBranchName := waitForCloneComplete(projName)
 
 		By("Provisioning task branches + release signals via the branch-writer Job")
-		var freshProj tideprojectv1alpha2.Project
+		var freshProj tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &freshProj)).To(Succeed())
 		// Re-fetch task UIDs from the cluster: on a flake-attempt re-run the
 		// createFixture calls hit AlreadyExists and leave the builder
 		// objects' UIDs empty.
-		var tA, tB tideprojectv1alpha2.Task
+		var tA, tB tideprojectv1alpha3.Task
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-a", Namespace: integrationMissNamespace}, &tA)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-b", Namespace: integrationMissNamespace}, &tB)).To(Succeed())
 		provisionTaskBranchesAndSignal(projName+"-branch-writer", string(freshProj.UID), runBranchName,
@@ -230,7 +230,7 @@ data:
 
 		By("Waiting for the Project to reach Complete")
 		Eventually(func() error {
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &current); err != nil {
 				return err
 			}
@@ -240,12 +240,12 @@ data:
 			return nil
 		}, 10*time.Minute, 5*time.Second).Should(Succeed())
 
-		var final tideprojectv1alpha2.Project
+		var final tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &final)).To(Succeed())
 		runBranch := final.Status.Git.BranchName
 		Expect(runBranch).NotTo(BeEmpty(), "Project must have stamped a run branch")
 
-		var taskAFresh, taskBFresh tideprojectv1alpha2.Task
+		var taskAFresh, taskBFresh tideprojectv1alpha3.Task
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-a", Namespace: integrationMissNamespace}, &taskAFresh)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "sw-task-b", Namespace: integrationMissNamespace}, &taskBFresh)).To(Succeed())
 
@@ -313,11 +313,11 @@ data:
 		runBranchName := waitForCloneComplete(projName)
 
 		By("Provisioning task branches + release signals via the branch-writer Job")
-		var freshProj tideprojectv1alpha2.Project
+		var freshProj tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &freshProj)).To(Succeed())
 		// Re-fetch task UIDs (see spec 1: flake-attempt AlreadyExists leaves
 		// the builder objects UID-less).
-		var tA, tB, tC tideprojectv1alpha2.Task
+		var tA, tB, tC tideprojectv1alpha3.Task
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-a", Namespace: integrationMissNamespace}, &tA)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-b", Namespace: integrationMissNamespace}, &tB)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-c", Namespace: integrationMissNamespace}, &tC)).To(Succeed())
@@ -326,7 +326,7 @@ data:
 
 		By("Waiting for the Project to reach Complete")
 		Eventually(func() error {
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &current); err != nil {
 				return err
 			}
@@ -339,12 +339,12 @@ data:
 		// BoundaryPushed=True — wait for the boundary-push retry state
 		// machine to converge (may take a few reconcile passes after Complete).
 		By("Waiting for BoundaryPushed=True")
-		var final tideprojectv1alpha2.Project
+		var final tideprojectv1alpha3.Project
 		Eventually(func() error {
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &final); err != nil {
 				return err
 			}
-			c := meta.FindStatusCondition(final.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+			c := meta.FindStatusCondition(final.Status.Conditions, tideprojectv1alpha3.ConditionBoundaryPushed)
 			if c == nil || c.Status != metav1.ConditionTrue {
 				return fmt.Errorf("BoundaryPushed not yet True (condition: %+v)", c)
 			}
@@ -360,7 +360,7 @@ data:
 		Expect(final.Status.Git.LastPushedSHA).NotTo(BeEmpty(),
 			"lastPushedSHA must be stamped once BoundaryPushed=True (D-14)")
 
-		var taskAFresh, taskBFresh, taskCFresh tideprojectv1alpha2.Task
+		var taskAFresh, taskBFresh, taskCFresh tideprojectv1alpha3.Task
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-a", Namespace: integrationMissNamespace}, &taskAFresh)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-b", Namespace: integrationMissNamespace}, &taskBFresh)).To(Succeed())
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "fw-task-c", Namespace: integrationMissNamespace}, &taskCFresh)).To(Succeed())
@@ -386,7 +386,7 @@ data:
 func stampPlanValidated(planName string) {
 	GinkgoHelper()
 	Eventually(func() error {
-		var pl tideprojectv1alpha2.Plan
+		var pl tideprojectv1alpha3.Plan
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: planName, Namespace: integrationMissNamespace}, &pl); err != nil {
 			return err
 		}
@@ -415,15 +415,15 @@ func stampPlanValidated(planName string) {
 func stampMilestoneRunning(name string) {
 	GinkgoHelper()
 	Eventually(func() error {
-		var ms tideprojectv1alpha2.Milestone
+		var ms tideprojectv1alpha3.Milestone
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: integrationMissNamespace}, &ms); err != nil {
 			return err
 		}
-		if ms.Status.Phase == tideprojectv1alpha2.PhaseRunning {
+		if ms.Status.Phase == tideprojectv1alpha3.PhaseRunning {
 			return nil
 		}
 		patch := client.MergeFrom(ms.DeepCopy())
-		ms.Status.Phase = tideprojectv1alpha2.PhaseRunning
+		ms.Status.Phase = tideprojectv1alpha3.PhaseRunning
 		return k8sClient.Status().Patch(ctx, &ms, patch)
 	}, 30*time.Second, time.Second).Should(Succeed(),
 		"stub Milestone %s must accept the Status.Phase=Running stamp", name)
@@ -432,15 +432,15 @@ func stampMilestoneRunning(name string) {
 func stampPhaseRunning(name string) {
 	GinkgoHelper()
 	Eventually(func() error {
-		var ph tideprojectv1alpha2.Phase
+		var ph tideprojectv1alpha3.Phase
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: integrationMissNamespace}, &ph); err != nil {
 			return err
 		}
-		if ph.Status.Phase == tideprojectv1alpha2.PhaseRunning {
+		if ph.Status.Phase == tideprojectv1alpha3.PhaseRunning {
 			return nil
 		}
 		patch := client.MergeFrom(ph.DeepCopy())
-		ph.Status.Phase = tideprojectv1alpha2.PhaseRunning
+		ph.Status.Phase = tideprojectv1alpha3.PhaseRunning
 		return k8sClient.Status().Patch(ctx, &ph, patch)
 	}, 30*time.Second, time.Second).Should(Succeed(),
 		"stub Phase %s must accept the Status.Phase=Running stamp", name)
@@ -455,7 +455,7 @@ func waitForCloneComplete(projName string) string {
 	GinkgoHelper()
 	var branch string
 	Eventually(func() error {
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: integrationMissNamespace}, &p); err != nil {
 			return err
 		}

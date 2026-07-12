@@ -24,35 +24,35 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
 
 // ---------- helpers ----------
 
-func makeTestTask(name, planRef string) tideprojectv1alpha2.Task {
-	return tideprojectv1alpha2.Task{
+func makeTestTask(name, planRef string) tideprojectv1alpha3.Task {
+	return tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       tideprojectv1alpha2.TaskSpec{PlanRef: planRef},
+		Spec:       tideprojectv1alpha3.TaskSpec{PlanRef: planRef},
 	}
 }
 
-func makeTestPlan(name, phaseRef string) tideprojectv1alpha2.Plan {
-	return tideprojectv1alpha2.Plan{
+func makeTestPlan(name, phaseRef string) tideprojectv1alpha3.Plan {
+	return tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: phaseRef},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: phaseRef},
 	}
 }
 
-func makeTestPhase(name, msRef string) tideprojectv1alpha2.Phase {
-	return tideprojectv1alpha2.Phase{
+func makeTestPhase(name, msRef string) tideprojectv1alpha3.Phase {
+	return tideprojectv1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msRef},
+		Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msRef},
 	}
 }
 
-func makeTestMilestone(name string) tideprojectv1alpha2.Milestone {
-	return tideprojectv1alpha2.Milestone{
+func makeTestMilestone(name string) tideprojectv1alpha3.Milestone {
+	return tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 }
@@ -77,7 +77,7 @@ func edgeSetFrom(edges []dag.Edge) map[edgeKey]struct{} {
 // ---------- buildScopeResolver.resolveScope tests ----------
 
 func TestResolveScope_DirectTaskRef(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-1"),
 		makeTestTask("task-b", "plan-1"),
 	}
@@ -91,12 +91,12 @@ func TestResolveScope_DirectTaskRef(t *testing.T) {
 }
 
 func TestResolveScope_PlanRef_FansOutToMemberTasks(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-alpha"),
 		makeTestTask("task-b", "plan-alpha"),
 		makeTestTask("task-c", "plan-beta"),
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}
@@ -115,17 +115,17 @@ func TestResolveScope_PlanRef_FansOutToMemberTasks(t *testing.T) {
 }
 
 func TestResolveScope_PhaseRef_FansOutAcrossPlans(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-1"),
 		makeTestTask("task-b", "plan-2"),
 		makeTestTask("task-c", "plan-other"),
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-1", "phase-x"),
 		makeTestPlan("plan-2", "phase-x"),
 		makeTestPlan("plan-other", "phase-y"),
 	}
-	phases := []tideprojectv1alpha2.Phase{
+	phases := []tideprojectv1alpha3.Phase{
 		makeTestPhase("phase-x", "ms-1"),
 		makeTestPhase("phase-y", "ms-1"),
 	}
@@ -144,22 +144,22 @@ func TestResolveScope_PhaseRef_FansOutAcrossPlans(t *testing.T) {
 }
 
 func TestResolveScope_MilestoneRef_FansOutTransitively(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-1"),
 		makeTestTask("task-b", "plan-2"),
 		makeTestTask("task-c", "plan-3"), // different milestone
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-1", "phase-1"),
 		makeTestPlan("plan-2", "phase-2"),
 		makeTestPlan("plan-3", "phase-3"),
 	}
-	phases := []tideprojectv1alpha2.Phase{
+	phases := []tideprojectv1alpha3.Phase{
 		makeTestPhase("phase-1", "ms-alpha"),
 		makeTestPhase("phase-2", "ms-alpha"),
 		makeTestPhase("phase-3", "ms-beta"),
 	}
-	milestones := []tideprojectv1alpha2.Milestone{
+	milestones := []tideprojectv1alpha3.Milestone{
 		makeTestMilestone("ms-alpha"),
 		makeTestMilestone("ms-beta"),
 	}
@@ -178,7 +178,7 @@ func TestResolveScope_MilestoneRef_FansOutTransitively(t *testing.T) {
 }
 
 func TestResolveScope_UnresolvedRef_ReturnsEmpty(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-1"),
 	}
 	resolver := buildScopeResolver(tasks, nil, nil, nil)
@@ -195,11 +195,11 @@ func TestResolveScope_UnresolvedRef_ReturnsEmpty(t *testing.T) {
 // must be recorded as a collision for observability.
 func TestResolveScope_CrossKindNameCollision_UnionsAndRecords(t *testing.T) {
 	// A Task named "shared" AND a Plan named "shared" containing task-x.
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("shared", "plan-1"),
 		makeTestTask("task-x", "shared"), // task-x's PlanRef is the plan "shared"
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-1", "phase-1"),
 		makeTestPlan("shared", "phase-1"),
 	}
@@ -225,17 +225,17 @@ func TestResolveScope_CrossKindNameCollision_UnionsAndRecords(t *testing.T) {
 
 func TestBuildGlobalEdges_DirectTaskDependsOn(t *testing.T) {
 	// task-b depends on task-a (direct name ref)
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-1"),
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "task-b"},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:   "plan-1",
 				DependsOn: []string{"task-a"},
 			},
 		},
 	}
-	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
+	plans := []tideprojectv1alpha3.Plan{makeTestPlan("plan-1", "phase-1")}
 	resolver := buildScopeResolver(tasks, plans, nil, nil)
 	edges := buildGlobalEdges(resolver, tasks, plans, nil)
 
@@ -252,18 +252,18 @@ func TestBuildGlobalEdges_CoarsePlanDependsOn_FansOut(t *testing.T) {
 	// task-c (in plan-beta) has DependsOn=["plan-alpha"]
 	// plan-alpha contains task-a and task-b
 	// expected edges: task-a → task-c, task-b → task-c
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-alpha"),
 		makeTestTask("task-b", "plan-alpha"),
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "task-c"},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:   "plan-beta",
 				DependsOn: []string{"plan-alpha"},
 			},
 		},
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}
@@ -281,15 +281,15 @@ func TestBuildGlobalEdges_CoarsePlanDependsOn_FansOut(t *testing.T) {
 
 func TestBuildGlobalEdges_PlanLevelDependsOn_FansOut(t *testing.T) {
 	// plan-beta.DependsOn = ["plan-alpha"]: all tasks in plan-beta depend on all tasks in plan-alpha
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-alpha"),
 		makeTestTask("task-b", "plan-beta"),
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "plan-beta"},
-			Spec: tideprojectv1alpha2.PlanSpec{
+			Spec: tideprojectv1alpha3.PlanSpec{
 				PhaseRef:  "phase-1",
 				DependsOn: []string{"plan-alpha"},
 			},
@@ -307,17 +307,17 @@ func TestBuildGlobalEdges_PlanLevelDependsOn_FansOut(t *testing.T) {
 func TestBuildGlobalEdges_EdgeDeDup_SameEdgeFromDirectAndPlanRef(t *testing.T) {
 	// task-b depends on "task-a" AND on "plan-alpha" (which also contains task-a).
 	// Should produce exactly ONE edge task-a → task-b, not two.
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		makeTestTask("task-a", "plan-alpha"),
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "task-b"},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:   "plan-beta",
 				DependsOn: []string{"task-a", "plan-alpha"},
 			},
 		},
 	}
-	plans := []tideprojectv1alpha2.Plan{
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}

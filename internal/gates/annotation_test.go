@@ -23,7 +23,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // withAnnotations is a small helper that fabricates a Milestone / Project /
@@ -31,8 +31,8 @@ import (
 // `client.Object` interface (GetAnnotations); the underlying tests are
 // agnostic to which CRD kind is used (the helpers read annotations off the
 // metav1.ObjectMeta uniformly).
-func mkMilestone(ann map[string]string) *tideprojectv1alpha2.Milestone {
-	return &tideprojectv1alpha2.Milestone{
+func mkMilestone(ann map[string]string) *tideprojectv1alpha3.Milestone {
+	return &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "m1",
 			Namespace:   "default",
@@ -41,8 +41,8 @@ func mkMilestone(ann map[string]string) *tideprojectv1alpha2.Milestone {
 	}
 }
 
-func mkPlan(ann map[string]string) *tideprojectv1alpha2.Plan {
-	return &tideprojectv1alpha2.Plan{
+func mkPlan(ann map[string]string) *tideprojectv1alpha3.Plan {
+	return &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "p1",
 			Namespace:   "default",
@@ -51,8 +51,8 @@ func mkPlan(ann map[string]string) *tideprojectv1alpha2.Plan {
 	}
 }
 
-func mkProject(ann map[string]string) *tideprojectv1alpha2.Project {
-	return &tideprojectv1alpha2.Project{
+func mkProject(ann map[string]string) *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "proj1",
 			Namespace:   "default",

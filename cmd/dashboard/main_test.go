@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TestTelemetryEnabledFromEnv covers the D-13/D-14 env resolution: the
@@ -90,7 +90,7 @@ func setOrUnsetEnv(t *testing.T, key string, v *string) {
 // response body.
 func TestConfigRouteRegistered(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
 	spa := fstest.MapFS{

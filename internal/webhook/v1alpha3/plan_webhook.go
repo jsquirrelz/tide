@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	"context"
@@ -28,18 +28,18 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
 
 // planlog is the named logger for the Plan validating webhook.
-var planlog = logf.Log.WithName("plan-webhook-v1alpha2") //nolint:logcheck // controller-runtime logf idiom
+var planlog = logf.Log.WithName("plan-webhook-v1alpha3") //nolint:logcheck // controller-runtime logf idiom
 
-// SetupPlanWebhookWithManager registers the validating webhook for v1alpha2.Plan with
+// SetupPlanWebhookWithManager registers the validating webhook for v1alpha3.Plan with
 // the controller-runtime Manager. The stateful PlanCustomValidator is wired with the
 // cache-backed client, cluster-default file-touch mode, and event recorder.
 func SetupPlanWebhookWithManager(mgr ctrl.Manager, defaultMode string) error {
-	return ctrl.NewWebhookManagedBy(mgr, &tideprojectv1alpha2.Plan{}).
+	return ctrl.NewWebhookManagedBy(mgr, &tideprojectv1alpha3.Plan{}).
 		WithValidator(&PlanCustomValidator{
 			Client:               mgr.GetClient(),
 			DefaultFileTouchMode: defaultMode,
@@ -49,14 +49,14 @@ func SetupPlanWebhookWithManager(mgr ctrl.Manager, defaultMode string) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-tideproject-k8s-v1alpha2-plan,mutating=false,failurePolicy=fail,sideEffects=None,groups=tideproject.k8s,resources=plans,verbs=create;update,versions=v1alpha2,name=vplan-v1alpha2.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-tideproject-k8s-v1alpha3-plan,mutating=false,failurePolicy=fail,sideEffects=None,groups=tideproject.k8s,resources=plans,verbs=create;update,versions=v1alpha3,name=vplan-v1alpha3.kb.io,admissionReviewVersions=v1
 
-// PlanCustomValidator validates v1alpha2.Plan objects.
+// PlanCustomValidator validates v1alpha3.Plan objects.
 //
 // Phase 2: cycle detection via pkg/dag.ComputeWaves (REQ-PLAN-01) and file-touch
 // reconciliation (REQ-PLAN-02) with strict/warn mode (D-E3).
 //
-// Cross-scope dependsOn (Pitfall 6 / T-23-06): in v1alpha2, Task.Spec.DependsOn may
+// Cross-scope dependsOn (Pitfall 6 / T-23-06): in v1alpha3, Task.Spec.DependsOn may
 // name tasks outside this plan (cross-scope deps, DEPS-01). The per-plan cycle webhook
 // filters these to within-plan edges only before calling ComputeWaves so "edge references
 // unknown node" never triggers here. Cross-scope cycle detection is the global gate in
@@ -71,20 +71,20 @@ type PlanCustomValidator struct {
 }
 
 // ValidateCreate is invoked on every Plan POST.
-func (v *PlanCustomValidator) ValidateCreate(ctx context.Context, obj *tideprojectv1alpha2.Plan) (admission.Warnings, error) {
+func (v *PlanCustomValidator) ValidateCreate(ctx context.Context, obj *tideprojectv1alpha3.Plan) (admission.Warnings, error) {
 	planlog.V(1).Info("ValidateCreate", "name", obj.GetName())
 	return v.validate(ctx, obj)
 }
 
 // ValidateUpdate is invoked on every Plan PUT/PATCH. Re-runs the same validation
 // as ValidateCreate — an edit can introduce a cycle (D-B3).
-func (v *PlanCustomValidator) ValidateUpdate(ctx context.Context, _ *tideprojectv1alpha2.Plan, newObj *tideprojectv1alpha2.Plan) (admission.Warnings, error) {
+func (v *PlanCustomValidator) ValidateUpdate(ctx context.Context, _ *tideprojectv1alpha3.Plan, newObj *tideprojectv1alpha3.Plan) (admission.Warnings, error) {
 	planlog.V(1).Info("ValidateUpdate", "name", newObj.GetName())
 	return v.validate(ctx, newObj)
 }
 
 // ValidateDelete is a no-op; owner-ref cascade handles Task cleanup.
-func (v *PlanCustomValidator) ValidateDelete(_ context.Context, obj *tideprojectv1alpha2.Plan) (admission.Warnings, error) {
+func (v *PlanCustomValidator) ValidateDelete(_ context.Context, obj *tideprojectv1alpha3.Plan) (admission.Warnings, error) {
 	planlog.V(1).Info("ValidateDelete (no-op)", "name", obj.GetName())
 	return nil, nil
 }
@@ -96,11 +96,11 @@ func (v *PlanCustomValidator) ValidateDelete(_ context.Context, obj *tideproject
 //     CycleError → rejection + K8s Event. Cross-scope deps are filtered out before
 //     ComputeWaves to prevent "edge references unknown node" errors (Pitfall 6 / T-23-06).
 //  4. PLAN-02: computes file-touch mismatches; strict mode → rejection; warn → warnings + Event.
-func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1alpha2.Plan) (admission.Warnings, error) {
+func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1alpha3.Plan) (admission.Warnings, error) {
 	warnings := admission.Warnings{}
 
 	// List owned Tasks via the .spec.planRef field indexer.
-	var taskList tideprojectv1alpha2.TaskList
+	var taskList tideprojectv1alpha3.TaskList
 	if err := v.Client.List(ctx, &taskList,
 		client.InNamespace(plan.Namespace),
 		client.MatchingFields{".spec.planRef": plan.Name},
@@ -168,7 +168,7 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 	return warnings, nil
 }
 
-// tasksToDAGWithinPlan translates a slice of v1alpha2.Task CRDs into the (nodes, edges)
+// tasksToDAGWithinPlan translates a slice of v1alpha3.Task CRDs into the (nodes, edges)
 // form consumed by pkg/dag.ComputeWaves.
 //
 // Cross-scope filtering (Pitfall 6 / T-23-06): an edge is included ONLY when the dep
@@ -179,7 +179,7 @@ func (v *PlanCustomValidator) validate(ctx context.Context, plan *tideprojectv1a
 //
 // within-plan node  = task.Name
 // within-plan edge  = (DependsOn[i], task.Name) iff DependsOn[i] is a within-plan node
-func tasksToDAGWithinPlan(tasks []tideprojectv1alpha2.Task) ([]dag.NodeID, []dag.Edge) {
+func tasksToDAGWithinPlan(tasks []tideprojectv1alpha3.Task) ([]dag.NodeID, []dag.Edge) {
 	// Build the within-plan node set first.
 	nodeSet := make(map[string]struct{}, len(tasks))
 	nodes := make([]dag.NodeID, 0, len(tasks))
@@ -206,25 +206,25 @@ func tasksToDAGWithinPlan(tasks []tideprojectv1alpha2.Task) ([]dag.NodeID, []dag
 
 // resolveProjectForWebhook walks the Plan → Phase → Milestone → Project owner-ref chain.
 // Returns nil on any Get failure so admission never hard-fails on a missing chain.
-func resolveProjectForWebhook(ctx context.Context, c client.Client, plan *tideprojectv1alpha2.Plan) *tideprojectv1alpha2.Project {
+func resolveProjectForWebhook(ctx context.Context, c client.Client, plan *tideprojectv1alpha3.Plan) *tideprojectv1alpha3.Project {
 	if plan.Spec.PhaseRef == "" {
 		return nil
 	}
-	var ph tideprojectv1alpha2.Phase
+	var ph tideprojectv1alpha3.Phase
 	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &ph); err != nil {
 		return nil
 	}
 	if ph.Spec.MilestoneRef == "" {
 		return nil
 	}
-	var ms tideprojectv1alpha2.Milestone
+	var ms tideprojectv1alpha3.Milestone
 	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
 		return nil
 	}
 	if ms.Spec.ProjectRef == "" {
 		return nil
 	}
-	var p tideprojectv1alpha2.Project
+	var p tideprojectv1alpha3.Project
 	if err := c.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
 		return nil
 	}

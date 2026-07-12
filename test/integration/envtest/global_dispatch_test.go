@@ -31,7 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -41,35 +41,35 @@ const (
 
 // createSimplePlanInNS creates a minimal Plan in the given namespace for cross-plan testing.
 func createSimplePlanInNS(ctx context.Context, name, ns string) {
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
 		},
-		Spec: tideprojectv1alpha2.PlanSpec{
+		Spec: tideprojectv1alpha3.PlanSpec{
 			PhaseRef: "test-phase",
 		},
 	}
 	Expect(k8sClient.Create(ctx, plan)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, &tideprojectv1alpha2.Plan{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, &tideprojectv1alpha3.Plan{})
 	}, "5s", "100ms").Should(Succeed())
 }
 
 // makeGlobalTask creates a Task in the given plan (cross-plan variant of makeTask)
 // with the globalDispatchTestProject label pre-stamped so TaskReconciler.resolveProject
 // resolves to the test project across plan/phase boundaries.
-func makeGlobalTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha2.Task {
+func makeGlobalTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha3.Task {
 	labels := map[string]string{
 		"tideproject.k8s/project": globalDispatchTestProject,
 	}
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalDispatchNS,
 			Labels:    labels,
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             planRef,
 			PromptPath:          "envelopes/test/children/" + name + ".json",
 			DependsOn:           dependsOn,
@@ -79,7 +79,7 @@ func makeGlobalTask(ctx context.Context, name, planRef string, dependsOn, files 
 	}
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalDispatchNS}, &tideprojectv1alpha2.Task{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalDispatchNS}, &tideprojectv1alpha3.Task{})
 	}, "5s", "100ms").Should(Succeed())
 	time.Sleep(50 * time.Millisecond) // allow indexer to propagate
 	return task
@@ -90,13 +90,13 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 
 	BeforeEach(func() {
 		makeBoundPVC(ctx, "tide-projects", globalDispatchNS)
-		project := &tideprojectv1alpha2.Project{
+		project := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      globalDispatchTestProject,
 				Namespace: globalDispatchNS,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/global-dispatch-test.git",
 			},
 		}
@@ -107,22 +107,22 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 	})
 
 	AfterEach(func() {
-		tasks := &tideprojectv1alpha2.TaskList{}
+		tasks := &tideprojectv1alpha3.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(globalDispatchNS))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
-		plans := &tideprojectv1alpha2.PlanList{}
+		plans := &tideprojectv1alpha3.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(globalDispatchNS))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		waves := &tideprojectv1alpha2.WaveList{}
+		waves := &tideprojectv1alpha3.WaveList{}
 		_ = k8sClient.List(ctx, waves, client.InNamespace(globalDispatchNS))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
 		}
-		projects := &tideprojectv1alpha2.ProjectList{}
+		projects := &tideprojectv1alpha3.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(globalDispatchNS))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -148,7 +148,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 
 			// taskA has no deps — reconciler will begin dispatching it (Pending → Running or Succeeded).
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskA.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -161,7 +161,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// and taskB dispatches prematurely. This Consistently will FAIL until
 			// 25-02 replaces listSiblingTasks with listProjectTasks.
 			Consistently(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskB.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return "error"
 				}
@@ -188,7 +188,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 
 			// Patch taskX to Failed to simulate a task execution failure under strict profile.
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskX.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return err
 				}
@@ -200,7 +200,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// RED: once 25-03 implements global indegree, Failed taskX means taskY's
 			// indegree never reaches 0 so taskY stays Pending.
 			Consistently(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskY.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return "error"
 				}
@@ -211,7 +211,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// taskZ (independent, no deps) must eventually dispatch — non-dependents continue.
 			// RED until 25-02/25-03 wire global indegree + strict profile correctly.
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskZ.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -236,7 +236,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 
 			// Patch taskP to Failed.
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskP.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return err
 				}
@@ -247,7 +247,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// taskQ (independent sibling in a different plan) must continue to dispatch.
 			// RED until 25-02/25-03 prove the global strict profile allows this.
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskQ.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -265,10 +265,10 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 	Describe("DISP-02 conservative: first failure stamps ConditionFailureHalt on Project", Label("DISP-02"), func() {
 		It("ConditionFailureHalt=True set on Project after task execution failure under conservative profile", func() {
 			// Switch project to conservative profile.
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: globalDispatchTestProject, Namespace: globalDispatchNS}, proj)).To(Succeed())
 			patch := client.MergeFrom(proj.DeepCopy())
-			proj.Spec.FailureProfile = tideprojectv1alpha2.FailureProfileConservative
+			proj.Spec.FailureProfile = tideprojectv1alpha3.FailureProfileConservative
 			Expect(k8sClient.Patch(ctx, proj, patch)).To(Succeed())
 
 			createSimplePlanInNS(ctx, "gd-conservative-plan", globalDispatchNS)
@@ -277,7 +277,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			taskF := makeGlobalTask(ctx, "gd-conservative-task-f", "gd-conservative-plan", nil, []string{"f.go"})
 
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskF.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return err
 				}
@@ -289,12 +289,12 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// setFailureHaltIfNeeded which stamps ConditionFailureHalt=True on the Project.
 			// RED: this stamp does not happen until 25-03 implements the halt logic.
 			Eventually(func() bool {
-				p := &tideprojectv1alpha2.Project{}
+				p := &tideprojectv1alpha3.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: globalDispatchTestProject, Namespace: globalDispatchNS}, p); err != nil {
 					return false
 				}
 				for _, c := range p.Status.Conditions {
-					if c.Type == tideprojectv1alpha2.ConditionFailureHalt && c.Status == metav1.ConditionTrue {
+					if c.Type == tideprojectv1alpha3.ConditionFailureHalt && c.Status == metav1.ConditionTrue {
 						return true
 					}
 				}
@@ -318,26 +318,26 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			labels := map[string]string{
 				"tideproject.k8s/project": globalDispatchTestProject,
 			}
-			taskG := &tideprojectv1alpha2.Task{
+			taskG := &tideprojectv1alpha3.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "gd-gate-task-g",
 					Namespace: globalDispatchNS,
 					Labels:    labels,
 				},
-				Spec: tideprojectv1alpha2.TaskSpec{
+				Spec: tideprojectv1alpha3.TaskSpec{
 					PlanRef:             "gd-gate-plan",
 					PromptPath:          "envelopes/test/children/gd-gate-task-g.json",
 					DependsOn:           nil,
 					FilesTouched:        []string{"g.go"},
 					DeclaredOutputPaths: []string{"g.go"},
-					Gates: tideprojectv1alpha2.Gates{
+					Gates: tideprojectv1alpha3.Gates{
 						Task: "approve",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, taskG)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: taskG.Name, Namespace: globalDispatchNS}, &tideprojectv1alpha2.Task{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: taskG.Name, Namespace: globalDispatchNS}, &tideprojectv1alpha3.Task{})
 			}, "5s", "100ms").Should(Succeed())
 			time.Sleep(50 * time.Millisecond)
 
@@ -346,7 +346,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 
 			// taskG must stay AwaitingApproval (held by gate).
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskG.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -357,7 +357,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// taskH (independent, no gate) must dispatch normally.
 			// RED until 25-02 confirms global indegree compose with task gate.
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskH.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -385,7 +385,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// Simulate restart: status-patch A and B to Succeeded as if they completed
 			// in a prior controller lifecycle (etcd holds their status).
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskA.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return err
 				}
@@ -394,7 +394,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			}, "30s", "200ms").Should(Succeed())
 
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskB.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return err
 				}
@@ -413,7 +413,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 			// under-estimated that cold worst case and flaked; if 120s is ever
 			// exceeded the dispatch is genuinely stalled (a real bug), not slow.
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskC.Name, Namespace: globalDispatchNS}, t); err != nil {
 					return ""
 				}
@@ -422,7 +422,7 @@ var _ = Describe("Phase 25 global dispatch, failure semantics, gates, resumption
 				"RESUME-01: taskC must dispatch after A and B Succeeded (global indegree re-derived, no new persistence)")
 
 			// Verify no IndegreeMap / Schedule aggregate field exists on Project status.
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: globalDispatchTestProject, Namespace: globalDispatchNS}, proj)).To(Succeed())
 			// The verify-no-aggregates Makefile target is the authoritative guard;
 			// this runtime assertion confirms no such field appears in the live object.

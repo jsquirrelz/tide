@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -32,12 +32,12 @@ import (
 
 // Test 1: per-level model override wins over Project default + Helm default.
 func TestResolveProviderPerLevelWins(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Model: "claude-sonnet-4-6",
-				Levels: tideprojectv1alpha2.LevelOverrides{
-					Milestone: &tideprojectv1alpha2.LevelConfig{
+				Levels: tideprojectv1alpha3.LevelOverrides{
+					Milestone: &tideprojectv1alpha3.LevelConfig{
 						Model: "claude-opus-4-7",
 					},
 				},
@@ -56,9 +56,9 @@ func TestResolveProviderPerLevelWins(t *testing.T) {
 
 // Test 2: Project default wins over Helm default when no per-level override.
 func TestResolveProviderProjectDefaultWinsOverHelm(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Model: "claude-sonnet-4-6",
 			},
 		},
@@ -72,7 +72,7 @@ func TestResolveProviderProjectDefaultWinsOverHelm(t *testing.T) {
 
 // Test 3: Helm default applies when Project has nothing set.
 func TestResolveProviderHelmDefaultFallback(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	defaults := ProviderDefaults{Models: map[string]string{"milestone": "claude-opus-4-7"}}
 	spec := ResolveProvider(project, "milestone", defaults)
 	if spec.Model != "claude-opus-4-7" {
@@ -82,11 +82,11 @@ func TestResolveProviderHelmDefaultFallback(t *testing.T) {
 
 // Test 3b: Params merge — level Params override Project-level Params on key conflict.
 func TestResolveProviderParamsMerge(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
-				Levels: tideprojectv1alpha2.LevelOverrides{
-					Phase: &tideprojectv1alpha2.LevelConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
+				Levels: tideprojectv1alpha3.LevelOverrides{
+					Phase: &tideprojectv1alpha3.LevelConfig{
 						Params: map[string]string{"thinking-budget": "high", "level-only": "yes"},
 					},
 				},
@@ -107,20 +107,20 @@ func TestResolveProviderParamsMerge(t *testing.T) {
 
 // Test 4: BuildPlannerEnvelope structure for a Milestone parent + Project.
 func TestBuildPlannerEnvelopeStructure(t *testing.T) {
-	milestone := &tideprojectv1alpha2.Milestone{
+	milestone := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("milestone-uid-001"),
 			Name:      "test-milestone",
 			Namespace: "default",
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-project",
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Model: "claude-opus-4-7",
 			},
 		},
@@ -178,12 +178,12 @@ func TestBuildPlannerEnvelopeStructure(t *testing.T) {
 
 // TestResolveImage_LevelWins: level Image override beats project default and Helm default.
 func TestResolveImage_LevelWins(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Image: "ghcr.io/project-default",
-				Levels: tideprojectv1alpha2.LevelOverrides{
-					Plan: &tideprojectv1alpha2.LevelConfig{Image: "ghcr.io/level-override"},
+				Levels: tideprojectv1alpha3.LevelOverrides{
+					Plan: &tideprojectv1alpha3.LevelConfig{Image: "ghcr.io/level-override"},
 				},
 			},
 		},
@@ -196,9 +196,9 @@ func TestResolveImage_LevelWins(t *testing.T) {
 
 // TestResolveImage_ProjectDefaultWinsOverHelm: project Image wins when no level override.
 func TestResolveImage_ProjectDefaultWinsOverHelm(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Image: "ghcr.io/project-image",
 			},
 		},
@@ -211,7 +211,7 @@ func TestResolveImage_ProjectDefaultWinsOverHelm(t *testing.T) {
 
 // TestResolveImage_HelmDefaultFallback: Helm default applies when project has no image set.
 func TestResolveImage_HelmDefaultFallback(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	defaults := ProviderDefaults{Image: "ghcr.io/helm-default"}
 	if got := resolveImage(project, "milestone", defaults); got != "ghcr.io/helm-default" {
 		t.Errorf("resolveImage = %q, want %q (helm default fallback)", got, "ghcr.io/helm-default")
@@ -229,12 +229,12 @@ func TestResolveImage_NilProject_ReturnsHelmDefault(t *testing.T) {
 // TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough: level config set with Model only
 // (Image "") falls through to project Spec.Subagent.Image.
 func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Image: "ghcr.io/project-image",
-				Levels: tideprojectv1alpha2.LevelOverrides{
-					Plan: &tideprojectv1alpha2.LevelConfig{Model: "claude-sonnet-4-6"}, // Image is ""
+				Levels: tideprojectv1alpha3.LevelOverrides{
+					Plan: &tideprojectv1alpha3.LevelConfig{Model: "claude-sonnet-4-6"}, // Image is ""
 				},
 			},
 		},
@@ -248,9 +248,9 @@ func TestResolveImage_LevelConfigPresentImageEmpty_FallsThrough(t *testing.T) {
 // TestResolveImage_ProjectLevel_NoLevelTier: level "project" has no level-config case;
 // Spec.Subagent.Image is returned directly.
 func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Image: "ghcr.io/project-image",
 			},
 		},
@@ -268,9 +268,9 @@ func TestResolveImage_ProjectLevel_NoLevelTier(t *testing.T) {
 // the field was previously never assigned and the real Claude planner saw an
 // empty prompt). Covers JSON round-trip so the on-PVC envelope carries it.
 func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			OutcomePrompt: "Add a /healthz endpoint returning 200 OK.",
 		},
 	}
@@ -314,13 +314,13 @@ func TestBuildPlannerEnvelopePromptThreading(t *testing.T) {
 // supplied sharedContext into EnvelopeIn.SharedContext; two calls with the
 // same blob produce byte-identical SharedContext (sibling identity — D-03/D-04).
 func TestBuildPlannerEnvelopeSharedContext(t *testing.T) {
-	proj := &tideprojectv1alpha2.Project{
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			OutcomePrompt: "Build the auth service.",
 		},
 	}
-	milestone := &tideprojectv1alpha2.Milestone{
+	milestone := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:  types.UID("ms-uid-sc-001"),
 			Name: "ms-sc-test",
@@ -364,10 +364,10 @@ func TestBuildPlannerEnvelopeSharedContext(t *testing.T) {
 // EnvelopeIn.SharedContext=="" and the marshaled bytes contain no
 // "sharedContext" key (omitempty).
 func TestBuildPlannerEnvelopeSharedContextEmpty(t *testing.T) {
-	proj := &tideprojectv1alpha2.Project{
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
 	}
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{UID: types.UID("ms-uid-sc-empty"), Name: "ms-sc-empty"},
 	}
 	caps := pkgdispatch.Caps{WallClockSeconds: 300, Iterations: 5}
@@ -405,7 +405,7 @@ func containsHelper(s, sub string) bool {
 func newFakeClientForController(t *testing.T, objs ...client.Object) client.Client {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
+	if err := tideprojectv1alpha3.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme tide: %v", err)
 	}
 	if err := batchv1.AddToScheme(s); err != nil {
@@ -549,7 +549,7 @@ func TestResolveAgentIdentity_CompiledDefault(t *testing.T) {
 // Test 2 (chart tier): chart-supplied identity wins over the compiled default
 // when the Project sets nothing (Spec.Git nil).
 func TestResolveAgentIdentity_ChartTier(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	helm := ProviderDefaults{AgentName: "Chart Agent", AgentEmail: "chart@example.com"}
 	name, email := resolveAgentIdentity(project, helm)
 	if name != "Chart Agent" {
@@ -563,9 +563,9 @@ func TestResolveAgentIdentity_ChartTier(t *testing.T) {
 // Test 3 (spec tier beats chart): Project spec identity overrides a non-empty
 // chart tier.
 func TestResolveAgentIdentity_SpecBeatsChart(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			Git: &tideprojectv1alpha2.GitConfig{
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Git: &tideprojectv1alpha3.GitConfig{
 				AgentName:  "Spec Agent",
 				AgentEmail: "spec@example.com",
 			},
@@ -585,9 +585,9 @@ func TestResolveAgentIdentity_SpecBeatsChart(t *testing.T) {
 // Project that sets only the name and a chart that sets only the email compose
 // across tiers.
 func TestResolveAgentIdentity_PerFieldIndependence(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			Git: &tideprojectv1alpha2.GitConfig{AgentName: "Spec Agent"},
+	project := &tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Git: &tideprojectv1alpha3.GitConfig{AgentName: "Spec Agent"},
 		},
 	}
 	helm := ProviderDefaults{AgentEmail: "chart@example.com"}
@@ -603,7 +603,7 @@ func TestResolveAgentIdentity_PerFieldIndependence(t *testing.T) {
 // Test 5 (nil safety): a non-nil Project whose Spec.Git is nil must not panic —
 // Spec.Git is a *GitConfig (Pitfall 7). Resolution falls to the chart tier.
 func TestResolveAgentIdentity_NilGitConfig(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	if project.Spec.Git != nil {
 		t.Fatalf("test precondition: Spec.Git must be nil")
 	}

@@ -41,7 +41,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // fakeStream is a controllable io.ReadCloser backed by a bytes channel.
@@ -105,18 +105,18 @@ func newLogsRouter(t *testing.T, taskExists bool, idleTimeout time.Duration, ope
 	scheme := testInformerScheme(t)
 	builder := fake.NewClientBuilder().WithScheme(scheme)
 	if taskExists {
-		tk := &tidev1alpha2.Task{
+		tk := &tidev1alpha3.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-task",
 				Namespace: "default",
 				UID:       types.UID("task-uid-A"),
 			},
-			Spec: tidev1alpha2.TaskSpec{
+			Spec: tidev1alpha3.TaskSpec{
 				PlanRef:             "pl1",
 				FilesTouched:        []string{"a.go"},
 				DeclaredOutputPaths: []string{"/workspace/a"},
 			},
-			Status: tidev1alpha2.TaskStatus{Phase: "Running"},
+			Status: tidev1alpha3.TaskStatus{Phase: "Running"},
 		}
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -478,7 +478,7 @@ func TestLogsResolvePodNameServesTerminatedPods(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tk := &tidev1alpha2.Task{
+			tk := &tidev1alpha3.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "term-task",
 					Namespace: "default",

@@ -53,7 +53,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 var _ = Describe("Up-stack dispatch — Milestone planner Job (ART-03 / D-A1 / D-A2)", Label("kind"), func() {
@@ -78,7 +78,7 @@ var _ = Describe("Up-stack dispatch — Milestone planner Job (ART-03 / D-A1 / D
 		Expect(applyFile("testdata/up-stack-project.yaml")).To(Succeed())
 
 		By("Wait for the Project to exist (controller readiness signal)")
-		var project tideprojectv1alpha2.Project
+		var project tideprojectv1alpha3.Project
 		Eventually(func() error {
 			return k8sClient.Get(ctx, client.ObjectKey{
 				Name: "up-stack-project", Namespace: upStackNS,
@@ -87,7 +87,7 @@ var _ = Describe("Up-stack dispatch — Milestone planner Job (ART-03 / D-A1 / D
 			"Project up-stack-project must exist after fixture apply")
 
 		By("Wait for MilestoneReconciler to set ownerReferences on the Milestone (cascade contract)")
-		var milestone tideprojectv1alpha2.Milestone
+		var milestone tideprojectv1alpha3.Milestone
 		Eventually(func(g Gomega) {
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name: "m1", Namespace: upStackNS,
@@ -146,7 +146,7 @@ var _ = Describe("Up-stack dispatch — Milestone planner Job (ART-03 / D-A1 / D
 
 // assertJobOwnedByMilestone verifies the Job's ownerReferences contain a
 // Milestone entry whose UID matches and Controller=true (CRD-02 / Pitfall 23).
-func assertJobOwnedByMilestone(job *batchv1.Job, ms *tideprojectv1alpha2.Milestone) {
+func assertJobOwnedByMilestone(job *batchv1.Job, ms *tideprojectv1alpha3.Milestone) {
 	var ref *metav1.OwnerReference
 	for i := range job.OwnerReferences {
 		r := &job.OwnerReferences[i]

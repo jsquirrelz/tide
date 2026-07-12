@@ -14,13 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	"fmt"
 	"strings"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // FileTouchMismatchPair records a pair of Tasks that share an EXACT file path
@@ -59,7 +59,7 @@ type FileTouchMismatchPair struct {
 //
 // Complexity: O(N² × P) where N = task count, P = average filesTouched length.
 // Acceptable for v1 Plans bounded to ≤20 Tasks per RESEARCH.md.
-func ComputeFileTouchMismatches(tasks []tideprojectv1alpha2.Task) []FileTouchMismatchPair {
+func ComputeFileTouchMismatches(tasks []tideprojectv1alpha3.Task) []FileTouchMismatchPair {
 	// Build name → dependsOn set for fast lookup.
 	dependsOnSet := make(map[string]map[string]struct{}, len(tasks))
 	for i := range tasks {

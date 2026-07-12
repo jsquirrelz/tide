@@ -24,7 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // WaveCustomValidator no-op behavior (Plan 07 Task 2 / revision Warning 9).
@@ -43,7 +43,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 	const namespace = "default"
 
 	AfterEach(func() {
-		waves := &tideprojectv1alpha2.WaveList{}
+		waves := &tideprojectv1alpha3.WaveList{}
 		_ = k8sClient.List(ctx, waves, client.InNamespace(namespace))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
@@ -51,12 +51,12 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 	})
 
 	It("rejects client-applied waves per D-B1", func() {
-		wave := &tideprojectv1alpha2.Wave{
+		wave := &tideprojectv1alpha3.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-create-wave",
 				Namespace: namespace,
 			},
-			Spec: tideprojectv1alpha2.WaveSpec{
+			Spec: tideprojectv1alpha3.WaveSpec{
 				ProjectRef: "some-plan",
 				WaveIndex:  0,
 			},
@@ -67,7 +67,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 	})
 
 	It("allows Reconciler-applied waves (has owner ref)", func() {
-		wave := &tideprojectv1alpha2.Wave{
+		wave := &tideprojectv1alpha3.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-create-wave-succ",
 				Namespace: namespace,
@@ -75,7 +75,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
 				},
 			},
-			Spec: tideprojectv1alpha2.WaveSpec{
+			Spec: tideprojectv1alpha3.WaveSpec{
 				ProjectRef: "some-plan",
 				WaveIndex:  0,
 			},
@@ -84,7 +84,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 	})
 
 	It("allows ValidateUpdate (Phase 1 no-op)", func() {
-		wave := &tideprojectv1alpha2.Wave{
+		wave := &tideprojectv1alpha3.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-update-wave",
 				Namespace: namespace,
@@ -92,7 +92,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "plan-a", UID: "dummy-uid"},
 				},
 			},
-			Spec: tideprojectv1alpha2.WaveSpec{
+			Spec: tideprojectv1alpha3.WaveSpec{
 				ProjectRef: "plan-a",
 				WaveIndex:  0,
 			},
@@ -100,7 +100,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 		Expect(k8sClient.Create(ctx, wave)).To(Succeed())
 
 		Eventually(func() error {
-			fresh := &tideprojectv1alpha2.Wave{}
+			fresh := &tideprojectv1alpha3.Wave{}
 			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(wave), fresh); err != nil {
 				return err
 			}
@@ -111,7 +111,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 	})
 
 	It("allows ValidateDelete (Phase 1 no-op)", func() {
-		wave := &tideprojectv1alpha2.Wave{
+		wave := &tideprojectv1alpha3.Wave{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "webhook-delete-wave",
 				Namespace: namespace,
@@ -119,7 +119,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
 				},
 			},
-			Spec: tideprojectv1alpha2.WaveSpec{
+			Spec: tideprojectv1alpha3.WaveSpec{
 				ProjectRef: "some-plan",
 				WaveIndex:  0,
 			},
@@ -133,9 +133,9 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 		// Sanity check that the Plan 05 CEL Minimum=0 marker is still the
 		// authoritative gate for the WaveIndex non-negativity invariant.
 		// The webhook does not fire on schema-invalid objects.
-		bad := &tideprojectv1alpha2.Wave{
+		bad := &tideprojectv1alpha3.Wave{
 			ObjectMeta: metav1.ObjectMeta{Name: "bad-wave", Namespace: namespace},
-			Spec: tideprojectv1alpha2.WaveSpec{
+			Spec: tideprojectv1alpha3.WaveSpec{
 				ProjectRef: "some-plan",
 				WaveIndex:  -1,
 			},

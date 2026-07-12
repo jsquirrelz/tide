@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -230,11 +230,11 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 	// 1. Resolve Task. We use label-selector to find the Task by UID.
 	//    For Phase 2 / test usage, callers pre-populate the fake client with the Task object;
 	//    in production the Task is always the reconciler's own object.
-	var taskList tidev1alpha2.TaskList
+	var taskList tidev1alpha3.TaskList
 	if err := b.Client.List(ctx, &taskList); err != nil {
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("list tasks: %w", err)
 	}
-	var task *tidev1alpha2.Task
+	var task *tidev1alpha3.Task
 	for i := range taskList.Items {
 		if string(taskList.Items[i].UID) == in.TaskUID {
 			task = &taskList.Items[i]
@@ -383,9 +383,9 @@ func isJobTerminal(job *batchv1.Job) bool {
 //  3. ErrParentUnresolved on miss
 //
 // Phase 04.1 P1.4 — replaces the prior projectList.Items[0] fallback.
-func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha2.Task) (*tidev1alpha2.Project, error) {
+func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha3.Task) (*tidev1alpha3.Project, error) {
 	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
-		var project tidev1alpha2.Project
+		var project tidev1alpha3.Project
 		if err := b.Client.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
 			return &project, nil
 		}
@@ -400,13 +400,13 @@ func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha2.T
 // depth levels. Returns nil, nil on miss. Phase 04.1 P1.4.
 //
 //nolint:unparam // error return is part of the recursive owner-walk signature; kept for caller uniformity
-func (b *PodJobBackend) walkOwnerChain(ctx context.Context, obj client.Object, depth int) (*tidev1alpha2.Project, error) {
+func (b *PodJobBackend) walkOwnerChain(ctx context.Context, obj client.Object, depth int) (*tidev1alpha3.Project, error) {
 	if depth <= 0 || obj == nil {
 		return nil, nil
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tidev1alpha2.GroupVersion.String()) {
-			var p tidev1alpha2.Project
+		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tidev1alpha3.GroupVersion.String()) {
+			var p tidev1alpha3.Project
 			if err := b.Client.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
 				return &p, nil
 			}
@@ -429,31 +429,31 @@ func (b *PodJobBackend) fetchBackendOwnerParent(ctx context.Context, ns string, 
 	key := client.ObjectKey{Namespace: ns, Name: ref.Name}
 	switch ref.Kind {
 	case "Plan":
-		var p tidev1alpha2.Plan
+		var p tidev1alpha3.Plan
 		if err := b.Client.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Phase":
-		var p tidev1alpha2.Phase
+		var p tidev1alpha3.Phase
 		if err := b.Client.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Milestone":
-		var p tidev1alpha2.Milestone
+		var p tidev1alpha3.Milestone
 		if err := b.Client.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Wave":
-		var p tidev1alpha2.Wave
+		var p tidev1alpha3.Wave
 		if err := b.Client.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Task":
-		var p tidev1alpha2.Task
+		var p tidev1alpha3.Task
 		if err := b.Client.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}

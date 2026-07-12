@@ -53,7 +53,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -151,12 +151,12 @@ data:
 		// planner level (project/milestone/phase/plan) completes and the cumulative
 		// artifact push rides the boundary tide-push Job to the run branch.
 		By("Waiting for the Project to reach Complete over http://")
-		var completed tideprojectv1alpha2.Project
+		var completed tideprojectv1alpha3.Project
 		Eventually(func() error {
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: artifactStagingNS}, &completed); err != nil {
 				return err
 			}
-			if completed.Status.Phase != tideprojectv1alpha2.PhaseComplete {
+			if completed.Status.Phase != tideprojectv1alpha3.PhaseComplete {
 				return fmt.Errorf("Project %s: want Phase=Complete, got %q (%s)",
 					projName, completed.Status.Phase, mediumLastConditionMessage(completed))
 			}
@@ -184,7 +184,7 @@ data:
 		diagPod := gitHTTPServerPod(artifactStagingNS)
 		diagUID := string(completed.UID)
 		Eventually(func(g Gomega) {
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			g.Expect(k8sClient.Get(ctx, client.ObjectKey{Name: projName, Namespace: artifactStagingNS}, &p)).To(Succeed())
 			// Per-tick diagnostics — fire WHILE the namespace still exists (run-4's
 			// DeferCleanup dump ran AFTER teardown and captured nothing). This yields the
@@ -193,7 +193,7 @@ data:
 			// reaching the CR? A diagnostic error degrades to a logged marker — it never
 			// fails the poll.
 			logPushDiagnostics(artifactStagingNS, diagUID, diagPod, p.Status.Git.LastPushedSHA)
-			g.Expect(p.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
+			g.Expect(p.Status.Phase).NotTo(Equal(tideprojectv1alpha3.PhasePushLeaseFailed),
 				"no push must have been rejected by --force-with-lease (Pitfall 2: artifact/boundary push must not interfere)")
 			g.Expect(p.Status.Git.LeaseFailureCount).To(BeNumerically("==", int32(0)),
 				"LeaseFailureCount must be 0 — no lease-rejected pushes across artifact + boundary staging")

@@ -27,14 +27,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // makeProjectTask builds a Task with the owner.LabelProject label set.
-func makeProjectTask(name, ns, projectName, planRef string, dependsOn []string, phase string) *tideprojectv1alpha2.Task {
-	return &tideprojectv1alpha2.Task{
+func makeProjectTask(name, ns, projectName, planRef string, dependsOn []string, phase string) *tideprojectv1alpha3.Task {
+	return &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
@@ -43,11 +43,11 @@ func makeProjectTask(name, ns, projectName, planRef string, dependsOn []string, 
 				owner.LabelProject: projectName,
 			},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:   planRef,
 			DependsOn: dependsOn,
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -65,7 +65,7 @@ func TestListProjectTasks_ReturnsAllProjectTasks(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	c := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(taskA, taskB, taskOther).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 
 	r := &TaskReconciler{Client: c, Scheme: s, Deps: TaskReconcilerDeps{Budget: budget.NewStore(), Defaults: budget.Limits{}, SigningKey: []byte("tide-test-signing-key-32-bytes!!")}}
@@ -96,10 +96,10 @@ func TestListProjectTasks_EmptyProjectName_ReturnsError(t *testing.T) {
 // ---------- computeGlobalIndegree ----------
 
 func TestComputeGlobalIndegree_NoDeps_ReturnsZero(t *testing.T) {
-	tasks := []tideprojectv1alpha2.Task{
+	tasks := []tideprojectv1alpha3.Task{
 		*makeProjectTask("task-a", "default", "proj", "plan-1", nil, "Succeeded"),
 	}
-	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
+	plans := []tideprojectv1alpha3.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
 	indegree := r.computeGlobalIndegree(context.Background(), tasks[0], tasks, plans, nil, nil)
@@ -111,8 +111,8 @@ func TestComputeGlobalIndegree_NoDeps_ReturnsZero(t *testing.T) {
 func TestComputeGlobalIndegree_DirectDepSucceeded_ReturnsZero(t *testing.T) {
 	taskA := makeProjectTask("task-a", "default", "proj", "plan-1", nil, "Succeeded")
 	taskB := makeProjectTask("task-b", "default", "proj", "plan-1", []string{"task-a"}, "")
-	tasks := []tideprojectv1alpha2.Task{*taskA, *taskB}
-	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
+	tasks := []tideprojectv1alpha3.Task{*taskA, *taskB}
+	plans := []tideprojectv1alpha3.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
 	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
@@ -124,8 +124,8 @@ func TestComputeGlobalIndegree_DirectDepSucceeded_ReturnsZero(t *testing.T) {
 func TestComputeGlobalIndegree_DirectDepNotSucceeded_ReturnsOne(t *testing.T) {
 	taskA := makeProjectTask("task-a", "default", "proj", "plan-1", nil, "Running")
 	taskB := makeProjectTask("task-b", "default", "proj", "plan-1", []string{"task-a"}, "")
-	tasks := []tideprojectv1alpha2.Task{*taskA, *taskB}
-	plans := []tideprojectv1alpha2.Plan{makeTestPlan("plan-1", "phase-1")}
+	tasks := []tideprojectv1alpha3.Task{*taskA, *taskB}
+	plans := []tideprojectv1alpha3.Plan{makeTestPlan("plan-1", "phase-1")}
 
 	r := &TaskReconciler{}
 	indegree := r.computeGlobalIndegree(context.Background(), *taskB, tasks, plans, nil, nil)
@@ -138,8 +138,8 @@ func TestComputeGlobalIndegree_CrossPlanDepNotSucceeded_ReturnsOne(t *testing.T)
 	// task-a in plan-alpha; task-b in plan-beta depends on task-a (cross-plan).
 	taskA := makeProjectTask("task-a", "default", "proj", "plan-alpha", nil, "Running")
 	taskB := makeProjectTask("task-b", "default", "proj", "plan-beta", []string{"task-a"}, "")
-	tasks := []tideprojectv1alpha2.Task{*taskA, *taskB}
-	plans := []tideprojectv1alpha2.Plan{
+	tasks := []tideprojectv1alpha3.Task{*taskA, *taskB}
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}
@@ -155,8 +155,8 @@ func TestComputeGlobalIndegree_CoarsePlanRef_AllMembersSucceeded_ReturnsZero(t *
 	// task-b has DependsOn=["plan-alpha"]; plan-alpha has task-a (Succeeded).
 	taskA := makeProjectTask("task-a", "default", "proj", "plan-alpha", nil, "Succeeded")
 	taskB := makeProjectTask("task-b", "default", "proj", "plan-beta", []string{"plan-alpha"}, "")
-	tasks := []tideprojectv1alpha2.Task{*taskA, *taskB}
-	plans := []tideprojectv1alpha2.Plan{
+	tasks := []tideprojectv1alpha3.Task{*taskA, *taskB}
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}
@@ -174,8 +174,8 @@ func TestComputeGlobalIndegree_CoarsePlanRef_OneMemberNotSucceeded_ReturnsPositi
 	taskA := makeProjectTask("task-a", "default", "proj", "plan-alpha", nil, "Running")
 	taskC := makeProjectTask("task-c", "default", "proj", "plan-alpha", nil, "Succeeded")
 	taskB := makeProjectTask("task-b", "default", "proj", "plan-beta", []string{"plan-alpha"}, "")
-	tasks := []tideprojectv1alpha2.Task{*taskA, *taskC, *taskB}
-	plans := []tideprojectv1alpha2.Plan{
+	tasks := []tideprojectv1alpha3.Task{*taskA, *taskC, *taskB}
+	plans := []tideprojectv1alpha3.Plan{
 		makeTestPlan("plan-alpha", "phase-1"),
 		makeTestPlan("plan-beta", "phase-1"),
 	}
@@ -233,7 +233,7 @@ func TestGlobalDependentsMapper_SelfSkip(t *testing.T) {
 func TestGlobalDependentsMapper_EmptyProjectLabel_NoDependents_ReturnsEmpty(t *testing.T) {
 	const ns = "default"
 	// task without owner.LabelProject set and no dependents anywhere.
-	taskNoLabel := &tideprojectv1alpha2.Task{
+	taskNoLabel := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-no-label", Namespace: ns, UID: types.UID("uid-no-label")},
 	}
 
@@ -254,7 +254,7 @@ func TestGlobalDependentsMapper_EmptyProjectLabel_NoDependents_ReturnsEmpty(t *t
 func TestGlobalDependentsMapper_EmptyProjectLabel_ReenqueuesDirectDependents(t *testing.T) {
 	const ns = "default"
 	// Predecessor has no project label; a labeled dependent names it directly.
-	taskNoLabel := &tideprojectv1alpha2.Task{
+	taskNoLabel := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "pred-no-label", Namespace: ns, UID: types.UID("uid-pred")},
 	}
 	dependent := makeProjectTask("dependent", ns, "test-proj", "plan-1", []string{"pred-no-label"}, "")
@@ -288,13 +288,13 @@ func TestGlobalDependentsMapper_CoarseRefDep_ReenqueuesDependent(t *testing.T) {
 	taskB := makeProjectTask("task-b", ns, proj, "plan-beta", []string{"plan-alpha"}, "")
 
 	// plans needed for the resolver to expand "plan-alpha" → {task-a}.
-	planAlpha := &tideprojectv1alpha2.Plan{
+	planAlpha := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-alpha", Namespace: ns},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
 	}
-	planBeta := &tideprojectv1alpha2.Plan{
+	planBeta := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-beta", Namespace: ns},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
 	}
 
 	s := fakeSchemeWithAll(t)

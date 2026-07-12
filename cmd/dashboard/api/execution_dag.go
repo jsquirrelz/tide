@@ -32,7 +32,7 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ExecutionDAGHandler serves GET /api/v1/projects/{name}/execution-dag.
@@ -68,7 +68,7 @@ func (h *ExecutionDAGHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// The label "tideproject.k8s/project" is stamped by internal/owner on
 	// every Task when the orchestrator creates it — matches the constant in
 	// waves.go (labelProject) to avoid an import cycle with internal/owner.
-	var tasks tidev1alpha2.TaskList
+	var tasks tidev1alpha3.TaskList
 	if err := h.Client.List(ctx, &tasks,
 		client.InNamespace(namespace),
 		client.MatchingLabels{"tideproject.k8s/project": name},
@@ -80,7 +80,7 @@ func (h *ExecutionDAGHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Waves — build waveByTask map from Wave CRs (same pattern as plans.go:121-127).
 	// Wave.Status.TaskRefs is the source of truth for waveIndex assignment per Task.
-	var waves tidev1alpha2.WaveList
+	var waves tidev1alpha3.WaveList
 	if err := h.Client.List(ctx, &waves,
 		client.InNamespace(namespace),
 		client.MatchingLabels{"tideproject.k8s/project": name},

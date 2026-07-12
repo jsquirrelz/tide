@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -32,7 +32,7 @@ import (
 func buildScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(s); err != nil {
+	if err := tidev1alpha3.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	return s
@@ -64,7 +64,7 @@ func writeOutJSON(t *testing.T, workspace, taskUID string, envOut pkgdispatch.En
 // phaseSpec returns a raw JSON-encoded PhaseSpec with the given milestoneRef.
 func phaseSpec(t *testing.T, milestoneRef string) runtime.RawExtension {
 	t.Helper()
-	raw, err := json.Marshal(tidev1alpha2.PhaseSpec{MilestoneRef: milestoneRef})
+	raw, err := json.Marshal(tidev1alpha3.PhaseSpec{MilestoneRef: milestoneRef})
 	if err != nil {
 		t.Fatalf("marshal PhaseSpec: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestRunHappyPath(t *testing.T) {
 	parentName := "parent-milestone"
 	parentNS := "default"
 
-	milestone := &tidev1alpha2.Milestone{
+	milestone := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      parentName,
 			Namespace: parentNS,
@@ -112,7 +112,7 @@ func TestRunHappyPath(t *testing.T) {
 
 	// Verify both Phase CRDs were created in the parent namespace.
 	for _, name := range []string{"phase-alpha", "phase-beta"} {
-		var ph tidev1alpha2.Phase
+		var ph tidev1alpha3.Phase
 		if err := c.Get(context.Background(), client.ObjectKey{Namespace: parentNS, Name: name}, &ph); err != nil {
 			t.Errorf("Get Phase %q: %v", name, err)
 			continue
@@ -150,7 +150,7 @@ func TestRunIdempotent(t *testing.T) {
 	parentName := "parent-milestone-idem"
 	parentNS := "default"
 
-	milestone := &tidev1alpha2.Milestone{
+	milestone := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      parentName,
 			Namespace: parentNS,
@@ -159,12 +159,12 @@ func TestRunIdempotent(t *testing.T) {
 	}
 
 	// Pre-create the phase (child already materialized).
-	existingPhase := &tidev1alpha2.Phase{
+	existingPhase := &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pre-existing-phase-idem",
 			Namespace: parentNS,
 		},
-		Spec: tidev1alpha2.PhaseSpec{MilestoneRef: parentName},
+		Spec: tidev1alpha3.PhaseSpec{MilestoneRef: parentName},
 	}
 
 	envOut := pkgdispatch.EnvelopeOut{
@@ -195,7 +195,7 @@ func TestRunMissingOutJSON(t *testing.T) {
 	workspace := t.TempDir()
 	// out.json deliberately NOT written.
 
-	c := buildFakeClient(t, &tidev1alpha2.Milestone{
+	c := buildFakeClient(t, &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: "m1", Namespace: "default"},
 	})
 	cfg := reporterConfig{
@@ -220,7 +220,7 @@ func TestRunDisallowedKind(t *testing.T) {
 	parentName := "parent-ms-disallowed"
 	parentNS := "default"
 
-	milestone := &tidev1alpha2.Milestone{
+	milestone := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      parentName,
 			Namespace: parentNS,
@@ -251,7 +251,7 @@ func TestRunDisallowedKind(t *testing.T) {
 	}
 
 	// Verify no Phase (or any TIDE CRD) was created as a side effect.
-	var phases tidev1alpha2.PhaseList
+	var phases tidev1alpha3.PhaseList
 	if err := c.List(context.Background(), &phases, client.InNamespace(parentNS)); err != nil {
 		t.Fatalf("List phases: %v", err)
 	}

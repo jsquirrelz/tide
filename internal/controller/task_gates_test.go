@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -36,16 +36,16 @@ import (
 var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Label("envtest", "phase4", "gates"), func() {
 	ctx := context.Background()
 
-	makeProjectWithGates := func(name string, g tideprojectv1alpha2.Gates) *tideprojectv1alpha2.Project {
-		p := &tideprojectv1alpha2.Project{
+	makeProjectWithGates := func(name string, g tideprojectv1alpha3.Gates) *tideprojectv1alpha3.Project {
+		p := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/tide.git",
 				Gates:      g,
 			},
 		}
 		Expect(k8sClient.Create(ctx, p)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 		return p
 	}
 
@@ -53,7 +53,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		const projectName, planRef, taskName = "gate-proj-tk1", "gate-plan-tk1", "gate-task-1"
 
 		BeforeEach(func() {
-			makeProjectWithGates(projectName, tideprojectv1alpha2.Gates{Task: gates.PolicyApprove})
+			makeProjectWithGates(projectName, tideprojectv1alpha3.Gates{Task: gates.PolicyApprove})
 			makeTask(taskName, planRef, nil, projectName)
 		})
 		AfterEach(func() {
@@ -75,12 +75,12 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var t tideprojectv1alpha2.Task
+				var t tideprojectv1alpha3.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 				g.Expect(t.Status.Phase).To(Equal("AwaitingApproval"))
-				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil())
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonAwaitingApproval))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonAwaitingApproval))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// No Job should have been created for this task while paused.
@@ -96,9 +96,9 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		const projectName, planRef, taskName = "gate-proj-tk2", "gate-plan-tk2", "gate-task-2"
 
 		BeforeEach(func() {
-			makeProjectWithGates(projectName, tideprojectv1alpha2.Gates{Task: gates.PolicyAuto})
+			makeProjectWithGates(projectName, tideprojectv1alpha3.Gates{Task: gates.PolicyAuto})
 			// Stamp reject annotation on the Project.
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 			patch := client.MergeFrom(proj.DeepCopy())
 			if proj.Annotations == nil {
@@ -107,7 +107,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			proj.Annotations[gates.AnnotationReject] = "task halt"
 			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
 			Eventually(func() string {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return ""
 				}
@@ -129,26 +129,26 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {
-				var t tideprojectv1alpha2.Task
+				var t tideprojectv1alpha3.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 				g.Expect(t.Status.Phase).NotTo(Equal("Failed"),
 					"D-05: reject must park the Task, not fail-mark it")
-				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonRejectedByUser))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("task halt"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// D-05 recovery: clear the reject annotation (simulating tide resume).
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
 			newAnno := gates.ConsumeReject(&current)
 			annoPatch := client.MergeFrom(current.DeepCopy())
 			current.SetAnnotations(newAnno)
 			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
 			Eventually(func() string {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return "err"
 				}
@@ -159,7 +159,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			_, err = reconcileN(r, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func(g Gomega) {
-				var t tideprojectv1alpha2.Task
+				var t tideprojectv1alpha3.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 				g.Expect(t.Status.Phase).NotTo(Equal("Failed"),
 					"D-05: Task must not be Failed after reject annotation cleared")
@@ -171,7 +171,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 		const projectName, planRef, taskName = "gate-proj-tk3", "gate-plan-tk3", "gate-task-3"
 
 		BeforeEach(func() {
-			makeProjectWithGates(projectName, tideprojectv1alpha2.Gates{Task: gates.PolicyAuto})
+			makeProjectWithGates(projectName, tideprojectv1alpha3.Gates{Task: gates.PolicyAuto})
 			makeTask(taskName, planRef, nil, projectName)
 		})
 		AfterEach(func() {
@@ -193,7 +193,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var t tideprojectv1alpha2.Task
+				var t tideprojectv1alpha3.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 				g.Expect(t.Status.Phase).To(Equal("Running"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
@@ -215,33 +215,33 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 
 		BeforeEach(func() {
 			// Create project
-			p := &tideprojectv1alpha2.Project{
+			p := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/tide.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			// Stamp BillingHalt=True condition on the Project.
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 			statusPatch := client.MergeFrom(proj.DeepCopy())
 			meta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha2.ConditionBillingHalt,
+				Type:               tideprojectv1alpha3.ConditionBillingHalt,
 				Status:             metav1.ConditionTrue,
-				Reason:             tideprojectv1alpha2.ReasonCreditBalanceTooLow,
+				Reason:             tideprojectv1alpha3.ReasonCreditBalanceTooLow,
 				Message:            "Test: billing halt stamped",
 				LastTransitionTime: metav1.Now(),
 			})
 			Expect(k8sClient.Status().Patch(ctx, &proj, statusPatch)).To(Succeed())
 			Eventually(func() bool {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return false
 				}
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 				return c != nil && c.Status == metav1.ConditionTrue
 			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BillingHalt condition should be visible in cache")
 
@@ -272,13 +272,13 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 				"BillingHalt hold must park with 30s requeue, not fail or no-requeue")
 
 			// Status.Phase must NOT be changed to "Failed" — park-not-fail (D-05, T-13-15).
-			var t tideprojectv1alpha2.Task
+			var t tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 			Expect(t.Status.Phase).NotTo(Equal("Failed"),
 				"D-05/T-13-15: BillingHalt must park the Task (not fail) — wave-boundary failure semantics preserved")
 
 			// No per-Task BillingHalt condition written (avoids status flapping per dogfood finding).
-			billingCond := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
+			billingCond := meta.FindStatusCondition(t.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 			Expect(billingCond).To(BeNil(),
 				"HALT-01 park: no per-Task BillingHalt condition should be written (operator signal is on Project only)")
 
@@ -297,33 +297,33 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 		const projectName, planRef, taskName = "billing-halt-proj-2", "billing-halt-plan-2", "billing-halt-task-2"
 
 		BeforeEach(func() {
-			p := &tideprojectv1alpha2.Project{
+			p := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/tide.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, p)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			// Stamp BillingHalt=True on the Project.
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 			statusPatch := client.MergeFrom(proj.DeepCopy())
 			meta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha2.ConditionBillingHalt,
+				Type:               tideprojectv1alpha3.ConditionBillingHalt,
 				Status:             metav1.ConditionTrue,
-				Reason:             tideprojectv1alpha2.ReasonCreditBalanceTooLow,
+				Reason:             tideprojectv1alpha3.ReasonCreditBalanceTooLow,
 				Message:            "Test: billing halt stamped",
 				LastTransitionTime: metav1.Now(),
 			})
 			Expect(k8sClient.Status().Patch(ctx, &proj, statusPatch)).To(Succeed())
 			Eventually(func() bool {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return false
 				}
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 				return c != nil && c.Status == metav1.ConditionTrue
 			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue())
 
@@ -353,17 +353,17 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 
 			// Clear the BillingHalt condition (mirrors what `tide resume` does via
 			// meta.RemoveStatusCondition + status update — D-06).
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
 			clearPatch := client.MergeFrom(current.DeepCopy())
-			meta.RemoveStatusCondition(&current.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
+			meta.RemoveStatusCondition(&current.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 			Expect(k8sClient.Status().Patch(ctx, &current, clearPatch)).To(Succeed())
 			Eventually(func() bool {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return false
 				}
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBillingHalt)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 				return c == nil
 			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BillingHalt condition should be removed from cache")
 
@@ -372,14 +372,14 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			Expect(err).NotTo(HaveOccurred())
 
 			// Task must not be Failed after halt cleared.
-			var t tideprojectv1alpha2.Task
+			var t tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 			Expect(t.Status.Phase).NotTo(Equal("Failed"),
 				"D-05: Task must not be Failed after BillingHalt cleared")
 
 			// Task should have progressed to Running (dispatch resumed).
 			Eventually(func(g Gomega) {
-				var t tideprojectv1alpha2.Task
+				var t tideprojectv1alpha3.Task
 				g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 				g.Expect(t.Status.Phase).To(Equal("Running"),
 					"Dispatch must resume after BillingHalt condition cleared")
@@ -390,7 +390,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 
 // getTaskUID is a small helper for the assertion in Test 7a; returns "" on miss.
 func getTaskUID(name string) types.UID {
-	var t tideprojectv1alpha2.Task
+	var t tideprojectv1alpha3.Task
 	if err := mgrClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &t); err != nil {
 		return ""
 	}

@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -132,7 +132,7 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	logger := logf.FromContext(ctx)
 
 	// 1. Fetch.
-	var milestone tideprojectv1alpha2.Milestone
+	var milestone tideprojectv1alpha3.Milestone
 	if err := r.Get(ctx, req.NamespacedName, &milestone); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -157,7 +157,7 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// 4. Ensure owner ref to parent Project (CRD-02, Pitfall 23 prevention).
 	if milestone.Spec.ProjectRef != "" {
-		var parent tideprojectv1alpha2.Project
+		var parent tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: milestone.Namespace, Name: milestone.Spec.ProjectRef}, &parent); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				// defect #17: parent Project named by spec.projectRef does not
@@ -202,9 +202,9 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&milestone.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionReady,
+		Type:               tideprojectv1alpha3.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonInitialized,
+		Reason:             tideprojectv1alpha3.ReasonInitialized,
 		Message:            "Milestone scaffolded; awaiting dispatch logic (Phase 2)",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -218,11 +218,11 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // resolveProjectNameForMilestone returns the Project name for a Milestone via
 // Milestone.Spec.ProjectRef (1 Get). Returns "" if the chain cannot be
 // resolved (orphan) — caller should skip the backfill silently.
-func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context, ms *tideprojectv1alpha2.Milestone) string {
+func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context, ms *tideprojectv1alpha3.Milestone) string {
 	if ms.Spec.ProjectRef == "" {
 		return ""
 	}
-	var p tideprojectv1alpha2.Project
+	var p tideprojectv1alpha3.Project
 	if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err != nil {
 		return ""
 	}
@@ -238,7 +238,7 @@ func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context
 // child CRDs from EnvelopeOut.ChildCRDs.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
-func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *tideprojectv1alpha2.Milestone) (ctrl.Result, error) {
+func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
 	// Step 1: Terminal short-circuit.
 	if ms.Status.Phase == "Succeeded" || ms.Status.Phase == "Failed" {
 		return ctrl.Result{}, nil
@@ -267,9 +267,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 			statusPatch := client.MergeFrom(ms.DeepCopy())
 			ms.Status.Phase = "Running"
 			meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha2.ReasonApprovedByUser,
+				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
 				Message:            "Milestone approved; children will dispatch",
 				LastTransitionTime: metav1.Now(),
 			})
@@ -286,7 +286,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		// Re-triggers are harmless: single-flight no-ops while busy, clean-tree skips
 		// empty commits once staged.
 		if ms.Spec.ProjectRef != "" {
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
 				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.TidePushImage, r.HelmProviderDefaults); apErr != nil {
 					logf.FromContext(ctx).Info("artifact push trigger failed at parked milestone (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
@@ -328,7 +328,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// race-free; ownerRef is kept as a belt-and-suspenders fallback. bare-Project
 	// flow is unaffected: each Milestone starts with 0 child Phases and authors once.
 	{
-		var existingPhases tideprojectv1alpha2.PhaseList
+		var existingPhases tideprojectv1alpha3.PhaseList
 		if lErr := r.List(ctx, &existingPhases, client.InNamespace(ms.Namespace)); lErr != nil {
 			return ctrl.Result{}, fmt.Errorf("idempotency: list phases: %w", lErr)
 		}
@@ -345,9 +345,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// A rejected Project must halt NEW dispatch (not only post-completion advancement).
 	// In-flight Jobs drain; no Job deletion (resolved discretion call).
 	{
-		var earlyProject *tideprojectv1alpha2.Project
+		var earlyProject *tideprojectv1alpha3.Project
 		if ms.Spec.ProjectRef != "" {
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
 				earlyProject = &p
 			}
@@ -383,7 +383,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		// Phase 28 IMPORT-01: park planner dispatch until import completes.
 		// Position: BEFORE pool acquire (Pitfall 2 — parking after acquire leaks a slot).
 		if earlyProject != nil && earlyProject.Spec.ImportSource != nil {
-			c := meta.FindStatusCondition(earlyProject.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+			c := meta.FindStatusCondition(earlyProject.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 			if c == nil || c.Status != metav1.ConditionTrue {
 				logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch",
 					"milestone", ms.Name, "project", ms.Spec.ProjectRef)
@@ -416,9 +416,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	}
 
 	// Step 4: Resolve project for provider config.
-	var project *tideprojectv1alpha2.Project
+	var project *tideprojectv1alpha3.Project
 	if ms.Spec.ProjectRef != "" {
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
 			project = &p
 		}
@@ -525,7 +525,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	patch := client.MergeFrom(ms.DeepCopy())
 	ms.Status.Phase = "Running"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionAuthoringPlanner,
+		Type:               tideprojectv1alpha3.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerDispatched",
 		Message:            fmt.Sprintf("Planner Job %s dispatched", jobName),
@@ -549,12 +549,12 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 // the reporter Job's own completion re-enqueues this reconciler.
 //
 //nolint:gocyclo // a flat state machine of mutually-exclusive completion arms; splitting obscures the contract
-func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha2.Milestone, completedJob *batchv1.Job) (ctrl.Result, error) {
+func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tideprojectv1alpha3.Milestone, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	var project *tideprojectv1alpha2.Project
+	var project *tideprojectv1alpha3.Project
 	if ms.Spec.ProjectRef != "" {
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
 			project = &p
 		}
@@ -637,7 +637,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				// WR-03: on retry-budget exhaustion, return the error to requeue rather than swallow —
 				// the marker must be durably set before the reporter Job's TTL-GC window reopens rollup.
 				if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-					latest := &tideprojectv1alpha2.Milestone{}
+					latest := &tideprojectv1alpha3.Milestone{}
 					if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
 						return err
 					}
@@ -684,7 +684,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// (matched > 0, false on zero children); see 33-CONTEXT.md D-01/D-02.
 	// isPlannerFailure re-checks envReadOK internally, so calling it here is safe.
 	if isPlannerFailure(out, envReadOK) {
-		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha2.ReasonPlannerFailed,
+		return r.patchMilestoneFailed(ctx, ms, tideprojectv1alpha3.ReasonPlannerFailed,
 			fmt.Sprintf("planner exited nonzero (exitCode=%d) with zero children; marked Failed to prevent false succession", out.ExitCode))
 	}
 
@@ -701,9 +701,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			// Check if this level was already approved (permanent ApprovedByUser or
 			// ResumedByUser condition with Status=False means the park was lifted).
 			alreadyApproved := false
-			if c := meta.FindStatusCondition(ms.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused); c != nil {
+			if c := meta.FindStatusCondition(ms.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused); c != nil {
 				if c.Status == metav1.ConditionFalse &&
-					(c.Reason == tideprojectv1alpha2.ReasonApprovedByUser || c.Reason == tideprojectv1alpha2.ReasonResumedByUser) {
+					(c.Reason == tideprojectv1alpha3.ReasonApprovedByUser || c.Reason == tideprojectv1alpha3.ReasonResumedByUser) {
 					alreadyApproved = true
 				}
 			}
@@ -735,9 +735,9 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				statusPatch := client.MergeFrom(ms.DeepCopy())
 				ms.Status.Phase = "Running"
 				meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha2.ReasonApprovedByUser,
+					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
 					Message:            "Milestone approved; children will dispatch",
 					LastTransitionTime: metav1.Now(),
 				})
@@ -834,14 +834,14 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 // hasChildPhases reports whether any Phase is owned by this Milestone. Debug #9
 // (mirrors PhaseReconciler.hasChildPlans / Phase 04.1). Used by the nil-EnvReader
 // fallback path in handleJobCompletion.
-func (r *MilestoneReconciler) hasChildPhases(ctx context.Context, ms *tideprojectv1alpha2.Milestone) bool {
+func (r *MilestoneReconciler) hasChildPhases(ctx context.Context, ms *tideprojectv1alpha3.Milestone) bool {
 	return r.countChildPhases(ctx, ms) > 0
 }
 
 // countChildPhases returns the number of Phases owned by this Milestone (plan 09-08).
 // Used by the ChildCount-gated succession path to compare observed vs expected children.
-func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideprojectv1alpha2.Milestone) int {
-	var phaseList tideprojectv1alpha2.PhaseList
+func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideprojectv1alpha3.Milestone) int {
+	var phaseList tideprojectv1alpha3.PhaseList
 	if err := r.List(ctx, &phaseList, client.InNamespace(ms.Namespace)); err != nil {
 		return 0
 	}
@@ -860,11 +860,11 @@ func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideproj
 // Used by the Phase 33 D4 false-leaf guard (PLANFAIL-02).
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchMilestoneFailed(...)` in the reconcile chain
-func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha2.Milestone, reason, message string) (ctrl.Result, error) {
+func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha3.Milestone, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(ms.DeepCopy())
 	ms.Status.Phase = "Failed"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionFailed,
+		Type:               tideprojectv1alpha3.ConditionFailed,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
@@ -876,11 +876,11 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 	return ctrl.Result{}, nil
 }
 
-func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha2.Milestone) (ctrl.Result, error) {
+func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
 	patch := client.MergeFrom(ms.DeepCopy())
 	ms.Status.Phase = "Succeeded"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionSucceeded,
+		Type:               tideprojectv1alpha3.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
 		Reason:             "PlannerComplete",
 		Message:            "Milestone planner completed; Phase children materialized",
@@ -890,9 +890,9 @@ func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *t
 	// WaveOrLevelPaused Condition to False with Reason=ResumedByUser so the
 	// transition is visible to operators tailing conditions.
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha2.ReasonResumedByUser,
+		Reason:             tideprojectv1alpha3.ReasonResumedByUser,
 		Message:            "Milestone resumed from gate boundary",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -907,12 +907,12 @@ func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *t
 // preserved so clearing the reject annotation (tide resume) lets the level
 // re-enter the normal dispatch path on the next reconcile.
 // Returns RequeueAfter 5s so the park polls for the annotation clear.
-func (r *MilestoneReconciler) patchMilestoneRejected(ctx context.Context, ms *tideprojectv1alpha2.Milestone, reason string) (ctrl.Result, error) {
+func (r *MilestoneReconciler) patchMilestoneRejected(ctx context.Context, ms *tideprojectv1alpha3.Milestone, reason string) (ctrl.Result, error) {
 	patch := client.MergeFrom(ms.DeepCopy())
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonRejectedByUser,
+		Reason:             tideprojectv1alpha3.ReasonRejectedByUser,
 		Message:            fmt.Sprintf("Rejected: %s", reason),
 		LastTransitionTime: metav1.Now(),
 	})
@@ -927,11 +927,11 @@ func (r *MilestoneReconciler) patchMilestoneRejected(ctx context.Context, ms *ti
 // ctrl.Result{} with no requeue — only an AnnotationChangedPredicate-triggered
 // re-reconcile (via the approve annotation write) advances the level (T-04-G4
 // mitigation: no polling DoS).
-func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context, ms *tideprojectv1alpha2.Milestone, policy tideprojectv1alpha2.GatePolicy) (ctrl.Result, error) {
-	reason := tideprojectv1alpha2.ReasonAwaitingApproval
+func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context, ms *tideprojectv1alpha3.Milestone, policy tideprojectv1alpha3.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha3.ReasonAwaitingApproval
 	message := "Milestone awaiting operator approve annotation (tideproject.k8s/approve-milestone=true)"
 	if policy == gates.PolicyPause {
-		reason = tideprojectv1alpha2.ReasonPausedAtBoundary
+		reason = tideprojectv1alpha3.ReasonPausedAtBoundary
 		message = "Milestone paused at boundary; requires explicit resume"
 	}
 	// Optimistic lock (WR-02 idiom): the park overwrites ConditionWaveOrLevelPaused —
@@ -946,7 +946,7 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 	patch := client.MergeFromWithOptions(ms.DeepCopy(), client.MergeFromWithOptimisticLock{})
 	ms.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
@@ -964,13 +964,13 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 // Event, then returns — the caller keeps requeuing so the Milestone self-heals
 // if the parent appears later. Best-effort: a Status().Update failure is logged
 // but not propagated, so the requeue still fires.
-func (r *MilestoneReconciler) surfaceParentRefUnresolved(ctx context.Context, ms *tideprojectv1alpha2.Milestone, parentKind, parentRef string) {
+func (r *MilestoneReconciler) surfaceParentRefUnresolved(ctx context.Context, ms *tideprojectv1alpha3.Milestone, parentKind, parentRef string) {
 	logger := logf.FromContext(ctx)
 	msg := fmt.Sprintf("parent %s %q (spec.projectRef) not found in namespace %q; requeuing until it appears", parentKind, parentRef, ms.Namespace)
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionParentUnresolved,
+		Type:               tideprojectv1alpha3.ConditionParentUnresolved,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha2.ReasonParentRefNotFound,
+		Reason:             tideprojectv1alpha3.ReasonParentRefNotFound,
 		Message:            msg,
 		LastTransitionTime: metav1.Now(),
 	})
@@ -978,7 +978,7 @@ func (r *MilestoneReconciler) surfaceParentRefUnresolved(ctx context.Context, ms
 		logger.V(1).Info("surfaceParentRefUnresolved: status update failed (will retry on requeue)", "error", err)
 	}
 	if r.Recorder != nil {
-		r.Recorder.Event(ms, corev1.EventTypeWarning, tideprojectv1alpha2.ReasonParentRefNotFound, msg)
+		r.Recorder.Event(ms, corev1.EventTypeWarning, tideprojectv1alpha3.ReasonParentRefNotFound, msg)
 	}
 }
 
@@ -1003,11 +1003,11 @@ func (r *MilestoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha2.Milestone{}).
+		For(&tideprojectv1alpha3.Milestone{}).
 		Owns(&batchv1.Job{}).
-		Owns(&tideprojectv1alpha2.Phase{}).
+		Owns(&tideprojectv1alpha3.Phase{}).
 		Watches(
-			&tideprojectv1alpha2.Milestone{},
+			&tideprojectv1alpha3.Milestone{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
 			}),

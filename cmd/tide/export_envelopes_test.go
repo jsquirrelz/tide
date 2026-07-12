@@ -46,7 +46,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -92,8 +92,8 @@ func injectExportRunner(f *fakeExportRunner) func() {
 }
 
 // makeProjectForExport builds a Project fixture with a stable UID.
-func makeProjectForExport(name, ns string) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func makeProjectForExport(name, ns string) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
@@ -103,8 +103,8 @@ func makeProjectForExport(name, ns string) *tidev1alpha2.Project {
 }
 
 // makeProjectForExportNoUID builds a Project without a UID (missing-UID error case).
-func makeProjectForExportNoUID(name, ns string) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func makeProjectForExportNoUID(name, ns string) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: ns,
@@ -339,29 +339,29 @@ func TestExportEnvelopesChildCountRepair(t *testing.T) {
 	restore := injectExportRunner(fr)
 	defer restore()
 
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-alpha",
 			Namespace: "default",
 			UID:       types.UID("ms-uid-001"),
 		},
-		Spec: tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
+		Spec: tidev1alpha3.MilestoneSpec{ProjectRef: "my-project"},
 	}
-	ph := &tidev1alpha2.Phase{
+	ph := &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ph-01",
 			Namespace: "default",
 			UID:       types.UID("ph-uid-001"),
 		},
-		Spec: tidev1alpha2.PhaseSpec{MilestoneRef: "ms-alpha"},
+		Spec: tidev1alpha3.PhaseSpec{MilestoneRef: "ms-alpha"},
 	}
-	pl := &tidev1alpha2.Plan{
+	pl := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-01",
 			Namespace: "default",
 			UID:       types.UID(taskUID), // oldUID matches the envelope
 		},
-		Spec: tidev1alpha2.PlanSpec{PhaseRef: "ph-01"},
+		Spec: tidev1alpha3.PlanSpec{PhaseRef: "ph-01"},
 	}
 	proj := makeProjectForExport("my-project", "default")
 
@@ -428,35 +428,35 @@ func TestExportEnvelopesSeedManifest(t *testing.T) {
 	const phUID = "ph-uid-seed-001"
 	const plUID = "pl-uid-seed-001"
 
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-alpha",
 			Namespace: "default",
 			UID:       types.UID(msUID),
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
-		Status: tidev1alpha2.MilestoneStatus{Phase: "Succeeded"},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha3.MilestoneStatus{Phase: "Succeeded"},
 	}
-	ph := &tidev1alpha2.Phase{
+	ph := &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ph-beta",
 			Namespace: "default",
 			UID:       types.UID(phUID),
 		},
-		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-alpha"},
-		Status: tidev1alpha2.PhaseStatus{Phase: "Succeeded"},
+		Spec:   tidev1alpha3.PhaseSpec{MilestoneRef: "ms-alpha"},
+		Status: tidev1alpha3.PhaseStatus{Phase: "Succeeded"},
 	}
-	pl := &tidev1alpha2.Plan{
+	pl := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-gamma",
 			Namespace: "default",
 			UID:       types.UID(plUID),
 		},
-		Spec: tidev1alpha2.PlanSpec{
+		Spec: tidev1alpha3.PlanSpec{
 			PhaseRef:  "ph-beta",
 			DependsOn: []string{"ms-alpha/ph-beta"},
 		},
-		Status: tidev1alpha2.PlanStatus{Phase: "Succeeded"},
+		Status: tidev1alpha3.PlanStatus{Phase: "Succeeded"},
 	}
 	proj := makeProjectForExport("my-project", "default")
 
@@ -603,50 +603,50 @@ func TestBuildSeedManifest_CompletenessGating(t *testing.T) {
 	const plIncompleteUID = "pl-uid-incomplete-001"
 	const plMissingUID = "pl-uid-missing-001"
 
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-cg",
 			Namespace: "default",
 			UID:       types.UID(msUID),
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
-		Status: tidev1alpha2.MilestoneStatus{Phase: "Running"},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha3.MilestoneStatus{Phase: "Running"},
 	}
-	ph := &tidev1alpha2.Phase{
+	ph := &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ph-cg",
 			Namespace: "default",
 			UID:       types.UID(phUID),
 		},
-		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-cg"},
-		Status: tidev1alpha2.PhaseStatus{Phase: "Running"},
+		Spec:   tidev1alpha3.PhaseSpec{MilestoneRef: "ms-cg"},
+		Status: tidev1alpha3.PhaseStatus{Phase: "Running"},
 	}
-	plComplete := &tidev1alpha2.Plan{
+	plComplete := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-complete",
 			Namespace: "default",
 			UID:       types.UID(plCompleteUID),
 		},
-		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
-		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+		Spec:   tidev1alpha3.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha3.PlanStatus{Phase: "Running"},
 	}
-	plIncomplete := &tidev1alpha2.Plan{
+	plIncomplete := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-incomplete",
 			Namespace: "default",
 			UID:       types.UID(plIncompleteUID),
 		},
-		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
-		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+		Spec:   tidev1alpha3.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha3.PlanStatus{Phase: "Running"},
 	}
-	plMissing := &tidev1alpha2.Plan{
+	plMissing := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-missing",
 			Namespace: "default",
 			UID:       types.UID(plMissingUID),
 		},
-		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-cg"},
-		Status: tidev1alpha2.PlanStatus{Phase: "Running"},
+		Spec:   tidev1alpha3.PlanSpec{PhaseRef: "ph-cg"},
+		Status: tidev1alpha3.PlanStatus{Phase: "Running"},
 	}
 	proj := makeProjectForExport("my-project", "default")
 
@@ -777,32 +777,32 @@ func TestSeedStatusFor_LegacyUnstampedEnvelopeIsRePlannableOnExport(t *testing.T
 		t.Fatalf("marshal legacy envelope: %v", err)
 	}
 
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-wr03",
 			Namespace: "default",
 			UID:       types.UID("ms-uid-wr03"),
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "my-project"},
-		Status: tidev1alpha2.MilestoneStatus{Phase: livePhase},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: "my-project"},
+		Status: tidev1alpha3.MilestoneStatus{Phase: livePhase},
 	}
-	ph := &tidev1alpha2.Phase{
+	ph := &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ph-wr03",
 			Namespace: "default",
 			UID:       types.UID("ph-uid-wr03"),
 		},
-		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "ms-wr03"},
-		Status: tidev1alpha2.PhaseStatus{Phase: livePhase},
+		Spec:   tidev1alpha3.PhaseSpec{MilestoneRef: "ms-wr03"},
+		Status: tidev1alpha3.PhaseStatus{Phase: livePhase},
 	}
-	pl := &tidev1alpha2.Plan{
+	pl := &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pl-wr03",
 			Namespace: "default",
 			UID:       types.UID(plUID),
 		},
-		Spec:   tidev1alpha2.PlanSpec{PhaseRef: "ph-wr03"},
-		Status: tidev1alpha2.PlanStatus{Phase: livePhase},
+		Spec:   tidev1alpha3.PlanSpec{PhaseRef: "ph-wr03"},
+		Status: tidev1alpha3.PlanStatus{Phase: livePhase},
 	}
 	proj := makeProjectForExport("my-project", "default")
 

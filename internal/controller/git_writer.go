@@ -19,7 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -56,7 +56,7 @@ const (
 // across retries so a re-dispatch after a transient failure is byte-for-byte
 // the same --integrate-task-branches value.
 func succeededTaskBranches(ctx context.Context, c client.Client, ns, projectName string) ([]string, error) {
-	var tasks tideprojectv1alpha2.TaskList
+	var tasks tideprojectv1alpha3.TaskList
 	if err := c.List(ctx, &tasks,
 		client.InNamespace(ns),
 		client.MatchingLabels{gitWriterProjectLabelKey: projectName},

@@ -24,7 +24,7 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -47,14 +47,14 @@ var configFlags = genericclioptions.NewConfigFlags(true)
 var outputFormat = "human"
 
 // scheme is the shared client.Object scheme registered with both client-go
-// builtins and api/v1alpha1 (Project, Milestone, Phase, Plan, Task, Wave).
+// builtins and api/v1alpha3 (Project, Milestone, Phase, Plan, Task, Wave).
 // Lazily constructed on first K8sClient() call to avoid init-order coupling.
 var scheme = newScheme()
 
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(tidev1alpha2.AddToScheme(s))
+	utilruntime.Must(tidev1alpha3.AddToScheme(s))
 	return s
 }
 
@@ -83,7 +83,7 @@ func RESTConfig() (*rest.Config, error) {
 
 // K8sClient builds a controller-runtime client.Client with the TIDE scheme
 // registered. Subcommands prefer this over raw clientsets so List/Get/Patch
-// returns strongly-typed api/v1alpha1 objects.
+// returns strongly-typed api/v1alpha3 objects.
 func K8sClient() (client.Client, error) {
 	cfg, err := RESTConfig()
 	if err != nil {

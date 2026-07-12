@@ -62,7 +62,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // importResumeNS is the namespace for tier-a spec (small fixture + round-trip).
@@ -170,7 +170,7 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// ----------------------------------------------------------------
 			By("Waiting for all Milestones to reach Succeeded (stub subagents drive cascade)")
 			Eventually(func() (bool, error) {
-				var msList tideprojectv1alpha2.MilestoneList
+				var msList tideprojectv1alpha3.MilestoneList
 				if err := k8sClient.List(ctx, &msList, client.InNamespace(importResumeNS)); err != nil {
 					return false, err
 				}
@@ -374,7 +374,7 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// Find the salvage project name from the applied YAML.
 			// The salvage project is named "dogfood-codex-runtime".
 			salvageProjectName := "dogfood-codex-runtime"
-			var project tideprojectv1alpha2.Project
+			var project tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Namespace: importResumeSalvageNS,
 				Name:      salvageProjectName,
@@ -515,7 +515,7 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// Assert this is stable for 15 seconds (Consistently window).
 			// ----------------------------------------------------------------
 			By("Resolving plan-complete UID for adopted-plan assertion")
-			var planComplete tideprojectv1alpha2.Plan
+			var planComplete tideprojectv1alpha3.Plan
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Namespace: importResumePartialNS,
 				Name:      "plan-complete",
@@ -545,7 +545,7 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// ImportComplete fires. A plan planner Job must appear.
 			// ----------------------------------------------------------------
 			By("Resolving plan-incomplete UID for re-plan assertion")
-			var planIncomplete tideprojectv1alpha2.Plan
+			var planIncomplete tideprojectv1alpha3.Plan
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Namespace: importResumePartialNS,
 				Name:      "plan-incomplete",
@@ -588,13 +588,13 @@ var _ = Describe("Import resume E2E", Label("kind", "long"), func() {
 			// ----------------------------------------------------------------
 			By("Waiting for Project to reach Status.Phase==Complete (partial-tree end-to-end drain)")
 			Eventually(func(g Gomega) {
-				var projects tideprojectv1alpha2.ProjectList
+				var projects tideprojectv1alpha3.ProjectList
 				g.Expect(k8sClient.List(ctx, &projects,
 					client.InNamespace(importResumePartialNS),
 				)).To(Succeed())
 				g.Expect(projects.Items).NotTo(BeEmpty(),
 					"no Project found in %s", importResumePartialNS)
-				g.Expect(projects.Items[0].Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete),
+				g.Expect(projects.Items[0].Status.Phase).To(Equal(tideprojectv1alpha3.PhaseComplete),
 					"Project %s/%s must reach Phase=Complete; current=%q",
 					importResumePartialNS, projects.Items[0].Name, projects.Items[0].Status.Phase)
 			}, 8*time.Minute, 5*time.Second).Should(Succeed())
@@ -674,11 +674,11 @@ func assertD02BundleShape(tgzPath string) {
 func waitForImportComplete(ns string) {
 	GinkgoHelper()
 	Eventually(func(g Gomega) {
-		var pl tideprojectv1alpha2.ProjectList
+		var pl tideprojectv1alpha3.ProjectList
 		g.Expect(k8sClient.List(ctx, &pl, client.InNamespace(ns))).To(Succeed())
 		g.Expect(pl.Items).NotTo(BeEmpty(), "no Project yet in %s", ns)
 		g.Expect(meta.IsStatusConditionTrue(
-			pl.Items[0].Status.Conditions, tideprojectv1alpha2.ConditionImportComplete,
+			pl.Items[0].Status.Conditions, tideprojectv1alpha3.ConditionImportComplete,
 		)).To(BeTrue(), "Project %s/%s not yet ImportComplete", ns, pl.Items[0].Name)
 	}, 3*time.Minute, 5*time.Second).Should(Succeed())
 }

@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -85,7 +85,7 @@ type BuildOptions struct {
 	Kind JobKind
 
 	// Task is the Task CRD being dispatched (executor Kind only).
-	Task *tidev1alpha2.Task
+	Task *tidev1alpha3.Task
 
 	// ParentObj is the parent CRD for both Kinds. For JobKindExecutor this is
 	// the Task; for JobKindPlanner this is the Milestone, Phase, or Plan.
@@ -97,7 +97,7 @@ type BuildOptions struct {
 	Level string
 
 	// Project is the owning Project (for namespace + ProviderSecretRef).
-	Project *tidev1alpha2.Project
+	Project *tidev1alpha3.Project
 
 	// Attempt is the nth dispatch attempt counter (D-B5).
 	Attempt int
@@ -135,7 +135,7 @@ type BuildOptions struct {
 	// for the wall-clock floor; both executor and planner Kinds route through
 	// the same helper, preventing token-validity vs Job-deadline drift).
 	// nil → DefaultCaps applies the Kind-appropriate floor automatically.
-	Caps *tidev1alpha2.Caps
+	Caps *tidev1alpha3.Caps
 
 	// PricingOverridesJSON is the D-02 transport: raw validated JSON forwarded
 	// opaquely to the subagent container as TIDE_PRICING_OVERRIDES_JSON. The
@@ -193,7 +193,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	if kind == "" {
 		kind = JobKindExecutor // backward compat: pre-P1.2 callers that omit Kind
 	}
-	var capsInput *tidev1alpha2.Caps
+	var capsInput *tidev1alpha3.Caps
 	switch kind {
 	case JobKindExecutor:
 		if opts.Task != nil {
@@ -507,7 +507,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 // routeJSON is the wire format for a single allowlist entry serialized into
 // the TIDE_ALLOWED_ROUTES env var (Phase 04.1 P4.2). The field names must
 // match the credproxy.RouteSpec JSON tags — the two types are parallel by
-// design (import-firewall: jobspec.go may import api/v1alpha1; credproxy
+// design (import-firewall: jobspec.go may import api/v1alpha3; credproxy
 // may not).
 type routeJSON struct {
 	Method     string `json:"method"`
@@ -520,7 +520,7 @@ type routeJSON struct {
 //
 // Returns "[]" on empty input — credproxy unmarshals this into an empty slice
 // and only the hardcoded baseline allowlist applies.
-func marshalAllowedRoutes(providers []tidev1alpha2.ProviderConfig) string {
+func marshalAllowedRoutes(providers []tidev1alpha3.ProviderConfig) string {
 	var routes []routeJSON
 	for _, p := range providers {
 		for _, r := range p.AllowedRoutes {

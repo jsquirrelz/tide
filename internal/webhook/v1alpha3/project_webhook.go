@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha2
+package v1alpha3
 
 import (
 	"context"
@@ -25,24 +25,24 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
-var projectlog = logf.Log.WithName("project-webhook-v1alpha2") //nolint:logcheck // controller-runtime logf idiom
+var projectlog = logf.Log.WithName("project-webhook-v1alpha3") //nolint:logcheck // controller-runtime logf idiom
 
-// SetupProjectWebhookWithManager registers the v1alpha2.Project validating webhook.
+// SetupProjectWebhookWithManager registers the v1alpha3.Project validating webhook.
 // Phase 04.1 P4.2: rejects PathPrefix values matching admin/billing surfaces
 // regardless of operator configuration (defense in depth alongside the
 // runtime credproxy enforcer).
 func SetupProjectWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr, &tideprojectv1alpha2.Project{}).
+	return ctrl.NewWebhookManagedBy(mgr, &tideprojectv1alpha3.Project{}).
 		WithValidator(&ProjectCustomValidator{}).
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/validate-tideproject-k8s-v1alpha2-project,mutating=false,failurePolicy=fail,sideEffects=None,groups=tideproject.k8s,resources=projects,verbs=create;update,versions=v1alpha2,name=vproject-v1alpha2.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-tideproject-k8s-v1alpha3-project,mutating=false,failurePolicy=fail,sideEffects=None,groups=tideproject.k8s,resources=projects,verbs=create;update,versions=v1alpha3,name=vproject-v1alpha3.kb.io,admissionReviewVersions=v1
 
-// ProjectCustomValidator validates v1alpha2.Project objects.
+// ProjectCustomValidator validates v1alpha3.Project objects.
 //
 // Phase 04.1 P4.2: enforces the credproxy-allowlist denylist — PathPrefix
 // matching admin/billing surfaces is rejected at admission regardless of
@@ -51,19 +51,19 @@ func SetupProjectWebhookWithManager(mgr ctrl.Manager) error {
 type ProjectCustomValidator struct{}
 
 // ValidateCreate is invoked on every Project POST.
-func (v *ProjectCustomValidator) ValidateCreate(_ context.Context, obj *tideprojectv1alpha2.Project) (admission.Warnings, error) {
+func (v *ProjectCustomValidator) ValidateCreate(_ context.Context, obj *tideprojectv1alpha3.Project) (admission.Warnings, error) {
 	projectlog.V(1).Info("ValidateCreate (P4.2 denylist enforcement)", "name", obj.GetName())
 	return v.validate(obj)
 }
 
 // ValidateUpdate is invoked on every Project PUT/PATCH.
-func (v *ProjectCustomValidator) ValidateUpdate(_ context.Context, _ *tideprojectv1alpha2.Project, newObj *tideprojectv1alpha2.Project) (admission.Warnings, error) {
+func (v *ProjectCustomValidator) ValidateUpdate(_ context.Context, _ *tideprojectv1alpha3.Project, newObj *tideprojectv1alpha3.Project) (admission.Warnings, error) {
 	projectlog.V(1).Info("ValidateUpdate (P4.2 denylist enforcement)", "name", newObj.GetName())
 	return v.validate(newObj)
 }
 
 // ValidateDelete is a no-op — denylist enforcement is create/update-only.
-func (v *ProjectCustomValidator) ValidateDelete(_ context.Context, _ *tideprojectv1alpha2.Project) (admission.Warnings, error) {
+func (v *ProjectCustomValidator) ValidateDelete(_ context.Context, _ *tideprojectv1alpha3.Project) (admission.Warnings, error) {
 	return nil, nil
 }
 
@@ -71,7 +71,7 @@ func (v *ProjectCustomValidator) ValidateDelete(_ context.Context, _ *tideprojec
 // PathPrefix matching admin/billing surfaces is rejected even if the operator
 // tries to add them. The hardcoded denylist is intentionally narrow — only
 // admin and billing paths.
-func (v *ProjectCustomValidator) validate(project *tideprojectv1alpha2.Project) (admission.Warnings, error) {
+func (v *ProjectCustomValidator) validate(project *tideprojectv1alpha3.Project) (admission.Warnings, error) {
 	denied := []string{"/v1/admin", "/v1/billing"}
 
 	for i, prov := range project.Spec.Providers {

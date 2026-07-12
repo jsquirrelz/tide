@@ -70,7 +70,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -124,7 +124,7 @@ func initLiveE2ESuite() { //nolint:unused // called only from live_claude_test.g
 	liveE2ECtx, liveE2ECancel = context.WithTimeout(context.Background(), liveE2ETestTimeout)
 
 	By("Registering TIDE CRD types in the runtime scheme")
-	Expect(tideprojectv1alpha2.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(tideprojectv1alpha3.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	By("Resolving kubeconfig path (KUBECONFIG env or ~/.kube/config)")
 	liveE2EKubeconfigPath = resolveKubeconfigPath()

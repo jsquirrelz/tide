@@ -33,7 +33,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 var _ = Describe("Output path violation detection (AC5 / HARN-05)", Label("kind"), func() {
@@ -66,14 +66,14 @@ var _ = Describe("Output path violation detection (AC5 / HARN-05)", Label("kind"
 
 		// Wait for task to be created.
 		Eventually(func() error {
-			t := &tideprojectv1alpha2.Task{}
+			t := &tideprojectv1alpha3.Task{}
 			return k8sClient.Get(ctx, client.ObjectKey{Name: "exceed-output-task", Namespace: outputNS}, t)
 		}, 30*time.Second, time.Second).Should(Succeed())
 
 		// The Task should reach Failed phase (output-path violation detected by harness).
 		// Allow 2 minutes for Job to complete + controller to detect the violation.
 		Eventually(func() string {
-			t := &tideprojectv1alpha2.Task{}
+			t := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: "exceed-output-task", Namespace: outputNS}, t); err != nil {
 				return ""
 			}

@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -46,23 +46,23 @@ func newTallyFakeClient(t *testing.T, objs ...client.Object) client.Client {
 	if err := clientgoscheme.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
-	if err := tidev1alpha2.AddToScheme(s); err != nil {
-		t.Fatalf("AddToScheme tidev1alpha2: %v", err)
+	if err := tidev1alpha3.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tidev1alpha3: %v", err)
 	}
 	return fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(objs...).
-		WithStatusSubresource(&tidev1alpha2.Project{}).
+		WithStatusSubresource(&tidev1alpha3.Project{}).
 		Build()
 }
 
-func makeProject(name string) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func makeProject(name string) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://github.com/example/repo",
 		},
 	}
@@ -82,7 +82,7 @@ func TestRollUpUsage_AccumulatesAcrossCalls(t *testing.T) {
 	}
 
 	// Fetch updated project after first patch.
-	updated := &tidev1alpha2.Project{}
+	updated := &tidev1alpha3.Project{}
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), updated); err != nil {
 		t.Fatalf("Get after first RollUpUsage: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRollUpUsage_AccumulatesAcrossCalls(t *testing.T) {
 	}
 
 	// Read final state.
-	final := &tidev1alpha2.Project{}
+	final := &tidev1alpha3.Project{}
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), final); err != nil {
 		t.Fatalf("Get after second RollUpUsage: %v", err)
 	}
@@ -119,21 +119,21 @@ func TestRollUpUsage_RetriesOnConflict(t *testing.T) {
 	if err := clientgoscheme.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
-	if err := tidev1alpha2.AddToScheme(s); err != nil {
-		t.Fatalf("AddToScheme tidev1alpha2: %v", err)
+	if err := tidev1alpha3.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme tidev1alpha3: %v", err)
 	}
 
 	var injected sync.Once
 	c := fake.NewClientBuilder().
 		WithScheme(s).
 		WithObjects(p).
-		WithStatusSubresource(&tidev1alpha2.Project{}).
+		WithStatusSubresource(&tidev1alpha3.Project{}).
 		WithInterceptorFuncs(interceptor.Funcs{
 			SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 				// Before the first patch lands, slip in a concurrent completion
 				// that bumps resourceVersion — forcing a Conflict and a retry.
 				injected.Do(func() {
-					other := &tidev1alpha2.Project{}
+					other := &tidev1alpha3.Project{}
 					if err := cl.Get(ctx, client.ObjectKeyFromObject(p), other); err != nil {
 						t.Errorf("interceptor Get: %v", err)
 						return
@@ -155,7 +155,7 @@ func TestRollUpUsage_RetriesOnConflict(t *testing.T) {
 		t.Fatalf("RollUpUsage: %v", err)
 	}
 
-	final := &tidev1alpha2.Project{}
+	final := &tidev1alpha3.Project{}
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), final); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRollUpUsage_SetsWindowStartOnFirstCall(t *testing.T) {
 		t.Fatalf("RollUpUsage: %v", err)
 	}
 
-	updated := &tidev1alpha2.Project{}
+	updated := &tidev1alpha3.Project{}
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestRollUpUsage_PreservesExistingWindowStart(t *testing.T) {
 		t.Fatalf("RollUpUsage: %v", err)
 	}
 
-	updated := &tidev1alpha2.Project{}
+	updated := &tidev1alpha3.Project{}
 	if err := c.Get(context.Background(), client.ObjectKeyFromObject(p), updated); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestMaybeResetWindow_TableDriven(t *testing.T) {
 				t.Errorf("reset = %v; want %v", reset, tc.wantReset)
 			}
 
-			var updated tidev1alpha2.Project
+			var updated tidev1alpha3.Project
 			if err := c.Get(ctx, client.ObjectKey{Namespace: p.Namespace, Name: p.Name}, &updated); err != nil {
 				t.Fatalf("get project: %v", err)
 			}

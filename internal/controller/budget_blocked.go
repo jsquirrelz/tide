@@ -43,7 +43,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 )
 
@@ -52,12 +52,12 @@ import (
 //
 // Nil-safe: a nil project returns false (no block — the reconciler handles the
 // missing-project case separately).
-func checkBudgetBlocked(project *tideprojectv1alpha2.Project) bool {
+func checkBudgetBlocked(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
 	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha2.ConditionBudgetBlocked &&
+		if c.Type == tideprojectv1alpha3.ConditionBudgetBlocked &&
 			c.Status == metav1.ConditionTrue {
 			return true
 		}
@@ -75,7 +75,7 @@ func checkBudgetBlocked(project *tideprojectv1alpha2.Project) bool {
 //
 // Called by the TaskReconciler after each cap check. The patch error is returned
 // so callers can log it non-fatally.
-func setBudgetBlockedIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project, reservedCents int64) error {
+func setBudgetBlockedIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha3.Project, reservedCents int64) error {
 	if project == nil {
 		return nil
 	}
@@ -84,15 +84,15 @@ func setBudgetBlockedIfNeeded(ctx context.Context, c client.Client, project *tid
 
 	if capExceeded {
 		// Idempotent check — avoid a spurious patch if already set.
-		existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+		existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 		if existing != nil && existing.Status == metav1.ConditionTrue {
 			return nil
 		}
 		patch := client.MergeFrom(project.DeepCopy())
 		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-			Type:   tideprojectv1alpha2.ConditionBudgetBlocked,
+			Type:   tideprojectv1alpha3.ConditionBudgetBlocked,
 			Status: metav1.ConditionTrue,
-			Reason: tideprojectv1alpha2.ReasonBudgetCapReached,
+			Reason: tideprojectv1alpha3.ReasonBudgetCapReached,
 			Message: fmt.Sprintf(
 				"Cost spent %d cents (+ %d reserved) exceeds cap %d cents; dispatch halted project-wide",
 				project.Status.Budget.CostSpentCents,
@@ -106,15 +106,15 @@ func setBudgetBlockedIfNeeded(ctx context.Context, c client.Client, project *tid
 
 	// Cap NOT exceeded — clear the condition if it is currently True so that an
 	// operator raising the cap recovers dispatch on the next reconcile cycle.
-	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+	existing := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 	if existing == nil || existing.Status != metav1.ConditionTrue {
 		return nil // condition absent or already False — no-op
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionBudgetBlocked,
+		Type:               tideprojectv1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha2.ReasonBudgetCapCleared,
+		Reason:             tideprojectv1alpha3.ReasonBudgetCapCleared,
 		Message:            "Budget cap is no longer exceeded; dispatch resumed.",
 		LastTransitionTime: metav1.Now(),
 	})

@@ -57,7 +57,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -86,7 +86,7 @@ func exportEnvelopesRun(
 	}
 
 	// Resolve Project to get its UID — the PVC subPath is the project UID.
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: projName}, &proj); err != nil {
 		return fmt.Errorf("get project %s/%s: %w", ns, projName, err)
 	}
@@ -420,7 +420,7 @@ func buildSeedManifest(
 	manifest := &pkgbundle.BundleManifest{}
 
 	// --- Milestones ---
-	var msList tidev1alpha2.MilestoneList
+	var msList tidev1alpha3.MilestoneList
 	if err := k.List(ctx, &msList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list milestones: %w", err)
 	}
@@ -448,7 +448,7 @@ func buildSeedManifest(
 	phaseToMilestone := make(map[string]string) // phase.Name → milestone.Name
 
 	// --- Phases ---
-	var phList tidev1alpha2.PhaseList
+	var phList tidev1alpha3.PhaseList
 	if err := k.List(ctx, &phList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list phases: %w", err)
 	}
@@ -483,7 +483,7 @@ func buildSeedManifest(
 	}
 
 	// --- Plans ---
-	var plList tidev1alpha2.PlanList
+	var plList tidev1alpha3.PlanList
 	if err := k.List(ctx, &plList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list plans: %w", err)
 	}
@@ -525,12 +525,12 @@ func assembleBundleFiles(
 	files := make(map[string][]byte)
 
 	// project.yaml — live Project spec with spec.importSource populated.
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: projName}, &proj); err != nil {
 		return nil, fmt.Errorf("get project for bundle: %w", err)
 	}
 	seedCMName := "tide-import-seed-" + projName
-	proj.Spec.ImportSource = &tidev1alpha2.ImportSourceRef{
+	proj.Spec.ImportSource = &tidev1alpha3.ImportSourceRef{
 		SeedManifestConfigMap: seedCMName,
 		SalvagedPVCSubPath:    projectUID + "/workspace",
 	}
@@ -539,7 +539,7 @@ func assembleBundleFiles(
 	// emitted project.yaml fails `kubectl apply` validation ("apiVersion not set,
 	// kind not set") when the round-trip re-applies it.
 	proj.TypeMeta = metav1.TypeMeta{
-		APIVersion: tidev1alpha2.GroupVersion.String(),
+		APIVersion: tidev1alpha3.GroupVersion.String(),
 		Kind:       "Project",
 	}
 	// Clear runtime fields so project.yaml is clean for re-apply.
@@ -552,7 +552,7 @@ func assembleBundleFiles(
 	proj.ResourceVersion = ""
 	proj.UID = ""
 	proj.Generation = 0
-	proj.Status = tidev1alpha2.ProjectStatus{}
+	proj.Status = tidev1alpha3.ProjectStatus{}
 	projYAML, err := yaml.Marshal(&proj)
 	if err != nil {
 		return nil, fmt.Errorf("marshal project.yaml: %w", err)
@@ -560,7 +560,7 @@ func assembleBundleFiles(
 	files[pkgbundle.BundleFileProject] = projYAML
 
 	// milestones.yaml — list of live Milestone specs.
-	var msList tidev1alpha2.MilestoneList
+	var msList tidev1alpha3.MilestoneList
 	if err := k.List(ctx, &msList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list milestones for bundle: %w", err)
 	}
@@ -572,7 +572,7 @@ func assembleBundleFiles(
 	files[pkgbundle.BundleFileMilestones] = msYAML
 
 	// phases.yaml — list of live Phase specs.
-	var phList tidev1alpha2.PhaseList
+	var phList tidev1alpha3.PhaseList
 	if err := k.List(ctx, &phList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list phases for bundle: %w", err)
 	}
@@ -585,7 +585,7 @@ func assembleBundleFiles(
 	files[pkgbundle.BundleFilePhases] = phYAML
 
 	// plans.yaml — list of live Plan specs.
-	var plList tidev1alpha2.PlanList
+	var plList tidev1alpha3.PlanList
 	if err := k.List(ctx, &plList, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("list plans for bundle: %w", err)
 	}
@@ -650,8 +650,8 @@ func buildSeedOutline(manifest *pkgbundle.BundleManifest) []byte {
 
 // -- helper filters ----------------------------------------------------------
 
-func filterMilestonesByProject(items []tidev1alpha2.Milestone, projName string) []tidev1alpha2.Milestone {
-	var out []tidev1alpha2.Milestone
+func filterMilestonesByProject(items []tidev1alpha3.Milestone, projName string) []tidev1alpha3.Milestone {
+	var out []tidev1alpha3.Milestone
 	for _, ms := range items {
 		if ms.Spec.ProjectRef == projName {
 			out = append(out, ms)
@@ -660,7 +660,7 @@ func filterMilestonesByProject(items []tidev1alpha2.Milestone, projName string) 
 	return out
 }
 
-func milestoneNameSet(items []tidev1alpha2.Milestone) map[string]bool {
+func milestoneNameSet(items []tidev1alpha3.Milestone) map[string]bool {
 	s := make(map[string]bool, len(items))
 	for _, ms := range items {
 		s[ms.Name] = true
@@ -668,8 +668,8 @@ func milestoneNameSet(items []tidev1alpha2.Milestone) map[string]bool {
 	return s
 }
 
-func filterPhasesByMilestones(items []tidev1alpha2.Phase, msNames map[string]bool) []tidev1alpha2.Phase {
-	var out []tidev1alpha2.Phase
+func filterPhasesByMilestones(items []tidev1alpha3.Phase, msNames map[string]bool) []tidev1alpha3.Phase {
+	var out []tidev1alpha3.Phase
 	for _, ph := range items {
 		if msNames[ph.Spec.MilestoneRef] {
 			out = append(out, ph)
@@ -678,7 +678,7 @@ func filterPhasesByMilestones(items []tidev1alpha2.Phase, msNames map[string]boo
 	return out
 }
 
-func phaseNameSet(items []tidev1alpha2.Phase) map[string]bool {
+func phaseNameSet(items []tidev1alpha3.Phase) map[string]bool {
 	s := make(map[string]bool, len(items))
 	for _, ph := range items {
 		s[ph.Name] = true
@@ -686,8 +686,8 @@ func phaseNameSet(items []tidev1alpha2.Phase) map[string]bool {
 	return s
 }
 
-func filterPlansByPhases(items []tidev1alpha2.Plan, phNames map[string]bool) []tidev1alpha2.Plan {
-	var out []tidev1alpha2.Plan
+func filterPlansByPhases(items []tidev1alpha3.Plan, phNames map[string]bool) []tidev1alpha3.Plan {
+	var out []tidev1alpha3.Plan
 	for _, pl := range items {
 		if phNames[pl.Spec.PhaseRef] {
 			out = append(out, pl)

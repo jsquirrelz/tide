@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ensurePVC creates a bound PVC if it doesn't already exist.
@@ -57,7 +57,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	})
 
 	AfterEach(func() {
-		p := &tideprojectv1alpha2.Project{}
+		p := &tideprojectv1alpha3.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, p); err == nil {
 			p.Finalizers = nil
 			_ = k8sClient.Update(ctx, p)
@@ -74,18 +74,18 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	})
 
 	It("Test 1: branch-name init sets Status.Git.BranchName to tide/run-<name>-<unix>", func() {
-		proj := &tideprojectv1alpha2.Project{
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 		r := &ProjectReconciler{
 			Client:                  k8sClient,
@@ -106,7 +106,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 				}
 			}
 			// On a particular pass, the init Job should exist — patch it to Succeeded.
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err == nil {
 				initJobName := fmt.Sprintf("tide-init-%s", p.UID)
 				var job batchv1.Job
@@ -120,7 +120,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 
 		// Verify Status.Git.BranchName is set.
 		Eventually(func(g Gomega) {
-			var got tideprojectv1alpha2.Project
+			var got tideprojectv1alpha3.Project
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 			g.Expect(got.Status.Git.BranchName).NotTo(BeEmpty(), "Status.Git.BranchName should be set after Phase 3 lifecycle")
 			matched, _ := regexp.MatchString(`^tide/run-test-proj-phase3-\d+$`, got.Status.Git.BranchName)
@@ -133,24 +133,24 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	})
 
 	It("Test 2: bypass annotation clears PushLeaseFailed and triggers retry", func() {
-		proj := &tideprojectv1alpha2.Project{
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 		// Patch Project status to PushLeaseFailed manually.
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
 		statusPatch := client.MergeFrom(p.DeepCopy())
-		p.Status.Phase = tideprojectv1alpha2.PhasePushLeaseFailed
+		p.Status.Phase = tideprojectv1alpha3.PhasePushLeaseFailed
 		p.Status.Git.BranchName = "tide/run-test-proj-phase3-1747200000"
 		p.Status.Git.LeaseFailureCount = 1
 		Expect(k8sClient.Status().Patch(ctx, &p, statusPatch)).To(Succeed())
@@ -182,9 +182,9 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 
 		// Verify PhasePushLeaseFailed is cleared.
 		Eventually(func(g Gomega) {
-			var got tideprojectv1alpha2.Project
+			var got tideprojectv1alpha3.Project
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-			g.Expect(got.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed), "PhasePushLeaseFailed should be cleared after bypass annotation")
+			g.Expect(got.Status.Phase).NotTo(Equal(tideprojectv1alpha3.PhasePushLeaseFailed), "PhasePushLeaseFailed should be cleared after bypass annotation")
 		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
@@ -197,29 +197,29 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 	// consume must run BEFORE the mid-run arm and must dispose of the
 	// classified failed Job so it cannot be re-classified after the bypass.
 	It("Test 3: bypass annotation clears PushLeaseFailed while the terminal-failed push Job still exists", func() {
-		proj := &tideprojectv1alpha2.Project{
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 		// Reproduce Test 3's end state from the kind spec: PushLeaseFailed
 		// phase + sticky condition, exactly as the lease-rejected arm writes.
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
 		statusPatch := client.MergeFrom(p.DeepCopy())
-		p.Status.Phase = tideprojectv1alpha2.PhasePushLeaseFailed
+		p.Status.Phase = tideprojectv1alpha3.PhasePushLeaseFailed
 		p.Status.Git.BranchName = "tide/run-test-proj-phase3-1747200000"
 		p.Status.Git.LeaseFailureCount = 1
 		p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionPushLeaseFailed,
+			Type:               tideprojectv1alpha3.ConditionPushLeaseFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "LeaseRejected",
 			Message:            "Push Job rejected by --force-with-lease",
@@ -275,9 +275,9 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		// disposed (so the mid-run arm cannot re-classify the bypassed
 		// failure back into PushLeaseFailed).
 		Eventually(func(g Gomega) {
-			var got tideprojectv1alpha2.Project
+			var got tideprojectv1alpha3.Project
 			g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-			g.Expect(got.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhasePushLeaseFailed),
+			g.Expect(got.Status.Phase).NotTo(Equal(tideprojectv1alpha3.PhasePushLeaseFailed),
 				"bypass must clear PushLeaseFailed even while the failed push Job exists (PR #3 CI regression)")
 			g.Expect(got.Annotations).NotTo(HaveKey(bypassPushLeaseAnnotation), "bypass annotation must be consumed")
 			var gotJob batchv1.Job

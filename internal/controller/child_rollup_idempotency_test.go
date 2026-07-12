@@ -39,29 +39,29 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
 // childRollupProject creates a minimal auto-gated Project, waits for cache, and returns it.
-func childRollupProject(ctx context.Context, name string) *tideprojectv1alpha2.Project {
-	proj := &tideprojectv1alpha2.Project{
+func childRollupProject(ctx context.Context, name string) *tideprojectv1alpha3.Project {
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://github.com/example/child-rollup.git",
-			Subagent:       tideprojectv1alpha2.SubagentConfig{Model: "claude-sonnet-4-6"},
-			Gates:          tideprojectv1alpha2.Gates{Milestone: tideprojectv1alpha2.GatePolicy("auto")},
+			Subagent:       tideprojectv1alpha3.SubagentConfig{Model: "claude-sonnet-4-6"},
+			Gates:          tideprojectv1alpha3.Gates{Milestone: tideprojectv1alpha3.GatePolicy("auto")},
 		},
 	}
 	Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 	return proj
 }
 
 // cleanupChildRollupProject deletes the project (best-effort, removes finalizers first).
 func cleanupChildRollupProject(ctx context.Context, name string) {
-	p := &tideprojectv1alpha2.Project{}
+	p := &tideprojectv1alpha3.Project{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(ctx, p)
@@ -70,8 +70,8 @@ func cleanupChildRollupProject(ctx context.Context, name string) {
 }
 
 // refetchProject reloads a Project from the manager cache.
-func refetchProject(ctx context.Context, name string) *tideprojectv1alpha2.Project {
-	p := &tideprojectv1alpha2.Project{}
+func refetchProject(ctx context.Context, name string) *tideprojectv1alpha3.Project {
+	p := &tideprojectv1alpha3.Project{}
 	Expect(mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, p)).To(Succeed())
 	return p
 }
@@ -94,7 +94,7 @@ var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-0
 	})
 
 	AfterEach(func() {
-		ms := &tideprojectv1alpha2.Milestone{}
+		ms := &tideprojectv1alpha3.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crMSName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
@@ -105,12 +105,12 @@ var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-0
 
 	It("ADOPT-02+04: milestone rollup accrues on first call and is idempotent on second (TTL-GC simulation)", func() {
 		// Create Milestone.
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: crMSName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: crMSProjName},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: crMSProjName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(crMSName, "default", &tideprojectv1alpha2.Milestone{})
+		waitForCacheSync(crMSName, "default", &tideprojectv1alpha3.Milestone{})
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crMSName, Namespace: "default"}, ms)).To(Succeed())
 
 		// Set Status.Phase=Running so the reconcile path enters handleJobCompletion.
@@ -165,7 +165,7 @@ var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-0
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			var fresh tideprojectv1alpha2.Milestone
+			var fresh tideprojectv1alpha3.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crMSName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.MilestoneRolledUpUID).To(
 				Equal(expectedJobName),
@@ -206,23 +206,23 @@ var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)",
 
 	BeforeEach(func() {
 		childRollupProject(ctx, crPHProjName)
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: crPHMSName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: crPHProjName},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: crPHProjName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(crPHMSName, "default", &tideprojectv1alpha2.Milestone{})
+		waitForCacheSync(crPHMSName, "default", &tideprojectv1alpha3.Milestone{})
 		envReader = newMapEnvReader()
 	})
 
 	AfterEach(func() {
-		ph := &tideprojectv1alpha2.Phase{}
+		ph := &tideprojectv1alpha3.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crPHName, Namespace: "default"}, ph); err == nil {
 			ph.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph)
 			_ = k8sClient.Delete(ctx, ph)
 		}
-		ms := &tideprojectv1alpha2.Milestone{}
+		ms := &tideprojectv1alpha3.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crPHMSName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
@@ -232,12 +232,12 @@ var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)",
 	})
 
 	It("ADOPT-02+04: phase rollup accrues on first call and is idempotent on second (TTL-GC simulation)", func() {
-		ph := &tideprojectv1alpha2.Phase{
+		ph := &tideprojectv1alpha3.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: crPHName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: crPHMSName},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: crPHMSName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(crPHName, "default", &tideprojectv1alpha2.Phase{})
+		waitForCacheSync(crPHName, "default", &tideprojectv1alpha3.Phase{})
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crPHName, Namespace: "default"}, ph)).To(Succeed())
 
 		statusPatch := client.MergeFrom(ph.DeepCopy())
@@ -293,7 +293,7 @@ var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)",
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			var fresh tideprojectv1alpha2.Phase
+			var fresh tideprojectv1alpha3.Phase
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crPHName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.PhaseRolledUpUID).To(
 				Equal(expectedJobName),
@@ -333,35 +333,35 @@ var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new m
 
 	BeforeEach(func() {
 		childRollupProject(ctx, crPlanProjName)
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: crPlanMSName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: crPlanProjName},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: crPlanProjName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(crPlanMSName, "default", &tideprojectv1alpha2.Milestone{})
-		ph := &tideprojectv1alpha2.Phase{
+		waitForCacheSync(crPlanMSName, "default", &tideprojectv1alpha3.Milestone{})
+		ph := &tideprojectv1alpha3.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: crPlanPhName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: crPlanMSName},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: crPlanMSName},
 		}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(crPlanPhName, "default", &tideprojectv1alpha2.Phase{})
+		waitForCacheSync(crPlanPhName, "default", &tideprojectv1alpha3.Phase{})
 		envReader = newMapEnvReader()
 	})
 
 	AfterEach(func() {
-		plan := &tideprojectv1alpha2.Plan{}
+		plan := &tideprojectv1alpha3.Plan{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crPlanName, Namespace: "default"}, plan); err == nil {
 			plan.Finalizers = nil
 			_ = k8sClient.Update(ctx, plan)
 			_ = k8sClient.Delete(ctx, plan)
 		}
-		ph := &tideprojectv1alpha2.Phase{}
+		ph := &tideprojectv1alpha3.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crPlanPhName, Namespace: "default"}, ph); err == nil {
 			ph.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph)
 			_ = k8sClient.Delete(ctx, ph)
 		}
-		ms := &tideprojectv1alpha2.Milestone{}
+		ms := &tideprojectv1alpha3.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: crPlanMSName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
@@ -371,12 +371,12 @@ var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new m
 	})
 
 	It("ADOPT-02+04 (D-03a): plan rollup accrues on first call and is idempotent on second (TTL-GC simulation)", func() {
-		plan := &tideprojectv1alpha2.Plan{
+		plan := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{Name: crPlanName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: crPlanPhName},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: crPlanPhName},
 		}
 		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-		waitForCacheSync(crPlanName, "default", &tideprojectv1alpha2.Plan{})
+		waitForCacheSync(crPlanName, "default", &tideprojectv1alpha3.Plan{})
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crPlanName, Namespace: "default"}, plan)).To(Succeed())
 
 		statusPatch := client.MergeFrom(plan.DeepCopy())
@@ -434,7 +434,7 @@ var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new m
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			var fresh tideprojectv1alpha2.Plan
+			var fresh tideprojectv1alpha3.Plan
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: crPlanName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.PlanRolledUpUID).To(
 				Equal(expectedJobName),

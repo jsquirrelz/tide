@@ -25,7 +25,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // reservedCostLabel is the K8s label key stamped on every dispatch Job at
@@ -124,7 +124,7 @@ func (s *ReservationStore) TotalReserved() int64 {
 //   - no cap is configured (both AbsoluteCapCents and RollingWindowCapCents <= 0;
 //     zero or negative = unlimited)
 //   - s is nil (store not configured — pre-Phase-14 code paths)
-func (s *ReservationStore) HasHeadroom(project *tidev1alpha2.Project, estimatedCents int64) bool {
+func (s *ReservationStore) HasHeadroom(project *tidev1alpha3.Project, estimatedCents int64) bool {
 	if s == nil {
 		return true
 	}

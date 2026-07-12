@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/yaml"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 func newSettingsHandler(t *testing.T, objs ...runtime.Object) http.Handler {
@@ -35,7 +35,7 @@ func newSettingsHandler(t *testing.T, objs ...runtime.Object) http.Handler {
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme(client-go): %v", err)
 	}
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -50,32 +50,37 @@ func newSettingsHandler(t *testing.T, objs ...runtime.Object) http.Handler {
 	return r
 }
 
-func fullSettingsProject() *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func fullSettingsProject() *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
 			OutcomePrompt:  "Build the thing end to end",
-			Git: &tidev1alpha2.GitConfig{
+			Git: &tidev1alpha3.GitConfig{
 				RepoURL:        "https://example.com/repo.git",
 				CredsSecretRef: "git-creds",
 			},
-			ModelSelection: tidev1alpha2.ModelSelection{
-				Milestone: "claude-opus", Phase: "claude-sonnet", Plan: "claude-sonnet", Task: "claude-haiku",
+			Subagent: tidev1alpha3.SubagentConfig{
+				Levels: tidev1alpha3.LevelOverrides{
+					Milestone: &tidev1alpha3.LevelConfig{Model: "claude-opus"},
+					Phase:     &tidev1alpha3.LevelConfig{Model: "claude-sonnet"},
+					Plan:      &tidev1alpha3.LevelConfig{Model: "claude-sonnet"},
+					Task:      &tidev1alpha3.LevelConfig{Model: "claude-haiku"},
+				},
 			},
-			Budget: tidev1alpha2.BudgetConfig{AbsoluteCapCents: 10000, RollingWindowCapCents: 5000},
-			Gates: tidev1alpha2.Gates{
+			Budget: tidev1alpha3.BudgetConfig{AbsoluteCapCents: 10000, RollingWindowCapCents: 5000},
+			Gates: tidev1alpha3.Gates{
 				Milestone: "approve", Phase: "auto", Plan: "auto", Task: "auto", PauseBetweenWaves: true,
 			},
-			SecretRefs: tidev1alpha2.SecretRefs{
+			SecretRefs: tidev1alpha3.SecretRefs{
 				AnthropicAPIKey: "anthropic-key", GitCredentials: "git-cred-secret",
 			},
 			ProviderSecretRef: "provider-secret",
 		},
-		Status: tidev1alpha2.ProjectStatus{
-			Git:    tidev1alpha2.GitStatus{BranchName: "tide/run-prj-1-1"},
-			Budget: tidev1alpha2.BudgetStatus{CostSpentCents: 250},
+		Status: tidev1alpha3.ProjectStatus{
+			Git:    tidev1alpha3.GitStatus{BranchName: "tide/run-prj-1-1"},
+			Budget: tidev1alpha3.BudgetStatus{CostSpentCents: 250},
 		},
 	}
 }
@@ -177,9 +182,9 @@ func TestSettingsRedaction(t *testing.T) {
 // TestSettingsHonestDefaults: absent optionals serialize as "" (never invented);
 // unknown project → 404.
 func TestSettingsHonestDefaults(t *testing.T) {
-	minimal := &tidev1alpha2.Project{
+	minimal := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "bare", Namespace: "default"},
-		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/r.git"},
+		Spec:       tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/r.git"},
 	}
 	router := newSettingsHandler(t, minimal)
 	srv := httptest.NewServer(router)

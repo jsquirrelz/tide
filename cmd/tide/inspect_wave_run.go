@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // canonical label keys per internal/controller/plan_controller.go:513-523.
@@ -69,7 +69,7 @@ func inspectWaveRunWithErr(
 ) error {
 	// List Tasks in the namespace; filter client-side by label vocabulary
 	// to avoid coupling the test harness to API-server selector parsing.
-	var list tidev1alpha2.TaskList
+	var list tidev1alpha3.TaskList
 	if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return fmt.Errorf("list tasks in %s: %w", ns, err)
 	}

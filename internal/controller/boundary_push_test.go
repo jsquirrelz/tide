@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
@@ -84,32 +84,32 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			_ = k8sClient.Delete(ctx, &j)
 		}
 		for _, n := range names {
-			ms := &tideprojectv1alpha2.Milestone{}
+			ms := &tideprojectv1alpha3.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, ms); err == nil {
 				ms.Finalizers = nil
 				_ = k8sClient.Update(ctx, ms)
 				_ = k8sClient.Delete(ctx, ms)
 			}
-			ph := &tideprojectv1alpha2.Phase{}
+			ph := &tideprojectv1alpha3.Phase{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, ph); err == nil {
 				ph.Finalizers = nil
 				_ = k8sClient.Update(ctx, ph)
 				_ = k8sClient.Delete(ctx, ph)
 			}
-			pl := &tideprojectv1alpha2.Plan{}
+			pl := &tideprojectv1alpha3.Plan{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, pl); err == nil {
 				pl.Finalizers = nil
 				_ = k8sClient.Update(ctx, pl)
 				_ = k8sClient.Delete(ctx, pl)
 			}
 			// CR-03 fix: also clean up child Tasks created to satisfy BoundaryDetected.
-			tsk := &tideprojectv1alpha2.Task{}
+			tsk := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
 				tsk.Finalizers = nil
 				_ = k8sClient.Update(ctx, tsk)
 				_ = k8sClient.Delete(ctx, tsk)
 			}
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
@@ -118,12 +118,12 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		}
 	}
 
-	makeProjectForBP := func(name string, gates tideprojectv1alpha2.Gates) *tideprojectv1alpha2.Project {
-		proj := &tideprojectv1alpha2.Project{
+	makeProjectForBP := func(name string, gates tideprojectv1alpha3.Gates) *tideprojectv1alpha3.Project {
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
@@ -131,10 +131,10 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 
 		// Stamp the BranchName so push-job dispatch picks a non-empty branch.
-		var got tideprojectv1alpha2.Project
+		var got tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
 		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
@@ -150,9 +150,9 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 	// for the cache to observe both the create and the status patch so
 	// BoundaryDetected returns true on the next reconcile.
 	makeSucceededChildPhase := func(name, msName string, msParent client.Object) {
-		ph := &tideprojectv1alpha2.Phase{
+		ph := &tideprojectv1alpha3.Phase{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 		}
 		t := true
 		ph.OwnerReferences = []metav1.OwnerReference{{
@@ -164,14 +164,14 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			BlockOwnerDeletion: &t,
 		}}
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Phase{})
-		var got tideprojectv1alpha2.Phase
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Phase{})
+		var got tideprojectv1alpha3.Phase
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
 		got.Status.Phase = "Succeeded"
 		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
 		Eventually(func() string {
-			var g tideprojectv1alpha2.Phase
+			var g tideprojectv1alpha3.Phase
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
 				return ""
 			}
@@ -180,9 +180,9 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 	}
 
 	makeSucceededChildPlan := func(name, phName string, phParent client.Object) {
-		pl := &tideprojectv1alpha2.Plan{
+		pl := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: phName},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: phName},
 		}
 		t := true
 		pl.OwnerReferences = []metav1.OwnerReference{{
@@ -194,14 +194,14 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			BlockOwnerDeletion: &t,
 		}}
 		Expect(k8sClient.Create(ctx, pl)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Plan{})
-		var got tideprojectv1alpha2.Plan
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Plan{})
+		var got tideprojectv1alpha3.Plan
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
 		got.Status.Phase = "Succeeded"
 		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
 		Eventually(func() string {
-			var g tideprojectv1alpha2.Plan
+			var g tideprojectv1alpha3.Plan
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
 				return ""
 			}
@@ -222,15 +222,15 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		})
 
 		It("creates a tide-push-<project-uid> Job with the milestone D-B2 message", func() {
-			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Milestone: "auto"})
+			proj := makeProjectForBP(projectName, tideprojectv1alpha3.Gates{Milestone: "auto"})
 
 			// Create Milestone with parent ref to Project.
-			ms := &tideprojectv1alpha2.Milestone{
+			ms := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
@@ -251,7 +251,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
 			// Get Milestone UID + set envelope-out, mark planner Job Succeeded.
-			var got tideprojectv1alpha2.Milestone
+			var got tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
 			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Phase
 			// before allowing succession. Without it the gate treats the milestone as a
@@ -287,21 +287,21 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		})
 
 		It("creates a tide-push-<project-uid> Job with the phase D-B2 message", func() {
-			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Phase: "auto"})
+			proj := makeProjectForBP(projectName, tideprojectv1alpha3.Gates{Phase: "auto"})
 
-			ms := &tideprojectv1alpha2.Milestone{
+			ms := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
-			ph := &tideprojectv1alpha2.Phase{
+			ph := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-			waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
@@ -321,7 +321,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
 
-			var got tideprojectv1alpha2.Phase
+			var got tideprojectv1alpha3.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)).To(Succeed())
 			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Plan.
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
@@ -358,27 +358,27 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		// Tasks pre-existing. The milestone + phase tests above DO pre-create
 		// Succeeded children to exercise the new BoundaryDetected gate.
 		It("creates a tide-push-<project-uid> Job with the plan D-B2 message (with '+ executed' suffix)", func() {
-			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Plan: "auto"})
-			ms := &tideprojectv1alpha2.Milestone{
+			proj := makeProjectForBP(projectName, tideprojectv1alpha3.Gates{Plan: "auto"})
+			ms := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
-			ph := &tideprojectv1alpha2.Phase{
+			ph := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, ph)).To(Succeed())
-			waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
-			plan := &tideprojectv1alpha2.Plan{
+			plan := &tideprojectv1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{Name: planName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: phaseName},
+				Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: phaseName},
 			}
 			Expect(k8sClient.Create(ctx, plan)).To(Succeed())
-			waitForCacheSync(planName, "default", &tideprojectv1alpha2.Plan{})
+			waitForCacheSync(planName, "default", &tideprojectv1alpha3.Plan{})
 
 			envReader := newMapEnvReader()
 			r := &PlanReconciler{
@@ -398,7 +398,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())
 
-			var got tideprojectv1alpha2.Plan
+			var got tideprojectv1alpha3.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: planName, Namespace: "default"}, &got)).To(Succeed())
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{
 				TaskUID:  string(got.UID),
@@ -422,14 +422,14 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		})
 
 		It("a second reconcile after the push Job already exists does not panic and does not duplicate", func() {
-			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Milestone: "auto"})
+			proj := makeProjectForBP(projectName, tideprojectv1alpha3.Gates{Milestone: "auto"})
 
-			ms := &tideprojectv1alpha2.Milestone{
+			ms := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
@@ -448,7 +448,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			}
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: msName, Namespace: "default"}, 5)).To(Succeed())
 
-			var got tideprojectv1alpha2.Milestone
+			var got tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got)).To(Succeed())
 			// Plan 09-08: ChildCount=1 so the ChildCount gate expects 1 child Phase.
 			envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0, ChildCount: 1})
@@ -474,10 +474,10 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		})
 
 		It("Project has reject annotation: push Job is NOT created", Label("heavy"), func() {
-			proj := makeProjectForBP(projectName, tideprojectv1alpha2.Gates{Milestone: "auto"})
+			proj := makeProjectForBP(projectName, tideprojectv1alpha3.Gates{Milestone: "auto"})
 
 			// Apply reject annotation on Project.
-			var pp tideprojectv1alpha2.Project
+			var pp tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &pp)).To(Succeed())
 			patch := client.MergeFrom(pp.DeepCopy())
 			if pp.Annotations == nil {
@@ -486,12 +486,12 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 			pp.Annotations["tideproject.k8s/reject"] = "operator halted"
 			Expect(k8sClient.Patch(ctx, &pp, patch)).To(Succeed())
 
-			ms := &tideprojectv1alpha2.Milestone{
+			ms := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+				Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 			}
 			Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-			waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
@@ -535,20 +535,20 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)", Label("envtest", "phase34", "boundarypush"), func() {
 	ctx := context.Background()
 
-	makeProjectTBP := func(name string) *tideprojectv1alpha2.Project {
-		proj := &tideprojectv1alpha2.Project{
+	makeProjectTBP := func(name string) *tideprojectv1alpha3.Project {
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
-		var got tideprojectv1alpha2.Project
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
+		var got tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
 		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
@@ -556,14 +556,14 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 		return &got
 	}
 
-	makeTaskTBP := func(name, projectName, phase string) *tideprojectv1alpha2.Task {
-		tsk := &tideprojectv1alpha2.Task{
+	makeTaskTBP := func(name, projectName, phase string) *tideprojectv1alpha3.Task {
+		tsk := &tideprojectv1alpha3.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "default",
 				Labels:    map[string]string{"tideproject.k8s/project": projectName},
 			},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:             "some-plan",
 				FilesTouched:        []string{"f.go"},
 				PromptPath:          "envelopes/x/children/task-01.json",
@@ -571,8 +571,8 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 			},
 		}
 		Expect(k8sClient.Create(ctx, tsk)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
-		var got tideprojectv1alpha2.Task
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Task{})
+		var got tideprojectv1alpha3.Task
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
 		got.Status.Phase = phase
@@ -582,7 +582,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 
 	cleanup := func(projectName string, taskNames []string, jobNames []string) {
 		for _, n := range taskNames {
-			tsk := &tideprojectv1alpha2.Task{}
+			tsk := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
 				_ = k8sClient.Delete(ctx, tsk)
 			}
@@ -593,7 +593,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 				_ = k8sClient.Delete(ctx, j)
 			}
 		}
-		proj := &tideprojectv1alpha2.Project{}
+		proj := &tideprojectv1alpha3.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 			_ = k8sClient.Delete(ctx, proj)
 		}
@@ -609,7 +609,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 		defer cleanup(projectName, []string{"tbp-cum-t1", "tbp-cum-t2", "tbp-cum-t3", "tbp-cum-t4"},
 			[]string{fmt.Sprintf("tide-push-%s", proj.UID)})
 
-		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-cum-parent"}}
+		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-cum-parent"}}
 		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
 			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})
 		Expect(err).NotTo(HaveOccurred())
@@ -648,7 +648,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 		}
 		Expect(k8sClient.Create(ctx, otherJob)).To(Succeed())
 
-		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-busy-parent"}}
+		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-busy-parent"}}
 		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
 			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})
 		Expect(errors.Is(err, errGitWriterBusy)).To(BeTrue(), "expected errGitWriterBusy, got: %v", err)
@@ -664,7 +664,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 		pushJobName := fmt.Sprintf("tide-push-%s", proj.UID)
 		defer cleanup(projectName, nil, []string{pushJobName})
 
-		parent := &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-idem-parent"}}
+		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-idem-parent"}}
 		Expect(triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
 			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})).To(Succeed())
 

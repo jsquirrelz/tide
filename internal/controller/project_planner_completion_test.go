@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -67,27 +67,27 @@ func qqhBuildReconciler(envReader *mapEnvReader) *ProjectReconciler {
 
 // qqhCreateProject creates a minimal Project with the given name and waits for
 // the cache to reflect it. Returns the hydrated project (with UID populated).
-func qqhCreateProject(ctx context.Context, name string) *tideprojectv1alpha2.Project {
-	proj := &tideprojectv1alpha2.Project{
+func qqhCreateProject(ctx context.Context, name string) *tideprojectv1alpha3.Project {
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://github.com/example/test.git",
 			OutcomePrompt:  "Build a test project",
-			Subagent:       tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+			Subagent:       tideprojectv1alpha3.SubagentConfig{Model: "claude-opus-4-7"},
 		},
 	}
 	Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 	return proj
 }
 
 // qqhCleanupProject removes finalizers and deletes the named Project (best-effort).
 func qqhCleanupProject(ctx context.Context, name string) {
-	p := &tideprojectv1alpha2.Project{}
+	p := &tideprojectv1alpha3.Project{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(ctx, p)
@@ -174,7 +174,7 @@ var _ = Describe("ProjectReconciler — BYPASS-03 / BYPASS-05 rollup-once across
 
 			// Assert: cost rolled up exactly once (not 2×) and marker is set.
 			Eventually(func(g Gomega) {
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass03ProjName, Namespace: "default"}, &refreshed)).To(Succeed())
 				g.Expect(refreshed.Status.Budget.CostSpentCents).To(
 					BeNumerically("==", plannerCostCents),
@@ -239,7 +239,7 @@ var _ = Describe("ProjectReconciler — BYPASS-03 / BYPASS-05 rollup-once across
 
 			// (b) CostSpentCents must reflect planner spend.
 			Eventually(func(g Gomega) {
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: bypass05ProjName, Namespace: "default"}, &refreshed)).To(Succeed())
 				g.Expect(refreshed.Status.Budget.CostSpentCents).To(
 					BeNumerically(">=", plannerCostCents),
@@ -286,7 +286,7 @@ var _ = Describe("ProjectReconciler — planner Job completion while Job still e
 			_, err := r.reconcileProjectPlannerDispatch(ctx, proj)
 			Expect(err).NotTo(HaveOccurred())
 			// reconcileProjectPlannerDispatch patches proj.Status.Phase in-place.
-			Expect(proj.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(proj.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"dispatch must have patched Phase=Running in-memory")
 
 			plannerJobName := fmt.Sprintf("tide-project-%s-1", proj.UID)
@@ -342,7 +342,7 @@ var _ = Describe("ProjectReconciler — planner Job completion while Job still e
 
 			// (b) Project.Status.Budget.CostSpentCents must reflect the planner spend.
 			Eventually(func(g Gomega) {
-				var refreshedProj tideprojectv1alpha2.Project
+				var refreshedProj tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: primProjName, Namespace: "default"}, &refreshedProj)).To(Succeed())
 				g.Expect(refreshedProj.Status.Budget.CostSpentCents).To(
 					BeNumerically(">=", plannerCostCents),
@@ -374,7 +374,7 @@ var _ = Describe("ProjectReconciler — planner Job completion while Job still e
 			_, err := r.reconcileProjectPlannerDispatch(ctx, proj)
 			Expect(err).NotTo(HaveOccurred())
 			// In-memory check: the dispatch patched proj.Status.Phase directly.
-			Expect(proj.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(proj.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"dispatch must patch Phase=Running in-memory")
 
 			plannerJobName := fmt.Sprintf("tide-project-%s-1", proj.UID)
@@ -409,7 +409,7 @@ var _ = Describe("ProjectReconciler — planner Job completion while Job still e
 				"control: tide-reporter-<uid> must NOT be created while planner Job is still Running")
 
 			// Budget must remain 0.
-			var refreshedProj tideprojectv1alpha2.Project
+			var refreshedProj tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: ctrlProjName, Namespace: "default"}, &refreshedProj)).To(Succeed())
 			Expect(refreshedProj.Status.Budget.CostSpentCents).To(BeZero(),
 				"control: budget must remain 0 while planner Job is non-terminal")

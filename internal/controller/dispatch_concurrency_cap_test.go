@@ -33,7 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/pool"
 )
 
@@ -61,26 +61,26 @@ func TestConcurrencyCapGate_MilestoneDispatchParks(t *testing.T) {
 	}
 
 	// A minimal Project so the early-project hold checks see a valid project.
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-project",
 			Namespace: "default",
 			UID:       types.UID("proj-uid-cap"),
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			OutcomePrompt:  "build something",
 		},
 	}
 
 	// A Milestone in an empty Phase (dispatch-eligible: not Succeeded/Failed/AwaitingApproval/Running).
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-cap-test",
 			Namespace: "default",
 			UID:       types.UID("ms-uid-cap"),
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{
+		Spec: tideprojectv1alpha3.MilestoneSpec{
 			ProjectRef: "test-project",
 		},
 	}
@@ -131,24 +131,24 @@ func TestConcurrencyCapGate_RequeueAfterIs10s(t *testing.T) {
 			Labels:    map[string]string{"tideproject.k8s/role": "planner"},
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-project-dur",
 			Namespace: "default",
 			UID:       types.UID("proj-uid-dur"),
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			OutcomePrompt:  "build something",
 		},
 	}
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-cap-dur",
 			Namespace: "default",
 			UID:       types.UID("ms-uid-dur"),
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "test-project-dur"},
+		Spec: tideprojectv1alpha3.MilestoneSpec{ProjectRef: "test-project-dur"},
 	}
 
 	s := milestoneDispatchScheme(t)
@@ -182,24 +182,24 @@ func TestGatePrecedesAcquire_SlotNotConsumed(t *testing.T) {
 			Labels:    map[string]string{"tideproject.k8s/role": "planner"},
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-project-order",
 			Namespace: "default",
 			UID:       types.UID("proj-uid-order"),
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			OutcomePrompt:  "build something",
 		},
 	}
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-cap-order",
 			Namespace: "default",
 			UID:       types.UID("ms-uid-order"),
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{ProjectRef: "test-project-order"},
+		Spec: tideprojectv1alpha3.MilestoneSpec{ProjectRef: "test-project-order"},
 	}
 
 	s := milestoneDispatchScheme(t)

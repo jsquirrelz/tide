@@ -58,7 +58,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
@@ -185,7 +185,7 @@ func (r *ImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	logger := logf.FromContext(ctx)
 
 	// 1. Fetch.
-	var project tideprojectv1alpha2.Project
+	var project tideprojectv1alpha3.Project
 	if err := r.Get(ctx, req.NamespacedName, &project); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -197,16 +197,16 @@ func (r *ImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Idempotency guard (D-12): ConditionImportComplete=True → no-op.
 	// Honor AnnotationRetryImport to reset on operator retry.
-	cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+	cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 	if cond != nil && cond.Status == metav1.ConditionTrue {
 		// Check for retry annotation: if present, reset and continue.
-		if _, hasRetry := project.Annotations[tideprojectv1alpha2.AnnotationRetryImport]; !hasRetry {
+		if _, hasRetry := project.Annotations[tideprojectv1alpha3.AnnotationRetryImport]; !hasRetry {
 			return ctrl.Result{}, nil
 		}
 		// Retry annotation present: clear the condition and proceed.
 		logger.Info("import retry annotation detected; resetting ImportComplete", "project", project.Name)
 		if err := r.setImportCondition(ctx, &project, metav1.ConditionFalse,
-			tideprojectv1alpha2.ReasonImportFailed, "retrying import per operator annotation"); err != nil {
+			tideprojectv1alpha3.ReasonImportFailed, "retrying import per operator annotation"); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -247,8 +247,8 @@ func (r *ImportReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 // Status.Import.Phase enum) instead. Deferred from the Phase 28 fix pass to
 // avoid destabilizing the state machine; the reason-checks below are also
 // partly unreachable.
-func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha2.Project) importStatePhase {
-	cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha3.Project) importStatePhase {
+	cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 	if cond == nil {
 		return "" // Pending
 	}
@@ -256,8 +256,8 @@ func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha2.Proje
 		return importStateComplete
 	}
 	// False condition with specific reasons:
-	if cond.Reason == tideprojectv1alpha2.ReasonCyclicPlanDetected ||
-		cond.Reason == tideprojectv1alpha2.ReasonImportFailed {
+	if cond.Reason == tideprojectv1alpha3.ReasonCyclicPlanDetected ||
+		cond.Reason == tideprojectv1alpha3.ReasonImportFailed {
 		// Check if this is a terminal failure vs in-progress marker.
 		// In-progress states use ReasonImportFailed with specific messages.
 		// We use the message to distinguish in-progress vs terminal failures.
@@ -283,7 +283,7 @@ func (r *ImportReconciler) currentImportState(project *tideprojectv1alpha2.Proje
 // materializes the CR tree, records the rekey ConfigMap, then transitions to CopyingEnvelopes.
 //
 //nolint:gocyclo // a flat sequence of mutually-exclusive transition arms over a freshly E2E-validated import path; splitting obscures the contract
-func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *tideprojectv1alpha2.Project) (ctrl.Result, error) {
+func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *tideprojectv1alpha3.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	logger.Info("import: creating CRs from seed", "project", project.Name)
 
@@ -306,14 +306,14 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 	rawManifest, ok := seedCM.Data["manifest"]
 	if !ok {
 		logger.Info("import: seed ConfigMap missing 'manifest' key; failing")
-		return ctrl.Result{}, r.failImport(ctx, project, tideprojectv1alpha2.ReasonImportFailed,
+		return ctrl.Result{}, r.failImport(ctx, project, tideprojectv1alpha3.ReasonImportFailed,
 			"seed ConfigMap missing 'manifest' key")
 	}
 
 	var seed seedManifest
 	if err := json.Unmarshal([]byte(rawManifest), &seed); err != nil {
 		logger.Error(err, "import: failed to parse seed manifest JSON")
-		return ctrl.Result{}, r.failImport(ctx, project, tideprojectv1alpha2.ReasonImportFailed,
+		return ctrl.Result{}, r.failImport(ctx, project, tideprojectv1alpha3.ReasonImportFailed,
 			fmt.Sprintf("seed manifest JSON parse error: %v", err))
 	}
 
@@ -371,13 +371,13 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 			logger.Info("import: cyclic dependency detected in seed planning DAG",
 				"involved", cycleErr.InvolvedNodes, "project", project.Name)
 			return ctrl.Result{}, r.failImport(ctx, project,
-				tideprojectv1alpha2.ReasonCyclicPlanDetected,
+				tideprojectv1alpha3.ReasonCyclicPlanDetected,
 				fmt.Sprintf("cyclic dependency in seed planning DAG: %v", cycleErr.InvolvedNodes))
 		}
 		// Unknown-node error: an unresolved dependsOn ref.
 		logger.Info("import: unresolved dependsOn reference in seed", "error", dagErr, "project", project.Name)
 		return ctrl.Result{}, r.failImport(ctx, project,
-			tideprojectv1alpha2.ReasonImportFailed,
+			tideprojectv1alpha3.ReasonImportFailed,
 			fmt.Sprintf("unresolved dependsOn reference in seed: %v", dagErr))
 	}
 
@@ -393,12 +393,12 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		if projectRef == "" {
 			projectRef = project.Name
 		}
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      msSeed.Name,
 				Namespace: project.Namespace,
 			},
-			Spec: tideprojectv1alpha2.MilestoneSpec{
+			Spec: tideprojectv1alpha3.MilestoneSpec{
 				ProjectRef: projectRef,
 				DependsOn:  msSeed.DependsOn,
 			},
@@ -434,12 +434,12 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 	// Materialize Phases (parent = Milestone).
 	for _, phSeed := range seed.Phases {
 		phaseRef := phSeed.MilestoneRef
-		ph := &tideprojectv1alpha2.Phase{
+		ph := &tideprojectv1alpha3.Phase{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      phSeed.Name,
 				Namespace: project.Namespace,
 			},
-			Spec: tideprojectv1alpha2.PhaseSpec{
+			Spec: tideprojectv1alpha3.PhaseSpec{
 				MilestoneRef: phaseRef,
 				DependsOn:    phSeed.DependsOn,
 			},
@@ -447,7 +447,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		// Owner ref to the parent Milestone (if it exists); fall back to Project.
 		var msOwner metav1.Object = project
 		if phaseRef != "" {
-			var parentMS tideprojectv1alpha2.Milestone
+			var parentMS tideprojectv1alpha3.Milestone
 			if getErr := r.Get(ctx, types.NamespacedName{Namespace: project.Namespace, Name: phaseRef}, &parentMS); getErr == nil {
 				msOwner = &parentMS
 			}
@@ -481,12 +481,12 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 	// Materialize Plans (parent = Phase).
 	for _, plSeed := range seed.Plans {
 		phaseRef := plSeed.PhaseRef
-		pl := &tideprojectv1alpha2.Plan{
+		pl := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      plSeed.Name,
 				Namespace: project.Namespace,
 			},
-			Spec: tideprojectv1alpha2.PlanSpec{
+			Spec: tideprojectv1alpha3.PlanSpec{
 				PhaseRef:  phaseRef,
 				DependsOn: plSeed.DependsOn,
 			},
@@ -494,7 +494,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 		// Owner ref to the parent Phase (if it exists); fall back to Project.
 		var phOwner metav1.Object = project
 		if phaseRef != "" {
-			var parentPh tideprojectv1alpha2.Phase
+			var parentPh tideprojectv1alpha3.Phase
 			if getErr := r.Get(ctx, types.NamespacedName{Namespace: project.Namespace, Name: phaseRef}, &parentPh); getErr == nil {
 				phOwner = &parentPh
 			}
@@ -581,7 +581,7 @@ func (r *ImportReconciler) reconcileCreatingCRs(ctx context.Context, project *ti
 
 // reconcileCopyingEnvelopes handles the CopyingEnvelopes phase: dispatch the
 // tide-import Job (if not already running/complete) and watch for completion.
-func (r *ImportReconciler) reconcileCopyingEnvelopes(ctx context.Context, project *tideprojectv1alpha2.Project) (ctrl.Result, error) {
+func (r *ImportReconciler) reconcileCopyingEnvelopes(ctx context.Context, project *tideprojectv1alpha3.Project) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	jobName := fmt.Sprintf("tide-import-%s", project.UID)
 
@@ -643,7 +643,7 @@ func (r *ImportReconciler) reconcileCopyingEnvelopes(ctx context.Context, projec
 			logger.Info("import: tide-import Job failed; marking ImportComplete=False",
 				"job", jobName, "project", project.Name)
 			return ctrl.Result{}, r.failImport(ctx, project,
-				tideprojectv1alpha2.ReasonImportFailed,
+				tideprojectv1alpha3.ReasonImportFailed,
 				fmt.Sprintf("tide-import Job %s failed", jobName))
 		}
 	}
@@ -656,13 +656,13 @@ func (r *ImportReconciler) reconcileCopyingEnvelopes(ctx context.Context, projec
 // Uses the MergeFrom + Status().Patch pattern (mirrors ProjectReconciler).
 func (r *ImportReconciler) setImportCondition(
 	ctx context.Context,
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	status metav1.ConditionStatus,
 	reason, message string,
 ) error {
 	statusPatch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionImportComplete,
+		Type:               tideprojectv1alpha3.ConditionImportComplete,
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
@@ -675,12 +675,12 @@ func (r *ImportReconciler) setImportCondition(
 // in-progress state tracking (CreatingCRs / CopyingEnvelopes).
 func (r *ImportReconciler) setImportPhaseCondition(
 	ctx context.Context,
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	reason, message string,
 ) error {
 	statusPatch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionImportComplete,
+		Type:               tideprojectv1alpha3.ConditionImportComplete,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            message,
@@ -693,16 +693,16 @@ func (r *ImportReconciler) setImportPhaseCondition(
 // Creates ZERO child CRs (call before any client.Create for atomicity — D-10).
 func (r *ImportReconciler) failImport(
 	ctx context.Context,
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	reason, message string,
 ) error {
 	return r.setImportCondition(ctx, project, metav1.ConditionFalse, reason, message)
 }
 
 // succeedImport sets ConditionImportComplete=True with ReasonImportSucceeded.
-func (r *ImportReconciler) succeedImport(ctx context.Context, project *tideprojectv1alpha2.Project) error {
+func (r *ImportReconciler) succeedImport(ctx context.Context, project *tideprojectv1alpha3.Project) error {
 	return r.setImportCondition(ctx, project, metav1.ConditionTrue,
-		tideprojectv1alpha2.ReasonImportSucceeded,
+		tideprojectv1alpha3.ReasonImportSucceeded,
 		"tide-import Job completed; all envelopes copied and schema-converted to new-UID paths")
 }
 
@@ -725,13 +725,13 @@ func (r *ImportReconciler) succeedImport(ctx context.Context, project *tideproje
 func newImportCompleteReassertPredicate() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldP, ok1 := e.ObjectOld.(*tideprojectv1alpha2.Project)
-			newP, ok2 := e.ObjectNew.(*tideprojectv1alpha2.Project)
+			oldP, ok1 := e.ObjectOld.(*tideprojectv1alpha3.Project)
+			newP, ok2 := e.ObjectNew.(*tideprojectv1alpha3.Project)
 			if !ok1 || !ok2 {
 				return false
 			}
-			was := meta.IsStatusConditionTrue(oldP.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
-			is := meta.IsStatusConditionTrue(newP.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+			was := meta.IsStatusConditionTrue(oldP.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
+			is := meta.IsStatusConditionTrue(newP.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 			return was && !is
 		},
 		CreateFunc:  func(event.CreateEvent) bool { return false },
@@ -748,7 +748,7 @@ func (r *ImportReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return obj.GetNamespace() == r.WatchNamespace
 	})
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha2.Project{},
+		For(&tideprojectv1alpha3.Project{},
 			builder.WithPredicates(predicate.Or(
 				predicate.GenerationChangedPredicate{},
 				predicate.AnnotationChangedPredicate{},

@@ -43,7 +43,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // Label vocabulary — canonical keys stamped by internal/controller/*.
@@ -92,7 +92,7 @@ type waveKey struct {
 //
 // The returned WavesSnapshot.Waves is always a non-nil slice.
 func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName string) (WavesSnapshot, error) {
-	var taskList tidev1alpha2.TaskList
+	var taskList tidev1alpha3.TaskList
 	if err := cli.List(ctx, &taskList,
 		client.InNamespace(ns),
 		client.MatchingLabels{labelProject: projectName},
@@ -104,7 +104,7 @@ func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName
 	// Group tasks by (planRef, wave-index).
 	// Tasks missing the wave-index label (not yet stamped by the reconciler)
 	// are skipped — they will appear on the next reconcile cycle.
-	groups := make(map[waveKey][]tidev1alpha2.Task)
+	groups := make(map[waveKey][]tidev1alpha3.Task)
 	for i := range taskList.Items {
 		tk := &taskList.Items[i]
 		waveStr, ok := tk.Labels[labelWaveIndex]
@@ -167,7 +167,7 @@ func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName
 
 // anyRunning reports whether any task in the slice has phase Running or
 // Dispatching — the "is this wave running" predicate per UI-SPEC C3.
-func anyRunning(tasks []tidev1alpha2.Task) bool {
+func anyRunning(tasks []tidev1alpha3.Task) bool {
 	for i := range tasks {
 		if isRunningPhase(tasks[i].Status.Phase) {
 			return true

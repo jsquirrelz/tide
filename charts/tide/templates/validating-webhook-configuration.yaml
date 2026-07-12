@@ -13,14 +13,14 @@ webhooks:
     service:
       name: '{{ include "tide.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
-      path: /validate-tideproject-k8s-v1alpha2-plan
+      path: /validate-tideproject-k8s-v1alpha3-plan
   failurePolicy: Fail
-  name: vplan-v1alpha2.kb.io
+  name: vplan-v1alpha3.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha2
+    - v1alpha3
     operations:
     - CREATE
     - UPDATE
@@ -33,14 +33,14 @@ webhooks:
     service:
       name: '{{ include "tide.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
-      path: /validate-tideproject-k8s-v1alpha2-project
+      path: /validate-tideproject-k8s-v1alpha3-project
   failurePolicy: Fail
-  name: vproject-v1alpha2.kb.io
+  name: vproject-v1alpha3.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha2
+    - v1alpha3
     operations:
     - CREATE
     - UPDATE
@@ -53,14 +53,14 @@ webhooks:
     service:
       name: '{{ include "tide.fullname" . }}-webhook-service'
       namespace: '{{ .Release.Namespace }}'
-      path: /validate-tideproject-k8s-v1alpha2-wave
+      path: /validate-tideproject-k8s-v1alpha3-wave
   failurePolicy: Fail
-  name: vwave-v1alpha2.kb.io
+  name: vwave-v1alpha3.kb.io
   rules:
   - apiGroups:
     - tideproject.k8s
     apiVersions:
-    - v1alpha2
+    - v1alpha3
     operations:
     - CREATE
     - UPDATE

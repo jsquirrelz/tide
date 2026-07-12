@@ -41,7 +41,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TasksHandler serves GET /api/v1/tasks/{name}. Clientset MAY be nil — if
@@ -100,7 +100,7 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		namespace = "default"
 	}
 
-	var tk tidev1alpha2.Task
+	var tk tidev1alpha3.Task
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &tk); err != nil {
 		if apierrors.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("task %s not found", name))
@@ -177,11 +177,11 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 // the Spec.*Ref chain. Returns (planName, projectName); either may be ""
 // if the chain breaks mid-traversal — the dashboard's drawer renders "—"
 // for empty fields rather than the handler 500ing the request.
-func (h *TasksHandler) resolveTaskParents(ctx context.Context, tk *tidev1alpha2.Task) (string, string) {
+func (h *TasksHandler) resolveTaskParents(ctx context.Context, tk *tidev1alpha3.Task) (string, string) {
 	if tk.Spec.PlanRef == "" {
 		return "", ""
 	}
-	var pl tidev1alpha2.Plan
+	var pl tidev1alpha3.Plan
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: tk.Namespace, Name: tk.Spec.PlanRef}, &pl); err != nil {
 		if !apierrors.IsNotFound(err) {
 			h.Log.V(1).Info("get plan for task failed", "task", tk.Name, "planRef", tk.Spec.PlanRef, "err", err)
@@ -193,7 +193,7 @@ func (h *TasksHandler) resolveTaskParents(ctx context.Context, tk *tidev1alpha2.
 	if pl.Spec.PhaseRef == "" {
 		return planName, ""
 	}
-	var ph tidev1alpha2.Phase
+	var ph tidev1alpha3.Phase
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: tk.Namespace, Name: pl.Spec.PhaseRef}, &ph); err != nil {
 		if !apierrors.IsNotFound(err) {
 			h.Log.V(1).Info("get phase for task failed", "task", tk.Name, "phaseRef", pl.Spec.PhaseRef, "err", err)
@@ -204,7 +204,7 @@ func (h *TasksHandler) resolveTaskParents(ctx context.Context, tk *tidev1alpha2.
 	if ph.Spec.MilestoneRef == "" {
 		return planName, ""
 	}
-	var ms tidev1alpha2.Milestone
+	var ms tidev1alpha3.Milestone
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: tk.Namespace, Name: ph.Spec.MilestoneRef}, &ms); err != nil {
 		if !apierrors.IsNotFound(err) {
 			h.Log.V(1).Info("get milestone for task failed", "task", tk.Name, "milestoneRef", ph.Spec.MilestoneRef, "err", err)
@@ -219,16 +219,16 @@ func (h *TasksHandler) resolveTaskParents(ctx context.Context, tk *tidev1alpha2.
 // whose Spec.PlanRef matches the Task's PlanRef, and returns the
 // Spec.WaveIndex of the one whose Status.TaskRefs contains the Task name.
 // Returns 0 (the pre-materialization fallback) on any miss.
-func (h *TasksHandler) resolveWaveIndex(ctx context.Context, tk *tidev1alpha2.Task) int {
+func (h *TasksHandler) resolveWaveIndex(ctx context.Context, tk *tidev1alpha3.Task) int {
 	if tk.Spec.PlanRef == "" {
 		return 0
 	}
-	var waves tidev1alpha2.WaveList
+	var waves tidev1alpha3.WaveList
 	if err := h.Client.List(ctx, &waves, client.InNamespace(tk.Namespace)); err != nil {
 		h.Log.V(1).Info("list waves for task failed", "task", tk.Name, "err", err)
 		return 0
 	}
-	// v1alpha2 Waves are global-scope (no Spec.PlanRef); a Wave is associated with
+	// v1alpha3 Waves are global-scope (no Spec.PlanRef); a Wave is associated with
 	// this Task purely by TaskRefs membership, and WaveIndex is the global wave
 	// position (T-23-14 / Phase 24 owns global derivation).
 	for i := range waves.Items {
@@ -249,7 +249,7 @@ func (h *TasksHandler) resolveWaveIndex(ctx context.Context, tk *tidev1alpha2.Ta
 // Label key matches logs_sse.go's existing convention (line 75:
 // `const taskUIDLabel = "tideproject.k8s/task-uid"`). Do NOT diverge —
 // the controller stamps Pods with this exact key.
-func (h *TasksHandler) resolvePodName(ctx context.Context, tk *tidev1alpha2.Task) string {
+func (h *TasksHandler) resolvePodName(ctx context.Context, tk *tidev1alpha3.Task) string {
 	if h.Clientset == nil {
 		return ""
 	}

@@ -40,7 +40,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 )
 
@@ -127,7 +127,7 @@ func (h *ArtifactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		namespace = "default"
 	}
 
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", projectName))

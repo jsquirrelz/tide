@@ -48,7 +48,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // isBillingFailureReason returns true if reason represents a provider
@@ -75,12 +75,12 @@ func isBillingFailureReason(reason string) bool {
 //
 // Nil-safe: a nil project returns false (no halt — the reconciler handles the
 // missing-project case separately).
-func checkBillingHalt(project *tideprojectv1alpha2.Project) bool {
+func checkBillingHalt(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
 	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha2.ConditionBillingHalt &&
+		if c.Type == tideprojectv1alpha3.ConditionBillingHalt &&
 			c.Status == metav1.ConditionTrue {
 			return true
 		}
@@ -101,7 +101,7 @@ func checkBillingHalt(project *tideprojectv1alpha2.Project) bool {
 // Fail-closed fallbacks: zero jobStart or unparseable annotation → stamp.
 //
 // Nil project is a safe no-op (returns nil). Non-billing reasons are a no-op.
-func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project, reason string, jobStart time.Time) error {
+func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha3.Project, reason string, jobStart time.Time) error {
 	if project == nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 	// on zero jobStart or unparseable annotation (never fail open toward burning
 	// credits). See D-06 paragraph in file header for full lifecycle.
 	if !jobStart.IsZero() {
-		if resumeVal, ok := project.Annotations[tideprojectv1alpha2.AnnotationBillingResumedAt]; ok {
+		if resumeVal, ok := project.Annotations[tideprojectv1alpha3.AnnotationBillingResumedAt]; ok {
 			if resumedAt, err := time.Parse(time.RFC3339, resumeVal); err == nil {
 				if jobStart.Before(resumedAt) {
 					return nil // stale pre-resume evidence; no-op
@@ -124,9 +124,9 @@ func setBillingHaltIfNeeded(ctx context.Context, c client.Client, project *tidep
 	}
 	patch := client.MergeFrom(project.DeepCopy())
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:   tideprojectv1alpha2.ConditionBillingHalt,
+		Type:   tideprojectv1alpha3.ConditionBillingHalt,
 		Status: metav1.ConditionTrue,
-		Reason: tideprojectv1alpha2.ReasonCreditBalanceTooLow,
+		Reason: tideprojectv1alpha3.ReasonCreditBalanceTooLow,
 		Message: "Provider billing 400: credit balance too low. New dispatch halted project-wide. " +
 			"Run `tide resume` after refilling credits.",
 		LastTransitionTime: metav1.Now(),

@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -33,14 +33,14 @@ import (
 var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("envtest", "phase34", "gitwriter"), func() {
 	ctx := context.Background()
 
-	makeTask := func(name, projectName, phase string) *tideprojectv1alpha2.Task {
-		tsk := &tideprojectv1alpha2.Task{
+	makeTask := func(name, projectName, phase string) *tideprojectv1alpha3.Task {
+		tsk := &tideprojectv1alpha3.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "default",
 				Labels:    map[string]string{gitWriterProjectLabelKey: projectName},
 			},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:             "some-plan",
 				FilesTouched:        []string{"file.go"},
 				PromptPath:          "envelopes/x/children/task-01.json",
@@ -48,15 +48,15 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 			},
 		}
 		Expect(k8sClient.Create(ctx, tsk)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Task{})
 		if phase != "" {
-			var got tideprojectv1alpha2.Task
+			var got tideprojectv1alpha3.Task
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 			patch := client.MergeFrom(got.DeepCopy())
 			got.Status.Phase = phase
 			Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
 			Eventually(func() string {
-				var g tideprojectv1alpha2.Task
+				var g tideprojectv1alpha3.Task
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
 					return ""
 				}
@@ -69,7 +69,7 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 
 	cleanupTasks := func(names ...string) {
 		for _, n := range names {
-			tsk := &tideprojectv1alpha2.Task{}
+			tsk := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: n, Namespace: "default"}, tsk); err == nil {
 				tsk.Finalizers = nil
 				_ = k8sClient.Update(ctx, tsk)
@@ -111,12 +111,12 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 		})
 
 		It("excludes Succeeded branches of a plan holding at a wave-pause boundary", func() {
-			makePlanTask := func(name, planRef, phase string, extraLabels map[string]string) *tideprojectv1alpha2.Task {
+			makePlanTask := func(name, planRef, phase string, extraLabels map[string]string) *tideprojectv1alpha3.Task {
 				labels := map[string]string{gitWriterProjectLabelKey: projectName}
 				maps.Copy(labels, extraLabels)
-				tsk := &tideprojectv1alpha2.Task{
+				tsk := &tideprojectv1alpha3.Task{
 					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: labels},
-					Spec: tideprojectv1alpha2.TaskSpec{
+					Spec: tideprojectv1alpha3.TaskSpec{
 						PlanRef:             planRef,
 						FilesTouched:        []string{"file.go"},
 						PromptPath:          "envelopes/x/children/task-01.json",
@@ -124,15 +124,15 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 					},
 				}
 				Expect(k8sClient.Create(ctx, tsk)).To(Succeed())
-				waitForCacheSync(name, "default", &tideprojectv1alpha2.Task{})
+				waitForCacheSync(name, "default", &tideprojectv1alpha3.Task{})
 				if phase != "" {
-					var got tideprojectv1alpha2.Task
+					var got tideprojectv1alpha3.Task
 					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 					patch := client.MergeFrom(got.DeepCopy())
 					got.Status.Phase = phase
 					Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
 					Eventually(func() string {
-						var g tideprojectv1alpha2.Task
+						var g tideprojectv1alpha3.Task
 						if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &g); err != nil {
 							return ""
 						}
@@ -340,12 +340,12 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 
 	Describe("buildPushJob labels", func() {
 		It("stamps both git-writer labels so the D-02 List gate can find it", func() {
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: "gw-label-proj", Namespace: "default", UID: types.UID("uid-label-proj")},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://example.com/x.git",
-					Git:            &tideprojectv1alpha2.GitConfig{RepoURL: "https://example.com/x.git", CredsSecretRef: "c"},
+					Git:            &tideprojectv1alpha3.GitConfig{RepoURL: "https://example.com/x.git", CredsSecretRef: "c"},
 				},
 			}
 			job := buildPushJob(project, "tide-projects", PushOptions{
