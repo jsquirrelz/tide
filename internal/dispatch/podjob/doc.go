@@ -51,7 +51,7 @@ limitations under the License.
 // # Executor path vs Run method
 //
 // Phase 2's TaskReconciler-driven executor path does NOT call Run. Instead:
-//   - TaskReconciler.ensureJob calls BuildJobSpec + client.Create (idempotent)
+//   - TaskReconciler.createDispatchJob calls BuildJobSpec + client.Create (idempotent)
 //   - Job terminal state is observed via Owns-watch events on batchv1.Job
 //   - handleJobCompletion reads EnvelopeOut from the PVC via FilesystemEnvelopeReader
 //

@@ -35,7 +35,7 @@ import (
 // by controller-runtime's single-reconcile-goroutine contract). Instead, the
 // executor path for Phase 2 is split:
 //
-//   - TaskReconciler.ensureJob: calls BuildJobSpec + client.Create (sync, fast) from
+//   - TaskReconciler.createDispatchJob: calls BuildJobSpec + client.Create (sync, fast) from
 //     inside Reconcile.
 //   - handleJobCompletion: reacts to Owns-watch events when the Job reaches terminal
 //     state; reads EnvelopeOut from the PVC.
