@@ -863,18 +863,14 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 //
 //nolint:unparam // ctrl.Result kept so callers can return r.patchTaskRejected(...) in the reconcile chain
 func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojectv1alpha3.Task, reason string) (ctrl.Result, error) {
-	patch := client.MergeFrom(task.DeepCopy())
-	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha3.ReasonRejectedByUser,
-		Message:            fmt.Sprintf("Rejected: %s", reason),
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, task, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	return patchLevelStatus(ctx, r.Client, task, &task.Status.Conditions, nil, "", false, ctrl.Result{RequeueAfter: 5 * time.Second},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  tideprojectv1alpha3.ReasonRejectedByUser,
+			Message: fmt.Sprintf("Rejected: %s", reason),
+		},
+	)
 }
 
 // patchTaskAwaitingApproval parks the Task at Status.Phase=AwaitingApproval
@@ -889,19 +885,16 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 		reason = tideprojectv1alpha3.ReasonPausedAtBoundary
 		message = "Task paused at boundary; requires explicit resume"
 	}
-	patch := client.MergeFrom(task.DeepCopy())
-	task.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
-	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, task, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	// Unlike Milestone/Phase/Plan's AwaitingApproval wrappers, Task uses a plain
+	// MergeFrom (no optimistic lock) here — preserved as-is (leaf param false).
+	return patchLevelStatus(ctx, r.Client, task, &task.Status.Conditions, &task.Status.Phase, tideprojectv1alpha3.LevelPhaseAwaitingApproval, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
 }
 
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
