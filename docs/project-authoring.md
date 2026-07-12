@@ -559,8 +559,8 @@ Override per-level via `Project.Spec.subagent.levels.{milestone,phase,plan,task}
 Each key names the artifact its dispatch produces (D-02, v1alpha3) — see the
 [Project.Spec field reference](#projectspec-field-reference) above for the
 per-key breakdown, or [`docs/migration/v1alpha2-to-v1alpha3.md`](migration/v1alpha2-to-v1alpha3.md)
-if you're carrying forward a v1alpha2 Project's overrides. Resolution chain at
-dispatch time:
+if you're carrying forward overrides from a prior schema revision. Resolution
+chain at dispatch time:
 
 ```
 Spec.Subagent.Levels.<level>.model  →  Spec.Subagent.Model  →  Helm-chart default

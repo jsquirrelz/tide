@@ -211,10 +211,10 @@ rule, the value is added to the SOT then propagated to
 TIDE ships **single-version CRDs** — `tideproject.k8s/v1alpha3` is the sole
 served and storage version for all six Kinds. There is no conversion webhook:
 Phase 23 retired the scaffolded no-op that earlier schema revisions carried,
-and each successive schema crank (v1alpha1→v1alpha2, v1alpha2→v1alpha3) has
-shipped as a **reinstall-only** migration instead — delete the old CRs, apply
-the new CRD schema, re-apply manifests carrying the current `schemaRevision`.
-See [`docs/migration/`](migration/) for the per-crank migration chapters.
+and every schema crank since has shipped as a **reinstall-only** migration
+instead — delete the old CRs, apply the new CRD schema, re-apply manifests
+carrying the current `schemaRevision`. See [`docs/migration/`](migration/)
+for the per-crank migration chapters.
 
 **What the chart ships:**
 
