@@ -1431,17 +1431,7 @@ func boundaryPushRequeue(attempts int32) time.Duration {
 // countChildMilestones returns the number of Milestones owned by this Project (plan 09-08).
 // Used by the ChildCount-gated succession path in handleProjectJobCompletion.
 func (r *ProjectReconciler) countChildMilestones(ctx context.Context, project *tidev1alpha3.Project) int {
-	var msList tidev1alpha3.MilestoneList
-	if err := r.List(ctx, &msList, client.InNamespace(project.Namespace)); err != nil {
-		return 0
-	}
-	count := 0
-	for i := range msList.Items {
-		if metav1.IsControlledBy(&msList.Items[i], project) {
-			count++
-		}
-	}
-	return count
+	return countChildren(ctx, r.Client, project.Namespace, project.UID, &tidev1alpha3.MilestoneList{})
 }
 
 // checkProjectComplete returns true (and patches Status.Phase=Complete) when

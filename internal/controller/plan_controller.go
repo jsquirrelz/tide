@@ -228,29 +228,11 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// bool, error) signature: dispatched=true suppresses reconcileWaveMaterialization.
 	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(plan, "plan") {
-			// Consume annotation (T-04-G2 one-shot).
-			newAnno := gates.ConsumeApprove(plan, "plan")
-			annoPatch := client.MergeFrom(plan.DeepCopy())
-			plan.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, plan, annoPatch); err != nil {
-				return ctrl.Result{}, true, err
-			}
-			// Return to Running + record ApprovedByUser condition (D-04).
-			statusPatch := client.MergeFrom(plan.DeepCopy())
-			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-				Message:            "Plan approved; Tasks will dispatch",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
-				return ctrl.Result{}, true, err
-			}
+			// Consume annotation + return to Running + record ApprovedByUser (D-04).
 			// Requeue immediately — the Running branch (below) calls
 			// handlePlannerJobCompletion which owns ChildCount-gated succession (D-03).
-			return ctrl.Result{Requeue: true}, true, nil
+			res, err := consumeApproveAndResume(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", "Plan approved; Tasks will dispatch")
+			return res, true, err
 		}
 		// No annotation — keep parked; dispatched=true so reconcileWaveMaterialization
 		// never runs while parked (GATE-04: no executor Jobs, no Wave CRs).
@@ -679,22 +661,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				// consume it and write Running+ApprovedByUser so the condition is recorded
 				// for future reconciles — otherwise the next reconcile would re-park because
 				// the annotation is gone but no approval record exists.
-				newAnno := gates.ConsumeApprove(plan, "plan")
-				annoPatch := client.MergeFrom(plan.DeepCopy())
-				plan.SetAnnotations(newAnno)
-				if err := r.Patch(ctx, plan, annoPatch); err != nil {
-					return ctrl.Result{}, err
-				}
-				statusPatch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-					Message:            "Plan approved; Tasks will dispatch",
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, plan, statusPatch); err != nil {
+				if _, err := consumeApproveAndResume(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, "plan", "Plan approved; Tasks will dispatch"); err != nil {
 					return ctrl.Result{}, err
 				}
 				// Fall through to ChildCount-gated succession (D-03).
@@ -783,28 +750,22 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 // BoundaryDetected(plan, "Task") returns true (REQ-7b). Mirrors
 // milestone_controller.go's patchMilestoneSucceeded pattern.
 func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideprojectv1alpha3.Plan) (ctrl.Result, error) {
-	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionSucceeded,
-		Status:             metav1.ConditionTrue,
-		Reason:             "TasksCompleted",
-		Message:            "All owned Tasks reached Succeeded; Plan complete",
-		LastTransitionTime: metav1.Now(),
-	})
-	// Clear any prior WaveOrLevelPaused state so the transition is
-	// visible to operators tailing conditions (mirrors patchMilestoneSucceeded).
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha3.ReasonResumedByUser,
-		Message:            "Plan complete; all Tasks Succeeded",
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, plan, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, tideprojectv1alpha3.LevelPhaseSucceeded, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionSucceeded,
+			Status:  metav1.ConditionTrue,
+			Reason:  "TasksCompleted",
+			Message: "All owned Tasks reached Succeeded; Plan complete",
+		},
+		// Clear any prior WaveOrLevelPaused state so the transition is
+		// visible to operators tailing conditions (mirrors patchMilestoneSucceeded).
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionFalse,
+			Reason:  tideprojectv1alpha3.ReasonResumedByUser,
+			Message: "Plan complete; all Tasks Succeeded",
+		},
+	)
 }
 
 // patchPlanRejected parks the Plan with a RejectedByUser condition WITHOUT
@@ -813,18 +774,14 @@ func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideproje
 // normal dispatch path on the next reconcile.
 // Returns RequeueAfter 5s so the park polls for the annotation clear.
 func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojectv1alpha3.Plan, reason string) (ctrl.Result, error) {
-	patch := client.MergeFrom(plan.DeepCopy())
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha3.ReasonRejectedByUser,
-		Message:            fmt.Sprintf("Rejected: %s", reason),
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, plan, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	return patchLevelStatus(ctx, r.Client, plan, &plan.Status.Conditions, nil, "", false, ctrl.Result{RequeueAfter: 5 * time.Second},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  tideprojectv1alpha3.ReasonRejectedByUser,
+			Message: fmt.Sprintf("Rejected: %s", reason),
+		},
+	)
 }
 
 // patchPlanFileTouchMismatch parks the Plan for a strict file-touch overlap (D-05,
@@ -833,22 +790,18 @@ func (r *PlanReconciler) patchPlanRejected(ctx context.Context, plan *tideprojec
 // Returns ctrl.Result{} without requeueing — the next Task create/update event
 // re-enters reconcile (matching how the reporter flow materializes Tasks async;
 // the false-negative window self-heals on the next Task event, per RESEARCH Pitfall 3).
-// No Status.Phase mutation (park-not-fail doctrine, D-05).
+// No Status.Phase mutation (park-not-fail doctrine, D-05) — fieldPtr targets
+// ValidationState instead of Phase.
 func (r *PlanReconciler) patchPlanFileTouchMismatch(ctx context.Context, plan *tideprojectv1alpha3.Plan, mismatches []webhookv1alpha3.FileTouchMismatchPair) (ctrl.Result, error) {
 	summary := webhookv1alpha3.SummariseMismatches(mismatches)
-	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.ValidationState = "FileTouchMismatch"
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             "FileTouchMismatch",
-		Message:            fmt.Sprintf("strict file-touch overlap detected — fix by adding a dependsOn edge or splitting file ownership: %s", summary),
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, plan, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.ValidationState, "FileTouchMismatch", false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  "FileTouchMismatch",
+			Message: fmt.Sprintf("strict file-touch overlap detected — fix by adding a dependsOn edge or splitting file ownership: %s", summary),
+		},
+	)
 }
 
 // liftPlanFileTouchMismatch clears a prior FileTouchMismatch park (D-06).
@@ -876,19 +829,14 @@ func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *ti
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchPlanFailed(...)` in the reconcile chain
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha3.Plan, reason, message string) (ctrl.Result, error) {
-	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionFailed,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, plan, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, tideprojectv1alpha3.LevelPhaseFailed, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
 }
 
 // patchPlanAwaitingApproval parks the Plan at Status.Phase=AwaitingApproval
@@ -904,37 +852,20 @@ func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *ti
 	// concurrent approve's Running+ApprovedByUser write — that clobber consumes
 	// the one-shot approve annotation and wedges the level at AwaitingApproval.
 	// See patchMilestoneAwaitingApproval for the full race description.
-	patch := client.MergeFromWithOptions(plan.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
-	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, plan, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, plan, &plan.Status.Conditions, &plan.Status.Phase, tideprojectv1alpha3.LevelPhaseAwaitingApproval, true, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
 }
 
 // countChildTasks returns the number of Tasks owned by this Plan (plan 09-08).
 // Used by the ChildCount-gated succession path to compare observed vs expected children.
 func (r *PlanReconciler) countChildTasks(ctx context.Context, plan *tideprojectv1alpha3.Plan) int {
-	var taskList tideprojectv1alpha3.TaskList
-	if err := r.List(ctx, &taskList, client.InNamespace(plan.Namespace)); err != nil {
-		return 0
-	}
-	count := 0
-	for i := range taskList.Items {
-		for _, ref := range taskList.Items[i].OwnerReferences {
-			if ref.Kind == "Plan" && ref.UID == plan.UID {
-				count++
-			}
-		}
-	}
-	return count
+	return countChildren(ctx, r.Client, plan.Namespace, plan.UID, &tideprojectv1alpha3.TaskList{})
 }
 
 // resolveProjectForPlan walks Plan → Phase → Milestone → Project.

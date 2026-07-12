@@ -28,6 +28,17 @@ confirms `cmd/tide-demo-init/fixture/` is intentionally untracked and materializ
 `go build ./... 2>&1 | grep -v tide-demo-init` plus explicit scoped builds of every touched
 package (`internal/controller`, `cmd/manager`, `test/integration/envtest`), all clean.
 
+## Update (Plan 41-07)
+
+Still present, still unrelated — confirmed again during 41-07's Task 1/2 acceptance-criteria run
+(`go build ./...` / `go list ./...` fail identically at `cmd/tide-demo-init/main.go:112:12`; a
+failing embed pattern anywhere in the module aborts `go list ./...` entirely, returning zero
+packages, which is why a plain `go vet ./...` also reports nothing useful). 41-07 verified with
+explicit scoped builds/vets (`go build ./internal/controller/... ./api/...`,
+`go vet ./internal/... ./api/... ./cmd/manager/... ./cmd/dashboard/... ./pkg/...`) plus the full
+`go test ./internal/controller/... -count=1` Ginkgo suite (204/204 specs green, envtest via
+`KUBEBUILDER_ASSETS`) — all clean.
+
 ## `internal/controller/dispatch_helpers.go:551,559,566` logcheck findings (pre-existing, Plan 41-05)
 
 `golangci-lint run ./internal/controller/...` reports 3 `logcheck` findings ("Key positional

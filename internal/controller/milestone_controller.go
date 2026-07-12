@@ -222,29 +222,10 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// Phase 12 D-04: approve never jumps a level to Succeeded past its children.
 	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(ms, "milestone") {
-			// Consume annotation (T-04-G2 one-shot).
-			newAnno := gates.ConsumeApprove(ms, "milestone")
-			annoPatch := client.MergeFrom(ms.DeepCopy())
-			ms.SetAnnotations(newAnno)
-			if err := r.Patch(ctx, ms, annoPatch); err != nil {
-				return ctrl.Result{}, err
-			}
-			// Return to Running + record ApprovedByUser condition (D-04).
-			statusPatch := client.MergeFrom(ms.DeepCopy())
-			ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-			meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-				Status:             metav1.ConditionFalse,
-				Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-				Message:            "Milestone approved; children will dispatch",
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
-				return ctrl.Result{}, err
-			}
+			// Consume annotation + return to Running + record ApprovedByUser (D-04).
 			// Requeue immediately — the Running branch (below) calls handleJobCompletion
 			// which owns the ChildCount-gated succession (D-03 invariant).
-			return ctrl.Result{Requeue: true}, nil
+			return consumeApproveAndResume(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, "milestone", "Milestone approved; children will dispatch")
 		}
 		// 37-06 Pitfall 8: keep retrying the artifact trigger while parked so the
 		// AwaitingApproval early-return cannot permanently swallow it (e.g. the run
@@ -667,22 +648,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 				// consume it and write Running+ApprovedByUser so the condition is recorded
 				// for future reconciles — otherwise the next reconcile would re-park because
 				// the annotation is gone but no approval record exists.
-				newAnno := gates.ConsumeApprove(ms, "milestone")
-				annoPatch := client.MergeFrom(ms.DeepCopy())
-				ms.SetAnnotations(newAnno)
-				if err := r.Patch(ctx, ms, annoPatch); err != nil {
-					return ctrl.Result{}, err
-				}
-				statusPatch := client.MergeFrom(ms.DeepCopy())
-				ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
-				meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-					Status:             metav1.ConditionFalse,
-					Reason:             tideprojectv1alpha3.ReasonApprovedByUser,
-					Message:            "Milestone approved; children will dispatch",
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Patch(ctx, ms, statusPatch); err != nil {
+				if _, err := consumeApproveAndResume(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, "milestone", "Milestone approved; children will dispatch"); err != nil {
 					return ctrl.Result{}, err
 				}
 				// Fall through to ChildCount-gated succession (D-03).
@@ -782,19 +748,7 @@ func (r *MilestoneReconciler) hasChildPhases(ctx context.Context, ms *tideprojec
 // countChildPhases returns the number of Phases owned by this Milestone (plan 09-08).
 // Used by the ChildCount-gated succession path to compare observed vs expected children.
 func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideprojectv1alpha3.Milestone) int {
-	var phaseList tideprojectv1alpha3.PhaseList
-	if err := r.List(ctx, &phaseList, client.InNamespace(ms.Namespace)); err != nil {
-		return 0
-	}
-	count := 0
-	for i := range phaseList.Items {
-		for _, ref := range phaseList.Items[i].OwnerReferences {
-			if ref.Kind == "Milestone" && ref.UID == ms.UID {
-				count++
-			}
-		}
-	}
-	return count
+	return countChildren(ctx, r.Client, ms.Namespace, ms.UID, &tideprojectv1alpha3.PhaseList{})
 }
 
 // patchMilestoneFailed sets Milestone.Status.Phase=Failed with the given reason/message.
@@ -802,45 +756,34 @@ func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideproj
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchMilestoneFailed(...)` in the reconcile chain
 func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha3.Milestone, reason, message string) (ctrl.Result, error) {
-	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionFailed,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ms, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, tideprojectv1alpha3.LevelPhaseFailed, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionFailed,
+			Status:  metav1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
 }
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
-	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionSucceeded,
-		Status:             metav1.ConditionTrue,
-		Reason:             "PlannerComplete",
-		Message:            "Milestone planner completed; Phase children materialized",
-		LastTransitionTime: metav1.Now(),
-	})
-	// Plan 04-05: when the level resumes from a prior approve-pause, clear the
-	// WaveOrLevelPaused Condition to False with Reason=ResumedByUser so the
-	// transition is visible to operators tailing conditions.
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha3.ReasonResumedByUser,
-		Message:            "Milestone resumed from gate boundary",
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ms, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, tideprojectv1alpha3.LevelPhaseSucceeded, false, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionSucceeded,
+			Status:  metav1.ConditionTrue,
+			Reason:  "PlannerComplete",
+			Message: "Milestone planner completed; Phase children materialized",
+		},
+		// Plan 04-05: when the level resumes from a prior approve-pause, clear the
+		// WaveOrLevelPaused Condition to False with Reason=ResumedByUser so the
+		// transition is visible to operators tailing conditions.
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionFalse,
+			Reason:  tideprojectv1alpha3.ReasonResumedByUser,
+			Message: "Milestone resumed from gate boundary",
+		},
+	)
 }
 
 // patchMilestoneRejected parks the Milestone with a RejectedByUser condition
@@ -849,18 +792,14 @@ func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *t
 // re-enter the normal dispatch path on the next reconcile.
 // Returns RequeueAfter 5s so the park polls for the annotation clear.
 func (r *MilestoneReconciler) patchMilestoneRejected(ctx context.Context, ms *tideprojectv1alpha3.Milestone, reason string) (ctrl.Result, error) {
-	patch := client.MergeFrom(ms.DeepCopy())
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha3.ReasonRejectedByUser,
-		Message:            fmt.Sprintf("Rejected: %s", reason),
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ms, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	return patchLevelStatus(ctx, r.Client, ms, &ms.Status.Conditions, nil, "", false, ctrl.Result{RequeueAfter: 5 * time.Second},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  tideprojectv1alpha3.ReasonRejectedByUser,
+			Message: fmt.Sprintf("Rejected: %s", reason),
+		},
+	)
 }
 
 // patchMilestoneAwaitingApproval parks the Milestone at Status.Phase=AwaitingApproval
@@ -884,19 +823,14 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 	// annotation (already deleted) and wedging the level at AwaitingApproval
 	// (Layer A gate-flow CI flake). With the lock, the stale writer 409s; the
 	// requeued reconcile re-reads fresh state and sees alreadyApproved.
-	patch := client.MergeFromWithOptions(ms.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
-	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
-		Status:             metav1.ConditionTrue,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	})
-	if err := r.Status().Patch(ctx, ms, patch); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchLevelStatus(ctx, r.Client, ms, &ms.Status.Conditions, &ms.Status.Phase, tideprojectv1alpha3.LevelPhaseAwaitingApproval, true, ctrl.Result{},
+		metav1.Condition{
+			Type:    tideprojectv1alpha3.ConditionWaveOrLevelPaused,
+			Status:  metav1.ConditionTrue,
+			Reason:  reason,
+			Message: message,
+		},
+	)
 }
 
 // surfaceParentRefUnresolved makes a parent-ref-NotFound stall observable
