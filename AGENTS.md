@@ -212,9 +212,9 @@ kubectl logs -n <project>-system deployment/<project>-controller-manager -c mana
 
 ### Logging
 
-**Follow Kubernetes logging message style guidelines:**
+**This repo's message style (deliberate deviation from the upstream Kubernetes SIG style below on initial-letter casing):**
 
-- Start from a capital letter
+- Start log messages lowercase-initial (repo convention — deliberate deviation from the upstream K8s SIG style)
 - Do not end the message with a period
 - Active voice: subject present (`"Deployment could not create Pod"`) or omitted (`"Could not create Pod"`)
 - Past tense: `"Could not delete Pod"` not `"Cannot delete Pod"`
@@ -222,12 +222,14 @@ kubectl logs -n <project>-system deployment/<project>-controller-manager -c mana
 - Balanced key-value pairs
 
 ```go
-log.Info("Starting reconciliation")
-log.Info("Created Deployment", "name", deploy.Name)
-log.Error(err, "Failed to create Pod", "name", name)
+logger.Info("spawned reporter Job", "job", reporterJobName, "plan", plan.Name)
+logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
+logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt", "milestone", ms.Name, "project", ms.Spec.ProjectRef)
 ```
 
-**Reference:** https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md#message-style-guidelines
+Exact log strings are load-bearing — do not churn them incidentally. `phase_gates_test.go` and the CLAUDE.md runtime-gate verification protocols grep exact strings such as `"creating job"` and `"dispatch held"`; changing a message's wording (not just its casing) can silently break those checks.
+
+**Reference (upstream style this repo deviates from on initial-letter casing):** https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md#message-style-guidelines
 
 ### Webhooks
 - **Create all types together**: `--defaulting --programmatic-validation --conversion`
