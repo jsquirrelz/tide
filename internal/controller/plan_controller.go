@@ -252,7 +252,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// dispatch executor Jobs without approval.
 	// Mirrors milestone_controller.go:216-243 Step 1a, adapted to the (ctrl.Result,
 	// bool, error) signature: dispatched=true suppresses reconcileWaveMaterialization.
-	if plan.Status.Phase == "AwaitingApproval" {
+	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(plan, "plan") {
 			// Consume annotation (T-04-G2 one-shot).
 			newAnno := gates.ConsumeApprove(plan, "plan")
@@ -263,7 +263,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 			}
 			// Return to Running + record ApprovedByUser condition (D-04).
 			statusPatch := client.MergeFrom(plan.DeepCopy())
-			plan.Status.Phase = "Running"
+			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 				Status:             metav1.ConditionFalse,
@@ -305,14 +305,14 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	}
 
 	// Terminal short-circuit.
-	if plan.Status.Phase == "Succeeded" || plan.Status.Phase == "Failed" {
+	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded || plan.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		return ctrl.Result{}, true, nil
 	}
 
 	jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
 
 	// On Running: check Job terminal state.
-	if plan.Status.Phase == "Running" {
+	if plan.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: jobName}, &job); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -516,7 +516,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	}
 
 	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.Phase = "Running"
+	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
@@ -741,7 +741,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					return ctrl.Result{}, err
 				}
 				statusPatch := client.MergeFrom(plan.DeepCopy())
-				plan.Status.Phase = "Running"
+				plan.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 				meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 					Status:             metav1.ConditionFalse,
@@ -839,7 +839,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 // milestone_controller.go's patchMilestoneSucceeded pattern.
 func (r *PlanReconciler) patchPlanSucceeded(ctx context.Context, plan *tideprojectv1alpha3.Plan) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.Phase = "Succeeded"
+	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
@@ -932,7 +932,7 @@ func (r *PlanReconciler) liftPlanFileTouchMismatch(ctx context.Context, plan *ti
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchPlanFailed(...)` in the reconcile chain
 func (r *PlanReconciler) patchPlanFailed(ctx context.Context, plan *tideprojectv1alpha3.Plan, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(plan.DeepCopy())
-	plan.Status.Phase = "Failed"
+	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionFailed,
 		Status:             metav1.ConditionTrue,
@@ -960,7 +960,7 @@ func (r *PlanReconciler) patchPlanAwaitingApproval(ctx context.Context, plan *ti
 	// the one-shot approve annotation and wedges the level at AwaitingApproval.
 	// See patchMilestoneAwaitingApproval for the full race description.
 	patch := client.MergeFromWithOptions(plan.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	plan.Status.Phase = "AwaitingApproval"
+	plan.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
 	meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
@@ -1114,7 +1114,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	// RESPONSIBILITY B: No Job found — dispatch if all wave-k tasks Succeeded.
 	for _, name := range layers[k] {
 		t := taskByName[name]
-		if t == nil || t.Status.Phase != "Succeeded" {
+		if t == nil || t.Status.Phase != tideprojectv1alpha3.LevelPhaseSucceeded {
 			// Wave k not yet complete — nothing to integrate yet.
 			return ctrl.Result{}, false, nil
 		}
@@ -1304,7 +1304,7 @@ func (r *PlanReconciler) reconcileWaveMaterialization(ctx context.Context, plan 
 		if errors.As(err, &cycleErr) {
 			// Defense-in-depth: the Plan admission webhook should have caught this.
 			patch := client.MergeFrom(plan.DeepCopy())
-			plan.Status.Phase = "Failed"
+			plan.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 			plan.Status.ValidationState = conditionTypeCycleDetected
 			plan.Status.CycleEdges = cycleErr.InvolvedNodes
 			meta.SetStatusCondition(&plan.Status.Conditions, metav1.Condition{
@@ -1435,7 +1435,7 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 		prevAllSucceeded := true
 		for _, name := range layers[n-1] {
 			t := taskByName[name]
-			if t == nil || t.Status.Phase != "Succeeded" {
+			if t == nil || t.Status.Phase != tideprojectv1alpha3.LevelPhaseSucceeded {
 				prevAllSucceeded = false
 				break
 			}
@@ -1446,7 +1446,7 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 		anyPending := false
 		for _, name := range layers[n] {
 			t := taskByName[name]
-			if t == nil || t.Status.Phase != "Succeeded" {
+			if t == nil || t.Status.Phase != tideprojectv1alpha3.LevelPhaseSucceeded {
 				anyPending = true
 				break
 			}

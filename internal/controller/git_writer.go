@@ -81,7 +81,7 @@ func succeededTaskBranches(ctx context.Context, c client.Client, ns, projectName
 	var branches []string
 	for i := range tasks.Items {
 		t := &tasks.Items[i]
-		if t.Status.Phase != "Succeeded" || pausedPlans[t.Spec.PlanRef] {
+		if t.Status.Phase != tideprojectv1alpha3.LevelPhaseSucceeded || pausedPlans[t.Spec.PlanRef] {
 			continue
 		}
 		branches = append(branches, pkggit.TaskBranchName(string(t.UID)))

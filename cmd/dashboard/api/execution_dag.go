@@ -103,7 +103,7 @@ func (h *ExecutionDAGHandler) Get(w http.ResponseWriter, r *http.Request) {
 		tk := &tasks.Items[i]
 		phase := tk.Status.Phase
 		if phase == "" {
-			phase = "Pending"
+			phase = tidev1alpha3.LevelPhasePending
 		}
 		deps := tk.Spec.DependsOn
 		if deps == nil {

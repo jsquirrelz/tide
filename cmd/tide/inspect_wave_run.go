@@ -139,7 +139,7 @@ func inspectWaveRunWithErr(
 // tabwriter column isn't empty for newly-created Tasks.
 func defaultStatus(phase string) string {
 	if phase == "" {
-		return "Pending"
+		return tidev1alpha3.LevelPhasePending
 	}
 	return phase
 }

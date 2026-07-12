@@ -236,7 +236,7 @@ func (r *MilestoneReconciler) resolveProjectNameForMilestone(ctx context.Context
 //nolint:gocyclo // a flat state machine of mutually-exclusive dispatch arms; splitting obscures the contract
 func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
 	// Step 1: Terminal short-circuit.
-	if ms.Status.Phase == "Succeeded" || ms.Status.Phase == "Failed" {
+	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded || ms.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		return ctrl.Result{}, nil
 	}
 
@@ -250,7 +250,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	//       GATE-01). The old path called patchMilestoneSucceeded directly here,
 	//       bypassing the ChildCount guard — that was the run-1 finding-7 bug.
 	// Phase 12 D-04: approve never jumps a level to Succeeded past its children.
-	if ms.Status.Phase == "AwaitingApproval" {
+	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval {
 		if gates.CheckApprove(ms, "milestone") {
 			// Consume annotation (T-04-G2 one-shot).
 			newAnno := gates.ConsumeApprove(ms, "milestone")
@@ -261,7 +261,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 			}
 			// Return to Running + record ApprovedByUser condition (D-04).
 			statusPatch := client.MergeFrom(ms.DeepCopy())
-			ms.Status.Phase = "Running"
+			ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 			meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 				Status:             metav1.ConditionFalse,
@@ -295,7 +295,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
 
 	// Step 2: On Running — check Job terminal state.
-	if ms.Status.Phase == "Running" {
+	if ms.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: jobName}, &job); err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -523,7 +523,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 
 	// Step 7: Patch Status.Phase=Running + Condition AuthoringPlanner=True.
 	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = "Running"
+	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionAuthoringPlanner,
 		Status:             metav1.ConditionTrue,
@@ -733,7 +733,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 					return ctrl.Result{}, err
 				}
 				statusPatch := client.MergeFrom(ms.DeepCopy())
-				ms.Status.Phase = "Running"
+				ms.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 				meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 					Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 					Status:             metav1.ConditionFalse,
@@ -862,7 +862,7 @@ func (r *MilestoneReconciler) countChildPhases(ctx context.Context, ms *tideproj
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchMilestoneFailed(...)` in the reconcile chain
 func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tideprojectv1alpha3.Milestone, reason, message string) (ctrl.Result, error) {
 	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = "Failed"
+	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionFailed,
 		Status:             metav1.ConditionTrue,
@@ -878,7 +878,7 @@ func (r *MilestoneReconciler) patchMilestoneFailed(ctx context.Context, ms *tide
 
 func (r *MilestoneReconciler) patchMilestoneSucceeded(ctx context.Context, ms *tideprojectv1alpha3.Milestone) (ctrl.Result, error) {
 	patch := client.MergeFrom(ms.DeepCopy())
-	ms.Status.Phase = "Succeeded"
+	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionSucceeded,
 		Status:             metav1.ConditionTrue,
@@ -944,7 +944,7 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 	// (Layer A gate-flow CI flake). With the lock, the stale writer 409s; the
 	// requeued reconcile re-reads fresh state and sees alreadyApproved.
 	patch := client.MergeFromWithOptions(ms.DeepCopy(), client.MergeFromWithOptimisticLock{})
-	ms.Status.Phase = "AwaitingApproval"
+	ms.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,

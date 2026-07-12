@@ -134,7 +134,7 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		phase := tk.Status.Phase
 		if phase == "" {
-			phase = "Pending"
+			phase = tidev1alpha3.LevelPhasePending
 		}
 		deps := tk.Spec.DependsOn
 		if deps == nil {
@@ -162,7 +162,7 @@ func (h *PlansHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// "Dispatching" or "Running". nil pointer when none are mid-flight.
 	var activeDispatchWave *int
 	for _, c := range cards {
-		if c.Phase == "Dispatching" || c.Phase == "Running" {
+		if c.Phase == "Dispatching" || c.Phase == tidev1alpha3.LevelPhaseRunning {
 			if activeDispatchWave == nil || c.WaveIndex < *activeDispatchWave {
 				w := c.WaveIndex
 				activeDispatchWave = &w

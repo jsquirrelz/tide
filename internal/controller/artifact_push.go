@@ -54,7 +54,7 @@ import (
 // levels, before approve gates, single writer class) is what this predicate holds.
 func plannerMaterialized(phase string) bool {
 	switch phase {
-	case "AwaitingApproval", "Succeeded", tideprojectv1alpha3.PhaseComplete:
+	case tideprojectv1alpha3.LevelPhaseAwaitingApproval, tideprojectv1alpha3.LevelPhaseSucceeded, tideprojectv1alpha3.PhaseComplete:
 		return true
 	default:
 		return false

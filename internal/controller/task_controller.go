@@ -301,10 +301,10 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 // Running-branch and gate-policy checks that logically belong to the gate layer).
 func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
 	// Step 1: Terminal short-circuit.
-	if task.Status.Phase == "Succeeded" {
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseSucceeded {
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
 	}
-	if task.Status.Phase == "Failed" {
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		// Phase 25 D-02b: conservative failure halt check at terminal short-circuit.
 		// A Failed task re-triggers the reconciler on every status change; this
 		// hook stamps ConditionFailureHalt on the Project when
@@ -328,7 +328,7 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	}
 
 	// Step 2: On Running — delegate to checkRunningState.
-	if task.Status.Phase == "Running" {
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseRunning {
 		return r.checkRunningState(ctx, task)
 	}
 
@@ -426,7 +426,7 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// OR the legacy BudgetExceeded phase check so the Phase machinery (D-04) is preserved
 	// — the condition check is the new primary path; the phase check is the fallback that
 	// ensures tasks parked by the pre-Phase-14 phase gate continue to be held.
-	if (checkBudgetBlocked(project) || project.Status.Phase == "BudgetExceeded") &&
+	if (checkBudgetBlocked(project) || project.Status.Phase == tideprojectv1alpha3.PhaseBudgetExceeded) &&
 		!budget.IsBypassed(project, time.Now()) {
 		// No per-Task condition stamp: the operator signal is the single Project
 		// BudgetBlocked condition, same as the other four dispatch gates. A
@@ -490,7 +490,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 	indegree := r.computeGlobalIndegree(ctx, *task, allProjectTasks, planList.Items, phaseList.Items, msList.Items)
 	if indegree > 0 {
 		patch := client.MergeFrom(task.DeepCopy())
-		task.Status.Phase = "Pending"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhasePending
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionReconciling,
 			Status:             metav1.ConditionTrue,
@@ -679,7 +679,7 @@ func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv
 	}
 	if attempt > maxAttempts {
 		patch := client.MergeFrom(task.DeepCopy())
-		task.Status.Phase = "Failed"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
@@ -825,7 +825,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	// Conflict rather than clobbering it; the reconcile requeues and short-circuits.
 	{
 		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
-		task.Status.Phase = "Running"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseRunning
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionRunning,
 			Status:             metav1.ConditionTrue,
@@ -876,7 +876,7 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 		message = "Task paused at boundary; requires explicit resume"
 	}
 	patch := client.MergeFrom(task.DeepCopy())
-	task.Status.Phase = "AwaitingApproval"
+	task.Status.Phase = tideprojectv1alpha3.LevelPhaseAwaitingApproval
 	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
@@ -911,7 +911,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
 	if err != nil {
 		patch := client.MergeFrom(task.DeepCopy())
-		task.Status.Phase = "Failed"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
@@ -937,7 +937,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		violations, skipped, vErr := validateControllerOutputPaths(taskWorkspaceRoot, task.Status.StartedAt.Time, task.Spec.DeclaredOutputPaths)
 		if vErr != nil {
 			patch := client.MergeFrom(task.DeepCopy())
-			task.Status.Phase = "Failed"
+			task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 			meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha3.ConditionFailed,
 				Status:             metav1.ConditionTrue,
@@ -976,7 +976,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			msg := buildViolationMessage(violations)
 			logger.Info("output path violations detected", "task", task.Name, "violations", len(violations))
 			patch := client.MergeFrom(task.DeepCopy())
-			task.Status.Phase = "Failed"
+			task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 			meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 				Type:               tideprojectv1alpha3.ConditionFailed,
 				Status:             metav1.ConditionTrue,
@@ -1012,7 +1012,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Standard result interpretation.
 	patch := client.MergeFrom(task.DeepCopy())
 	if out.ExitCode != 0 || out.Result == "cap-hit" || out.Result == outputPathsViolation {
-		task.Status.Phase = "Failed"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 		reason := conditionReasonFromEnvelopeResult(out.Result, out.ExitCode)
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionFailed,
@@ -1044,7 +1044,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			logger.Error(hErr, "setFailureHaltIfNeeded failed (non-fatal)", "task", task.Name)
 		}
 	} else {
-		task.Status.Phase = "Succeeded"
+		task.Status.Phase = tideprojectv1alpha3.LevelPhaseSucceeded
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               tideprojectv1alpha3.ConditionSucceeded,
 			Status:             metav1.ConditionTrue,
@@ -1076,7 +1076,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Budget accounting (Phase 16 D-12). Non-fatal: task is already terminal.
 	// Compute the bounded metric reason from the envelope result; "" = Succeeded.
 	var metricReason string
-	if task.Status.Phase == "Failed" {
+	if task.Status.Phase == tideprojectv1alpha3.LevelPhaseFailed {
 		metricReason = metricFailureReason(out.Result, out.ExitCode)
 	}
 	if emitErr := r.emitTaskMetrics(ctx, task, project, out.Usage, out.CompletedAt, metricReason); emitErr != nil {
@@ -1369,7 +1369,7 @@ func (r *TaskReconciler) computeGlobalIndegree(
 		}
 		// A coarse ref is satisfied only when ALL member tasks have Succeeded.
 		for _, member := range memberTasks {
-			if statusByName[member] != "Succeeded" {
+			if statusByName[member] != tideprojectv1alpha3.LevelPhaseSucceeded {
 				indegree++
 				break // one unsatisfied member in this dep is enough
 			}

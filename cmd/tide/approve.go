@@ -233,7 +233,7 @@ func approveLevelTarget(ctx context.Context, c client.Client, obj client.Object,
 	case *tidev1alpha3.Task:
 		targetPhase = v.Status.Phase
 	}
-	if targetPhase == "Failed" {
+	if targetPhase == tidev1alpha3.LevelPhaseFailed {
 		detail := buildFailureDetail(obj)
 		return fmt.Errorf(
 			"tide: level %q (%s) has failed%s; approval never retries failed work — "+
@@ -258,7 +258,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		if m.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if m.Status.Phase == "Failed" {
+		if m.Status.Phase == tidev1alpha3.LevelPhaseFailed {
 			return m, "milestone", nil
 		}
 	}
@@ -272,7 +272,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		if p.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if p.Status.Phase == "Failed" {
+		if p.Status.Phase == tidev1alpha3.LevelPhaseFailed {
 			return p, "phase", nil
 		}
 	}
@@ -286,7 +286,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		if p.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if p.Status.Phase == "Failed" {
+		if p.Status.Phase == tidev1alpha3.LevelPhaseFailed {
 			return p, "plan", nil
 		}
 	}
@@ -300,7 +300,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 		if t.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if t.Status.Phase == "Failed" {
+		if t.Status.Phase == tidev1alpha3.LevelPhaseFailed {
 			return t, "task", nil
 		}
 	}
@@ -370,7 +370,7 @@ func findAwaitingMilestone(
 		if m.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if m.Status.Phase == "AwaitingApproval" {
+		if m.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
 			return m, "milestone", nil
 		}
 	}
@@ -387,7 +387,7 @@ func findAwaitingPhase(ctx context.Context, c client.Client, ns, projectName str
 		if p.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if p.Status.Phase == "AwaitingApproval" {
+		if p.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
 			return p, "phase", nil
 		}
 	}
@@ -404,7 +404,7 @@ func findAwaitingPlan(ctx context.Context, c client.Client, ns, projectName stri
 		if p.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if p.Status.Phase == "AwaitingApproval" {
+		if p.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
 			return p, "plan", nil
 		}
 	}
@@ -421,7 +421,7 @@ func findAwaitingTask(ctx context.Context, c client.Client, ns, projectName stri
 		if t.Labels["tideproject.k8s/project"] != projectName {
 			continue
 		}
-		if t.Status.Phase == "AwaitingApproval" {
+		if t.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
 			return t, "task", nil
 		}
 	}

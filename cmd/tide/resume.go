@@ -226,7 +226,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 	for i := range msList.Items {
 		item := &msList.Items[i]
-		if item.Status.Phase != "Failed" {
+		if item.Status.Phase != tidev1alpha3.LevelPhaseFailed {
 			continue
 		}
 		orig := item.DeepCopy()
@@ -251,7 +251,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 	for i := range phList.Items {
 		item := &phList.Items[i]
-		if item.Status.Phase != "Failed" {
+		if item.Status.Phase != tidev1alpha3.LevelPhaseFailed {
 			continue
 		}
 		orig := item.DeepCopy()
@@ -276,7 +276,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 	for i := range plList.Items {
 		item := &plList.Items[i]
-		if item.Status.Phase != "Failed" {
+		if item.Status.Phase != tidev1alpha3.LevelPhaseFailed {
 			continue
 		}
 		orig := item.DeepCopy()
@@ -314,7 +314,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 	for i := range tkList.Items {
 		item := &tkList.Items[i]
-		if item.Status.Phase != "Failed" {
+		if item.Status.Phase != tidev1alpha3.LevelPhaseFailed {
 			continue
 		}
 		orig := item.DeepCopy()

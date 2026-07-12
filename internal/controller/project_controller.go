@@ -2492,7 +2492,7 @@ func (r *ProjectReconciler) deriveGlobalWaves(
 					"phase", w.Status.Phase, "memberCount", len(w.Status.TaskRefs))
 				continue
 			}
-			if len(w.Status.TaskRefs) == 0 || w.Status.Phase == "Succeeded" {
+			if len(w.Status.TaskRefs) == 0 || w.Status.Phase == tidev1alpha3.LevelPhaseSucceeded {
 				if delErr := r.Delete(ctx, w); delErr != nil && !apierrors.IsNotFound(delErr) {
 					return fmt.Errorf("prune wave %s: %w", w.Name, delErr)
 				}
