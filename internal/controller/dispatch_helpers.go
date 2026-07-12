@@ -55,6 +55,8 @@ import (
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
+	"github.com/jsquirrelz/tide/internal/dispatch"
+	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -138,6 +140,53 @@ type ProviderDefaults struct {
 	// populated from TIDE_AGENT_EMAIL. Same "empty = no Helm default"
 	// convention as AgentName; resolves independently of it.
 	AgentEmail string
+}
+
+// PlannerReconcilerDeps carries the dispatch-related dependencies shared by
+// the four planner-tier reconcilers (Milestone/Phase/Plan/Project). Mirrors
+// TaskReconcilerDeps (task_controller.go:90-119) for the up-stack
+// reconcilers — plan 41-06 consolidation.
+//
+// Fields are populated at Manager wiring time (cmd/manager/main.go) and never
+// mutated thereafter — copying a small struct at construction is cheaper than
+// indirection at every dispatch (RESEARCH.md §P3.2 §Known pitfalls).
+//
+// Pool fields (PlannerPool, ExecutorPool), WatchNamespace, Recorder, and
+// SharedPVCName stay as direct fields on each reconciler because they're
+// conceptually separate from "what to dispatch with" — they're concurrency
+// limiters and per-reconciler config, not dispatch-tier deps.
+//
+// Project is included here, not just Milestone/Phase/Plan, per RESEARCH
+// Pitfall 2: leaving it out would repeat exactly the "forgotten Dispatcher
+// field" bug class (cascade-8) this carrier exists to prevent.
+type PlannerReconcilerDeps struct {
+	Dispatcher dispatch.Dispatcher
+
+	// EnvReader reads the EnvelopeOut from the per-Project PVC after the
+	// planner Job completes.
+	EnvReader podjob.EnvelopeReader
+
+	// SigningKey is the HMAC signing key used to mint per-dispatch tokens
+	// for the credproxy sidecar.
+	SigningKey []byte
+
+	// CredproxyImage is the image ref for the tide-credproxy sidecar.
+	CredproxyImage string
+
+	// TidePushImage is the image ref for the tide-push container used by
+	// the W-2 boundary push trigger.
+	TidePushImage string
+
+	// ReporterImage is the image ref for the tide-reporter reader Job. When
+	// empty, spawning the reader Job is skipped.
+	ReporterImage string
+
+	// HelmProviderDefaults carry Helm-chart provider/model defaults.
+	HelmProviderDefaults ProviderDefaults
+
+	// PricingOverridesJSON is the validated D-02 override JSON forwarded
+	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON.
+	PricingOverridesJSON string
 }
 
 // levelOverrideKey maps a dispatch level (the 5-valued identity string

@@ -269,12 +269,12 @@ func triggerWaveIntegrationJob(
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
 func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, r.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
 func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, r.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PlanReconciler entry point. Plan boundary
@@ -288,5 +288,5 @@ func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent c
 // anyway (CR-03 note), so the old per-caller collection here was always
 // dead code in practice.
 func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, r.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
 }
