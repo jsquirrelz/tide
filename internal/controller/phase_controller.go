@@ -73,9 +73,22 @@ type PhaseReconciler struct {
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+
 	// Recorder emits K8s Events for observable parent-ref-resolution failures
 	// (defect #17). Nil-safe: every use is guarded by r.Recorder != nil.
 	Recorder record.EventRecorder
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *PhaseReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=phases,verbs=get;list;watch;create;update;patch;delete
@@ -354,13 +367,13 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 	plannerPrompt := outcomePromptOf(project)
 	envIn, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, ph.Spec.SharedContext)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, ph.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}
@@ -406,7 +419,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,

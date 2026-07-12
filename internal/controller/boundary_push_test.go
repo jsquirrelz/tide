@@ -643,8 +643,8 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 				Name:      "tbp-busy-other-writer",
 				Namespace: "default",
 				Labels: map[string]string{
-					gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
-					gitWriterProjectLabelKey: projectName,
+					gitWriterRoleLabelKey:     gitWriterRoleLabelValue,
+					"tideproject.k8s/project": projectName,
 				},
 			},
 			Spec: batchv1.JobSpec{

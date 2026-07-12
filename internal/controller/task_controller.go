@@ -133,9 +133,22 @@ type TaskReconciler struct {
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+
 	// Deps carries the dispatch-tier dependencies. Phase 04.1 P3.2 — mirrors the
 	// HelmProviderDefaults precedent on Milestone/Phase/Plan reconcilers.
 	Deps TaskReconcilerDeps
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *TaskReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -537,7 +550,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 	// stamps tideproject.k8s/wave-paused=<N> on tasks in a wave waiting for
 	// approve-wave-N on the parent Plan; until the label is cleared (by
 	// PlanReconciler on annotation consume), the Task stays AwaitingApproval.
-	if _, paused := task.Labels["tideproject.k8s/wave-paused"]; paused {
+	if _, paused := task.Labels[owner.LabelWavePaused]; paused {
 		result, err := r.patchTaskAwaitingApproval(ctx, task, gates.PolicyPause)
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
@@ -817,7 +830,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           string(project.UID),
 		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
@@ -1117,7 +1130,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 // silently mis-routed Tasks in multi-Project namespaces.
 func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1alpha3.Task) (*tideprojectv1alpha3.Project, error) {
 	// Fast path: PlanReconciler stamps tideproject.k8s/project=<name> on all Tasks.
-	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+	if projectName, ok := task.Labels[owner.LabelProject]; ok && projectName != "" {
 		var project tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
 			return &project, nil
@@ -1416,7 +1429,7 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 	maxAttempt := 0
 	logger := logf.FromContext(ctx)
 	for _, j := range jobList.Items {
-		attempt, ok := j.Labels["tideproject.k8s/attempt"]
+		attempt, ok := j.Labels[owner.LabelAttempt]
 		if !ok {
 			continue
 		}
@@ -1496,7 +1509,7 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 		// ("refusing vendor=\"\""). Latent until a run first reached real task
 		// execution (the planner paths set Provider; this builder never did).
 		Provider:      ResolveProvider(project, "task", r.Deps.HelmProviderDefaults),
-		ProxyEndpoint: "https://127.0.0.1:8443",
+		ProxyEndpoint: credproxyEndpoint,
 		SignedToken:   token,
 		Dev:           dev,
 	}

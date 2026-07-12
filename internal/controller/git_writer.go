@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -37,11 +38,6 @@ const (
 	// label consumed by plannerInFlightCount (dispatch_helpers.go).
 	gitWriterRoleLabelKey   = "tideproject.k8s/role"
 	gitWriterRoleLabelValue = "git-writer"
-
-	// gitWriterProjectLabelKey scopes the git-writer List to a single
-	// Project — matches the existing tideproject.k8s/project label
-	// convention used project-wide (fixtures_test.go, cmd/tide/resume.go).
-	gitWriterProjectLabelKey = "tideproject.k8s/project"
 )
 
 // succeededTaskBranches returns the sorted, deterministic list of worktree
@@ -59,7 +55,7 @@ func succeededTaskBranches(ctx context.Context, c client.Client, ns, projectName
 	var tasks tideprojectv1alpha3.TaskList
 	if err := c.List(ctx, &tasks,
 		client.InNamespace(ns),
-		client.MatchingLabels{gitWriterProjectLabelKey: projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return nil, err
 	}
@@ -74,7 +70,7 @@ func succeededTaskBranches(ctx context.Context, c client.Client, ns, projectName
 	// bypass for the durable (labeled) pause state.
 	pausedPlans := make(map[string]bool)
 	for i := range tasks.Items {
-		if _, paused := tasks.Items[i].Labels["tideproject.k8s/wave-paused"]; paused {
+		if _, paused := tasks.Items[i].Labels[owner.LabelWavePaused]; paused {
 			pausedPlans[tasks.Items[i].Spec.PlanRef] = true
 		}
 	}
@@ -106,8 +102,8 @@ func gitWriterInFlightCount(ctx context.Context, c client.Client, ns, projectNam
 	if err := c.List(ctx, &jobs,
 		client.InNamespace(ns),
 		client.MatchingLabels{
-			gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
-			gitWriterProjectLabelKey: projectName,
+			gitWriterRoleLabelKey: gitWriterRoleLabelValue,
+			owner.LabelProject:    projectName,
 		},
 	); err != nil {
 		return 0, err

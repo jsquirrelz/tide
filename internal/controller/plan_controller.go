@@ -92,6 +92,19 @@ type PlanReconciler struct {
 
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
+
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *PlanReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=plans,verbs=get;list;watch;create;update;patch;delete
@@ -374,13 +387,13 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 	plannerPrompt := outcomePromptOf(project)
 	envIn, envInJSON, err := BuildPlannerEnvelope("plan", plan, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, plan.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, true, fmt.Errorf("build planner envelope: %w", err)
 	}
@@ -426,7 +439,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
@@ -873,7 +886,7 @@ func (r *PlanReconciler) resolveProjectForPlan(ctx context.Context, plan *tidepr
 	// Fast path: if the Plan carries the tideproject.k8s/project label (stamped
 	// by stampTaskLabels), use it directly to avoid the Phase→Milestone→Project
 	// chain walk. This is the same label fast-path resolveProjectName uses.
-	if projectName, ok := plan.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+	if projectName, ok := plan.Labels[owner.LabelProject]; ok && projectName != "" {
 		var p tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: projectName}, &p); err == nil {
 			return &p
@@ -1364,11 +1377,11 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 			if t == nil || t.Labels == nil {
 				continue
 			}
-			if _, has := t.Labels["tideproject.k8s/wave-paused"]; !has {
+			if _, has := t.Labels[owner.LabelWavePaused]; !has {
 				continue
 			}
 			tPatch := client.MergeFrom(t.DeepCopy())
-			delete(t.Labels, "tideproject.k8s/wave-paused")
+			delete(t.Labels, owner.LabelWavePaused)
 			if err := r.Patch(ctx, t, tPatch); err != nil {
 				return ctrl.Result{}, fmt.Errorf("clear wave-paused on task %s: %w", t.Name, err)
 			}
@@ -1395,14 +1408,14 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 		if t == nil {
 			continue
 		}
-		if t.Labels["tideproject.k8s/wave-paused"] == waveLabel {
+		if t.Labels[owner.LabelWavePaused] == waveLabel {
 			continue
 		}
 		tPatch := client.MergeFrom(t.DeepCopy())
 		if t.Labels == nil {
 			t.Labels = map[string]string{}
 		}
-		t.Labels["tideproject.k8s/wave-paused"] = waveLabel
+		t.Labels[owner.LabelWavePaused] = waveLabel
 		if err := r.Patch(ctx, t, tPatch); err != nil {
 			return ctrl.Result{}, fmt.Errorf("stamp wave-paused on task %s: %w", t.Name, err)
 		}
@@ -1431,7 +1444,7 @@ func (r *PlanReconciler) maybePauseForWaveApprove(ctx context.Context, plan *tid
 // silently mis-routed Plans in multi-Project namespaces.
 func (r *PlanReconciler) resolveProjectName(ctx context.Context, plan *tideprojectv1alpha3.Plan) (string, error) {
 	// Fast path: label stamped on this Plan.
-	if name, ok := plan.Labels["tideproject.k8s/project"]; ok && name != "" {
+	if name, ok := plan.Labels[owner.LabelProject]; ok && name != "" {
 		return name, nil
 	}
 	// Owner-ref chain walk: Plan→Phase→Milestone→Project (via Spec.PhaseRef).

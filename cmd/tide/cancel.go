@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // cancelRun is the testable seam. Returns an error if --force is absent
@@ -107,7 +108,7 @@ func cancelDryRun(
 		} else {
 			for i := range list.Items {
 				m := &list.Items[i]
-				if m.Labels["tideproject.k8s/project"] == projectName {
+				if m.Labels[owner.LabelProject] == projectName {
 					fmt.Fprintf(out, "    Milestone/%s\n", m.Name)
 				}
 			}
@@ -120,7 +121,7 @@ func cancelDryRun(
 		} else {
 			for i := range list.Items {
 				p := &list.Items[i]
-				if p.Labels["tideproject.k8s/project"] == projectName {
+				if p.Labels[owner.LabelProject] == projectName {
 					fmt.Fprintf(out, "    Phase/%s\n", p.Name)
 				}
 			}
@@ -133,7 +134,7 @@ func cancelDryRun(
 		} else {
 			for i := range list.Items {
 				p := &list.Items[i]
-				if p.Labels["tideproject.k8s/project"] == projectName {
+				if p.Labels[owner.LabelProject] == projectName {
 					fmt.Fprintf(out, "    Plan/%s\n", p.Name)
 				}
 			}
@@ -146,7 +147,7 @@ func cancelDryRun(
 		} else {
 			for i := range list.Items {
 				tk := &list.Items[i]
-				if tk.Labels["tideproject.k8s/project"] == projectName {
+				if tk.Labels[owner.LabelProject] == projectName {
 					fmt.Fprintf(out, "    Task/%s\n", tk.Name)
 				}
 			}

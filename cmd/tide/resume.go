@@ -53,6 +53,7 @@ import (
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // resumeRun is the testable seam. Fetches the Project, calls
@@ -220,7 +221,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	var msList tidev1alpha3.MilestoneList
 	if err := c.List(ctx, &msList,
 		client.InNamespace(ns),
-		client.MatchingLabels{"tideproject.k8s/project": projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return fmt.Errorf("list milestones: %w", err)
 	}
@@ -245,7 +246,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	var phList tidev1alpha3.PhaseList
 	if err := c.List(ctx, &phList,
 		client.InNamespace(ns),
-		client.MatchingLabels{"tideproject.k8s/project": projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return fmt.Errorf("list phases: %w", err)
 	}
@@ -270,7 +271,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	var plList tidev1alpha3.PlanList
 	if err := c.List(ctx, &plList,
 		client.InNamespace(ns),
-		client.MatchingLabels{"tideproject.k8s/project": projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return fmt.Errorf("list plans: %w", err)
 	}
@@ -308,7 +309,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	var tkList tidev1alpha3.TaskList
 	if err := c.List(ctx, &tkList,
 		client.InNamespace(ns),
-		client.MatchingLabels{"tideproject.k8s/project": projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return fmt.Errorf("list tasks: %w", err)
 	}

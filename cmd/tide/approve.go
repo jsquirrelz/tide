@@ -53,6 +53,7 @@ import (
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // approveWaveRE validates the --wave flag SHAPE — non-empty plan name +
@@ -255,7 +256,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 	}
 	for i := range msList.Items {
 		m := &msList.Items[i]
-		if m.Labels["tideproject.k8s/project"] != projectName {
+		if m.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if m.Status.Phase == tidev1alpha3.LevelPhaseFailed {
@@ -269,7 +270,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 	}
 	for i := range phList.Items {
 		p := &phList.Items[i]
-		if p.Labels["tideproject.k8s/project"] != projectName {
+		if p.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if p.Status.Phase == tidev1alpha3.LevelPhaseFailed {
@@ -283,7 +284,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 	}
 	for i := range plList.Items {
 		p := &plList.Items[i]
-		if p.Labels["tideproject.k8s/project"] != projectName {
+		if p.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if p.Status.Phase == tidev1alpha3.LevelPhaseFailed {
@@ -297,7 +298,7 @@ func findFailedLevel(ctx context.Context, c client.Client, ns, projectName strin
 	}
 	for i := range tkList.Items {
 		t := &tkList.Items[i]
-		if t.Labels["tideproject.k8s/project"] != projectName {
+		if t.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if t.Status.Phase == tidev1alpha3.LevelPhaseFailed {
@@ -367,7 +368,7 @@ func findAwaitingMilestone(
 	}
 	for i := range list.Items {
 		m := &list.Items[i]
-		if m.Labels["tideproject.k8s/project"] != projectName {
+		if m.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if m.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
@@ -384,7 +385,7 @@ func findAwaitingPhase(ctx context.Context, c client.Client, ns, projectName str
 	}
 	for i := range list.Items {
 		p := &list.Items[i]
-		if p.Labels["tideproject.k8s/project"] != projectName {
+		if p.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if p.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
@@ -401,7 +402,7 @@ func findAwaitingPlan(ctx context.Context, c client.Client, ns, projectName stri
 	}
 	for i := range list.Items {
 		p := &list.Items[i]
-		if p.Labels["tideproject.k8s/project"] != projectName {
+		if p.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if p.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {
@@ -418,7 +419,7 @@ func findAwaitingTask(ctx context.Context, c client.Client, ns, projectName stri
 	}
 	for i := range list.Items {
 		t := &list.Items[i]
-		if t.Labels["tideproject.k8s/project"] != projectName {
+		if t.Labels[owner.LabelProject] != projectName {
 			continue
 		}
 		if t.Status.Phase == tidev1alpha3.LevelPhaseAwaitingApproval {

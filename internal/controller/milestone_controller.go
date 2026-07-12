@@ -80,9 +80,22 @@ type MilestoneReconciler struct {
 	// WatchNamespace narrows the watch (AUTH-02). Empty = watch-all-namespaces.
 	WatchNamespace string
 
+	// SharedPVCName is the name of the cluster-wide PVC provisioned by the
+	// Helm chart (Plan 12). Defaults to "tide-projects". Configurable via
+	// --workspaces-pvc-name flag on the manager (Blocker #2/#3 architecture).
+	SharedPVCName string
+
 	// Recorder emits K8s Events for observable parent-ref-resolution failures
 	// (defect #17). Nil-safe: every use is guarded by r.Recorder != nil.
 	Recorder record.EventRecorder
+}
+
+// sharedPVCName returns the configured shared PVC name or the default.
+func (r *MilestoneReconciler) sharedPVCName() string {
+	if r.SharedPVCName != "" {
+		return r.SharedPVCName
+	}
+	return defaultSharedPVCName
 }
 
 // +kubebuilder:rbac:groups=tideproject.k8s,resources=milestones,verbs=get;list;watch;create;update;patch;delete
@@ -388,17 +401,15 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// Project.Spec does not carry per-project Caps (only Task does) — pass nil
 	// to let DefaultCaps apply the 600s planner floor unconditionally.
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
-	// If operator has not set Iterations, apply the 20-iteration planner default
-	// inline (the Caps type doesn't carry per-Kind iteration defaults; only the
-	// wall-clock floor differs by Kind via DefaultCaps).
+	// If operator has not set Iterations, apply the planner default.
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 	plannerPrompt := outcomePromptOf(project)
 	envIn, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, ms.Spec.SharedContext)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, ms.Spec.SharedContext)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build planner envelope: %w", err)
 	}
@@ -443,7 +454,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,

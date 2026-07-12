@@ -1171,7 +1171,7 @@ func (r *ProjectReconciler) formatMissingBranchesMessage(ctx context.Context, pr
 	byUID := make(map[string]string)
 	var taskList tidev1alpha3.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(project.Namespace),
-		client.MatchingLabels{gitWriterProjectLabelKey: project.Name}); err == nil {
+		client.MatchingLabels{owner.LabelProject: project.Name}); err == nil {
 		for i := range taskList.Items {
 			byUID[string(taskList.Items[i].UID)] = taskList.Items[i].Name
 		}
@@ -1680,7 +1680,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	// Step 4: Build caps.
 	plannerCaps := podjob.DefaultCaps(nil, podjob.JobKindPlanner)
 	if plannerCaps.Iterations <= 0 {
-		plannerCaps.Iterations = 20
+		plannerCaps.Iterations = defaultPlannerIterations
 	}
 
 	// Step 5: Build planner envelope.
@@ -1689,7 +1689,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 	envIn, envInJSON, err := BuildPlannerEnvelope("project", project, project, attempt, "", project.Spec.OutcomePrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
-	}, "https://127.0.0.1:8443", r.Deps.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
+	}, credproxyEndpoint, r.Deps.HelmProviderDefaults, "" /* project is the root; no parent SharedContext */)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build project planner envelope: %w", err)
 	}
@@ -1730,7 +1730,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.Deps.CredproxyImage,
 		SecretUID:            secretUID,
-		PVCName:              "tide-projects",
+		PVCName:              r.sharedPVCName(),
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
@@ -2512,7 +2512,7 @@ func (r *ProjectReconciler) stampGlobalTaskLabels(
 		}
 		waveIndexStr := fmt.Sprintf("%d", waveIdx)
 		// Skip patch if both labels are already correct — no churn on re-derivation.
-		if t.Labels["tideproject.k8s/wave-index"] == waveIndexStr &&
+		if t.Labels[owner.LabelWaveIndex] == waveIndexStr &&
 			(projectName == "" || t.Labels[owner.LabelProject] == projectName) {
 			continue
 		}
@@ -2520,7 +2520,7 @@ func (r *ProjectReconciler) stampGlobalTaskLabels(
 		if t.Labels == nil {
 			t.Labels = map[string]string{}
 		}
-		t.Labels["tideproject.k8s/wave-index"] = waveIndexStr
+		t.Labels[owner.LabelWaveIndex] = waveIndexStr
 		if projectName != "" {
 			t.Labels[owner.LabelProject] = projectName
 		}

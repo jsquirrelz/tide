@@ -29,14 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
-)
-
-// canonical label keys per internal/controller/plan_controller.go:513-523.
-// Do not invent alternate vocabularies — these are the contract WaveReconciler
-// + TaskReconciler depend on for fast lookups.
-const (
-	labelProject   = "tideproject.k8s/project"
-	labelWaveIndex = "tideproject.k8s/wave-index"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // taskRow is the JSON-shaped row emitted by inspect-wave -o json. JSON tag
@@ -77,10 +70,10 @@ func inspectWaveRunWithErr(
 	rows := make([]taskRow, 0, len(list.Items))
 	for i := range list.Items {
 		tk := &list.Items[i]
-		if tk.Labels[labelProject] != projectName {
+		if tk.Labels[owner.LabelProject] != projectName {
 			continue
 		}
-		waveStr := tk.Labels[labelWaveIndex]
+		waveStr := tk.Labels[owner.LabelWaveIndex]
 		wave, err := strconv.Atoi(waveStr)
 		if err != nil {
 			// Tasks without a stamped wave label are skipped — they

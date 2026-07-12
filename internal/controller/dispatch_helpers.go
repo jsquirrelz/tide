@@ -62,6 +62,21 @@ import (
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
+const (
+	// credproxyEndpoint is the in-pod HTTPS address of the tide-credproxy
+	// native sidecar (Plan 05). Every dispatch (planner and executor) passes
+	// this to the subagent Job as the envelope's ProxyEndpoint so the
+	// subagent routes provider calls through the sidecar for token
+	// validation (D-C1).
+	credproxyEndpoint = "https://127.0.0.1:8443"
+
+	// defaultPlannerIterations is applied when the operator has not set
+	// Caps.Iterations on a planner dispatch (the Caps type doesn't carry
+	// per-Kind iteration defaults; only the wall-clock floor differs by Kind
+	// via podjob.DefaultCaps).
+	defaultPlannerIterations = 20
+)
+
 // spawnReporterIfNeeded idempotently spawns the tide-reporter reader Job for a
 // planner-level Job completion (Option C / T-09-13: AlreadyExists on Create is
 // success; a pre-existing reporter Job means this completion was already

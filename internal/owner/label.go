@@ -32,6 +32,23 @@ import (
 // first call (CUTS-01 run-1 finding-6).
 const LabelProject = "tideproject.k8s/project"
 
+// LabelWavePaused is stamped on Tasks by PlanReconciler's wave-pause gate
+// (value is the paused wave index) and read by the Task dispatch gate and
+// git_writer's cumulative-branch scan to hold dispatch/integration at an
+// unapproved wave boundary. Cleared by PlanReconciler on wave-approve.
+const LabelWavePaused = "tideproject.k8s/wave-paused"
+
+// LabelWaveIndex is stamped on Tasks by the global wave aggregator
+// (WaveReconciler/ProjectReconciler) and read by the project status
+// roll-up, the dashboard waves/execution-dag API, and the tide CLI to
+// group Tasks by their derived global wave.
+const LabelWaveIndex = "tideproject.k8s/wave-index"
+
+// LabelAttempt is stamped on dispatch Jobs by the podjob jobspec builder
+// (value is the current attempt number) and read by TaskReconciler's
+// retry-accounting scan to compute the next attempt.
+const LabelAttempt = "tideproject.k8s/attempt"
+
 // StampProjectLabel stamps the canonical tideproject.k8s/project label on obj.
 // Must be called at every child CR create site BEFORE c.Create().
 //
