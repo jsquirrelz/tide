@@ -16,7 +16,7 @@ limitations under the License.
 
 // Package anthropic implements pkg/dispatch.Subagent against Anthropic's
 // Claude Code CLI. Per D-C1 (the provider firewall) all Anthropic-specific
-// code lives here, NOT in pkg/dispatch, pkg/controller, or pkg/dag â the
+// code lives here, NOT in pkg/dispatch, pkg/controller, or pkg/dag — the
 // firewall is enforced at build time by tools/analyzers/providerfirewall.
 //
 // HARN-06 decision (03-RESEARCH Â§"Alternatives Considered"): we shell out to
@@ -26,13 +26,13 @@ limitations under the License.
 // Go SDK module.
 //
 // CLAUDE.md anti-pattern guardrails baked in:
-//   - NEVER mount the host claude config dir â the --bare flag (RESEARCH
+//   - NEVER mount the host claude config dir — the --bare flag (RESEARCH
 //     Â§"Critical new finding") skips auto-discovery of hooks/skills/plugins/MCP
 //     and any CLAUDE-doc auto-memory, so the per-Pod runtime is hermetic.
-//   - NEVER use OAuth headless â claude-code#29983, #7100 break it. We pin
+//   - NEVER use OAuth headless — claude-code#29983, #7100 break it. We pin
 //     ANTHROPIC_API_KEY to the signed token minted by the controller and
 //     validated by the credproxy sidecar (Phase 2 D-C1..C4).
-//   - NEVER embed an LLM API key directly â the API key lives only in the
+//   - NEVER embed an LLM API key directly — the API key lives only in the
 //     credproxy sidecar; this binary sees a short-lived HMAC token.
 package anthropic
 
@@ -56,7 +56,7 @@ import (
 
 // vendorSentinel is the Provider.Vendor value this binary accepts. The
 // envelope.Provider.Vendor field is the compile-time agreement between the
-// orchestrator-resolved provider triple and the running subagent image â if
+// orchestrator-resolved provider triple and the running subagent image — if
 // they disagree, we refuse to dispatch (Pitfall 14 mitigation).
 const vendorSentinel = "anthropic"
 
@@ -196,7 +196,7 @@ func NewWithExec(opts Options, execFunc func(ctx context.Context, name string, a
 //  1. Fail-fast vendor check: refuse if in.Provider.Vendor != "anthropic".
 //  2. Fail-fast params allow-list (Q3): refuse unknown Provider.Params keys.
 //  3. Load + render the compiled-in prompt template via
-//     common.LoadPromptTemplate(in.Role, in.Level) â never read the host
+//     common.LoadPromptTemplate(in.Role, in.Level) — never read the host
 //     filesystem for prompt content (CLAUDE.md anti-pattern).
 //  4. Build `claude -p <rendered> --model <Provider.Model> --output-format
 //     stream-json --verbose --include-partial-messages --bare` (the --bare
@@ -219,7 +219,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: refusing vendor=%q (expected %q)", in.Provider.Vendor, vendorSentinel)
 	}
 
-	// 2. Params allow-list fail-fast (Q3 RESOLVED â 03-RESEARCH line 933).
+	// 2. Params allow-list fail-fast (Q3 RESOLVED — 03-RESEARCH line 933).
 	for key := range in.Provider.Params {
 		if !paramsAllowList[key] {
 			return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: unknown param %q (allowed: temperature, thinking_budget, top_p, top_k)", key)
@@ -315,7 +315,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	}
 	defer func() { _ = eventsFile.Close() }() // best-effort event sink; close error is non-actionable cleanup
 
-	// 7. Pipe stdout â ParseStream(stdout, events.jsonl). Stderr surfaces
+	// 7. Pipe stdout → ParseStream(stdout, events.jsonl). Stderr surfaces
 	// as task-level Reason on non-zero exit.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -332,7 +332,7 @@ func (a *Anthropic) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkgdisp
 	waitErr := cmd.Wait()
 
 	// Decide exit code + reason. Order:
-	//   - parse error on the stream â dispatch-level (return err).
+	//   - parse error on the stream → dispatch-level (return err).
 	//   - wait error: task-level (ExitCode from exec.ExitError, Reason from stderr).
 	if parseErr != nil {
 		return pkgdispatch.EnvelopeOut{}, fmt.Errorf("anthropic subagent: parse stream: %w", parseErr)

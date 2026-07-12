@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package controller â dispatch_helpers.go consolidates the three planner
+// Package controller — dispatch_helpers.go consolidates the three planner
 // dispatch helpers that all three up-stack reconcilers (Milestone, Phase,
 // Plan) share (Phase 3 D-A1 / D-A2 / D-A4). The helpers exist to keep the
-// reconciler bodies from drifting in lockstep â each reconciler is ~80-150
+// reconciler bodies from drifting in lockstep — each reconciler is ~80-150
 // LOC of NEW code instead of ~230 LOC because the shared bits live here.
 //
 //   - ResolveProvider walks the Project.Spec.Subagent precedence chain
-//     per D-C2: levels.{level}.{model,params} â Project default â
+//     per D-C2: levels.{level}.{model,params} → Project default →
 //     Helm-chart default.
 //
 //   - BuildPlannerEnvelope mirrors task_controller.go buildEnvelopeIn for
-//     planner-level dispatch â sets Role="planner", Level=<level>,
+//     planner-level dispatch — sets Role="planner", Level=<level>,
 //     populates Provider via ResolveProvider, and marshals to []byte.
 //
 //   - MaterializeChildCRDs server-side-creates child CRDs from
@@ -114,11 +114,11 @@ func spawnReporterIfNeeded(
 // model identifier. Both are filled at Manager startup from Helm values.
 type ProviderDefaults struct {
 	// Image is the default subagent image ref. Empty string means
-	// "no Helm default" â caller is responsible for surfacing this
+	// "no Helm default" — caller is responsible for surfacing this
 	// at Job creation time (a missing image is a config error).
 	Image string
 
-	// Models maps levelâmodel. Missing key means "no Helm default for
+	// Models maps level→model. Missing key means "no Helm default for
 	// that level".
 	Models map[string]string
 
@@ -218,14 +218,14 @@ func ResolveProvider(project *tideprojectv1alpha3.Project, level string, helmDef
 		}
 	}
 
-	// Merge Params â level overrides Project defaults on key conflict.
+	// Merge Params — level overrides Project defaults on key conflict.
 	var params map[string]string
 	if levelCfg != nil && len(levelCfg.Params) > 0 {
 		params = make(map[string]string, len(levelCfg.Params))
 		maps.Copy(params, levelCfg.Params)
 	}
 	// (Project-level Params are not currently exposed on SubagentConfig
-	// â LevelConfig.Params is the per-level extension; if a future
+	// — LevelConfig.Params is the per-level extension; if a future
 	// schema bump adds a top-level Subagent.Params, merge here with
 	// "level wins on conflict" semantics.)
 
@@ -244,18 +244,18 @@ func ResolveProvider(project *tideprojectv1alpha3.Project, level string, helmDef
 //
 // parent is the up-stack CRD whose UID stamps EnvelopeIn.TaskUID (the
 // field is named TaskUID for backward-compat with Phase 2's envelope
-// schema, but it carries the parent's UID at the planner level â the
+// schema, but it carries the parent's UID at the planner level — the
 // semantic is "the dispatch this envelope drives" regardless of level).
 //
 // prompt is the level-appropriate prompt body the dispatching reconciler
 // supplies; it is assigned verbatim to EnvelopeIn.Prompt so the real
 // subagent's template render has the actual outcome to author against
 // (defect #4: prior to this the field was never set and the real Claude
-// planner saw an empty prompt). token and prompt are DISTINCT params â
+// planner saw an empty prompt). token and prompt are DISTINCT params —
 // token is the credproxy HMAC, prompt is the authoring instruction. The
 // project planner passes Project.Spec.OutcomePrompt; deeper planners pass
-// the same outcome (the parent artifact context â MILESTONE.md, the phase
-// brief, PLAN.md â lives on the PVC and the template instructs reading it,
+// the same outcome (the parent artifact context — MILESTONE.md, the phase
+// brief, PLAN.md — lives on the PVC and the template instructs reading it,
 // and ParentName flows through EnvelopeIn.Dispatch).
 // outcomePromptOf returns project.Spec.OutcomePrompt, nil-safe: the deeper
 // reconcilers resolve the owning Project by walking the parent chain
@@ -291,7 +291,7 @@ func BuildPlannerEnvelope(level string, parent metav1.Object, project *tideproje
 
 	// Stamp parentName into the dedicated Dispatch metadata field so the stub
 	// planner can populate the child *Ref field (e.g. milestoneRef, phaseRef)
-	// without querying the K8s API â parent.GetName() is the authoritative
+	// without querying the K8s API — parent.GetName() is the authoritative
 	// source (T-07-03-03: parentName is metadata, not a secret). This is kept
 	// out of Provider.Params (model-parameters-only) so the anthropic runner's
 	// strict param allow-list is not tripped by dispatch metadata.
