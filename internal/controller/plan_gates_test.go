@@ -408,9 +408,9 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			task1NN := types.NamespacedName{Name: task1Name, Namespace: "default"}
 			task2NN := types.NamespacedName{Name: task2Name, Namespace: "default"}
 
-			_, err := reconcileN(taskReconciler, task1NN, 3)
+			err := reconcileWithRetry(taskReconciler.Reconcile, task1NN, 3)
 			Expect(err).NotTo(HaveOccurred())
-			_, err = reconcileN(taskReconciler, task2NN, 3)
+			err = reconcileWithRetry(taskReconciler.Reconcile, task2NN, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			// SECOND RED ASSERTION: Task reconciler holds (Status.Phase stays "")
@@ -479,7 +479,7 @@ var _ = Describe("PlanReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// Step 7: after approval the Task hold lifts and an executor Job is dispatched.
-			_, err = reconcileN(taskReconciler, task1NN, 5)
+			err = reconcileWithRetry(taskReconciler.Reconcile, task1NN, 5)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func(g Gomega) {
 				uid1 := string(getTaskUID(task1Name))

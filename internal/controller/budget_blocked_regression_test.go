@@ -131,7 +131,7 @@ var _ = Describe("BudgetBlocked run-1 regression (a): cap trips → Project carr
 
 		It("Project carries BudgetBlocked=True with Reason=BudgetCapReached after cap-crossing reconcile", func() {
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
-			_, err := reconcileN(reconciler, name, 3)
+			err := reconcileWithRetry(reconciler.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
@@ -173,7 +173,7 @@ var _ = Describe("BudgetBlocked run-1 regression (b): no Job created; Task NOT F
 
 		It("no executor Job created while BudgetBlocked; task is NOT Failed; hold returns 30s requeue", func() {
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
-			result, err := reconcileN(reconciler, name, 3)
+			result, err := reconcileWithRetryResult(reconciler.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(30*time.Second),
 				"budget-blocked hold must return 30s park requeue (not empty Result)")
@@ -247,7 +247,7 @@ var _ = Describe("BudgetBlocked reservation bound: second task parks when headro
 				"BUDGET-03: first task must dispatch when headroom is available")
 
 			// Task B: spent(9000) + reserved(600) + estimate(600) = 10200 >= cap(10000) → park.
-			result, err := reconcileN(reconciler, nameB, 3)
+			result, err := reconcileWithRetryResult(reconciler.Reconcile, nameB, 3)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(30*time.Second),
 				"BUDGET-03: second task must park at headroom gate (30s requeue)")
@@ -293,7 +293,7 @@ var _ = Describe("BudgetBlocked cap-raise recovery: condition clears and dispatc
 
 			// Pre-condition: pump reconciler until BudgetBlocked=True on the Project.
 			Eventually(func(g Gomega) {
-				_, err := reconcileN(reconciler, name, 1)
+				err := reconcileWithRetry(reconciler.Reconcile, name, 1)
 				g.Expect(err).NotTo(HaveOccurred())
 				var p tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p)).To(Succeed())
@@ -323,7 +323,7 @@ var _ = Describe("BudgetBlocked cap-raise recovery: condition clears and dispatc
 			// Reconcile again — bidirectional setBudgetBlockedIfNeeded clears the condition
 			// (cap no longer exceeded with the raised limit).
 			Eventually(func(g Gomega) {
-				_, err := reconcileN(reconciler, name, 1)
+				err := reconcileWithRetry(reconciler.Reconcile, name, 1)
 				g.Expect(err).NotTo(HaveOccurred())
 				var p tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p)).To(Succeed())
