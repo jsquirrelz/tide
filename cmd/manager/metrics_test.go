@@ -24,8 +24,9 @@ limitations under the License.
 // test file's own import would trigger init(). To prove the wire-up lives in
 // main.go (and survives a future refactor that removes the test file), grep
 // the production source for the exact blank-import literal. This mirrors the
-// static-assertion pattern in api/v1alpha1/aggregates_guard_test.go and
-// cmd/manager/rbac_docs_test.go.
+// static-assertion pattern used by cmd/manager/rbac_docs_test.go (the
+// aggregates-guard variant of this pattern was retired in Phase 40 — its
+// concern is now carried by the hardened `make verify-no-aggregates` gate).
 //
 // A second test (TestMetricsFamilies) seeds and gathers via the
 // controller-runtime registry to prove the metric NAMES match the contract

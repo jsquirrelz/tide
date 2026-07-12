@@ -62,8 +62,8 @@ import (
 	"github.com/jsquirrelz/tide/internal/pool"
 
 	// All webhooks serve v1alpha3 (Phase 40 crank, plan 40-03) — the prior
-	// v1alpha2 package was renamed, not kept alongside it (D-01 reinstall-only:
-	// no transitional multi-version webhook registration).
+	// schema-revision package was renamed, not kept alongside it (D-01
+	// reinstall-only: no transitional multi-version webhook registration).
 	webhookv1alpha3 "github.com/jsquirrelz/tide/internal/webhook/v1alpha3"
 	// +kubebuilder:scaffold:imports
 )

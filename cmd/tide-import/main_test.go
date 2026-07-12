@@ -414,7 +414,7 @@ func TestFQNameNoAliasing(t *testing.T) {
 }
 
 // TestConversionNoOp verifies (f): a Plan child with extra objective/wave/filesTouched
-// round-trips to clean v1alpha2 PlanSpec (only phaseRef/dependsOn survive).
+// round-trips to clean v1alpha3 PlanSpec (only phaseRef/dependsOn survive).
 func TestConversionNoOp(t *testing.T) {
 	oldWS := t.TempDir()
 	newWS := t.TempDir()

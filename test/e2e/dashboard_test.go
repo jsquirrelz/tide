@@ -137,12 +137,13 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdA==
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: dashboard-smoke
   namespace: %[1]s
 spec:
+  schemaRevision: v1alpha3
   targetRepo: "https://github.com/example/dashboard-smoke.git"
   providerSecretRef: tide-provider-secret
   budget:

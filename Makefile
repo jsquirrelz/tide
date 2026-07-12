@@ -576,6 +576,67 @@ verify-no-aggregates: ## Assert api/v1alpha* declares no aggregate schedule fiel
 	fi
 	@echo "OK: no aggregate schedule fields"
 
+##@ Legacy API-Version Regression Gate (CRANK-07 / Phase 40 close)
+
+# verify-no-legacy-api-refs is the durable, CI-wired successor to Phase 40's
+# terminal grep sweep ("zero legacy schema-revision references outside a
+# sanctioned set"): it turns a one-off closeout check into a permanent
+# regression guard, so a future contributor can't silently reintroduce the
+# two prior CRD schema revisions (the same failure class as the dead
+# verify-no-aggregates glob this phase also hardened, D-12).
+#
+# CRITICAL self-match hazard: this recipe must never spell out the literal
+# version tokens it hunts for, or it would flag its own definition — every
+# pattern below is built at runtime by concatenating a $$PAT variable.
+#
+# Exclusions (each is a locked decision, not a convenience):
+#   - docs/migration/, docs/audit/, docs/superpowers/ (whole dirs) — migration
+#     guides legitimately narrate prior schema revisions; audit/superpowers
+#     are dated historical snapshots preserved per D-12.
+#   - AGENTS.md (whole file) — generic kubebuilder tutorial boilerplate with
+#     example.com groups (a RESEARCH false positive, not a real reference).
+#   - examples/projects/dogfood/salvage-*/ (whole dirs) — dated historical
+#     dogfood-run archives (captured envelopes/events/plan artifacts); same
+#     D-12 preservation principle already established for this bundle's
+#     events.jsonl transcripts in plan 40-03.
+#   - the dispatch-contract envelope group line (D-08) — kept fixed by
+#     design, deliberately decoupled from the CRD group.
+#   - lines naming the migration-doc path (guard constant, doc links).
+#   - the external Krew plugin-manifest API group line (unrelated to TIDE's
+#     own CRDs).
+#   - the bare pre-decoupling CRD-group string, scoped to its one legal home
+#     pkg/dispatch/envelope_test.go (plan 40-02 D-08 drift-boundary test:
+#     proves the validator rejects it — this IS the regression coverage for
+#     this gate's own concern, not a stray reference; NOT filtered anywhere
+#     else in the tree, so a real reintroduction elsewhere still fails).
+#   - the wrong-value SchemaRevision literal, scoped to its one legal home
+#     internal/controller/project_controller_v2_guard_test.go (D-04 guard
+#     test: proves the fail-closed guard rejects a stale revision; NOT
+#     filtered anywhere else in the tree).
+.PHONY: verify-no-legacy-api-refs
+verify-no-legacy-api-refs: ## Assert zero legacy CRD schema-revision references outside the sanctioned set (CRANK-07).
+	@echo "verifying no legacy API-version references outside the sanctioned set (CRANK-07)..."
+	@PAT=v1alpha; \
+	MATCHES=$$(grep -rnE "$${PAT}1|$${PAT}2" . \
+		--exclude-dir=.git --exclude-dir=.planning --exclude-dir=.worktrees \
+		--exclude-dir=node_modules --exclude-dir=bin --exclude-dir=dist \
+		--exclude-dir=migration --exclude-dir=audit --exclude-dir=superpowers \
+		--exclude-dir=salvage-20260618 --exclude-dir=salvage-20260628 \
+		--exclude=AGENTS.md \
+		2>/dev/null \
+		| grep -v "dispatch\.tideproject\.k8s/$${PAT}1" \
+		| grep -v "$${PAT}2-to-$${PAT}3" \
+		| grep -v "krew\.googlecontainertools\.github\.com/$${PAT}2" \
+		| grep -v "envelope_test\.go:[0-9]*:.*\"tideproject\.k8s/$${PAT}1\"" \
+		| grep -v "project_controller_v2_guard_test\.go:[0-9]*:.*SchemaRevision: \"$${PAT}2\"" \
+		|| true); \
+	if [ -n "$$MATCHES" ]; then \
+		echo "CRANK-07 violation: legacy API-version references detected outside the sanctioned set:"; \
+		echo "$$MATCHES"; \
+		exit 1; \
+	fi
+	@echo "OK: no legacy API-version references"
+
 .PHONY: verify-no-sqlite-dep
 verify-no-sqlite-dep: ## Assert go.mod has no DB driver dependencies (PERSIST-01).
 	@echo "verifying no DB driver deps in go.mod (PERSIST-01)..."

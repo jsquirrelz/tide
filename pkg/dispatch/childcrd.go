@@ -28,7 +28,7 @@ import "k8s.io/apimachinery/pkg/runtime"
 // struct is the contract.
 //
 // runtime.RawExtension lets each child CRD carry its own Spec schema without
-// pkg/dispatch importing api/v1alpha1 (which would invert the dependency
+// pkg/dispatch importing api/v1alpha3 (which would invert the dependency
 // arrow — controllers depend on pkg/dispatch, not the other way). The
 // orchestrator consuming this slice (internal/controller/dispatch_helpers.go,
 // plan 03-08) decodes Spec.Raw into the appropriate typed Spec at server-side

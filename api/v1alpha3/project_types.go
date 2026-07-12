@@ -165,7 +165,7 @@ type SubagentConfig struct {
 // Each pointer is nil when no override is set for that level. Keys name the
 // artifact each level's dispatch produces (D-02 artifact-first semantic
 // rename, v1alpha3) — the Go field names and JSON tags are unchanged from
-// v1alpha2; only the meaning attached to each key moved.
+// the prior schema revision; only the meaning attached to each key moved.
 type LevelOverrides struct {
 	// Milestone optionally overrides settings for the planner that authors
 	// MILESTONE.md (the Project-level planning dispatch).

@@ -16,6 +16,9 @@
 #   Phase 2 invariants:
 #   - TEST-02 (Layer A envtest tier)            — test job "Layer A envtest" step (make test-int-fast)
 #
+#   Phase 40 invariants:
+#   - CRANK-07 (no legacy API-version refs)     — make verify-no-legacy-api-refs
+#
 # Per-push CI runs only fast gates (this workflow's test + helm-lint jobs). The
 # heavy Layer B kind integration suite (make test-int) and TIDE's real kind_e2e
 # e2e suite (make test-e2e-kind) moved OFF the per-push critical path to the
@@ -58,6 +61,9 @@ jobs:
 
       - name: Verify no aggregate schedule fields (PERSIST-02 / Pitfall 4)
         run: make verify-no-aggregates
+
+      - name: Verify no legacy API-version references (CRANK-07)
+        run: make verify-no-legacy-api-refs
 
       - name: Verify no DB drivers (PERSIST-01)
         run: make verify-no-sqlite-dep

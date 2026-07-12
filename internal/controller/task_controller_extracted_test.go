@@ -507,7 +507,7 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 	spec := taskDispatchSpec{
 		attempt:   1,
 		token:     token,
-		envInJSON: []byte(`{"apiVersion":"v1alpha1","taskUID":"uid-ae"}`),
+		envInJSON: []byte(`{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","taskUID":"uid-ae"}`),
 		project:   project,
 	}
 

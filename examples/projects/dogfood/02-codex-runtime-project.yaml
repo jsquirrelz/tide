@@ -2,9 +2,10 @@
 #
 # Run 2 of 3 in the TIDE-on-TIDE dogfood sequence (a.k.a. "dogfood run #2").
 #
-# CONVERTED to tideproject.k8s/v1alpha3 (Phase 40 Plan 40-03; previously
-# v1alpha2 as of 2026-06-17's Spring Tide migration, Phase 23). The cluster
-# serves ONLY v1alpha3 as of this crank; a v1alpha1 or v1alpha2 Project is
+# CONVERTED to tideproject.k8s/v1alpha3 (Phase 40 Plan 40-03; see
+# docs/migration/v1alpha2-to-v1alpha3.md for the full migration history,
+# including the 2026-06-17 Spring Tide predecessor crank). The cluster serves
+# ONLY v1alpha3 as of this crank; any earlier schema-revision Project is
 # rejected, and a v1alpha3 Project MUST carry `schemaRevision: v1alpha3` or the
 # Project reconciler fail-closes with RequiresReinstall.
 #

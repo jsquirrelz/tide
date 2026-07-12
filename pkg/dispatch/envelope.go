@@ -21,9 +21,9 @@ import "time"
 // APIVersionV1Alpha1 is the envelope contract version. The group
 // "dispatch.tideproject.k8s" is the dispatch-contract's OWN subdomain group,
 // deliberately decoupled from the CRD group "tideproject.k8s" (D-08) — a CRD
-// version crank (v1alpha1 -> v1alpha2 -> v1alpha3 -> ...) cannot collide with
-// or accidentally bump the subagent-image envelope contract. The version
-// component stays v1alpha1; this is a pure group decoupling, not a stability
+// version crank (each schema-revision bump) cannot collide with or
+// accidentally bump the subagent-image envelope contract. The version
+// component stays fixed; this is a pure group decoupling, not a stability
 // claim (see pkg/dispatch/doc.go for the kubeadm precedent this follows).
 // Consumers MUST reject envelopes whose apiVersion field does not match this
 // constant via [ValidateAPIVersionKind].

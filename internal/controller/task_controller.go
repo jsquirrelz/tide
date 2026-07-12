@@ -711,7 +711,7 @@ func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv
 		return taskDispatchSpec{}, fmt.Errorf("mint signed token: %w", err)
 	}
 
-	// Step 9: Build EnvelopeIn; translate api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03.
+	// Step 9: Build EnvelopeIn; translate api/v1alpha3.Caps → pkg/dispatch.Caps per Plan 03.
 	_, envInJSON, err := r.buildEnvelopeIn(ctx, task, project, attempt, token)
 	if err != nil {
 		return taskDispatchSpec{}, err
@@ -1514,7 +1514,7 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 }
 
 // buildEnvelopeIn constructs and marshals the EnvelopeIn for this Task dispatch.
-// Translates api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
+// Translates api/v1alpha3.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
 func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {

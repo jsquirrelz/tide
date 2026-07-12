@@ -1,4 +1,4 @@
-# TIDE Krew plugin manifest template (v1alpha2 — verified May 2026).
+# TIDE Krew plugin manifest template (krew's own plugin schema, verified May 2026).
 #
 # Phase 4 plan 04-09 (Wave 4). This file lands the schema; krew-release-bot
 # (wired in Phase 5) fills `{{ .TagName }}` and `{{ .Sha256 }}` at release

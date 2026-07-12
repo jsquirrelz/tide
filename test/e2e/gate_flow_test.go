@@ -82,12 +82,13 @@ type: Opaque
 data:
   ANTHROPIC_API_KEY: dGVzdC1ub3QtdXNlZA==
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: %[2]s
   namespace: %[1]s
 spec:
+  schemaRevision: v1alpha3
   targetRepo: "https://github.com/example/gate-flow-smoke.git"
   providerSecretRef: tide-provider-secret
   budget:
@@ -95,7 +96,7 @@ spec:
   gates:
     milestone: approve
 ---
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Milestone
 metadata:
   name: %[2]s-m1

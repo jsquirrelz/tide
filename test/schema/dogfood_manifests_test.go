@@ -15,10 +15,10 @@ limitations under the License.
 */
 
 // Package schema relocates the dogfood-fixture strict-decode coverage that
-// previously lived in api/v1alpha1/dogfood_manifests_test.go. It moved here
-// (Phase 40 Plan 40-05) when api/v1alpha1 and api/v1alpha2 were deleted —
-// v1alpha3 is now the sole served+storage version, so the fixture set is
-// single-version rather than mixed. Stays in the fast unit tier: `make test`
+// previously lived alongside the original API package's test suite. It moved
+// here (Phase 40 Plan 40-05) when the two prior schema-revision packages were
+// deleted — v1alpha3 is now the sole served+storage version, so the fixture
+// set is single-version rather than mixed. Stays in the fast unit tier: `make test`
 // selects `go list ./... | grep -v /e2e | grep -v /test/integration`, and
 // test/schema matches neither exclusion.
 package schema
@@ -70,7 +70,8 @@ func projectAPIVersion(t *testing.T, doc []byte) string {
 
 // supportedProjectAPIVersions is the set of apiVersions a dogfood Project may
 // declare. New schema versions get added here as they ship. v1alpha3 is the
-// sole served+storage version as of Phase 40 (v1alpha1/v1alpha2 removed).
+// sole served+storage version as of Phase 40 (the two prior schema-revision
+// versions were removed).
 var supportedProjectAPIVersions = map[string]bool{
 	"tideproject.k8s/v1alpha3": true,
 }

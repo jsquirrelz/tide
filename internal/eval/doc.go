@@ -46,7 +46,7 @@ limitations under the License.
 //   - internal/controller  (import cycle: controller → subagent → eval)
 //   - internal/budget      (import cycle: budget → metrics → eval)
 //   - internal/metrics     (import cycle: metrics → eval)
-//   - api/v1alpha1         (import cycle: api → controller → eval)
+//   - api/v1alpha3         (import cycle: api → controller → eval)
 //
 // The only allowed project-package imports are internal/subagent/common
 // (LoadPromptTemplate) and pkg/dispatch (EnvelopeIn fixture type).

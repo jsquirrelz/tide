@@ -16,7 +16,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs.
-# tide-import imports: api/v1alpha2, pkg/dispatch, cmd/tide-import.
+# tide-import imports: api/v1alpha3, pkg/dispatch, cmd/tide-import.
 # NO internal/reporter, NO internal/owner — pure filesystem I/O, no K8s client.
 # This preserves the provider firewall (SUB-05 / Phase 28 D-08 layer 2).
 COPY api/ api/
@@ -24,7 +24,7 @@ COPY pkg/dispatch/ pkg/dispatch/
 COPY cmd/tide-import/ cmd/tide-import/
 
 # Static binary: no CGO, stripped symbols for a smaller image. tide-import uses
-# only stdlib + api/v1alpha2 + pkg/dispatch — pure-Go, no external C deps.
+# only stdlib + api/v1alpha3 + pkg/dispatch — pure-Go, no external C deps.
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags="-s -w" \
