@@ -413,29 +413,29 @@ func main() {
 	// 7. Register all six reconcilers (CTRL-01).
 	//    Phase 3 plan 03-09: TidePushImage (Project) + HelmProviderDefaults
 	//    (Milestone/Phase/Plan) are wired from Helm env vars (D-C4 / D-B5).
+	//
+	// plannerDeps carries the dispatch-tier deps shared by the four
+	// planner-tier reconcilers (Milestone/Phase/Plan/Project), built once and
+	// assigned four times below (plan 41-06 consolidation). A forgotten
+	// wiring is now a one-place mistake instead of a per-reconciler one — the
+	// cascade-8 class (never-assigned Dispatcher field; see
+	// .planning/debug/credproxy-backoff-suppression.md) this closes.
+	plannerDeps := controller.PlannerReconcilerDeps{
+		Dispatcher:           dispatcher,
+		EnvReader:            envReader,
+		SigningKey:           signingKey,
+		CredproxyImage:       credproxyImage,
+		TidePushImage:        tidePushImage,
+		ReporterImage:        reporterImage,
+		HelmProviderDefaults: helmProviderDefaults,
+		PricingOverridesJSON: pricingOverridesJSON,
+	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Project,
 		WatchNamespace:          watchNamespace,
-		TidePushImage:           tidePushImage,
-		// Phase 04.1 P1.1 fix: Dispatcher must be assigned for the
-		// reconcileProjectPhase2 path to fire — project_controller.go:198 gates
-		// budget cap + init Job + Phase 3 clone/push lifecycle on r.Dispatcher != nil.
-		// Without this assignment, ProjectReconciler only ever sets the Ready
-		// condition and never runs Phase 2/3 lifecycle work in production.
-		Dispatcher: dispatcher,
-		// Phase 7 (D-06): wire the 5 dispatch fields so reconcileProjectPlannerDispatch
-		// can dispatch the project-level planner Job (D-A2 5th dispatch site).
-		// Values are the same variables already computed above for MilestoneReconciler.
-		EnvReader:            envReader,
-		SigningKey:           signingKey,
-		CredproxyImage:       credproxyImage,
-		HelmProviderDefaults: helmProviderDefaults,
-		// Phase 09 plan 09-06: reader Job image.
-		ReporterImage: reporterImage,
-		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
-		PricingOverridesJSON: pricingOverridesJSON,
+		Deps:                    plannerDeps,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
@@ -446,25 +446,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Milestone,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
-		HelmProviderDefaults:    helmProviderDefaults,
-		// CR-01 fix: Dispatcher must be assigned for planner-dispatch path to fire
-		// (milestone_controller.go:144 gates on r.Dispatcher != nil). Without this
-		// the W-2 mid-stack boundary push never triggers at the milestone level.
-		Dispatcher: dispatcher,
-		// CR-02 fix: TidePushImage must be assigned so triggerBoundaryPush does not
-		// silently no-op at V(1) (boundary_push.go empty-image branch).
-		TidePushImage: tidePushImage,
-		// CR-01 fix: EnvReader is consumed by handleJobCompletion to materialize
-		// child Phase CRDs from the planner Job's EnvelopeOut.
-		EnvReader: envReader,
-		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract;
-		// signing key mints a token the sidecar validates before forwarding.
-		SigningKey:     signingKey,
-		CredproxyImage: credproxyImage,
-		// Phase 09 plan 09-06: reader Job image.
-		ReporterImage: reporterImage,
-		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
-		PricingOverridesJSON: pricingOverridesJSON,
+		Deps:                    plannerDeps,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Milestone")
 		os.Exit(1)
@@ -475,21 +457,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Phase,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
-		HelmProviderDefaults:    helmProviderDefaults,
-		// CR-01 fix: Dispatcher must be assigned for planner-dispatch path to fire
-		// (phase_controller.go:136 gates on r.Dispatcher != nil).
-		Dispatcher: dispatcher,
-		// CR-02 fix: TidePushImage required for W-2 phase-boundary push.
-		TidePushImage: tidePushImage,
-		// CR-01 fix: EnvReader consumed by handleJobCompletion.
-		EnvReader: envReader,
-		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
-		SigningKey:     signingKey,
-		CredproxyImage: credproxyImage,
-		// Phase 09 plan 09-06: reader Job image.
-		ReporterImage: reporterImage,
-		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
-		PricingOverridesJSON: pricingOverridesJSON,
+		Deps:                    plannerDeps,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Phase")
 		os.Exit(1)
@@ -500,20 +468,7 @@ func main() {
 		MaxConcurrentReconciles: cfg.MaxConcurrentReconciles.Plan,
 		PlannerPool:             plannerPool,
 		WatchNamespace:          watchNamespace,
-		Dispatcher:              dispatcher,
-		HelmProviderDefaults:    helmProviderDefaults,
-		// CR-02 fix: TidePushImage required for W-2 plan-boundary push.
-		TidePushImage: tidePushImage,
-		// CR-01 fix: EnvReader consumed by handleJobCompletion to materialize
-		// child Task/Wave CRDs from the planner Job's EnvelopeOut.
-		EnvReader: envReader,
-		// Phase 04.1 P1.2 fix: planner Jobs share the credproxy sidecar contract.
-		SigningKey:     signingKey,
-		CredproxyImage: credproxyImage,
-		// Phase 09 plan 09-06: reader Job image.
-		ReporterImage: reporterImage,
-		// Phase 14 D-02: pricing overrides forwarded to planner Jobs.
-		PricingOverridesJSON: pricingOverridesJSON,
+		Deps:                    plannerDeps,
 		// Phase 15 D-05: same cluster-level default as the webhook so the reconciler
 		// gate uses the same baseline mode when no Project.Spec overrides it.
 		DefaultFileTouchMode: defaultFileTouchMode,

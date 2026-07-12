@@ -28,18 +28,20 @@ import (
 // TestReconcilerWiringComplete asserts that every reconciler constructed by
 // main() has its required dispatch-tier dependencies wired. A nil field here
 // means the production path silently short-circuits (the bug class that
-// Phase 04.1 P1.1 closed for ProjectReconciler).
+// Phase 04.1 P1.1 closed for ProjectReconciler, and that plan 41-06's
+// PlannerReconcilerDeps carrier now closes at a single construction site for
+// all four planner-tier reconcilers).
 //
 // This test does NOT exercise the full Manager construction — it only checks
 // the struct-literal completeness for each reconciler. Constructs minimal
 // non-nil stand-ins for Dispatcher and EnvReader and asserts they propagate.
 //
 // Required-field matrix (per Phase 04.1 P1.1 locked user decision):
-//   - Project:   Dispatcher                (not EnvReader — no envelope consumer)
-//   - Milestone: Dispatcher, EnvReader
-//   - Phase:     Dispatcher, EnvReader
-//   - Plan:      Dispatcher, EnvReader
-//   - Task:      Dispatcher                (EnvReader on the Dispatcher itself)
+//   - Project:   Deps.Dispatcher, Deps.EnvReader
+//   - Milestone: Deps.Dispatcher, Deps.EnvReader
+//   - Phase:     Deps.Dispatcher, Deps.EnvReader
+//   - Plan:      Deps.Dispatcher, Deps.EnvReader
+//   - Task:      Deps.Dispatcher                (EnvReader on the Dispatcher itself)
 func TestReconcilerWiringComplete(t *testing.T) {
 	dispatcher := &podjob.PodJobBackend{}
 	envReader := &podjob.FilesystemEnvelopeReader{}
@@ -50,39 +52,60 @@ func TestReconcilerWiringComplete(t *testing.T) {
 		message string
 	}{
 		{
-			name:    "Project.Dispatcher",
-			nilFn:   func() bool { return (&controller.ProjectReconciler{Dispatcher: dispatcher}).Dispatcher == nil },
-			message: "ProjectReconciler.Dispatcher must be non-nil after main() wires the struct literal (Phase 04.1 P1.1 — project_controller.go:198 gates reconcileProjectPhase2 on this)",
+			name: "Project.Deps.Dispatcher",
+			nilFn: func() bool {
+				return (&controller.ProjectReconciler{Deps: controller.PlannerReconcilerDeps{Dispatcher: dispatcher}}).Deps.Dispatcher == nil
+			},
+			message: "ProjectReconciler.Deps.Dispatcher must be non-nil after main() wires the struct literal (Phase 04.1 P1.1 — project_controller.go:198 gates reconcileProjectPhase2 on this)",
 		},
 		{
-			name:    "Milestone.Dispatcher",
-			nilFn:   func() bool { return (&controller.MilestoneReconciler{Dispatcher: dispatcher}).Dispatcher == nil },
-			message: "MilestoneReconciler.Dispatcher must be non-nil (CR-01 fix; milestone_controller.go:144 gates planner-dispatch path on this)",
+			name: "Project.Deps.EnvReader",
+			nilFn: func() bool {
+				return (&controller.ProjectReconciler{Deps: controller.PlannerReconcilerDeps{EnvReader: envReader}}).Deps.EnvReader == nil
+			},
+			message: "ProjectReconciler.Deps.EnvReader must be non-nil (Phase 7 D-06 — project-level planner dispatch reads EnvelopeOut)",
 		},
 		{
-			name:    "Milestone.EnvReader",
-			nilFn:   func() bool { return (&controller.MilestoneReconciler{EnvReader: envReader}).EnvReader == nil },
-			message: "MilestoneReconciler.EnvReader must be non-nil (CR-01 fix; handleJobCompletion needs it to materialize child Phase CRDs)",
+			name: "Milestone.Deps.Dispatcher",
+			nilFn: func() bool {
+				return (&controller.MilestoneReconciler{Deps: controller.PlannerReconcilerDeps{Dispatcher: dispatcher}}).Deps.Dispatcher == nil
+			},
+			message: "MilestoneReconciler.Deps.Dispatcher must be non-nil (CR-01 fix; milestone_controller.go:144 gates planner-dispatch path on this)",
 		},
 		{
-			name:    "Phase.Dispatcher",
-			nilFn:   func() bool { return (&controller.PhaseReconciler{Dispatcher: dispatcher}).Dispatcher == nil },
-			message: "PhaseReconciler.Dispatcher must be non-nil (CR-01 fix)",
+			name: "Milestone.Deps.EnvReader",
+			nilFn: func() bool {
+				return (&controller.MilestoneReconciler{Deps: controller.PlannerReconcilerDeps{EnvReader: envReader}}).Deps.EnvReader == nil
+			},
+			message: "MilestoneReconciler.Deps.EnvReader must be non-nil (CR-01 fix; handleJobCompletion needs it to materialize child Phase CRDs)",
 		},
 		{
-			name:    "Phase.EnvReader",
-			nilFn:   func() bool { return (&controller.PhaseReconciler{EnvReader: envReader}).EnvReader == nil },
-			message: "PhaseReconciler.EnvReader must be non-nil (CR-01 fix)",
+			name: "Phase.Deps.Dispatcher",
+			nilFn: func() bool {
+				return (&controller.PhaseReconciler{Deps: controller.PlannerReconcilerDeps{Dispatcher: dispatcher}}).Deps.Dispatcher == nil
+			},
+			message: "PhaseReconciler.Deps.Dispatcher must be non-nil (CR-01 fix)",
 		},
 		{
-			name:    "Plan.Dispatcher",
-			nilFn:   func() bool { return (&controller.PlanReconciler{Dispatcher: dispatcher}).Dispatcher == nil },
-			message: "PlanReconciler.Dispatcher must be non-nil",
+			name: "Phase.Deps.EnvReader",
+			nilFn: func() bool {
+				return (&controller.PhaseReconciler{Deps: controller.PlannerReconcilerDeps{EnvReader: envReader}}).Deps.EnvReader == nil
+			},
+			message: "PhaseReconciler.Deps.EnvReader must be non-nil (CR-01 fix)",
 		},
 		{
-			name:    "Plan.EnvReader",
-			nilFn:   func() bool { return (&controller.PlanReconciler{EnvReader: envReader}).EnvReader == nil },
-			message: "PlanReconciler.EnvReader must be non-nil",
+			name: "Plan.Deps.Dispatcher",
+			nilFn: func() bool {
+				return (&controller.PlanReconciler{Deps: controller.PlannerReconcilerDeps{Dispatcher: dispatcher}}).Deps.Dispatcher == nil
+			},
+			message: "PlanReconciler.Deps.Dispatcher must be non-nil",
+		},
+		{
+			name: "Plan.Deps.EnvReader",
+			nilFn: func() bool {
+				return (&controller.PlanReconciler{Deps: controller.PlannerReconcilerDeps{EnvReader: envReader}}).Deps.EnvReader == nil
+			},
+			message: "PlanReconciler.Deps.EnvReader must be non-nil",
 		},
 		{
 			name: "Task.Deps.Dispatcher",

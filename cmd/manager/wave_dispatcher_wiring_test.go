@@ -56,6 +56,12 @@ import (
 // TaskReconciler is intentionally excluded: it carries its Dispatcher inside a
 // nested Deps struct (TaskReconcilerDeps), a different literal shape covered by
 // TestReconcilerWiringComplete's Task.Deps.Dispatcher case.
+//
+// Since plan 41-06, ProjectReconciler/MilestoneReconciler/PhaseReconciler/
+// PlanReconciler ALSO carry Dispatcher inside a nested Deps struct
+// (PlannerReconcilerDeps, built once as `plannerDeps` and assigned via
+// `Deps: plannerDeps`) — see resolveDispatcherPresence below for how this
+// test follows that indirection back to the literal that sets Dispatcher.
 var reconcilersRequiringDispatcher = []string{
 	"ProjectReconciler",
 	"MilestoneReconciler",
@@ -66,9 +72,11 @@ var reconcilersRequiringDispatcher = []string{
 
 // TestMainWiresDispatcherOnGatedReconcilers asserts that the WaveReconciler
 // (and the other Dispatcher-gated reconcilers) are constructed in main.go with
-// a `Dispatcher:` field. This is the regression guard for debug #16: before the
-// fix, the WaveReconciler composite literal omitted Dispatcher, so this test
-// fails on the buggy tree and passes once the field is wired.
+// a `Dispatcher:` field (directly, or indirectly via a `Deps:` struct field
+// whose value resolves to a composite literal setting Dispatcher). This is
+// the regression guard for debug #16: before the fix, the WaveReconciler
+// composite literal omitted Dispatcher, so this test fails on the buggy tree
+// and passes once the field is wired.
 func TestMainWiresDispatcherOnGatedReconcilers(t *testing.T) {
 	mainPath := mainGoPath(t)
 
@@ -78,8 +86,36 @@ func TestMainWiresDispatcherOnGatedReconcilers(t *testing.T) {
 		t.Fatalf("parse %s: %v", mainPath, err)
 	}
 
+	// First pass: collect every composite literal assigned to a variable
+	// (`:=` or `=`), keyed by variable name — resolves the `Deps: plannerDeps`
+	// indirection (plan 41-06) back to the PlannerReconcilerDeps literal that
+	// actually carries Dispatcher.
+	varLiterals := map[string]*ast.CompositeLit{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, rhs := range assign.Rhs {
+			if i >= len(assign.Lhs) {
+				continue
+			}
+			lit, ok := rhs.(*ast.CompositeLit)
+			if !ok {
+				continue
+			}
+			ident, ok := assign.Lhs[i].(*ast.Ident)
+			if !ok {
+				continue
+			}
+			varLiterals[ident.Name] = lit
+		}
+		return true
+	})
+
 	// Collect, per reconciler type, whether main() constructs it with a
-	// Dispatcher field. A type may be constructed once; record presence.
+	// Dispatcher field (directly or via Deps). A type may be constructed
+	// once; record presence.
 	constructed := map[string]bool{}
 	hasDispatcher := map[string]bool{}
 
@@ -101,8 +137,17 @@ func TestMainWiresDispatcherOnGatedReconcilers(t *testing.T) {
 			if !ok {
 				continue
 			}
-			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Dispatcher" {
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			switch key.Name {
+			case "Dispatcher":
 				hasDispatcher[typeName] = true
+			case "Deps":
+				if depsLiteralHasDispatcher(kv.Value, varLiterals) {
+					hasDispatcher[typeName] = true
+				}
 			}
 		}
 		return true
@@ -122,6 +167,35 @@ func TestMainWiresDispatcherOnGatedReconcilers(t *testing.T) {
 				"into wave 0). Wire `Dispatcher: dispatcher` in the struct literal.", name)
 		}
 	}
+}
+
+// depsLiteralHasDispatcher reports whether a `Deps:` field's value literal
+// sets a Dispatcher field — either inline (`Deps: controller.XReconcilerDeps{
+// Dispatcher: dispatcher}`) or indirectly through a variable reference
+// (`Deps: plannerDeps`, resolved via varLiterals to the plannerDeps := ...
+// composite literal). Plan 41-06 introduced the indirect form for the four
+// planner-tier reconcilers.
+func depsLiteralHasDispatcher(expr ast.Expr, varLiterals map[string]*ast.CompositeLit) bool {
+	var lit *ast.CompositeLit
+	switch v := expr.(type) {
+	case *ast.CompositeLit:
+		lit = v
+	case *ast.Ident:
+		lit = varLiterals[v.Name]
+	}
+	if lit == nil {
+		return false
+	}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Dispatcher" {
+			return true
+		}
+	}
+	return false
 }
 
 // compositeLitTypeName returns the type name of a composite literal whose type
