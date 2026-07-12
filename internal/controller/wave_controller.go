@@ -136,8 +136,8 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(wave.Namespace),
 		client.MatchingLabels{
-			"tideproject.k8s/wave-index": waveIndexLabel,
-			owner.LabelProject:           wave.Spec.ProjectRef,
+			owner.LabelWaveIndex: waveIndexLabel,
+			owner.LabelProject:   wave.Spec.ProjectRef,
 		},
 	); err != nil {
 		return ctrl.Result{}, fmt.Errorf("list tasks for wave %s: %w", wave.Name, err)
@@ -242,7 +242,7 @@ func (r *WaveReconciler) taskToWaveMapper(_ context.Context, obj client.Object) 
 	}
 	labels := task.GetLabels()
 	projectName := labels[owner.LabelProject]
-	waveIndexStr := labels["tideproject.k8s/wave-index"]
+	waveIndexStr := labels[owner.LabelWaveIndex]
 	if projectName == "" || waveIndexStr == "" {
 		return nil
 	}

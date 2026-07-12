@@ -34,12 +34,12 @@ import (
 // makeTask is a minimal Task factory for wave test fixtures.
 func makeTask(name, projectName, planRef, waveIdx, phase string) *tidev1alpha3.Task {
 	labels := map[string]string{
-		labelProject:   projectName,
-		labelWaveIndex: waveIdx,
+		"tideproject.k8s/project":    projectName,
+		"tideproject.k8s/wave-index": waveIdx,
 	}
 	if waveIdx == "" {
 		labels = map[string]string{
-			labelProject: projectName,
+			"tideproject.k8s/project": projectName,
 		}
 	}
 	t := &tidev1alpha3.Task{

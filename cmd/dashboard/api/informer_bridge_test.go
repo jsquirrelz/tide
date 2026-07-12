@@ -376,8 +376,8 @@ func TestInformerBridgeTaskUpdatePublishesBothTaskAndWavesSnapshot(t *testing.T)
 			Name:      "task-run-1",
 			Namespace: "default",
 			Labels: map[string]string{
-				labelProject:   "proj1",
-				labelWaveIndex: "0",
+				"tideproject.k8s/project":    "proj1",
+				"tideproject.k8s/wave-index": "0",
 			},
 		},
 		Spec: tidev1alpha3.TaskSpec{

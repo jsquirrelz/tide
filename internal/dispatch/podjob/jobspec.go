@@ -29,6 +29,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -221,7 +222,7 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 	var jobName string
 	var parentUID string
 	labels := map[string]string{
-		"tideproject.k8s/attempt":             fmt.Sprintf("%d", opts.Attempt),
+		owner.LabelAttempt:                    fmt.Sprintf("%d", opts.Attempt),
 		"tideproject.k8s/provider-secret-uid": opts.SecretUID,
 	}
 	switch kind {

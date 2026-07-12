@@ -88,8 +88,8 @@ func TestBuildPushJobGitWriterLabels(t *testing.T) {
 	if got := job.Labels[gitWriterRoleLabelKey]; got != gitWriterRoleLabelValue {
 		t.Errorf("Job.Labels[%q] = %q, want %q (D-02 List gate)", gitWriterRoleLabelKey, got, gitWriterRoleLabelValue)
 	}
-	if got := job.Labels[gitWriterProjectLabelKey]; got != project.Name {
-		t.Errorf("Job.Labels[%q] = %q, want %q", gitWriterProjectLabelKey, got, project.Name)
+	if got := job.Labels["tideproject.k8s/project"]; got != project.Name {
+		t.Errorf("Job.Labels[%q] = %q, want %q", "tideproject.k8s/project", got, project.Name)
 	}
 }
 

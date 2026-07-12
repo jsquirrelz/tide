@@ -113,7 +113,7 @@ func makeWaveIntegTask(name, uid, planRef, phase, projectName string, dependsOn 
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID(uid),
-			Labels:    map[string]string{gitWriterProjectLabelKey: projectName},
+			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
 		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             planRef,
@@ -713,8 +713,8 @@ func TestPlanReconcilerWaveDispatchGatedByGitWriterBusy(t *testing.T) {
 			Name:      "tide-push-some-other-writer",
 			Namespace: "default",
 			Labels: map[string]string{
-				gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
-				gitWriterProjectLabelKey: projectName,
+				gitWriterRoleLabelKey:     gitWriterRoleLabelValue,
+				"tideproject.k8s/project": projectName,
 			},
 		},
 	}

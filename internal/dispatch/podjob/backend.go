@@ -384,7 +384,7 @@ func isJobTerminal(job *batchv1.Job) bool {
 //
 // Phase 04.1 P1.4 — replaces the prior projectList.Items[0] fallback.
 func (b *PodJobBackend) resolveProject(ctx context.Context, task *tidev1alpha3.Task) (*tidev1alpha3.Project, error) {
-	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+	if projectName, ok := task.Labels[owner.LabelProject]; ok && projectName != "" {
 		var project tidev1alpha3.Project
 		if err := b.Client.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
 			return &project, nil

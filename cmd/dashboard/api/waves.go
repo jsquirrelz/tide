@@ -30,9 +30,10 @@ limitations under the License.
 // disposition for v1 (documented in the T-15-17 row of the threat model;
 // debounce is deferred to v1.x if profiling demands it).
 //
-// Label vocabulary mirrors cmd/tide/inspect_wave_run.go:37-40 — the same
-// constants (labelProject, labelWaveIndex) are used so the CLI's grouping
-// semantics and the dashboard's aggregate share a single source of truth.
+// Label vocabulary mirrors cmd/tide/inspect_wave_run.go — both import the
+// canonical owner.LabelProject/owner.LabelWaveIndex constants so the CLI's
+// grouping semantics and the dashboard's aggregate share a single source
+// of truth.
 package api
 
 import (
@@ -44,14 +45,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
-)
-
-// Label vocabulary — canonical keys stamped by internal/controller/*.
-// Also defined in cmd/tide/inspect_wave_run.go; kept here to avoid an
-// import cycle (cmd/tide is main; cmd/dashboard/api is a library package).
-const (
-	labelProject   = "tideproject.k8s/project"
-	labelWaveIndex = "tideproject.k8s/wave-index"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // RunningWaveTask is the per-task JSON shape in a wave card.
@@ -95,7 +89,7 @@ func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName
 	var taskList tidev1alpha3.TaskList
 	if err := cli.List(ctx, &taskList,
 		client.InNamespace(ns),
-		client.MatchingLabels{labelProject: projectName},
+		client.MatchingLabels{owner.LabelProject: projectName},
 	); err != nil {
 		return WavesSnapshot{Waves: []RunningWave{}},
 			fmt.Errorf("list tasks for waves aggregate: %w", err)
@@ -107,7 +101,7 @@ func computeRunningWaves(ctx context.Context, cli client.Reader, ns, projectName
 	groups := make(map[waveKey][]tidev1alpha3.Task)
 	for i := range taskList.Items {
 		tk := &taskList.Items[i]
-		waveStr, ok := tk.Labels[labelWaveIndex]
+		waveStr, ok := tk.Labels[owner.LabelWaveIndex]
 		if !ok {
 			continue
 		}

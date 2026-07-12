@@ -1171,7 +1171,7 @@ func (r *ProjectReconciler) formatMissingBranchesMessage(ctx context.Context, pr
 	byUID := make(map[string]string)
 	var taskList tidev1alpha3.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(project.Namespace),
-		client.MatchingLabels{gitWriterProjectLabelKey: project.Name}); err == nil {
+		client.MatchingLabels{owner.LabelProject: project.Name}); err == nil {
 		for i := range taskList.Items {
 			byUID[string(taskList.Items[i].UID)] = taskList.Items[i].Name
 		}
@@ -2512,7 +2512,7 @@ func (r *ProjectReconciler) stampGlobalTaskLabels(
 		}
 		waveIndexStr := fmt.Sprintf("%d", waveIdx)
 		// Skip patch if both labels are already correct — no churn on re-derivation.
-		if t.Labels["tideproject.k8s/wave-index"] == waveIndexStr &&
+		if t.Labels[owner.LabelWaveIndex] == waveIndexStr &&
 			(projectName == "" || t.Labels[owner.LabelProject] == projectName) {
 			continue
 		}
@@ -2520,7 +2520,7 @@ func (r *ProjectReconciler) stampGlobalTaskLabels(
 		if t.Labels == nil {
 			t.Labels = map[string]string{}
 		}
-		t.Labels["tideproject.k8s/wave-index"] = waveIndexStr
+		t.Labels[owner.LabelWaveIndex] = waveIndexStr
 		if projectName != "" {
 			t.Labels[owner.LabelProject] = projectName
 		}

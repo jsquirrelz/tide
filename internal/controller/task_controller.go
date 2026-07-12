@@ -537,7 +537,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 	// stamps tideproject.k8s/wave-paused=<N> on tasks in a wave waiting for
 	// approve-wave-N on the parent Plan; until the label is cleared (by
 	// PlanReconciler on annotation consume), the Task stays AwaitingApproval.
-	if _, paused := task.Labels["tideproject.k8s/wave-paused"]; paused {
+	if _, paused := task.Labels[owner.LabelWavePaused]; paused {
 		result, err := r.patchTaskAwaitingApproval(ctx, task, gates.PolicyPause)
 		return taskGateResult{shouldHalt: true, result: result}, err
 	}
@@ -1117,7 +1117,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 // silently mis-routed Tasks in multi-Project namespaces.
 func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1alpha3.Task) (*tideprojectv1alpha3.Project, error) {
 	// Fast path: PlanReconciler stamps tideproject.k8s/project=<name> on all Tasks.
-	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
+	if projectName, ok := task.Labels[owner.LabelProject]; ok && projectName != "" {
 		var project tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
 			return &project, nil
@@ -1416,7 +1416,7 @@ func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alp
 	maxAttempt := 0
 	logger := logf.FromContext(ctx)
 	for _, j := range jobList.Items {
-		attempt, ok := j.Labels["tideproject.k8s/attempt"]
+		attempt, ok := j.Labels[owner.LabelAttempt]
 		if !ok {
 			continue
 		}

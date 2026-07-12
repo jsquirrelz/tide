@@ -274,8 +274,8 @@ func buildPushJob(project *tideprojectv1alpha3.Project, pvcName string, opts Pus
 			// builder and only overrides Name/OwnerReferences, so wave-
 			// integration Jobs inherit the same labels automatically.
 			Labels: map[string]string{
-				gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
-				gitWriterProjectLabelKey: project.Name,
+				gitWriterRoleLabelKey: gitWriterRoleLabelValue,
+				owner.LabelProject:    project.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{

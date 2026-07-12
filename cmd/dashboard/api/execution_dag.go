@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/owner"
 )
 
 // ExecutionDAGHandler serves GET /api/v1/projects/{name}/execution-dag.
@@ -65,13 +66,12 @@ func (h *ExecutionDAGHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// List ALL Tasks for this project via the project label.
-	// The label "tideproject.k8s/project" is stamped by internal/owner on
-	// every Task when the orchestrator creates it — matches the constant in
-	// waves.go (labelProject) to avoid an import cycle with internal/owner.
+	// The label is owner.LabelProject, stamped by internal/owner on every
+	// Task when the orchestrator creates it.
 	var tasks tidev1alpha3.TaskList
 	if err := h.Client.List(ctx, &tasks,
 		client.InNamespace(namespace),
-		client.MatchingLabels{"tideproject.k8s/project": name},
+		client.MatchingLabels{owner.LabelProject: name},
 	); err != nil {
 		h.Log.Error(err, "list tasks failed", "project", name, "namespace", namespace)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list tasks: %s", err.Error()))
@@ -83,7 +83,7 @@ func (h *ExecutionDAGHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var waves tidev1alpha3.WaveList
 	if err := h.Client.List(ctx, &waves,
 		client.InNamespace(namespace),
-		client.MatchingLabels{"tideproject.k8s/project": name},
+		client.MatchingLabels{owner.LabelProject: name},
 	); err != nil {
 		// Non-fatal: return tasks with waveIndex=0 fallback rather than erroring out.
 		// The SSE refresh path will re-fetch when waves become available.

@@ -38,7 +38,7 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: "default",
-				Labels:    map[string]string{gitWriterProjectLabelKey: projectName},
+				Labels:    map[string]string{"tideproject.k8s/project": projectName},
 			},
 			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:             "some-plan",
@@ -112,7 +112,7 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 
 		It("excludes Succeeded branches of a plan holding at a wave-pause boundary", func() {
 			makePlanTask := func(name, planRef, phase string, extraLabels map[string]string) *tideprojectv1alpha3.Task {
-				labels := map[string]string{gitWriterProjectLabelKey: projectName}
+				labels := map[string]string{"tideproject.k8s/project": projectName}
 				maps.Copy(labels, extraLabels)
 				tsk := &tideprojectv1alpha3.Task{
 					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: labels},
@@ -170,8 +170,8 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 					Name:      name,
 					Namespace: "default",
 					Labels: map[string]string{
-						gitWriterRoleLabelKey:    gitWriterRoleLabelValue,
-						gitWriterProjectLabelKey: projectName,
+						gitWriterRoleLabelKey:     gitWriterRoleLabelValue,
+						"tideproject.k8s/project": projectName,
 					},
 				},
 				Spec: batchv1.JobSpec{
@@ -354,7 +354,7 @@ var _ = Describe("git-writer shared helpers (Phase 34 D-02/D-03/D-07)", Label("e
 				CommitMessage: "tide: project complete",
 			}, k8sClient.Scheme())
 			Expect(job.Labels).To(HaveKeyWithValue(gitWriterRoleLabelKey, gitWriterRoleLabelValue))
-			Expect(job.Labels).To(HaveKeyWithValue(gitWriterProjectLabelKey, project.Name))
+			Expect(job.Labels).To(HaveKeyWithValue("tideproject.k8s/project", project.Name))
 		})
 	})
 })
