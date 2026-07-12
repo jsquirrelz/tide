@@ -37,7 +37,7 @@ The following components are in-scope for vulnerability reports against the v1.0
 
 - **TIDE controller** — `cmd/manager/` + `internal/controller/` reconcilers, webhooks, finalizer logic, owner-ref cascade.
 - **TIDE dashboard** — `cmd/dashboard/` backend + `dashboard/web/` SPA bundle, including the SSE event stream and apiserver-proxy auth surface.
-- **CRDs** — `api/v1alpha1/*` schemas, CEL validators, conversion webhook (no-op for v1).
+- **CRDs** — `api/v1alpha3/*` schemas, CEL validators, and the validating webhooks (Plan and Wave pre-admission). Conversion webhooks were retired in Phase 23 — TIDE ships single-version CRDs with reinstall-only migration between schema revisions (see [`docs/migration/`](docs/migration/)).
 - **RBAC** — `charts/tide/templates/*-rbac.yaml`, per-Kind ClusterRoles, ServiceAccount bindings, per-namespace RoleBinding template.
 - **Helm chart templates** — `charts/tide/templates/` and `charts/tide-crds/templates/`, including default values, webhook configuration, and the dashboard ClusterRole verb minimization.
 - **CLI** — `cmd/tide/` binary, including credential handling and apiserver authentication flow.
