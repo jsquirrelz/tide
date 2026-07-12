@@ -132,6 +132,16 @@ None — no external service configuration required.
 - Ready for Plan 40-06 (parallel, docs/README/SECURITY.md/config/samples sweep) to land the `docs/migration/v1alpha2-to-v1alpha3.md` migration doc, which will close the one known documented exception above.
 - Ready for Plan 40-04 (parallel, internal/controller + internal/dispatch/podjob) — no file overlap; both worktrees stayed within their declared scopes.
 
+## Self-Check: PASSED
+
+- FOUND: test/schema/dogfood_manifests_test.go
+- FOUND: api/v1alpha1 deleted
+- FOUND: api/v1alpha2 deleted
+- FOUND: .planning/phases/40-deprecate-v1alpha1-api/40-05-SUMMARY.md
+- FOUND commit: 410c7c5 (Task 1)
+- FOUND commit: 93161ef (Task 2)
+- FOUND commit: d7c47c2 (SUMMARY.md)
+
 ---
 *Phase: 40-deprecate-v1alpha1-api*
 *Completed: 2026-07-12*
