@@ -121,3 +121,7 @@ None blocking. See Deviations for the two non-blocking notes.
 ---
 *Phase: 41-refactoring-review-non-breaking-cleanup-12-items*
 *Completed: 2026-07-12*
+
+## Self-Check: PASSED
+
+All 5 modified/created controller and todo files verified present on disk; all 4 commit hashes (`96dd23b`, `ba715b0`, `7e9bca1`, `e6d3b19`) verified present in `git log --oneline --all`.
