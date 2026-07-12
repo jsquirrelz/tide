@@ -122,7 +122,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -164,7 +163,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -242,7 +240,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -323,7 +320,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -410,7 +406,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      newMapEnvReader(),
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -454,7 +449,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -515,7 +509,6 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    newPlannerPoolForTest(),
 				EnvReader:      envReader,
-				SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{

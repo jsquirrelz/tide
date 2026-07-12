@@ -97,7 +97,6 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      newMapEnvReader(),
-			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{
@@ -137,7 +136,6 @@ var _ = Describe("PlanReconciler — planner dispatch (Phase 3)", Label("envtest
 			Dispatcher:     &stubDispatcher{},
 			PlannerPool:    newPlannerPoolForTest(),
 			EnvReader:      newMapEnvReader(),
-			SubagentImage:  testSubagentImage, // dead since Phase 13; HelmProviderDefaults.Image is the default tier
 			CredproxyImage: testCredproxyImage,
 			SigningKey:     testSigningKey,
 			HelmProviderDefaults: ProviderDefaults{

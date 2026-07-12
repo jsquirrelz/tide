@@ -30,10 +30,11 @@ import (
 // dispatch_image_test.go — envtest regression for DISPATCH-01.
 //
 // Asserts that CRD image fields (Spec.Subagent.Levels.<level>.Image and
-// Spec.Subagent.Image) land in the created Job's subagent container image,
-// NOT the r.SubagentImage / r.Deps.SubagentImage reconciler field.
+// Spec.Subagent.Image) land in the created Job's subagent container image.
 // This is the structural negation of the v1.0 stub-image bug (run-1
 // signature: planner pod completing in seconds with "planner stub success").
+// The reconciler-level SubagentImage field this test once had to out-rank
+// (Phase 41 item 4) is gone entirely — resolveImage is now the sole source.
 
 // --- Spec 0: CR-01 nil-project guard in milestone reconcilePlannerDispatch ---
 
@@ -189,13 +190,11 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 
 			const helmDefaultImage = "tide-stub-subagent:test"
 			r := &PlanReconciler{
-				Client:      mgrClient,
-				Scheme:      k8sClient.Scheme(),
-				Dispatcher:  &stubDispatcher{},
-				PlannerPool: newPlannerPoolForTest(),
-				EnvReader:   newMapEnvReader(),
-				// SubagentImage intentionally set to helm default — reconciler field must NOT win.
-				SubagentImage:  helmDefaultImage,
+				Client:         mgrClient,
+				Scheme:         k8sClient.Scheme(),
+				Dispatcher:     &stubDispatcher{},
+				PlannerPool:    newPlannerPoolForTest(),
+				EnvReader:      newMapEnvReader(),
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 				HelmProviderDefaults: ProviderDefaults{
@@ -292,8 +291,6 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 					SigningKey:     testSigningKey,
 					CredproxyImage: testCredproxyImage,
 					EnvReader:      newMapEnvReader(),
-					// SubagentImage intentionally set to stub — must NOT win when CRD field is set.
-					SubagentImage: depsSubagentImage,
 					HelmProviderDefaults: ProviderDefaults{
 						Image: depsSubagentImage,
 					},

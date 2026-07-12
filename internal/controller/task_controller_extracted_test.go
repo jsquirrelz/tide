@@ -83,7 +83,6 @@ func TestGateChecks_TerminalShortCircuit(t *testing.T) {
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
 	}
@@ -356,7 +355,6 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
 	}
@@ -424,7 +422,6 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
 	}
@@ -493,7 +490,6 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
 	}
@@ -580,7 +576,6 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 			Budget:         store,
 			Defaults:       limits,
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 			Dispatcher:     &stubDispatcher{},
 		},
@@ -632,7 +627,6 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 			Budget:         budget.NewStore(),
 			Defaults:       budget.Limits{RequestsPerMinute: 120, BurstSize: 10},
 			SigningKey:     []byte("tide-test-signing-key-32-bytes!!"),
-			SubagentImage:  "tide-stub-subagent:test",
 			CredproxyImage: "tide-credproxy:test",
 		},
 	}
