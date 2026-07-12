@@ -197,6 +197,14 @@ None - no external service configuration required. Operator action needed only t
 
 The durable regression gate and CI wiring are complete and merged; all fast/unit verification is green; the phase's structural end-state (6 single-version CRDs, `api/` v1alpha3-only, zero legacy references outside a small justified set) is confirmed. The one open item is the fresh-cluster kind Layer B run, blocked on this environment's Docker Desktop daemon being unresponsive — not a code or plan defect. `/gsd:verify-work` should re-run `make test-int` once Docker recovers before signing off the phase's kind-suite evidence; everything else in this plan's acceptance criteria is met and evidenced above.
 
+## Self-Check: PASSED
+
+- FOUND: Makefile, .github/workflows/ci.yaml, this SUMMARY, and all three fixed test files (`test/integration/kind/baseref_crd_render_test.go`, `test/e2e/dashboard_test.go`, `test/e2e/gate_flow_test.go`)
+- FOUND: commits `a39baa6` (Task 1) and `1da2b84` (SUMMARY) in `git log --oneline --all`
+- Re-ran `make verify-no-legacy-api-refs` → `OK: no legacy API-version references`
+- Re-ran the self-match-proof check → `grep -A20 'verify-no-legacy-api-refs:' Makefile | grep -c 'v1alpha1\|v1alpha2'` → `0`
+- Re-ran the CI-wiring check → `grep -c 'verify-no-legacy-api-refs' .github/workflows/ci.yaml` → `2`
+
 ---
 *Phase: 40-deprecate-v1alpha1-api*
 *Completed: 2026-07-12*
