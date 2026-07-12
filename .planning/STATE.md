@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-status: ready_to_plan
-stopped_at: Phase 40 complete (7/7) — ready to discuss Phase 41
-last_updated: 2026-07-12T03:12:33.306Z
-last_activity: 2026-07-11 -- Phase 40 execution started
+status: planning
+stopped_at: Phase 41 context gathered (auto)
+last_updated: "2026-07-12T03:19:10.265Z"
+last_activity: 2026-07-12
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 40
-  completed_plans: 42
-  percent: 71
+  completed_plans: 40
+  percent: 86
 ---
 
 # Project State
@@ -137,9 +137,9 @@ v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2
 
 ## Session Continuity
 
-Last session: 2026-07-06T16:44:10.929Z
-Stopped at: Phase 40 planned (7 plans, gate-passed); execution HELD until last in v1.0.7
-Resume file: .planning/phases/40-deprecate-v1alpha1-api/40-01-PLAN.md
+Last session: 2026-07-12T03:19:10.228Z
+Stopped at: Phase 41 context gathered (auto)
+Resume file: .planning/phases/41-refactoring-review-non-breaking-cleanup-12-items/41-CONTEXT.md
 
 ## Operator Next Steps
 
