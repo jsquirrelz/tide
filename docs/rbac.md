@@ -15,7 +15,6 @@ RBAC manifests described below.
 - Per-Kind verbs the orchestrator's ServiceAccount holds across the six TIDE CRDs
 - Auxiliary ServiceAccounts (subagent, dashboard) and what they're allowed to do
 - The opt-in per-namespace RoleBinding template (D-X4, AUTH-02 catch-up) for multi-Project installs
-- Conversion-webhook RBAC posture (D-X7 — scaffolded but no-op in v1.0)
 - Auditing recipes for verifying any of the above with `kubectl` and `make` targets
 
 ---
@@ -207,50 +206,30 @@ rule, the value is added to the SOT then propagated to
 
 ---
 
-## Conversion webhook (D-X7 — no-op for v1.0)
+## Conversion webhook (retired — Phase 23)
 
-The CRD conversion webhook is **scaffolded but no-op for v1.0** because
-v1alpha1 IS the hub schema (Phase 1 D-A3 schema lock) and no spoke
-version (`v1beta1`, `v1`) exists yet. CRD-05 / Pitfall 16's mitigation
-IS the scaffold itself — having the conversion-webhook plumbing wired
-end-to-end at install time means the v1.x activation work is "write
-`ConvertTo`/`ConvertFrom` bodies in Go" rather than "add the chart
-templates, the cert plumbing, and the webhook service."
+TIDE ships **single-version CRDs** — `tideproject.k8s/v1alpha3` is the sole
+served and storage version for all six Kinds. There is no conversion webhook:
+Phase 23 retired the scaffolded no-op that earlier schema revisions carried,
+and every schema crank since has shipped as a **reinstall-only** migration
+instead — delete the old CRs, apply the new CRD schema, re-apply manifests
+carrying the current `schemaRevision`. See [`docs/migration/`](migration/)
+for the per-crank migration chapters.
 
-**What the chart ships at v1.0:**
+**What the chart ships:**
 
 - A `webhook-service` (`charts/tide/templates/webhook-service.yaml`)
-  exposes the controller manager's webhook port. The validating webhook
-  for Plan and Wave (CEL-and-Go pre-admission validation, Phase 1
-  CRD-04) uses this same service.
+  exposes the controller manager's webhook port, used by the validating
+  webhook for Plan and Wave (CEL-and-Go pre-admission validation).
 - A `serving-cert` (`charts/tide/templates/serving-cert.yaml`) — a
   cert-manager `Certificate` mounted into the controller manager Pod —
-  serves TLS for the webhook port. Same cert serves the validating
-  webhook and the (future) conversion webhook; cert-manager rotation
-  applies to both.
+  serves TLS for the webhook port.
 - A `validating-webhook-configuration`
   (`charts/tide/templates/validating-webhook-configuration.yaml`) wires
   the Plan and Wave pre-admission validators.
-- **No** `conversion-webhook-configuration` is shipped — at v1.0 each
-  CRD's `spec.conversion.strategy` is `None` (the kubebuilder default
-  for single-version CRDs), so no separate conversion webhook
-  registration is needed.
-
-**RBAC implications:**
-
-- The controller manager SA (`tide-controller-manager`) already has the
-  verbs the conversion webhook will eventually need — it's the same SA,
-  the same `manager-role` binding. Activating v1.x conversion will
-  require zero RBAC changes: just the Go `ConvertTo`/`ConvertFrom`
-  bodies plus the per-CRD `spec.conversion.strategy: Webhook` flip
-  (and a `conversion-webhook-configuration` template).
-- The cert-manager `Issuer` and `Certificate` are already serving the
-  controller's webhook endpoint; the conversion webhook will reuse
-  them. No new `Certificate` is required.
-
-When v1.x activates conversion with a real spoke schema, no chart-level
-RBAC change is required — only Go code and the per-CRD
-`spec.conversion.strategy` flip.
+- **No** `conversion-webhook-configuration` is shipped — each CRD's
+  `spec.conversion.strategy` is `None` (the kubebuilder default for
+  single-version CRDs).
 
 ---
 

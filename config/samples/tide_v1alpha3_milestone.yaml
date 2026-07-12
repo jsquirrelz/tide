@@ -1,5 +1,5 @@
-# tide_v1alpha1_milestone.yaml — single milestone owned by sample-project.
-apiVersion: tideproject.k8s/v1alpha1
+# tide_v1alpha3_milestone.yaml — single milestone owned by sample-project.
+apiVersion: tideproject.k8s/v1alpha3
 kind: Milestone
 metadata:
   name: sample-milestone

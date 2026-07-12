@@ -105,12 +105,13 @@ The safety contract in v1 is:
 A real Project is a Kubernetes custom resource:
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: example-project
   namespace: tide-example
 spec:
+  schemaRevision: v1alpha3
   targetRepo: https://github.com/example-org/example-repo.git
   outcomePrompt: |
     Add a small, well-tested capability to this repository.

@@ -1,9 +1,9 @@
-# tide_v1alpha1_task_theta.yaml — θ (Wave 3, depends on η).
-# Edge set: η→θ — matches pkg/dag/kahn_test.go alphaThroughThetaFixture.
-apiVersion: tideproject.k8s/v1alpha1
+# tide_v1alpha3_task_epsilon.yaml — ε (Wave 3, depends on δ).
+# Edge set: δ→ε — matches pkg/dag/kahn_test.go alphaThroughThetaFixture.
+apiVersion: tideproject.k8s/v1alpha3
 kind: Task
 metadata:
-  name: theta
+  name: epsilon
   namespace: tide-samples
   labels:
     app.kubernetes.io/name: tide
@@ -13,8 +13,8 @@ metadata:
 spec:
   planRef: sample-plan
   dependsOn:
-    - eta
+    - delta
   filesTouched:
-    - pkg/example/theta.go
+    - pkg/example/epsilon.go
   declaredOutputPaths:
-    - artifacts/theta.json
+    - artifacts/epsilon.json

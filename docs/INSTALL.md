@@ -251,12 +251,13 @@ a real budget cap, and the git push target. Field names matter — copy this sha
 samples):
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: my-project
   namespace: tide-sample-medium
 spec:
+  schemaRevision: v1alpha3
   outcomePrompt: "<what you want TIDE to build, in plain prose>"
   targetRepo: https://github.com/my-org/my-repo.git   # CEL: http(s):// or git@ only — file:// is rejected
   providerSecretRef: tide-anthropic-creds              # top-level; carries ANTHROPIC_API_KEY

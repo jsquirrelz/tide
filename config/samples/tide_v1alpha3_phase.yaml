@@ -1,5 +1,5 @@
-# tide_v1alpha1_phase.yaml — single phase owned by sample-milestone.
-apiVersion: tideproject.k8s/v1alpha1
+# tide_v1alpha3_phase.yaml — single phase owned by sample-milestone.
+apiVersion: tideproject.k8s/v1alpha3
 kind: Phase
 metadata:
   name: sample-phase

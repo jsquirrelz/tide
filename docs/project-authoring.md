@@ -2,13 +2,14 @@
 
 **Audience:** Operators writing their first `project.yaml`.
 
-**Status:** v1.0; covers `Project.Spec` at the `tideproject.k8s/v1alpha1` schema lock
-(Phase 1 D-A3; the API group + version are stable across the M0 → M_self bridge).
+**Status:** v1.0.7; covers `Project.Spec` at the `tideproject.k8s/v1alpha3` schema lock
+(Phase 40 D-04; a future schema crank repoints this doc and the two constants in
+`checkSchemaRevisionGuard`).
 
 **Scope of this doc:**
 
 - The `Project` CRD's `Project.Spec` field reference (the authoritative shape lives in
-  [`api/v1alpha1/project_types.go`](../api/v1alpha1/project_types.go)).
+  [`api/v1alpha3/project_types.go`](../api/v1alpha3/project_types.go)).
 - A three-sample walkthrough — **small ($0 stub)** → **medium (~$5 mini Claude)** →
   **large (~$25 acceptance)** — with the cost spectrum as the discriminator (per
   Phase 5 D-B1).
@@ -30,7 +31,7 @@ See [`README.md`](../README.md) for the five-level paradigm and the two-DAG fram
 
 ## Project.Spec field reference
 
-Field shapes are sourced verbatim from [`api/v1alpha1/project_types.go`](../api/v1alpha1/project_types.go).
+Field shapes are sourced verbatim from [`api/v1alpha3/project_types.go`](../api/v1alpha3/project_types.go).
 When a field comment in the type definition disagrees with this table, the type
 file wins — file a doc-drift issue.
 
@@ -38,13 +39,14 @@ file wins — file a doc-drift issue.
 
 | Field                       | Type                  | Required | Default                       | What it controls                                                                                                                                                                                |
 | --------------------------- | --------------------- | -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schemaRevision`            | `string`              | yes      | (none — must be `v1alpha3`)   | Fail-closed schema discriminator (D-04). Any Project without `schemaRevision: v1alpha3` is rejected with a `Ready=False/RequiresReinstall` condition on the next reconcile — see [`docs/migration/v1alpha2-to-v1alpha3.md`](migration/v1alpha2-to-v1alpha3.md). |
 | `targetRepo`                | `string` (URL)        | yes      | (none)                        | The URL of the repository TIDE plans + executes against. Must start with `http`, `https`, or `git@` (CEL-validated). Used by the in-cluster clone Job to populate the workspace PVC.            |
 | `secretRefs.anthropicAPIKey` | `string` (Secret name) | optional | (none)                        | Name of the same-namespace `Secret` carrying `ANTHROPIC_API_KEY`. Read by the credproxy sidecar — the controller pod itself never sees the key (Phase 2 D-C1..C4).                              |
 | `secretRefs.gitCredentials` | `string` (Secret name) | optional | (none)                        | Name of the same-namespace `Secret` carrying `GIT_PAT` for HTTPS+PAT push. Mounted as `envFrom` on the push Job pod; never read by the controller.                                              |
 | `providerSecretRef`         | `string` (Secret name) | optional | (none)                        | Convenience alias for `secretRefs.anthropicAPIKey` (Phase 2+ credproxy contract). Set this if you prefer one Secret name per provider rather than the per-axis `secretRefs` block.              |
 | `subagent.image`            | `string` (image ref)  | optional | Helm chart default            | Default subagent container image for all four levels. Picks the **vendor** (Claude, OpenAI stub, etc.) via the bundled `Subagent` impl. Example: `ghcr.io/jsquirrelz/tide-claude-subagent:v0.1.0`. |
 | `subagent.model`            | `string`              | optional | Helm chart default            | Default model identifier passed to the vendor's CLI/SDK. Example: `claude-sonnet-4-6` (anthropic) or `o1-mini` (openai). Vendor + model are orthogonal axes (Phase 3 D-C2).                      |
-| `subagent.levels.{milestone,phase,plan,task}.model` | `string` | optional | falls back to `subagent.model` | Per-level model override. Use a cheap model (e.g., `claude-haiku-4-5`) for the milestone planner and a stronger model (e.g., `claude-sonnet-4-6`) for plan/task levels.                          |
+| `subagent.levels.{milestone,phase,plan,task}.model` | `string` | optional | falls back to `subagent.model` | Per-level model override. Each key names the **artifact the dispatch produces** (D-02 artifact-first rename, v1alpha3): `milestone` → the dispatch that authors MILESTONE.md, `phase` → authors phase briefs, `plan` → authors PLAN.md **and** the task DAG (two dispatches share this one slot), `task` → task execution (diffs). Use a cheap model (e.g., `claude-haiku-4-5`) for `milestone`/`phase` and a stronger model (e.g., `claude-sonnet-4-6`) for `plan`/`task`. See [`docs/migration/v1alpha2-to-v1alpha3.md`](migration/v1alpha2-to-v1alpha3.md) for the old-vs-new meaning remap if you're carrying forward a v1alpha2 Project. |
 | `git.repoURL`               | `string` (URL)        | optional | (none)                        | The per-Project push target. CEL pattern requires `http(s)://`. Required for any Project whose lifecycle reaches push; optional for purely transient/test Projects (Phase 3 D-B6).              |
 | `git.credsSecretRef`        | `string` (Secret name) | optional | (none)                        | Same-namespace Secret carrying `GIT_PAT`. Cross-namespace refs are NOT permitted in v1.0. Read only by the push Job (`tide-push` ServiceAccount), never by the controller.                       |
 | `git.leaksConfigRef`        | `string` (ConfigMap)   | optional | embedded gitleaks defaults    | ConfigMap with gitleaks rule overrides per-Project. When empty, the push image's embedded ruleset applies.                                                                                       |
@@ -65,7 +67,6 @@ file wins — file a doc-drift issue.
 | `providers[].allowedRoutes` | `[]RouteSpec` (`{method, pathPrefix}`) | optional | hardcoded `POST /v1/messages` + `POST /v1/messages/count_tokens` | Additive (not restrictive) extensions to the credproxy upstream allowlist. Use for newly-released LLM endpoints (Files API, prompt caching) without rebuilding credproxy.                       |
 | `planAdmission.fileTouchMode` | `strict \| warn`    | optional | `warn`                        | How file-touch mismatches between a Plan's declared `<files>` and its executed diff are handled. `strict` rejects plans at admission; `warn` admits + annotates `Plan.Status` (Phase 2 D-E1..E4). |
 | `maxAttemptsPerTask`        | `int32` (1..10)       | optional | `3` (Helm chart default)      | Number of dispatch attempts per Task before it's marked failed. Bounded by CEL to `[1, 10]` to prevent runaway retries.                                                                          |
-| `modelSelection.{milestone,phase,plan,task}` | `string` | optional | falls back to `subagent.*`   | Legacy per-level model selection (kept for Phase 1 fixtures). Prefer `subagent.levels.*` in new Projects.                                                                                        |
 
 > **`outcomePrompt` note.** The user-facing outcome prompt is conventionally
 > embedded in a project-authoring annotation or a separate `ConfigMap` referenced
@@ -133,12 +134,13 @@ examples/projects/small/
 **project.yaml shape:**
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: small
   namespace: tide-sample-small
 spec:
+  schemaRevision: v1alpha3
   # Stub-subagent runs against any URL — pattern validator just needs http(s).
   targetRepo: "https://example.invalid/no-real-clone-needed.git"
 
@@ -211,12 +213,13 @@ examples/projects/medium/
 **project.yaml shape:**
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: medium
   namespace: tide-sample-medium
 spec:
+  schemaRevision: v1alpha3
   # The bare repo lives on demo-remote-pvc, mounted by the clone Job. The
   # path matches the subPath the demo-remote-init Job wrote to.
   targetRepo: "file:///demo-remote.git"
@@ -321,7 +324,7 @@ RESEARCH §"Topic 5"; copied verbatim because the prompt phrasing is itself the
 acceptance contract):
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: large-project
@@ -367,6 +370,7 @@ metadata:
       `docker build -f internal/subagent/openai/Dockerfile .` builds without
       error.
 spec:
+  schemaRevision: v1alpha3
   targetRepo: "https://github.com/jsquirrelz/tide.git"
 
   secretRefs:
@@ -552,7 +556,11 @@ Reference the Secret name from `Project.Spec.secretRefs.anthropicAPIKey` and/or
 
 `Project.Spec.subagent.model` sets the default model for all four levels.
 Override per-level via `Project.Spec.subagent.levels.{milestone,phase,plan,task}.model`.
-Resolution chain at dispatch time:
+Each key names the artifact its dispatch produces (D-02, v1alpha3) — see the
+[Project.Spec field reference](#projectspec-field-reference) above for the
+per-key breakdown, or [`docs/migration/v1alpha2-to-v1alpha3.md`](migration/v1alpha2-to-v1alpha3.md)
+if you're carrying forward overrides from a prior schema revision. Resolution
+chain at dispatch time:
 
 ```
 Spec.Subagent.Levels.<level>.model  →  Spec.Subagent.Model  →  Helm-chart default
@@ -711,7 +719,7 @@ Once your Project is authored and applied:
   failure modes (finalizer stuck, 401 invalid key, push lease conflict,
   gitleaks blocked, RWX missing, etc.) with copy-paste recipes.
 - **RBAC reference:** [`docs/rbac.md`](rbac.md) — per-Kind verbs, per-namespace
-  RoleBinding template (AUTH-02 catch-up), conversion-webhook no-op caveats.
+  RoleBinding template (AUTH-02 catch-up).
 
 For the load-bearing five-level paradigm + two-DAG framing + water/tide
 vocabulary, see [`README.md`](../README.md). The spec is the source of truth

@@ -11,11 +11,12 @@ A **gate** is a human-or-policy checkpoint that an up-stack reconciler
 declared in `Project.Spec.gates`:
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: hello-tide
 spec:
+  schemaRevision: v1alpha3
   gates:
     milestone: approve  # halt every milestone until `tide approve` annotates it
     phase:     auto     # advance phases without manual approval

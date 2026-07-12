@@ -65,12 +65,13 @@ kubectl create secret generic tide-git-creds \
 Reference the Secret from the `Project` CRD:
 
 ```yaml
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: my-tide-project
   namespace: my-namespace
 spec:
+  schemaRevision: v1alpha3
   git:
     repoURL: https://github.com/my-org/my-repo.git
     credsSecretRef: tide-git-creds

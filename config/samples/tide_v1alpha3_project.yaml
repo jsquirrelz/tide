@@ -1,6 +1,6 @@
-# tide_v1alpha1_project.yaml — root of the α…θ worked-example hierarchy.
+# tide_v1alpha3_project.yaml — root of the α…θ worked-example hierarchy.
 # Project → Milestone → Phase → Plan → 8 Tasks (alpha…theta).
-apiVersion: tideproject.k8s/v1alpha1
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: sample-project
@@ -10,4 +10,5 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
     tideproject.k8s/sample: "true"
 spec:
+  schemaRevision: v1alpha3
   targetRepo: https://github.com/jsquirrelz/tide.git

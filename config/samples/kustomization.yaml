@@ -2,17 +2,17 @@
 #
 # Resource order is the owner-ref dependency cascade:
 #   1. namespace.yaml         (creates tide-samples ns)
-#   2. tide_v1alpha1_project.yaml
-#   3. tide_v1alpha1_milestone.yaml   (refs sample-project)
-#   4. tide_v1alpha1_phase.yaml       (refs sample-milestone)
-#   5. tide_v1alpha1_plan.yaml        (refs sample-phase)
-#   6..13. tide_v1alpha1_task_<name>.yaml (each refs sample-plan)
+#   2. tide_v1alpha3_project.yaml
+#   3. tide_v1alpha3_milestone.yaml   (refs sample-project)
+#   4. tide_v1alpha3_phase.yaml       (refs sample-milestone)
+#   5. tide_v1alpha3_plan.yaml        (refs sample-phase)
+#   6..13. tide_v1alpha3_task_<name>.yaml (each refs sample-plan)
 #
 # kustomize does not enforce strict apply order at build time, but listing
 # top-down approximates the cascade so `kubectl apply -k config/samples/`
 # resolves owner refs in dependency order on a real cluster.
 #
-# NOTE: per D-B1, there is NO `tide_v1alpha1_wave*.yaml` sample — Wave
+# NOTE: per D-B1, there is NO `tide_v1alpha3_wave*.yaml` sample — Wave
 # resources are created by the WaveReconciler from a Plan + its Tasks; a
 # human applying a Wave directly is rejected by the admission webhook.
 #
@@ -22,16 +22,16 @@
 
 resources:
   - namespace.yaml
-  - tide_v1alpha1_project.yaml
-  - tide_v1alpha1_milestone.yaml
-  - tide_v1alpha1_phase.yaml
-  - tide_v1alpha1_plan.yaml
-  - tide_v1alpha1_task_alpha.yaml
-  - tide_v1alpha1_task_beta.yaml
-  - tide_v1alpha1_task_gamma.yaml
-  - tide_v1alpha1_task_zeta.yaml
-  - tide_v1alpha1_task_delta.yaml
-  - tide_v1alpha1_task_eta.yaml
-  - tide_v1alpha1_task_epsilon.yaml
-  - tide_v1alpha1_task_theta.yaml
+  - tide_v1alpha3_project.yaml
+  - tide_v1alpha3_milestone.yaml
+  - tide_v1alpha3_phase.yaml
+  - tide_v1alpha3_plan.yaml
+  - tide_v1alpha3_task_alpha.yaml
+  - tide_v1alpha3_task_beta.yaml
+  - tide_v1alpha3_task_gamma.yaml
+  - tide_v1alpha3_task_zeta.yaml
+  - tide_v1alpha3_task_delta.yaml
+  - tide_v1alpha3_task_eta.yaml
+  - tide_v1alpha3_task_epsilon.yaml
+  - tide_v1alpha3_task_theta.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
