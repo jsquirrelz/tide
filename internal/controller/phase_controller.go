@@ -344,40 +344,11 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		if earlyProject != nil && gates.CheckRejected(earlyProject) {
 			return r.patchPhaseRejected(ctx, ph, gates.RejectedReason(earlyProject))
 		}
-		// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
-		// parent-approval); park, never fail; cleared by tide resume.
-		// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
-		// No per-Phase condition written (operator signal is the Project condition).
-		if checkBillingHalt(earlyProject) {
-			logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
-				"phase", ph.Name)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		// Phase 25 DISP-02 / D-02b: conservative failure halt hold.
-		// Execution-only (not planner) — gates phase dispatch when ConditionFailureHalt=True.
-		// Park (never fail); cleared by `tide resume --retry-failed`.
-		if checkFailureHalt(earlyProject) {
-			logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
-				"phase", ph.Name)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
-		// BillingHalt (provider billing); both may be true simultaneously.
-		// No per-Phase condition written (operator signal is the single Project BudgetBlocked condition).
-		if checkBudgetBlocked(earlyProject) && !budget.IsBypassed(earlyProject, time.Now()) {
-			logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
-				"phase", ph.Name)
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-		// Phase 28 IMPORT-01: park planner dispatch until import completes.
-		// Position: BEFORE pool acquire (Pitfall 2 — parking after acquire leaks a slot).
-		if earlyProject != nil && earlyProject.Spec.ImportSource != nil {
-			c := meta.FindStatusCondition(earlyProject.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
-			if c == nil || c.Status != metav1.ConditionTrue {
-				logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch",
-					"phase", ph.Name)
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-			}
+		// Item 7 (Phase 41 D-07): shared planner-tier project-scoped hold chain
+		// (Billing → Failure → Budget → Import) — see checkDispatchHolds in
+		// dispatch_helpers.go for the order/requeue rationale.
+		if held, res := checkDispatchHolds(ctx, earlyProject, "phase", ph.Name); held {
+			return res, nil
 		}
 	}
 

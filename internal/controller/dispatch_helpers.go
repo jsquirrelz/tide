@@ -41,16 +41,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
@@ -464,4 +468,65 @@ func checkParentApproval(ctx context.Context, c client.Client, ns, parentName, p
 		return plan.Status.Phase == tideprojectv1alpha3.LevelPhaseAwaitingApproval, nil
 	}
 	return false, nil
+}
+
+// checkDispatchHolds centralizes the planner-tier project-scoped dispatch-holds
+// gate chain shared by MilestoneReconciler, PhaseReconciler, and PlanReconciler
+// (item 7, Phase 41 D-07 — the seed's "finish an extraction the codebase
+// already started"). The order — Billing(30s) → Failure(30s) → Budget(30s) →
+// Import(5s) — and the requeue literals are load-bearing: this is the
+// enforcement point that stops planner Job dispatch (and therefore LLM spend)
+// on BillingHalt / FailureHalt / BudgetBlocked / import-pending. A swap in
+// order or interval is a spend-gate bypass or an over-holding regression, not
+// a cosmetic change (T-41-05a/b).
+//
+// TaskReconciler intentionally does NOT call this helper — its chain checks
+// Import SECOND (immediately after parent-approval, before Billing/Failure/
+// Budget) and adds a task-only reservation-headroom hold with no planner-tier
+// counterpart. Normalizing Task onto this order would be a behavior change in
+// a non-breaking phase; see the divergence comment at task_controller.go's
+// gate chain and .planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md.
+//
+// nil-safe: a nil project is not a hold (matches checkBillingHalt /
+// checkFailureHalt / checkBudgetBlocked's own nil-safe wrappers).
+func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Project, level, objName string) (held bool, result ctrl.Result) {
+	if project == nil {
+		return false, ctrl.Result{}
+	}
+
+	// Phase 13 HALT-01 / D-05: third dispatch-entry hold (after CheckRejected +
+	// parent-approval); park, never fail; cleared by tide resume.
+	// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
+	if checkBillingHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
+			level, objName, "project", project.Name)
+		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
+	}
+	// Phase 25 DISP-02 / D-02b: conservative failure halt hold.
+	// Execution-only (not planner) — gates dispatch when ConditionFailureHalt=True.
+	// Park (never fail); cleared by `tide resume --retry-failed`.
+	if checkFailureHalt(project) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
+			level, objName, "project", project.Name)
+		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
+	}
+	// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
+	// BillingHalt (provider billing); both may be true simultaneously.
+	if checkBudgetBlocked(project) && !budget.IsBypassed(project, time.Now()) {
+		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
+			level, objName, "project", project.Name)
+		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
+	}
+	// Phase 28 IMPORT-01: park planner dispatch until import completes.
+	// Position: BEFORE pool acquire (Pitfall 2 — parking after acquire leaks a slot).
+	if project.Spec.ImportSource != nil {
+		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
+		if c == nil || c.Status != metav1.ConditionTrue {
+			logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch",
+				level, objName, "project", project.Name)
+			return true, ctrl.Result{RequeueAfter: 5 * time.Second}
+		}
+	}
+
+	return false, ctrl.Result{}
 }
