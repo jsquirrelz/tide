@@ -292,7 +292,7 @@ Plans:
 **Goal:** The 12-item operator-shared refactoring review lands as non-breaking cleanup: quick wins (typed Status.Phase constants, meta.IsStatusConditionTrue, stale scheme comment, dead code/fields, mojibake, test-helper unification) then structural extractions (shared dispatch-holds gate chain, PlannerDeps carrier, condition-polarity normalization, status-helper extraction, magic-literal centralization, log-style decision).
 **Requirements**: REFAC-01, REFAC-02, REFAC-04, REFAC-05, REFAC-06, REFAC-07, REFAC-08, REFAC-09, REFAC-10, REFAC-11, REFAC-12 (REFAC-03 pre-satisfied by Phase 40 — IDs map 1:1 to seed item numbers; minted 2026-07-12 per D-08)
 **Depends on:** Phase 40 (doing 40 first collapses the dual-version scaffolding items #1/#3 otherwise work around)
-**Plans:** 8/9 plans executed
+**Plans:** 9/9 plans complete
 
 Plans:
 **Wave 1**
@@ -326,4 +326,4 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7)*
 
-- [ ] 41-09-PLAN.md — Magic literals: owner label keys, SharedPVCName plumb, endpoint/iterations consts (item 11) — wave 8
+- [x] 41-09-PLAN.md — Magic literals: owner label keys, SharedPVCName plumb, endpoint/iterations consts (item 11) — wave 8
