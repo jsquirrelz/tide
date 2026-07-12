@@ -355,6 +355,20 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		return taskGateResult{}, fmt.Errorf("resolve project: %w", err)
 	}
 
+	// Item 7 (Phase 41 D-07): this gate chain intentionally stays inline and is
+	// NOT a caller of checkDispatchHolds (dispatch_helpers.go). The order here
+	// is Reject → ParentApproval → Import → Billing → Failure → Budget →
+	// reservation-headroom — Import is checked SECOND (immediately after
+	// parent-approval, before Billing/Failure/Budget), whereas the planner tier
+	// (Milestone/Phase/Plan, via checkDispatchHolds) checks Import LAST. Task
+	// also adds a reservation-headroom hold with no planner-tier counterpart.
+	// Normalizing Task onto the planner-tier order would change which hold
+	// message/requeue fires when import-pending coincides with a Billing/
+	// Failure/Budget halt — a behavior change Phase 41's non-breaking boundary
+	// does not permit. See
+	// .planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md
+	// for the follow-up decision (normalize vs. declare a permanent outlier).
+
 	// Plan 04-05 reject short-circuit (D-G1 per-level policy enum, T-04-G1
 	// mitigation). Fires BEFORE budget/indegree/dispatch so a rejected Project
 	// halts even Pending tasks. Reject value carries the operator-supplied
