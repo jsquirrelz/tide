@@ -54,7 +54,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtest", "phase04.1", "parent-unresolved"), func() {
@@ -73,9 +73,9 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 		// idempotent AND safe against this Describe's own AfterEach deletion still
 		// terminating when the next It's BeforeEach runs.
 		for _, name := range []string{projectA, projectB} {
-			ensureLiveProject(ctx, &tideprojectv1alpha2.Project{
+			ensureLiveProject(ctx, &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: fmt.Sprintf("https://github.com/example/%s.git", name),
 				},
 			})
@@ -84,13 +84,13 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 		// Task with NO tideproject.k8s/project label and NO owner-ref to either Project.
 		// This is the regression input: before P1.4, the reconciler would have found
 		// projectList.Items[0] and dispatched against it. After P1.4, it sets the condition.
-		task := &tideprojectv1alpha2.Task{
+		task := &tideprojectv1alpha3.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      taskName,
 				Namespace: ns,
 				// Intentionally NO tideproject.k8s/project label.
 			},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				PlanRef:             "pu-plan",
 				PromptPath:          "envelopes/test/children/" + taskName + ".json",
 				FilesTouched:        []string{"pu.go"},
@@ -101,14 +101,14 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 	})
 
 	AfterEach(func() {
-		task := &tideprojectv1alpha2.Task{}
+		task := &tideprojectv1alpha3.Task{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: taskName, Namespace: ns}, task); err == nil {
 			task.Finalizers = nil
 			_ = k8sClient.Update(ctx, task)
 			_ = k8sClient.Delete(ctx, task)
 		}
 		for _, name := range []string{projectA, projectB} {
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
@@ -120,21 +120,21 @@ var _ = Describe("Phase 04.1 P1.4 — ParentUnresolved condition", Label("envtes
 	It("sets ConditionParentUnresolved=True on an unlabeled Task in a 2-Project namespace", func() {
 		// Eventually the running TaskReconciler should set ConditionParentUnresolved=True.
 		Eventually(func() bool {
-			var fetched tideprojectv1alpha2.Task
+			var fetched tideprojectv1alpha3.Task
 			if err := mgrClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &fetched); err != nil {
 				return false
 			}
-			cond := meta.FindStatusCondition(fetched.Status.Conditions, tideprojectv1alpha2.ConditionParentUnresolved)
+			cond := meta.FindStatusCondition(fetched.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
 			return cond != nil && cond.Status == metav1.ConditionTrue
 		}, 30*time.Second, 1*time.Second).Should(BeTrue(),
 			"Task should have ConditionParentUnresolved=True within 30s")
 
 		// Verify the condition Reason is set correctly.
-		var fetched tideprojectv1alpha2.Task
+		var fetched tideprojectv1alpha3.Task
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: taskName}, &fetched)).To(Succeed())
-		cond := meta.FindStatusCondition(fetched.Status.Conditions, tideprojectv1alpha2.ConditionParentUnresolved)
+		cond := meta.FindStatusCondition(fetched.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
 		Expect(cond).NotTo(BeNil())
-		Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonNoProjectLabel),
+		Expect(cond.Reason).To(Equal(tideprojectv1alpha3.ReasonNoProjectLabel),
 			"Reason should be NoProjectLabel when label is absent")
 
 		// No Job should have been created for this Task — the reconciler short-circuits

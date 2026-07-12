@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
@@ -78,7 +78,7 @@ func triggerBoundaryPush(
 	c client.Client,
 	scheme *runtime.Scheme,
 	parent client.Object,
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	level string,
 	tidePushImage string,
 	helmDefaults ProviderDefaults,
@@ -112,8 +112,8 @@ func triggerBoundaryPush(
 	// miss-reason variant stays dispatchable (its cap arm bounds retries and
 	// a later success auto-clears the condition); `tide resume` clears the
 	// conflict park after a replan.
-	if cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionIntegrationIncomplete); cond != nil &&
-		cond.Status == metav1.ConditionTrue && cond.Reason == tideprojectv1alpha2.ReasonMergeConflict {
+	if cond := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionIntegrationIncomplete); cond != nil &&
+		cond.Status == metav1.ConditionTrue && cond.Reason == tideprojectv1alpha3.ReasonMergeConflict {
 		logger.Info("skipping boundary push: parked on a merge conflict awaiting `tide resume`",
 			"level", level, "project", project.Name)
 		return nil
@@ -209,8 +209,8 @@ func triggerWaveIntegrationJob(
 	ctx context.Context,
 	c client.Client,
 	scheme *runtime.Scheme,
-	plan *tideprojectv1alpha2.Plan,
-	project *tideprojectv1alpha2.Project,
+	plan *tideprojectv1alpha3.Plan,
+	project *tideprojectv1alpha3.Project,
 	waveIndex int,
 	branches []string,
 	tidePushImage string,
@@ -268,12 +268,12 @@ func triggerWaveIntegrationJob(
 // or rejected level NEVER pushes) and BEFORE patchMilestoneSucceeded
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
-func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
+func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
 	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.TidePushImage, r.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
-func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
+func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
 	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.TidePushImage, r.HelmProviderDefaults)
 }
 
@@ -287,6 +287,6 @@ func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent c
 // (plan_controller.go, at planner-Job completion) fires BEFORE Tasks exist
 // anyway (CR-03 note), so the old per-caller collection here was always
 // dead code in practice.
-func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha2.Project) error {
+func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
 	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.TidePushImage, r.HelmProviderDefaults)
 }

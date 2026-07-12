@@ -25,39 +25,39 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // artifactTestProject returns a git-configured, run-branch-provisioned Project
 // suitable for driving triggerArtifactPush past its guard chain.
-func artifactTestProject() *tideprojectv1alpha2.Project {
-	p := &tideprojectv1alpha2.Project{
+func artifactTestProject() *tideprojectv1alpha3.Project {
+	p := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "default",
 			UID:       types.UID("proj-uid"),
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			Git:            &tideprojectv1alpha2.GitConfig{RepoURL: "https://example.com/repo.git"},
+			Git:            &tideprojectv1alpha3.GitConfig{RepoURL: "https://example.com/repo.git"},
 		},
 	}
-	p.Status.Phase = tideprojectv1alpha2.PhaseRunning
+	p.Status.Phase = tideprojectv1alpha3.PhaseRunning
 	p.Status.Git.BranchName = "tide/run-proj-123"
 	return p
 }
 
-func milestone(name, uid, phase string) *tideprojectv1alpha2.Milestone {
-	m := &tideprojectv1alpha2.Milestone{
+func milestone(name, uid, phase string) *tideprojectv1alpha3.Milestone {
+	m := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
 	}
 	m.Status.Phase = phase
 	return m
 }
 
-func phaseCR(name, uid, phase string) *tideprojectv1alpha2.Phase {
-	p := &tideprojectv1alpha2.Phase{
+func phaseCR(name, uid, phase string) *tideprojectv1alpha3.Phase {
+	p := &tideprojectv1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
 	}
 	p.Status.Phase = phase
@@ -231,7 +231,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 // test project, with no approve annotation (so reconcilePlannerDispatch takes the
 // parked branch). Its own AwaitingApproval phase makes collectStageEnvelopes
 // non-empty, so the trigger has something to stage.
-func parkedMilestone() *tideprojectv1alpha2.Milestone {
+func parkedMilestone() *tideprojectv1alpha3.Milestone {
 	m := milestone("m-parked", "uid-parked", "AwaitingApproval")
 	m.Spec.ProjectRef = "proj"
 	return m

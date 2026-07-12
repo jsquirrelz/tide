@@ -39,7 +39,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/config"
 	"github.com/jsquirrelz/tide/internal/controller"
@@ -61,10 +61,10 @@ import (
 	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/pool"
 
-	// All webhooks moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
-	// webhookv1alpha1 no longer needed here; only SetupProjectWebhookWithManager
-	// remains via suite_test.go which still needs the v1alpha1 package for strict_mode.
-	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
+	// All webhooks serve v1alpha3 (Phase 40 crank, plan 40-03) — the prior
+	// v1alpha2 package was renamed, not kept alongside it (D-01 reinstall-only:
+	// no transitional multi-version webhook registration).
+	webhookv1alpha3 "github.com/jsquirrelz/tide/internal/webhook/v1alpha3"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -300,14 +300,13 @@ func main() {
 		"executorConcurrency", cfg.ExecutorConcurrency,
 		"maxConcurrentReconciles", cfg.MaxConcurrentReconciles)
 
-	// 2. Build scheme with v1alpha1 + corev1 + batchv1.
+	// 2. Build scheme with v1alpha3 + corev1 + batchv1. v1alpha3 is the sole
+	// served+storage version (Phase 40 D-01 reinstall-only removal) — nothing
+	// prior is registered; checkSchemaRevisionGuard fail-closes any Project
+	// authored under an earlier schema instead of relying on scheme decode.
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
-	// Register v1alpha2 as the served+storage version (Spring Tide breaking CRD change,
-	// Plan 23-02). v1alpha1 remains registered so the manager can decode any surviving
-	// v1alpha1 objects for the Plan-03 reinstall guard (RequiresReinstall path).
-	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
+	utilruntime.Must(tidev1alpha3.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 
 	// 3. Construct the Manager (CTRL-01, CTRL-03).
@@ -593,17 +592,17 @@ func main() {
 	// The Helm-chart default is "warn" (safe for fresh installs); operators opt in to
 	// "strict" via --set planAdmission.fileTouchMode=strict which is passed through
 	// the controller Deployment args to this --default-file-touch-mode flag.
-	// Plan webhook moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
-	if err := webhookv1alpha2.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
+	// Plan webhook serves v1alpha3 (Phase 40 crank, plan 40-03).
+	if err := webhookv1alpha3.SetupPlanWebhookWithManager(mgr, defaultFileTouchMode); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Plan")
 		os.Exit(1)
 	}
-	// Wave webhook re-registered for v1alpha2 (D-B1 re-registration, Plan 23-02).
-	if err := webhookv1alpha2.SetupWaveWebhookWithManager(mgr); err != nil {
+	// Wave webhook re-registered for v1alpha3 (D-B1 re-registration).
+	if err := webhookv1alpha3.SetupWaveWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Wave")
 		os.Exit(1)
 	}
-	if err := webhookv1alpha2.SetupProjectWebhookWithManager(mgr); err != nil {
+	if err := webhookv1alpha3.SetupProjectWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "kind", "Project")
 		os.Exit(1)
 	}

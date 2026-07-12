@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -43,12 +43,12 @@ func TestResolveWave_WaveOwner(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	r := &TaskReconciler{Client: c, Scheme: s}
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-wave-owner",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-abc-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-abc-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 	}
@@ -65,12 +65,12 @@ func TestResolveWave_NoWaveOwner(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 	r := &TaskReconciler{Client: c, Scheme: s}
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-no-wave",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Plan", Name: "some-plan", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Plan", Name: "some-plan", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 	}
@@ -99,33 +99,33 @@ func newFakeSchemeForMetrics(t *testing.T) *runtime.Scheme {
 func TestEmitTaskMetrics_EndToEnd(t *testing.T) {
 	s := newFakeSchemeForMetrics(t)
 
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-m1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-m1"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-m1"},
 	}
 	now := time.Now().UTC()
 	startedAt := metav1.NewTime(now.Add(-90 * time.Second))
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-m1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-x-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-x-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             "plan-m1",
 			FilesTouched:        []string{"foo"},
 			DeclaredOutputPaths: []string{"foo"},
 			PromptPath:          "envelopes/test/children/task-01.json",
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			StartedAt: &startedAt,
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-m1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -186,19 +186,19 @@ func TestEmitTaskMetrics_EndToEnd(t *testing.T) {
 func TestEmitTaskMetrics_PhaseMissSentinel(t *testing.T) {
 	s := newFakeSchemeForMetrics(t)
 	// Seed no Plan — get will return NotFound.
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-miss", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
 	}
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-miss",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-miss-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-miss-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             "nonexistent-plan",
 			FilesTouched:        []string{"bar"},
 			DeclaredOutputPaths: []string{"bar"},
@@ -235,31 +235,31 @@ func TestEmitTaskMetrics_PhaseMissSentinel(t *testing.T) {
 func TestEmitTaskMetrics_FailedReason(t *testing.T) {
 	s := newFakeSchemeForMetrics(t)
 
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-fr1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-fr1"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-fr1"},
 	}
 	now := time.Now().UTC()
 	startedAt := metav1.NewTime(now.Add(-60 * time.Second))
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-fr1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-fr1-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-fr1-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:    "plan-fr1",
 			PromptPath: "envelopes/test/children/task-fr1.json",
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			StartedAt: &startedAt,
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-fr1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -316,33 +316,33 @@ func TestMetricFailureReason(t *testing.T) {
 func TestEmitTaskMetrics_NegativeDuration_WR04(t *testing.T) {
 	s := newFakeSchemeForMetrics(t)
 
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: "plan-nd1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-nd1"},
+		Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-nd1"},
 	}
 	now := time.Now().UTC()
 	// StartedAt is in the future relative to completedAt — simulates stale envelope.
 	startedAt := metav1.NewTime(now)
 	completedAt := now.Add(-5 * time.Minute) // before startedAt
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task-nd1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-nd1-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-nd1-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:    "plan-nd1",
 			PromptPath: "envelopes/test/children/task-nd1.json",
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			StartedAt: &startedAt,
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-nd1", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
 	}
 
 	c := fake.NewClientBuilder().WithScheme(s).

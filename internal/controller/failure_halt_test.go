@@ -29,17 +29,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ---------- checkFailureHalt ----------
 
 func TestCheckFailureHalt_TrueWhenConditionPresent(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionFailureHalt,
+		Type:               tideprojectv1alpha3.ConditionFailureHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonTaskFailedHalt,
+		Reason:             tideprojectv1alpha3.ReasonTaskFailedHalt,
 		LastTransitionTime: metav1.Now(),
 	})
 	if !checkFailureHalt(project) {
@@ -48,7 +48,7 @@ func TestCheckFailureHalt_TrueWhenConditionPresent(t *testing.T) {
 }
 
 func TestCheckFailureHalt_FalseWhenConditionAbsent(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	if checkFailureHalt(project) {
 		t.Error("expected checkFailureHalt=false when no conditions")
 	}
@@ -64,12 +64,12 @@ func TestCheckFailureHalt_FalseForNilProject(t *testing.T) {
 
 func TestSetFailureHaltIfNeeded_StrictProfile_NoOp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "strict-project", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			FailureProfile: tideprojectv1alpha2.FailureProfileStrict,
+			FailureProfile: tideprojectv1alpha3.FailureProfileStrict,
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -81,11 +81,11 @@ func TestSetFailureHaltIfNeeded_StrictProfile_NoOp(t *testing.T) {
 		t.Fatalf("setFailureHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "strict-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 	if cond != nil && cond.Status == metav1.ConditionTrue {
 		t.Errorf("expected NO FailureHalt for strict profile; got %+v", cond)
 	}
@@ -93,12 +93,12 @@ func TestSetFailureHaltIfNeeded_StrictProfile_NoOp(t *testing.T) {
 
 func TestSetFailureHaltIfNeeded_ConservativeStampsHalt(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "my-project", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+			FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -110,27 +110,27 @@ func TestSetFailureHaltIfNeeded_ConservativeStampsHalt(t *testing.T) {
 		t.Fatalf("setFailureHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected FailureHalt=True; got %v", cond)
 	}
-	if cond.Reason != tideprojectv1alpha2.ReasonTaskFailedHalt {
-		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha2.ReasonTaskFailedHalt, cond.Reason)
+	if cond.Reason != tideprojectv1alpha3.ReasonTaskFailedHalt {
+		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha3.ReasonTaskFailedHalt, cond.Reason)
 	}
 }
 
 func TestSetFailureHaltIfNeeded_IdempotentSecondCall(t *testing.T) {
 	s := fakeSchemeWithAll(t)
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "idem-project", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+			FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -144,7 +144,7 @@ func TestSetFailureHaltIfNeeded_IdempotentSecondCall(t *testing.T) {
 	}
 
 	// Re-fetch so the in-memory object is fresh.
-	var refreshed tideprojectv1alpha2.Project
+	var refreshed tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "idem-project"}, &refreshed); err != nil {
 		t.Fatalf("re-get project: %v", err)
 	}
@@ -154,11 +154,11 @@ func TestSetFailureHaltIfNeeded_IdempotentSecondCall(t *testing.T) {
 		t.Fatalf("second setFailureHaltIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "idem-project"}, &got); err != nil {
 		t.Fatalf("get project after idempotent call: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected FailureHalt=True after idempotent second call; got %v", cond)
 	}
@@ -178,18 +178,18 @@ func TestSetFailureHaltIfNeeded_NilProject_NoOp(t *testing.T) {
 func TestSetFailureHaltIfNeeded_StaleFailureBeforeResume_NoOp(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	resumedAt := time.Now()
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "fenced-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha2.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
+				tideprojectv1alpha3.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+			FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -203,11 +203,11 @@ func TestSetFailureHaltIfNeeded_StaleFailureBeforeResume_NoOp(t *testing.T) {
 		t.Fatalf("setFailureHaltIfNeeded (stale): %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "fenced-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 	if cond != nil && cond.Status == metav1.ConditionTrue {
 		t.Errorf("expected NO FailureHalt for pre-resume straggler; got %+v", cond)
 	}
@@ -217,18 +217,18 @@ func TestSetFailureHaltIfNeeded_StaleFailureBeforeResume_NoOp(t *testing.T) {
 func TestSetFailureHaltIfNeeded_FreshFailureAfterResume_Stamps(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	resumedAt := time.Now()
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "fresh-project",
 			Namespace: "default",
 			Annotations: map[string]string{
-				tideprojectv1alpha2.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
+				tideprojectv1alpha3.AnnotationFailureResumedAt: resumedAt.UTC().Format(time.RFC3339),
 			},
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			FailureProfile: tideprojectv1alpha2.FailureProfileConservative,
+			FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).
@@ -241,11 +241,11 @@ func TestSetFailureHaltIfNeeded_FreshFailureAfterResume_Stamps(t *testing.T) {
 		t.Fatalf("setFailureHaltIfNeeded (fresh): %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "fresh-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionFailureHalt)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected FailureHalt=True for fresh post-resume failure; got %v", cond)
 	}

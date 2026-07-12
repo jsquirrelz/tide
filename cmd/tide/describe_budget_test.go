@@ -25,19 +25,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
-func projectFixture(name string, capCents, spendCents int64, tokens int64) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func projectFixture(name string, capCents, spendCents int64, tokens int64) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://example.com/repo.git",
-			Budget:     tidev1alpha2.BudgetConfig{AbsoluteCapCents: capCents},
+			Budget:     tidev1alpha3.BudgetConfig{AbsoluteCapCents: capCents},
 		},
-		Status: tidev1alpha2.ProjectStatus{
+		Status: tidev1alpha3.ProjectStatus{
 			Phase: "Running",
-			Budget: tidev1alpha2.BudgetStatus{
+			Budget: tidev1alpha3.BudgetStatus{
 				CostSpentCents: spendCents,
 				TokensSpent:    tokens,
 			},
@@ -45,7 +45,7 @@ func projectFixture(name string, capCents, spendCents int64, tokens int64) *tide
 	}
 }
 
-func newBudgetContext(t *testing.T, p *tidev1alpha2.Project) client.Client {
+func newBudgetContext(t *testing.T, p *tidev1alpha3.Project) client.Client {
 	t.Helper()
 	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p).Build()
 }

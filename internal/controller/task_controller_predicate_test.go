@@ -22,7 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TestStatusPhaseOrDepsChangedPredicate verifies the WR-02 predicate firing matrix.
@@ -38,16 +38,16 @@ func TestStatusPhaseOrDepsChangedPredicate(t *testing.T) {
 	// exist in the package yet. Implementing it in task_controller.go turns this GREEN.
 
 	// Helper: build a Task with the supplied phase + dependsOn.
-	makeTask := func(name, phase string, deps []string) *tideprojectv1alpha2.Task {
-		return &tideprojectv1alpha2.Task{
+	makeTask := func(name, phase string, deps []string) *tideprojectv1alpha3.Task {
+		return &tideprojectv1alpha3.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            name,
 				ResourceVersion: "12345",
 			},
-			Spec: tideprojectv1alpha2.TaskSpec{
+			Spec: tideprojectv1alpha3.TaskSpec{
 				DependsOn: deps,
 			},
-			Status: tideprojectv1alpha2.TaskStatus{
+			Status: tideprojectv1alpha3.TaskStatus{
 				Phase: phase,
 			},
 		}

@@ -46,7 +46,7 @@ import (
 
 	"k8s.io/client-go/tools/record"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch"
@@ -158,7 +158,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger := logf.FromContext(ctx)
 
 	// 1. Fetch.
-	var task tideprojectv1alpha2.Task
+	var task tideprojectv1alpha3.Task
 	if err := r.Get(ctx, req.NamespacedName, &task); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -188,7 +188,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// If the Plan is not found (e.g., Task created before Plan, or Plan deleted),
 	// log and continue — owner ref is best-effort; dispatch must still proceed.
 	if task.Spec.PlanRef != "" {
-		var parent tideprojectv1alpha2.Plan
+		var parent tideprojectv1alpha3.Plan
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &parent); err != nil {
 			if client.IgnoreNotFound(err) != nil {
 				return ctrl.Result{}, err
@@ -212,9 +212,9 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionReady,
+		Type:               tideprojectv1alpha3.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonInitialized,
+		Reason:             tideprojectv1alpha3.ReasonInitialized,
 		Message:            "Task scaffolded; dispatcher not wired",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -232,7 +232,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // Phase 04.1 P3.1 — introduced to allow gateChecks to return structured halt
 // context to the reconcileDispatch orchestrator without multi-return sprawl.
 type taskGateResult struct {
-	project    *tideprojectv1alpha2.Project
+	project    *tideprojectv1alpha3.Project
 	shouldHalt bool
 	result     ctrl.Result
 }
@@ -245,13 +245,13 @@ type taskDispatchSpec struct {
 	attempt   int
 	token     string
 	envInJSON []byte
-	project   *tideprojectv1alpha2.Project
+	project   *tideprojectv1alpha3.Project
 }
 
 // reconcileDispatch is the 12-step dispatch flow decomposed into 4 named
 // methods per Phase 04.1 P3.1. Behavior is unchanged from the pre-extraction
 // version; tests in task_controller_test.go continue to pass without changes.
-func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojectv1alpha2.Task) (ctrl.Result, error) {
+func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojectv1alpha3.Task) (ctrl.Result, error) {
 	gate, err := r.gateChecks(ctx, task)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -302,7 +302,7 @@ func (r *TaskReconciler) reconcileDispatch(ctx context.Context, task *tideprojec
 //
 // Phase 04.1 P3.1 — extracted from reconcileDispatch steps 1-4 (plus the
 // Running-branch and gate-policy checks that logically belong to the gate layer).
-func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alpha2.Task) (taskGateResult, error) {
+func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
 	// Step 1: Terminal short-circuit.
 	if task.Status.Phase == "Succeeded" {
 		return taskGateResult{shouldHalt: true, result: ctrl.Result{}}, nil
@@ -343,9 +343,9 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 		// race safety with concurrent Plan reconciles that may stamp the label.
 		patch := client.MergeFrom(task.DeepCopy())
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionParentUnresolved,
+			Type:               tideprojectv1alpha3.ConditionParentUnresolved,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonNoProjectLabel,
+			Reason:             tideprojectv1alpha3.ReasonNoProjectLabel,
 			Message:            "No Project found via label or owner-ref chain; awaiting label stamp by PlanReconciler",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -387,7 +387,7 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 	// Position: AFTER resolveProject (project is non-nil here — Pitfall 1) and BEFORE
 	// billing/budget/dispatch holds (Pitfall 2 — parking after pool acquire leaks a slot).
 	if project.Spec.ImportSource != nil {
-		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 		if c == nil || c.Status != metav1.ConditionTrue {
 			logf.FromContext(ctx).V(1).Info("import pending; holding task dispatch",
 				"task", task.Name, "project", project.Name)
@@ -467,7 +467,7 @@ func (r *TaskReconciler) gateChecks(ctx context.Context, task *tideprojectv1alph
 // the resolved Project in taskGateResult.project when all gates pass.
 //
 // Phase 04.1 P3.1 — extracted from gateChecks (steps 5+) to keep gateChecks ≤ 80 lines.
-func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project) (taskGateResult, error) {
+func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (taskGateResult, error) {
 	// DISP-01: list ALL project tasks (global scope) so computeGlobalIndegree
 	// resolves DependsOn edges across plan/phase/milestone boundaries. project.Name
 	// is guaranteed non-empty (resolveProject returned it without error above).
@@ -477,15 +477,15 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 	}
 
 	// List Plans, Phases, Milestones for coarse-ref fan-out (same as assembleProjectDepGraph).
-	var planList tideprojectv1alpha2.PlanList
+	var planList tideprojectv1alpha3.PlanList
 	if err := r.List(ctx, &planList, client.InNamespace(task.Namespace)); err != nil {
 		return taskGateResult{}, fmt.Errorf("list plans for global indegree: %w", err)
 	}
-	var phaseList tideprojectv1alpha2.PhaseList
+	var phaseList tideprojectv1alpha3.PhaseList
 	if err := r.List(ctx, &phaseList, client.InNamespace(task.Namespace)); err != nil {
 		return taskGateResult{}, fmt.Errorf("list phases for global indegree: %w", err)
 	}
-	var msList tideprojectv1alpha2.MilestoneList
+	var msList tideprojectv1alpha3.MilestoneList
 	if err := r.List(ctx, &msList, client.InNamespace(task.Namespace)); err != nil {
 		return taskGateResult{}, fmt.Errorf("list milestones for global indegree: %w", err)
 	}
@@ -495,9 +495,9 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Pending"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionReconciling,
+			Type:               tideprojectv1alpha3.ConditionReconciling,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonAwaitingDispatch,
+			Reason:             tideprojectv1alpha3.ReasonAwaitingDispatch,
 			Message:            fmt.Sprintf("Waiting for %d predecessor(s) to complete", indegree),
 			LastTransitionTime: metav1.Now(),
 		})
@@ -537,7 +537,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 	// precedence: a fully-supervised run sets Gates.Task="approve" on individual
 	// tasks without requiring a project-wide approval gate.
 	taskLevelGates := task.Spec.Gates
-	var effectiveGates tideprojectv1alpha2.Gates
+	var effectiveGates tideprojectv1alpha3.Gates
 	if taskLevelGates.Task != "" {
 		effectiveGates = taskLevelGates
 	} else {
@@ -566,7 +566,7 @@ func (r *TaskReconciler) checkReadinessGates(ctx context.Context, task *tideproj
 // proceeds to the dispatch path.
 //
 // Phase 04.1 P3.1 — extracted from gateChecks (step 2) to keep gateChecks ≤ 80 lines.
-func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojectv1alpha2.Task) (taskGateResult, error) {
+func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojectv1alpha3.Task) (taskGateResult, error) {
 	jobName := podjob.JobName(task.UID, task.Status.Attempt)
 	var job batchv1.Job
 	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: jobName}, &job); err != nil {
@@ -600,7 +600,7 @@ func (r *TaskReconciler) checkRunningState(ctx context.Context, task *tideprojec
 // cancel — preserved across Phase 04.1 P3.1 extraction).
 //
 // Phase 04.1 P3.1 — extracted from reconcileDispatch step 6.
-func (r *TaskReconciler) acquireDispatchSlots(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project) (release func(), err error) {
+func (r *TaskReconciler) acquireDispatchSlots(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (release func(), err error) {
 	// Step 6: Rate-limit gate (Pattern 1 — no blocking per Pitfall 1, D-D3).
 	//
 	// CR-03: Once a token is reserved (d == 0), any subsequent error before the
@@ -630,7 +630,7 @@ func (r *TaskReconciler) acquireDispatchSlots(ctx context.Context, task *tidepro
 					budget.ProviderRateLimitHitsTotal.WithLabelValues(project.Name).Inc()
 					patch := client.MergeFrom(task.DeepCopy())
 					meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-						Type:               tideprojectv1alpha2.ConditionReconciling,
+						Type:               tideprojectv1alpha3.ConditionReconciling,
 						Status:             metav1.ConditionTrue,
 						Reason:             "RateLimited",
 						Message:            fmt.Sprintf("Rate-limit bucket exhausted; requeuing after %s", d),
@@ -670,7 +670,7 @@ func (e *rateLimitedError) Error() string {
 // the caller passes to createDispatchJob.
 //
 // Phase 04.1 P3.1 — extracted from reconcileDispatch steps 7-9.
-func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project) (taskDispatchSpec, error) {
+func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project) (taskDispatchSpec, error) {
 	// Step 7: Attempt counter.
 	attempt, err := r.nextAttempt(ctx, task)
 	if err != nil {
@@ -684,7 +684,7 @@ func (r *TaskReconciler) prepareDispatch(ctx context.Context, task *tideprojectv
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Failed"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionFailed,
+			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "ExceededAttempts",
 			Message:            fmt.Sprintf("Exceeded max attempts %d", maxAttempts),
@@ -741,7 +741,7 @@ func (e *maxAttemptsError) Error() string { return "task exceeded max dispatch a
 // Phase 04.1 P3.1 — extracted from reconcileDispatch steps 10-12.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.createDispatchJob(...)` in the reconcile chain
-func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojectv1alpha2.Task, spec taskDispatchSpec) (ctrl.Result, error) {
+func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojectv1alpha3.Task, spec taskDispatchSpec) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 	project := spec.project
 
@@ -825,7 +825,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		patch := client.MergeFromWithOptions(task.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		task.Status.Phase = "Running"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionRunning,
+			Type:               tideprojectv1alpha3.ConditionRunning,
 			Status:             metav1.ConditionTrue,
 			Reason:             "Dispatched",
 			Message:            fmt.Sprintf("Job %s dispatched (attempt %d)", job.Name, spec.attempt),
@@ -846,12 +846,12 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 // Returns RequeueAfter 5s so the park polls for the annotation clear.
 //
 //nolint:unparam // ctrl.Result kept so callers can return r.patchTaskRejected(...) in the reconcile chain
-func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojectv1alpha2.Task, reason string) (ctrl.Result, error) {
+func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojectv1alpha3.Task, reason string) (ctrl.Result, error) {
 	patch := client.MergeFrom(task.DeepCopy())
 	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonRejectedByUser,
+		Reason:             tideprojectv1alpha3.ReasonRejectedByUser,
 		Message:            fmt.Sprintf("Rejected: %s", reason),
 		LastTransitionTime: metav1.Now(),
 	})
@@ -866,17 +866,17 @@ func (r *TaskReconciler) patchTaskRejected(ctx context.Context, task *tideprojec
 // AnnotationChangedPredicate-driven re-reconcile is the only path forward).
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.patchTaskAwaitingApproval(...)` in the reconcile chain
-func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *tideprojectv1alpha2.Task, policy tideprojectv1alpha2.GatePolicy) (ctrl.Result, error) {
-	reason := tideprojectv1alpha2.ReasonAwaitingApproval
+func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *tideprojectv1alpha3.Task, policy tideprojectv1alpha3.GatePolicy) (ctrl.Result, error) {
+	reason := tideprojectv1alpha3.ReasonAwaitingApproval
 	message := "Task awaiting operator approve annotation (tideproject.k8s/approve-task=true)"
 	if policy == gates.PolicyPause {
-		reason = tideprojectv1alpha2.ReasonPausedAtBoundary
+		reason = tideprojectv1alpha3.ReasonPausedAtBoundary
 		message = "Task paused at boundary; requires explicit resume"
 	}
 	patch := client.MergeFrom(task.DeepCopy())
 	task.Status.Phase = "AwaitingApproval"
 	meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tideprojectv1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionTrue,
 		Reason:             reason,
 		Message:            message,
@@ -892,7 +892,7 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 // budget, and patches Task.Status to the terminal state.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
-func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
+func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
 	// D-05: settle the reservation when this handler returns — i.e. AFTER
@@ -911,7 +911,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = "Failed"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionFailed,
+			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "EnvelopeReadFailed",
 			Message:            err.Error(),
@@ -937,7 +937,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			patch := client.MergeFrom(task.DeepCopy())
 			task.Status.Phase = "Failed"
 			meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha2.ConditionFailed,
+				Type:               tideprojectv1alpha3.ConditionFailed,
 				Status:             metav1.ConditionTrue,
 				Reason:             "OutputValidationError",
 				Message:            vErr.Error(),
@@ -976,7 +976,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 			patch := client.MergeFrom(task.DeepCopy())
 			task.Status.Phase = "Failed"
 			meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-				Type:               tideprojectv1alpha2.ConditionFailed,
+				Type:               tideprojectv1alpha3.ConditionFailed,
 				Status:             metav1.ConditionTrue,
 				Reason:             "OutputPathsViolation",
 				Message:            msg,
@@ -1013,7 +1013,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		task.Status.Phase = "Failed"
 		reason := conditionReasonFromEnvelopeResult(out.Result, out.ExitCode)
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionFailed,
+			Type:               tideprojectv1alpha3.ConditionFailed,
 			Status:             metav1.ConditionTrue,
 			Reason:             reason,
 			Message:            fmt.Sprintf("Task failed: exitCode=%d result=%s", out.ExitCode, out.Result),
@@ -1044,7 +1044,7 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	} else {
 		task.Status.Phase = "Succeeded"
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionSucceeded,
+			Type:               tideprojectv1alpha3.ConditionSucceeded,
 			Status:             metav1.ConditionTrue,
 			Reason:             "JobComplete",
 			Message:            "Task completed successfully",
@@ -1099,10 +1099,10 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 //
 // Phase 04.1 P1.4 removed the prior `projectList.Items[0]` fallback which
 // silently mis-routed Tasks in multi-Project namespaces.
-func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1alpha2.Task) (*tideprojectv1alpha2.Project, error) {
+func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1alpha3.Task) (*tideprojectv1alpha3.Project, error) {
 	// Fast path: PlanReconciler stamps tideproject.k8s/project=<name> on all Tasks.
 	if projectName, ok := task.Labels["tideproject.k8s/project"]; ok && projectName != "" {
-		var project tideprojectv1alpha2.Project
+		var project tideprojectv1alpha3.Project
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: projectName}, &project); err == nil {
 			return &project, nil
 		}
@@ -1127,7 +1127,7 @@ func (r *TaskReconciler) resolveProject(ctx context.Context, task *tideprojectv1
 // Execution DAG — not a per-plan layer index. The metric `wave` label emitted by
 // emitTaskMetrics (via this function) now carries the global wave index, satisfying
 // the SCHEMA-02 lock: {project, phase, plan, wave} with `wave` = global wave name.
-func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha2.Task) string {
+func (r *TaskReconciler) resolveWave(task *tideprojectv1alpha3.Task) string {
 	for _, ref := range task.GetOwnerReferences() {
 		if ref.Kind == "Wave" {
 			return ref.Name
@@ -1180,7 +1180,7 @@ func metricFailureReason(envelopeResult string, exitCode int) string {
 // registry.go — arity differs from the six TELEM-03 metrics above.
 //
 //nolint:unparam // error return kept so callers can `if err := r.emitTaskMetrics(...); err != nil` in the reconcile chain
-func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string) error {
+func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, usage pkgdispatch.Usage, completedAt time.Time, failureReason string) error {
 	logger := logf.FromContext(ctx)
 	wave := r.resolveWave(task)
 	projectName := project.Name
@@ -1196,7 +1196,7 @@ func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv
 	// the codebase). Fall back to "unknown" on any miss.
 	phase := "unknown"
 	if task.Spec.PlanRef != "" {
-		var planObj tideprojectv1alpha2.Plan
+		var planObj tideprojectv1alpha3.Plan
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &planObj); err == nil {
 			if planObj.Spec.PhaseRef != "" {
 				phase = planObj.Spec.PhaseRef
@@ -1242,18 +1242,18 @@ func (r *TaskReconciler) emitTaskMetrics(ctx context.Context, task *tideprojectv
 // bounded to depth 5 (Task→Plan→Phase→Milestone→Project). Returns nil, nil
 // on miss (not an error — the caller decides whether the miss is terminal).
 // Phase 04.1 P1.4.
-func (r *TaskReconciler) walkOwnerChainToProject(ctx context.Context, obj client.Object) (*tideprojectv1alpha2.Project, error) {
+func (r *TaskReconciler) walkOwnerChainToProject(ctx context.Context, obj client.Object) (*tideprojectv1alpha3.Project, error) {
 	const maxDepth = 5
 	return r.walkOwnerChainToProjectDepth(ctx, obj, maxDepth)
 }
 
-func (r *TaskReconciler) walkOwnerChainToProjectDepth(ctx context.Context, obj client.Object, depth int) (*tideprojectv1alpha2.Project, error) {
+func (r *TaskReconciler) walkOwnerChainToProjectDepth(ctx context.Context, obj client.Object, depth int) (*tideprojectv1alpha3.Project, error) {
 	if depth <= 0 || obj == nil {
 		return nil, nil
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tideprojectv1alpha2.GroupVersion.String()) {
-			var p tideprojectv1alpha2.Project
+		if ref.Kind == "Project" && ref.APIVersion == tideprojectv1alpha3.GroupVersion.String() {
+			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
 				return &p, nil
 			}
@@ -1278,31 +1278,31 @@ func (r *TaskReconciler) fetchTaskOwnerParent(ctx context.Context, ns string, re
 	key := client.ObjectKey{Namespace: ns, Name: ref.Name}
 	switch ref.Kind {
 	case "Plan":
-		var p tideprojectv1alpha2.Plan
+		var p tideprojectv1alpha3.Plan
 		if err := r.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Phase":
-		var p tideprojectv1alpha2.Phase
+		var p tideprojectv1alpha3.Phase
 		if err := r.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Milestone":
-		var p tideprojectv1alpha2.Milestone
+		var p tideprojectv1alpha3.Milestone
 		if err := r.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Wave":
-		var p tideprojectv1alpha2.Wave
+		var p tideprojectv1alpha3.Wave
 		if err := r.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
 		return &p, nil
 	case "Task":
-		var p tideprojectv1alpha2.Task
+		var p tideprojectv1alpha3.Task
 		if err := r.Get(ctx, key, &p); err != nil {
 			return nil, err
 		}
@@ -1315,11 +1315,11 @@ func (r *TaskReconciler) fetchTaskOwnerParent(ctx context.Context, ns string, re
 // by the owner.LabelProject label. This is the global sibling set consumed by
 // computeGlobalIndegree to resolve DependsOn across plan/phase/milestone
 // boundaries (DISP-01 D-01). projectName must be non-empty (Pitfall 2 guard).
-func (r *TaskReconciler) listProjectTasks(ctx context.Context, task *tideprojectv1alpha2.Task, projectName string) ([]tideprojectv1alpha2.Task, error) {
+func (r *TaskReconciler) listProjectTasks(ctx context.Context, task *tideprojectv1alpha3.Task, projectName string) ([]tideprojectv1alpha3.Task, error) {
 	if projectName == "" {
 		return nil, fmt.Errorf("listProjectTasks: projectName must be non-empty")
 	}
-	var taskList tideprojectv1alpha2.TaskList
+	var taskList tideprojectv1alpha3.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(task.Namespace),
 		client.MatchingLabels{owner.LabelProject: projectName},
@@ -1339,11 +1339,11 @@ func (r *TaskReconciler) listProjectTasks(ctx context.Context, task *tideproject
 // the dispatch indegree and wave map can never disagree (D-01 invariant).
 func (r *TaskReconciler) computeGlobalIndegree(
 	ctx context.Context,
-	task tideprojectv1alpha2.Task,
-	allProjectTasks []tideprojectv1alpha2.Task,
-	plans []tideprojectv1alpha2.Plan,
-	phases []tideprojectv1alpha2.Phase,
-	ms []tideprojectv1alpha2.Milestone,
+	task tideprojectv1alpha3.Task,
+	allProjectTasks []tideprojectv1alpha3.Task,
+	plans []tideprojectv1alpha3.Plan,
+	phases []tideprojectv1alpha3.Phase,
+	ms []tideprojectv1alpha3.Milestone,
 ) int {
 	if len(task.Spec.DependsOn) == 0 {
 		return 0
@@ -1389,7 +1389,7 @@ func (r *TaskReconciler) computeGlobalIndegree(
 
 // nextAttempt returns the next attempt number (current max + 1, minimum 1).
 // Lists all Jobs with label tideproject.k8s/task-uid=<task.UID>.
-func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alpha2.Task) (int, error) {
+func (r *TaskReconciler) nextAttempt(ctx context.Context, task *tideprojectv1alpha3.Task) (int, error) {
 	var jobList batchv1.JobList
 	if err := r.List(ctx, &jobList,
 		client.InNamespace(task.Namespace),
@@ -1444,7 +1444,7 @@ func (r *TaskReconciler) gateDispatch(projectName, secretUID string, limits budg
 // This is the helper referenced by the plan's grep contract.
 //
 //nolint:unused // intentionally retained per plan grep contract; wired by a later phase
-func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project, attempt int, token string, envInJSON []byte) (*batchv1.Job, error) {
+func (r *TaskReconciler) ensureJob(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, attempt int, token string, envInJSON []byte) (*batchv1.Job, error) {
 	var secretUID string
 	if project.Spec.ProviderSecretRef != "" {
 		var secret corev1.Secret
@@ -1510,7 +1510,7 @@ func (r *TaskReconciler) defaultsForSecret(secret *corev1.Secret) budget.Limits 
 
 // buildEnvelopeIn constructs and marshals the EnvelopeIn for this Task dispatch.
 // Translates api/v1alpha1.Caps → pkg/dispatch.Caps per Plan 03's two-type design.
-func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha2.Task, project *tideprojectv1alpha2.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
+func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, _ int, token string) (pkgdispatch.EnvelopeIn, []byte, error) {
 	caps := pkgdispatch.Caps{}
 	if task.Spec.Caps != nil {
 		caps = pkgdispatch.Caps{
@@ -1577,7 +1577,7 @@ func (r *TaskReconciler) buildEnvelopeIn(_ context.Context, task *tideprojectv1a
 //
 // Guards: UID self-skip (Pitfall 1), empty projectName nil-return (Pitfall 2).
 func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.Object) []reconcile.Request {
-	task, ok := obj.(*tideprojectv1alpha2.Task)
+	task, ok := obj.(*tideprojectv1alpha3.Task)
 	if !ok {
 		return nil
 	}
@@ -1595,7 +1595,7 @@ func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.
 	}
 
 	// List all tasks in the project for label query.
-	var all tideprojectv1alpha2.TaskList
+	var all tideprojectv1alpha3.TaskList
 	if err := r.List(ctx, &all,
 		client.InNamespace(task.Namespace),
 		client.MatchingLabels{owner.LabelProject: projectName},
@@ -1606,15 +1606,15 @@ func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.
 	// Build the shared resolver to determine the changed task's ancestor scope
 	// names (plan, phase, milestone) — these are additional identifiers that a
 	// coarse-ref dependent's DependsOn might name.
-	var planList tideprojectv1alpha2.PlanList
+	var planList tideprojectv1alpha3.PlanList
 	if err := r.List(ctx, &planList, client.InNamespace(task.Namespace)); err != nil {
 		return nil
 	}
-	var phaseList tideprojectv1alpha2.PhaseList
+	var phaseList tideprojectv1alpha3.PhaseList
 	if err := r.List(ctx, &phaseList, client.InNamespace(task.Namespace)); err != nil {
 		return nil
 	}
-	var msList tideprojectv1alpha2.MilestoneList
+	var msList tideprojectv1alpha3.MilestoneList
 	if err := r.List(ctx, &msList, client.InNamespace(task.Namespace)); err != nil {
 		return nil
 	}
@@ -1661,8 +1661,8 @@ func (r *TaskReconciler) globalDependentsMapper(ctx context.Context, obj client.
 // direct-name edges are always resolvable from a namespace-wide list, so an
 // unlabeled predecessor's direct dependents do not stall until the periodic
 // resync. Self-skip by UID (Pitfall 1).
-func (r *TaskReconciler) directNameDependents(ctx context.Context, task *tideprojectv1alpha2.Task) []reconcile.Request {
-	var all tideprojectv1alpha2.TaskList
+func (r *TaskReconciler) directNameDependents(ctx context.Context, task *tideprojectv1alpha3.Task) []reconcile.Request {
+	var all tideprojectv1alpha3.TaskList
 	if err := r.List(ctx, &all, client.InNamespace(task.Namespace)); err != nil {
 		return nil
 	}
@@ -1787,8 +1787,8 @@ func isJobTerminal(job *batchv1.Job) bool {
 func newStatusPhaseOrDepsChangedPredicate() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldT, ok1 := e.ObjectOld.(*tideprojectv1alpha2.Task)
-			newT, ok2 := e.ObjectNew.(*tideprojectv1alpha2.Task)
+			oldT, ok1 := e.ObjectOld.(*tideprojectv1alpha3.Task)
+			newT, ok2 := e.ObjectNew.(*tideprojectv1alpha3.Task)
 			if !ok1 || !ok2 {
 				return true // conservative: let untyped events through
 			}
@@ -1809,10 +1809,10 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Register .spec.planRef field indexer so checkParentApproval can use MatchingFields.
 	// (listProjectTasks uses label matching; the field indexer is kept for checkParentApproval.)
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(),
-		&tideprojectv1alpha2.Task{},
+		&tideprojectv1alpha3.Task{},
 		taskPlanRefIndexKey,
 		func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert // type guaranteed by IndexField
+			task := obj.(*tideprojectv1alpha3.Task) //nolint:forcetypeassert // type guaranteed by IndexField
 			return []string{task.Spec.PlanRef}
 		},
 	); err != nil {
@@ -1837,15 +1837,15 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	statusPhaseOrDepsChanged := newStatusPhaseOrDepsChangedPredicate() // WR-02
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha2.Task{}).
+		For(&tideprojectv1alpha3.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(
-			&tideprojectv1alpha2.Task{},
+			&tideprojectv1alpha3.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.globalDependentsMapper),
 			builder.WithPredicates(statusPhaseOrDepsChanged), // WR-02
 		).
 		Watches(
-			&tideprojectv1alpha2.Task{},
+			&tideprojectv1alpha3.Task{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
 			}),

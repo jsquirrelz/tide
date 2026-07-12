@@ -24,54 +24,54 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // makeProject is a Project fixture with optional AwaitingApproval condition.
-func makeProject(name string) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func makeProject(name string) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://example.com/repo.git",
 		},
-		Status: tidev1alpha2.ProjectStatus{Phase: "Running"},
+		Status: tidev1alpha3.ProjectStatus{Phase: "Running"},
 	}
 }
 
-func makeMilestoneAwaiting(name, projectName string) *tidev1alpha2.Milestone {
-	return &tidev1alpha2.Milestone{
+func makeMilestoneAwaiting(name, projectName string) *tidev1alpha3.Milestone {
+	return &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: projectName},
-		Status: tidev1alpha2.MilestoneStatus{Phase: "AwaitingApproval"},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: projectName},
+		Status: tidev1alpha3.MilestoneStatus{Phase: "AwaitingApproval"},
 	}
 }
 
-func makePlan(name, projectName string) *tidev1alpha2.Plan {
-	return &tidev1alpha2.Plan{
+func makePlan(name, projectName string) *tidev1alpha3.Plan {
+	return &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec: tidev1alpha2.PlanSpec{PhaseRef: "some-phase"},
+		Spec: tidev1alpha3.PlanSpec{PhaseRef: "some-phase"},
 	}
 }
 
 // makeFailedMilestone builds a Milestone fixture with Status.Phase="Failed"
 // and optionally one condition for the D-07 reason/message extraction test.
-func makeFailedMilestone(name, projectName string, conditions []metav1.Condition) *tidev1alpha2.Milestone {
-	return &tidev1alpha2.Milestone{
+func makeFailedMilestone(name, projectName string, conditions []metav1.Condition) *tidev1alpha3.Milestone {
+	return &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: projectName},
-		Status: tidev1alpha2.MilestoneStatus{Phase: "Failed", Conditions: conditions},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: projectName},
+		Status: tidev1alpha3.MilestoneStatus{Phase: "Failed", Conditions: conditions},
 	}
 }
 
@@ -85,7 +85,7 @@ func TestApproveLevelDiscoversAwaitingMilestone(t *testing.T) {
 	}
 
 	// Re-fetch and verify the approve-milestone annotation lands on the Milestone.
-	var got tidev1alpha2.Milestone
+	var got tidev1alpha3.Milestone
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-alpha"}, &got); err != nil {
 		t.Fatalf("get milestone: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestApproveWaveWritesAnnotationOnPlan(t *testing.T) {
 	if err := approveRun(context.Background(), c, "default", "my-project", "my-plan/3", nil); err != nil {
 		t.Fatalf("approveRun: %v", err)
 	}
-	var got tidev1alpha2.Plan
+	var got tidev1alpha3.Plan
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-plan"}, &got); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestApproveUsesMergeFromPatch(t *testing.T) {
 	if err := approveRun(context.Background(), c, "default", "my-project", "", nil); err != nil {
 		t.Fatalf("approveRun: %v", err)
 	}
-	var got tidev1alpha2.Milestone
+	var got tidev1alpha3.Milestone
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "ms-alpha"}, &got); err != nil {
 		t.Fatalf("get milestone: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestApproveFailedLevelErrorIncludesReason(t *testing.T) {
 	p := makeProject("my-project")
 	ms := makeFailedMilestone("ms-alpha", "my-project", []metav1.Condition{
 		{
-			Type:               tidev1alpha2.ConditionWaveOrLevelPaused,
+			Type:               tidev1alpha3.ConditionWaveOrLevelPaused,
 			Status:             metav1.ConditionTrue,
 			Reason:             "PlannerJobFailed",
 			Message:            "planner job exceeded backoffLimit",
@@ -230,14 +230,14 @@ func TestApproveFailedLevelErrorIncludesReason(t *testing.T) {
 // the approved surface (T-15-01 mitigation).
 func TestApproveUnlabeledMilestoneNotDiscovered(t *testing.T) {
 	p := makeProject("proj-unlabeled")
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-unlabeled",
 			Namespace: "default",
 			// Labels intentionally absent — reproduces pre-Phase-15 reporter shape.
 		},
-		Spec:   tidev1alpha2.MilestoneSpec{ProjectRef: "proj-unlabeled"},
-		Status: tidev1alpha2.MilestoneStatus{Phase: "AwaitingApproval"},
+		Spec:   tidev1alpha3.MilestoneSpec{ProjectRef: "proj-unlabeled"},
+		Status: tidev1alpha3.MilestoneStatus{Phase: "AwaitingApproval"},
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(p, ms).Build()
 
@@ -264,7 +264,7 @@ func TestApproveLabeledMilestoneDiscoveredFirstCall(t *testing.T) {
 		t.Fatalf("approveRun on labeled Milestone: %v — should discover it on first call (CUTS-01 fix)", err)
 	}
 
-	var got tidev1alpha2.Milestone
+	var got tidev1alpha3.Milestone
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-labeled"}, &got); err != nil {
 		t.Fatalf("get milestone: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestApproveFailedLevelNoAnnotationWritten(t *testing.T) {
 
 	_ = approveRun(context.Background(), c, "default", "my-project", "", nil)
 
-	var got tidev1alpha2.Milestone
+	var got tidev1alpha3.Milestone
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ms-alpha"}, &got); err != nil {
 		t.Fatalf("get milestone: %v", err)
 	}
@@ -298,15 +298,15 @@ func TestApproveFailedLevelNoAnnotationWritten(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // makeAwaitingPhase builds a Phase fixture with Status.Phase="AwaitingApproval".
-func makeAwaitingPhase(name, projectName string) *tidev1alpha2.Phase {
-	return &tidev1alpha2.Phase{
+func makeAwaitingPhase(name, projectName string) *tidev1alpha3.Phase {
+	return &tidev1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tidev1alpha2.PhaseSpec{MilestoneRef: "some-milestone"},
-		Status: tidev1alpha2.PhaseStatus{Phase: "AwaitingApproval"},
+		Spec:   tidev1alpha3.PhaseSpec{MilestoneRef: "some-milestone"},
+		Status: tidev1alpha3.PhaseStatus{Phase: "AwaitingApproval"},
 	}
 }
 
@@ -333,7 +333,7 @@ func TestApproveUnrelatedFailedLevelDoesNotBlockHealthyPhase(t *testing.T) {
 	}
 
 	// Verify the approve annotation was written on the Phase.
-	var got tidev1alpha2.Phase
+	var got tidev1alpha3.Phase
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "ph-beta"}, &got); err != nil {
 		t.Fatalf("get phase: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestApproveWaveDoesNotRequireCleanProjectState(t *testing.T) {
 		t.Fatalf("approveRun --wave should succeed regardless of unrelated Failed Milestone; got error: %v", err)
 	}
 
-	var got tidev1alpha2.Plan
+	var got tidev1alpha3.Plan
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-plan"}, &got); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}

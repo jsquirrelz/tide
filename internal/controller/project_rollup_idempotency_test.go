@@ -49,7 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -64,22 +64,22 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 
 	BeforeEach(func() {
 		// Create a minimal auto-gated Project.
-		proj := &tideprojectv1alpha2.Project{
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: prProjName, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/project-rollup.git",
-				Subagent:       tideprojectv1alpha2.SubagentConfig{Model: "claude-sonnet-4-6"},
-				Gates:          tideprojectv1alpha2.Gates{Milestone: tideprojectv1alpha2.GatePolicy("auto")},
+				Subagent:       tideprojectv1alpha3.SubagentConfig{Model: "claude-sonnet-4-6"},
+				Gates:          tideprojectv1alpha3.Gates{Milestone: tideprojectv1alpha3.GatePolicy("auto")},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(prProjName, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(prProjName, "default", &tideprojectv1alpha3.Project{})
 		envReader = newMapEnvReader()
 	})
 
 	AfterEach(func() {
-		p := &tideprojectv1alpha2.Project{}
+		p := &tideprojectv1alpha3.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: prProjName, Namespace: "default"}, p); err == nil {
 			p.Finalizers = nil
 			_ = k8sClient.Update(ctx, p)
@@ -89,7 +89,7 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 
 	It("PREFLIGHT-02: project rollup accrues on first call and is idempotent on second (TTL-GC simulation)", func() {
 		// Load the project with its server-assigned UID.
-		proj := &tideprojectv1alpha2.Project{}
+		proj := &tideprojectv1alpha3.Project{}
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: prProjName, Namespace: "default"}, proj)).To(Succeed())
 
 		// Set Status.Phase=Running so handleProjectJobCompletion's rollup branch fires.
@@ -139,7 +139,7 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 		// PREFLIGHT-02 Test 1: CostSpentCents must reflect project planner spend,
 		// and PlannerRolledUpUID must be set to the planner Job name.
 		Eventually(func(g Gomega) {
-			var fresh tideprojectv1alpha2.Project
+			var fresh tideprojectv1alpha3.Project
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: prProjName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.Budget.CostSpentCents).To(
 				BeNumerically("==", costCents),
@@ -153,7 +153,7 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Capture cost baseline and reload project with the marker already set in cache.
-		var projWithMarker tideprojectv1alpha2.Project
+		var projWithMarker tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: prProjName, Namespace: "default"}, &projWithMarker)).To(Succeed())
 		costBefore := projWithMarker.Status.Budget.CostSpentCents
 
@@ -166,7 +166,7 @@ var _ = Describe("ProjectRollupIdempotency — project-level PlannerRolledUpUID 
 		// PREFLIGHT-02 Test 2: CostSpentCents must be UNCHANGED on the second post-TTL-GC
 		// reconcile — the durable marker is the sole guard and no second rollup fires.
 		Consistently(func(g Gomega) {
-			var fresh tideprojectv1alpha2.Project
+			var fresh tideprojectv1alpha3.Project
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: prProjName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.Budget.CostSpentCents).To(
 				BeNumerically("==", costBefore),

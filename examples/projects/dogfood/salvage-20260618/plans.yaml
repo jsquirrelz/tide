@@ -1,6 +1,6 @@
 apiVersion: v1
 items:
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:09Z"
@@ -12,7 +12,7 @@ items:
     name: plan-01-chart-codex-provider-wiring
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -36,7 +36,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:02:49Z"
@@ -48,7 +48,7 @@ items:
     name: plan-01-codex-entrypoint-shim
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -72,7 +72,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:15Z"
@@ -84,7 +84,7 @@ items:
     name: plan-01-codex-foundation
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -108,7 +108,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:00:14Z"
@@ -120,7 +120,7 @@ items:
     name: plan-01-codex-package-scaffold
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -144,7 +144,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:04:00Z"
@@ -156,7 +156,7 @@ items:
     name: plan-01-codex-pricing
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -180,7 +180,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:02:25Z"
@@ -192,7 +192,7 @@ items:
     name: plan-01-codex-scaffold
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -216,7 +216,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:13Z"
@@ -228,7 +228,7 @@ items:
     name: plan-01-codex-subagent-entrypoint
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -252,7 +252,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:57Z"
@@ -264,7 +264,7 @@ items:
     name: plan-01-hetero-example-yaml
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -288,7 +288,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:17Z"
@@ -300,7 +300,7 @@ items:
     name: plan-01-level-config-provider-secret
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -324,7 +324,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:54Z"
@@ -336,7 +336,7 @@ items:
     name: plan-01-vendor-api-types
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -360,7 +360,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:36Z"
@@ -372,7 +372,7 @@ items:
     name: plan-01-vendor-field-schema
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -396,7 +396,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:17Z"
@@ -408,7 +408,7 @@ items:
     name: plan-02-chart-codex-values
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -432,7 +432,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:02:49Z"
@@ -444,7 +444,7 @@ items:
     name: plan-02-codex-dockerfile
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -470,7 +470,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:00:14Z"
@@ -482,7 +482,7 @@ items:
     name: plan-02-codex-pricing-table
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -508,7 +508,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:09Z"
@@ -520,7 +520,7 @@ items:
     name: plan-02-codex-secret-injection
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -544,7 +544,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:15Z"
@@ -556,7 +556,7 @@ items:
     name: plan-02-codex-stream-parser
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -580,7 +580,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:13Z"
@@ -592,7 +592,7 @@ items:
     name: plan-02-codex-subagent-dockerfile
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -618,7 +618,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:57Z"
@@ -630,7 +630,7 @@ items:
     name: plan-02-mixed-provider-integration-test
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -654,7 +654,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:36Z"
@@ -666,7 +666,7 @@ items:
     name: plan-02-resolve-provider-rewire
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -692,7 +692,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:40Z"
@@ -704,7 +704,7 @@ items:
     name: plan-02-resolve-provider-vendor
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -730,7 +730,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:54Z"
@@ -742,7 +742,7 @@ items:
     name: plan-02-vendor-dispatch-wire
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -768,7 +768,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:08Z"
@@ -780,7 +780,7 @@ items:
     name: plan-03-chart-image-defaults
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -804,7 +804,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:04:00Z"
@@ -816,7 +816,7 @@ items:
     name: plan-03-codex-package-scaffold
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -840,7 +840,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:15Z"
@@ -852,7 +852,7 @@ items:
     name: plan-03-codex-run
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -873,7 +873,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:00:14Z"
@@ -885,7 +885,7 @@ items:
     name: plan-03-codex-usage-normalizer
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -911,7 +911,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:09Z"
@@ -923,7 +923,7 @@ items:
     name: plan-03-hetero-demo-and-integration-test
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -950,7 +950,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:17Z"
@@ -962,7 +962,7 @@ items:
     name: plan-03-jobspec-codex-creds
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -988,7 +988,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:57Z"
@@ -1000,7 +1000,7 @@ items:
     name: plan-03-join-verify-and-fix
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1027,7 +1027,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:40Z"
@@ -1039,7 +1039,7 @@ items:
     name: plan-03-manager-helm-vendor
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1065,7 +1065,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:01:36Z"
@@ -1077,7 +1077,7 @@ items:
     name: plan-03-vendor-switch-tests
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1103,7 +1103,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:08Z"
@@ -1115,7 +1115,7 @@ items:
     name: plan-04-01-api-schema-vendor
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1139,7 +1139,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:08Z"
@@ -1151,7 +1151,7 @@ items:
     name: plan-04-02-resolve-provider-rewire
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1177,7 +1177,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:03:08Z"
@@ -1189,7 +1189,7 @@ items:
     name: plan-04-03-vendor-resolution-tests
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1215,7 +1215,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:00:14Z"
@@ -1227,7 +1227,7 @@ items:
     name: plan-04-codex-pricing-tests
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1253,7 +1253,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:04:00Z"
@@ -1265,7 +1265,7 @@ items:
     name: plan-04-codex-run
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1293,7 +1293,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:17Z"
@@ -1305,7 +1305,7 @@ items:
     name: plan-04-demo-manifest
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1331,7 +1331,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:08Z"
@@ -1343,7 +1343,7 @@ items:
     name: plan-04-jobspec-vendor-credentials
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1367,7 +1367,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:00:14Z"
@@ -1379,7 +1379,7 @@ items:
     name: plan-05-codex-usage-tests
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -1405,7 +1405,7 @@ items:
       type: WaveOrLevelPaused
     phase: Running
     validationState: Validated
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-18T00:06:17Z"
@@ -1417,7 +1417,7 @@ items:
     name: plan-05-integration-test
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase

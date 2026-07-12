@@ -34,7 +34,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ProjectsHandler serves GET /api/v1/projects + GET /api/v1/projects/{name}.
@@ -129,7 +129,7 @@ func (h *ProjectsHandler) List(w http.ResponseWriter, r *http.Request) {
 		opts = append(opts, client.InNamespace(namespace))
 	}
 
-	var projects tidev1alpha2.ProjectList
+	var projects tidev1alpha3.ProjectList
 	if err := h.Client.List(ctx, &projects, opts...); err != nil {
 		h.Log.Error(err, "list projects failed")
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list projects: %s", err.Error()))
@@ -169,7 +169,7 @@ func projectKey(namespace, name string) string {
 // with the previous per-project countActiveMilestones partial-result
 // behavior — never 500s the parent List request).
 func (h *ProjectsHandler) activeMilestoneCountsByProject(ctx context.Context, opts []client.ListOption) map[string]int {
-	var ms tidev1alpha2.MilestoneList
+	var ms tidev1alpha3.MilestoneList
 	if err := h.Client.List(ctx, &ms, opts...); err != nil {
 		h.Log.Error(err, "list milestones for active-count failed (returning empty map)")
 		return map[string]int{}
@@ -201,7 +201,7 @@ func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	if namespace != "" {
 		// Fast path: namespace explicitly provided — direct lookup.
-		var p tidev1alpha2.Project
+		var p tidev1alpha3.Project
 		if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
 			if apierrors.IsNotFound(err) {
 				writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
@@ -218,7 +218,7 @@ func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Cross-namespace fallback: list all projects and find the first by name.
 	// This is the SC-7 fix — the dashboard's List endpoint searches all
 	// namespaces; Get must behave consistently when ?namespace= is absent.
-	var projects tidev1alpha2.ProjectList
+	var projects tidev1alpha3.ProjectList
 	if err := h.Client.List(ctx, &projects); err != nil {
 		h.Log.Error(err, "list projects for cross-namespace Get failed", "name", name)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
@@ -237,7 +237,7 @@ func (h *ProjectsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // All child List calls use client.InNamespace(p.Namespace) — never any outer
 // namespace variable — so the result is always scoped to the project's
 // actual namespace. (RESEARCH Pitfall 4: child lists must use p.Namespace.)
-func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha2.Project) projectDetail {
+func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha3.Project) projectDetail {
 	count, _ := h.countActiveMilestones(ctx, p)
 
 	detail := projectDetail{
@@ -245,7 +245,7 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha2.Proje
 	}
 
 	// Milestones — filtered by Spec.ProjectRef == p.Name.
-	var ms tidev1alpha2.MilestoneList
+	var ms tidev1alpha3.MilestoneList
 	if err := h.Client.List(ctx, &ms, client.InNamespace(p.Namespace)); err != nil {
 		h.Log.Error(err, "list milestones failed", "project", p.Name)
 	}
@@ -266,7 +266,7 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha2.Proje
 	}
 
 	// Phases — owned by Milestones via Spec.MilestoneRef.
-	var phs tidev1alpha2.PhaseList
+	var phs tidev1alpha3.PhaseList
 	if err := h.Client.List(ctx, &phs, client.InNamespace(p.Namespace)); err != nil {
 		h.Log.Error(err, "list phases failed", "project", p.Name)
 	}
@@ -287,7 +287,7 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha2.Proje
 	}
 
 	// Plans — owned by Phases via Spec.PhaseRef.
-	var pls tidev1alpha2.PlanList
+	var pls tidev1alpha3.PlanList
 	if err := h.Client.List(ctx, &pls, client.InNamespace(p.Namespace)); err != nil {
 		h.Log.Error(err, "list plans failed", "project", p.Name)
 	}
@@ -312,8 +312,8 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha2.Proje
 // is neither "Succeeded" nor "Failed" — the dashboard's "active count"
 // metric. Surfaces apiserver List errors so the caller can decide
 // whether to 500 the request or partial-result with count=0.
-func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1alpha2.Project) (int, error) {
-	var ms tidev1alpha2.MilestoneList
+func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1alpha3.Project) (int, error) {
+	var ms tidev1alpha3.MilestoneList
 	if err := h.Client.List(ctx, &ms, client.InNamespace(p.Namespace)); err != nil {
 		return 0, err
 	}
@@ -342,7 +342,7 @@ func (h *ProjectsHandler) countActiveMilestones(ctx context.Context, p *tidev1al
 // (D-UI-SPEC empty-array contract). Age uses the same formatAge helper from
 // tasks.go (same package). Whitelist limits exposure to exactly 2 types
 // per T-14-06-01/02/03.
-func summarize(p *tidev1alpha2.Project, activeMilestoneCount int) projectSummary {
+func summarize(p *tidev1alpha3.Project, activeMilestoneCount int) projectSummary {
 	cap := p.Spec.Budget.AbsoluteCapCents
 	spent := p.Status.Budget.CostSpentCents
 	within := true
@@ -358,7 +358,7 @@ func summarize(p *tidev1alpha2.Project, activeMilestoneCount int) projectSummary
 		if c.Status != metav1.ConditionTrue {
 			continue
 		}
-		if c.Type != tidev1alpha2.ConditionBudgetBlocked && c.Type != tidev1alpha2.ConditionBillingHalt {
+		if c.Type != tidev1alpha3.ConditionBudgetBlocked && c.Type != tidev1alpha3.ConditionBillingHalt {
 			continue
 		}
 		blocking = append(blocking, projectCondition{

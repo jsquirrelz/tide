@@ -20,12 +20,14 @@ limitations under the License.
 //
 // There is no conversion webhook in this repo (v1alpha1 is
 // +kubebuilder:unservedversion; conversion strategy is None). "Survive
-// v1alpha1⇄v1alpha2 conversion round-trip" therefore means: identical field
+// v1alpha1⇄current conversion round-trip" therefore means: identical field
 // shape in both Go packages AND both version blocks of the generated CRD YAML,
 // plus a JSON round-trip that mirrors what the strategy-None apiVersion rewrite
-// does at the API server. These tests follow the phase3_schema_test.go
-// static-analysis convention (regex over source + generated CRD YAML) and reuse
-// its findRepoRoot / readProjectCRD helpers (same package).
+// does at the API server. "Current" was v1alpha2 at Phase 35 authorship and is
+// v1alpha3 as of Phase 40 Plan 40-03 (D-04 version crank). These tests follow
+// the phase3_schema_test.go static-analysis convention (regex over source +
+// generated CRD YAML) and reuse its findRepoRoot / readProjectCRD helpers
+// (same package).
 package v1alpha1_test
 
 import (
@@ -37,23 +39,26 @@ import (
 	"testing"
 
 	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
-// readProjectTypesV2 reads api/v1alpha2/project_types.go (the twin of the
-// phase3 readProjectTypes helper, which reads the v1alpha1 file).
+// readProjectTypesV2 reads api/v1alpha3/project_types.go (the twin of the
+// phase3 readProjectTypes helper, which reads the v1alpha1 file). Named V2
+// for the helper's historical Phase 35 role (checking v1alpha1 against
+// whichever version is current); it now points at v1alpha3, the sole
+// served+storage version as of Phase 40 Plan 40-03.
 func readProjectTypesV2(t *testing.T) string {
 	t.Helper()
 	root := findRepoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "api", "v1alpha2", "project_types.go"))
+	data, err := os.ReadFile(filepath.Join(root, "api", "v1alpha3", "project_types.go"))
 	if err != nil {
-		t.Fatalf("read v1alpha2 project_types.go: %v", err)
+		t.Fatalf("read v1alpha3 project_types.go: %v", err)
 	}
 	return string(data)
 }
 
 // TestBaseRefFieldDeclaredBothVersions asserts GitConfig.BaseRef exists in BOTH
-// api/v1alpha1 and api/v1alpha2 source (P9 both-versions rule). Removing either
+// api/v1alpha1 and api/v1alpha3 source (P9 both-versions rule). Removing either
 // side makes this fail loudly — that is the point.
 func TestBaseRefFieldDeclaredBothVersions(t *testing.T) {
 	re := regexp.MustCompile(`BaseRef\s+string`)
@@ -61,7 +66,7 @@ func TestBaseRefFieldDeclaredBothVersions(t *testing.T) {
 		t.Errorf("api/v1alpha1/project_types.go missing `BaseRef string` in GitConfig (P9 both-versions drop)")
 	}
 	if src := readProjectTypesV2(t); !re.MatchString(src) {
-		t.Errorf("api/v1alpha2/project_types.go missing `BaseRef string` in GitConfig (P9 both-versions drop)")
+		t.Errorf("api/v1alpha3/project_types.go missing `BaseRef string` in GitConfig (P9 both-versions drop)")
 	}
 }
 
@@ -73,7 +78,7 @@ func TestBaseSHAFieldDeclaredBothVersions(t *testing.T) {
 		t.Errorf("api/v1alpha1/project_types.go missing `BaseSHA string` in GitStatus (P9 both-versions drop)")
 	}
 	if src := readProjectTypesV2(t); !re.MatchString(src) {
-		t.Errorf("api/v1alpha2/project_types.go missing `BaseSHA string` in GitStatus (P9 both-versions drop)")
+		t.Errorf("api/v1alpha3/project_types.go missing `BaseSHA string` in GitStatus (P9 both-versions drop)")
 	}
 }
 
@@ -85,7 +90,7 @@ func TestBaseRefHasNoDefaultMarker(t *testing.T) {
 	region := regexp.MustCompile(`(?s)// BaseRef optionally names.*?BaseRef string`)
 	for name, src := range map[string]string{
 		"v1alpha1": readProjectTypes(t),
-		"v1alpha2": readProjectTypesV2(t),
+		"v1alpha3": readProjectTypesV2(t),
 	} {
 		m := region.FindString(src)
 		if m == "" {
@@ -150,7 +155,7 @@ func TestBaseRefBaseSHARoundTrip(t *testing.T) {
 		wantSHA = "0123456789abcdef0123456789abcdef01234567"
 	)
 
-	// v1alpha1 -> v1alpha2
+	// v1alpha1 -> v1alpha3
 	src1 := tideprojectv1alpha1.Project{
 		Spec: tideprojectv1alpha1.ProjectSpec{
 			Git: &tideprojectv1alpha1.GitConfig{
@@ -167,48 +172,48 @@ func TestBaseRefBaseSHARoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal v1alpha1 Project: %v", err)
 	}
-	var dst2 tideprojectv1alpha2.Project
+	var dst2 tideprojectv1alpha3.Project
 	if err := json.Unmarshal(raw1, &dst2); err != nil {
-		t.Fatalf("unmarshal into v1alpha2 Project: %v", err)
+		t.Fatalf("unmarshal into v1alpha3 Project: %v", err)
 	}
 	if dst2.Spec.Git == nil {
-		t.Fatal("v1alpha1->v1alpha2: spec.git dropped entirely")
+		t.Fatal("v1alpha1->v1alpha3: spec.git dropped entirely")
 	}
 	if dst2.Spec.Git.BaseRef != wantRef {
-		t.Errorf("v1alpha1->v1alpha2: spec.git.baseRef = %q, want %q", dst2.Spec.Git.BaseRef, wantRef)
+		t.Errorf("v1alpha1->v1alpha3: spec.git.baseRef = %q, want %q", dst2.Spec.Git.BaseRef, wantRef)
 	}
 	if dst2.Status.Git.BaseSHA != wantSHA {
-		t.Errorf("v1alpha1->v1alpha2: status.git.baseSHA = %q, want %q", dst2.Status.Git.BaseSHA, wantSHA)
+		t.Errorf("v1alpha1->v1alpha3: status.git.baseSHA = %q, want %q", dst2.Status.Git.BaseSHA, wantSHA)
 	}
 
-	// v1alpha2 -> v1alpha1 (reverse)
-	src2 := tideprojectv1alpha2.Project{
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			Git: &tideprojectv1alpha2.GitConfig{
+	// v1alpha3 -> v1alpha1 (reverse)
+	src2 := tideprojectv1alpha3.Project{
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Git: &tideprojectv1alpha3.GitConfig{
 				RepoURL:        "https://github.com/owner/repo.git",
 				CredsSecretRef: "git-creds",
 				BaseRef:        wantRef,
 			},
 		},
-		Status: tideprojectv1alpha2.ProjectStatus{
-			Git: tideprojectv1alpha2.GitStatus{BaseSHA: wantSHA},
+		Status: tideprojectv1alpha3.ProjectStatus{
+			Git: tideprojectv1alpha3.GitStatus{BaseSHA: wantSHA},
 		},
 	}
 	raw2, err := json.Marshal(src2)
 	if err != nil {
-		t.Fatalf("marshal v1alpha2 Project: %v", err)
+		t.Fatalf("marshal v1alpha3 Project: %v", err)
 	}
 	var dst1 tideprojectv1alpha1.Project
 	if err := json.Unmarshal(raw2, &dst1); err != nil {
 		t.Fatalf("unmarshal into v1alpha1 Project: %v", err)
 	}
 	if dst1.Spec.Git == nil {
-		t.Fatal("v1alpha2->v1alpha1: spec.git dropped entirely")
+		t.Fatal("v1alpha3->v1alpha1: spec.git dropped entirely")
 	}
 	if dst1.Spec.Git.BaseRef != wantRef {
-		t.Errorf("v1alpha2->v1alpha1: spec.git.baseRef = %q, want %q", dst1.Spec.Git.BaseRef, wantRef)
+		t.Errorf("v1alpha3->v1alpha1: spec.git.baseRef = %q, want %q", dst1.Spec.Git.BaseRef, wantRef)
 	}
 	if dst1.Status.Git.BaseSHA != wantSHA {
-		t.Errorf("v1alpha2->v1alpha1: status.git.baseSHA = %q, want %q", dst1.Status.Git.BaseSHA, wantSHA)
+		t.Errorf("v1alpha3->v1alpha1: status.git.baseSHA = %q, want %q", dst1.Status.Git.BaseSHA, wantSHA)
 	}
 }

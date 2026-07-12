@@ -61,7 +61,7 @@ import (
 	ctrlmgr "sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	dashboardapi "github.com/jsquirrelz/tide/cmd/dashboard/api"
 	dashboardembed "github.com/jsquirrelz/tide/cmd/dashboard/embed"
 	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
@@ -95,12 +95,12 @@ func main() {
 
 	signalCtx := ctrl.SetupSignalHandler()
 
-	// 1. Build scheme with v1alpha1 + corev1 (needed for pods/log proxy
+	// 1. Build scheme with v1alpha3 + corev1 (needed for pods/log proxy
 	//    in plan 04-11; included now so the cache primes the right
 	//    informers from the first reconcile loop).
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(tidev1alpha2.AddToScheme(scheme))
+	utilruntime.Must(tidev1alpha3.AddToScheme(scheme))
 
 	// 2. Construct the controller-runtime Manager. LeaderElection: false
 	//    — the dashboard is a stateless read replica (D-D2). The

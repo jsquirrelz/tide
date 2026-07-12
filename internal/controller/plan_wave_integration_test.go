@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
 
@@ -45,23 +45,23 @@ func fakeSchemeForWaveInteg(t *testing.T) *runtime.Scheme {
 // the owner of a Plan via the tideproject.k8s/project label. This lets
 // resolveProjectForPlan find the Project so triggerWaveIntegrationJob can
 // dispatch the integration Job.
-func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha2.Project {
+func waveIntegProject(t *testing.T, name string) *tideprojectv1alpha3.Project {
 	t.Helper()
-	return &tideprojectv1alpha2.Project{
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID("proj-uid-wave-integ"),
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://github.com/example/test.git",
-			Git: &tideprojectv1alpha2.GitConfig{
+			Git: &tideprojectv1alpha3.GitConfig{
 				RepoURL:        "https://github.com/example/test.git",
 				CredsSecretRef: "test-creds",
 			},
 		},
-		Status: tideprojectv1alpha2.ProjectStatus{
-			Git: tideprojectv1alpha2.GitStatus{
+		Status: tideprojectv1alpha3.ProjectStatus{
+			Git: tideprojectv1alpha3.GitStatus{
 				BranchName: "tide/run-test-1",
 			},
 		},
@@ -76,13 +76,13 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 		WithScheme(scheme).
 		WithObjects(objs...).
 		WithStatusSubresource(
-			&tideprojectv1alpha2.Plan{},
-			&tideprojectv1alpha2.Task{},
+			&tideprojectv1alpha3.Plan{},
+			&tideprojectv1alpha3.Task{},
 			&batchv1.Job{},
-			&tideprojectv1alpha2.Project{},
+			&tideprojectv1alpha3.Project{},
 		).
-		WithIndex(&tideprojectv1alpha2.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert
+		WithIndex(&tideprojectv1alpha3.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
+			task := obj.(*tideprojectv1alpha3.Task) //nolint:forcetypeassert
 			return []string{task.Spec.PlanRef}
 		}).
 		Build()
@@ -106,22 +106,22 @@ func buildPlanReconcilerForWaveInteg(t *testing.T, scheme *runtime.Scheme, objs 
 // Phase 34: labeled tideproject.k8s/project=projectName so
 // succeededTaskBranches (the D-03/D-07 cumulative-set helper) can find it —
 // the cumulative set is now a project-wide List, not a wave-local collection.
-func makeWaveIntegTask(name, uid, planRef, phase, projectName string, dependsOn []string) *tideprojectv1alpha2.Task {
-	task := &tideprojectv1alpha2.Task{
+func makeWaveIntegTask(name, uid, planRef, phase, projectName string, dependsOn []string) *tideprojectv1alpha3.Task {
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 			UID:       types.UID(uid),
 			Labels:    map[string]string{gitWriterProjectLabelKey: projectName},
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             planRef,
 			DependsOn:           dependsOn,
 			PromptPath:          "envelopes/test/" + name + ".json",
 			FilesTouched:        []string{"src/" + name + ".go"},
 			DeclaredOutputPaths: []string{"artifacts/" + name + ".txt"},
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -132,7 +132,7 @@ func makeWaveIntegTask(name, uid, planRef, phase, projectName string, dependsOn 
 func reconcileWaveIntegPlan(t *testing.T, r *PlanReconciler, planName string) (reconcile.Result, error) {
 	t.Helper()
 	// First re-fetch the plan so we have a fresh copy.
-	var plan tideprojectv1alpha2.Plan
+	var plan tideprojectv1alpha3.Plan
 	if err := r.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &plan); err != nil {
 		return reconcile.Result{}, fmt.Errorf("get plan: %w", err)
 	}
@@ -173,15 +173,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 
 	// Plan with two waves: wave-0 (task1, task2, no deps) and wave-1 (task3 depends on task1).
 	// Label tideproject.k8s/project allows resolveProjectForPlan fast-path.
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-1"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{
+		Spec: tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{
 			ValidationState: "Validated",
 		},
 	}
@@ -195,7 +195,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	r, fc := buildPlanReconcilerForWaveInteg(t, scheme, proj, plan, task1, task2, task3)
 
 	// Patch Project status (WithStatusSubresource requires Status().Update for status).
-	var projGot tideprojectv1alpha2.Project
+	var projGot tideprojectv1alpha3.Project
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: projectName, Namespace: "default"}, &projGot); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	}
 
 	// IntegratedThroughWave must still be 0 (Job dispatched, not yet Succeeded).
-	var freshPlan tideprojectv1alpha2.Plan
+	var freshPlan tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &freshPlan); err != nil {
 		t.Fatalf("step (a) get plan: %v", err)
 	}
@@ -308,15 +308,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 	// --- Step (e): Permanently-failed integration Job ---
 	// Reset to a fresh plan with wave-0 all-Succeeded and no integration Job.
 	const plan2Name = "wave-integ-plan-e"
-	plan2 := &tideprojectv1alpha2.Plan{
+	plan2 := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plan2Name,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-2"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-2"},
-		Status: tideprojectv1alpha2.PlanStatus{
+		Spec: tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-2"},
+		Status: tideprojectv1alpha3.PlanStatus{
 			ValidationState: "Validated",
 		},
 	}
@@ -333,7 +333,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		t.Fatalf("step (e) create task5: %v", err)
 	}
 	// Patch plan2 status to Validated (WithStatusSubresource strips status from Create).
-	var pp2 tideprojectv1alpha2.Plan
+	var pp2 tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &pp2); err != nil {
 		t.Fatalf("step (e) get plan2: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		t.Fatalf("step (e) patch plan2 status: %v", err)
 	}
 	// Patch task4 status to Succeeded.
-	var t4 tideprojectv1alpha2.Task
+	var t4 tideprojectv1alpha3.Task
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: "task4-e", Namespace: "default"}, &t4); err != nil {
 		t.Fatalf("step (e) get task4: %v", err)
 	}
@@ -388,7 +388,7 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 			t.Fatalf("step (e) attempt %d reconcile: %v", attempt, err)
 		}
 
-		var plan2Fresh tideprojectv1alpha2.Plan
+		var plan2Fresh tideprojectv1alpha3.Plan
 		if err := fc.Get(context.Background(), types.NamespacedName{Name: plan2Name, Namespace: "default"}, &plan2Fresh); err != nil {
 			t.Fatalf("step (e) attempt %d get plan2: %v", attempt, err)
 		}
@@ -432,15 +432,15 @@ func TestPlanReconcilerPerWaveIntegration(t *testing.T) {
 		}
 		foundFailedCondition := false
 		for _, cond := range plan2Fresh.Status.Conditions {
-			if cond.Type == tideprojectv1alpha2.ConditionFailed &&
-				cond.Reason == tideprojectv1alpha2.ReasonWaveIntegrationFailed {
+			if cond.Type == tideprojectv1alpha3.ConditionFailed &&
+				cond.Reason == tideprojectv1alpha3.ReasonWaveIntegrationFailed {
 				foundFailedCondition = true
 				break
 			}
 		}
 		if !foundFailedCondition {
 			t.Errorf("step (e): ConditionFailed with Reason %q not found; conditions: %v",
-				tideprojectv1alpha2.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
+				tideprojectv1alpha3.ReasonWaveIntegrationFailed, plan2Fresh.Status.Conditions)
 		}
 		if result.RequeueAfter != 0 {
 			t.Errorf("step (e): RequeueAfter = %v, want 0 (permanently failed → no livelock)",
@@ -481,15 +481,15 @@ func TestPlanReconcilerSingleWaveDispatchesIntegrationJob(t *testing.T) {
 	scheme := fakeSchemeForWaveInteg(t)
 
 	proj := waveIntegProject(t, projectName)
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-single-wave"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 	}
 	// Two tasks, NO dependsOn — a single Kahn wave.
 	task1 := makeWaveIntegTask("sw-task1", "uid-sw-task1", planName, "Succeeded", projectName, nil)
@@ -524,15 +524,15 @@ func TestPlanReconcilerPauseBetweenWavesFinalWaveStillIntegrates(t *testing.T) {
 
 		proj := waveIntegProject(t, projectName)
 		proj.Spec.Gates.PauseBetweenWaves = true
-		plan := &tideprojectv1alpha2.Plan{
+		plan := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: "default",
 				UID:       types.UID("plan-uid-paused-single"),
 				Labels:    map[string]string{"tideproject.k8s/project": projectName},
 			},
-			Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-			Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+			Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 		}
 		task1 := makeWaveIntegTask("psw-task1", "uid-psw-task1", planName, "Succeeded", projectName, nil)
 		task2 := makeWaveIntegTask("psw-task2", "uid-psw-task2", planName, "Succeeded", projectName, nil)
@@ -557,15 +557,15 @@ func TestPlanReconcilerPauseBetweenWavesFinalWaveStillIntegrates(t *testing.T) {
 
 		proj := waveIntegProject(t, projectName)
 		proj.Spec.Gates.PauseBetweenWaves = true
-		plan := &tideprojectv1alpha2.Plan{
+		plan := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: "default",
 				UID:       types.UID("plan-uid-paused-two"),
 				Labels:    map[string]string{"tideproject.k8s/project": projectName},
 			},
-			Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-			Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+			Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 		}
 		// Wave 1: ptw-task1 Succeeded. Wave 2: ptw-task2 depends on ptw-task1.
 		task1 := makeWaveIntegTask("ptw-task1", "uid-ptw-task1", planName, "Succeeded", projectName, nil)
@@ -596,22 +596,22 @@ func TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded(t *testing.T) {
 	scheme := fakeSchemeForWaveInteg(t)
 
 	proj := waveIntegProject(t, projectName)
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-final-wave"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 	}
 	// wave-0: task1 (no deps). wave-1 (FINAL): task2 depends on task1.
 	// Owner refs are required for gates.BoundaryDetected(plan, "Task") to
 	// count these as the Plan's children when checking Plan=Succeeded.
 	trueVal := true
 	ownerRef := metav1.OwnerReference{
-		APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+		APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 		Kind:               "Plan",
 		Name:               plan.Name,
 		UID:                plan.UID,
@@ -654,7 +654,7 @@ func TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded(t *testing.T) {
 	// Plan must NOT be Succeeded yet — the final-wave integration Job is
 	// still running (Pitfall 6: Plan=Succeeded now implies all waves,
 	// including the last, are integrated).
-	var planMid tideprojectv1alpha2.Plan
+	var planMid tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planMid); err != nil {
 		t.Fatalf("get plan mid: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestPlanReconcilerFinalWaveIntegratesAndGatesSucceeded(t *testing.T) {
 	if _, err := reconcileWaveIntegPlan(t, r, planName); err != nil {
 		t.Fatalf("reconcile 3: %v", err)
 	}
-	var planFinal tideprojectv1alpha2.Plan
+	var planFinal tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFinal); err != nil {
 		t.Fatalf("get plan final: %v", err)
 	}
@@ -693,15 +693,15 @@ func TestPlanReconcilerWaveDispatchGatedByGitWriterBusy(t *testing.T) {
 	scheme := fakeSchemeForWaveInteg(t)
 
 	proj := waveIntegProject(t, projectName)
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-busy-gate"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 	}
 	task1 := makeWaveIntegTask("busy-task1", "uid-busy-task1", planName, "Succeeded", projectName, nil)
 
@@ -743,15 +743,15 @@ func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
 	scheme := fakeSchemeForWaveInteg(t)
 
 	proj := waveIntegProject(t, projectName)
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-conflict"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 	}
 	taskA := makeWaveIntegTask("conf-taskA", "uid-conf-taskA", planName, "Succeeded", projectName, nil)
 	taskB := makeWaveIntegTask("conf-taskB", "uid-conf-taskB", planName, "Succeeded", projectName, nil)
@@ -799,7 +799,7 @@ func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
 		t.Fatalf("classify reconcile: %v", err)
 	}
 
-	var planFresh tideprojectv1alpha2.Plan
+	var planFresh tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFresh); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
@@ -812,7 +812,7 @@ func TestPlanReconcilerWaveConflictFailsPlanImmediately(t *testing.T) {
 	}
 	found := false
 	for _, cond := range planFresh.Status.Conditions {
-		if cond.Type == tideprojectv1alpha2.ConditionFailed && cond.Reason == tideprojectv1alpha2.ReasonMergeConflict {
+		if cond.Type == tideprojectv1alpha3.ConditionFailed && cond.Reason == tideprojectv1alpha3.ReasonMergeConflict {
 			found = true
 			if !strings.Contains(cond.Message, "tide/wt-uid-conf-taskB") {
 				t.Errorf("condition message %q does not name the conflicting branch", cond.Message)
@@ -840,17 +840,17 @@ func TestPlanReconcilerWaveRetryHonorsBackoffFence(t *testing.T) {
 		scheme := fakeSchemeForWaveInteg(t)
 		proj := waveIntegProject(t, projectName)
 		at := metav1.NewTime(lastAttempt)
-		plan := &tideprojectv1alpha2.Plan{
+		plan := &tideprojectv1alpha3.Plan{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      planName,
 				Namespace: "default",
 				UID:       types.UID("plan-uid-" + planName),
 				Labels:    map[string]string{"tideproject.k8s/project": projectName},
 			},
-			Spec: tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-			Status: tideprojectv1alpha2.PlanStatus{
+			Spec: tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+			Status: tideprojectv1alpha3.PlanStatus{
 				ValidationState: "Validated",
-				WaveIntegration: tideprojectv1alpha2.WaveIntegrationStatus{
+				WaveIntegration: tideprojectv1alpha3.WaveIntegrationStatus{
 					Wave: 1, Attempts: attempts, LastAttemptTime: &at, LastError: "integration-failed",
 				},
 			},
@@ -898,15 +898,15 @@ func TestPlanReconcilerWaveJobPodFailureIsNotTerminal(t *testing.T) {
 	scheme := fakeSchemeForWaveInteg(t)
 
 	proj := waveIntegProject(t, projectName)
-	plan := &tideprojectv1alpha2.Plan{
+	plan := &tideprojectv1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planName,
 			Namespace: "default",
 			UID:       types.UID("plan-uid-podfail"),
 			Labels:    map[string]string{"tideproject.k8s/project": projectName},
 		},
-		Spec:   tideprojectv1alpha2.PlanSpec{PhaseRef: "phase-1"},
-		Status: tideprojectv1alpha2.PlanStatus{ValidationState: "Validated"},
+		Spec:   tideprojectv1alpha3.PlanSpec{PhaseRef: "phase-1"},
+		Status: tideprojectv1alpha3.PlanStatus{ValidationState: "Validated"},
 	}
 	task1 := makeWaveIntegTask("pf-task1", "uid-pf-task1", planName, "Succeeded", projectName, nil)
 
@@ -936,7 +936,7 @@ func TestPlanReconcilerWaveJobPodFailureIsNotTerminal(t *testing.T) {
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: integJobName, Namespace: "default"}, &job); err != nil {
 		t.Fatalf("mid-retry Job was deleted while the Job controller still owed pod retries: %v", err)
 	}
-	var planFresh tideprojectv1alpha2.Plan
+	var planFresh tideprojectv1alpha3.Plan
 	if err := fc.Get(context.Background(), types.NamespacedName{Name: planName, Namespace: "default"}, &planFresh); err != nil {
 		t.Fatalf("get plan: %v", err)
 	}

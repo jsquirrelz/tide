@@ -28,13 +28,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/controller"
 )
 
 // newImportTestProject builds a Project fixture for the import-Job tests.
-func newImportTestProject() *tideprojectv1alpha2.Project {
-	return &tideprojectv1alpha2.Project{
+func newImportTestProject() *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj-import",
 			Namespace: "ns-import",

@@ -40,7 +40,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -49,13 +49,13 @@ import (
 
 // projectWithImportSource returns a Project with spec.importSource set and no
 // ConditionImportComplete condition (import is pending).
-func projectWithImportSource() *tideprojectv1alpha2.Project {
-	return &tideprojectv1alpha2.Project{
+func projectWithImportSource() *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "import-pending-project", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+			ImportSource: &tideprojectv1alpha3.ImportSourceRef{
 				SeedManifestConfigMap: "seed-cm",
 				SalvagedPVCSubPath:    "old-uid/workspace",
 			},
@@ -65,12 +65,12 @@ func projectWithImportSource() *tideprojectv1alpha2.Project {
 
 // projectWithImportComplete returns a Project with spec.importSource set AND
 // ConditionImportComplete=True (import has completed; guard must clear).
-func projectWithImportComplete() *tideprojectv1alpha2.Project {
+func projectWithImportComplete() *tideprojectv1alpha3.Project {
 	p := projectWithImportSource()
 	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionImportComplete,
+		Type:               tideprojectv1alpha3.ConditionImportComplete,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+		Reason:             tideprojectv1alpha3.ReasonImportSucceeded,
 		Message:            "tide-import Job completed",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -78,11 +78,11 @@ func projectWithImportComplete() *tideprojectv1alpha2.Project {
 }
 
 // projectWithoutImportSource returns a normal Project (no spec.importSource).
-func projectWithoutImportSource() *tideprojectv1alpha2.Project {
-	return &tideprojectv1alpha2.Project{
+func projectWithoutImportSource() *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "normal-project", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
 		},
 	}
@@ -91,11 +91,11 @@ func projectWithoutImportSource() *tideprojectv1alpha2.Project {
 // importGuardFires returns true when the Phase 28 IMPORT-01 guard would park a
 // Project's planner dispatch (spec.importSource != nil AND ConditionImportComplete != True).
 // This mirrors the exact in-line guard logic at all 5 dispatch sites.
-func importGuardFires(project *tideprojectv1alpha2.Project) bool {
+func importGuardFires(project *tideprojectv1alpha3.Project) bool {
 	if project == nil || project.Spec.ImportSource == nil {
 		return false
 	}
-	c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+	c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 	return c == nil || c.Status != metav1.ConditionTrue
 }
 
@@ -115,9 +115,9 @@ func TestImportGuard_ParkOnPending_ConditionFalse(t *testing.T) {
 	p := projectWithImportSource()
 	// ImportComplete=False (e.g. import in progress) → guard must still fire.
 	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionImportComplete,
+		Type:               tideprojectv1alpha3.ConditionImportComplete,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha2.ReasonImportFailed,
+		Reason:             tideprojectv1alpha3.ReasonImportFailed,
 		LastTransitionTime: metav1.Now(),
 	})
 	if !importGuardFires(p) {
@@ -129,7 +129,7 @@ func TestImportGuard_ParkOnPending_ConditionCopyingEnvelopes(t *testing.T) {
 	p := projectWithImportSource()
 	// ImportComplete=False with in-progress reason → guard must still fire.
 	meta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionImportComplete,
+		Type:               tideprojectv1alpha3.ConditionImportComplete,
 		Status:             metav1.ConditionFalse,
 		Reason:             "CopyingEnvelopes",
 		Message:            "CopyingEnvelopes",

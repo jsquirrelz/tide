@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // TestResumeRunClearsFailureHalt asserts that resumeRun with retryFailed=true
@@ -43,15 +43,15 @@ func TestResumeRunClearsFailureHalt(t *testing.T) {
 	p := makeProject("my-project")
 	// Stamp FailureHalt=True on the project (simulates a conservative-profile halt).
 	p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionFailureHalt,
+		Type:               tidev1alpha3.ConditionFailureHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha2.ReasonTaskFailedHalt,
+		Reason:             tidev1alpha3.ReasonTaskFailedHalt,
 		LastTransitionTime: metav1.Now(),
 	})
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p).
-		WithStatusSubresource(&tidev1alpha2.Project{}, &tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		WithStatusSubresource(&tidev1alpha3.Project{}, &tidev1alpha3.Milestone{}, &tidev1alpha3.Phase{}, &tidev1alpha3.Plan{}, &tidev1alpha3.Task{}).
 		Build()
 
 	var buf bytes.Buffer
@@ -59,11 +59,11 @@ func TestResumeRunClearsFailureHalt(t *testing.T) {
 		t.Fatalf("resumeRun(retryFailed=true): %v", err)
 	}
 
-	var got tidev1alpha2.Project
+	var got tidev1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	fhCond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+	fhCond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha3.ConditionFailureHalt)
 	if fhCond != nil && fhCond.Status == metav1.ConditionTrue {
 		t.Errorf("expected ConditionFailureHalt cleared by retry-failed; still True")
 	}
@@ -82,15 +82,15 @@ func TestResumeRunClearsFailureHalt(t *testing.T) {
 func TestResumeWithoutRetryFailedLeavesFailureHalt(t *testing.T) {
 	p := makeProject("my-project-noflag")
 	p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionFailureHalt,
+		Type:               tidev1alpha3.ConditionFailureHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha2.ReasonTaskFailedHalt,
+		Reason:             tidev1alpha3.ReasonTaskFailedHalt,
 		LastTransitionTime: metav1.Now(),
 	})
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p).
-		WithStatusSubresource(&tidev1alpha2.Project{}, &tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		WithStatusSubresource(&tidev1alpha3.Project{}, &tidev1alpha3.Milestone{}, &tidev1alpha3.Phase{}, &tidev1alpha3.Plan{}, &tidev1alpha3.Task{}).
 		Build()
 
 	// retryFailed=false — bare resume must not clear FailureHalt.
@@ -98,11 +98,11 @@ func TestResumeWithoutRetryFailedLeavesFailureHalt(t *testing.T) {
 		t.Fatalf("resumeRun(retryFailed=false): %v", err)
 	}
 
-	var got tidev1alpha2.Project
+	var got tidev1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project-noflag"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	fhCond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+	fhCond := meta.FindStatusCondition(got.Status.Conditions, tidev1alpha3.ConditionFailureHalt)
 	if fhCond == nil || fhCond.Status != metav1.ConditionTrue {
 		t.Errorf("expected ConditionFailureHalt=True still present after bare resume (no --retry-failed); got %v", fhCond)
 	}
@@ -122,11 +122,11 @@ func TestResumeWithoutRetryFailedLeavesFailureHalt(t *testing.T) {
 // after a "successful" resume.
 func TestResumeRetryFailedRecoversConservativeHalt(t *testing.T) {
 	p := makeProject("conservative-proj")
-	p.Spec.FailureProfile = tidev1alpha2.FailureProfileConservative
+	p.Spec.FailureProfile = tidev1alpha3.FailureProfileConservative
 	p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionFailureHalt,
+		Type:               tidev1alpha3.ConditionFailureHalt,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha2.ReasonTaskFailedHalt,
+		Reason:             tidev1alpha3.ReasonTaskFailedHalt,
 		LastTransitionTime: metav1.Now(),
 	})
 
@@ -137,7 +137,7 @@ func TestResumeRetryFailedRecoversConservativeHalt(t *testing.T) {
 	c := fake.NewClientBuilder().
 		WithScheme(testScheme(t)).
 		WithObjects(p, failed).
-		WithStatusSubresource(&tidev1alpha2.Project{}, &tidev1alpha2.Milestone{}, &tidev1alpha2.Phase{}, &tidev1alpha2.Plan{}, &tidev1alpha2.Task{}).
+		WithStatusSubresource(&tidev1alpha3.Project{}, &tidev1alpha3.Milestone{}, &tidev1alpha3.Phase{}, &tidev1alpha3.Plan{}, &tidev1alpha3.Task{}).
 		Build()
 
 	var buf bytes.Buffer
@@ -146,29 +146,29 @@ func TestResumeRetryFailedRecoversConservativeHalt(t *testing.T) {
 	}
 
 	// (a) FailureHalt cleared.
-	var gotProj tidev1alpha2.Project
+	var gotProj tidev1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "conservative-proj"}, &gotProj); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	if cond := meta.FindStatusCondition(gotProj.Status.Conditions, tidev1alpha2.ConditionFailureHalt); cond != nil && cond.Status == metav1.ConditionTrue {
+	if cond := meta.FindStatusCondition(gotProj.Status.Conditions, tidev1alpha3.ConditionFailureHalt); cond != nil && cond.Status == metav1.ConditionTrue {
 		t.Errorf("expected ConditionFailureHalt cleared; still True")
 	}
 
 	// (b) The previously-frozen task is reset for re-dispatch.
-	var gotTask tidev1alpha2.Task
+	var gotTask tidev1alpha3.Task
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "frozen-task"}, &gotTask); err != nil {
 		t.Fatalf("get task: %v", err)
 	}
 	if gotTask.Status.Phase != "" {
 		t.Errorf("expected frozen task phase reset to \"\"; got %q", gotTask.Status.Phase)
 	}
-	if cond := meta.FindStatusCondition(gotTask.Status.Conditions, tidev1alpha2.ConditionWaveOrLevelPaused); cond == nil || cond.Reason != tidev1alpha2.ReasonResumedByUser {
+	if cond := meta.FindStatusCondition(gotTask.Status.Conditions, tidev1alpha3.ConditionWaveOrLevelPaused); cond == nil || cond.Reason != tidev1alpha3.ReasonResumedByUser {
 		t.Errorf("expected ResumedByUser condition on reset task; got %v", cond)
 	}
 
 	// (c) Resume fence stamped so setFailureHaltIfNeeded refuses to re-freeze on a
 	//     pre-resume straggler reconcile. RED on pre-CR-01 code (never stamped).
-	if _, ok := gotProj.Annotations[tidev1alpha2.AnnotationFailureResumedAt]; !ok {
+	if _, ok := gotProj.Annotations[tidev1alpha3.AnnotationFailureResumedAt]; !ok {
 		t.Errorf("expected AnnotationFailureResumedAt stamped on FailureHalt clear; annotations=%v", gotProj.Annotations)
 	}
 }

@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgbundle "github.com/jsquirrelz/tide/pkg/bundle"
 )
 
@@ -60,7 +60,7 @@ func TestBuildExportInspectorPodSpec_SubPath(t *testing.T) {
 // `kubectl apply project.yaml` fails validation ("apiVersion not set, kind not
 // set").
 func TestAssembleBundleFiles_ProjectTypeMeta(t *testing.T) {
-	proj := &tidev1alpha2.Project{
+	proj := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "p1",
 			Namespace: "ns1",
@@ -74,7 +74,7 @@ func TestAssembleBundleFiles_ProjectTypeMeta(t *testing.T) {
 		t.Fatalf("assembleBundleFiles: %v", err)
 	}
 	py := string(files[pkgbundle.BundleFileProject])
-	if !strings.Contains(py, "apiVersion: tideproject.k8s/v1alpha2") {
+	if !strings.Contains(py, "apiVersion: tideproject.k8s/v1alpha3") {
 		t.Errorf("project.yaml missing apiVersion; got:\n%s", py)
 	}
 	if !strings.Contains(py, "kind: Project") {

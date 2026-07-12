@@ -25,27 +25,27 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/controller"
 )
 
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(s)
-	_ = tideprojectv1alpha2.AddToScheme(s)
+	_ = tideprojectv1alpha3.AddToScheme(s)
 	return s
 }
 
 // TestBuildReporterJob_ServiceAccount asserts the Job uses the tide-reporter SA.
 func TestBuildReporterJob_ServiceAccount(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-a",
 			UID:       "project-uid-1",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-1",
 			Namespace: "ns-a",
@@ -63,14 +63,14 @@ func TestBuildReporterJob_ServiceAccount(t *testing.T) {
 
 // TestBuildReporterJob_SubPath asserts the PVC is mounted at /workspace with the correct subPath.
 func TestBuildReporterJob_SubPath(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-a",
 			UID:       "project-uid-2",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-1",
 			Namespace: "ns-a",
@@ -102,14 +102,14 @@ func TestBuildReporterJob_SubPath(t *testing.T) {
 
 // TestBuildReporterJob_Args asserts all required flags are present in container args.
 func TestBuildReporterJob_Args(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-b",
 			UID:       "project-uid-3",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-2",
 			Namespace: "ns-b",
@@ -141,14 +141,14 @@ func TestBuildReporterJob_Args(t *testing.T) {
 
 // TestBuildReporterJob_OwnerRef asserts owner ref is set to the parent (not necessarily the project).
 func TestBuildReporterJob_OwnerRef(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-c",
 			UID:       "project-uid-4",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-3",
 			Namespace: "ns-c",
@@ -178,14 +178,14 @@ func TestBuildReporterJob_OwnerRef(t *testing.T) {
 
 // TestBuildReporterJob_RoleLabel asserts the Job and pod template carry tideproject.k8s/role=reporter.
 func TestBuildReporterJob_RoleLabel(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-d",
 			UID:       "project-uid-5",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-4",
 			Namespace: "ns-d",
@@ -207,14 +207,14 @@ func TestBuildReporterJob_RoleLabel(t *testing.T) {
 
 // TestBuildReporterJob_SecurityContext asserts RunAsNonRoot + drop ALL caps.
 func TestBuildReporterJob_SecurityContext(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-e",
 			UID:       "project-uid-6",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-5",
 			Namespace: "ns-e",
@@ -248,20 +248,20 @@ func TestBuildReporterJob_SecurityContext(t *testing.T) {
 
 // TestBuildReporterJob_NoGitCredsEnvFrom asserts no git-creds EnvFrom is present.
 func TestBuildReporterJob_NoGitCredsEnvFrom(t *testing.T) {
-	gitCfg := &tideprojectv1alpha2.GitConfig{
+	gitCfg := &tideprojectv1alpha3.GitConfig{
 		CredsSecretRef: "my-git-creds",
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-f",
 			UID:       "project-uid-7",
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			Git: gitCfg,
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-6",
 			Namespace: "ns-f",
@@ -281,14 +281,14 @@ func TestBuildReporterJob_NoGitCredsEnvFrom(t *testing.T) {
 
 // TestBuildReporterJob_Namespace asserts the Job is in the project namespace.
 func TestBuildReporterJob_Namespace(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "tenant-ns",
 			UID:       "project-uid-8",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-7",
 			Namespace: "tenant-ns",
@@ -306,14 +306,14 @@ func TestBuildReporterJob_Namespace(t *testing.T) {
 
 // TestBuildReporterJob_DeterministicName asserts two calls with the same parent produce the same Job name.
 func TestBuildReporterJob_DeterministicName(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-g",
 			UID:       "project-uid-9",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-8",
 			Namespace: "ns-g",
@@ -335,14 +335,14 @@ func TestBuildReporterJob_DeterministicName(t *testing.T) {
 
 // TestBuildReporterJob_BackoffAndTTL asserts BackoffLimit=2 and TTLSecondsAfterFinished=300.
 func TestBuildReporterJob_BackoffAndTTL(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-h",
 			UID:       "project-uid-10",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-9",
 			Namespace: "ns-h",
@@ -366,14 +366,14 @@ func TestBuildReporterJob_BackoffAndTTL(t *testing.T) {
 
 // TestBuildReporterJob_Image asserts the container uses opts.ReporterImage.
 func TestBuildReporterJob_Image(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-i",
 			UID:       "project-uid-11",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-10",
 			Namespace: "ns-i",
@@ -393,7 +393,7 @@ func TestBuildReporterJob_Image(t *testing.T) {
 
 // TestBuildReporterJob_ProjectAsParent asserts Project-as-parent works (project is its own parent).
 func TestBuildReporterJob_ProjectAsParent(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "self-proj",
 			Namespace: "ns-j",
@@ -434,14 +434,14 @@ func TestBuildReporterJob_ProjectAsParent(t *testing.T) {
 // TestBuildReporterJob_EmptyImageStillBuilds asserts a zero ReporterImage still produces a valid Job
 // (caller-side skip is done by the spawn site, not the builder).
 func TestBuildReporterJob_EmptyImageStillBuilds(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj",
 			Namespace: "ns-k",
 			UID:       "project-uid-13",
 		},
 	}
-	parent := &tideprojectv1alpha2.Milestone{
+	parent := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ms-11",
 			Namespace: "ns-k",

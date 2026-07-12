@@ -52,7 +52,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -149,7 +149,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithTimeout(context.Background(), kindTestTimeout)
 
 	By("Ensuring TIDE CRD types are registered in the scheme")
-	Expect(tideprojectv1alpha2.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(tideprojectv1alpha3.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	By("Checking if kind is available")
 	if _, err := exec.LookPath("kind"); err != nil {
@@ -908,7 +908,7 @@ data:
 // NOT call createNamespace themselves before calling applyHierarchy to avoid
 // double-create noise.
 //
-// API group: tideproject.k8s/v1alpha2 (per CLAUDE.md TIDE domain rule — never tide.io).
+// API group: tideproject.k8s/v1alpha3 (per CLAUDE.md TIDE domain rule — never tide.io).
 func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
 	// Step 1: Create Namespace + namespace-local Task Job dependencies.
 	createNamespace(ns)
@@ -966,7 +966,7 @@ func applyHierarchy(ctx context.Context, ns, planName, taskName string) error {
 // first step; callers must NOT call createNamespace themselves before calling
 // createProjectHierarchy to avoid double-create noise.
 //
-// API group: tideproject.k8s/v1alpha2 (per CLAUDE.md TIDE domain rule —
+// API group: tideproject.k8s/v1alpha3 (per CLAUDE.md TIDE domain rule —
 // never tide.io).
 func createProjectHierarchy(ctx context.Context, ns string) error {
 	// Step 1: Create Namespace + namespace-local Task Job dependencies.

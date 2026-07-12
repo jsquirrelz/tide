@@ -27,7 +27,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ---------- ReservationStore pure-Go unit tests ----------
@@ -68,13 +68,13 @@ func TestReservationStore_Release(t *testing.T) {
 
 // ---------- HasHeadroom table tests ----------
 
-func makeProjectWithBudget(cap, spent int64) *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
-		Spec: tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
-			Budget: tidev1alpha2.BudgetConfig{AbsoluteCapCents: cap},
+func makeProjectWithBudget(cap, spent int64) *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
+		Spec: tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
+			Budget: tidev1alpha3.BudgetConfig{AbsoluteCapCents: cap},
 		},
-		Status: tidev1alpha2.ProjectStatus{
-			Budget: tidev1alpha2.BudgetStatus{CostSpentCents: spent},
+		Status: tidev1alpha3.ProjectStatus{
+			Budget: tidev1alpha3.BudgetStatus{CostSpentCents: spent},
 		},
 	}
 }
@@ -159,7 +159,7 @@ func TestReservationStore_HasHeadroom(t *testing.T) {
 				}
 			}
 
-			var project *tidev1alpha2.Project
+			var project *tidev1alpha3.Project
 			if !tc.nilProject {
 				project = makeProjectWithBudget(tc.cap, tc.spent)
 				project.Spec.Budget.RollingWindowCapCents = tc.rollingCap

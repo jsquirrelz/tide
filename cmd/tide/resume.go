@@ -51,7 +51,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -70,7 +70,7 @@ import (
 // when the caller does not need feedback (e.g. tests checking annotation-only
 // behaviour).
 func resumeRun(ctx context.Context, c client.Client, ns, projectName string, retryFailed bool, out io.Writer) error {
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
@@ -86,7 +86,7 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	// without the sticky condition yet), stamp the reset-boundary-push
 	// annotation so the controller resets Attempts/LastError and clears the
 	// condition on its next reconcile (consumeResetBoundaryPushAnnotation).
-	imCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionIntegrationIncomplete)
+	imCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionIntegrationIncomplete)
 	needsBoundaryPushReset := (imCond != nil && imCond.Status == metav1.ConditionTrue) ||
 		proj.Status.BoundaryPush.Attempts > 0
 	if needsBoundaryPushReset {
@@ -113,11 +113,11 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		return fmt.Errorf("re-get project for BillingHalt clear: %w", err)
 	}
-	haltCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionBillingHalt)
+	haltCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionBillingHalt)
 	if haltCond != nil {
 		hadBillingHalt := haltCond.Status == metav1.ConditionTrue
 		patch2 := client.MergeFrom(proj.DeepCopy())
-		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha2.ConditionBillingHalt)
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha3.ConditionBillingHalt)
 		if err := c.Status().Patch(ctx, &proj, patch2); err != nil {
 			return fmt.Errorf("patch status (clear BillingHalt): %w", err)
 		}
@@ -134,7 +134,7 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 			if ann == nil {
 				ann = make(map[string]string)
 			}
-			ann[tidev1alpha2.AnnotationBillingResumedAt] = time.Now().UTC().Format(time.RFC3339)
+			ann[tidev1alpha3.AnnotationBillingResumedAt] = time.Now().UTC().Format(time.RFC3339)
 			proj.SetAnnotations(ann)
 			if err := c.Patch(ctx, &proj, metaPatch); err != nil {
 				return fmt.Errorf("patch metadata (billing-resumed-at stamp): %w", err)
@@ -170,10 +170,10 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		return fmt.Errorf("re-get project for FailureHalt clear: %w", err)
 	}
-	fhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+	fhCond := meta.FindStatusCondition(proj.Status.Conditions, tidev1alpha3.ConditionFailureHalt)
 	if fhCond != nil && fhCond.Status == metav1.ConditionTrue {
 		patch3 := client.MergeFrom(proj.DeepCopy())
-		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha2.ConditionFailureHalt)
+		meta.RemoveStatusCondition(&proj.Status.Conditions, tidev1alpha3.ConditionFailureHalt)
 		if err := c.Status().Patch(ctx, &proj, patch3); err != nil {
 			return fmt.Errorf("patch status (clear FailureHalt): %w", err)
 		}
@@ -189,7 +189,7 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 		if ann == nil {
 			ann = make(map[string]string)
 		}
-		ann[tidev1alpha2.AnnotationFailureResumedAt] = time.Now().UTC().Format(time.RFC3339)
+		ann[tidev1alpha3.AnnotationFailureResumedAt] = time.Now().UTC().Format(time.RFC3339)
 		proj.SetAnnotations(ann)
 		if err := c.Patch(ctx, &proj, metaPatch); err != nil {
 			return fmt.Errorf("patch metadata (failure-resumed-at stamp): %w", err)
@@ -209,15 +209,15 @@ func resumeRun(ctx context.Context, c client.Client, ns, projectName string, ret
 func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName string, out io.Writer) error {
 	resetCount := 0
 	resumedByUser := metav1.Condition{
-		Type:               tidev1alpha2.ConditionWaveOrLevelPaused,
+		Type:               tidev1alpha3.ConditionWaveOrLevelPaused,
 		Status:             metav1.ConditionFalse,
-		Reason:             tidev1alpha2.ReasonResumedByUser,
+		Reason:             tidev1alpha3.ReasonResumedByUser,
 		Message:            "Level reset by tide resume --retry-failed; reconciler will re-dispatch",
 		LastTransitionTime: metav1.Now(),
 	}
 
 	// Milestone
-	var msList tidev1alpha2.MilestoneList
+	var msList tidev1alpha3.MilestoneList
 	if err := c.List(ctx, &msList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -242,7 +242,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Phase
-	var phList tidev1alpha2.PhaseList
+	var phList tidev1alpha3.PhaseList
 	if err := c.List(ctx, &phList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -267,7 +267,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Plan
-	var plList tidev1alpha2.PlanList
+	var plList tidev1alpha3.PlanList
 	if err := c.List(ctx, &plList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},
@@ -288,7 +288,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 		// at the Attempts cap re-fails terminally after ONE fresh attempt —
 		// the same-wave reset arm in handleWaveIntegrationFailure only zeroes
 		// the counter when the blocking wave CHANGES.
-		item.Status.WaveIntegration = tidev1alpha2.WaveIntegrationStatus{}
+		item.Status.WaveIntegration = tidev1alpha3.WaveIntegrationStatus{}
 		meta.SetStatusCondition(&item.Status.Conditions, resumedByUser)
 		if err := c.Status().Patch(ctx, item, patch); err != nil {
 			return fmt.Errorf("reset plan %s: %w", item.Name, err)
@@ -305,7 +305,7 @@ func retryFailedLevels(ctx context.Context, c client.Client, ns, projectName str
 	}
 
 	// Task
-	var tkList tidev1alpha2.TaskList
+	var tkList tidev1alpha3.TaskList
 	if err := c.List(ctx, &tkList,
 		client.InNamespace(ns),
 		client.MatchingLabels{"tideproject.k8s/project": projectName},

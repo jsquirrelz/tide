@@ -28,7 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const globalWaveNamespace = "default"
@@ -37,36 +37,36 @@ const globalWaveTestProject = "global-wave-test-project"
 // createSimplePhase creates a minimal Phase in the globalWaveNamespace for testing.
 // Follows the createSimplePlan shape from indegree_test.go.
 func createSimplePhase(ctx context.Context, name, milestoneRef string) {
-	phase := &tideprojectv1alpha2.Phase{
+	phase := &tideprojectv1alpha3.Phase{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalWaveNamespace,
 		},
-		Spec: tideprojectv1alpha2.PhaseSpec{
+		Spec: tideprojectv1alpha3.PhaseSpec{
 			MilestoneRef: milestoneRef,
 		},
 	}
 	Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Phase{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Phase{})
 	}, "5s", "100ms").Should(Succeed())
 }
 
 // createSimpleMilestone creates a minimal Milestone in the globalWaveNamespace for testing.
 // Follows the createSimplePlan shape from indegree_test.go.
 func createSimpleMilestone(ctx context.Context, name, projectRef string) {
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalWaveNamespace,
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{
+		Spec: tideprojectv1alpha3.MilestoneSpec{
 			ProjectRef: projectRef,
 		},
 	}
 	Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 	}, "5s", "100ms").Should(Succeed())
 }
 
@@ -80,20 +80,20 @@ func createSimpleMilestone(ctx context.Context, name, projectRef string) {
 //	client.MatchingLabels{owner.LabelProject: project.Name}
 //
 // so Tasks MUST carry the correct project label to be picked up by the reconciler.
-func makeGlobalWaveTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha2.Task {
+func makeGlobalWaveTask(ctx context.Context, name, planRef string, dependsOn, files []string) *tideprojectv1alpha3.Task {
 	if files == nil {
 		files = []string{name + ".go"}
 	}
 	labels := map[string]string{
 		"tideproject.k8s/project": globalWaveTestProject,
 	}
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalWaveNamespace,
 			Labels:    labels,
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             planRef,
 			PromptPath:          "envelopes/test/children/" + name + ".json",
 			DependsOn:           dependsOn,
@@ -103,7 +103,7 @@ func makeGlobalWaveTask(ctx context.Context, name, planRef string, dependsOn, fi
 	}
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Task{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Task{})
 	}, "5s", "100ms").Should(Succeed())
 	time.Sleep(50 * time.Millisecond) // allow indexer to propagate
 	return task
@@ -113,7 +113,7 @@ func makeGlobalWaveTask(ctx context.Context, name, planRef string, dependsOn, fi
 // exists in globalWaveNamespace. Uses the Get pattern from indegree_test.go.
 func assertWaveExists(ctx context.Context, projectName string, waveIdx int) {
 	Eventually(func() error {
-		wave := &tideprojectv1alpha2.Wave{}
+		wave := &tideprojectv1alpha3.Wave{}
 		return k8sClient.Get(ctx, client.ObjectKey{
 			Name:      fmt.Sprintf("tide-wave-%s-%d", projectName, waveIdx),
 			Namespace: globalWaveNamespace,
@@ -136,13 +136,13 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 		// IgnoreAlreadyExists can be silently swallowed by the still-terminating
 		// object, leaving the spec with NO Project (CI flake: tide-wave-<project>-0
 		// absent for the full 30s assert window).
-		ensureLiveProject(ctx, &tideprojectv1alpha2.Project{
+		ensureLiveProject(ctx, &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      globalWaveTestProject,
 				Namespace: globalWaveNamespace,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/global-wave-test.git",
 			},
 		})
@@ -150,32 +150,32 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 	AfterEach(func() {
 		// Delete Waves first so global Wave CRs do not leak into the next It block.
-		waves := &tideprojectv1alpha2.WaveList{}
+		waves := &tideprojectv1alpha3.WaveList{}
 		_ = k8sClient.List(ctx, waves, client.InNamespace(globalWaveNamespace))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
 		}
-		tasks := &tideprojectv1alpha2.TaskList{}
+		tasks := &tideprojectv1alpha3.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(globalWaveNamespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
-		plans := &tideprojectv1alpha2.PlanList{}
+		plans := &tideprojectv1alpha3.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(globalWaveNamespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		phases := &tideprojectv1alpha2.PhaseList{}
+		phases := &tideprojectv1alpha3.PhaseList{}
 		_ = k8sClient.List(ctx, phases, client.InNamespace(globalWaveNamespace))
 		for i := range phases.Items {
 			_ = k8sClient.Delete(ctx, &phases.Items[i])
 		}
-		milestones := &tideprojectv1alpha2.MilestoneList{}
+		milestones := &tideprojectv1alpha3.MilestoneList{}
 		_ = k8sClient.List(ctx, milestones, client.InNamespace(globalWaveNamespace))
 		for i := range milestones.Items {
 			_ = k8sClient.Delete(ctx, &milestones.Items[i])
 		}
-		projects := &tideprojectv1alpha2.ProjectList{}
+		projects := &tideprojectv1alpha3.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(globalWaveNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -238,7 +238,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Wave 0: {α,β,γ,ζ} — assert correct WaveIndex and ProjectRef.
 			Eventually(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				waveName := fmt.Sprintf("tide-wave-%s-0", globalWaveTestProject)
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: globalWaveNamespace}, wave); err != nil {
 					return fmt.Errorf("get wave 0: %w", err)
@@ -254,7 +254,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Wave 1: {δ,η} — assert correct WaveIndex.
 			Eventually(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				waveName := fmt.Sprintf("tide-wave-%s-1", globalWaveTestProject)
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: globalWaveNamespace}, wave); err != nil {
 					return fmt.Errorf("get wave 1: %w", err)
@@ -267,7 +267,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Wave 2: {ε,θ} — assert correct WaveIndex.
 			Eventually(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				waveName := fmt.Sprintf("tide-wave-%s-2", globalWaveTestProject)
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: waveName, Namespace: globalWaveNamespace}, wave); err != nil {
 					return fmt.Errorf("get wave 2: %w", err)
@@ -296,7 +296,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// task→wave: bi-task-p and bi-task-q should have wave-index label "0".
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskP.Name, Namespace: globalWaveNamespace}, t); err != nil {
 					return ""
 				}
@@ -304,7 +304,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			}, "30s", "500ms").Should(Equal("0"), "bi-task-p should carry wave-index label = 0")
 
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: taskQ.Name, Namespace: globalWaveNamespace}, t); err != nil {
 					return ""
 				}
@@ -313,7 +313,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// task→wave: bi-task-r should have wave-index label "1".
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: "bi-task-r", Namespace: globalWaveNamespace}, t); err != nil {
 					return ""
 				}
@@ -323,7 +323,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			// wave→tasks: label selector for wave-index=0 and project=<project>
 			// should return exactly {bi-task-p, bi-task-q}.
 			Eventually(func() ([]string, error) {
-				taskList := &tideprojectv1alpha2.TaskList{}
+				taskList := &tideprojectv1alpha3.TaskList{}
 				if err := k8sClient.List(ctx, taskList,
 					client.InNamespace(globalWaveNamespace),
 					client.MatchingLabels{
@@ -362,7 +362,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Wave 2 should not exist yet.
 			Consistently(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				return k8sClient.Get(ctx, client.ObjectKey{
 					Name:      fmt.Sprintf("tide-wave-%s-2", globalWaveTestProject),
 					Namespace: globalWaveNamespace,
@@ -387,7 +387,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			// Verify Project.Status does NOT carry a cached schedule aggregate.
 			// The verify-no-aggregates Makefile guard forbids Schedule/Waves[]/IndegreeMap
 			// in api types; this test ensures the runtime value is also absent.
-			project := &tideprojectv1alpha2.Project{}
+			project := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      globalWaveTestProject,
 				Namespace: globalWaveNamespace,
@@ -426,7 +426,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			assertWaveExists(ctx, globalWaveTestProject, 1)
 
 			// Shrink: delete ps-task-dep. Re-derivation now produces only wave-0.
-			depTask := &tideprojectv1alpha2.Task{}
+			depTask := &tideprojectv1alpha3.Task{}
 			Expect(k8sClient.Get(ctx, client.ObjectKey{
 				Name:      "ps-task-dep",
 				Namespace: globalWaveNamespace,
@@ -437,7 +437,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 			// ProjectReconciler re-derives the schedule. Before FIX 1 this would timeout
 			// because the prune List always returned zero items (dead selector).
 			Eventually(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				err := k8sClient.Get(ctx, client.ObjectKey{
 					Name:      fmt.Sprintf("tide-wave-%s-1", globalWaveTestProject),
 					Namespace: globalWaveNamespace,
@@ -470,19 +470,19 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// Plan B has one task with a coarse Plan-level DependsOn targeting Plan A.
 			// This should fan out to: cm-task-b1 depends on {cm-task-a1, cm-task-a2}.
-			planB := &tideprojectv1alpha2.Plan{
+			planB := &tideprojectv1alpha3.Plan{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "cm-plan-b",
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.PlanSpec{
+				Spec: tideprojectv1alpha3.PlanSpec{
 					PhaseRef:  "cm-phase",
 					DependsOn: []string{"cm-plan-a"}, // coarse Plan-level dep
 				},
 			}
 			Expect(k8sClient.Create(ctx, planB)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "cm-plan-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Plan{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "cm-plan-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Plan{})
 			}, "5s", "100ms").Should(Succeed())
 
 			// cm-task-b1 declares no DependsOn itself; coarse fan-out from Plan B's
@@ -496,7 +496,7 @@ var _ = Describe("Global Wave Derivation", Label("envtest"), func() {
 
 			// cm-task-b1 should be in wave 1 (depends on all tasks in plan-a via fan-out).
 			Eventually(func() string {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: "cm-task-b1", Namespace: globalWaveNamespace}, t); err != nil {
 					return ""
 				}

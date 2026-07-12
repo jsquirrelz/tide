@@ -41,7 +41,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -478,7 +478,7 @@ data:
 		By("Waiting for medium Project to reach Complete over http://")
 		lastProgress := time.Now()
 		Eventually(func() error {
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      projName,
 				Namespace: mediumHTTPNamespace,
@@ -596,7 +596,7 @@ data:
 
 		By("Waiting for baseRef Project clone to complete and stamp baseSHA")
 		Eventually(func() error {
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			if err := k8sClient.Get(ctx, client.ObjectKey{
 				Name:      projName,
 				Namespace: mediumHTTPNamespace,
@@ -614,7 +614,7 @@ data:
 		}, 5*time.Minute, 5*time.Second).Should(Succeed(),
 			"baseRef Project must reach cloneComplete with baseSHA stamped within 5 minutes")
 
-		var final tideprojectv1alpha2.Project
+		var final tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, client.ObjectKey{
 			Name:      projName,
 			Namespace: mediumHTTPNamespace,
@@ -646,19 +646,19 @@ func grepGreppedTip(log, prefix string) string {
 // own conditions do not change while a mid-hierarchy level is wedged).
 func mediumChildSummary() string {
 	var parts []string
-	var msList tideprojectv1alpha2.MilestoneList
+	var msList tideprojectv1alpha3.MilestoneList
 	if err := k8sClient.List(ctx, &msList, client.InNamespace(mediumHTTPNamespace)); err == nil {
 		for i := range msList.Items {
 			parts = append(parts, fmt.Sprintf("ms/%s=%s", msList.Items[i].Name, msList.Items[i].Status.Phase))
 		}
 	}
-	var phList tideprojectv1alpha2.PhaseList
+	var phList tideprojectv1alpha3.PhaseList
 	if err := k8sClient.List(ctx, &phList, client.InNamespace(mediumHTTPNamespace)); err == nil {
 		for i := range phList.Items {
 			parts = append(parts, fmt.Sprintf("ph/%s=%s", phList.Items[i].Name, phList.Items[i].Status.Phase))
 		}
 	}
-	var plList tideprojectv1alpha2.PlanList
+	var plList tideprojectv1alpha3.PlanList
 	if err := k8sClient.List(ctx, &plList, client.InNamespace(mediumHTTPNamespace)); err == nil {
 		for i := range plList.Items {
 			wi := plList.Items[i].Status.WaveIntegration
@@ -668,7 +668,7 @@ func mediumChildSummary() string {
 				wi.Wave, wi.Attempts, wi.LastError))
 		}
 	}
-	var tList tideprojectv1alpha2.TaskList
+	var tList tideprojectv1alpha3.TaskList
 	if err := k8sClient.List(ctx, &tList, client.InNamespace(mediumHTTPNamespace)); err == nil {
 		for i := range tList.Items {
 			parts = append(parts, fmt.Sprintf("task/%s=%s", tList.Items[i].Name, tList.Items[i].Status.Phase))
@@ -692,7 +692,7 @@ func mediumChildSummary() string {
 
 // mediumLastConditionMessage returns the last condition message for a Project,
 // for diagnostic output in Eventually error messages.
-func mediumLastConditionMessage(proj tideprojectv1alpha2.Project) string {
+func mediumLastConditionMessage(proj tideprojectv1alpha3.Project) string {
 	conds := proj.Status.Conditions
 	if len(conds) == 0 {
 		return "(no conditions)"

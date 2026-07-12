@@ -19,7 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
 	pkggit "github.com/jsquirrelz/tide/pkg/git"
 )
@@ -191,7 +191,7 @@ const stagedEnvelopesAnnotation = "tideproject.k8s/staged-envelopes"
 //
 // Plan 03-08 ProjectReconciler is the sole caller. This is a pure
 // builder — no client.Create here.
-func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts PushOptions, scheme *runtime.Scheme) *batchv1.Job {
+func buildPushJob(project *tideprojectv1alpha3.Project, pvcName string, opts PushOptions, scheme *runtime.Scheme) *batchv1.Job {
 	args := []string{
 		"--mode=push",
 		"--branch=" + opts.Branch,
@@ -382,7 +382,7 @@ func buildPushJob(project *tideprojectv1alpha2.Project, pvcName string, opts Pus
 // the PAT (private repo clones need it; public repos ignore it), same
 // PVC mount at /workspace. Args differ: --mode=clone --repo-url=...
 // and no branch/sha/message/artifacts.
-func buildCloneJob(project *tideprojectv1alpha2.Project, pvcName string, opts CloneOptions, scheme *runtime.Scheme) *batchv1.Job {
+func buildCloneJob(project *tideprojectv1alpha3.Project, pvcName string, opts CloneOptions, scheme *runtime.Scheme) *batchv1.Job {
 	args := []string{
 		"--mode=clone",
 		"--repo-url=" + project.Spec.Git.RepoURL,

@@ -31,7 +31,7 @@ limitations under the License.
 package controller
 
 import (
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
 
@@ -60,10 +60,10 @@ type scopeResolver struct {
 // Pass nil for any list that is not available (e.g., phases=nil when only
 // Task/Plan resolution is needed).
 func buildScopeResolver(
-	tasks []tideprojectv1alpha2.Task,
-	plans []tideprojectv1alpha2.Plan,
-	phases []tideprojectv1alpha2.Phase,
-	ms []tideprojectv1alpha2.Milestone,
+	tasks []tideprojectv1alpha3.Task,
+	plans []tideprojectv1alpha3.Plan,
+	phases []tideprojectv1alpha3.Phase,
+	ms []tideprojectv1alpha3.Milestone,
 ) *scopeResolver {
 	r := &scopeResolver{
 		taskNames:   make(map[string]struct{}, len(tasks)),
@@ -200,9 +200,9 @@ func (r *scopeResolver) ancestorScopeNames(taskPlanRef string) (planName, phaseN
 // shared scopeResolver rather than the inline tasksForScope closure.
 func buildGlobalEdges(
 	resolver *scopeResolver,
-	tasks []tideprojectv1alpha2.Task,
-	plans []tideprojectv1alpha2.Plan,
-	phases []tideprojectv1alpha2.Phase,
+	tasks []tideprojectv1alpha3.Task,
+	plans []tideprojectv1alpha3.Plan,
+	phases []tideprojectv1alpha3.Phase,
 ) []dag.Edge {
 	var edges []dag.Edge
 	edgeSet := make(map[string]struct{})

@@ -1,16 +1,16 @@
-# Dogfood run #2 — fresh Project (v1alpha2). Real config, NOT the stub fixture.
+# Dogfood run #2 — fresh Project (v1alpha3). Real config, NOT the stub fixture.
 # M+P adoption is via IMPORT (importSource + ImportComplete), NOT hand-applied skeleton:
 # the project-level planner guard is Job-presence-based, so hand-apply would re-author.
 # Deploy with TIDE_IMPORT_IMAGE blanked so the envelope Job dev-skips (no copy; plans
 # regenerate against current main). Seed ConfigMap = run-2/seed-manifest.trimmed.json.
 # See .planning/dogfood/run-2-SCOPE.md + RUNBOOK.md.
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: dogfood-codex-runtime
   namespace: tide-dogfood-codex
 spec:
-  schemaRevision: v1alpha2
+  schemaRevision: v1alpha3
   targetRepo: http://git-http-server.tide-dogfood-codex.svc.cluster.local/tide.git
   outcomePrompt: |
     ## Outcome
@@ -29,13 +29,13 @@ spec:
     given infrastructure; the ONLY new product surface this run delivers is the
     Codex subagent package + the per-level provider switch.
 
-    - **v1alpha2 schema + global Execution DAG (Phases 23-26).** `Plan`/`Phase`/
+    - **v1alpha3 schema + global Execution DAG (Phases 23-26, 40).** `Plan`/`Phase`/
       `Milestone`/`Task` all carry `dependsOn` at any level; the assembler builds
       ONE global Execution DAG and derives Project-scoped waves
       (`tide-wave-<project>-<N>`) across plan/phase/milestone boundaries via
       layered Kahn. The project planner emits N Milestones up-front with
       `Milestone.dependsOn` (planning-DAG edge only — zero execution edges).
-      Child CRDs authored by the planner are v1alpha2.
+      Child CRDs authored by the planner are v1alpha3.
     - **Global dispatch / failure / gates / resumption (Phase 25).** Readiness is
       re-derived from the global indegree map + completed-set each reconcile
       (nothing cached). `failureProfile` and the gate-as-hold model below are live.
@@ -68,7 +68,7 @@ spec:
     - Per-project selection: no mixing within a run (defeats heterogeneity goal).
 
     The SubagentConfig field already has Levels.{Milestone,Phase,Plan,Task}
-    per-level LevelConfig overrides (api/v1alpha2/project_types.go via
+    per-level LevelConfig overrides (api/v1alpha3/project_types.go via
     SubagentConfig). Wire the Codex image at the levels the operator wants Codex.
     NOTE: today `resolveImage` honors a per-level image, but `ResolveProvider`
     (internal/controller/dispatch_helpers.go) still returns Vendor:"anthropic"

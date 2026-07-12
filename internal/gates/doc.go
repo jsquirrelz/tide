@@ -15,7 +15,7 @@ You may obtain a copy of the License at
 //
 // # Vocabulary
 //
-// Three policy values live in the api/v1alpha1.Gates CRD field, CEL-validated
+// Three policy values live in the api/v1alpha3.Gates CRD field, CEL-validated
 // at admission time to exactly this set:
 //
 //   - auto    — advance immediately; today's behavior. Default for phase,

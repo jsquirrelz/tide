@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
@@ -56,7 +56,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		const projectName = "test-clone-idempotency-no-reclone"
 
 		AfterEach(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -65,12 +65,12 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		})
 
 		It("does not dispatch a clone Job when Status.Git.CloneComplete=true", func() {
-			proj := &tideprojectv1alpha2.Project{
+			proj := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/test.git",
-					Git: &tideprojectv1alpha2.GitConfig{
+					Git: &tideprojectv1alpha3.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
 						CredsSecretRef: "test-creds",
 					},
@@ -79,16 +79,16 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
 
 			// Wait for create to propagate to cache.
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			// Patch status: CloneComplete=true + non-empty BranchName simulate an
 			// already-cloned workspace. The controller must NOT re-dispatch the clone Job.
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p)).To(Succeed())
 			statusPatch := client.MergeFrom(p.DeepCopy())
 			p.Status.Git.CloneComplete = true
 			p.Status.Git.BranchName = "tide/run-test-clone-idempotency-1000000000"
-			p.Status.Phase = tideprojectv1alpha2.PhaseRunning
+			p.Status.Phase = tideprojectv1alpha3.PhaseRunning
 			Expect(k8sClient.Status().Patch(ctx, &p, statusPatch)).To(Succeed())
 
 			r := &ProjectReconciler{
@@ -124,7 +124,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		const projectName = "test-clone-idempotency-set-on-success"
 
 		AfterEach(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -133,19 +133,19 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		})
 
 		It("sets Status.Git.CloneComplete=true when the clone Job reports Succeeded>0", func() {
-			proj := &tideprojectv1alpha2.Project{
+			proj := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/test.git",
-					Git: &tideprojectv1alpha2.GitConfig{
+					Git: &tideprojectv1alpha3.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
 						CredsSecretRef: "test-creds",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			r := &ProjectReconciler{
 				Client:                  k8sClient,
@@ -158,7 +158,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 
 			// Advance the project to the clone-dispatch point: simulate init Job success
 			// so the reconciler reaches reconcilePhase3Lifecycle and dispatches the clone Job.
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			for range 10 {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
@@ -230,7 +230,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 
 			// Assert CloneComplete is now true.
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 				g.Expect(got.Status.Git.CloneComplete).To(BeTrue(),
 					"Status.Git.CloneComplete must be true after clone Job reports Succeeded>0")
@@ -246,7 +246,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		const projectName = "test-clone-idempotency-failed-redispatch"
 
 		AfterEach(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -255,19 +255,19 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 		})
 
 		It("deletes a Failed clone Job and re-dispatches, setting CloneFailed", func() {
-			proj := &tideprojectv1alpha2.Project{
+			proj := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/test.git",
-					Git: &tideprojectv1alpha2.GitConfig{
+					Git: &tideprojectv1alpha3.GitConfig{
 						RepoURL:        "https://github.com/example/test.git",
 						CredsSecretRef: "test-creds",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			r := &ProjectReconciler{
 				Client:                  k8sClient,
@@ -280,7 +280,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 
 			// Advance to the clone-dispatch point: drive reconciles + succeed the
 			// init Job so reconcilePhase3Lifecycle dispatches the clone Job.
-			var p tideprojectv1alpha2.Project
+			var p tideprojectv1alpha3.Project
 			for range 10 {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
@@ -341,11 +341,11 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 
 			// The failed Job must be gone (deleted), and CloneFailed condition set.
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 				cond := false
 				for i := range got.Status.Conditions {
-					if got.Status.Conditions[i].Type == tideprojectv1alpha2.ConditionCloneFailed &&
+					if got.Status.Conditions[i].Type == tideprojectv1alpha3.ConditionCloneFailed &&
 						got.Status.Conditions[i].Status == metav1.ConditionTrue {
 						cond = true
 					}

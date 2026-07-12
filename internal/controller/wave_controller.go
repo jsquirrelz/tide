@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/dispatch"
 	"github.com/jsquirrelz/tide/internal/finalizer"
 	"github.com/jsquirrelz/tide/internal/owner"
@@ -77,8 +77,8 @@ type WaveReconciler struct {
 func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
-	// 1. Fetch v1alpha2.Wave (Spring Tide: Wave ownership moved Plan→Project, Plan 23-02).
-	var wave tideprojectv1alpha2.Wave
+	// 1. Fetch v1alpha3.Wave (Spring Tide: Wave ownership moved Plan→Project, Plan 23-02).
+	var wave tideprojectv1alpha3.Wave
 	if err := r.Get(ctx, req.NamespacedName, &wave); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -113,9 +113,9 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// 6. Update status conditions and persist via Status().Update.
 	meta.SetStatusCondition(&wave.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionReady,
+		Type:               tideprojectv1alpha3.ConditionReady,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonInitialized,
+		Reason:             tideprojectv1alpha3.ReasonInitialized,
 		Message:            "Wave scaffolded; dispatcher not wired",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -129,7 +129,7 @@ func (r *WaveReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 // reconcileObservational implements the Wave observational roll-up body inside
 // the Dispatcher seam (step 5 of the six-step pattern). Per D-B2 and D-B4,
 // this method is PURELY observational — it NEVER creates Jobs.
-func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha2.Wave) (ctrl.Result, error) {
+func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tideprojectv1alpha3.Wave) (ctrl.Result, error) {
 	// Step 1: List Tasks by the global wave-index label stamped by
 	// ProjectReconciler.stampGlobalTaskLabels (Phase 24 Plan 03 — now live and
 	// authoritative). The global wave index is Project-scoped: wave-index=<N>
@@ -137,7 +137,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	// This is the bidirectional index described by the README:54 namesake
 	// invariant (EXEC-03): given any wave, you know its tasks.
 	waveIndexLabel := fmt.Sprintf("%d", wave.Spec.WaveIndex)
-	var taskList tideprojectv1alpha2.TaskList
+	var taskList tideprojectv1alpha3.TaskList
 	if err := r.List(ctx, &taskList,
 		client.InNamespace(wave.Namespace),
 		client.MatchingLabels{
@@ -191,15 +191,15 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 	patch := client.MergeFrom(wave.DeepCopy())
 	wave.Status.Phase = phase
 	wave.Status.TaskRefs = taskRefs
-	condType := tideprojectv1alpha2.ConditionReconciling
+	condType := tideprojectv1alpha3.ConditionReconciling
 	condStatus := metav1.ConditionTrue
 	reason := "Aggregating"
 	switch phase {
 	case "Succeeded":
-		condType = tideprojectv1alpha2.ConditionSucceeded
+		condType = tideprojectv1alpha3.ConditionSucceeded
 		reason = "AllTasksSucceeded"
 	case "Failed":
-		condType = tideprojectv1alpha2.ConditionFailed
+		condType = tideprojectv1alpha3.ConditionFailed
 		reason = "MemberTaskFailed"
 	}
 	meta.SetStatusCondition(&wave.Status.Conditions, metav1.Condition{
@@ -241,7 +241,7 @@ func (r *WaveReconciler) reconcileObservational(ctx context.Context, wave *tidep
 // ProjectReconciler stamp). Dropped events are self-healed by the low-frequency
 // RequeueAfter resync on Running Waves (WR-05 mitigation).
 func (r *WaveReconciler) taskToWaveMapper(_ context.Context, obj client.Object) []reconcile.Request {
-	task, ok := obj.(*tideprojectv1alpha2.Task)
+	task, ok := obj.(*tideprojectv1alpha3.Task)
 	if !ok {
 		return nil
 	}
@@ -272,13 +272,13 @@ func (r *WaveReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	annotationOnly := predicate.AnnotationChangedPredicate{}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&tideprojectv1alpha2.Wave{}).
+		For(&tideprojectv1alpha3.Wave{}).
 		Watches(
-			&tideprojectv1alpha2.Task{},
+			&tideprojectv1alpha3.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.taskToWaveMapper),
 		).
 		Watches(
-			&tideprojectv1alpha2.Wave{},
+			&tideprojectv1alpha3.Wave{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 				return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
 			}),

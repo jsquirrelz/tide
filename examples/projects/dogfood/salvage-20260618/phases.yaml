@@ -1,6 +1,6 @@
 apiVersion: v1
 items:
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -12,7 +12,7 @@ items:
     name: phase-01-codex-pricing-usage
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -30,7 +30,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:49:38Z"
@@ -42,7 +42,7 @@ items:
     name: phase-01-codex-subagent-core
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -60,7 +60,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:51:05Z"
@@ -72,7 +72,7 @@ items:
     name: phase-01-provider-switch
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -90,7 +90,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:49:38Z"
@@ -102,7 +102,7 @@ items:
     name: phase-02-codex-image-binary
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -122,7 +122,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:51:05Z"
@@ -134,7 +134,7 @@ items:
     name: phase-02-codex-subagent
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -152,7 +152,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -164,7 +164,7 @@ items:
     name: phase-02-codex-subagent-core
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -184,7 +184,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -196,7 +196,7 @@ items:
     name: phase-03-codex-image-entrypoint
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -216,7 +216,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:51:05Z"
@@ -228,7 +228,7 @@ items:
     name: phase-03-image-and-credentials
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -248,7 +248,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:49:38Z"
@@ -260,7 +260,7 @@ items:
     name: phase-03-per-level-provider-switch
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -278,7 +278,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:49:38Z"
@@ -290,7 +290,7 @@ items:
     name: phase-04-credential-and-chart-wiring
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -310,7 +310,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:51:05Z"
@@ -322,7 +322,7 @@ items:
     name: phase-04-mixed-provider-integration
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -343,7 +343,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -355,7 +355,7 @@ items:
     name: phase-04-per-level-vendor-switch
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -373,7 +373,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -385,7 +385,7 @@ items:
     name: phase-05-chart-secret-wiring
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -415,7 +415,7 @@ items:
       status: "False"
       type: WaveOrLevelPaused
     phase: Succeeded
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:49:38Z"
@@ -427,7 +427,7 @@ items:
     name: phase-05-heterogeneous-dispatch-demo
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone
@@ -450,7 +450,7 @@ items:
       status: "True"
       type: AuthoringPlanner
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-17T23:53:37Z"
@@ -462,7 +462,7 @@ items:
     name: phase-06-hetero-integration
     namespace: tide-dogfood-codex
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone

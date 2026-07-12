@@ -113,7 +113,7 @@ func makeMinimalBundleTgz(t *testing.T) (tgzPath string, cleanFn func()) {
 	files := map[string][]byte{
 		pkgbundle.BundleFileSeedManifest: manifestJSON,
 		pkgbundle.BundleFilePVCEnvelopes: pvcTgz,
-		pkgbundle.BundleFileProject:      []byte("apiVersion: tideproject.k8s/v1alpha2\nkind: Project\n"),
+		pkgbundle.BundleFileProject:      []byte("apiVersion: tideproject.k8s/v1alpha3\nkind: Project\n"),
 	}
 
 	tmp, err := os.CreateTemp("", "import-test-*.tgz")
@@ -422,7 +422,7 @@ func makeMinimalBundleDirForLive(t *testing.T) (bundleDir, oldUID string, cleanu
 	})
 
 	// project.yaml must have importSource for live mode to read pvcSubPath.
-	projectYAML := `apiVersion: tideproject.k8s/v1alpha2
+	projectYAML := `apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: my-project

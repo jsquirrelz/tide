@@ -27,17 +27,17 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ---------- checkBudgetBlocked ----------
 
 func TestCheckBudgetBlocked_TrueWhenConditionPresent(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionBudgetBlocked,
+		Type:               tideprojectv1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonBudgetCapReached,
+		Reason:             tideprojectv1alpha3.ReasonBudgetCapReached,
 		LastTransitionTime: metav1.Now(),
 	})
 	if !checkBudgetBlocked(project) {
@@ -46,18 +46,18 @@ func TestCheckBudgetBlocked_TrueWhenConditionPresent(t *testing.T) {
 }
 
 func TestCheckBudgetBlocked_FalseWhenConditionAbsent(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	if checkBudgetBlocked(project) {
 		t.Error("expected checkBudgetBlocked=false when no conditions")
 	}
 }
 
 func TestCheckBudgetBlocked_FalseWhenConditionFalse(t *testing.T) {
-	project := &tideprojectv1alpha2.Project{}
+	project := &tideprojectv1alpha3.Project{}
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionBudgetBlocked,
+		Type:               tideprojectv1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionFalse,
-		Reason:             tideprojectv1alpha2.ReasonBudgetCapCleared,
+		Reason:             tideprojectv1alpha3.ReasonBudgetCapCleared,
 		LastTransitionTime: metav1.Now(),
 	})
 	if checkBudgetBlocked(project) {
@@ -74,18 +74,18 @@ func TestCheckBudgetBlocked_FalseForNilProject(t *testing.T) {
 // ---------- setBudgetBlockedIfNeeded ----------
 
 // projectWithCap creates a Project with the given cap and spent values (for fake client).
-func projectWithCap(name string, capCents, spentCents int64) *tideprojectv1alpha2.Project {
-	return &tideprojectv1alpha2.Project{
+func projectWithCap(name string, capCents, spentCents int64) *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
 		},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://example.com/repo.git",
-			Budget:     tideprojectv1alpha2.BudgetConfig{AbsoluteCapCents: capCents},
+			Budget:     tideprojectv1alpha3.BudgetConfig{AbsoluteCapCents: capCents},
 		},
-		Status: tideprojectv1alpha2.ProjectStatus{
-			Budget: tideprojectv1alpha2.BudgetStatus{CostSpentCents: spentCents},
+		Status: tideprojectv1alpha3.ProjectStatus{
+			Budget: tideprojectv1alpha3.BudgetStatus{CostSpentCents: spentCents},
 		},
 	}
 }
@@ -103,20 +103,20 @@ func TestSetBudgetBlockedIfNeeded_SetsCondition(t *testing.T) {
 		t.Fatalf("setBudgetBlockedIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "my-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
 
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 	if cond == nil {
 		t.Fatal("expected BudgetBlocked condition to be set; got nil")
 	}
 	if cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected BudgetBlocked=True; got %q", cond.Status)
 	}
-	if cond.Reason != tideprojectv1alpha2.ReasonBudgetCapReached {
-		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha2.ReasonBudgetCapReached, cond.Reason)
+	if cond.Reason != tideprojectv1alpha3.ReasonBudgetCapReached {
+		t.Errorf("expected Reason=%q; got %q", tideprojectv1alpha3.ReasonBudgetCapReached, cond.Reason)
 	}
 	if len(cond.Message) == 0 {
 		t.Error("expected non-empty condition Message")
@@ -143,11 +143,11 @@ func TestSetBudgetBlockedIfNeeded_CapNotExceeded_NoOp(t *testing.T) {
 		t.Fatalf("setBudgetBlockedIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "under-cap-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 	if cond != nil {
 		t.Errorf("expected no BudgetBlocked condition when cap not exceeded; got %+v", cond)
 	}
@@ -159,9 +159,9 @@ func TestSetBudgetBlockedIfNeeded_Idempotent(t *testing.T) {
 	project := projectWithCap("already-blocked-project", 1000, 1001)
 	// Pre-stamp the condition
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionBudgetBlocked,
+		Type:               tideprojectv1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonBudgetCapReached,
+		Reason:             tideprojectv1alpha3.ReasonBudgetCapReached,
 		Message:            "already set",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -178,11 +178,11 @@ func TestSetBudgetBlockedIfNeeded_Idempotent(t *testing.T) {
 		t.Fatalf("second call (idempotent): %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "already-blocked-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Errorf("expected BudgetBlocked=True after idempotent call; got %v", cond)
 	}
@@ -206,9 +206,9 @@ func TestSetBudgetBlockedIfNeeded_CapRaised_ClearsCondition(t *testing.T) {
 	project := projectWithCap("raised-cap-project", 2000, 1001)
 	// Pre-stamp the condition as True (was previously exceeded).
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
-		Type:               tideprojectv1alpha2.ConditionBudgetBlocked,
+		Type:               tideprojectv1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionTrue,
-		Reason:             tideprojectv1alpha2.ReasonBudgetCapReached,
+		Reason:             tideprojectv1alpha3.ReasonBudgetCapReached,
 		Message:            "was exceeded",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -221,18 +221,18 @@ func TestSetBudgetBlockedIfNeeded_CapRaised_ClearsCondition(t *testing.T) {
 		t.Fatalf("setBudgetBlockedIfNeeded: %v", err)
 	}
 
-	var got tideprojectv1alpha2.Project
+	var got tideprojectv1alpha3.Project
 	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "raised-cap-project"}, &got); err != nil {
 		t.Fatalf("get project: %v", err)
 	}
-	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 	if cond == nil {
 		t.Fatal("expected BudgetBlocked condition after clear; got nil")
 	}
 	if cond.Status != metav1.ConditionFalse {
 		t.Errorf("cap-raise recovery: expected BudgetBlocked=False; got %q", cond.Status)
 	}
-	if cond.Reason != tideprojectv1alpha2.ReasonBudgetCapCleared {
-		t.Errorf("cap-raise recovery: expected Reason=%q; got %q", tideprojectv1alpha2.ReasonBudgetCapCleared, cond.Reason)
+	if cond.Reason != tideprojectv1alpha3.ReasonBudgetCapCleared {
+		t.Errorf("cap-raise recovery: expected Reason=%q; got %q", tideprojectv1alpha3.ReasonBudgetCapCleared, cond.Reason)
 	}
 }

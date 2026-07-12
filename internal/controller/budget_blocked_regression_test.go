@@ -40,7 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
 )
@@ -49,14 +49,14 @@ import (
 // task completion rolling up spend past the cap. Used across run-1 regression
 // scenarios.
 func stampBudgetSpend(ctx context.Context, projectName string, spentCents int64) {
-	var proj tideprojectv1alpha2.Project
+	var proj tideprojectv1alpha3.Project
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 	sp := client.MergeFrom(proj.DeepCopy())
 	proj.Status.Budget.CostSpentCents = spentCents
 	Expect(k8sClient.Status().Patch(ctx, &proj, sp)).To(Succeed())
 	// Wait for the manager cache to reflect the spend — reconciler reads via mgrClient.
 	Eventually(func() bool {
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 			return false
 		}
@@ -66,18 +66,18 @@ func stampBudgetSpend(ctx context.Context, projectName string, spentCents int64)
 }
 
 // makeBudgetProject creates a Project with a given AbsoluteCapCents budget.
-func makeBudgetProject(ctx context.Context, name string, capCents int64) *tideprojectv1alpha2.Project {
-	p := &tideprojectv1alpha2.Project{
+func makeBudgetProject(ctx context.Context, name string, capCents int64) *tideprojectv1alpha3.Project {
+	p := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			TargetRepo: "https://github.com/example/tide.git",
-			Budget: tideprojectv1alpha2.BudgetConfig{
+			Budget: tideprojectv1alpha3.BudgetConfig{
 				AbsoluteCapCents: capCents,
 			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, p)).To(Succeed())
-	waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+	waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 	return p
 }
 
@@ -135,13 +135,13 @@ var _ = Describe("BudgetBlocked run-1 regression (a): cap trips → Project carr
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p)).To(Succeed())
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 				g.Expect(c).NotTo(BeNil(),
 					"run-1 regression: Project must carry BudgetBlocked condition (was silently absent in run-1)")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonBudgetCapReached))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonBudgetCapReached))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
@@ -178,7 +178,7 @@ var _ = Describe("BudgetBlocked run-1 regression (b): no Job created; Task NOT F
 			Expect(result.RequeueAfter).To(Equal(30*time.Second),
 				"budget-blocked hold must return 30s park requeue (not empty Result)")
 
-			var t tideprojectv1alpha2.Task
+			var t tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 			Expect(t.Status.Phase).NotTo(Equal("Failed"),
 				"BUDGET-02: BudgetBlocked must park the Task, not fail it")
@@ -241,7 +241,7 @@ var _ = Describe("BudgetBlocked reservation bound: second task parks when headro
 
 			// Task A: spent(9000) + reserved(0) + estimate(600) = 9600 < cap(10000) → dispatch.
 			pumpTaskToRunning(reconciler, projName, taskA)
-			var ta tideprojectv1alpha2.Task
+			var ta tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, nameA, &ta)).To(Succeed())
 			Expect(ta.Status.Phase).To(Equal("Running"),
 				"BUDGET-03: first task must dispatch when headroom is available")
@@ -252,7 +252,7 @@ var _ = Describe("BudgetBlocked reservation bound: second task parks when headro
 			Expect(result.RequeueAfter).To(Equal(30*time.Second),
 				"BUDGET-03: second task must park at headroom gate (30s requeue)")
 
-			var tb tideprojectv1alpha2.Task
+			var tb tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, nameB, &tb)).To(Succeed())
 			Expect(tb.Status.Phase).NotTo(Equal("Running"),
 				"BUDGET-03: second task must not dispatch — headroom gate parks it")
@@ -295,16 +295,16 @@ var _ = Describe("BudgetBlocked cap-raise recovery: condition clears and dispatc
 			Eventually(func(g Gomega) {
 				_, err := reconcileN(reconciler, name, 1)
 				g.Expect(err).NotTo(HaveOccurred())
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p)).To(Succeed())
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
 				"pre-condition: BudgetBlocked=True must be visible before cap raise")
 
 			// Operator raises the cap via Spec edit (standard recovery path per D-04).
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &proj)).To(Succeed())
 			projPatch := client.MergeFrom(proj.DeepCopy())
 			proj.Spec.Budget.AbsoluteCapCents = raisedCap
@@ -312,7 +312,7 @@ var _ = Describe("BudgetBlocked cap-raise recovery: condition clears and dispatc
 
 			// Wait for cache to reflect the spec change.
 			Eventually(func() bool {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
 					return false
 				}
@@ -325,21 +325,21 @@ var _ = Describe("BudgetBlocked cap-raise recovery: condition clears and dispatc
 			Eventually(func(g Gomega) {
 				_, err := reconcileN(reconciler, name, 1)
 				g.Expect(err).NotTo(HaveOccurred())
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p)).To(Succeed())
-				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha2.ConditionBudgetBlocked)
+				c := meta.FindStatusCondition(p.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 				if c == nil {
 					return // absent is also a cleared state
 				}
 				g.Expect(c.Status).To(Equal(metav1.ConditionFalse),
 					"T-14-08 mitigated: cap raise must clear BudgetBlocked (Reason=BudgetCapCleared)")
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonBudgetCapCleared))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonBudgetCapCleared))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed(),
 				"BudgetBlocked must flip to False after cap raise (bidirectional clear path)")
 
 			// Dispatch must now succeed.
 			pumpTaskToRunning(reconciler, projName, taskName)
-			var t tideprojectv1alpha2.Task
+			var t tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 			Expect(t.Status.Phase).To(Equal("Running"),
 				"cap-raise recovery: task must dispatch after BudgetBlocked cleared")

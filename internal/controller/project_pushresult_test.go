@@ -29,7 +29,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/metrics"
 )
 
@@ -132,7 +132,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 				Namespace: namespace,
 				OwnerReferences: []metav1.OwnerReference{
 					{
-						APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+						APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 						Kind:               "Project",
 						Name:               projectName,
 						UID:                projectUID,
@@ -173,7 +173,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			p := pods.Items[i]
 			_ = k8sClient.Delete(ctx, &p)
 		}
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &p); err == nil {
 			p.Finalizers = nil
 			_ = k8sClient.Update(ctx, &p)
@@ -184,24 +184,24 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 	// makeProjectInPhaseComplete creates a Project, drives it to
 	// PhaseComplete, ensures Status.Git.BranchName + RepoURL are set so the
 	// push Job dispatch path can run.
-	makeProjectInPhaseComplete := func(name string) *tideprojectv1alpha2.Project {
-		proj := &tideprojectv1alpha2.Project{
+	makeProjectInPhaseComplete := func(name string) *tideprojectv1alpha3.Project {
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 
-		var got tideprojectv1alpha2.Project
+		var got tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: "default"}, &got)).To(Succeed())
 		patch := client.MergeFrom(got.DeepCopy())
-		got.Status.Phase = tideprojectv1alpha2.PhaseComplete
+		got.Status.Phase = tideprojectv1alpha3.PhaseComplete
 		got.Status.Git.BranchName = "tide/run-" + name + "-1747200000"
 		Expect(k8sClient.Status().Patch(ctx, &got, patch)).To(Succeed())
 		return &got
@@ -241,10 +241,10 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			}
 
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhasePushLeakBlocked))
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionPushLeakBlocked)
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha3.PhasePushLeakBlocked))
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionPushLeakBlocked)
 				g.Expect(c).NotTo(BeNil(), "ConditionPushLeakBlocked should be set")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal("LeakDetected"))
@@ -287,10 +287,10 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			}
 
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhasePushLeaseFailed))
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionPushLeaseFailed)
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha3.PhasePushLeaseFailed))
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionPushLeaseFailed)
 				g.Expect(c).NotTo(BeNil())
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
 				g.Expect(c.Reason).To(Equal("LeaseRejected"))
@@ -333,27 +333,27 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			}
 
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &got)).To(Succeed())
 				// Succession not blocked: still Complete (no PushLeaseFailed dead-end).
-				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseComplete),
+				g.Expect(got.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseComplete),
 					"unknown-reason boundary failure must NOT regress Complete")
 				// A fresh attempt was dispatched (attempts incremented, last error recorded).
 				g.Expect(got.Status.BoundaryPush.Attempts).To(BeNumerically(">=", 1),
 					"a fresh boundary-push attempt should have been dispatched")
 				g.Expect(got.Status.BoundaryPush.LastError).NotTo(BeEmpty())
 				// Non-terminal BoundaryPushed condition surfaces the in-flight retry.
-				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha2.ConditionBoundaryPushed)
+				c := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionBoundaryPushed)
 				g.Expect(c).NotTo(BeNil(), "BoundaryPushed condition should be set")
 				g.Expect(c.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonPushing))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonPushing))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
 
-	Describe("Test 6: ConditionPushLeakBlocked constant exists in api/v1alpha1", func() {
-		It("api/v1alpha1.ConditionPushLeakBlocked equals 'PushLeakBlocked'", func() {
-			Expect(tideprojectv1alpha2.ConditionPushLeakBlocked).To(Equal("PushLeakBlocked"))
+	Describe("Test 6: ConditionPushLeakBlocked constant exists in api/v1alpha3", func() {
+		It("api/v1alpha3.ConditionPushLeakBlocked equals 'PushLeakBlocked'", func() {
+			Expect(tideprojectv1alpha3.ConditionPushLeakBlocked).To(Equal("PushLeakBlocked"))
 		})
 	})
 })

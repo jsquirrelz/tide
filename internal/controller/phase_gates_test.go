@@ -25,7 +25,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
@@ -34,13 +34,13 @@ import (
 var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Label("envtest", "phase4", "gates"), func() {
 	ctx := context.Background()
 
-	makeProjectAndMilestone := func(projectName, msName string, g tideprojectv1alpha2.Gates) {
-		proj := &tideprojectv1alpha2.Project{
+	makeProjectAndMilestone := func(projectName, msName string, g tideprojectv1alpha3.Gates) {
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: projectName, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 				TargetRepo: "https://github.com/example/test.git",
-				Subagent:   tideprojectv1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
-				Git: &tideprojectv1alpha2.GitConfig{
+				Subagent:   tideprojectv1alpha3.SubagentConfig{Model: "claude-opus-4-7"},
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 				},
@@ -48,29 +48,29 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
-		ms := &tideprojectv1alpha2.Milestone{
+		waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: msName, Namespace: "default"},
-			Spec:       tideprojectv1alpha2.MilestoneSpec{ProjectRef: projectName},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: projectName},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-		waitForCacheSync(msName, "default", &tideprojectv1alpha2.Milestone{})
+		waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 	}
 
 	cleanup := func(projectName, msName, phaseName string) {
-		ph := &tideprojectv1alpha2.Phase{}
+		ph := &tideprojectv1alpha3.Phase{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, ph); err == nil {
 			ph.Finalizers = nil
 			_ = k8sClient.Update(ctx, ph)
 			_ = k8sClient.Delete(ctx, ph)
 		}
-		ms := &tideprojectv1alpha2.Milestone{}
+		ms := &tideprojectv1alpha3.Milestone{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
 			ms.Finalizers = nil
 			_ = k8sClient.Update(ctx, ms)
 			_ = k8sClient.Delete(ctx, ms)
 		}
-		proj := &tideprojectv1alpha2.Project{}
+		proj := &tideprojectv1alpha3.Project{}
 		if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, proj); err == nil {
 			proj.Finalizers = nil
 			_ = k8sClient.Update(ctx, proj)
@@ -85,9 +85,9 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 	}
 
 	driveToJobCompletion := func(phaseName string, r *PhaseReconciler, envReader *mapEnvReader) {
-		waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+		waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
-		var got tideprojectv1alpha2.Phase
+		var got tideprojectv1alpha3.Phase
 		Eventually(func() error {
 			return mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &got)
 		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
@@ -104,14 +104,14 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		const projectName, msName, phaseName = "gate-proj-ph1", "gate-ms-ph1", "gate-phase-1"
 
 		BeforeEach(func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyApprove})
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyApprove})
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("patches Status.Phase=AwaitingApproval with WaveOrLevelPaused True", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
@@ -132,12 +132,12 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			driveToJobCompletion(phaseName, r, envReader)
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).To(Equal("AwaitingApproval"))
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil())
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonAwaitingApproval))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonAwaitingApproval))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 		})
 	})
@@ -146,14 +146,14 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		const projectName, msName, phaseName = "gate-proj-ph2", "gate-ms-ph2", "gate-phase-2"
 
 		BeforeEach(func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyApprove})
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyApprove})
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("consumes annotation, transitions Running+ApprovedByUser, then Succeeded via ChildCount gate (leaf)", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
@@ -174,14 +174,14 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			driveToJobCompletion(phaseName, r, envReader)
 
 			Eventually(func() string {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after); err != nil {
 					return ""
 				}
 				return after.Status.Phase
 			}, 5*time.Second, 100*time.Millisecond).Should(Equal("AwaitingApproval"))
 
-			var current tideprojectv1alpha2.Phase
+			var current tideprojectv1alpha3.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &current)).To(Succeed())
 			patch := client.MergeFrom(current.DeepCopy())
 			if current.Annotations == nil {
@@ -195,7 +195,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			// The D-04 two-step: first Running+ApprovedByUser (or already Succeeded for leaf),
 			// then Succeeded via ChildCount-gated succession. The key assertion: annotation consumed.
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				// Must NOT still be AwaitingApproval (annotation must have been consumed by
 				// the new AwaitingApproval branch in reconcilePlannerDispatch — D-01 fix).
@@ -208,7 +208,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			// Terminal: Succeeded via ChildCount-gated succession (leaf fixture, ChildCount=0).
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).To(Equal("Succeeded"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
@@ -224,14 +224,14 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		const projectName, msName, phaseName = "gate-proj-ph-osc", "gate-ms-ph-osc", "gate-phase-osc"
 
 		BeforeEach(func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyApprove})
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyApprove})
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("Phase stays AwaitingApproval through 3 reconciles; zero planner Jobs created (D-01)", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
@@ -253,7 +253,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			// First: assert parked at AwaitingApproval (gate hook fired).
 			Eventually(func() string {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after); err != nil {
 					return ""
 				}
@@ -272,7 +272,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			}
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).To(Equal("AwaitingApproval"),
 					"Phase must NOT leave AwaitingApproval without an approve annotation (oscillation fix D-01)")
@@ -289,8 +289,8 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		const projectName, msName, phaseName = "gate-proj-ph3", "gate-ms-ph3", "gate-phase-3"
 
 		BeforeEach(func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyAuto})
-			var proj tideprojectv1alpha2.Project
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyAuto})
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 			patch := client.MergeFrom(proj.DeepCopy())
 			if proj.Annotations == nil {
@@ -299,7 +299,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			proj.Annotations[gates.AnnotationReject] = "phase halt"
 			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
 			Eventually(func() string {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return ""
 				}
@@ -309,12 +309,12 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("Phase is parked with ConditionWaveOrLevelPaused/RejectedByUser (NOT Failed), then recovers after annotation clear", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
-			waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
@@ -335,26 +335,26 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
 					"D-05: reject must park the Phase, not fail-mark it")
-				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha2.ConditionWaveOrLevelPaused)
+				c := meta.FindStatusCondition(after.Status.Conditions, tideprojectv1alpha3.ConditionWaveOrLevelPaused)
 				g.Expect(c).NotTo(BeNil(), "ConditionWaveOrLevelPaused must be set when parked")
 				g.Expect(c.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(c.Reason).To(Equal(tideprojectv1alpha2.ReasonRejectedByUser))
+				g.Expect(c.Reason).To(Equal(tideprojectv1alpha3.ReasonRejectedByUser))
 				g.Expect(c.Message).To(ContainSubstring("phase halt"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// D-05 recovery: clear the reject annotation (simulating tide resume).
-			var current tideprojectv1alpha2.Project
+			var current tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &current)).To(Succeed())
 			newAnno := gates.ConsumeReject(&current)
 			annoPatch := client.MergeFrom(current.DeepCopy())
 			current.SetAnnotations(newAnno)
 			Expect(k8sClient.Patch(ctx, &current, annoPatch)).To(Succeed())
 			Eventually(func() string {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return "err"
 				}
@@ -364,7 +364,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			// After annotation clear, re-driving must let the Phase proceed.
 			driveToJobCompletion(phaseName, r, envReader)
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).NotTo(Equal("Failed"),
 					"D-05: Phase must not be Failed after reject annotation cleared")
@@ -377,8 +377,8 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		const projectName, msName, phaseName = "gate-proj-ph3h", "gate-ms-ph3h", "gate-phase-3h"
 
 		BeforeEach(func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyAuto})
-			var proj tideprojectv1alpha2.Project
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyAuto})
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &proj)).To(Succeed())
 			patch := client.MergeFrom(proj.DeepCopy())
 			if proj.Annotations == nil {
@@ -387,7 +387,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			proj.Annotations[gates.AnnotationReject] = "halt dispatch"
 			Expect(k8sClient.Patch(ctx, &proj, patch)).To(Succeed())
 			Eventually(func() string {
-				var p tideprojectv1alpha2.Project
+				var p tideprojectv1alpha3.Project
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err != nil {
 					return ""
 				}
@@ -397,12 +397,12 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("Pending Phase creates no planner Job while Project carries reject annotation", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
-			waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
 			r := &PhaseReconciler{
 				Client:         mgrClient,
@@ -436,14 +436,14 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 		BeforeEach(func() {
 			// Empty Gates → default for phase is "auto" per gates.EvaluatePolicy.
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{})
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{})
 		})
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("Phase reaches Succeeded immediately when phase gate is auto/empty", func() {
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
 
@@ -464,7 +464,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			driveToJobCompletion(phaseName, r, envReader)
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).To(Equal("Succeeded"))
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
@@ -483,17 +483,17 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 		AfterEach(func() { cleanup(projectName, msName, phaseName) })
 
 		It("Phase dispatch held: zero planner Jobs while parent Milestone AwaitingApproval; Job created after approval", func() {
-			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha2.Gates{Phase: gates.PolicyAuto})
+			makeProjectAndMilestone(projectName, msName, tideprojectv1alpha3.Gates{Phase: gates.PolicyAuto})
 
 			// Manually park the Milestone at AwaitingApproval (simulating the gate hook
 			// in milestone_controller.go). The Phase under test must see this status.
-			var ms tideprojectv1alpha2.Milestone
+			var ms tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &ms)).To(Succeed())
 			msPatch := client.MergeFrom(ms.DeepCopy())
 			ms.Status.Phase = "AwaitingApproval"
 			Expect(mgrClient.Status().Patch(ctx, &ms, msPatch)).To(Succeed())
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
 					return ""
 				}
@@ -501,12 +501,12 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			}, 5*time.Second, 50*time.Millisecond).Should(Equal("AwaitingApproval"))
 
 			// Create the Phase with MilestoneRef pointing at the parked Milestone.
-			phase := &tideprojectv1alpha2.Phase{
+			phase := &tideprojectv1alpha3.Phase{
 				ObjectMeta: metav1.ObjectMeta{Name: phaseName, Namespace: "default"},
-				Spec:       tideprojectv1alpha2.PhaseSpec{MilestoneRef: msName},
+				Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: msName},
 			}
 			Expect(k8sClient.Create(ctx, phase)).To(Succeed())
-			waitForCacheSync(phaseName, "default", &tideprojectv1alpha2.Phase{})
+			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
@@ -535,7 +535,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			// Assert: Phase stays at "" (held — not AwaitingApproval; Pitfall 5 guard).
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Phase
+				var after tideprojectv1alpha3.Phase
 				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &after)).To(Succeed())
 				g.Expect(after.Status.Phase).To(Equal(""),
 					"held child must stay at Status.Phase='' (not AwaitingApproval) while parent is parked (Pitfall 5)")
@@ -553,7 +553,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			ms.Status.Phase = "Running"
 			Expect(mgrClient.Status().Patch(ctx, &ms, approvePatch)).To(Succeed())
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, &got); err != nil {
 					return ""
 				}
@@ -564,7 +564,7 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
 
 			// Assert: planner Job now exists (dispatch unblocked).
-			var phaseAfterApproval tideprojectv1alpha2.Phase
+			var phaseAfterApproval tideprojectv1alpha3.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phaseName, Namespace: "default"}, &phaseAfterApproval)).To(Succeed())
 			jobName := fmt.Sprintf("tide-phase-%s-1", phaseAfterApproval.UID)
 			Eventually(func() error {

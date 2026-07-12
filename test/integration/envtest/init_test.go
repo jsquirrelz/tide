@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const initNamespace = "default"
@@ -36,7 +36,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 	ctx := context.Background()
 
 	AfterEach(func() {
-		projects := &tideprojectv1alpha2.ProjectList{}
+		projects := &tideprojectv1alpha3.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(initNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -54,12 +54,12 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 			projectName := "init-job-project-01"
 			makeBoundPVC(ctx, "tide-projects", initNamespace) // idempotent
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/init-test.git",
 				},
 			}
@@ -67,7 +67,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 
 			// Wait for the Project to get a UID.
 			Eventually(func() string {
-				p := &tideprojectv1alpha2.Project{}
+				p := &tideprojectv1alpha3.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: initNamespace}, p); err != nil {
 					return ""
 				}
@@ -110,12 +110,12 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 			projectName := "init-job-idempotent-02"
 			makeBoundPVC(ctx, "tide-projects", initNamespace)
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/idempotent.git",
 				},
 			}
@@ -148,7 +148,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 
 			// Trigger another reconcile by updating an annotation.
 			Eventually(func() error {
-				p := &tideprojectv1alpha2.Project{}
+				p := &tideprojectv1alpha3.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: initNamespace}, p); err != nil {
 					return err
 				}
@@ -183,12 +183,12 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 			projectName := "init-job-complete-03"
 			makeBoundPVC(ctx, "tide-projects", initNamespace)
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      projectName,
 					Namespace: initNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/complete.git",
 				},
 			}
@@ -201,7 +201,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 			// when Ginkgo's --randomize-all puts the completion spec late in the
 			// run order; AfterEach deletes happen between specs but ResourceVersion
 			// lag can still surface a stale entry to the cache-backed test client.
-			var fetched tideprojectv1alpha2.Project
+			var fetched tideprojectv1alpha3.Project
 			Eventually(func() string {
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: initNamespace}, &fetched); err != nil {
 					return ""
@@ -255,7 +255,7 @@ var _ = Describe("Project init Job lifecycle", Label("envtest"), func() {
 
 			// The Project.Status.Phase should become Initialized.
 			Eventually(func() string {
-				p := &tideprojectv1alpha2.Project{}
+				p := &tideprojectv1alpha3.Project{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{Name: projectName, Namespace: initNamespace}, p); err != nil {
 					return ""
 				}

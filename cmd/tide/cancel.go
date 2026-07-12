@@ -37,7 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // cancelRun is the testable seam. Returns an error if --force is absent
@@ -52,7 +52,7 @@ func cancelRun(
 		)
 	}
 
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: projectName}, &proj); err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("tide: project %q not found in namespace %q", projectName, ns)
@@ -101,7 +101,7 @@ func cancelDryRun(
 	// 04-04/04-07 decisions). Owner-ref filtering would also work but the
 	// label form is consistent with the rest of the CLI.
 	{
-		var list tidev1alpha2.MilestoneList
+		var list tidev1alpha3.MilestoneList
 		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 			fmt.Fprintf(errOut, "warning: list Milestones failed (cannot enumerate scope): %v\n", err)
 		} else {
@@ -114,7 +114,7 @@ func cancelDryRun(
 		}
 	}
 	{
-		var list tidev1alpha2.PhaseList
+		var list tidev1alpha3.PhaseList
 		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 			fmt.Fprintf(errOut, "warning: list Phases failed (cannot enumerate scope): %v\n", err)
 		} else {
@@ -127,7 +127,7 @@ func cancelDryRun(
 		}
 	}
 	{
-		var list tidev1alpha2.PlanList
+		var list tidev1alpha3.PlanList
 		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 			fmt.Fprintf(errOut, "warning: list Plans failed (cannot enumerate scope): %v\n", err)
 		} else {
@@ -140,7 +140,7 @@ func cancelDryRun(
 		}
 	}
 	{
-		var list tidev1alpha2.TaskList
+		var list tidev1alpha3.TaskList
 		if err := c.List(ctx, &list, client.InNamespace(ns)); err != nil {
 			fmt.Fprintf(errOut, "warning: list Tasks failed (cannot enumerate scope): %v\n", err)
 		} else {

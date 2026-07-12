@@ -52,7 +52,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	tidemetrics "github.com/jsquirrelz/tide/internal/metrics"
 )
 
@@ -66,7 +66,7 @@ import (
 // condition is already True with a Message naming the same model, the metric
 // still increments (it counts dispatch rollups) but the status patch is
 // skipped to avoid churn.
-func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha2.Project, fallbackModel string) error {
+func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *tideprojectv1alpha3.Project, fallbackModel string) error {
 	if project == nil || fallbackModel == "" {
 		return nil
 	}
@@ -79,11 +79,11 @@ func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *t
 	// condition-clobber class fixed in d864860/91a67c2/957fbc1. The lock makes
 	// a concurrent write a retryable conflict instead of a silent erase.
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		latest := &tideprojectv1alpha2.Project{}
+		latest := &tideprojectv1alpha3.Project{}
 		if err := c.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
 			return err
 		}
-		existing := meta.FindStatusCondition(latest.Status.Conditions, tideprojectv1alpha2.ConditionPricingFallbackActive)
+		existing := meta.FindStatusCondition(latest.Status.Conditions, tideprojectv1alpha3.ConditionPricingFallbackActive)
 		// Anchor the dedupe on the quoted form the Message embeds (%q below): a
 		// bare Contains false-positives on model IDs that are substrings of an
 		// already-surfaced one (claude-sonnet-6 vs claude-sonnet-6-1, or a dated
@@ -94,9 +94,9 @@ func setPricingFallbackIfNeeded(ctx context.Context, c client.Client, project *t
 		}
 		patch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		meta.SetStatusCondition(&latest.Status.Conditions, metav1.Condition{
-			Type:   tideprojectv1alpha2.ConditionPricingFallbackActive,
+			Type:   tideprojectv1alpha3.ConditionPricingFallbackActive,
 			Status: metav1.ConditionTrue,
-			Reason: tideprojectv1alpha2.ReasonUnknownModelPriced,
+			Reason: tideprojectv1alpha3.ReasonUnknownModelPriced,
 			// %q keeps envelope-derived content inert — the model ID lands as a
 			// quoted string only, never as formatting directives (T-38-06).
 			Message: fmt.Sprintf("pricing: model %q missing from the price table; dispatches billed at the conservative (most-expensive) tier. "+

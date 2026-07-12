@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // newImportReconciler constructs an ImportReconciler wired to the shared mgrClient.
@@ -71,15 +71,15 @@ func makeSeedConfigMap(ctx context.Context, namespace, cmName string, manifest s
 
 // makeImportProject creates a Project with Spec.ImportSource set pointing to seedCMName.
 func makeImportProject(ctx context.Context, name, namespace, seedCMName string) error {
-	proj := &tideprojectv1alpha2.Project{
+	proj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: tideprojectv1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://github.com/example/import-test.git",
-			Subagent: tideprojectv1alpha2.SubagentConfig{
+			Subagent: tideprojectv1alpha3.SubagentConfig{
 				Model: "claude-opus-4-7",
 			},
-			ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+			ImportSource: &tideprojectv1alpha3.ImportSourceRef{
 				SeedManifestConfigMap: seedCMName,
 				SalvagedPVCSubPath:    "old-project-uid/workspace",
 			},
@@ -91,11 +91,11 @@ func makeImportProject(ctx context.Context, name, namespace, seedCMName string) 
 // findImportCondition is a helper that fetches the current ConditionImportComplete
 // from the Project status using the mgrClient (cache-backed).
 func findImportCondition(ctx context.Context, name, namespace string) *metav1.Condition {
-	var proj tideprojectv1alpha2.Project
+	var proj tideprojectv1alpha3.Project
 	if err := mgrClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, &proj); err != nil {
 		return nil
 	}
-	return apimeta.FindStatusCondition(proj.Status.Conditions, tideprojectv1alpha2.ConditionImportComplete)
+	return apimeta.FindStatusCondition(proj.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 }
 
 // ===== IMPORT CONTROLLER TESTS =====
@@ -144,12 +144,12 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
 			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
-			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projName, ns, &tideprojectv1alpha3.Project{})
 		})
 
 		AfterEach(func() {
 			// Cleanup Project (best-effort; webhooks require finalizer removal).
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
@@ -157,7 +157,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			// Cleanup child CRs.
 			for _, name := range []string{msMigName} {
-				ms := &tideprojectv1alpha2.Milestone{}
+				ms := &tideprojectv1alpha3.Milestone{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ms); err == nil {
 					ms.Finalizers = nil
 					_ = k8sClient.Update(ctx, ms)
@@ -165,7 +165,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{phMigName} {
-				ph := &tideprojectv1alpha2.Phase{}
+				ph := &tideprojectv1alpha3.Phase{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ph); err == nil {
 					ph.Finalizers = nil
 					_ = k8sClient.Update(ctx, ph)
@@ -173,7 +173,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{plMigName} {
-				pl := &tideprojectv1alpha2.Plan{}
+				pl := &tideprojectv1alpha3.Plan{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pl); err == nil {
 					pl.Finalizers = nil
 					_ = k8sClient.Update(ctx, pl)
@@ -199,27 +199,27 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				cond := findImportCondition(ctx, projName, ns)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonImportSucceeded))
+				g.Expect(cond.Reason).To(Equal(tideprojectv1alpha3.ReasonImportSucceeded))
 			}, 15*time.Second, 200*time.Millisecond).Should(Succeed())
 
 			// Assert Milestone CR was created with a new (non-empty) UID.
-			var ms tideprojectv1alpha2.Milestone
+			var ms tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msMigName, Namespace: ns}, &ms)).To(Succeed())
 			Expect(string(ms.UID)).NotTo(BeEmpty())
 			Expect(string(ms.UID)).NotTo(Equal("old-ms-uid-adopt"))
 
 			// Assert Phase CR was created.
-			var ph tideprojectv1alpha2.Phase
+			var ph tideprojectv1alpha3.Phase
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: phMigName, Namespace: ns}, &ph)).To(Succeed())
 			Expect(string(ph.UID)).NotTo(BeEmpty())
 
 			// Assert Plan CR was created.
-			var pl tideprojectv1alpha2.Plan
+			var pl tideprojectv1alpha3.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: plMigName, Namespace: ns}, &pl)).To(Succeed())
 			Expect(string(pl.UID)).NotTo(BeEmpty())
 
 			// Assert rekey ConfigMap exists.
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(mgrClient.Get(ctx, projKey, &proj)).To(Succeed())
 			rekeyCMName := fmt.Sprintf("tide-import-rekey-%s", proj.UID)
 			var rekeyCM corev1.ConfigMap
@@ -288,11 +288,11 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
 			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
-			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projName, ns, &tideprojectv1alpha3.Project{})
 		})
 
 		AfterEach(func() {
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
@@ -315,19 +315,19 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				cond := findImportCondition(ctx, projName, ns)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonCyclicPlanDetected))
+				g.Expect(cond.Reason).To(Equal(tideprojectv1alpha3.ReasonCyclicPlanDetected))
 			}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			// Consistently assert ZERO Milestone/Phase/Plan CRs were created (per-milestone atomicity, D-10).
 			// The cycle is detected BEFORE any client.Create, so NO child CRs should exist.
 			Consistently(func(g Gomega) {
-				var msList tideprojectv1alpha2.MilestoneList
+				var msList tideprojectv1alpha3.MilestoneList
 				g.Expect(mgrClient.List(ctx, &msList,
 					client.InNamespace(ns),
 					client.MatchingLabels(map[string]string{}),
 				)).To(Succeed())
 				// Filter to only the cycle test's objects (by name prefix to avoid pollution from other tests).
-				var cycleMS []tideprojectv1alpha2.Milestone
+				var cycleMS []tideprojectv1alpha3.Milestone
 				for _, ms := range msList.Items {
 					if ms.Name == msCycleName {
 						cycleMS = append(cycleMS, ms)
@@ -336,9 +336,9 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				g.Expect(cycleMS).To(BeEmpty(),
 					"cycle detection must prevent ANY Milestone CRs from being created (D-10 atomicity)")
 
-				var phList tideprojectv1alpha2.PhaseList
+				var phList tideprojectv1alpha3.PhaseList
 				g.Expect(mgrClient.List(ctx, &phList, client.InNamespace(ns))).To(Succeed())
-				var cyclePh []tideprojectv1alpha2.Phase
+				var cyclePh []tideprojectv1alpha3.Phase
 				for _, ph := range phList.Items {
 					if ph.Name == phCycleName {
 						cyclePh = append(cyclePh, ph)
@@ -347,9 +347,9 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				g.Expect(cyclePh).To(BeEmpty(),
 					"cycle detection must prevent ANY Phase CRs from being created (D-10 atomicity)")
 
-				var plList tideprojectv1alpha2.PlanList
+				var plList tideprojectv1alpha3.PlanList
 				g.Expect(mgrClient.List(ctx, &plList, client.InNamespace(ns))).To(Succeed())
-				var cyclePl []tideprojectv1alpha2.Plan
+				var cyclePl []tideprojectv1alpha3.Plan
 				for _, pl := range plList.Items {
 					if pl.Name == plCycleAName || pl.Name == plCycleBName {
 						cyclePl = append(cyclePl, pl)
@@ -388,11 +388,11 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
 			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
-			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projName, ns, &tideprojectv1alpha3.Project{})
 		})
 
 		AfterEach(func() {
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
@@ -443,18 +443,18 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
 			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
-			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projName, ns, &tideprojectv1alpha3.Project{})
 		})
 
 		AfterEach(func() {
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
 				_ = k8sClient.Delete(ctx, proj)
 			}
 			for _, name := range []string{msIdempName} {
-				ms := &tideprojectv1alpha2.Milestone{}
+				ms := &tideprojectv1alpha3.Milestone{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ms); err == nil {
 					ms.Finalizers = nil
 					_ = k8sClient.Update(ctx, ms)
@@ -462,7 +462,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{phIdempName} {
-				ph := &tideprojectv1alpha2.Phase{}
+				ph := &tideprojectv1alpha3.Phase{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ph); err == nil {
 					ph.Finalizers = nil
 					_ = k8sClient.Update(ctx, ph)
@@ -470,7 +470,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{plIdempName} {
-				pl := &tideprojectv1alpha2.Plan{}
+				pl := &tideprojectv1alpha3.Plan{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pl); err == nil {
 					pl.Finalizers = nil
 					_ = k8sClient.Update(ctx, pl)
@@ -497,12 +497,12 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}, 15*time.Second, 200*time.Millisecond).Should(Succeed())
 
 			// Verify the initial CRs were created.
-			var ms1 tideprojectv1alpha2.Milestone
+			var ms1 tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msIdempName, Namespace: ns}, &ms1)).To(Succeed())
 			initialMSUID := ms1.UID
 
 			// Touch an annotation to trigger a new reconcile cycle.
-			var proj tideprojectv1alpha2.Project
+			var proj tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, projKey, &proj)).To(Succeed())
 			if proj.Annotations == nil {
 				proj.Annotations = map[string]string{}
@@ -520,13 +520,13 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 			// Assert: the Milestone CR UID is unchanged (no re-create).
-			var ms2 tideprojectv1alpha2.Milestone
+			var ms2 tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: msIdempName, Namespace: ns}, &ms2)).To(Succeed())
 			Expect(ms2.UID).To(Equal(initialMSUID), "Milestone UID must be unchanged on idempotent re-run")
 
 			// Assert: no import Job was created (ImportImage="" so Job would have been skipped anyway;
 			// but idempotency guard fires first and returns before reaching job creation).
-			var proj2 tideprojectv1alpha2.Project
+			var proj2 tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, projKey, &proj2)).To(Succeed())
 			jobName := fmt.Sprintf("tide-import-%s", proj2.UID)
 			// List actual Jobs and assert the deterministic import-Job name is absent.
@@ -613,18 +613,18 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}
 			Expect(makeSeedConfigMap(ctx, ns, seedCMName, manifest)).To(Succeed())
 			Expect(makeImportProject(ctx, projName, ns, seedCMName)).To(Succeed())
-			waitForCacheSync(projName, ns, &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projName, ns, &tideprojectv1alpha3.Project{})
 		})
 
 		AfterEach(func() {
-			proj := &tideprojectv1alpha2.Project{}
+			proj := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, proj); err == nil {
 				proj.Finalizers = nil
 				_ = k8sClient.Update(ctx, proj)
 				_ = k8sClient.Delete(ctx, proj)
 			}
 			for _, name := range []string{msPartName} {
-				ms := &tideprojectv1alpha2.Milestone{}
+				ms := &tideprojectv1alpha3.Milestone{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ms); err == nil {
 					ms.Finalizers = nil
 					_ = k8sClient.Update(ctx, ms)
@@ -632,7 +632,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{phPartName} {
-				ph := &tideprojectv1alpha2.Phase{}
+				ph := &tideprojectv1alpha3.Phase{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, ph); err == nil {
 					ph.Finalizers = nil
 					_ = k8sClient.Update(ctx, ph)
@@ -640,7 +640,7 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 				}
 			}
 			for _, name := range []string{plCompleteName, plIncompleteName} {
-				pl := &tideprojectv1alpha2.Plan{}
+				pl := &tideprojectv1alpha3.Plan{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pl); err == nil {
 					pl.Finalizers = nil
 					_ = k8sClient.Update(ctx, pl)
@@ -667,11 +667,11 @@ var _ = Describe("ImportReconciler", Label("envtest", "phase28"), func() {
 			}, 15*time.Second, 200*time.Millisecond).Should(Succeed())
 
 			// Assert BOTH Plans exist (RESUME-PARTIAL-04: incomplete node materialized, not omitted).
-			var plComplete tideprojectv1alpha2.Plan
+			var plComplete tideprojectv1alpha3.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: plCompleteName, Namespace: ns}, &plComplete)).
 				To(Succeed(), "complete Plan CR must exist after reconcile")
 
-			var plIncomplete tideprojectv1alpha2.Plan
+			var plIncomplete tideprojectv1alpha3.Plan
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: plIncompleteName, Namespace: ns}, &plIncomplete)).
 				To(Succeed(), "incomplete Plan CR must exist after reconcile (identity preserved)")
 

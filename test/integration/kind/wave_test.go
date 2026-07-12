@@ -32,7 +32,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,7 +45,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 
 	// taskPhase reads a Task's status phase ("" if not found yet).
 	taskPhase := func(name string) string {
-		t := &tideprojectv1alpha2.Task{}
+		t := &tideprojectv1alpha3.Task{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: fixtureNS}, t); err != nil {
 			return ""
 		}
@@ -53,7 +53,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	}
 
 	// waveTask builds a wave Task via the shared typed fixture builder.
-	waveTask := func(name, prompt, waveIdx, mode string, capSec int32, deps ...string) *tideprojectv1alpha2.Task {
+	waveTask := func(name, prompt, waveIdx, mode string, capSec int32, deps ...string) *tideprojectv1alpha3.Task {
 		opts := []taskOpt{
 			withTaskProjectLabel(proj),
 			withWaveIndex(waveIdx),
@@ -99,7 +99,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	// AC1: α,β (wave 0) succeed; γ (wave 1, dependsOn both) then succeeds. This
 	// also proves the wave gate OPENS — γ runs once its dependencies complete.
 	It("AC1: three-task wave — all tasks succeed via stub-subagent", func() {
-		for _, t := range []*tideprojectv1alpha2.Task{
+		for _, t := range []*tideprojectv1alpha3.Task{
 			waveTask("alpha", "children/task-01.json", "0", "success", 120),
 			waveTask("beta", "children/task-02.json", "0", "success", 120),
 			waveTask("gamma", "children/task-03.json", "1", "success", 120, "alpha", "beta"),
@@ -123,7 +123,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	It("AC1: wave 1 (gamma) does not dispatch until wave 0 tasks complete", func() {
 		// capSec 300 keeps the blocked wave-0 tasks alive well past the assertion
 		// window so the wall-clock cap can't fail them mid-test (mirrors chaos_resume).
-		for _, t := range []*tideprojectv1alpha2.Task{
+		for _, t := range []*tideprojectv1alpha3.Task{
 			waveTask("alpha", "children/task-01.json", "0", "wait-for-signal", 300),
 			waveTask("beta", "children/task-02.json", "0", "wait-for-signal", 300),
 			waveTask("gamma", "children/task-03.json", "1", "success", 300, "alpha", "beta"),
@@ -149,7 +149,7 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 func skipIfCRDsOnlyMode() {
 	// Check if the controller is ready by listing Projects.
 	// If the Project CRD is not installed (CRDs-only mode), we skip.
-	pl := &tideprojectv1alpha2.ProjectList{}
+	pl := &tideprojectv1alpha3.ProjectList{}
 	if err := k8sClient.List(ctx, pl); err != nil {
 		// Suite-ctx expiry is NOT CRDs-only mode: once kindTestTimeout
 		// elapses every List fails, and converting that into per-spec

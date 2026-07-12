@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // budgetPayload is the -o json shape for `tide describe-budget`. Becomes a
@@ -49,7 +49,7 @@ type budgetPayload struct {
 // fields. It never touches Spec.SecretRefs, ProviderSecretRef, or any
 // kubeconfig-derived token; the threat-model assertion is by-construction.
 func describeBudgetRun(ctx context.Context, c client.Client, ns, name, format string, out io.Writer) error {
-	var p tidev1alpha2.Project
+	var p tidev1alpha3.Project
 	if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
 		return fmt.Errorf("get project %s/%s: %w", ns, name, err)
 	}
@@ -91,7 +91,7 @@ func describeBudgetRun(ctx context.Context, c client.Client, ns, name, format st
 
 	// Human form — six readable lines plus a status marker. Uses USD-cents
 	// rendering since BudgetConfig.AbsoluteCapCents is the canonical unit
-	// per api/v1alpha1/project_types.go.
+	// per api/v1alpha3/project_types.go.
 	status := "within budget"
 	if !within {
 		status = "OVER BUDGET"

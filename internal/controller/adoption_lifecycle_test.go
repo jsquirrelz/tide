@@ -48,7 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -130,32 +130,32 @@ func newAdoptionReconciler() *ProjectReconciler {
 // ImportComplete=True, and creates one owned Milestone (metav1.IsControlledBy=true).
 // Returns the re-fetched project (with UID) and the milestone's name.
 // Callers must defer cleanup via cleanupAdoptedProject.
-func createAdoptedProject(ctx context.Context, projName, msName string) *tidev1alpha2.Project {
+func createAdoptedProject(ctx context.Context, projName, msName string) *tidev1alpha3.Project {
 	// 1. Create project with ImportSource.
-	proj := &tidev1alpha2.Project{
+	proj := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://github.com/example/adopted.git",
-			ImportSource: &tidev1alpha2.ImportSourceRef{
+			ImportSource: &tidev1alpha3.ImportSourceRef{
 				SeedManifestConfigMap: fmt.Sprintf("seed-cm-%s", projName),
 				SalvagedPVCSubPath:    "old-uid/workspace",
 			},
 		},
 	}
 	Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-	waitForCacheSync(projName, "default", &tidev1alpha2.Project{})
+	waitForCacheSync(projName, "default", &tidev1alpha3.Project{})
 
 	// 2. Re-fetch to get the UID.
-	fetched := &tidev1alpha2.Project{}
+	fetched := &tidev1alpha3.Project{}
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, fetched)).To(Succeed())
 
 	// 3. Stamp ImportComplete=True.
 	sp := client.MergeFrom(fetched.DeepCopy())
 	meta.SetStatusCondition(&fetched.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionImportComplete,
+		Type:               tidev1alpha3.ConditionImportComplete,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha2.ReasonImportSucceeded,
+		Reason:             tidev1alpha3.ReasonImportSucceeded,
 		Message:            "Import completed for test",
 		LastTransitionTime: metav1.Now(),
 	})
@@ -166,23 +166,23 @@ func createAdoptedProject(ctx context.Context, projName, msName string) *tidev1a
 
 	// 5. Wait for ImportComplete to be visible in cache.
 	Eventually(func() bool {
-		var p tidev1alpha2.Project
+		var p tidev1alpha3.Project
 		if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
 			return false
 		}
-		c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionImportComplete)
+		c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionImportComplete)
 		return c != nil && c.Status == metav1.ConditionTrue
 	}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "ImportComplete must be in cache before reconcile")
 
 	// 6. Create an owned Milestone with a real controller owner reference pointing
 	// to this Project's UID (mirrors import_controller.go:405 via owner.EnsureOwnerRef).
 	tru := true
-	ms := &tidev1alpha2.Milestone{
+	ms := &tidev1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      msName,
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         tidev1alpha2.GroupVersion.String(),
+				APIVersion:         tidev1alpha3.GroupVersion.String(),
 				Kind:               "Project",
 				Name:               projName,
 				UID:                fetched.UID,
@@ -190,23 +190,23 @@ func createAdoptedProject(ctx context.Context, projName, msName string) *tidev1a
 				BlockOwnerDeletion: &tru,
 			}},
 		},
-		Spec: tidev1alpha2.MilestoneSpec{ProjectRef: projName},
+		Spec: tidev1alpha3.MilestoneSpec{ProjectRef: projName},
 	}
 	Expect(k8sClient.Create(ctx, ms)).To(Succeed())
-	waitForCacheSync(msName, "default", &tidev1alpha2.Milestone{})
+	waitForCacheSync(msName, "default", &tidev1alpha3.Milestone{})
 
 	return fetched
 }
 
 // cleanupAdoptedProject removes a Project and its owned Milestone (best-effort).
 func cleanupAdoptedProject(ctx context.Context, projName, msName string) {
-	ms := &tidev1alpha2.Milestone{}
+	ms := &tidev1alpha3.Milestone{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: "default"}, ms); err == nil {
 		ms.Finalizers = nil
 		_ = k8sClient.Update(ctx, ms)
 		_ = k8sClient.Delete(ctx, ms)
 	}
-	p := &tidev1alpha2.Project{}
+	p := &tidev1alpha3.Project{}
 	if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, p); err == nil {
 		p.Finalizers = nil
 		_ = k8sClient.Update(ctx, p)
@@ -234,24 +234,24 @@ func listPlannerJobsForProject(ctx context.Context, projectUID types.UID) []batc
 // Status().Patch and waits for the cache to reflect it. This is the lightest
 // faithful path — identical to how budget_blocked_test.go seeds the condition.
 func stampBudgetBlockedOnProject(ctx context.Context, projName string) {
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &proj)).To(Succeed())
 	sp := client.MergeFrom(proj.DeepCopy())
 	meta.SetStatusCondition(&proj.Status.Conditions, metav1.Condition{
-		Type:               tidev1alpha2.ConditionBudgetBlocked,
+		Type:               tidev1alpha3.ConditionBudgetBlocked,
 		Status:             metav1.ConditionTrue,
-		Reason:             tidev1alpha2.ReasonBudgetCapReached,
+		Reason:             tidev1alpha3.ReasonBudgetCapReached,
 		Message:            "Test: budget cap reached",
 		LastTransitionTime: metav1.Now(),
 	})
 	Expect(k8sClient.Status().Patch(ctx, &proj, sp)).To(Succeed())
 	// Wait for cache to reflect it.
 	Eventually(func() bool {
-		var p tidev1alpha2.Project
+		var p tidev1alpha3.Project
 		if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
 			return false
 		}
-		c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionBudgetBlocked)
+		c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionBudgetBlocked)
 		return c != nil && c.Status == metav1.ConditionTrue
 	}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BudgetBlocked must be visible in cache")
 }
@@ -269,7 +269,7 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 			const projName = "adopt-01-proj"
 			const msName = "adopt-01-ms"
 
-			var fetched *tidev1alpha2.Project
+			var fetched *tidev1alpha3.Project
 			BeforeEach(func() {
 				fetched = createAdoptedProject(ctx, projName, msName)
 			})
@@ -294,21 +294,21 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 					_, err := r.reconcileProjectPlannerDispatch(ctx, fetched)
 					g.Expect(err).NotTo(HaveOccurred())
 					// Re-fetch to see if Phase was patched.
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning),
+					g.Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning),
 						"ADOPT-01: adopted Project must advance to Running")
 				}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 				// Assert ConditionProjectPlannerSuppressed=True (Reason=AdoptionComplete).
-				var p tidev1alpha2.Project
+				var p tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 				Expect(suppCond).NotTo(BeNil(),
 					"ADOPT-01: ConditionProjectPlannerSuppressed must be stamped on adopted Project")
 				Expect(suppCond.Status).To(Equal(metav1.ConditionTrue),
 					"ADOPT-01: ConditionProjectPlannerSuppressed must be True")
-				Expect(suppCond.Reason).To(Equal(tidev1alpha2.ReasonAdoptionComplete),
+				Expect(suppCond.Reason).To(Equal(tidev1alpha3.ReasonAdoptionComplete),
 					"ADOPT-01: suppression condition must have Reason=AdoptionComplete")
 
 				// Assert ZERO project-planner Jobs created.
@@ -328,7 +328,7 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 			const projName = "wr04-single-patch-proj"
 			const msName = "wr04-single-patch-ms"
 
-			var fetched *tidev1alpha2.Project
+			var fetched *tidev1alpha3.Project
 			BeforeEach(func() {
 				fetched = createAdoptedProject(ctx, projName, msName)
 			})
@@ -352,9 +352,9 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				Eventually(func(g Gomega) {
 					_, err := r.reconcileProjectPlannerDispatch(ctx, fetched)
 					g.Expect(err).NotTo(HaveOccurred())
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning),
+					g.Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning),
 						"WR-04: adopted Project must reach Running before patch-count assertion")
 				}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
@@ -370,11 +370,11 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 					"WR-04: at most two Status patches expected (one adoption patch; WR-04 guards against splitting Phase=Running and suppression condition into separate patches)")
 
 				// Verify end state: both Phase=Running and suppression condition are present.
-				var p tidev1alpha2.Project
+				var p tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-				Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning),
+				Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning),
 					"WR-04: Phase must be Running after adoption advance")
-				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 				Expect(suppCond).NotTo(BeNil(),
 					"WR-04: ConditionProjectPlannerSuppressed must be present when Phase=Running")
 				Expect(suppCond.Status).To(Equal(metav1.ConditionTrue),
@@ -391,7 +391,7 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 			const projName = "adopt-05-cold-proj"
 			const msName = "adopt-05-cold-ms"
 
-			var fetched *tidev1alpha2.Project
+			var fetched *tidev1alpha3.Project
 			BeforeEach(func() {
 				fetched = createAdoptedProject(ctx, projName, msName)
 			})
@@ -414,16 +414,16 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				Eventually(func(g Gomega) {
 					_, err := r.reconcileProjectPlannerDispatch(ctx, fetched)
 					g.Expect(err).NotTo(HaveOccurred())
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning))
-					cond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+					g.Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning))
+					cond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 					g.Expect(cond).NotTo(BeNil())
 					g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 				}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 				// Simulate a cold-cache restart: fetch the project fresh (condition is in .status).
-				var fresh tidev1alpha2.Project
+				var fresh tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &fresh)).To(Succeed())
 
 				// Second reconcile: must short-circuit on the durable condition.
@@ -433,9 +433,9 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 					"ADOPT-05: suppression condition short-circuit must return empty Result (no requeue)")
 
 				// Assert Phase is still Running, no new Jobs.
-				var after tidev1alpha2.Project
+				var after tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &after)).To(Succeed())
-				Expect(after.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning),
+				Expect(after.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning),
 					"ADOPT-05: Phase must remain Running after cold-cache re-reconcile")
 				Expect(listPlannerJobsForProject(ctx, fetched.UID)).To(BeEmpty(),
 					"ADOPT-05: zero project-planner Jobs must exist after cold-cache re-reconcile")
@@ -450,24 +450,24 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 		Describe("ADOPT-05 no-regression: normal Project (ImportSource==nil) still dispatches project-planner", func() {
 			const projName = "adopt-05-normal-proj"
 
-			var proj *tidev1alpha2.Project
+			var proj *tidev1alpha3.Project
 			BeforeEach(func() {
-				proj = &tidev1alpha2.Project{
+				proj = &tidev1alpha3.Project{
 					ObjectMeta: metav1.ObjectMeta{Name: projName, Namespace: "default"},
-					Spec: tidev1alpha2.ProjectSpec{
-						SchemaRevision: "v1alpha2",
+					Spec: tidev1alpha3.ProjectSpec{
+						SchemaRevision: "v1alpha3",
 						TargetRepo:     "https://github.com/example/normal.git",
 						OutcomePrompt:  "Build something",
-						Subagent:       tidev1alpha2.SubagentConfig{Model: "claude-opus-4-7"},
+						Subagent:       tidev1alpha3.SubagentConfig{Model: "claude-opus-4-7"},
 					},
 				}
 				Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-				waitForCacheSync(projName, "default", &tidev1alpha2.Project{})
+				waitForCacheSync(projName, "default", &tidev1alpha3.Project{})
 				// Re-fetch to get the UID.
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, proj)).To(Succeed())
 			})
 			AfterEach(func() {
-				p := &tidev1alpha2.Project{}
+				p := &tidev1alpha3.Project{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, p); err == nil {
 					p.Finalizers = nil
 					_ = k8sClient.Update(ctx, p)
@@ -503,20 +503,20 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				// Wait for Phase=Running AND a planner Job to exist.
 				Eventually(func(g Gomega) {
 					// Re-fetch before each reconcile attempt.
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
 					_, err := r.reconcileProjectPlannerDispatch(ctx, &p)
 					g.Expect(err).NotTo(HaveOccurred())
 					// Check Phase.
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning),
+					g.Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning),
 						"ADOPT-05 no-regression: normal Project must advance to Running")
 				}, 10*time.Second, 200*time.Millisecond).Should(Succeed())
 
 				// Assert ConditionProjectPlannerSuppressed is NOT set on normal Project.
-				var p tidev1alpha2.Project
+				var p tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+				suppCond := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 				Expect(suppCond).To(BeNil(),
 					"ADOPT-05 no-regression: ConditionProjectPlannerSuppressed must NOT be set on normal Project")
 			})
@@ -531,7 +531,7 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 			const projName = "adopt-03-proj"
 			const msName = "adopt-03-ms"
 
-			var fetched *tidev1alpha2.Project
+			var fetched *tidev1alpha3.Project
 			BeforeEach(func() {
 				fetched = createAdoptedProject(ctx, projName, msName)
 
@@ -541,20 +541,20 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				Eventually(func(g Gomega) {
 					_, err := r.reconcileProjectPlannerDispatch(ctx, fetched)
 					g.Expect(err).NotTo(HaveOccurred())
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					g.Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
-					g.Expect(p.Status.Phase).To(Equal(tidev1alpha2.PhaseRunning))
+					g.Expect(p.Status.Phase).To(Equal(tidev1alpha3.PhaseRunning))
 				}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 				// Wait for ConditionProjectPlannerSuppressed to be visible in the mgrClient
 				// cache before seeding BudgetBlocked. Without this wait, the It block may
 				// get a stale view that misses the suppression condition.
 				Eventually(func() bool {
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					if err := mgrClient.Get(ctx, name, &p); err != nil {
 						return false
 					}
-					c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+					c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 					return c != nil && c.Status == metav1.ConditionTrue
 				}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(),
 					"ADOPT-03 BeforeEach: ConditionProjectPlannerSuppressed must be in cache before BudgetBlocked stamp")
@@ -582,16 +582,16 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 				// stamped the suppression condition via Status().Patch; if the cache is stale
 				// the reconciler would run the full dispatch path instead of short-circuiting.
 				Eventually(func() bool {
-					var p tidev1alpha2.Project
+					var p tidev1alpha3.Project
 					if err := mgrClient.Get(ctx, name, &p); err != nil {
 						return false
 					}
 					hasSuppressed := func() bool {
-						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionProjectPlannerSuppressed)
+						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionProjectPlannerSuppressed)
 						return c != nil && c.Status == metav1.ConditionTrue
 					}()
 					hasBudgetBlocked := func() bool {
-						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha2.ConditionBudgetBlocked)
+						c := meta.FindStatusCondition(p.Status.Conditions, tidev1alpha3.ConditionBudgetBlocked)
 						return c != nil && c.Status == metav1.ConditionTrue
 					}()
 					return hasSuppressed && hasBudgetBlocked
@@ -599,7 +599,7 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 					"ADOPT-03: both ConditionProjectPlannerSuppressed and ConditionBudgetBlocked must be in cache")
 
 				// Re-fetch after both conditions are visible in cache.
-				var p tidev1alpha2.Project
+				var p tidev1alpha3.Project
 				Expect(mgrClient.Get(ctx, name, &p)).To(Succeed())
 
 				// The dispatch is blocked by either:

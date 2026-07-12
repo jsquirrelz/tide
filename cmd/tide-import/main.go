@@ -24,7 +24,7 @@ limitations under the License.
 // /old-workspace/envelopes/<oldUID>/ to /new-workspace/envelopes/<newUID>/
 // using cp -n semantics (no-clobber + atomic rename for partial-write safety,
 // D-12). Rewrites out.json.taskUID atomically to newUID. Runs schema conversion
-// (json.Unmarshal→json.Marshal through typed v1alpha2 structs) on child
+// (json.Unmarshal→json.Marshal through typed v1alpha3 structs) on child
 // Spec.Raw bytes, validating each child Kind against the local allowlist
 // {Milestone,Phase,Plan,Task} before conversion (D-05/D-08). Wave CRs are
 // never imported (D-09). Path-traversal defended (D-08 layer 2, T-28-03-01).
@@ -49,7 +49,7 @@ import (
 	"strings"
 	"syscall"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 )
 
@@ -228,7 +228,7 @@ func run(ctx context.Context, cfg importConfig, stdin io.Reader, stdout, stderr 
 		}
 
 		// Kind allowlist + schema conversion (T-28-03-02, D-05, D-06).
-		// Convert every child Spec.Raw through the typed v1alpha2 structs.
+		// Convert every child Spec.Raw through the typed v1alpha3 structs.
 		for i, child := range env.ChildCRDs {
 			if !childKindAllowlist[child.Kind] {
 				fmt.Fprintf(stderr, "tide-import: child Kind %q not in allowlist (fqName=%q)\n", child.Kind, entry.FQName)
@@ -313,7 +313,7 @@ func containedJoin(base, elem string) (string, error) {
 	return full, nil
 }
 
-// convertSpecRaw round-trips rawBytes through the appropriate v1alpha2 typed
+// convertSpecRaw round-trips rawBytes through the appropriate v1alpha3 typed
 // spec struct (json.Unmarshal → json.Marshal). This strips unknown fields
 // (objective/wave/filesTouched per RESEARCH) and preserves required fields.
 // A non-allowlisted Kind (already checked by caller) falls to the default case
@@ -321,25 +321,25 @@ func containedJoin(base, elem string) (string, error) {
 func convertSpecRaw(kind string, rawBytes []byte) ([]byte, error) {
 	switch kind {
 	case "Milestone":
-		var spec tidev1alpha2.MilestoneSpec
+		var spec tidev1alpha3.MilestoneSpec
 		if err := json.Unmarshal(rawBytes, &spec); err != nil {
 			return nil, fmt.Errorf("unmarshal MilestoneSpec: %w", err)
 		}
 		return json.Marshal(spec)
 	case "Phase":
-		var spec tidev1alpha2.PhaseSpec
+		var spec tidev1alpha3.PhaseSpec
 		if err := json.Unmarshal(rawBytes, &spec); err != nil {
 			return nil, fmt.Errorf("unmarshal PhaseSpec: %w", err)
 		}
 		return json.Marshal(spec)
 	case "Plan":
-		var spec tidev1alpha2.PlanSpec
+		var spec tidev1alpha3.PlanSpec
 		if err := json.Unmarshal(rawBytes, &spec); err != nil {
 			return nil, fmt.Errorf("unmarshal PlanSpec: %w", err)
 		}
 		return json.Marshal(spec)
 	case "Task":
-		var spec tidev1alpha2.TaskSpec
+		var spec tidev1alpha3.TaskSpec
 		if err := json.Unmarshal(rawBytes, &spec); err != nil {
 			return nil, fmt.Errorf("unmarshal TaskSpec: %w", err)
 		}

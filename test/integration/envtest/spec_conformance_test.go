@@ -60,7 +60,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/gates"
 )
 
@@ -69,19 +69,19 @@ const specConformanceProject = "spec-conformance-project"
 // createSimpleMilestoneWithDeps creates a Milestone with optional dependsOn
 // in globalWaveNamespace. Extends createSimpleMilestone with the DependsOn field.
 func createSimpleMilestoneWithDeps(ctx context.Context, name, projectRef string, deps []string) {
-	ms := &tideprojectv1alpha2.Milestone{
+	ms := &tideprojectv1alpha3.Milestone{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalWaveNamespace,
 		},
-		Spec: tideprojectv1alpha2.MilestoneSpec{
+		Spec: tideprojectv1alpha3.MilestoneSpec{
 			ProjectRef: projectRef,
 			DependsOn:  deps,
 		},
 	}
 	Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 	}, "5s", "100ms").Should(Succeed())
 }
 
@@ -94,17 +94,17 @@ func createSimpleMilestoneWithDeps(ctx context.Context, name, projectRef string,
 // dependent's DependsOn field (e.g., δ depends on α gives
 // sc-delta.DependsOn=["sc-alpha"]). Task names must match exactly across
 // DependsOn refs to avoid silently dropped edges (Pitfall 4).
-func makeSpecConformanceTask(ctx context.Context, name, planRef string, dependsOn []string) *tideprojectv1alpha2.Task {
+func makeSpecConformanceTask(ctx context.Context, name, planRef string, dependsOn []string) *tideprojectv1alpha3.Task {
 	labels := map[string]string{
 		"tideproject.k8s/project": specConformanceProject,
 	}
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: globalWaveNamespace,
 			Labels:    labels,
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             planRef,
 			PromptPath:          "envelopes/test/children/" + name + ".json",
 			DependsOn:           dependsOn,
@@ -114,7 +114,7 @@ func makeSpecConformanceTask(ctx context.Context, name, planRef string, dependsO
 	}
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
 	Eventually(func() error {
-		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Task{})
+		return mgrClient.Get(ctx, client.ObjectKey{Name: name, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Task{})
 	}, "5s", "100ms").Should(Succeed())
 	time.Sleep(50 * time.Millisecond) // allow indexer to propagate
 	return task
@@ -125,7 +125,7 @@ func makeSpecConformanceTask(ctx context.Context, name, planRef string, dependsO
 // Reports which task is missing on failure.
 func assertWaveMembership(ctx context.Context, projectName string, waveIdx int, expectedTasks []string) {
 	Eventually(func() error {
-		wave := &tideprojectv1alpha2.Wave{}
+		wave := &tideprojectv1alpha3.Wave{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{
 			Name:      fmt.Sprintf("tide-wave-%s-%d", projectName, waveIdx),
 			Namespace: globalWaveNamespace,
@@ -169,13 +169,13 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 	BeforeEach(func() {
 		makeBoundPVC(ctx, "tide-projects", globalWaveNamespace)
-		project := &tideprojectv1alpha2.Project{
+		project := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      specConformanceProject,
 				Namespace: globalWaveNamespace,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/spec-conformance.git",
 			},
 		}
@@ -188,32 +188,32 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 	AfterEach(func() {
 		// Cleanup order mirrors global_wave_derivation_test.go:
 		// Waves → Tasks → Plans → Phases → Milestones → Projects → PVCs.
-		waves := &tideprojectv1alpha2.WaveList{}
+		waves := &tideprojectv1alpha3.WaveList{}
 		_ = k8sClient.List(ctx, waves, client.InNamespace(globalWaveNamespace))
 		for i := range waves.Items {
 			_ = k8sClient.Delete(ctx, &waves.Items[i])
 		}
-		tasks := &tideprojectv1alpha2.TaskList{}
+		tasks := &tideprojectv1alpha3.TaskList{}
 		_ = k8sClient.List(ctx, tasks, client.InNamespace(globalWaveNamespace))
 		for i := range tasks.Items {
 			_ = k8sClient.Delete(ctx, &tasks.Items[i])
 		}
-		plans := &tideprojectv1alpha2.PlanList{}
+		plans := &tideprojectv1alpha3.PlanList{}
 		_ = k8sClient.List(ctx, plans, client.InNamespace(globalWaveNamespace))
 		for i := range plans.Items {
 			_ = k8sClient.Delete(ctx, &plans.Items[i])
 		}
-		phases := &tideprojectv1alpha2.PhaseList{}
+		phases := &tideprojectv1alpha3.PhaseList{}
 		_ = k8sClient.List(ctx, phases, client.InNamespace(globalWaveNamespace))
 		for i := range phases.Items {
 			_ = k8sClient.Delete(ctx, &phases.Items[i])
 		}
-		milestones := &tideprojectv1alpha2.MilestoneList{}
+		milestones := &tideprojectv1alpha3.MilestoneList{}
 		_ = k8sClient.List(ctx, milestones, client.InNamespace(globalWaveNamespace))
 		for i := range milestones.Items {
 			_ = k8sClient.Delete(ctx, &milestones.Items[i])
 		}
-		projects := &tideprojectv1alpha2.ProjectList{}
+		projects := &tideprojectv1alpha3.ProjectList{}
 		_ = k8sClient.List(ctx, projects, client.InNamespace(globalWaveNamespace))
 		for i := range projects.Items {
 			_ = k8sClient.Delete(ctx, &projects.Items[i])
@@ -285,7 +285,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			// execution edges that force sc-zeta out of Wave 0 (and sc-eta would
 			// also be misplaced). This Consistently check proves γ→η is honored.
 			Consistently(func() error {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{
 					Name:      fmt.Sprintf("tide-wave-%s-0", specConformanceProject),
 					Namespace: globalWaveNamespace,
@@ -305,7 +305,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			// execution edges are added from Milestone A tasks to Milestone B tasks.
 			// sc-zeta has no task-level DependsOn and must therefore be Wave 0.
 			Eventually(func() bool {
-				wave := &tideprojectv1alpha2.Wave{}
+				wave := &tideprojectv1alpha3.Wave{}
 				if err := k8sClient.Get(ctx, client.ObjectKey{
 					Name:      fmt.Sprintf("tide-wave-%s-0", specConformanceProject),
 					Namespace: globalWaveNamespace,
@@ -327,15 +327,15 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			const approveProjectName = "ms03-approve-project"
 
 			// Create project with Gates.Milestone=approve.
-			approveProject := &tideprojectv1alpha2.Project{
+			approveProject := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      approveProjectName,
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/ms03-approve.git",
-					Gates: tideprojectv1alpha2.Gates{
+					Gates: tideprojectv1alpha3.Gates{
 						Milestone: gates.PolicyApprove,
 						Phase:     gates.PolicyAuto,
 						Plan:      gates.PolicyAuto,
@@ -345,44 +345,44 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			}
 			Expect(k8sClient.Create(ctx, approveProject)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: approveProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Project{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: approveProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Project{})
 			}, "5s", "100ms").Should(Succeed())
 
 			// Create Milestone A (no dependsOn) and Milestone B (depends on A).
 			// Direct status-injection into AwaitingApproval (fixture-inject approach
 			// per RESEARCH OQ-3: avoids needing full planner Job dispatch in envtest).
-			msA := &tideprojectv1alpha2.Milestone{
+			msA := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "ms03-a",
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.MilestoneSpec{
+				Spec: tideprojectv1alpha3.MilestoneSpec{
 					ProjectRef: approveProjectName,
 					DependsOn:  nil,
 				},
 			}
 			Expect(k8sClient.Create(ctx, msA)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-a", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-a", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 			}, "5s", "100ms").Should(Succeed())
 
-			msB := &tideprojectv1alpha2.Milestone{
+			msB := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "ms03-b",
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.MilestoneSpec{
+				Spec: tideprojectv1alpha3.MilestoneSpec{
 					ProjectRef: approveProjectName,
 					DependsOn:  []string{"ms03-a"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, msB)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 			}, "5s", "100ms").Should(Succeed())
 
 			// Status-inject AwaitingApproval on Milestone A (simulates post-planner gate park).
-			var msAObj tideprojectv1alpha2.Milestone
+			var msAObj tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-a", Namespace: globalWaveNamespace}, &msAObj)).To(Succeed())
 			msAPatch := client.MergeFrom(msAObj.DeepCopy())
 			msAObj.Status.Phase = "AwaitingApproval"
@@ -390,7 +390,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 			// Milestone A should reach AwaitingApproval.
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-a", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -399,14 +399,14 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				"Milestone A must reach AwaitingApproval under gates.milestone=approve")
 
 			// Status-inject AwaitingApproval on Milestone B too (N holds compose).
-			var msBObj tideprojectv1alpha2.Milestone
+			var msBObj tideprojectv1alpha3.Milestone
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-b", Namespace: globalWaveNamespace}, &msBObj)).To(Succeed())
 			msBPatch := client.MergeFrom(msBObj.DeepCopy())
 			msBObj.Status.Phase = "AwaitingApproval"
 			Expect(mgrClient.Status().Patch(ctx, &msBObj, msBPatch)).To(Succeed())
 
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-b", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -425,7 +425,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 			// Milestone A must leave AwaitingApproval after approve annotation.
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-a", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -444,7 +444,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 			// Milestone B must also leave AwaitingApproval.
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Milestone
+				var got tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-b", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -453,24 +453,24 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				"Milestone B must leave AwaitingApproval after approve-milestone annotation")
 
 			// Cleanup: delete the extra project and milestones so AfterEach list-delete is clean.
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-a", Namespace: globalWaveNamespace}})
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-b", Namespace: globalWaveNamespace}})
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{Name: approveProjectName, Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-a", Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-b", Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Project{ObjectMeta: metav1.ObjectMeta{Name: approveProjectName, Namespace: globalWaveNamespace}})
 		})
 
 		// Subtest 2: gates.milestone: auto — full-auto expressible (no milestone holds).
 		It("gates.milestone=auto: neither milestone reaches AwaitingApproval (full-auto expressible)", func() {
 			const autoProjectName = "ms03-auto-project"
 
-			autoProject := &tideprojectv1alpha2.Project{
+			autoProject := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      autoProjectName,
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/ms03-auto.git",
-					Gates: tideprojectv1alpha2.Gates{
+					Gates: tideprojectv1alpha3.Gates{
 						Milestone: gates.PolicyAuto,
 						Phase:     gates.PolicyAuto,
 						Plan:      gates.PolicyAuto,
@@ -480,36 +480,36 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			}
 			Expect(k8sClient.Create(ctx, autoProject)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: autoProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Project{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: autoProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Project{})
 			}, "5s", "100ms").Should(Succeed())
 
-			msAutoA := &tideprojectv1alpha2.Milestone{
+			msAutoA := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "ms03-auto-a",
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.MilestoneSpec{
+				Spec: tideprojectv1alpha3.MilestoneSpec{
 					ProjectRef: autoProjectName,
 				},
 			}
 			Expect(k8sClient.Create(ctx, msAutoA)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-auto-a", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-auto-a", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 			}, "5s", "100ms").Should(Succeed())
 
-			msAutoB := &tideprojectv1alpha2.Milestone{
+			msAutoB := &tideprojectv1alpha3.Milestone{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "ms03-auto-b",
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.MilestoneSpec{
+				Spec: tideprojectv1alpha3.MilestoneSpec{
 					ProjectRef: autoProjectName,
 					DependsOn:  []string{"ms03-auto-a"},
 				},
 			}
 			Expect(k8sClient.Create(ctx, msAutoB)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-auto-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Milestone{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "ms03-auto-b", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Milestone{})
 			}, "5s", "100ms").Should(Succeed())
 
 			// Under gates.milestone=auto, neither milestone should ever hold at
@@ -519,13 +519,13 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			//
 			// Use Consistently to assert no AwaitingApproval state appears.
 			Consistently(func() error {
-				var gotA tideprojectv1alpha2.Milestone
+				var gotA tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-auto-a", Namespace: globalWaveNamespace}, &gotA); err == nil {
 					if gotA.Status.Phase == "AwaitingApproval" {
 						return fmt.Errorf("ms03-auto-a unexpectedly at AwaitingApproval under gates.milestone=auto")
 					}
 				}
-				var gotB tideprojectv1alpha2.Milestone
+				var gotB tideprojectv1alpha3.Milestone
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "ms03-auto-b", Namespace: globalWaveNamespace}, &gotB); err == nil {
 					if gotB.Status.Phase == "AwaitingApproval" {
 						return fmt.Errorf("ms03-auto-b unexpectedly at AwaitingApproval under gates.milestone=auto")
@@ -536,9 +536,9 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				"Neither milestone must reach AwaitingApproval under gates.milestone=auto (full-auto expressible)")
 
 			// Cleanup.
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-auto-a", Namespace: globalWaveNamespace}})
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-auto-b", Namespace: globalWaveNamespace}})
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-auto-a", Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "ms03-auto-b", Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Project{ObjectMeta: metav1.ObjectMeta{Name: autoProjectName, Namespace: globalWaveNamespace}})
 		})
 
 		// Subtest 3: gates.task: approve — full-supervised expressible (ASSERTED).
@@ -557,15 +557,15 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 			// Create Project with gates.task=approve; milestone/phase/plan all auto
 			// so descent proceeds past milestone/phase/plan boundaries to the Task.
-			fsProject := &tideprojectv1alpha2.Project{
+			fsProject := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      fsProjectName,
 					Namespace: globalWaveNamespace,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{
-					SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{
+					SchemaRevision: "v1alpha3",
 					TargetRepo:     "https://github.com/example/ms03-fullsupervised.git",
-					Gates: tideprojectv1alpha2.Gates{
+					Gates: tideprojectv1alpha3.Gates{
 						Milestone: gates.PolicyAuto,
 						Phase:     gates.PolicyAuto,
 						Plan:      gates.PolicyAuto,
@@ -575,7 +575,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			}
 			Expect(k8sClient.Create(ctx, fsProject)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: fsProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Project{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: fsProjectName, Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Project{})
 			}, "5s", "100ms").Should(Succeed())
 
 			// Create a simple plan + task stamped with the full-supervised project label.
@@ -584,7 +584,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			// → PolicyApprove → patchTaskAwaitingApproval).
 			createSimplePlan(ctx, "fs-plan-a")
 
-			fsTask := &tideprojectv1alpha2.Task{
+			fsTask := &tideprojectv1alpha3.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fs-task-alpha",
 					Namespace: globalWaveNamespace,
@@ -592,7 +592,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 						"tideproject.k8s/project": fsProjectName,
 					},
 				},
-				Spec: tideprojectv1alpha2.TaskSpec{
+				Spec: tideprojectv1alpha3.TaskSpec{
 					PlanRef:             "fs-plan-a",
 					PromptPath:          "envelopes/test/children/fs-task-alpha.json",
 					DependsOn:           nil,
@@ -602,7 +602,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			}
 			Expect(k8sClient.Create(ctx, fsTask)).To(Succeed())
 			Eventually(func() error {
-				return mgrClient.Get(ctx, client.ObjectKey{Name: "fs-task-alpha", Namespace: globalWaveNamespace}, &tideprojectv1alpha2.Task{})
+				return mgrClient.Get(ctx, client.ObjectKey{Name: "fs-task-alpha", Namespace: globalWaveNamespace}, &tideprojectv1alpha3.Task{})
 			}, "5s", "100ms").Should(Succeed())
 			time.Sleep(50 * time.Millisecond)
 
@@ -614,7 +614,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 			//
 			// Poll until the background reconciler parks the task.
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Task
+				var got tideprojectv1alpha3.Task
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "fs-task-alpha", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -623,7 +623,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				"fs-task-alpha must reach AwaitingApproval under gates.task=approve (full-supervised hold)")
 
 			// Apply approve-task annotation → TaskReconciler consumes it, proceeds.
-			var fsTaskObj tideprojectv1alpha2.Task
+			var fsTaskObj tideprojectv1alpha3.Task
 			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: "fs-task-alpha", Namespace: globalWaveNamespace}, &fsTaskObj)).To(Succeed())
 			approveTaskPatch := client.MergeFrom(fsTaskObj.DeepCopy())
 			if fsTaskObj.Annotations == nil {
@@ -634,7 +634,7 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 
 			// Task must leave AwaitingApproval after approve-task annotation.
 			Eventually(func() string {
-				var got tideprojectv1alpha2.Task
+				var got tideprojectv1alpha3.Task
 				if err := mgrClient.Get(ctx, types.NamespacedName{Name: "fs-task-alpha", Namespace: globalWaveNamespace}, &got); err != nil {
 					return ""
 				}
@@ -643,8 +643,8 @@ var _ = Describe("SpecConformance", Label("envtest"), func() {
 				"fs-task-alpha must leave AwaitingApproval after approve-task annotation (full-supervised release)")
 
 			// Cleanup.
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Task{ObjectMeta: metav1.ObjectMeta{Name: "fs-task-alpha", Namespace: globalWaveNamespace}})
-			_ = k8sClient.Delete(ctx, &tideprojectv1alpha2.Project{ObjectMeta: metav1.ObjectMeta{Name: fsProjectName, Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Task{ObjectMeta: metav1.ObjectMeta{Name: "fs-task-alpha", Namespace: globalWaveNamespace}})
+			_ = k8sClient.Delete(ctx, &tideprojectv1alpha3.Project{ObjectMeta: metav1.ObjectMeta{Name: fsProjectName, Namespace: globalWaveNamespace}})
 		})
 	})
 })

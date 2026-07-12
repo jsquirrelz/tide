@@ -41,7 +41,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
 
@@ -103,7 +103,7 @@ type ImportJobOptions struct {
 // rewrite); it never creates K8s objects. Wave CR creation is handled by deriveGlobalWaves
 // on the first reconcile after Tasks exist.
 func BuildImportJob(
-	project *tideprojectv1alpha2.Project,
+	project *tideprojectv1alpha3.Project,
 	opts ImportJobOptions,
 	scheme *runtime.Scheme,
 ) *batchv1.Job {

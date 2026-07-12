@@ -42,9 +42,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
-	webhookv1alpha2 "github.com/jsquirrelz/tide/internal/webhook/v1alpha2"
+	webhookv1alpha3 "github.com/jsquirrelz/tide/internal/webhook/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
 	// +kubebuilder:scaffold:imports
 )
@@ -138,7 +138,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	var err error
-	err = tideprojectv1alpha2.AddToScheme(scheme.Scheme)
+	err = tideprojectv1alpha3.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	// admissionregistration/v1 is required so envtest can install
@@ -195,11 +195,11 @@ var _ = BeforeSuite(func() {
 	// Register webhooks (Plan 07 Task 1 scaffolding; Plan 11 fills the body).
 	// SetupPlanWebhookWithManager now accepts the cluster-default file-touch mode
 	// (Phase 2 — Plan 11). Pass "warn" as the cluster default per the Helm chart default.
-	// Plan and Wave webhooks moved to v1alpha2 (Spring Tide breaking change, Plan 23-02).
-	Expect(webhookv1alpha2.SetupPlanWebhookWithManager(mgr, "warn")).To(Succeed())
-	Expect(webhookv1alpha2.SetupWaveWebhookWithManager(mgr)).To(Succeed())
-	// Phase 04.1 P4.2 — Project AllowedRoutes denylist webhook (moved to v1alpha2, Plan 23-02).
-	Expect(webhookv1alpha2.SetupProjectWebhookWithManager(mgr)).To(Succeed())
+	// Plan and Wave webhooks serve v1alpha3 (Phase 40 crank, plan 40-03).
+	Expect(webhookv1alpha3.SetupPlanWebhookWithManager(mgr, "warn")).To(Succeed())
+	Expect(webhookv1alpha3.SetupWaveWebhookWithManager(mgr)).To(Succeed())
+	// Phase 04.1 P4.2 — Project AllowedRoutes denylist webhook (serves v1alpha3, Phase 40 plan 40-03).
+	Expect(webhookv1alpha3.SetupProjectWebhookWithManager(mgr)).To(Succeed())
 
 	// mgrClient is the manager's cached client; supports custom field indexers.
 	mgrClient = mgr.GetClient()
@@ -209,10 +209,10 @@ var _ = BeforeSuite(func() {
 	// (taskToWaveMapper via field-indexed list). Registered once here per
 	// PATTERNS.md "Single envtest BeforeSuite".
 	Expect(mgr.GetFieldIndexer().IndexField(context.Background(),
-		&tideprojectv1alpha2.Task{},
+		&tideprojectv1alpha3.Task{},
 		taskPlanRefIndexKey,
 		func(obj client.Object) []string {
-			task := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert
+			task := obj.(*tideprojectv1alpha3.Task) //nolint:forcetypeassert
 			return []string{task.Spec.PlanRef}
 		},
 	)).To(Succeed())

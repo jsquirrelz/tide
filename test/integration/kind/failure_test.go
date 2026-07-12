@@ -31,7 +31,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("kind"), func() {
@@ -77,14 +77,14 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 		for _, taskName := range []string{"alpha-fail", "beta-fail", "gamma-fail"} {
 			name := taskName
 			Eventually(func() error {
-				t := &tideprojectv1alpha2.Task{}
+				t := &tideprojectv1alpha3.Task{}
 				return k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: ns}, t)
 			}, 30*time.Second, time.Second).Should(Succeed(), "Task %s should be created", name)
 		}
 
 		// Wait for β to fail.
 		Eventually(func() string {
-			t := &tideprojectv1alpha2.Task{}
+			t := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: "beta-fail", Namespace: ns}, t); err != nil {
 				return ""
 			}
@@ -94,7 +94,7 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 
 		// α (independent sibling) should eventually complete.
 		Eventually(func() string {
-			t := &tideprojectv1alpha2.Task{}
+			t := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: "alpha-fail", Namespace: ns}, t); err != nil {
 				return ""
 			}
@@ -104,7 +104,7 @@ var _ = Describe("Failure injection and dependent task blocking (AC3)", Label("k
 
 		// γ (depends on β) should NEVER dispatch — verify it stays non-Running.
 		Consistently(func() string {
-			t := &tideprojectv1alpha2.Task{}
+			t := &tideprojectv1alpha3.Task{}
 			if err := k8sClient.Get(ctx, client.ObjectKey{Name: "gamma-fail", Namespace: ns}, t); err != nil {
 				return "notfound"
 			}

@@ -22,7 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // newPlansHandler returns a PlansHandler with a fake controller-runtime
@@ -31,7 +31,7 @@ import (
 func newPlansHandler(t *testing.T, objs ...runtime.Object) (*PlansHandler, http.Handler) {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -49,36 +49,36 @@ func newPlansHandler(t *testing.T, objs ...runtime.Object) (*PlansHandler, http.
 }
 
 // newPlanCRD is a minimal Plan factory.
-func newPlanCRD(name, namespace, phaseRef, phase string) *tidev1alpha2.Plan {
-	return &tidev1alpha2.Plan{
+func newPlanCRD(name, namespace, phaseRef, phase string) *tidev1alpha3.Plan {
+	return &tidev1alpha3.Plan{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha2.PlanSpec{PhaseRef: phaseRef},
-		Status:     tidev1alpha2.PlanStatus{Phase: phase},
+		Spec:       tidev1alpha3.PlanSpec{PhaseRef: phaseRef},
+		Status:     tidev1alpha3.PlanStatus{Phase: phase},
 	}
 }
 
 // newTaskCRD is a minimal Task factory.
-func newTaskCRD(name, namespace, planRef, phase string, dependsOn []string, attempt int) *tidev1alpha2.Task {
-	return &tidev1alpha2.Task{
+func newTaskCRD(name, namespace, planRef, phase string, dependsOn []string, attempt int) *tidev1alpha3.Task {
+	return &tidev1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: tidev1alpha2.TaskSpec{
+		Spec: tidev1alpha3.TaskSpec{
 			PlanRef:             planRef,
 			DependsOn:           dependsOn,
 			FilesTouched:        []string{"a.go"},
 			DeclaredOutputPaths: []string{"/workspace/a"},
 		},
-		Status: tidev1alpha2.TaskStatus{Phase: phase, Attempt: attempt},
+		Status: tidev1alpha3.TaskStatus{Phase: phase, Attempt: attempt},
 	}
 }
 
-// newWaveCRD is a minimal Wave factory. v1alpha2 Waves are global-scope:
+// newWaveCRD is a minimal Wave factory. v1alpha3 Waves are global-scope:
 // ProjectRef replaces the removed PlanRef. The Plan→Wave association is derived
 // by the plans handler from Wave.Status.TaskRefs membership, not from the spec.
-func newWaveCRD(name, namespace, projectRef string, waveIndex int, taskRefs []string) *tidev1alpha2.Wave {
-	return &tidev1alpha2.Wave{
+func newWaveCRD(name, namespace, projectRef string, waveIndex int, taskRefs []string) *tidev1alpha3.Wave {
+	return &tidev1alpha3.Wave{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec:       tidev1alpha2.WaveSpec{ProjectRef: projectRef, WaveIndex: waveIndex},
-		Status:     tidev1alpha2.WaveStatus{TaskRefs: taskRefs},
+		Spec:       tidev1alpha3.WaveSpec{ProjectRef: projectRef, WaveIndex: waveIndex},
+		Status:     tidev1alpha3.WaveStatus{TaskRefs: taskRefs},
 	}
 }
 

@@ -63,7 +63,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/pkg/dag"
 )
 
@@ -258,7 +258,7 @@ func chaosControllerDeploymentLive() bool {
 // the given Status.Phase, or fails the spec on timeout.
 func waitForChaosTaskPhase(name, want string, timeout time.Duration) {
 	Eventually(func() string {
-		t := &tideprojectv1alpha2.Task{}
+		t := &tideprojectv1alpha3.Task{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: chaosResumeNS}, t); err != nil {
 			return ""
 		}
@@ -279,7 +279,7 @@ func snapshotChaosTasks() map[string]chaosTaskSnapshot {
 		Fail(fmt.Sprintf("snapshotChaosTasks: list jobs: %v", err))
 	}
 	for _, name := range []string{"alpha-chaos", "beta-chaos", "gamma-chaos"} {
-		t := &tideprojectv1alpha2.Task{}
+		t := &tideprojectv1alpha3.Task{}
 		if err := k8sClient.Get(ctx, client.ObjectKey{Name: name, Namespace: chaosResumeNS}, t); err != nil {
 			Fail(fmt.Sprintf("snapshotChaosTasks: get Task %s: %v", name, err))
 		}
@@ -366,7 +366,7 @@ func waitForChaosLeaseHandoff(previous string, timeout time.Duration) {
 // Pod's /workspace is /workspace/envelopes/{task-uid}/release.
 func writeChaosReleaseSignals(beta, gamma chaosTaskSnapshot) {
 	// Resolve the Project UID — the PVC subPath for chaos-resume.
-	var proj tideprojectv1alpha2.Project
+	var proj tideprojectv1alpha3.Project
 	Expect(k8sClient.Get(ctx, client.ObjectKey{
 		Name: "chaos-resume-project", Namespace: chaosResumeNS,
 	}, &proj)).To(Succeed(), "chaos-resume-project must exist for release-signal write")
@@ -465,7 +465,7 @@ func writeChaosReleaseSignals(beta, gamma chaosTaskSnapshot) {
 // structure (same node sets per wave layer) proves "schedule is re-derived,
 // not cached on disk" (PERSIST-03).
 func assertChaosWavesGoldenMatch() {
-	var tl tideprojectv1alpha2.TaskList
+	var tl tideprojectv1alpha3.TaskList
 	Expect(k8sClient.List(ctx, &tl, client.InNamespace(chaosResumeNS))).To(Succeed(),
 		"Pillar 5: list Tasks for ComputeWaves input")
 
@@ -512,7 +512,7 @@ func assertChaosWavesGoldenMatch() {
 // Only invoked when GENERATE_GOLDEN=1 — escape hatch for legitimate fixture
 // changes.
 func writeChaosGolden(_ map[string]chaosTaskSnapshot) {
-	var tl tideprojectv1alpha2.TaskList
+	var tl tideprojectv1alpha3.TaskList
 	Expect(k8sClient.List(ctx, &tl, client.InNamespace(chaosResumeNS))).To(Succeed())
 	nodes := make([]dag.NodeID, 0, len(tl.Items))
 	edges := make([]dag.Edge, 0, len(tl.Items))

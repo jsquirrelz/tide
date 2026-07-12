@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/budget"
 	"github.com/jsquirrelz/tide/internal/credproxy"
 	"github.com/jsquirrelz/tide/internal/dispatch/podjob"
@@ -44,7 +44,7 @@ import (
 func fakeSchemeWithAll(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()
-	if err := tideprojectv1alpha2.AddToScheme(s); err != nil {
+	if err := tideprojectv1alpha3.AddToScheme(s); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	if err := batchv1.AddToScheme(s); err != nil {
@@ -61,20 +61,20 @@ func fakeSchemeWithAll(t *testing.T) *runtime.Scheme {
 // TestGateChecks_TerminalShortCircuit verifies that a Task in Phase=Succeeded
 // returns shouldHalt=true with an empty ctrl.Result (no requeue).
 func TestGateChecks_TerminalShortCircuit(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-terminal",
 			Namespace: "default",
 			UID:       types.UID("uid-terminal"),
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			Phase: "Succeeded",
 		},
 	}
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -106,13 +106,13 @@ func TestGateChecks_TerminalShortCircuit(t *testing.T) {
 // TestGateChecks_FailedShortCircuit verifies that a Task in Phase=Failed
 // also returns shouldHalt=true.
 func TestGateChecks_FailedShortCircuit(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-failed-sc",
 			Namespace: "default",
 			UID:       types.UID("uid-failed-sc"),
 		},
-		Status: tideprojectv1alpha2.TaskStatus{
+		Status: tideprojectv1alpha3.TaskStatus{
 			Phase: "Failed",
 		},
 	}
@@ -142,7 +142,7 @@ func TestGateChecks_FailedShortCircuit(t *testing.T) {
 // and no owner refs triggers ErrParentUnresolved → shouldHalt=true with a 30s
 // RequeueAfter and the ConditionParentUnresolved condition set on the Task.
 func TestGateChecks_ParentUnresolved(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-no-parent",
 			Namespace: "default",
@@ -153,7 +153,7 @@ func TestGateChecks_ParentUnresolved(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -182,17 +182,17 @@ func TestGateChecks_ParentUnresolved(t *testing.T) {
 // TestAcquireDispatchSlots_NoProviderSecret verifies that when the Project has
 // no ProviderSecretRef, acquireDispatchSlots returns nil error and a no-op release.
 func TestAcquireDispatchSlots_NoProviderSecret(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-noprov", Namespace: "default", UID: "uid-noprov"},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-noprov", Namespace: "default"},
 		// No ProviderSecretRef.
 	}
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -225,12 +225,12 @@ func TestAcquireDispatchSlots_RateLimitHit(t *testing.T) {
 	preRsv := lim.Reserve()
 	_ = preRsv // intentionally NOT cancelled — drains the bucket
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-rl", Namespace: "default", UID: "uid-rl"},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-rl", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", ProviderSecretRef: "test-secret-rl"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", ProviderSecretRef: "test-secret-rl"},
 	}
 	// Pre-create the secret in the fake client with the known UID so Budget can
 	// look it up.
@@ -245,7 +245,7 @@ func TestAcquireDispatchSlots_RateLimitHit(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project, secretObj).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -281,12 +281,12 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 	secretUID := "secret-uid-release"
 	limits := budget.Limits{RequestsPerMinute: 60, BurstSize: 5}
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-rel", Namespace: "default", UID: "uid-rel"},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-rel", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", ProviderSecretRef: "secret-rel"},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", ProviderSecretRef: "secret-rel"},
 	}
 	secretObj := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -299,7 +299,7 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project, secretObj).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -328,26 +328,26 @@ func TestAcquireDispatchSlots_ReleaseFn(t *testing.T) {
 // TestPrepareDispatch_AttemptIncrement verifies that attempt counter starts at 1
 // for a fresh Task (no prior Jobs).
 func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-attempt",
 			Namespace: "default",
 			UID:       types.UID("uid-attempt"),
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			FilesTouched:        []string{"src/main.go"},
 			DeclaredOutputPaths: []string{"artifacts/out.txt"},
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-attempt", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", MaxAttemptsPerTask: 3},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", MaxAttemptsPerTask: 3},
 	}
 
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -380,16 +380,16 @@ func TestPrepareDispatch_AttemptIncrement(t *testing.T) {
 // exceeds MaxAttemptsPerTask, prepareDispatch returns a *maxAttemptsError
 // (which reconcileDispatch translates to a clean halt).
 func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-maxatt",
 			Namespace: "default",
 			UID:       types.UID("uid-maxatt"),
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-maxatt", Namespace: "default"},
-		Spec:       tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", MaxAttemptsPerTask: 1},
+		Spec:       tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", MaxAttemptsPerTask: 1},
 	}
 
 	// Pre-create a Job labeled attempt=1 so nextAttempt returns 2 > MaxAttemptsPerTask=1.
@@ -415,7 +415,7 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project, preExistingJob).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -446,18 +446,18 @@ func TestPrepareDispatch_ExceedMaxAttempts(t *testing.T) {
 // returns (ctrl.Result{}, nil) — treating AlreadyExists as success.
 func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 	taskUID := types.UID("uid-ae")
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-ae",
 			Namespace: "default",
 			UID:       taskUID,
 		},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			FilesTouched:        []string{"src/main.go"},
 			DeclaredOutputPaths: []string{"artifacts/out.txt"},
 		},
 	}
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "proj-ae",
 			Namespace: "default",
@@ -484,7 +484,7 @@ func TestCreateDispatchJob_AlreadyExists(t *testing.T) {
 	s := fakeSchemeWithAll(t)
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, project, preJob).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
 		Build()
 	r := &TaskReconciler{
 		Client: fakeClient,
@@ -542,7 +542,7 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 
 	s := fakeSchemeWithAll(t)
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "task-cr03",
 			Namespace: "default",
@@ -550,9 +550,9 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 			Labels:    map[string]string{"tideproject.k8s/project": "proj-cr03"},
 		},
 	}
-	projectObj := &tideprojectv1alpha2.Project{
+	projectObj := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-cr03", Namespace: "default"},
-		Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+		Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 			ProviderSecretRef: "secret-cr03",
 		},
 	}
@@ -567,9 +567,9 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 	// Register the .spec.planRef field indexer required by listSiblingTasks.
 	fakeClient := fake.NewClientBuilder().WithScheme(s).
 		WithRuntimeObjects(task, projectObj, secretObj).
-		WithStatusSubresource(&tideprojectv1alpha2.Task{}).
-		WithIndex(&tideprojectv1alpha2.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
-			t := obj.(*tideprojectv1alpha2.Task) //nolint:forcetypeassert
+		WithStatusSubresource(&tideprojectv1alpha3.Task{}).
+		WithIndex(&tideprojectv1alpha3.Task{}, taskPlanRefIndexKey, func(obj client.Object) []string {
+			t := obj.(*tideprojectv1alpha3.Task) //nolint:forcetypeassert
 			return []string{t.Spec.PlanRef}
 		}).
 		Build()
@@ -605,9 +605,9 @@ func TestReconcileDispatch_CommittedReleaseSuppression(t *testing.T) {
 func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 	const promptPath = "envelopes/planner-uid/children/task-01.json"
 
-	task := &tideprojectv1alpha2.Task{
+	task := &tideprojectv1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "task-prompt", Namespace: "default", UID: types.UID("uid-prompt")},
-		Spec: tideprojectv1alpha2.TaskSpec{
+		Spec: tideprojectv1alpha3.TaskSpec{
 			PlanRef:             "plan-01",
 			FilesTouched:        []string{"main.go"},
 			DeclaredOutputPaths: []string{"main.go"},
@@ -615,10 +615,10 @@ func TestBuildEnvelopeIn_PromptPath(t *testing.T) {
 		},
 	}
 	const runBranch = "tide/run-proj-prompt-1700000000"
-	project := &tideprojectv1alpha2.Project{
+	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "proj-prompt", Namespace: "default", UID: types.UID("proj-uid")},
-		Status: tideprojectv1alpha2.ProjectStatus{
-			Git: tideprojectv1alpha2.GitStatus{BranchName: runBranch},
+		Status: tideprojectv1alpha3.ProjectStatus{
+			Git: tideprojectv1alpha3.GitStatus{BranchName: runBranch},
 		},
 	}
 

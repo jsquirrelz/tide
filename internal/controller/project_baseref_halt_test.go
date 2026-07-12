@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // BASE-02 (D-06/D-07) + BASE-03 (D-11): the ProjectReconciler classifies an
@@ -80,13 +80,13 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 	}
 
 	// makeProject creates a Project with the given baseRef and cleans it up.
-	makeProject := func(name, baseRef string) *tideprojectv1alpha2.Project {
-		proj := &tideprojectv1alpha2.Project{
+	makeProject := func(name, baseRef string) *tideprojectv1alpha3.Project {
+		proj := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/test.git",
-				Git: &tideprojectv1alpha2.GitConfig{
+				Git: &tideprojectv1alpha3.GitConfig{
 					RepoURL:        "https://github.com/example/test.git",
 					CredsSecretRef: "test-creds",
 					BaseRef:        baseRef,
@@ -94,9 +94,9 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			},
 		}
 		Expect(k8sClient.Create(ctx, proj)).To(Succeed())
-		waitForCacheSync(name, "default", &tideprojectv1alpha2.Project{})
+		waitForCacheSync(name, "default", &tideprojectv1alpha3.Project{})
 		DeferCleanup(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, nn(name), p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -121,8 +121,8 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 	// advanceToCloneJob drives reconciles, succeeding the init Job as it appears,
 	// until the deterministic tide-clone-<uid> Job has been dispatched. Returns
 	// the refreshed Project and the clone Job name.
-	advanceToCloneJob := func(r *ProjectReconciler, name string) (tideprojectv1alpha2.Project, string) {
-		var p tideprojectv1alpha2.Project
+	advanceToCloneJob := func(r *ProjectReconciler, name string) (tideprojectv1alpha3.Project, string) {
+		var p tideprojectv1alpha3.Project
 		for range 12 {
 			if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(name)}); err != nil && !isConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
@@ -225,10 +225,10 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 	}
 
 	cloneFailedCond := func(name string) *metav1.Condition {
-		var p tideprojectv1alpha2.Project
+		var p tideprojectv1alpha3.Project
 		Expect(k8sClient.Get(ctx, nn(name), &p)).To(Succeed())
 		for i := range p.Status.Conditions {
-			if p.Status.Conditions[i].Type == tideprojectv1alpha2.ConditionCloneFailed {
+			if p.Status.Conditions[i].Type == tideprojectv1alpha3.ConditionCloneFailed {
 				return &p.Status.Conditions[i]
 			}
 		}
@@ -254,10 +254,10 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			cond := cloneFailedCond(projectName)
 			Expect(cond).NotTo(BeNil(), "CloneFailed condition must be set")
 			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-			Expect(cond.Reason).To(Equal(tideprojectv1alpha2.ReasonBaseRefUnresolvable))
+			Expect(cond.Reason).To(Equal(tideprojectv1alpha3.ReasonBaseRefUnresolvable))
 			Expect(cond.Message).To(ContainSubstring("unable to resolve 'no-such-ref' to a commit SHA"))
 
-			var got tideprojectv1alpha2.Project
+			var got tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, nn(projectName), &got)).To(Succeed())
 			Expect(cond.ObservedGeneration).To(Equal(got.Generation),
 				"halt must be scoped to the current generation (D-07)")
@@ -284,7 +284,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 				Reason: "baseref-unresolvable", BaseRef: "no-such-ref",
 			}, corev1.PodFailed)
 			reconcileN(r, projectName, 3)
-			Expect(cloneFailedCond(projectName).Reason).To(Equal(tideprojectv1alpha2.ReasonBaseRefUnresolvable))
+			Expect(cloneFailedCond(projectName).Reason).To(Equal(tideprojectv1alpha3.ReasonBaseRefUnresolvable))
 
 			// Simulate TTL GC: delete the failed Job (and its envelope pod).
 			var j batchv1.Job
@@ -322,7 +322,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 				Reason: "baseref-unresolvable", BaseRef: "no-such-ref",
 			}, corev1.PodFailed)
 			reconcileN(r, projectName, 3)
-			Expect(cloneFailedCond(projectName).Reason).To(Equal(tideprojectv1alpha2.ReasonBaseRefUnresolvable))
+			Expect(cloneFailedCond(projectName).Reason).To(Equal(tideprojectv1alpha3.ReasonBaseRefUnresolvable))
 
 			// Simulate TTL GC of the halted Job, then fix the ref.
 			var j batchv1.Job
@@ -336,19 +336,19 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 				return apierrors.IsNotFound(k8sClient.Get(ctx, nn(cloneJobName), &batchv1.Job{}))
 			}, 5*time.Second, 200*time.Millisecond).Should(BeTrue())
 
-			var before tideprojectv1alpha2.Project
+			var before tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, nn(projectName), &before)).To(Succeed())
 			genBefore := before.Generation
 			before.Spec.Git.BaseRef = "also-bad-but-different"
 			Expect(k8sClient.Update(ctx, &before)).To(Succeed())
 
 			Eventually(func(g Gomega) {
-				var after tideprojectv1alpha2.Project
+				var after tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, nn(projectName), &after)).To(Succeed())
 				g.Expect(after.Generation).To(BeNumerically(">", genBefore),
 					"spec edit must increment metadata.generation")
 			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
-			waitForCacheSync(projectName, "default", &tideprojectv1alpha2.Project{})
+			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			reconcileN(r, projectName, 5)
 
@@ -370,7 +370,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 
 			// Apply-half of BASE-03's upgrade-path test: the field survives a real
 			// API-server round-trip under the regenerated CRD (unpruned).
-			var applied tideprojectv1alpha2.Project
+			var applied tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, nn(projectName), &applied)).To(Succeed())
 			Expect(applied.Spec.Git.BaseRef).To(Equal("release-1.4"),
 				"spec.git.baseRef must round-trip through the API server unpruned")
@@ -384,7 +384,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			reconcileN(r, projectName, 3)
 
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, nn(projectName), &got)).To(Succeed())
 				g.Expect(got.Status.Git.CloneComplete).To(BeTrue())
 				g.Expect(got.Status.Git.BaseSHA).To(Equal(resolvedSHA),
@@ -419,7 +419,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			}
 			Expect(res.RequeueAfter).To(BeNumerically(">", 0),
 				"an unreadable success envelope within the cutoff must requeue, not flip")
-			var mid tideprojectv1alpha2.Project
+			var mid tideprojectv1alpha3.Project
 			Expect(k8sClient.Get(ctx, nn(projectName), &mid)).To(Succeed())
 			Expect(mid.Status.Git.CloneComplete).To(BeFalse(),
 				"CloneComplete must NOT flip while the envelope is still readable-pending")
@@ -436,7 +436,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			reconcileN(r, projectName, 3)
 
 			Eventually(func(g Gomega) {
-				var got tideprojectv1alpha2.Project
+				var got tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, nn(projectName), &got)).To(Succeed())
 				g.Expect(got.Status.Git.CloneComplete).To(BeTrue(),
 					"past the cutoff, CloneComplete flips even without an envelope")

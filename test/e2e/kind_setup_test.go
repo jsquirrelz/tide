@@ -60,7 +60,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 const (
@@ -146,7 +146,7 @@ var _ = BeforeSuite(func() {
 	kindE2ECtx, kindE2ECancel = context.WithTimeout(context.Background(), kindE2ETestTimeout)
 
 	By("Ensuring TIDE CRD types are registered in the runtime scheme")
-	Expect(tideprojectv1alpha2.AddToScheme(scheme.Scheme)).To(Succeed())
+	Expect(tideprojectv1alpha3.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	By("Checking that kind, docker, and helm are available")
 	for _, tool := range []string{"kind", "docker", "helm", "kubectl"} {

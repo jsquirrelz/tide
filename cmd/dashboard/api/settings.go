@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // SettingsHandler serves GET /api/v1/projects/{name}/settings. It needs ONLY the
@@ -108,7 +108,7 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	namespace := r.URL.Query().Get("namespace")
 
 	if namespace != "" {
-		var p tidev1alpha2.Project
+		var p tidev1alpha3.Project
 		if err := h.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &p); err != nil {
 			if apierrors.IsNotFound(err) {
 				writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
@@ -124,7 +124,7 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	// Cross-namespace fallback — mirrors ProjectsHandler.Get (SC-7): the list
 	// endpoint searches all namespaces, so settings must too when ?namespace= is absent.
-	var projects tidev1alpha2.ProjectList
+	var projects tidev1alpha3.ProjectList
 	if err := h.Client.List(ctx, &projects); err != nil {
 		h.Log.Error(err, "list projects for cross-namespace settings failed", "name", name)
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get project: %s", err.Error()))
@@ -139,12 +139,22 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, fmt.Sprintf("project %s not found", name))
 }
 
+// resolvedLevelModel returns the per-level model override if set, falling back
+// to the Project's Subagent-wide default (D-10 — ModelSelection was dropped
+// from v1alpha3 as a dead duplicate of this already-wired resolution chain).
+func resolvedLevelModel(levelCfg *tidev1alpha3.LevelConfig, fallback string) string {
+	if levelCfg != nil && levelCfg.Model != "" {
+		return levelCfg.Model
+	}
+	return fallback
+}
+
 // writeSettings projects a Project into the curated projectSettings payload by
 // EXPLICIT field whitelist (never marshaling Spec wholesale into typed fields),
 // then renders the raw spec as YAML. The Spec object holds secret refs by NAME
 // only, so the raw-spec view is the deliberate D-10 exception — the redaction
 // test proves no secret value bytes appear (SettingsHandler holds no clientset).
-func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha2.Project) {
+func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha3.Project) {
 	settings := projectSettings{
 		OutcomePrompt: p.Spec.OutcomePrompt,
 		Repo: repoSettings{
@@ -153,10 +163,10 @@ func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha2.P
 			BranchName: p.Status.Git.BranchName,
 		},
 		Models: modelSettings{
-			Milestone: p.Spec.ModelSelection.Milestone,
-			Phase:     p.Spec.ModelSelection.Phase,
-			Plan:      p.Spec.ModelSelection.Plan,
-			Task:      p.Spec.ModelSelection.Task,
+			Milestone: resolvedLevelModel(p.Spec.Subagent.Levels.Milestone, p.Spec.Subagent.Model),
+			Phase:     resolvedLevelModel(p.Spec.Subagent.Levels.Phase, p.Spec.Subagent.Model),
+			Plan:      resolvedLevelModel(p.Spec.Subagent.Levels.Plan, p.Spec.Subagent.Model),
+			Task:      resolvedLevelModel(p.Spec.Subagent.Levels.Task, p.Spec.Subagent.Model),
 		},
 		Budget: budgetSettings{
 			AbsoluteCapCents:      p.Spec.Budget.AbsoluteCapCents,
@@ -196,7 +206,7 @@ func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha2.P
 // buildSecretRefs collects the Project's Secret references as purpose/name pairs,
 // skipping empties. Pre-allocated so zero refs serialize as [] not null. NAMES
 // ONLY — never a Secret read (D-10).
-func buildSecretRefs(p *tidev1alpha2.Project) []secretRef {
+func buildSecretRefs(p *tidev1alpha3.Project) []secretRef {
 	refs := make([]secretRef, 0, 4)
 	add := func(purpose, name string) {
 		if name != "" {

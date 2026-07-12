@@ -35,16 +35,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/internal/owner"
 )
 
-// makeCycleTask creates a v1alpha1.Task in the given namespace, owned by the
+// makeCycleTask creates a v1alpha3.Task in the given namespace, owned by the
 // given project (via label), with the given dependsOn list.
 // Named makeCycleTask to avoid conflicts with the existing makeTask helper in
 // task_controller_test.go (which has a different signature).
-func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tidev1alpha2.Task {
-	return &tidev1alpha2.Task{
+func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tidev1alpha3.Task {
+	return &tidev1alpha3.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -52,7 +52,7 @@ func makeCycleTask(name, namespace, projectName string, dependsOn []string) *tid
 				owner.LabelProject: projectName,
 			},
 		},
-		Spec: tidev1alpha2.TaskSpec{
+		Spec: tidev1alpha3.TaskSpec{
 			PlanRef:             "plan-x",
 			FilesTouched:        []string{"dummy.go"},
 			PromptPath:          "envelopes/plan-x/children/task-01.json",
@@ -79,14 +79,14 @@ func TestGlobalCycleDetection(t *testing.T) {
 			taskB    = "task-b"
 		)
 
-		// Create a v1alpha2 Project with SchemaRevision set (passes schema guard).
-		proj := &tidev1alpha2.Project{
+		// Create a v1alpha3 Project with SchemaRevision set (passes schema guard).
+		proj := &tidev1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: ns,
 			},
-			Spec: tidev1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tidev1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/repo.git",
 			},
 		}
@@ -119,7 +119,7 @@ func TestGlobalCycleDetection(t *testing.T) {
 		}
 
 		// Fetch the updated project and verify GlobalCycleDetected condition.
-		updated := &tidev1alpha2.Project{}
+		updated := &tidev1alpha3.Project{}
 		if getErr := fc.Get(ctx, client.ObjectKey{Name: projName, Namespace: ns}, updated); getErr != nil {
 			t.Fatalf("Get updated project: %v", getErr)
 		}
@@ -127,7 +127,7 @@ func TestGlobalCycleDetection(t *testing.T) {
 		foundCycle := false
 		involvedInMessage := false
 		for _, c := range updated.Status.Conditions {
-			if c.Type == "CycleDetected" && c.Reason == tidev1alpha2.ReasonGlobalCycleDetected {
+			if c.Type == "CycleDetected" && c.Reason == tidev1alpha3.ReasonGlobalCycleDetected {
 				foundCycle = true
 				// Both involved nodes must be named in the condition message.
 				if strings.Contains(c.Message, taskA) && strings.Contains(c.Message, taskB) {
@@ -156,14 +156,14 @@ func TestGlobalCycleDetection(t *testing.T) {
 			planName = "plan-y" // this name is NOT a known Task name
 		)
 
-		// Create a v1alpha2 Project with SchemaRevision set.
-		proj := &tidev1alpha2.Project{
+		// Create a v1alpha3 Project with SchemaRevision set.
+		proj := &tidev1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: ns,
 			},
-			Spec: tidev1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tidev1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/repo.git",
 			},
 		}
@@ -193,13 +193,13 @@ func TestGlobalCycleDetection(t *testing.T) {
 		}
 
 		// Also verify no GlobalCycleDetected condition is set on the Project.
-		updated := &tidev1alpha2.Project{}
+		updated := &tidev1alpha3.Project{}
 		if getErr := fc.Get(ctx, client.ObjectKey{Name: projName, Namespace: ns}, updated); getErr != nil {
 			// Project status not updated (no cycle found) — that's fine.
 			return
 		}
 		for _, c := range updated.Status.Conditions {
-			if c.Reason == tidev1alpha2.ReasonGlobalCycleDetected {
+			if c.Reason == tidev1alpha3.ReasonGlobalCycleDetected {
 				t.Errorf("coarse-only dep incorrectly triggered GlobalCycleDetected condition; conditions = %v",
 					updated.Status.Conditions)
 				return

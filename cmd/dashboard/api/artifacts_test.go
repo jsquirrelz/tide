@@ -29,7 +29,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 )
 
@@ -70,7 +70,7 @@ func (f *fakeFetcher) Fetch(_ context.Context, _, _ string, auth *gitfetch.Auth)
 func newArtifactsHandler(t *testing.T, cs kubernetes.Interface, f gitfetch.Fetcher, objs ...runtime.Object) http.Handler {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -96,19 +96,19 @@ func newArtifactsHandler(t *testing.T, cs kubernetes.Interface, f gitfetch.Fetch
 
 // gitProject builds a Project with a git remote + a run branch so the handler
 // proceeds past the no-git / absent-branch short circuits.
-func gitProject() *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func gitProject() *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "https://example.com/repo.git",
-			Git: &tidev1alpha2.GitConfig{
+			Git: &tidev1alpha3.GitConfig{
 				RepoURL:        "https://example.com/repo.git",
 				CredsSecretRef: "git-creds",
 			},
 		},
-		Status: tidev1alpha2.ProjectStatus{
-			Git: tidev1alpha2.GitStatus{BranchName: "tide/run-prj-1-1"},
+		Status: tidev1alpha3.ProjectStatus{
+			Git: tidev1alpha3.GitStatus{BranchName: "tide/run-prj-1-1"},
 		},
 	}
 }
@@ -116,19 +116,19 @@ func gitProject() *tidev1alpha2.Project {
 // httpGitProject builds a Project on an anonymous in-cluster http:// remote
 // (Gap 37-G1 repro) with a run branch + a credsSecretRef. The scheme is the
 // only difference from gitProject() (https://) — it gates the empty-PAT relax.
-func httpGitProject() *tidev1alpha2.Project {
-	return &tidev1alpha2.Project{
+func httpGitProject() *tidev1alpha3.Project {
+	return &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec: tidev1alpha2.ProjectSpec{
-			SchemaRevision: "v1alpha2",
+		Spec: tidev1alpha3.ProjectSpec{
+			SchemaRevision: "v1alpha3",
 			TargetRepo:     "http://git-http-server.tide.svc/repo.git",
-			Git: &tidev1alpha2.GitConfig{
+			Git: &tidev1alpha3.GitConfig{
 				RepoURL:        "http://git-http-server.tide.svc/repo.git",
 				CredsSecretRef: "git-creds",
 			},
 		},
-		Status: tidev1alpha2.ProjectStatus{
-			Git: tidev1alpha2.GitStatus{BranchName: "tide/run-prj-1-1"},
+		Status: tidev1alpha3.ProjectStatus{
+			Git: tidev1alpha3.GitStatus{BranchName: "tide/run-prj-1-1"},
 		},
 	}
 }
@@ -177,9 +177,9 @@ func doGet(t *testing.T, router http.Handler, path string) (*http.Response, []by
 
 // TestArtifactsNoGit: a Project without spec.git returns 200 {state:"no-git", files:[]}.
 func TestArtifactsNoGit(t *testing.T) {
-	prj := &tidev1alpha2.Project{
+	prj := &tidev1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "prj-1", Namespace: "default"},
-		Spec:       tidev1alpha2.ProjectSpec{SchemaRevision: "v1alpha2", TargetRepo: "https://example.com/repo.git"},
+		Spec:       tidev1alpha3.ProjectSpec{SchemaRevision: "v1alpha3", TargetRepo: "https://example.com/repo.git"},
 	}
 	router := newArtifactsHandler(t, fakeclientset.NewSimpleClientset(), &fakeFetcher{}, prj)
 	resp, body := doGet(t, router, "/api/v1/nodes/milestone/m1/artifacts?project=prj-1")

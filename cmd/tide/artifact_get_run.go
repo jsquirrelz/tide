@@ -49,7 +49,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // inspectorPodRunner creates and streams the inspector pod. Function var so
@@ -135,7 +135,7 @@ func artifactGetRun(
 	// Resolve Project to get its UID — the PVC subPath is the project UID,
 	// NOT the project name (RESEARCH Pitfall 4: subPath matches the directory
 	// the manager writes artifacts into, which is keyed by UID).
-	var proj tidev1alpha2.Project
+	var proj tidev1alpha3.Project
 	if err := k.Get(ctx, types.NamespacedName{Namespace: ns, Name: projName}, &proj); err != nil {
 		return fmt.Errorf("get project %s/%s: %w", ns, projName, err)
 	}

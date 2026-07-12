@@ -28,7 +28,7 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	tidev1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	"github.com/jsquirrelz/tide/cmd/dashboard/gitfetch"
 )
 
@@ -38,8 +38,8 @@ import (
 func newTestRouter(t *testing.T) chi.Router {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
-		t.Fatalf("add v1alpha1 scheme: %v", err)
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
+		t.Fatalf("add v1alpha3 scheme: %v", err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	spa := fstest.MapFS{
@@ -277,7 +277,7 @@ func TestRouteTableContainsExpectedGETs(t *testing.T) {
 // chi walker as GET (DASH-05 zero-mutation invariant).
 func TestArtifactsAndSettingsRoutesAreGET(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
 		t.Fatalf("add scheme: %v", err)
 	}
 	store, err := gitfetch.NewStore(&gitfetch.GoGitFetcher{}, 4)
@@ -334,8 +334,8 @@ func TestPrometheusEndpointWiringThroughRegisterRoutes(t *testing.T) {
 	defer upstream.Close()
 
 	scheme := runtime.NewScheme()
-	if err := tidev1alpha2.AddToScheme(scheme); err != nil {
-		t.Fatalf("add v1alpha1 scheme: %v", err)
+	if err := tidev1alpha3.AddToScheme(scheme); err != nil {
+		t.Fatalf("add v1alpha3 scheme: %v", err)
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	spa := fstest.MapFS{

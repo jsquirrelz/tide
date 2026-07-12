@@ -267,7 +267,7 @@ func TestLoadPromptFileNonexistentPath(t *testing.T) {
 	}
 }
 
-const testProjectYAML = `apiVersion: tideproject.k8s/v1alpha2
+const testProjectYAML = `apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: demo

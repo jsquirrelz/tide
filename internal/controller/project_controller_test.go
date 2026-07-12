@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	tideprojectv1alpha2 "github.com/jsquirrelz/tide/api/v1alpha2"
+	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
 // newTestProjectReconciler returns a ProjectReconciler wired to the shared
@@ -87,12 +87,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-create-init-job",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -118,7 +118,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			// Re-fetch project to get the UID.
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			expectedJobName := "tide-init-" + string(fetched.UID)
@@ -172,12 +172,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-idempotent",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -199,7 +199,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			// Re-fetch project to get UID.
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			jobName := "tide-init-" + string(fetched.UID)
@@ -225,12 +225,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-success",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -245,7 +245,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Succeeded init Job.
@@ -298,12 +298,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-revert-from-complete",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -318,7 +318,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Succeeded init Job (mirror lines 243-271 of the canonical test).
@@ -361,7 +361,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			// Succeeded in the cluster — a subsequent Reconcile will re-enter
 			// handleInitJobCompletion's isJobSucceeded branch.
 			statusPatch := client.MergeFrom(fetched.DeepCopy())
-			fetched.Status.Phase = tideprojectv1alpha2.PhaseComplete
+			fetched.Status.Phase = tideprojectv1alpha3.PhaseComplete
 			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
 
 			// Sanity check the patch landed.
@@ -391,12 +391,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-init-fail",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -411,7 +411,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Pre-create a Failed init Job.
@@ -465,14 +465,14 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-budget-exceeded",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -481,7 +481,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			// Patch status to exceed the cap.
 			statusPatch := fetched.DeepCopy()
@@ -514,7 +514,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				_ = k8sClient.Delete(ctx, pvc)
 			})
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass-oneshot",
 					Namespace: ns,
@@ -522,9 +522,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -533,7 +533,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Patch status to BudgetExceeded with overspend.
@@ -563,7 +563,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(fetched.Status.Phase).NotTo(Equal("BudgetExceeded"),
 				"Phase should be cleared from BudgetExceeded when one-shot bypass annotation is present")
 			// BYPASS-01: bypass of an initialized project must target PhaseRunning, not PhasePending.
-			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"Phase must be Running (not Pending) after bypass clears BudgetExceeded on an initialized project")
 			// One-shot bypass annotation should be consumed.
 			Expect(fetched.Annotations).NotTo(HaveKey("tideproject.k8s/bypass-budget"),
@@ -582,7 +582,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			})
 
 			futureTime := time.Now().Add(time.Hour).Format(time.RFC3339)
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass-ttl",
 					Namespace: ns,
@@ -590,9 +590,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget-until": futureTime,
 					},
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents: 100,
 					},
 				},
@@ -601,7 +601,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Patch status to BudgetExceeded with overspend.
@@ -663,7 +663,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			})
 
 			// Project: absoluteCap=100, rollingCap=100; spend=200 exceeds both.
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass04-raise-abs",
 					Namespace: ns,
@@ -671,9 +671,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents:      100,
 						RollingWindowCapCents: 100,
 					},
@@ -683,12 +683,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Set status: BudgetExceeded phase, spend=200, initialized project.
 			statusPatch := client.MergeFrom(fetched.DeepCopy())
-			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Phase = tideprojectv1alpha3.PhaseBudgetExceeded
 			fetched.Status.Budget.CostSpentCents = 200
 			fetched.Status.Git.BranchName = "tide/run-test-bypass04-raise-abs-1000000000"
 			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
@@ -705,7 +705,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
-			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"Phase should be Running after bypass")
 			// Verify baseline was recorded.
 			Expect(fetched.Status.Budget.BypassBaselineCents).To(BeNumerically("==", 200),
@@ -730,9 +730,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Consistently(func(g Gomega) {
 				_, rErr := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 				g.Expect(rErr).NotTo(HaveOccurred())
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
-				g.Expect(refreshed.Status.Phase).NotTo(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+				g.Expect(refreshed.Status.Phase).NotTo(Equal(tideprojectv1alpha3.PhaseBudgetExceeded),
 					"Phase must NOT re-halt to BudgetExceeded when only absolute cap was raised and no new spend occurred")
 			}, 2*time.Second, 200*time.Millisecond).Should(Succeed())
 		})
@@ -751,7 +751,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			})
 
 			// Project: absoluteCap=500 (high, won't be hit), rollingCap=100.
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-bypass04-rolling",
 					Namespace: ns,
@@ -759,9 +759,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents:      500,
 						RollingWindowCapCents: 100,
 					},
@@ -771,12 +771,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Set status: BudgetExceeded, spend=150 (only rolling cap exceeded), initialized.
 			statusPatch := client.MergeFrom(fetched.DeepCopy())
-			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Phase = tideprojectv1alpha3.PhaseBudgetExceeded
 			fetched.Status.Budget.CostSpentCents = 150
 			fetched.Status.Git.BranchName = "tide/run-test-bypass04-rolling-1000000000"
 			Expect(k8sClient.Status().Patch(ctx, fetched, statusPatch)).To(Succeed())
@@ -793,7 +793,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
-			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"Phase should be Running after bypass")
 
 			// Stamp NEW spend past baseline and rolling cap: 151 > baseline 150 AND > rolling 100.
@@ -805,14 +805,14 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
-				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseBudgetExceeded),
 					"Phase must be BudgetExceeded after new spend crosses rolling-window cap")
 				// Assert which-cap reason is RollingWindowCapReached.
 				var cond *metav1.Condition
 				for i := range refreshed.Status.Conditions {
-					if refreshed.Status.Conditions[i].Type == tideprojectv1alpha2.ConditionBudgetExceeded {
+					if refreshed.Status.Conditions[i].Type == tideprojectv1alpha3.ConditionBudgetExceeded {
 						cond = &refreshed.Status.Conditions[i]
 						break
 					}
@@ -843,7 +843,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			// Rolling cap=100; absolute high (won't be hit). Short rolling window so
 			// we can force a reset by stamping WindowStart in the past.
 			oneHour := metav1.Duration{Duration: time.Hour}
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-cr01-window-reset",
 					Namespace: ns,
@@ -851,9 +851,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 						"tideproject.k8s/bypass-budget": "true",
 					},
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
-					Budget: tideprojectv1alpha2.BudgetConfig{
+					Budget: tideprojectv1alpha3.BudgetConfig{
 						AbsoluteCapCents:      5000,
 						RollingWindowCapCents: 100,
 						RollingWindowDuration: &oneHour,
@@ -864,13 +864,13 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, project) })
 
 			name := types.NamespacedName{Name: project.Name, Namespace: project.Namespace}
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 
 			// Bypass at spend=200 (> rolling cap 100), initialized project, window open.
 			windowStart := metav1.NewTime(time.Now())
 			statusPatch := client.MergeFrom(fetched.DeepCopy())
-			fetched.Status.Phase = tideprojectv1alpha2.PhaseBudgetExceeded
+			fetched.Status.Phase = tideprojectv1alpha3.PhaseBudgetExceeded
 			fetched.Status.Budget.CostSpentCents = 200
 			fetched.Status.Budget.WindowStart = &windowStart
 			fetched.Status.Git.BranchName = "tide/run-test-cr01-window-reset-1000000000"
@@ -888,7 +888,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
-			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseRunning),
+			Expect(fetched.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseRunning),
 				"Phase should be Running after bypass")
 			Expect(fetched.Status.Budget.BypassBaselineCents).To(BeNumerically("==", 200),
 				"baseline must be recorded at bypass time")
@@ -908,7 +908,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
 				g.Expect(refreshed.Status.Budget.CostSpentCents).To(BeNumerically("==", 0),
 					"window reset must zero CostSpentCents")
@@ -926,9 +926,9 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
-				var refreshed tideprojectv1alpha2.Project
+				var refreshed tideprojectv1alpha3.Project
 				g.Expect(k8sClient.Get(ctx, name, &refreshed)).To(Succeed())
-				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha2.PhaseBudgetExceeded),
+				g.Expect(refreshed.Status.Phase).To(Equal(tideprojectv1alpha3.PhaseBudgetExceeded),
 					"CR-01: new-window spend over the rolling cap must re-halt despite the old baseline")
 			}, 5*time.Second, 200*time.Millisecond).Should(Succeed())
 		})
@@ -939,12 +939,12 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 			ns := "default"
 			// Deliberately do NOT create the shared PVC for this test.
 
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-no-pvc",
 					Namespace: ns,
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -967,7 +967,7 @@ var _ = Describe("ProjectReconciler init + budget", Label("envtest", "phase2"), 
 				"should requeue after 30s when shared PVC is missing (Pitfall 1 — non-blocking)")
 
 			// No init Job should have been created.
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			var jobList batchv1.JobList
 			Expect(k8sClient.List(ctx, &jobList, client.InNamespace(ns))).To(Succeed())
@@ -984,12 +984,12 @@ var _ = Describe("Project Controller", func() {
 		ctx := context.Background()
 
 		It("accepts a valid Project CRD apply", func() {
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "valid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -1000,12 +1000,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("rejects a Project with an invalid targetRepo (CEL XValidation)", func() {
-			invalid := &tideprojectv1alpha2.Project{
+			invalid := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-project",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "not-a-valid-url",
 				},
 			}
@@ -1016,12 +1016,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("sets the finalizer on create (CTRL-05)", func() {
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "finalizer-set",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -1038,7 +1038,7 @@ var _ = Describe("Project Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Finalizers).To(ContainElement("tideproject.k8s/project-cleanup"))
 
@@ -1050,12 +1050,12 @@ var _ = Describe("Project Controller", func() {
 		})
 
 		It("removes finalizer on deletion (TestFinalizerLifecycle, Pitfall 21)", func() {
-			project := &tideprojectv1alpha2.Project{
+			project := &tideprojectv1alpha3.Project{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "finalizer-lifecycle",
 					Namespace: "default",
 				},
-				Spec: tideprojectv1alpha2.ProjectSpec{SchemaRevision: "v1alpha2",
+				Spec: tideprojectv1alpha3.ProjectSpec{SchemaRevision: "v1alpha3",
 					TargetRepo: "https://github.com/example/repo.git",
 				},
 			}
@@ -1071,7 +1071,7 @@ var _ = Describe("Project Controller", func() {
 			_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: name})
 			Expect(err).NotTo(HaveOccurred())
 
-			fetched := &tideprojectv1alpha2.Project{}
+			fetched := &tideprojectv1alpha3.Project{}
 			Expect(k8sClient.Get(ctx, name, fetched)).To(Succeed())
 			Expect(fetched.Finalizers).To(ContainElement("tideproject.k8s/project-cleanup"))
 
@@ -1087,7 +1087,7 @@ var _ = Describe("Project Controller", func() {
 
 			// The object should be GC'd within a short window.
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, name, &tideprojectv1alpha2.Project{})
+				err := k8sClient.Get(ctx, name, &tideprojectv1alpha3.Project{})
 				return apierrors.IsNotFound(err)
 			}, 10*time.Second, 250*time.Millisecond).Should(BeTrue(),
 				"expected Project to be garbage-collected after finalizer removal")
@@ -1097,7 +1097,7 @@ var _ = Describe("Project Controller", func() {
 
 // buildSucceededInitJob builds a pre-created init Job for testing — Spec only,
 // caller patches Status separately since envtest requires separate status updates.
-func buildSucceededInitJob(project *tideprojectv1alpha2.Project, _ string) *batchv1.Job {
+func buildSucceededInitJob(project *tideprojectv1alpha3.Project, _ string) *batchv1.Job {
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	return &batchv1.Job{
@@ -1125,7 +1125,7 @@ func buildSucceededInitJob(project *tideprojectv1alpha2.Project, _ string) *batc
 }
 
 // buildFailedInitJob builds a pre-created init Job for testing — Spec only.
-func buildFailedInitJob(project *tideprojectv1alpha2.Project, _ string) *batchv1.Job {
+func buildFailedInitJob(project *tideprojectv1alpha3.Project, _ string) *batchv1.Job {
 	backoffLimit := int32(2)
 	ttl := int32(300)
 	return &batchv1.Job{
@@ -1182,15 +1182,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		const msName = "ms-import-guard-owned"
 
 		// 1. Create the Project with ImportSource set (required to enter the guard).
-		project := &tideprojectv1alpha2.Project{
+		project := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: ns,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/repo.git",
-				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+				ImportSource: &tideprojectv1alpha3.ImportSourceRef{
 					SeedManifestConfigMap: "seed-cm-guard-test",
 					SalvagedPVCSubPath:    "old-uid/workspace",
 				},
@@ -1198,7 +1198,7 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		}
 		Expect(k8sClient.Create(ctx, project)).To(Succeed())
 		DeferCleanup(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -1207,15 +1207,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		})
 
 		// Re-fetch to get the assigned UID.
-		fetched := &tideprojectv1alpha2.Project{}
+		fetched := &tideprojectv1alpha3.Project{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
 
 		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
 		statusPatch := fetched.DeepCopy()
 		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Type:               tideprojectv1alpha3.ConditionImportComplete,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Reason:             tideprojectv1alpha3.ReasonImportSucceeded,
 			Message:            "Import completed",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1227,12 +1227,12 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		// owner.EnsureOwnerRef (import_controller.go:405). The guard must use
 		// metav1.IsControlledBy (UID-bound), not Spec.ProjectRef (WR-01 fix).
 		tru := true
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      msName,
 				Namespace: ns,
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Project",
 					Name:               projName,
 					UID:                fetched.UID,
@@ -1240,13 +1240,13 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 					BlockOwnerDeletion: &tru,
 				}},
 			},
-			Spec: tideprojectv1alpha2.MilestoneSpec{
+			Spec: tideprojectv1alpha3.MilestoneSpec{
 				ProjectRef: projName,
 			},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		DeferCleanup(func() {
-			m := &tideprojectv1alpha2.Milestone{}
+			m := &tideprojectv1alpha3.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: ns}, m); err == nil {
 				m.Finalizers = nil
 				_ = k8sClient.Update(ctx, m)
@@ -1281,15 +1281,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		const projName = "import-guard-no-milestones"
 
 		// 1. Create the Project with ImportSource set.
-		project := &tideprojectv1alpha2.Project{
+		project := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: ns,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/repo.git",
-				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+				ImportSource: &tideprojectv1alpha3.ImportSourceRef{
 					SeedManifestConfigMap: "seed-cm-no-ms",
 					SalvagedPVCSubPath:    "old-uid/workspace",
 				},
@@ -1297,7 +1297,7 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		}
 		Expect(k8sClient.Create(ctx, project)).To(Succeed())
 		DeferCleanup(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -1306,15 +1306,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		})
 
 		// Re-fetch to get the assigned UID.
-		fetched := &tideprojectv1alpha2.Project{}
+		fetched := &tideprojectv1alpha3.Project{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
 
 		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
 		statusPatch := fetched.DeepCopy()
 		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Type:               tideprojectv1alpha3.ConditionImportComplete,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Reason:             tideprojectv1alpha3.ReasonImportSucceeded,
 			Message:            "Import completed",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1354,15 +1354,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		const msName = "ms-import-guard-foreign-owned"
 
 		// 1. Create the Project with ImportSource set.
-		project := &tideprojectv1alpha2.Project{
+		project := &tideprojectv1alpha3.Project{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      projName,
 				Namespace: ns,
 			},
-			Spec: tideprojectv1alpha2.ProjectSpec{
-				SchemaRevision: "v1alpha2",
+			Spec: tideprojectv1alpha3.ProjectSpec{
+				SchemaRevision: "v1alpha3",
 				TargetRepo:     "https://github.com/example/repo.git",
-				ImportSource: &tideprojectv1alpha2.ImportSourceRef{
+				ImportSource: &tideprojectv1alpha3.ImportSourceRef{
 					SeedManifestConfigMap: "seed-cm-foreign-ms",
 					SalvagedPVCSubPath:    "old-uid/workspace",
 				},
@@ -1370,7 +1370,7 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		}
 		Expect(k8sClient.Create(ctx, project)).To(Succeed())
 		DeferCleanup(func() {
-			p := &tideprojectv1alpha2.Project{}
+			p := &tideprojectv1alpha3.Project{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, p); err == nil {
 				p.Finalizers = nil
 				_ = k8sClient.Update(ctx, p)
@@ -1379,15 +1379,15 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		})
 
 		// Re-fetch to get the assigned UID.
-		fetched := &tideprojectv1alpha2.Project{}
+		fetched := &tideprojectv1alpha3.Project{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: ns}, fetched)).To(Succeed())
 
 		// 2. Stamp ImportComplete=True on Project.Status.Conditions.
 		statusPatch := fetched.DeepCopy()
 		meta.SetStatusCondition(&statusPatch.Status.Conditions, metav1.Condition{
-			Type:               tideprojectv1alpha2.ConditionImportComplete,
+			Type:               tideprojectv1alpha3.ConditionImportComplete,
 			Status:             metav1.ConditionTrue,
-			Reason:             tideprojectv1alpha2.ReasonImportSucceeded,
+			Reason:             tideprojectv1alpha3.ReasonImportSucceeded,
 			Message:            "Import completed",
 			LastTransitionTime: metav1.Now(),
 		})
@@ -1400,12 +1400,12 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 		// collision in the namespace but NOT owned by the current Project object.
 		foreignUID := types.UID("foreign-project-uid-not-this-one")
 		tru := true
-		ms := &tideprojectv1alpha2.Milestone{
+		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      msName,
 				Namespace: ns,
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         tideprojectv1alpha2.GroupVersion.String(),
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Project",
 					Name:               projName,
 					UID:                foreignUID, // points to a DIFFERENT Project UID
@@ -1413,13 +1413,13 @@ var _ = Describe("ProjectReconciler post-ImportComplete adoption guard", Label("
 					BlockOwnerDeletion: &tru,
 				}},
 			},
-			Spec: tideprojectv1alpha2.MilestoneSpec{
+			Spec: tideprojectv1alpha3.MilestoneSpec{
 				ProjectRef: projName, // same name as current project — the collision case
 			},
 		}
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		DeferCleanup(func() {
-			m := &tideprojectv1alpha2.Milestone{}
+			m := &tideprojectv1alpha3.Milestone{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: msName, Namespace: ns}, m); err == nil {
 				m.Finalizers = nil
 				_ = k8sClient.Update(ctx, m)
