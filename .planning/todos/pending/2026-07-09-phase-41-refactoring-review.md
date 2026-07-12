@@ -2,6 +2,7 @@
 name: phase-41-refactoring-review
 description: Internal refactoring review (12 items) — the non-breaking cleanup track; candidate Phase 41
 type: phase-seed
+resolves_phase: 41
 captured: 2026-07-09
 source: operator-shared refactoring review (generated against current source, file:line-verified)
 relates_to:
