@@ -56,13 +56,7 @@ func checkBudgetBlocked(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
-	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha3.ConditionBudgetBlocked &&
-			c.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionBudgetBlocked)
 }
 
 // setBudgetBlockedIfNeeded stamps BudgetBlocked=True on project when the cap is

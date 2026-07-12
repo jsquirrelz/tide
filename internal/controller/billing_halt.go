@@ -79,13 +79,7 @@ func checkBillingHalt(project *tideprojectv1alpha3.Project) bool {
 	if project == nil {
 		return false
 	}
-	for _, c := range project.Status.Conditions {
-		if c.Type == tideprojectv1alpha3.ConditionBillingHalt &&
-			c.Status == metav1.ConditionTrue {
-			return true
-		}
-	}
-	return false
+	return meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionBillingHalt)
 }
 
 // setBillingHaltIfNeeded classifies reason via isBillingFailureReason; if it is
