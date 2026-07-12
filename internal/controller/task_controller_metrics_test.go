@@ -48,7 +48,7 @@ func TestResolveWave_WaveOwner(t *testing.T) {
 			Name:      "test-task-wave-owner",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-abc-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-abc-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 	}
@@ -70,7 +70,7 @@ func TestResolveWave_NoWaveOwner(t *testing.T) {
 			Name:      "test-task-no-wave",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Plan", Name: "some-plan", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Plan", Name: "some-plan", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 	}
@@ -110,7 +110,7 @@ func TestEmitTaskMetrics_EndToEnd(t *testing.T) {
 			Name:      "test-task-m1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-x-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-x-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 		Spec: tideprojectv1alpha3.TaskSpec{
@@ -195,7 +195,7 @@ func TestEmitTaskMetrics_PhaseMissSentinel(t *testing.T) {
 			Name:      "test-task-miss",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-miss-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-miss-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 		Spec: tideprojectv1alpha3.TaskSpec{
@@ -246,7 +246,7 @@ func TestEmitTaskMetrics_FailedReason(t *testing.T) {
 			Name:      "test-task-fr1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-fr1-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-fr1-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 		Spec: tideprojectv1alpha3.TaskSpec{
@@ -329,7 +329,7 @@ func TestEmitTaskMetrics_NegativeDuration_WR04(t *testing.T) {
 			Name:      "test-task-nd1",
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{Kind: "Wave", Name: "tide-wave-nd1-0", APIVersion: "tideproject.k8s/v1alpha1"},
+				{Kind: "Wave", Name: "tide-wave-nd1-0", APIVersion: tideprojectv1alpha3.GroupVersion.String()},
 			},
 		},
 		Spec: tideprojectv1alpha3.TaskSpec{

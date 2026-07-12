@@ -1,6 +1,6 @@
 apiVersion: v1
 items:
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-26T00:00:03Z"
@@ -12,7 +12,7 @@ items:
     name: plan-complete
     namespace: import-partial-ns
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase
@@ -23,7 +23,7 @@ items:
     phaseRef: phase-01-partial
   status:
     phase: Running
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Plan
   metadata:
     creationTimestamp: "2026-06-26T00:00:04Z"
@@ -35,7 +35,7 @@ items:
     name: plan-incomplete
     namespace: import-partial-ns
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Phase

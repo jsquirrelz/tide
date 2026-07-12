@@ -194,7 +194,7 @@ var _ = Describe("PhaseReconciler — planner dispatch", Label("envtest", "phase
 				Name:      "child-plan-ph5-pending",
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         "tideproject.k8s/v1alpha1",
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Phase",
 					Name:               got.GetName(),
 					UID:                got.GetUID(),

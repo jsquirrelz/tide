@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-analytics
 ---
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: dogfood-analytics
@@ -38,9 +38,9 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-analytics
 spec:
-  # Required since Spring Tide (v1.0.2): v1alpha2 is the only served version and
+  # Required as of Phase 40 Plan 40-03: v1alpha3 is the sole served version and
   # the controller fail-closes any object lacking this explicit opt-in.
-  schemaRevision: v1alpha2
+  schemaRevision: v1alpha3
   # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
   # Phase 3 D-B6: TIDE clones, authors artifacts on a per-run branch, and pushes
   # back to this remote (never to main per D-B6 contract).

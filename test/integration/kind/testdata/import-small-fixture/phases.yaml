@@ -1,6 +1,6 @@
 apiVersion: v1
 items:
-- apiVersion: tideproject.k8s/v1alpha2
+- apiVersion: tideproject.k8s/v1alpha3
   kind: Phase
   metadata:
     creationTimestamp: "2026-06-22T00:00:02Z"
@@ -12,7 +12,7 @@ items:
     name: phase-01-stub
     namespace: import-small-ns
     ownerReferences:
-    - apiVersion: tideproject.k8s/v1alpha2
+    - apiVersion: tideproject.k8s/v1alpha3
       blockOwnerDeletion: true
       controller: true
       kind: Milestone

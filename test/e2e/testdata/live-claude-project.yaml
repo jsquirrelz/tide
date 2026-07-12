@@ -5,7 +5,7 @@
 # substituting `${ANTHROPIC_API_KEY}` with the value from the env at apply
 # time — see docs/live-e2e.md for the double-gate (env + build tag) protocol.
 #
-# Schema notes (kept in sync with api/v1alpha1/project_types.go):
+# Schema notes (kept in sync with api/v1alpha3/project_types.go):
 #   - Project.Spec.budget.absoluteCapCents is the on-CRD field (int64 cents).
 #     "$1.00 cap" => absoluteCapCents: 100 ($1.00 = 100 cents). Docs / prose
 #     use "$1.00 / usdCap=1.00" framing; this YAML uses the schema-correct
@@ -44,12 +44,16 @@ stringData:
   # needed). Field present so Project.Spec.git.credsSecretRef resolves.
   GIT_PAT: "${GIT_PAT_OR_DUMMY}"
 ---
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: live-claude
   namespace: live-claude-test
 spec:
+  # Phase 40 Plan 40-03: required since v1alpha3 is the sole served version;
+  # the reconciler fail-closes any object lacking this explicit opt-in.
+  schemaRevision: v1alpha3
+
   # Phase 2 D-A1: targetRepo is the read-only origin URL. For the live E2E
   # we use the in-cluster fixture repo (a bare clone on the workspace PVC
   # populated by the init Job from a tarball in test/e2e/testdata/fixture-repo.tar

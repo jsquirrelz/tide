@@ -260,7 +260,7 @@ var _ = Describe("Plan 04-06 Task 3 — W-2 boundary push integration envtest", 
 					Name:      phaseName + "-child",
 					Namespace: "default",
 					OwnerReferences: []metav1.OwnerReference{{
-						APIVersion:         "tideproject.k8s/v1alpha1",
+						APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 						Kind:               "Phase",
 						Name:               got.Name,
 						UID:                got.UID,

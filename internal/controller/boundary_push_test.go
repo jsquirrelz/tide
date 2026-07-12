@@ -156,7 +156,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		}
 		t := true
 		ph.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion:         "tideproject.k8s/v1alpha1",
+			APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 			Kind:               "Milestone",
 			Name:               msParent.GetName(),
 			UID:                msParent.GetUID(),
@@ -186,7 +186,7 @@ var _ = Describe("Up-stack reconcilers — W-2 boundary push trigger (Plan 04-06
 		}
 		t := true
 		pl.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion:         "tideproject.k8s/v1alpha1",
+			APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 			Kind:               "Phase",
 			Name:               phParent.GetName(),
 			UID:                phParent.GetUID(),

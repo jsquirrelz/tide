@@ -1,1 +1,1 @@
-{"apiVersion":"tideproject.k8s/v1alpha1","kind":"PushResult","projectUID":"df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab","branch":"tide/run-dogfood-codex-runtime-1781739693","headSHA":"","exitCode":1,"reason":"commit-failed"}
+{"apiVersion":"dispatch.tideproject.k8s/v1alpha1","kind":"PushResult","projectUID":"df5a0c1f-a6c5-4a8a-a56f-4a24c7a56eab","branch":"tide/run-dogfood-codex-runtime-1781739693","headSHA":"","exitCode":1,"reason":"commit-failed"}

@@ -4,12 +4,12 @@
 # seed ConfigMap + salvage envelopes. spec.importSource drives the Phase 28
 # ImportController. Stub subagent + $0 budget keep the run cost-free; adoption of
 # the milestone/phase envelopes (zero planner Jobs) is what Tier b asserts.
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: dogfood-codex-runtime
 spec:
-  schemaRevision: v1alpha2
+  schemaRevision: v1alpha3
   targetRepo: "https://git.example.internal/stub/no-such-repo.git"
   providerSecretRef: "tide-provider-secret"
   budget:

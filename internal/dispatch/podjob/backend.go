@@ -405,7 +405,7 @@ func (b *PodJobBackend) walkOwnerChain(ctx context.Context, obj client.Object, d
 		return nil, nil
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tidev1alpha3.GroupVersion.String()) {
+		if ref.Kind == "Project" && ref.APIVersion == tidev1alpha3.GroupVersion.String() {
 			var p tidev1alpha3.Project
 			if err := b.Client.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
 				return &p, nil

@@ -44,7 +44,7 @@ func makeWaveWithTasks(planRef, waveName string, waveIndex int, taskNames []stri
 			Name:      waveName,
 			Namespace: "default",
 			OwnerReferences: []metav1.OwnerReference{
-				{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: planRef, UID: "dummy-uid"},
+				{APIVersion: tideprojectv1alpha3.GroupVersion.String(), Kind: "Plan", Name: planRef, UID: "dummy-uid"},
 			},
 		},
 		Spec: tideprojectv1alpha3.WaveSpec{

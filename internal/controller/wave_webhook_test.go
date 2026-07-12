@@ -72,7 +72,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				Name:      "webhook-create-wave-succ",
 				Namespace: namespace,
 				OwnerReferences: []metav1.OwnerReference{
-					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
+					{APIVersion: tideprojectv1alpha3.GroupVersion.String(), Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
 				},
 			},
 			Spec: tideprojectv1alpha3.WaveSpec{
@@ -89,7 +89,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				Name:      "webhook-update-wave",
 				Namespace: namespace,
 				OwnerReferences: []metav1.OwnerReference{
-					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "plan-a", UID: "dummy-uid"},
+					{APIVersion: tideprojectv1alpha3.GroupVersion.String(), Kind: "Plan", Name: "plan-a", UID: "dummy-uid"},
 				},
 			},
 			Spec: tideprojectv1alpha3.WaveSpec{
@@ -116,7 +116,7 @@ var _ = Describe("WaveCustomValidator (Phase 1 no-op — D-B1 rejection wires in
 				Name:      "webhook-delete-wave",
 				Namespace: namespace,
 				OwnerReferences: []metav1.OwnerReference{
-					{APIVersion: "tideproject.k8s/v1alpha1", Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
+					{APIVersion: tideprojectv1alpha3.GroupVersion.String(), Kind: "Plan", Name: "some-plan", UID: "dummy-uid"},
 				},
 			},
 			Spec: tideprojectv1alpha3.WaveSpec{

@@ -400,7 +400,7 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 				Name:      "child-phase-pending",
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         "tideproject.k8s/v1alpha1",
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Milestone",
 					Name:               got.GetName(),
 					UID:                got.GetUID(),

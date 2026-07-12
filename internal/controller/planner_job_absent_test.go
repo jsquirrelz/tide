@@ -321,7 +321,7 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 				Name:      "child-phase-envabsent",
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         "tideproject.k8s/v1alpha1",
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Milestone",
 					Name:               got.GetName(),
 					UID:                got.GetUID(),
@@ -408,7 +408,7 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 				Name:      "child-plan-envabsent",
 				Namespace: "default",
 				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion:         "tideproject.k8s/v1alpha1",
+					APIVersion:         tideprojectv1alpha3.GroupVersion.String(),
 					Kind:               "Phase",
 					Name:               got.GetName(),
 					UID:                got.GetUID(),

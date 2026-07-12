@@ -14,13 +14,13 @@
 #
 # Budget: absoluteCapCents=0 — stub subagent costs nothing; the $0 cap
 # ensures the run never charges real cost (mirroring bare-project.yaml).
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: import-small-test
   # namespace: import-small-ns  (applied by the test per its ns lifecycle)
 spec:
-  schemaRevision: v1alpha2
+  schemaRevision: v1alpha3
   targetRepo: "https://git.example.internal/stub/no-such-repo.git"
   providerSecretRef: "tide-provider-secret"
   budget:

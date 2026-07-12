@@ -145,7 +145,7 @@ spec:
       persistentVolumeClaim:
         claimName: tide-projects
 ---
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: small-project
@@ -155,9 +155,9 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: small
 spec:
-  # Spring Tide (v1.0.2) made v1alpha2 the only served version and fail-closes
+  # Phase 40 (Plan 40-03) made v1alpha3 the sole served version and fail-closes
   # any object lacking this explicit opt-in (checkSchemaRevisionGuard). Required.
-  schemaRevision: v1alpha2
+  schemaRevision: v1alpha3
   # RFC 2606 .example TLD sentinel — non-routable by design. The stub-subagent
   # ignores targetRepo entirely and returns canned success envelopes regardless
   # of this value (MEDIUM-7 design lock, verified in plan 06 main_test.go).

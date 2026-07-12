@@ -2,9 +2,10 @@
 #
 # Run 2 of 3 in the TIDE-on-TIDE dogfood sequence (a.k.a. "dogfood run #2").
 #
-# CONVERTED to tideproject.k8s/v1alpha2 (2026-06-17). The cluster serves ONLY
-# v1alpha2 after the Spring Tide migration (Phase 23); a v1alpha1 Project is
-# rejected, and a v1alpha2 Project MUST carry `schemaRevision: v1alpha2` or the
+# CONVERTED to tideproject.k8s/v1alpha3 (Phase 40 Plan 40-03; previously
+# v1alpha2 as of 2026-06-17's Spring Tide migration, Phase 23). The cluster
+# serves ONLY v1alpha3 as of this crank; a v1alpha1 or v1alpha2 Project is
+# rejected, and a v1alpha3 Project MUST carry `schemaRevision: v1alpha3` or the
 # Project reconciler fail-closes with RequiresReinstall.
 #
 # Purpose: add a second Subagent implementation (Codex / OpenAI) to TIDE and
@@ -12,7 +13,7 @@
 # waves, not just proving the interface compiles. This is STILL the deliverable:
 # `internal/subagent/codex/` does not exist yet, and the resolved provider vendor
 # is still pinned to "anthropic" (internal/controller/dispatch_helpers.go:179,
-# ResolveProvider — now takes a *v1alpha2.Project; per-level provider switch is
+# ResolveProvider — now takes a *v1alpha3.Project; per-level provider switch is
 # unbuilt). The halted first attempt at this run (~$29.72) pushed NO code branch
 # (it halted on the foundational global-DAG defect before authoring); there is
 # nothing to salvage from it. Run #1 (analytics) did push
@@ -25,8 +26,8 @@
 # the deployed dashboard today.
 #
 # Prerequisites (see README.md for the recipe):
-#   - kind cluster updated to Spring Tide dev-head (v1alpha2 CRDs + Phase-26
-#     manager/dashboard). `kind-tide-dogfood` is currently in this state.
+#   - kind cluster updated to Phase 40's v1alpha3 dev-head (v1alpha3 CRDs +
+#     Phase-26 manager/dashboard). `kind-tide-dogfood` is currently in this state.
 #   - per-namespace resources in tide-dogfood-codex:
 #     kubectl apply -f examples/projects/medium/per-namespace-resources.yaml -n tide-dogfood-codex
 #   - tide-secrets Secret in tide-dogfood-codex (ANTHROPIC_API_KEY from
@@ -44,7 +45,7 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-codex
 ---
-apiVersion: tideproject.k8s/v1alpha2
+apiVersion: tideproject.k8s/v1alpha3
 kind: Project
 metadata:
   name: dogfood-codex-runtime
@@ -54,8 +55,8 @@ metadata:
     app.kubernetes.io/managed-by: tide-sample
     tideproject.k8s/sample: dogfood-codex
 spec:
-  # Required in v1alpha2 — the reconciler fail-closes without it.
-  schemaRevision: v1alpha2
+  # Required in v1alpha3 — the reconciler fail-closes without it.
+  schemaRevision: v1alpha3
 
   # TIDE operates against its own repo — TIDE-on-TIDE dogfood run.
   targetRepo: https://github.com/jsquirrelz/tide.git
@@ -77,13 +78,13 @@ spec:
     given infrastructure; the ONLY new product surface this run delivers is the
     Codex subagent package + the per-level provider switch.
 
-    - **v1alpha2 schema + global Execution DAG (Phases 23-26).** `Plan`/`Phase`/
+    - **v1alpha3 schema + global Execution DAG (Phases 23-26, 40).** `Plan`/`Phase`/
       `Milestone`/`Task` all carry `dependsOn` at any level; the assembler builds
       ONE global Execution DAG and derives Project-scoped waves
       (`tide-wave-<project>-<N>`) across plan/phase/milestone boundaries via
       layered Kahn. The project planner emits N Milestones up-front with
       `Milestone.dependsOn` (planning-DAG edge only — zero execution edges).
-      Child CRDs authored by the planner are v1alpha2.
+      Child CRDs authored by the planner are v1alpha3.
     - **Global dispatch / failure / gates / resumption (Phase 25).** Readiness is
       re-derived from the global indegree map + completed-set each reconcile
       (nothing cached). `failureProfile` and the gate-as-hold model below are live.
@@ -116,7 +117,7 @@ spec:
     - Per-project selection: no mixing within a run (defeats heterogeneity goal).
 
     The SubagentConfig field already has Levels.{Milestone,Phase,Plan,Task}
-    per-level LevelConfig overrides (api/v1alpha2/project_types.go via
+    per-level LevelConfig overrides (api/v1alpha3/project_types.go via
     SubagentConfig). Wire the Codex image at the levels the operator wants Codex.
     NOTE: today `resolveImage` honors a per-level image, but `ResolveProvider`
     (internal/controller/dispatch_helpers.go) still returns Vendor:"anthropic"

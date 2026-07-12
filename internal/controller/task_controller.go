@@ -1252,7 +1252,7 @@ func (r *TaskReconciler) walkOwnerChainToProjectDepth(ctx context.Context, obj c
 		return nil, nil
 	}
 	for _, ref := range obj.GetOwnerReferences() {
-		if ref.Kind == "Project" && (ref.APIVersion == "tideproject.k8s/v1alpha1" || ref.APIVersion == tideprojectv1alpha3.GroupVersion.String()) {
+		if ref.Kind == "Project" && ref.APIVersion == tideprojectv1alpha3.GroupVersion.String() {
 			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: obj.GetNamespace(), Name: ref.Name}, &p); err == nil {
 				return &p, nil

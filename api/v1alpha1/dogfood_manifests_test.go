@@ -30,13 +30,11 @@ import (
 
 // projectAPIVersion extracts the declared apiVersion from a Project doc so the
 // strict-decode + required-field checks can validate each manifest against the
-// schema it actually targets. The dogfood set is mixed-version: the
-// codex-runtime project was intentionally converted to v1alpha2 (commit
-// dcd7069), so unconditionally strict-decoding every doc as v1alpha1 is wrong.
-// The "tideproject.k8s/v1alpha2" case decodes into the current Go package
-// (tideprojectv1alpha3.Project as of Phase 40 Plan 40-03's crank — the on-disk
-// dogfood apiVersion strings bump to v1alpha3 in this same phase's Task 2,
-// at which point this case label moves with them).
+// schema it actually targets. The dogfood set is mixed-version: v1alpha1 stays
+// as a case for older/hypothetical fixtures; all three live dogfood manifests
+// moved to v1alpha3 as of Phase 40 Plan 40-03 (previously v1alpha2, commit
+// dcd7069), so unconditionally strict-decoding every doc as one fixed version
+// is wrong.
 func projectAPIVersion(t *testing.T, doc []byte) string {
 	t.Helper()
 	var meta struct {
@@ -52,7 +50,7 @@ func projectAPIVersion(t *testing.T, doc []byte) string {
 // declare. New schema versions get added here as they ship.
 var supportedProjectAPIVersions = map[string]bool{
 	"tideproject.k8s/v1alpha1": true,
-	"tideproject.k8s/v1alpha2": true,
+	"tideproject.k8s/v1alpha3": true,
 }
 
 // splitYAMLDocs splits a multi-document YAML file on "---" document separators,
@@ -141,10 +139,10 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
 						t.Errorf("UnmarshalStrict (v1alpha1) failed for Project doc in %s: %v", path, err)
 					}
-				case "tideproject.k8s/v1alpha2":
+				case "tideproject.k8s/v1alpha3":
 					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-						t.Errorf("UnmarshalStrict (v1alpha2) failed for Project doc in %s: %v", path, err)
+						t.Errorf("UnmarshalStrict (v1alpha3) failed for Project doc in %s: %v", path, err)
 					}
 				default:
 					t.Errorf("Project doc in %s declares unsupported apiVersion %q", path, av)
@@ -159,7 +157,7 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 
 // TestDogfoodManifests_RequiredFields asserts per-Project field invariants,
 // validating each manifest against the schema version it declares (the dogfood
-// set is mixed v1alpha1/v1alpha2):
+// set is mixed v1alpha1/v1alpha3):
 //   - apiVersion is a supported tideproject.k8s version
 //   - spec.targetRepo == "https://github.com/jsquirrelz/tide.git"
 //   - spec.outcomePrompt is non-empty
@@ -192,10 +190,10 @@ func TestDogfoodManifests_RequiredFields(t *testing.T) {
 					if proj.Spec.Git != nil {
 						gitNil, gitCredsRef = false, proj.Spec.Git.CredsSecretRef
 					}
-				case "tideproject.k8s/v1alpha2":
+				case "tideproject.k8s/v1alpha3":
 					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-						t.Fatalf("UnmarshalStrict (v1alpha2): %v", err)
+						t.Fatalf("UnmarshalStrict (v1alpha3): %v", err)
 					}
 					apiVersion, targetRepo, outcomePrompt, providerSecretRef = proj.APIVersion, proj.Spec.TargetRepo, proj.Spec.OutcomePrompt, proj.Spec.ProviderSecretRef
 					if proj.Spec.Git != nil {
