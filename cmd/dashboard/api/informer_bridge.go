@@ -35,7 +35,7 @@ limitations under the License.
 //   Phase     → .Spec.MilestoneRef → Milestone → .Spec.ProjectRef
 //   Plan      → .Spec.PhaseRef → Phase → ...
 //   Task      → .Spec.PlanRef → Plan → ...
-//   Wave      → .Spec.ProjectRef (global-scope since v1alpha2, unchanged in v1alpha3; resolves in one hop)
+//   Wave      → .Spec.ProjectRef (global-scope since the Phase 25 crank, unchanged in v1alpha3; resolves in one hop)
 //
 // Failures to resolve the parent project are logged at V(1) and the event
 // is silently dropped — the dashboard's correctness budget allows missed

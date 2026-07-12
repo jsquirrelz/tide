@@ -367,8 +367,8 @@ func TestValidateAPIVersionKind_AcceptsValid(t *testing.T) {
 	}
 }
 
-// TestValidateAPIVersionKind_AcceptsOut asserts that v1alpha1 + TaskEnvelopeOut
-// passes validation when expectedKind is KindTaskEnvelopeOut.
+// TestValidateAPIVersionKind_AcceptsOut asserts that APIVersionV1Alpha1 +
+// TaskEnvelopeOut passes validation when expectedKind is KindTaskEnvelopeOut.
 func TestValidateAPIVersionKind_AcceptsOut(t *testing.T) {
 	err := ValidateAPIVersionKind(APIVersionV1Alpha1, KindTaskEnvelopeOut, KindTaskEnvelopeOut)
 	if err != nil {
@@ -379,7 +379,7 @@ func TestValidateAPIVersionKind_AcceptsOut(t *testing.T) {
 // TestEnvelopeIn_Constants asserts that the exported constants carry the
 // expected literal values per D-A3. D-08: the envelope contract group is
 // decoupled from the CRD group ("dispatch.tideproject.k8s" subdomain, not
-// "tideproject.k8s") — the version component stays v1alpha1.
+// "tideproject.k8s") — the version component stays fixed.
 func TestEnvelopeIn_Constants(t *testing.T) {
 	if APIVersionV1Alpha1 != "dispatch.tideproject.k8s/v1alpha1" {
 		t.Errorf("APIVersionV1Alpha1 = %q, want %q", APIVersionV1Alpha1, "dispatch.tideproject.k8s/v1alpha1")

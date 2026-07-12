@@ -67,7 +67,7 @@ import) were built from the same `main` as this chart, so no ImagePullBackOff is
 **Blank `TIDE_IMPORT_IMAGE` (dev-skip the envelope Job).** We adopt the M+P skeleton via the
 import path, but we do NOT resume task envelopes (plans regenerate). With the import image empty,
 `ImportController.CopyingEnvelopes` skips the copy Job and sets `ImportComplete=True` right after
-materializing M+P — no envelope copy, no v1alpha1→v1alpha2 envelope-conversion risk
+materializing M+P — no envelope copy, no cross-schema-revision envelope-conversion risk
 (`import_controller.go:595-600`). Required, because project-level adoption only happens through
 `ImportComplete` (the project planner guard is Job-presence-based; hand-apply would re-author).
 ```bash
@@ -124,7 +124,7 @@ branch (no re-authoring). No skeleton.yaml is applied — import owns materializ
 ```bash
 kubectl -n "$NS" create configmap tide-import-seed-dogfood-codex-runtime \
   --from-file=manifest="$RUN2"/seed-manifest.trimmed.json
-kubectl apply -f "$RUN2"/project.yaml        # fresh v1alpha2 Project (importSource, $50 cap, mirror)
+kubectl apply -f "$RUN2"/project.yaml        # fresh v1alpha3 Project (importSource, $50 cap, mirror)
 ```
 
 **Pre-run verification (do this before walking away):**

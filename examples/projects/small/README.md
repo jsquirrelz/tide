@@ -114,7 +114,7 @@ Phase, Plan, Task, Wave) via owner-refs.
 ## Troubleshooting
 
 **`kubectl apply` returns `no matches for kind "Project" in version
-"tideproject.k8s/v1alpha1"`** — the TIDE CRDs are not installed. Install the
+"tideproject.k8s/v1alpha3"`** — the TIDE CRDs are not installed. Install the
 CRDs chart FIRST before the controller chart (Pitfall 4):
 
 ```bash

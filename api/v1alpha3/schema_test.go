@@ -62,7 +62,7 @@ func TestLevelOverridesShape(t *testing.T) {
 
 	levelOverridesType := reflect.TypeFor[tidev1alpha3.LevelOverrides]()
 
-	// Assert json tags are unchanged from v1alpha2 (lowercase, singular).
+	// Assert json tags are unchanged from the prior schema revision (lowercase, singular).
 	wantTags := map[string]string{
 		"Milestone": "milestone,omitempty",
 		"Phase":     "phase,omitempty",

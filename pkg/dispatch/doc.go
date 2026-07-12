@@ -32,14 +32,14 @@ limitations under the License.
 // itself a served API resource, so it gets its own subdomain group — the same
 // pattern kubeadm uses for its own config-file API group (kubeadm.k8s.io),
 // distinct from the core Kubernetes resource APIs it drives. Decoupling means
-// a CRD version crank (v1alpha1 -> v1alpha2 -> v1alpha3 -> ...) can never
-// collide with or accidentally bump the subagent-image envelope contract —
-// the two lifecycles are now independent by construction.
+// a CRD version crank (each schema-revision bump) can never collide with or
+// accidentally bump the subagent-image envelope contract — the two
+// lifecycles are now independent by construction.
 //
-// JSON tag stability is the public contract. Field names under v1alpha1 are
-// frozen after this plan ships. Future breaking changes (e.g., new required
-// fields) bump the dispatch group's OWN version component instead — they do
-// not ride the CRD group's version cranks.
+// JSON tag stability is the public contract. Field names under the dispatch
+// group are frozen after this plan ships. Future breaking changes (e.g., new
+// required fields) bump the dispatch group's OWN version component instead —
+// they do not ride the CRD group's version cranks.
 //
 // Per SUB-01 / DAG-05-mirror, this package MUST NOT import:
 //   - sigs.k8s.io/controller-runtime/* (manager/client/reconcile/...)
@@ -49,7 +49,7 @@ limitations under the License.
 // The package IS permitted to import k8s.io/apimachinery/pkg/runtime for
 // runtime.RawExtension (Phase 3 D-A1: ChildCRDSpec.Spec uses RawExtension as
 // the typed-but-deferred-decode escape hatch that keeps pkg/dispatch free of
-// api/v1alpha1 imports, which would invert the dependency arrow). The
+// api/v1alpha3 imports, which would invert the dependency arrow). The
 // required transitive closure of apimachinery (sigs.k8s.io/json,
 // sigs.k8s.io/structured-merge-diff, k8s.io/kube-openapi, k8s.io/klog) rides
 // along with that decision and is allowlisted.

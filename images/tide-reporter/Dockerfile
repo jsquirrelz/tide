@@ -16,7 +16,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs.
-# cmd/tide-reporter imports: internal/reporter, internal/owner, api/v1alpha1, pkg/dispatch.
+# cmd/tide-reporter imports: internal/reporter, internal/owner, api/v1alpha3, pkg/dispatch.
 COPY api/ api/
 COPY internal/reporter/ internal/reporter/
 COPY internal/owner/ internal/owner/

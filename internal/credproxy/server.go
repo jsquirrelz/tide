@@ -35,8 +35,8 @@ import (
 
 // RouteSpec is a (method, path-prefix) tuple for the per-Project credproxy
 // allowlist extension (Phase 04.1 P4.2). This type is intentionally duplicated
-// from api/v1alpha1.RouteSpec — the credproxy package MUST NOT import
-// api/v1alpha1 (providerfirewall analyzer rule); JSON serialisation at the
+// from api/v1alpha3.RouteSpec — the credproxy package MUST NOT import
+// api/v1alpha3 (providerfirewall analyzer rule); JSON serialisation at the
 // TIDE_ALLOWED_ROUTES env-var boundary bridges the two types.
 type RouteSpec struct {
 	Method     string `json:"method"`
@@ -106,7 +106,7 @@ type Proxy struct {
 //
 // Provider-firewall: this is the Anthropic-specific classification at the HTTP
 // boundary. It lives in internal/credproxy (the legal home per the firewall
-// analyzer rule). Do NOT import api/v1alpha1 or controller-runtime here.
+// analyzer rule). Do NOT import api/v1alpha3 or controller-runtime here.
 func isCreditExhaustion(body []byte) bool {
 	return strings.Contains(strings.ToLower(string(body)), "credit balance")
 }

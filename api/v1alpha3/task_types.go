@@ -67,8 +67,8 @@ type TaskDev struct {
 
 // TaskSpec carries the executor envelope per D-F1 (retired), D-F2.
 // In v1alpha3 the plan-local D-F1 restriction on DependsOn stays retired
-// (retired in v1alpha2); Tasks may declare dependencies on any node
-// (Task/Plan/Phase/Milestone) in the Project.
+// (retired in the prior schema revision); Tasks may declare dependencies on
+// any node (Task/Plan/Phase/Milestone) in the Project.
 type TaskSpec struct {
 	// PlanRef is the name of the owning Plan (same namespace). Used for
 	// ownership and Task listing; NOT a dep constraint.

@@ -21,8 +21,9 @@ import (
 )
 
 // WaveSpec carries the global-scope wave identity per D-07 (SCHEMA-01).
-// Wave ownership is Project-scoped (moved from Plan in v1alpha2): one Wave CR
-// per global wave position across the entire Project's execution DAG.
+// Wave ownership is Project-scoped (moved from Plan in the prior schema
+// revision): one Wave CR per global wave position across the entire
+// Project's execution DAG.
 type WaveSpec struct {
 	// ProjectRef is the name of the owning Project (same namespace).
 	// +kubebuilder:validation:MinLength=1
