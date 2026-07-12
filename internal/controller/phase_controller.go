@@ -419,7 +419,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		plannerCaps.Iterations = 20
 	}
 	plannerPrompt := outcomePromptOf(project)
-	_, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
+	envIn, envInJSON, err := BuildPlannerEnvelope("phase", ph, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, ph.Spec.SharedContext)
@@ -451,6 +451,10 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	// resolver is nil-safe, so a nil project resolves to the chart tier /
 	// compiled default without a caller-side guard.
 	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "phase", r.HelmProviderDefaults)
+	// D-02 / T-40-12: log the resolved model at dispatch — previously the
+	// resolved model appeared nowhere outside the PVC envelope.
+	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "phase", "model", envIn.Provider.Model, "image", resolvedImage)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            ph,
@@ -459,7 +463,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		Project:              project,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
-		SubagentImage:        resolveImage(project, "phase", r.HelmProviderDefaults),
+		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,

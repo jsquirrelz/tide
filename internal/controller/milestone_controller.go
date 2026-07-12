@@ -461,7 +461,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		plannerCaps.Iterations = 20
 	}
 	plannerPrompt := outcomePromptOf(project)
-	_, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
+	envIn, envInJSON, err := BuildPlannerEnvelope("milestone", ms, project, attempt, "", plannerPrompt, pkgdispatch.Caps{
 		WallClockSeconds: int(plannerCaps.WallClockSeconds),
 		Iterations:       int(plannerCaps.Iterations),
 	}, "https://127.0.0.1:8443", r.HelmProviderDefaults, ms.Spec.SharedContext)
@@ -492,6 +492,10 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 	// SIGN-01 / D-03: resolve committer/author identity (mirrors resolveImage's
 	// HelmProviderDefaults tier) and stamp it into the planner Job env.
 	agentName, agentEmail := resolveAgentIdentity(project, r.HelmProviderDefaults)
+	resolvedImage := resolveImage(project, "milestone", r.HelmProviderDefaults)
+	// D-02 / T-40-12: log the resolved model at dispatch — previously the
+	// resolved model appeared nowhere outside the PVC envelope.
+	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "milestone", "model", envIn.Provider.Model, "image", resolvedImage)
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            ms,
@@ -500,7 +504,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		Project:              project,
 		SignedToken:          token,
 		EnvelopeInJSON:       envInJSON,
-		SubagentImage:        resolveImage(project, "milestone", r.HelmProviderDefaults),
+		SubagentImage:        resolvedImage,
 		AgentName:            agentName,
 		AgentEmail:           agentEmail,
 		CredproxyImage:       r.CredproxyImage,
