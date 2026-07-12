@@ -46,6 +46,10 @@ import (
 // as a ConditionParentUnresolved status patch + 30s requeue. Phase 04.1 P1.4.
 var ErrParentUnresolved = errors.New("no parent Project found via label or owner-ref chain")
 
+// defaultSharedPVCName is the chart-provisioned shared PVC used when
+// PodJobBackend.PVCName is unset (name mirrors the controller-side default).
+const defaultSharedPVCName = "tide-projects"
+
 // EnvelopeReader is the interface for reading an EnvelopeOut from the per-Project PVC.
 // Injected into PodJobBackend for testability — production wiring uses
 // FilesystemEnvelopeReader.
@@ -269,7 +273,7 @@ func (b *PodJobBackend) Run(ctx context.Context, in pkgdispatch.EnvelopeIn) (pkg
 
 	pvcName := b.PVCName
 	if pvcName == "" {
-		pvcName = "tide-projects"
+		pvcName = defaultSharedPVCName
 	}
 
 	// Inline image precedence walk — mirrors controller.resolveImage for the
