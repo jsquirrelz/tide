@@ -168,3 +168,8 @@ None - no external service configuration required.
 ---
 *Phase: 40-deprecate-v1alpha1-api*
 *Completed: 2026-07-11*
+
+## Self-Check: PASSED
+
+- Verified 11 key created/modified files exist on disk (webhook package files, guard/owner-ref sites, dashboard settings, salvage tarball, e2e testdata, this summary).
+- Verified all 3 commit hashes (`03f8d8b`, `8494f9f`, `5d136c6`) exist in `git log --oneline --all`.
