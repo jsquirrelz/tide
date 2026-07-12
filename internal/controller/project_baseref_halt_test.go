@@ -70,12 +70,14 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 
 	newReconciler := func() *ProjectReconciler {
 		return &ProjectReconciler{
-			Client:                  k8sClient,
-			Scheme:                  k8sClient.Scheme(),
-			Dispatcher:              &stubDispatcher{},
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:    &stubDispatcher{},
+				TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+			},
 			MaxConcurrentReconciles: 1,
 			SharedPVCName:           pvcName,
-			TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 		}
 	}
 

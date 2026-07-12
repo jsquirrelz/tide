@@ -347,7 +347,7 @@ var _ = Describe("ProjectReconciler — boundary-push bounded auto-retry (debug 
 
 	newReconciler := func(pvc string) *ProjectReconciler {
 		r := newTestProjectReconciler()
-		r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+		r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 		r.SharedPVCName = pvc
 		ensurePVC(ctx, pvc, "default")
 		return r
@@ -828,7 +828,7 @@ var _ = Describe("ProjectReconciler — LastPushedSHA stamp + mid-run observatio
 
 	newReconcilerSHA := func(pvc string) *ProjectReconciler {
 		r := newTestProjectReconciler()
-		r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+		r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 		r.SharedPVCName = pvc
 		ensurePVC(ctx, pvc, "default")
 		return r
@@ -1072,7 +1072,7 @@ var _ = Describe("ProjectReconciler — integration-miss + merge-conflict failur
 
 	newReconcilerIM := func(pvc string) *ProjectReconciler {
 		r := newTestProjectReconciler()
-		r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+		r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 		r.SharedPVCName = pvc
 		ensurePVC(ctx, pvc, "default")
 		return r
@@ -1317,7 +1317,7 @@ var _ = Describe("ProjectReconciler — reset-boundary-push annotation consumpti
 			Expect(k8sClient.Patch(ctx, &toAnnotate, annPatch)).To(Succeed())
 
 			r := newTestProjectReconciler()
-			r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+			r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 			r.SharedPVCName = "tide-projects-reset-bp"
 			ensurePVC(ctx, "tide-projects-reset-bp", "default")
 

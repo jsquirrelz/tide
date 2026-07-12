@@ -937,15 +937,17 @@ var _ = Describe("BillingHalt backstop: non-billing failure does not set conditi
 // making the hold specs vacuous (HALT-01 regression honesty — Phase 13 WR-01).
 func newBHMilestoneReconciler() *MilestoneReconciler {
 	return &MilestoneReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 }
 
@@ -953,15 +955,17 @@ func newBHMilestoneReconciler() *MilestoneReconciler {
 // See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHPhaseReconciler() *PhaseReconciler {
 	return &PhaseReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 }
 
@@ -969,15 +973,17 @@ func newBHPhaseReconciler() *PhaseReconciler {
 // See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHPlanReconciler() *PlanReconciler {
 	return &PlanReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 }
 
@@ -985,15 +991,17 @@ func newBHPlanReconciler() *PlanReconciler {
 // See newBHMilestoneReconciler for the two-gate wiring rationale.
 func newBHProjectReconciler() *ProjectReconciler {
 	return &ProjectReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 }
 

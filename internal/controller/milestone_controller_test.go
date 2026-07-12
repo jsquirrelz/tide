@@ -184,16 +184,18 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 		}, "5s", "100ms").Should(Succeed())
 
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      newMapEnvReader(),
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      newMapEnvReader(),
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		// Reconcile a few times — first for finalizer ensure, then for owner ref, then for dispatch.
@@ -273,16 +275,18 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: budgetMilestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -367,16 +371,18 @@ var _ = Describe("MilestoneReconciler — planner dispatch + child materializati
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: autoMilestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -577,16 +583,18 @@ var _ = Describe("MilestoneReconciler — DEBT-02 reject short-circuit before re
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		// Drive through to handleJobCompletion: dispatch, fake planner Job terminal,
@@ -738,16 +746,18 @@ var _ = Describe("MilestoneReconciler — PLANFAIL D4 false-leaf guard (Phase 33
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		// Drive reconcile to dispatch the planner Job.
@@ -804,16 +814,18 @@ var _ = Describe("MilestoneReconciler — PLANFAIL D4 false-leaf guard (Phase 33
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		// Drive reconcile to dispatch the planner Job.

@@ -61,11 +61,13 @@ var _ = Describe("CR-01: milestone nil-project guard (DISPATCH-01)", Label("envt
 			Client:      mgrClient,
 			Scheme:      k8sClient.Scheme(),
 			PlannerPool: newPlannerPoolForTest(),
-			SigningKey:  testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: "tide-stub-subagent:test",
+			Deps: PlannerReconcilerDeps{
+				SigningKey: testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: "tide-stub-subagent:test",
+				},
+				CredproxyImage: testCredproxyImage,
 			},
-			CredproxyImage: testCredproxyImage,
 		}
 
 		// Direct white-box call — the full Reconcile stops earlier at parent resolution
@@ -190,16 +192,18 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 
 			const helmDefaultImage = "tide-stub-subagent:test"
 			r := &PlanReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      newMapEnvReader(),
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: helmDefaultImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      newMapEnvReader(),
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: helmDefaultImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: planName, Namespace: "default"}, 5)).To(Succeed())

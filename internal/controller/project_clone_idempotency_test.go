@@ -93,12 +93,14 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 			Expect(k8sClient.Status().Patch(ctx, &p, statusPatch)).To(Succeed())
 
 			r := &ProjectReconciler{
-				Client:                  k8sClient,
-				Scheme:                  k8sClient.Scheme(),
-				Dispatcher:              &stubDispatcher{},
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:    &stubDispatcher{},
+					TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				},
 				MaxConcurrentReconciles: 1,
 				SharedPVCName:           pvcName,
-				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			// Drive a reconcile; the CloneComplete guard must prevent clone-Job creation.
@@ -149,12 +151,14 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			r := &ProjectReconciler{
-				Client:                  k8sClient,
-				Scheme:                  k8sClient.Scheme(),
-				Dispatcher:              &stubDispatcher{},
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:    &stubDispatcher{},
+					TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				},
 				MaxConcurrentReconciles: 1,
 				SharedPVCName:           pvcName,
-				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			// Advance the project to the clone-dispatch point: simulate init Job success
@@ -271,12 +275,14 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 			waitForCacheSync(projectName, "default", &tideprojectv1alpha3.Project{})
 
 			r := &ProjectReconciler{
-				Client:                  k8sClient,
-				Scheme:                  k8sClient.Scheme(),
-				Dispatcher:              &stubDispatcher{},
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:    &stubDispatcher{},
+					TidePushImage: "ghcr.io/jsquirrelz/tide-push:test",
+				},
 				MaxConcurrentReconciles: 1,
 				SharedPVCName:           pvcName,
-				TidePushImage:           "ghcr.io/jsquirrelz/tide-push:test",
 			}
 
 			// Advance to the clone-dispatch point: drive reconciles + succeed the

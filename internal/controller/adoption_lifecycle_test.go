@@ -96,15 +96,17 @@ func newCountingAdoptionReconciler() (*ProjectReconciler, *atomic.Int64) {
 	var counter atomic.Int64
 	wrapped := &countingClient{Client: mgrClient, statusCounter: &counter}
 	r := &ProjectReconciler{
-		Client:         wrapped,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: wrapped,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 	return r, &counter
 }
@@ -114,15 +116,17 @@ func newCountingAdoptionReconciler() (*ProjectReconciler, *atomic.Int64) {
 // mgrClient so the cached client sees freshly-patched status conditions.
 func newAdoptionReconciler() *ProjectReconciler {
 	return &ProjectReconciler{
-		Client:         mgrClient,
-		Scheme:         k8sClient.Scheme(),
-		Dispatcher:     &stubDispatcher{},
-		SigningKey:     testSigningKey,
-		CredproxyImage: testCredproxyImage,
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			SigningKey:     testSigningKey,
+			CredproxyImage: testCredproxyImage,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
+			EnvReader: newMapEnvReader(),
 		},
-		EnvReader: newMapEnvReader(),
 	}
 }
 
@@ -486,16 +490,18 @@ var _ = Describe("Adoption lifecycle — ADOPT-01/03/05 (Plan 31-02)",
 			It("dispatches project-planner Job and advances Phase=Running (no import suppression on normal path)", func() {
 				// Build a reconciler with PlannerPool for the normal-dispatch path.
 				r := &ProjectReconciler{
-					Client:         mgrClient,
-					Scheme:         k8sClient.Scheme(),
-					Dispatcher:     &stubDispatcher{},
-					PlannerPool:    newPlannerPoolForTest(),
-					SigningKey:     testSigningKey,
-					CredproxyImage: testCredproxyImage,
-					HelmProviderDefaults: ProviderDefaults{
-						Image: testSubagentImage,
+					Client: mgrClient,
+					Scheme: k8sClient.Scheme(),
+					Deps: PlannerReconcilerDeps{
+						Dispatcher:     &stubDispatcher{},
+						SigningKey:     testSigningKey,
+						CredproxyImage: testCredproxyImage,
+						HelmProviderDefaults: ProviderDefaults{
+							Image: testSubagentImage,
+						},
+						EnvReader: newMapEnvReader(),
 					},
-					EnvReader: newMapEnvReader(),
+					PlannerPool: newPlannerPoolForTest(),
 				}
 
 				name := types.NamespacedName{Name: projName, Namespace: "default"}

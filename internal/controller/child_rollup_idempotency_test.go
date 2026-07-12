@@ -133,16 +133,18 @@ var _ = Describe("ChildRollupIdempotency — Milestone level (ADOPT-02 + ADOPT-0
 		})
 
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 			// ReporterImage deliberately empty: spawnReporterIfNeeded returns
 			// (true, nil) → isFirstCompletion=true on every call without a PVC.
 		}
@@ -259,16 +261,18 @@ var _ = Describe("ChildRollupIdempotency — Phase level (ADOPT-02 + ADOPT-04)",
 		})
 
 		r := &PhaseReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 			// ReporterImage empty: isFirstCompletion=true without PVC.
 		}
 
@@ -398,16 +402,18 @@ var _ = Describe("ChildRollupIdempotency — Plan level ADOPT-02+04 (D-03a new m
 		})
 
 		r := &PlanReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 			// ReporterImage empty: isFirstCompletion=true without PVC.
 		}
 

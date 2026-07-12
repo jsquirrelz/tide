@@ -38,17 +38,19 @@ import (
 // the tideproject.k8s/project label on the Plan.
 func fileTouchGateReconciler() *PlanReconciler {
 	return &PlanReconciler{
-		Client:               mgrClient,
-		Scheme:               k8sClient.Scheme(),
-		Dispatcher:           &stubDispatcher{},
-		PlannerPool:          newPlannerPoolForTest(),
-		EnvReader:            newMapEnvReader(),
-		CredproxyImage:       testCredproxyImage,
-		SigningKey:           testSigningKey,
-		DefaultFileTouchMode: "warn",
-		HelmProviderDefaults: ProviderDefaults{
-			Image: testSubagentImage,
+		Client: mgrClient,
+		Scheme: k8sClient.Scheme(),
+		Deps: PlannerReconcilerDeps{
+			Dispatcher:     &stubDispatcher{},
+			EnvReader:      newMapEnvReader(),
+			CredproxyImage: testCredproxyImage,
+			SigningKey:     testSigningKey,
+			HelmProviderDefaults: ProviderDefaults{
+				Image: testSubagentImage,
+			},
 		},
+		PlannerPool:          newPlannerPoolForTest(),
+		DefaultFileTouchMode: "warn",
 	}
 }
 

@@ -231,7 +231,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			markJobFailed(pushJobName, "default")
 
 			r := newTestProjectReconciler()
-			r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+			r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 			r.SharedPVCName = "tide-projects-pushres-1"
 			// Ensure the shared PVC exists so the Project reconcile path proceeds.
 			ensurePVC(ctx, r.SharedPVCName, "default")
@@ -278,7 +278,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			markJobFailed(pushJobName, "default")
 
 			r := newTestProjectReconciler()
-			r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+			r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 			r.SharedPVCName = "tide-projects-pushres-2"
 			ensurePVC(ctx, r.SharedPVCName, "default")
 
@@ -323,7 +323,7 @@ var _ = Describe("ProjectReconciler — push-result envelope reason parsing (Pla
 			markJobFailed(pushJobName, "default")
 
 			r := newTestProjectReconciler()
-			r.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
+			r.Deps.TidePushImage = "ghcr.io/jsquirrelz/tide-push:test"
 			r.SharedPVCName = "tide-projects-pushres-3"
 			ensurePVC(ctx, r.SharedPVCName, "default")
 

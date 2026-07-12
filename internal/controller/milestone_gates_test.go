@@ -111,16 +111,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -154,16 +156,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(msName, r, envReader)
 
@@ -241,16 +245,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 
 			// Drive to job completion with ChildCount=5 (5 Phase children expected).
@@ -397,16 +403,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
 			// No Job is created; the reconciler parks the Milestone with RejectedByUser.
@@ -489,16 +497,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 			waitForCacheSync(msName, "default", &tideprojectv1alpha3.Milestone{})
 
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      newMapEnvReader(),
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      newMapEnvReader(),
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 
 			var jobsBefore batchv1.JobList
@@ -532,16 +542,18 @@ var _ = Describe("MilestoneReconciler — gate-policy hook (Plan 04-05 Task 1)",
 
 			envReader := newMapEnvReader()
 			r := &MilestoneReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(msName, r, envReader)
 

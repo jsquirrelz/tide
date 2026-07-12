@@ -134,19 +134,21 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 		// authoring with no Milestone children, which drives a clean completion.
 		envReader.SetOut(string(got.UID), pkgdispatch.EnvelopeOut{TaskUID: string(got.UID), ExitCode: 0, ChildCount: 0})
 		r := &ProjectReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			SharedPVCName:  pvcName,
-			TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
-			ReporterImage:  testReporterImage,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				TidePushImage:  "ghcr.io/jsquirrelz/tide-push:test",
+				ReporterImage:  testReporterImage,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool:   newPlannerPoolForTest(),
+			SharedPVCName: pvcName,
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: projectName, Namespace: "default"}, 5)).To(Succeed())
@@ -172,17 +174,19 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			ReporterImage:  testReporterImage,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -228,17 +232,19 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 
 		envReader := newMapEnvReader()
 		r := &PhaseReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			ReporterImage:  testReporterImage,
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())
@@ -286,19 +292,21 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 
 		envReader := newMapEnvReader()
 		r := &MilestoneReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			ReporterImage:  testReporterImage,
-			// TidePushImage intentionally empty: the boundary push is skipped so the
-			// spec stays focused on succession, not the push Job (boundary_push.go:79-90).
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				// TidePushImage intentionally empty: the boundary push is skipped so the
+				// spec stays focused on succession, not the push Job (boundary_push.go:79-90).
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: milestoneName, Namespace: "default"}, 5)).To(Succeed())
@@ -375,18 +383,20 @@ var _ = Describe("Planner Job absent while Running (debug real-claude-authoring-
 
 		envReader := newMapEnvReader()
 		r := &PhaseReconciler{
-			Client:         mgrClient,
-			Scheme:         k8sClient.Scheme(),
-			Dispatcher:     &stubDispatcher{},
-			PlannerPool:    newPlannerPoolForTest(),
-			EnvReader:      envReader,
-			CredproxyImage: testCredproxyImage,
-			SigningKey:     testSigningKey,
-			ReporterImage:  testReporterImage,
-			// TidePushImage intentionally empty (see milestone spec above).
-			HelmProviderDefaults: ProviderDefaults{
-				Image: testSubagentImage,
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				// TidePushImage intentionally empty (see milestone spec above).
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
 			},
+			PlannerPool: newPlannerPoolForTest(),
 		}
 
 		Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 5)).To(Succeed())

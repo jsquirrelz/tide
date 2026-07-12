@@ -246,7 +246,7 @@ func TestArtifactPush_ParkedMilestoneTriggersAndRequeues(t *testing.T) {
 	ms := parkedMilestone()
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, ms).Build()
 
-	r := &MilestoneReconciler{Client: c, Scheme: s, TidePushImage: "tide-push:latest"}
+	r := &MilestoneReconciler{Client: c, Scheme: s, Deps: PlannerReconcilerDeps{TidePushImage: "tide-push:latest"}}
 	res, err := r.reconcilePlannerDispatch(context.Background(), ms)
 	if err != nil {
 		t.Fatalf("reconcilePlannerDispatch (parked): %v", err)
@@ -275,7 +275,7 @@ func TestArtifactPush_ParkedMilestoneRequeuesWhileBusy(t *testing.T) {
 	busy := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "tide-push-proj-uid", Namespace: "default"}}
 	c := fake.NewClientBuilder().WithScheme(s).WithObjects(project, ms, busy).Build()
 
-	r := &MilestoneReconciler{Client: c, Scheme: s, TidePushImage: "tide-push:latest"}
+	r := &MilestoneReconciler{Client: c, Scheme: s, Deps: PlannerReconcilerDeps{TidePushImage: "tide-push:latest"}}
 	res, err := r.reconcilePlannerDispatch(context.Background(), ms)
 	if err != nil {
 		t.Fatalf("reconcilePlannerDispatch (parked, busy): %v", err)

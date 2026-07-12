@@ -117,16 +117,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -158,16 +160,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -235,16 +239,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -315,16 +321,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			// D-05 dispatch-entry hold fires before Job creation — drive reconcile directly.
 			Expect(reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: phaseName, Namespace: "default"}, 3)).To(Succeed())
@@ -401,16 +409,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 			waitForCacheSync(phaseName, "default", &tideprojectv1alpha3.Phase{})
 
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      newMapEnvReader(),
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      newMapEnvReader(),
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 
 			var jobsBefore batchv1.JobList
@@ -444,16 +454,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 			driveToJobCompletion(phaseName, r, envReader)
 
@@ -504,16 +516,18 @@ var _ = Describe("PhaseReconciler — gate-policy hook (Plan 04-05 Task 1)", Lab
 
 			envReader := newMapEnvReader()
 			r := &PhaseReconciler{
-				Client:         mgrClient,
-				Scheme:         k8sClient.Scheme(),
-				Dispatcher:     &stubDispatcher{},
-				PlannerPool:    newPlannerPoolForTest(),
-				EnvReader:      envReader,
-				CredproxyImage: testCredproxyImage,
-				SigningKey:     testSigningKey,
-				HelmProviderDefaults: ProviderDefaults{
-					Image: testSubagentImage,
+				Client: mgrClient,
+				Scheme: k8sClient.Scheme(),
+				Deps: PlannerReconcilerDeps{
+					Dispatcher:     &stubDispatcher{},
+					EnvReader:      envReader,
+					CredproxyImage: testCredproxyImage,
+					SigningKey:     testSigningKey,
+					HelmProviderDefaults: ProviderDefaults{
+						Image: testSubagentImage,
+					},
 				},
+				PlannerPool: newPlannerPoolForTest(),
 			}
 
 			// Drive 3 consecutive reconciles while parent is parked.
