@@ -14,7 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1_test
+// Package schema relocates the dogfood-fixture strict-decode coverage that
+// previously lived in api/v1alpha1/dogfood_manifests_test.go. It moved here
+// (Phase 40 Plan 40-05) when api/v1alpha1 and api/v1alpha2 were deleted —
+// v1alpha3 is now the sole served+storage version, so the fixture set is
+// single-version rather than mixed. Stays in the fast unit tier: `make test`
+// selects `go list ./... | grep -v /e2e | grep -v /test/integration`, and
+// test/schema matches neither exclusion.
+package schema
 
 import (
 	"bytes"
@@ -23,18 +30,33 @@ import (
 	"strings"
 	"testing"
 
-	tideprojectv1alpha1 "github.com/jsquirrelz/tide/api/v1alpha1"
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
+// findRepoRoot walks up from cwd until it finds go.mod.
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	root := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			return root
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatalf("go.mod not found from %s; cannot locate repo root", cwd)
+		}
+		root = parent
+	}
+}
+
 // projectAPIVersion extracts the declared apiVersion from a Project doc so the
 // strict-decode + required-field checks can validate each manifest against the
-// schema it actually targets. The dogfood set is mixed-version: v1alpha1 stays
-// as a case for older/hypothetical fixtures; all three live dogfood manifests
-// moved to v1alpha3 as of Phase 40 Plan 40-03 (previously v1alpha2, commit
-// dcd7069), so unconditionally strict-decoding every doc as one fixed version
-// is wrong.
+// schema it actually targets.
 func projectAPIVersion(t *testing.T, doc []byte) string {
 	t.Helper()
 	var meta struct {
@@ -47,9 +69,9 @@ func projectAPIVersion(t *testing.T, doc []byte) string {
 }
 
 // supportedProjectAPIVersions is the set of apiVersions a dogfood Project may
-// declare. New schema versions get added here as they ship.
+// declare. New schema versions get added here as they ship. v1alpha3 is the
+// sole served+storage version as of Phase 40 (v1alpha1/v1alpha2 removed).
 var supportedProjectAPIVersions = map[string]bool{
-	"tideproject.k8s/v1alpha1": true,
 	"tideproject.k8s/v1alpha3": true,
 }
 
@@ -116,7 +138,7 @@ func TestDogfoodManifests_GlobFindsThreeFiles(t *testing.T) {
 }
 
 // TestDogfoodManifests_StrictDecode verifies that each 0*.yaml file contains a
-// Project document that strict-decodes cleanly into v1alpha1.Project.
+// Project document that strict-decodes cleanly into v1alpha3.Project.
 // UnmarshalStrict rejects unknown field names, so typos in field names fail here
 // without needing a live cluster — this is the schema-validity proof.
 func TestDogfoodManifests_StrictDecode(t *testing.T) {
@@ -134,11 +156,6 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 				}
 				found = true
 				switch av := projectAPIVersion(t, doc); av {
-				case "tideproject.k8s/v1alpha1":
-					var proj tideprojectv1alpha1.Project
-					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-						t.Errorf("UnmarshalStrict (v1alpha1) failed for Project doc in %s: %v", path, err)
-					}
 				case "tideproject.k8s/v1alpha3":
 					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
@@ -155,9 +172,7 @@ func TestDogfoodManifests_StrictDecode(t *testing.T) {
 	}
 }
 
-// TestDogfoodManifests_RequiredFields asserts per-Project field invariants,
-// validating each manifest against the schema version it declares (the dogfood
-// set is mixed v1alpha1/v1alpha3):
+// TestDogfoodManifests_RequiredFields asserts per-Project field invariants:
 //   - apiVersion is a supported tideproject.k8s version
 //   - spec.targetRepo == "https://github.com/jsquirrelz/tide.git"
 //   - spec.outcomePrompt is non-empty
@@ -176,20 +191,9 @@ func TestDogfoodManifests_RequiredFields(t *testing.T) {
 					continue
 				}
 
-				// Decode against the declared schema version, then assert the
-				// version-agnostic field invariants on the shared spec fields.
 				var apiVersion, targetRepo, outcomePrompt, providerSecretRef, gitCredsRef string
 				gitNil := true
 				switch av := projectAPIVersion(t, doc); av {
-				case "tideproject.k8s/v1alpha1":
-					var proj tideprojectv1alpha1.Project
-					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {
-						t.Fatalf("UnmarshalStrict (v1alpha1): %v", err)
-					}
-					apiVersion, targetRepo, outcomePrompt, providerSecretRef = proj.APIVersion, proj.Spec.TargetRepo, proj.Spec.OutcomePrompt, proj.Spec.ProviderSecretRef
-					if proj.Spec.Git != nil {
-						gitNil, gitCredsRef = false, proj.Spec.Git.CredsSecretRef
-					}
 				case "tideproject.k8s/v1alpha3":
 					var proj tideprojectv1alpha3.Project
 					if err := sigsyaml.UnmarshalStrict(doc, &proj); err != nil {

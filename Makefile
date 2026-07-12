@@ -525,7 +525,7 @@ verify-dispatch-imports: ## Assert pkg/dispatch has no controller-runtime/anthro
 	@# Narrow firewall (Phase 3 D-A1 / D-C3 + plan 03-01): pkg/dispatch is
 	@# permitted to import k8s.io/apimachinery/pkg/runtime (for ChildCRDSpec's
 	@# runtime.RawExtension — typed-but-deferred-decode escape hatch that keeps
-	@# pkg/dispatch from importing api/v1alpha1) and its required transitive
+	@# pkg/dispatch from importing api/v1alpha*) and its required transitive
 	@# closure (sigs.k8s.io/json, sigs.k8s.io/structured-merge-diff,
 	@# k8s.io/kube-openapi, k8s.io/klog). Other k8s.io/* and sigs.k8s.io/*
 	@# packages (notably sigs.k8s.io/controller-runtime — manager/client/etc.)
@@ -561,9 +561,14 @@ verify-import-firewall: demo-fixture ## Run providerfirewall analyzer via tide-l
 ##@ PERSIST gates (PERSIST-01, PERSIST-02 / Pitfall 4)
 
 .PHONY: verify-no-aggregates
-verify-no-aggregates: ## Assert api/v1alpha1 and api/v1alpha2 declare no aggregate schedule fields (PERSIST-02 / Pitfall 4).
-	@echo "verifying no aggregate schedule fields on api/v1alpha1 and api/v1alpha2 types (PERSIST-02)..."
-	@MATCHES=$$(grep -nE 'Schedule|Waves *\[\]|IndegreeMap|CachedDag|DerivedDag' api/v1alpha1/*_types.go api/v1alpha2/*_types.go || true); \
+verify-no-aggregates: ## Assert api/v1alpha* declares no aggregate schedule fields (PERSIST-02 / Pitfall 4).
+	@echo "verifying no aggregate schedule fields on api/v1alpha* types (PERSIST-02)..."
+	@FILES=$$(ls api/v1alpha*/*_types.go 2>/dev/null); \
+	if [ -z "$$FILES" ]; then \
+		echo "no api/v1alpha*/*_types.go files found — gate misconfigured"; \
+		exit 1; \
+	fi; \
+	MATCHES=$$(grep -nE 'Schedule|Waves *\[\]|IndegreeMap|CachedDag|DerivedDag' $$FILES || true); \
 	if [ -n "$$MATCHES" ]; then \
 		echo "PERSIST-02 violation: aggregate schedule fields detected:"; \
 		echo "$$MATCHES"; \
