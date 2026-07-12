@@ -141,6 +141,22 @@ func (r *MilestoneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := r.Update(ctx, &milestone); err != nil {
 			return ctrl.Result{}, err
 		}
+		// D-04 (Phase 41): the parent resolved — clear a stale
+		// ParentUnresolved=True. Guarded on IsStatusConditionTrue so steady-state
+		// reconciles (the common case, parent already resolved) are write-free
+		// (T-41-08b).
+		if meta.IsStatusConditionTrue(milestone.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved) {
+			meta.SetStatusCondition(&milestone.Status.Conditions, metav1.Condition{
+				Type:               tideprojectv1alpha3.ConditionParentUnresolved,
+				Status:             metav1.ConditionFalse,
+				Reason:             tideprojectv1alpha3.ReasonParentResolved,
+				Message:            fmt.Sprintf("parent Project %q resolved", parent.Name),
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Update(ctx, &milestone); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// 4b. D-03 (CUTS-01): backfill tideproject.k8s/project on the Milestone
@@ -834,17 +850,18 @@ func (r *MilestoneReconciler) patchMilestoneAwaitingApproval(ctx context.Context
 }
 
 // surfaceParentRefUnresolved makes a parent-ref-NotFound stall observable
-// (defect #17). It sets ConditionParentUnresolved (status False, reason
-// ParentRefNotFound, message naming the missing parent) and emits a Warning
-// Event, then returns — the caller keeps requeuing so the Milestone self-heals
-// if the parent appears later. Best-effort: a Status().Update failure is logged
-// but not propagated, so the requeue still fires.
+// (defect #17). It sets ConditionParentUnresolved (status True — D-04, Phase
+// 41: True == parent unresolved — reason ParentRefNotFound, message naming
+// the missing parent) and emits a Warning Event, then returns — the caller
+// keeps requeuing so the Milestone self-heals if the parent appears later.
+// Best-effort: a Status().Update failure is logged but not propagated, so the
+// requeue still fires.
 func (r *MilestoneReconciler) surfaceParentRefUnresolved(ctx context.Context, ms *tideprojectv1alpha3.Milestone, parentKind, parentRef string) {
 	logger := logf.FromContext(ctx)
 	msg := fmt.Sprintf("parent %s %q (spec.projectRef) not found in namespace %q; requeuing until it appears", parentKind, parentRef, ms.Namespace)
 	meta.SetStatusCondition(&ms.Status.Conditions, metav1.Condition{
 		Type:               tideprojectv1alpha3.ConditionParentUnresolved,
-		Status:             metav1.ConditionFalse,
+		Status:             metav1.ConditionTrue, // True == parent unresolved (D-04, Phase 41)
 		Reason:             tideprojectv1alpha3.ReasonParentRefNotFound,
 		Message:            msg,
 		LastTransitionTime: metav1.Now(),

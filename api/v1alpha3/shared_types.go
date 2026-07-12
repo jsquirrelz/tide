@@ -200,9 +200,15 @@ const (
 
 	// ReasonParentRefNotFound — the resource's direct parent-ref (defect #17:
 	// Phase.spec.milestoneRef / Milestone.spec.projectRef) names a parent that
-	// does not exist in the namespace. Surfaced (condition False + Warning Event)
-	// before requeuing so the stall is observable rather than silent.
+	// does not exist in the namespace. Surfaced (condition True — D-04, Phase
+	// 41: True == parent unresolved — + Warning Event) before requeuing so the
+	// stall is observable rather than silent.
 	ReasonParentRefNotFound = "ParentRefNotFound"
+
+	// ReasonParentResolved — set with Status=False once a previously-missing
+	// parent-ref resolves successfully (D-04, Phase 41: the clear-on-resolve
+	// counterpart to ReasonParentRefNotFound).
+	ReasonParentResolved = "ParentResolved"
 )
 
 // Phase 11 condition + reason vocabulary — per-wave integration failure.
