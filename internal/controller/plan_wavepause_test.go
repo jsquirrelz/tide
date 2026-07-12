@@ -107,7 +107,7 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			planNS := types.NamespacedName{Name: planName, Namespace: "default"}
 
 			// Drive Plan reconcile: materializes Waves + stamps Task labels.
-			_, err := reconcilePlanN(r, planNS, 5)
+			err := reconcileWithRetry(r.Reconcile, planNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Mark wave-0 tasks Succeeded (alpha + beta).
@@ -115,7 +115,7 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			markTaskSucceeded(planName + "-beta")
 
 			// Reconcile again — should detect the wave boundary and pause.
-			_, err = reconcilePlanN(r, planNS, 3)
+			err = reconcileWithRetry(r.Reconcile, planNS, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
@@ -147,12 +147,12 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			r := newPlanReconciler()
 			planNS := types.NamespacedName{Name: planName, Namespace: "default"}
 
-			_, err := reconcilePlanN(r, planNS, 5)
+			err := reconcileWithRetry(r.Reconcile, planNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			markTaskSucceeded(planName + "-alpha")
 			markTaskSucceeded(planName + "-beta")
-			_, err = reconcilePlanN(r, planNS, 3)
+			err = reconcileWithRetry(r.Reconcile, planNS, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Sanity: pause condition is set.
@@ -175,7 +175,7 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			current.Annotations[gates.AnnotationApproveWavePrefix+"1"] = "true"
 			Expect(k8sClient.Patch(ctx, &current, patch)).To(Succeed())
 
-			_, err = reconcilePlanN(r, planNS, 5)
+			err = reconcileWithRetry(r.Reconcile, planNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
@@ -207,13 +207,13 @@ var _ = Describe("PlanReconciler — PauseBetweenWaves (Plan 04-05 Task 2)", Lab
 			r := newPlanReconciler()
 			planNS := types.NamespacedName{Name: planName, Namespace: "default"}
 
-			_, err := reconcilePlanN(r, planNS, 5)
+			err := reconcileWithRetry(r.Reconcile, planNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			markTaskSucceeded(planName + "-alpha")
 			markTaskSucceeded(planName + "-beta")
 
-			_, err = reconcilePlanN(r, planNS, 3)
+			err = reconcileWithRetry(r.Reconcile, planNS, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			Consistently(func(g Gomega) {

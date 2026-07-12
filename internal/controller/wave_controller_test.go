@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,7 +27,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -142,29 +140,6 @@ func newWaveReconciler() *WaveReconciler {
 	}
 }
 
-// reconcileWaveN drives a WaveReconciler N times, retrying on 409 Conflict.
-func reconcileWaveN(r *WaveReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
-	var result ctrl.Result
-	var err error
-	for range n {
-		for range 5 {
-			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
-			if err == nil {
-				break
-			}
-			if strings.Contains(err.Error(), "the object has been modified") {
-				err = nil
-				continue
-			}
-			return result, err
-		}
-		if err != nil {
-			return result, err
-		}
-	}
-	return result, err
-}
-
 var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase2"), func() {
 	ctx := context.Background()
 
@@ -184,11 +159,11 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			r := newWaveReconciler()
 			wavNS := types.NamespacedName{Name: wName, Namespace: "default"}
 
-			_, _ = reconcileWaveN(r, wavNS, 3)
+			_ = reconcileWithRetry(r.Reconcile, wavNS, 3)
 			for _, name := range taskNames {
 				setTaskPhase(name, "Succeeded")
 			}
-			_, err := reconcileWaveN(r, wavNS, 1)
+			err := reconcileWithRetry(r.Reconcile, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			var wave tideprojectv1alpha3.Wave
@@ -213,13 +188,13 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			r := newWaveReconciler()
 			wavNS := types.NamespacedName{Name: wName, Namespace: "default"}
 
-			_, _ = reconcileWaveN(r, wavNS, 3)
+			_ = reconcileWithRetry(r.Reconcile, wavNS, 3)
 
 			setTaskPhase(taskNames[0], "Succeeded")
 			setTaskPhase(taskNames[1], "Succeeded")
 			setTaskPhase(taskNames[2], "Failed")
 
-			_, err := reconcileWaveN(r, wavNS, 1)
+			err := reconcileWithRetry(r.Reconcile, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			var wave tideprojectv1alpha3.Wave
@@ -244,12 +219,12 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			r := newWaveReconciler()
 			wavNS := types.NamespacedName{Name: wName, Namespace: "default"}
 
-			_, _ = reconcileWaveN(r, wavNS, 3)
+			_ = reconcileWithRetry(r.Reconcile, wavNS, 3)
 
 			setTaskPhase(taskNames[0], "Succeeded")
 			// taskNames[1] phase is empty (Pending)
 
-			_, err := reconcileWaveN(r, wavNS, 1)
+			err := reconcileWithRetry(r.Reconcile, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			var wave tideprojectv1alpha3.Wave
@@ -276,7 +251,7 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			r := newWaveReconciler()
 			wavNS := types.NamespacedName{Name: wName, Namespace: "default"}
 
-			_, err := reconcileWaveN(r, wavNS, 5)
+			err := reconcileWithRetry(r.Reconcile, wavNS, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			var task tideprojectv1alpha3.Task
@@ -308,8 +283,8 @@ var _ = Describe("WaveReconciler observational roll-up", Label("envtest", "phase
 			r := newWaveReconciler()
 			wavNS := types.NamespacedName{Name: wName, Namespace: "default"}
 
-			_, _ = reconcileWaveN(r, wavNS, 3)
-			_, err := reconcileWaveN(r, wavNS, 1)
+			_ = reconcileWithRetry(r.Reconcile, wavNS, 3)
+			err := reconcileWithRetry(r.Reconcile, wavNS, 1)
 			Expect(err).NotTo(HaveOccurred())
 
 			var wave tideprojectv1alpha3.Wave

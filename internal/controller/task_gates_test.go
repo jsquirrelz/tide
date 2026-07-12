@@ -71,7 +71,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
-			_, err := reconcileN(r, name, 5)
+			err := reconcileWithRetry(r.Reconcile, name, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
@@ -124,7 +124,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
-			_, err := reconcileN(r, name, 5)
+			err := reconcileWithRetry(r.Reconcile, name, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// D-05: reject parks — Status.Phase must NOT be "Failed".
@@ -156,7 +156,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			}, 5*time.Second, 50*time.Millisecond).Should(BeEmpty())
 
 			// After annotation clear, re-driving must let the Task proceed (no longer halted).
-			_, err = reconcileN(r, name, 3)
+			err = reconcileWithRetry(r.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func(g Gomega) {
 				var t tideprojectv1alpha3.Task
@@ -189,7 +189,7 @@ var _ = Describe("TaskReconciler — gate-policy hook (Plan 04-05 Task 1)", Labe
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
-			_, err := reconcileN(r, name, 5)
+			err := reconcileWithRetry(r.Reconcile, name, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			Eventually(func(g Gomega) {
@@ -264,7 +264,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
-			result, err := reconcileN(r, name, 5)
+			result, err := reconcileWithRetryResult(r.Reconcile, name, 5)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Park semantics: requeue with 30s interval (billing recovery is operator-paced).
@@ -347,7 +347,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			name := types.NamespacedName{Name: taskName, Namespace: "default"}
 
 			// While halted: reconcile must park with 30s requeue.
-			result, err := reconcileN(r, name, 3)
+			result, err := reconcileWithRetryResult(r.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(Equal(30 * time.Second))
 
@@ -368,7 +368,7 @@ var _ = Describe("TaskReconciler — BillingHalt dispatch-entry hold (Phase 13 H
 			}, 5*time.Second, 50*time.Millisecond).Should(BeTrue(), "BillingHalt condition should be removed from cache")
 
 			// After clear, re-reconcile should let dispatch proceed (no longer halted).
-			_, err = reconcileN(r, name, 3)
+			err = reconcileWithRetry(r.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Task must not be Failed after halt cleared.

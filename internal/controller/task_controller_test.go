@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +31,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -73,42 +71,6 @@ func newTaskReconciler(envReader podjob.EnvelopeReader) *TaskReconciler {
 			},
 		},
 	}
-}
-
-// reconcileN drives a reconciler N times for a given NamespacedName.
-// It retries silently on 409 Conflict (resource version mismatch between
-// cache and API server) — this is normal when using the cached mgrClient
-// directly in tests without the retry infrastructure the controller manager
-// provides automatically.
-func reconcileN(r *TaskReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
-	var result ctrl.Result
-	var err error
-	for range n {
-		for range 5 {
-			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
-			if err == nil {
-				break
-			}
-			// Retry on 409 Conflict (stale cache resource version).
-			if isConflict(err) {
-				err = nil
-				continue
-			}
-			return result, err
-		}
-		if err != nil {
-			return result, err
-		}
-	}
-	return result, err
-}
-
-// isConflict returns true if the error is a Kubernetes 409 Conflict error.
-func isConflict(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "the object has been modified")
 }
 
 // waitForCacheSync waits for the mgrClient cache to reflect an object by name.
@@ -229,7 +191,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskAlpha, Namespace: "default"}
 
 			// Drive through finalizer + owner-ref + dispatch passes.
-			_, err := reconcileN(r, name, 4)
+			err := reconcileWithRetry(r.Reconcile, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Assert Job exists.
@@ -266,10 +228,10 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			nameA := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive A through finalizer/owner passes only (no dispatch seam).
-			_, _ = reconcileN(r, nameA, 3)
+			_ = reconcileWithRetry(r.Reconcile, nameA, 3)
 
 			// Drive B through its passes.
-			result, err := reconcileN(r, nameB, 4)
+			result, err := reconcileWithRetryResult(r.Reconcile, nameB, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			// The indegree-halt gate must park B with a BOUNDED RequeueAfter, not a
@@ -317,14 +279,14 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			nameB := types.NamespacedName{Name: taskB, Namespace: "default"}
 
 			// Settle A and B through finalizer passes.
-			_, _ = reconcileN(r, nameA, 3)
-			_, _ = reconcileN(r, nameB, 3)
+			_ = reconcileWithRetry(r.Reconcile, nameA, 3)
+			_ = reconcileWithRetry(r.Reconcile, nameB, 3)
 
 			// Mark A Succeeded.
 			markTaskSucceeded(taskA)
 
 			// Drive B through dispatch.
-			_, err := reconcileN(r, nameB, 3)
+			err := reconcileWithRetry(r.Reconcile, nameB, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			var taskBObj tideprojectv1alpha3.Task
@@ -352,11 +314,11 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive first time through dispatch.
-			_, err := reconcileN(r, name, 4)
+			err := reconcileWithRetry(r.Reconcile, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Drive again — second dispatch attempt on same task (Job already exists).
-			_, err = reconcileN(r, name, 2)
+			err = reconcileWithRetry(r.Reconcile, name, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			var task tideprojectv1alpha3.Task
@@ -439,7 +401,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive through finalizer and owner-ref passes.
-			_, err := reconcileN(r, name, 3)
+			err := reconcileWithRetry(r.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			// The dispatch pass should hit the rate-limit gate.
@@ -528,7 +490,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			// Drive all tasks through finalizer + owner-ref passes first.
 			for i := range taskCount {
 				name := types.NamespacedName{Name: fmt.Sprintf("task-storm-%d", i), Namespace: "default"}
-				_, _ = reconcileN(r, name, 3)
+				_ = reconcileWithRetry(r.Reconcile, name, 3)
 			}
 
 			// Rapid reconcile of all 20 tasks — all should hit rate-limit gate.
@@ -613,7 +575,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
-			_, err := reconcileN(r, name, 4)
+			err := reconcileWithRetry(r.Reconcile, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			var task tideprojectv1alpha3.Task
@@ -677,7 +639,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			r := newTaskReconciler(newMapEnvReader())
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
-			_, err := reconcileN(r, name, 4)
+			err := reconcileWithRetry(r.Reconcile, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			var task tideprojectv1alpha3.Task
@@ -706,7 +668,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive through first dispatch.
-			_, err := reconcileN(r, name, 4)
+			err := reconcileWithRetry(r.Reconcile, name, 4)
 			Expect(err).NotTo(HaveOccurred())
 
 			var task tideprojectv1alpha3.Task
@@ -719,7 +681,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			Expect(k8sClient.Status().Patch(ctx, &task, patch)).To(Succeed())
 
 			// Drive dispatch again.
-			_, err = reconcileN(r, name, 2)
+			err = reconcileWithRetry(r.Reconcile, name, 2)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
@@ -755,7 +717,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive first dispatch.
-			_, _ = reconcileN(r, name, 4)
+			_ = reconcileWithRetry(r.Reconcile, name, 4)
 
 			// Simulate: pre-create a Job for attempt-1 to make nextAttempt return 2.
 			var task tideprojectv1alpha3.Task
@@ -806,7 +768,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 				"timed out waiting for mgrClient cache to reflect Phase=\"\" / Attempt=0")
 
 			// Drive dispatch — attempt counter will be 2 > MaxAttemptsPerTask=1.
-			_, err := reconcileN(r, name, 3)
+			err := reconcileWithRetry(r.Reconcile, name, 3)
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
@@ -834,7 +796,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive through dispatch to get task UID.
-			_, _ = reconcileN(r, name, 4)
+			_ = reconcileWithRetry(r.Reconcile, name, 4)
 
 			var task tideprojectv1alpha3.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())
@@ -930,7 +892,7 @@ var _ = Describe("TaskReconciler dispatch", Label("envtest", "phase2"), func() {
 			name := types.NamespacedName{Name: taskA, Namespace: "default"}
 
 			// Drive through dispatch.
-			_, _ = reconcileN(r, name, 4)
+			_ = reconcileWithRetry(r.Reconcile, name, 4)
 
 			var task tideprojectv1alpha3.Task
 			Expect(k8sClient.Get(ctx, name, &task)).To(Succeed())

@@ -29,7 +29,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -147,29 +146,6 @@ func newPlanReconciler() *PlanReconciler {
 			Image: testSubagentImage,
 		},
 	}
-}
-
-// reconcilePlanN drives a PlanReconciler N times, retrying on 409 Conflict.
-func reconcilePlanN(r *PlanReconciler, name types.NamespacedName, n int) (ctrl.Result, error) {
-	var result ctrl.Result
-	var err error
-	for range n {
-		for range 5 {
-			result, err = r.Reconcile(context.Background(), reconcile.Request{NamespacedName: name})
-			if err == nil {
-				break
-			}
-			if strings.Contains(err.Error(), "the object has been modified") {
-				err = nil
-				continue
-			}
-			return result, err
-		}
-		if err != nil {
-			return result, err
-		}
-	}
-	return result, err
 }
 
 // makePlan creates a Plan in the default namespace with the given ValidationState.

@@ -101,7 +101,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		for range 8 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
 			if err != nil {
-				if !isConflict(err) {
+				if !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 			}
@@ -175,7 +175,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		// Reconcile to process the annotation.
 		for range 5 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
-			if err != nil && !isConflict(err) {
+			if err != nil && !apierrors.IsConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 		}
@@ -266,7 +266,7 @@ var _ = Describe("ProjectReconciler — Phase 3 lifecycle (clone + push + branch
 		}
 		for range 5 {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"}})
-			if err != nil && !isConflict(err) {
+			if err != nil && !apierrors.IsConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 		}

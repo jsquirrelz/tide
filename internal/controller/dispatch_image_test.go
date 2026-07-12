@@ -300,7 +300,7 @@ var _ = Describe("Dispatch image resolution (DISPATCH-01)", Label("envtest", "di
 				},
 			}
 
-			_, _ = reconcileN(r, types.NamespacedName{Name: taskName, Namespace: "default"}, 4)
+			_ = reconcileWithRetry(r.Reconcile, types.NamespacedName{Name: taskName, Namespace: "default"}, 4)
 
 			Eventually(func(g Gomega) {
 				var got tideprojectv1alpha3.Task

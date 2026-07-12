@@ -27,6 +27,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -105,7 +106,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
 				})
-				if err != nil && !isConflict(err) {
+				if err != nil && !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 			}
@@ -163,7 +164,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
 				})
-				if err != nil && !isConflict(err) {
+				if err != nil && !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				// Patch the init Job to succeeded so the reconciler advances.
@@ -223,7 +224,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
 				})
-				if err != nil && !isConflict(err) {
+				if err != nil && !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 			}
@@ -285,7 +286,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
 				})
-				if err != nil && !isConflict(err) {
+				if err != nil && !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: projectName, Namespace: "default"}, &p); err == nil {
@@ -334,7 +335,7 @@ var _ = Describe("BYPASS-02 clone idempotency", Label("envtest"), func() {
 				_, err := r.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: projectName, Namespace: "default"},
 				})
-				if err != nil && !isConflict(err) {
+				if err != nil && !apierrors.IsConflict(err) {
 					Expect(err).NotTo(HaveOccurred())
 				}
 			}

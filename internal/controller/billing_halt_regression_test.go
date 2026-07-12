@@ -559,7 +559,7 @@ const billingReason = "claude exit 1: API Error: 400 Your credit balance is too 
 func pumpTaskToRunning(r *TaskReconciler, projName, taskName string) {
 	name := types.NamespacedName{Name: taskName, Namespace: "default"}
 	Eventually(func(g Gomega) {
-		_, _ = reconcileN(r, name, 2)
+		_ = reconcileWithRetry(r.Reconcile, name, 2)
 		var t tideprojectv1alpha3.Task
 		g.Expect(mgrClient.Get(context.Background(), name, &t)).To(Succeed())
 		g.Expect(t.Status.Phase).To(Equal("Running"))
@@ -692,7 +692,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 1: backstop stamps condition"
 			CompletedAt: metav1.Now().Time,
 		})
 		nameA := types.NamespacedName{Name: taskA, Namespace: "default"}
-		_, err := reconcileN(reconciler, nameA, 3)
+		err := reconcileWithRetry(reconciler.Reconcile, nameA, 3)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Task A must be Failed (genuine-failure patch*Failed semantics preserved).
@@ -750,7 +750,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 2: sibling holds while halted
 			CompletedAt: metav1.Now().Time,
 		})
 		nameA := types.NamespacedName{Name: taskA, Namespace: "default"}
-		_, err := reconcileN(reconciler, nameA, 3)
+		err := reconcileWithRetry(reconciler.Reconcile, nameA, 3)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Wait for BillingHalt to land on Project.
@@ -765,7 +765,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 2: sibling holds while halted
 
 		// Now reconcile task B — it must NOT create a Job (held by BillingHalt).
 		nameB := types.NamespacedName{Name: taskB, Namespace: "default"}
-		result, err := reconcileN(reconciler, nameB, 3)
+		result, err := reconcileWithRetryResult(reconciler.Reconcile, nameB, 3)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(30*time.Second),
 			"BillingHalt hold must park task B with 30s requeue")
@@ -822,7 +822,7 @@ var _ = Describe("BillingHalt run-1 regression Leg 3: dispatch resumes after cle
 			CompletedAt: metav1.Now().Time,
 		})
 		nameA := types.NamespacedName{Name: taskA, Namespace: "default"}
-		_, _ = reconcileN(reconciler, nameA, 3)
+		_ = reconcileWithRetry(reconciler.Reconcile, nameA, 3)
 		Eventually(func() bool {
 			var p tideprojectv1alpha3.Project
 			if err := mgrClient.Get(ctx, types.NamespacedName{Name: projName, Namespace: "default"}, &p); err != nil {
@@ -833,14 +833,14 @@ var _ = Describe("BillingHalt run-1 regression Leg 3: dispatch resumes after cle
 		}, 5*time.Second, 50*time.Millisecond).Should(BeTrue())
 
 		nameB := types.NamespacedName{Name: taskB, Namespace: "default"}
-		result, _ := reconcileN(reconciler, nameB, 2)
+		result, _ := reconcileWithRetryResult(reconciler.Reconcile, nameB, 2)
 		Expect(result.RequeueAfter).To(Equal(30 * time.Second))
 
 		// Clear BillingHalt (tide resume).
 		clearBillingHalt(ctx, projName)
 
 		// Re-reconcile task B — dispatch must resume.
-		_, err := reconcileN(reconciler, nameB, 3)
+		err := reconcileWithRetry(reconciler.Reconcile, nameB, 3)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func(g Gomega) {
@@ -879,7 +879,7 @@ var _ = Describe("BillingHalt backstop: non-billing failure does not set conditi
 		// Pump to Running.
 		name := types.NamespacedName{Name: taskName, Namespace: "default"}
 		Eventually(func(g Gomega) {
-			_, _ = reconcileN(reconciler, name, 2)
+			_ = reconcileWithRetry(reconciler.Reconcile, name, 2)
 			var t tideprojectv1alpha3.Task
 			g.Expect(mgrClient.Get(ctx, name, &t)).To(Succeed())
 			g.Expect(t.Status.Phase).To(Equal("Running"))
@@ -913,7 +913,7 @@ var _ = Describe("BillingHalt backstop: non-billing failure does not set conditi
 		})
 
 		name := types.NamespacedName{Name: taskName, Namespace: "default"}
-		_, err := reconcileN(reconciler, name, 3)
+		err := reconcileWithRetry(reconciler.Reconcile, name, 3)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Task must be Failed (genuine failure).

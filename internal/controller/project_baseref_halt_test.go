@@ -110,7 +110,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 		var last reconcile.Result
 		for range n {
 			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(name)})
-			if err != nil && !isConflict(err) {
+			if err != nil && !apierrors.IsConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 			last = res
@@ -124,7 +124,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 	advanceToCloneJob := func(r *ProjectReconciler, name string) (tideprojectv1alpha3.Project, string) {
 		var p tideprojectv1alpha3.Project
 		for range 12 {
-			if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(name)}); err != nil && !isConflict(err) {
+			if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(name)}); err != nil && !apierrors.IsConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 			if err := k8sClient.Get(ctx, nn(name), &p); err == nil {
@@ -414,7 +414,7 @@ var _ = Describe("BASE-02/BASE-03 baseRef classification + baseSHA stamp", Label
 			markCloneSucceeded(cloneJobName, 0)
 
 			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn(projectName)})
-			if err != nil && !isConflict(err) {
+			if err != nil && !apierrors.IsConflict(err) {
 				Expect(err).NotTo(HaveOccurred())
 			}
 			Expect(res.RequeueAfter).To(BeNumerically(">", 0),
