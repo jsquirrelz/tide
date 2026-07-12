@@ -561,7 +561,6 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 				Scheme:         k8sClient.Scheme(),
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    pool.New(16, "planner"),
-				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 			}
@@ -766,11 +765,10 @@ var _ = Describe("Plan 04-05 Task 3 — gate-flow envtest", Label("envtest", "ph
 // gate-policy hook lives).
 func newMilestoneReconcilerForGateIT(envReader *mapEnvReader) *controller.MilestoneReconciler {
 	return &controller.MilestoneReconciler{
-		Client:        mgrClient,
-		Scheme:        k8sClient.Scheme(),
-		Dispatcher:    &stubDispatcher{},
-		EnvReader:     envReader,
-		SubagentImage: testSubagentImage,
+		Client:     mgrClient,
+		Scheme:     k8sClient.Scheme(),
+		Dispatcher: &stubDispatcher{},
+		EnvReader:  envReader,
 		// SigningKey makes this driven reconciler dispatch-capable. Without it,
 		// reconcilePlannerDispatch aborts every pass at credproxy.Sign
 		// ("signingKey must not be empty") BEFORE Job creation, so the planner Job
@@ -791,7 +789,6 @@ func newPhaseReconcilerForGateIT() *controller.PhaseReconciler {
 		Scheme:         k8sClient.Scheme(),
 		Dispatcher:     &stubDispatcher{},
 		PlannerPool:    pool.New(16, "planner"),
-		SubagentImage:  testSubagentImage,
 		CredproxyImage: testCredproxyImage,
 		SigningKey:     testSigningKey,
 	}

@@ -120,7 +120,6 @@ var _ = Describe("Phase 04.1 P1.2 — planner dispatch contract (envtest)", Labe
 				Dispatcher:     &stubDispatcher{},
 				PlannerPool:    pool.New(16, "planner"),
 				EnvReader:      newMapEnvReader(),
-				SubagentImage:  testSubagentImage,
 				CredproxyImage: testCredproxyImage,
 				SigningKey:     testSigningKey,
 			}
