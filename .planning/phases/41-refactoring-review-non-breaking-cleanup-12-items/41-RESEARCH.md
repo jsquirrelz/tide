@@ -387,17 +387,19 @@ Fixing milestone/phase requires also adding the "clear to False once resolved" h
 
 **All three assumptions above are grounded in this session's own grep/read verification (not training-data recall)** — they are flagged `[ASSUMED]`-adjacent only in the sense that the *planning implication* (how to resolve the divergence) is a decision, not a fact; the underlying code facts themselves are `[VERIFIED: codebase grep]`.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Item 7: should the shared helper cover only Milestone/Phase/Plan (3 sites, identical order) or all 4 including Task (different order + extra headroom check)?**
    - What we know: 3 of 4 sites share byte-identical project-scoped gate order; Task's differs on Import position and has an extra reservation-headroom check with no counterpart elsewhere.
    - What's unclear: Whether CONTEXT's D-07 "migrates ONE controller per plan/commit" implies all 4 must eventually land on the same helper, or whether Task legitimately stays a structural outlier.
    - Recommendation: Plan item 7 as 3 commits (Milestone, Phase, Plan → shared `checkDispatchHolds`) plus a 4th commit that either (a) leaves Task's inline chain as-is with a comment cross-referencing the new helper, or (b) migrates Task with an explicit, tested, documented order (mirroring how D-04 documents item 9's behavior change). Surface this choice to the user at plan time if `discuss_mode` allows — it's a genuine fork, not free discretion.
+   - **RESOLVED (plan-time, 2026-07-12):** Recommendation adopted as option (a) — plan 41-05 extracts `checkDispatchHolds` for the three planner-tier sites ONLY (Milestone/Phase/Plan, preserving their shared order and 5s/30s requeues); Task's inline chain stays untouched with a cross-reference comment plus the follow-up todo `.planning/todos/pending/2026-07-12-task-dispatch-gate-order-divergence.md`.
 
 2. **Item 6: does `reconcileWithRetry`'s looser conflict-match (`"Conflict"` substring in addition to `"the object has been modified"`) need to be preserved, tightened to `apierrors.IsConflict`, or is the substring match hiding a case `apierrors.IsConflict` won't catch?**
    - What we know: `apierrors.IsConflict(err)` checks `StatusError.ErrStatus.Reason == metav1.StatusReasonConflict`, which is what the K8s API server returns for real 409s.
    - What's unclear: Whether any test path produces a conflict-shaped error that is NOT a `*apierrors.StatusError` (e.g., a wrapped error from a fake/cached client) that would only be caught by the substring match today.
    - Recommendation: Convert to `apierrors.IsConflict(err)` and run the full `internal/controller` test suite (not just a `-run` subset) before considering item 6 closed — the seed's own Verify line (`go test ./internal/controller/...`) already covers this, just make sure it runs the FULL package given the ~90-callsite blast radius, not a narrowed `-run` filter.
+   - **RESOLVED (plan-time, 2026-07-12):** Recommendation adopted — plan 41-02 converts the surviving `reconcileWithRetry` driver to `apierrors.IsConflict` and gates on the FULL `go test ./internal/controller/...` package run (no `-run` narrowing), proving IsConflict catches every conflict shape the substring match did.
 
 ## Environment Availability
 

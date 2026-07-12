@@ -2,8 +2,8 @@
 phase: 41
 slug: refactoring-review-non-breaking-cleanup-12-items
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-11
 ---
 
@@ -49,7 +49,7 @@ Populated from the seed's per-item Verify lines (RESEARCH.md re-anchored them ag
 | 8 PlannerDeps carrier | REFAC | wiring tests | `go test ./cmd/manager/... ./internal/controller/...` (wiring_test.go + wave_dispatcher_wiring_test.go extended) | ✅ | ⬜ pending |
 | 9 polarity normalization | REFAC | unit+grep | `go test ./internal/controller/... -run 'Parent'` + `rg -l ConditionParentUnresolved cmd/dashboard internal test` swept | ✅ | ⬜ pending |
 | 10 status-helper extraction | REFAC | envtest | `go test ./internal/controller/... -run 'Gates\|Approve\|Boundary'` | ✅ | ⬜ pending |
-| 11 magic-literal centralization | REFAC | grep+unit | `rg '"tide-projects"' internal \| grep -v _test` returns only constant def; `go test ./internal/controller/...` | ✅ | ⬜ pending |
+| 11 magic-literal centralization | REFAC | grep+unit | `rg '"tide-projects"' internal \| grep -v _test` returns only constant def; repo-wide label grep (41-09 Task 1 acceptance) returns 0; `go test ./internal/controller/... ./internal/dispatch/... ./cmd/...` | ✅ | ⬜ pending |
 | 12 log-style (AGENTS.md amendment) | REFAC | grep | `rg -l 'dispatch held\|creating job' internal test .planning` unchanged before/after (doc-only change) | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -72,11 +72,11 @@ Existing infrastructure covers all phase requirements — the controller test su
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (none)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 480s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (none)
+- [x] No watch-mode flags
+- [x] Feedback latency < 480s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-12
