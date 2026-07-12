@@ -77,14 +77,80 @@ func TestPhaseReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 	if cond == nil {
 		t.Fatalf("expected ConditionParentUnresolved to be set; conditions=%+v", got.Status.Conditions)
 	}
-	if cond.Status != metav1.ConditionFalse {
-		t.Errorf("condition Status = %q, want False", cond.Status)
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("condition Status = %q, want True (D-04, Phase 41: True == parent unresolved)", cond.Status)
 	}
 	if cond.Reason != tideprojectv1alpha3.ReasonParentRefNotFound {
 		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentRefNotFound)
 	}
 	if !strings.Contains(cond.Message, "milestone-02-does-not-exist") {
 		t.Errorf("condition Message %q should name the missing parent-ref", cond.Message)
+	}
+}
+
+// TestPhaseReconciler_ParentRefResolves_ClearsCondition verifies the D-04
+// (Phase 41) clear-on-resolve half: once a Phase carrying a stale
+// ConditionParentUnresolved=True reconciles and its spec.milestoneRef now
+// resolves, the condition clears to False/ParentResolved.
+func TestPhaseReconciler_ParentRefResolves_ClearsCondition(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	milestone := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "milestone-03",
+			Namespace: "default",
+			UID:       types.UID("ms-uid-resolve"),
+		},
+	}
+	phase := &tideprojectv1alpha3.Phase{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "phase-03",
+			Namespace:  "default",
+			UID:        types.UID("phase-uid-resolve"),
+			Finalizers: []string{phaseFinalizer},
+		},
+		Spec: tideprojectv1alpha3.PhaseSpec{
+			MilestoneRef: "milestone-03",
+		},
+		Status: tideprojectv1alpha3.PhaseStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               tideprojectv1alpha3.ConditionParentUnresolved,
+					Status:             metav1.ConditionTrue,
+					Reason:             tideprojectv1alpha3.ReasonParentRefNotFound,
+					Message:            "stale: parent was previously missing",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithRuntimeObjects(milestone, phase).
+		WithStatusSubresource(&tideprojectv1alpha3.Phase{}).
+		Build()
+	r := &PhaseReconciler{Client: c, Scheme: s}
+
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "phase-03"},
+	}); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	var got tideprojectv1alpha3.Phase
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "phase-03"}, &got); err != nil {
+		t.Fatalf("Get phase: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
+	if cond == nil {
+		t.Fatalf("expected ConditionParentUnresolved to still be present (cleared, not removed); conditions=%+v", got.Status.Conditions)
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("condition Status = %q, want False (cleared on resolve)", cond.Status)
+	}
+	if cond.Reason != tideprojectv1alpha3.ReasonParentResolved {
+		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentResolved)
+	}
+	if !strings.Contains(cond.Message, "milestone-03") {
+		t.Errorf("condition Message %q should name the resolved parent", cond.Message)
 	}
 }
 
@@ -129,10 +195,79 @@ func TestMilestoneReconciler_ParentRefNotFound_Surfaces(t *testing.T) {
 	if cond == nil {
 		t.Fatalf("expected ConditionParentUnresolved to be set; conditions=%+v", got.Status.Conditions)
 	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("condition Status = %q, want True (D-04, Phase 41: True == parent unresolved)", cond.Status)
+	}
 	if cond.Reason != tideprojectv1alpha3.ReasonParentRefNotFound {
 		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentRefNotFound)
 	}
 	if !strings.Contains(cond.Message, "project-99-does-not-exist") {
 		t.Errorf("condition Message %q should name the missing parent-ref", cond.Message)
+	}
+}
+
+// TestMilestoneReconciler_ParentRefResolves_ClearsCondition is the symmetric
+// clear-on-resolve check one level up: a Milestone carrying a stale
+// ConditionParentUnresolved=True whose spec.projectRef now resolves clears
+// the condition to False/ParentResolved.
+func TestMilestoneReconciler_ParentRefResolves_ClearsCondition(t *testing.T) {
+	s := fakeSchemeWithAll(t)
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "project-02",
+			Namespace: "default",
+			UID:       types.UID("project-uid-resolve"),
+		},
+	}
+	ms := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "milestone-04",
+			Namespace:  "default",
+			UID:        types.UID("ms-uid-resolve-2"),
+			Finalizers: []string{milestoneFinalizer},
+		},
+		Spec: tideprojectv1alpha3.MilestoneSpec{
+			ProjectRef: "project-02",
+		},
+		Status: tideprojectv1alpha3.MilestoneStatus{
+			Conditions: []metav1.Condition{
+				{
+					Type:               tideprojectv1alpha3.ConditionParentUnresolved,
+					Status:             metav1.ConditionTrue,
+					Reason:             tideprojectv1alpha3.ReasonParentRefNotFound,
+					Message:            "stale: parent was previously missing",
+					LastTransitionTime: metav1.Now(),
+				},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(s).
+		WithRuntimeObjects(project, ms).
+		WithStatusSubresource(&tideprojectv1alpha3.Milestone{}).
+		Build()
+	r := &MilestoneReconciler{Client: c, Scheme: s}
+
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{
+		NamespacedName: types.NamespacedName{Namespace: "default", Name: "milestone-04"},
+	}); err != nil {
+		t.Fatalf("Reconcile returned error: %v", err)
+	}
+
+	var got tideprojectv1alpha3.Milestone
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "milestone-04"}, &got); err != nil {
+		t.Fatalf("Get milestone: %v", err)
+	}
+	cond := meta.FindStatusCondition(got.Status.Conditions, tideprojectv1alpha3.ConditionParentUnresolved)
+	if cond == nil {
+		t.Fatalf("expected ConditionParentUnresolved to still be present (cleared, not removed); conditions=%+v", got.Status.Conditions)
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("condition Status = %q, want False (cleared on resolve)", cond.Status)
+	}
+	if cond.Reason != tideprojectv1alpha3.ReasonParentResolved {
+		t.Errorf("condition Reason = %q, want %q", cond.Reason, tideprojectv1alpha3.ReasonParentResolved)
+	}
+	if !strings.Contains(cond.Message, "project-02") {
+		t.Errorf("condition Message %q should name the resolved parent", cond.Message)
 	}
 }
