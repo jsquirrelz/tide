@@ -290,10 +290,40 @@ Plans:
 ### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)
 
 **Goal:** The 12-item operator-shared refactoring review lands as non-breaking cleanup: quick wins (typed Status.Phase constants, meta.IsStatusConditionTrue, stale scheme comment, dead code/fields, mojibake, test-helper unification) then structural extractions (shared dispatch-holds gate chain, PlannerDeps carrier, condition-polarity normalization, status-helper extraction, magic-literal centralization, log-style decision).
-**Requirements**: TBD at planning (seed: `.planning/todos/pending/2026-07-09-phase-41-refactoring-review.md` — file:line-verified against source)
+**Requirements**: REFAC-01, REFAC-02, REFAC-04, REFAC-05, REFAC-06, REFAC-07, REFAC-08, REFAC-09, REFAC-10, REFAC-11, REFAC-12 (REFAC-03 pre-satisfied by Phase 40 — IDs map 1:1 to seed item numbers; minted 2026-07-12 per D-08)
 **Depends on:** Phase 40 (doing 40 first collapses the dual-version scaffolding items #1/#3 otherwise work around)
-**Plans:** 0 plans
+**Plans:** 9 plans
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 41 to break down)
+- [ ] 41-01-PLAN.md — Quick wins: meta.IsStatusConditionTrue swap, mojibake fix, AGENTS.md logging policy (items 2/5/12) — wave 1
+- [ ] 41-02-PLAN.md — Test-driver unification onto reconcileWithRetry + apierrors.IsConflict (item 6) — wave 1
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 41-03-PLAN.md — Dead code deletion: gateDispatch/ensureJob, SubagentImage fields, Wave pools (item 4) — wave 2
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 41-04-PLAN.md — Typed LevelPhase* Status.Phase constants + 117-site sweep (item 1) — wave 3
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 41-05-PLAN.md — checkDispatchHolds gate-chain extraction, one controller per task; Task divergence documented (item 7) — wave 4
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 41-06-PLAN.md — PlannerReconcilerDeps carrier across 4 planner reconcilers incl. Project (item 8) — wave 5
+
+**Wave 6** *(blocked on Wave 5)*
+
+- [ ] 41-07-PLAN.md — Leaf status-helper extraction: patch*/consumeApproveAndResume/countChildren (item 10) — wave 6
+
+**Wave 7** *(blocked on Wave 6)*
+
+- [ ] 41-08-PLAN.md — ConditionParentUnresolved polarity normalization, True==unresolved (item 9) — wave 7
+
+**Wave 8** *(blocked on Wave 7)*
+
+- [ ] 41-09-PLAN.md — Magic literals: owner label keys, SharedPVCName plumb, endpoint/iterations consts (item 11) — wave 8

@@ -75,6 +75,23 @@ Added 2026-07-06 (Phase 40 rescope discussion; IDs minted at plan time per 40-CO
 - [x] **CRANK-06**: Deep docs/samples accuracy pass (D-06): migration chapter with the levels-remap table; INSTALL/gates/git-hosts/project-authoring/README examples on v1alpha3 + `schemaRevision`; 12 samples renamed with kustomization in lockstep; SECURITY.md/rbac.md conversion-webhook staleness fixed while audit snapshots stay untouched (D-12)
 - [x] **CRANK-07**: End state enforced: a CI-wired `verify-no-legacy-api-refs` gate (zero v1alpha1/v1alpha2 references outside the sanctioned exclusion set) proven alive by a seeded-failure check, and full `make test-int` green on the final tree
 
+### Refactoring Review — Phase 41 (REFAC)
+
+Added 2026-07-12 (minted at plan time per 41-CONTEXT.md D-08, one ID per seed item — REFAC-NN maps 1:1 to seed item NN in `.planning/todos/pending/2026-07-09-phase-41-refactoring-review.md`). Non-breaking cleanup: no CRD schema changes, no API version changes, no new capabilities; behavior invariance is the contract (existing suites stay green), with two sanctioned observable exceptions (REFAC-09 polarity per D-04; REFAC-11 making a dead config knob live). Decisions locked in `.planning/phases/41-.../41-CONTEXT.md` (D-01..D-09).
+
+- [ ] **REFAC-01**: Typed Status.Phase constants for the five level kinds (Milestone/Phase/Plan/Task/Wave) in `api/v1alpha3` (`LevelPhase*` block, Project-pattern precedent); all ~117 non-test literal sites in `internal/controller` + `cmd` swept; field type stays `string`, zero CRD regen diff (D-03)
+- [ ] **REFAC-02**: `checkBillingHalt`/`checkFailureHalt` (both loops)/`checkBudgetBlocked` delegate to `meta.IsStatusConditionTrue` behind unchanged nil-safe wrappers
+- [x] **REFAC-03**: Stale scheme comment + duplicated AddToScheme in `cmd/manager/main.go`. **Already satisfied — resolved by Phase 40's consumer-migration crank (verified 2026-07-11: single `tidev1alpha3.AddToScheme` call, comment accurate); dropped from Phase 41 scope per 41-CONTEXT.md.**
+- [ ] **REFAC-04**: Dead code deleted end-to-end: `gateDispatch`/`ensureJob` (grep contracts historical), the dead `SubagentImage` reconciler-struct field ×5 + main.go wiring + test fixtures, `WaveReconciler.PlannerPool`/`ExecutorPool` (never read) — live SubagentImage surfaces (podjob backend, resolveImage JobSpec population, --subagent-image flag) untouched
+- [ ] **REFAC-05**: Zero mojibake byte sequences in `dispatch_helpers.go` (13 lines) and `internal/subagent/anthropic/subagent.go` (9 lines); comment-only diff
+- [ ] **REFAC-06**: One envtest reconcile-retry driver family (`reconcileWithRetry` + result-returning core) using `apierrors.IsConflict`; the three receiver-typed duplicates deleted and ~89 call sites repointed; FULL `internal/controller` package green (OQ-2: no `-run` narrowing)
+- [ ] **REFAC-07**: Shared `checkDispatchHolds` in `dispatch_helpers.go` carries the planner-tier project-scoped hold chain (Billing→Failure→Budget→Import, 30s/30s/30s/5s) for Milestone/Phase/Plan — one controller migrated per task; Task's divergent chain (Import second + reservation headroom) preserved as-is, documented in code + follow-up todo (resolved plan-time decision on RESEARCH Pitfall 1)
+- [ ] **REFAC-08**: `PlannerReconcilerDeps` carrier (8 dispatch-tier fields) on all FOUR planner reconcilers including Project (Pitfall 2), built once in main.go; wiring-lock tests extended to assert non-nil Deps for all four
+- [ ] **REFAC-09**: `ConditionParentUnresolved` polarity normalized to True==unresolved (D-04) in milestone/phase `surfaceParentRefUnresolved`, with the clear-to-False/`ReasonParentResolved` half added on parent resolve; consumers/tests swept in the same commit; observable change documented
+- [ ] **REFAC-10**: Approve-consume two-step (`consumeApproveAndResume`), the 15 `patch{Level}{Outcome}` bodies (leaf status-mutation primitive), and 4 `countChild*` bodies extracted as shared functions with thin typed wrappers (triggerBoundaryPush/spawnReporterIfNeeded shape); flat state machines untouched (D-09)
+- [ ] **REFAC-11**: Magic literals centralized: wave-paused/wave-index/attempt label keys in `internal/owner`, raw `tideproject.k8s/project` sites on `owner.LabelProject`, credproxy endpoint + planner Iterations=20 constants; `SharedPVCName` field + accessor added to Milestone/Phase/Plan/Task reconcilers and wired from main.go so `--workspaces-pvc-name` is honored by every dispatch Job (Pitfall 3: latent config bug, not style)
+- [ ] **REFAC-12**: AGENTS.md Logging section codifies the codebase's lowercase-initial convention (88 real sites); zero log-message edits (D-05 — load-bearing test/verification greps preserved)
+
 ## Future Requirements
 
 Deferred. Tracked but not in the current roadmap.
@@ -108,6 +125,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | ~~`subagent.levels` rename~~ | **No longer out of scope — folded into Phase 40 as CRANK-04 (2026-07-06)** |
 | Dashboard mutation auth hardening | Seed trigger (dashboard beyond trusted perimeter) has not fired |
 | Envelope stability declaration (`dispatch.tideproject.k8s/v1`) | Deliberately NOT taken in Phase 40 — revisit once the post-rename contract has soaked (40-CONTEXT.md deferred) |
+| `+kubebuilder:validation:Enum` on Status.Phase fields | CRD schema change — rides a future version crank (v1alpha4); Phase 41 D-03 keeps constants string-typed |
+| Phase 40 REVIEW.md WR findings (6×) | Route via `/gsd:code-review 40 --fix` or explicit user fold — NOT Phase 41 scope (41-CONTEXT.md D-06) |
 
 ## Traceability
 
@@ -147,13 +166,25 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CRANK-05 | Phase 40 | Complete |
 | CRANK-06 | Phase 40 | Complete |
 | CRANK-07 | Phase 40 | Complete |
+| REFAC-01 | Phase 41 (plan 41-04) | Pending |
+| REFAC-02 | Phase 41 (plan 41-01) | Pending |
+| REFAC-03 | Phase 41 | Complete (Phase 40) |
+| REFAC-04 | Phase 41 (plan 41-03) | Pending |
+| REFAC-05 | Phase 41 (plan 41-01) | Pending |
+| REFAC-06 | Phase 41 (plan 41-02) | Pending |
+| REFAC-07 | Phase 41 (plan 41-05) | Pending |
+| REFAC-08 | Phase 41 (plan 41-06) | Pending |
+| REFAC-09 | Phase 41 (plan 41-08) | Pending |
+| REFAC-10 | Phase 41 (plan 41-07) | Pending |
+| REFAC-11 | Phase 41 (plan 41-09) | Pending |
+| REFAC-12 | Phase 41 (plan 41-01) | Pending |
 
 **Coverage:**
 
-- v1.0.7 "First-Run Paper Cuts" requirements: 30 total (23 original + 7 CRANK minted 2026-07-06), 100% mapped (2 — DEBT-01/DEBT-02 — already satisfied by the carried-in Phase 39)
+- v1.0.7 "First-Run Paper Cuts" requirements: 42 total (23 original + 7 CRANK minted 2026-07-06 + 12 REFAC minted 2026-07-12), 100% mapped (DEBT-01/DEBT-02 pre-satisfied by the carried-in Phase 39; REFAC-03 pre-satisfied by Phase 40)
 - Carried-in requirements (PREFLIGHT-01/02, Phase 39): 2 total, 2 complete
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-07-03*
-*Last updated: 2026-07-06 — minted CRANK-01..07 for Phase 40 (full API version-lifecycle turn; requirement IDs were TBD at roadmap time, minted at plan time per 40-CONTEXT.md). STAGE-02 and the "subagent.levels rename" out-of-scope row superseded by the Phase 40 fold. Previously: 2026-07-04 merge of the parallel "Flood Tide" session (PREFLIGHT carried in as Phase 39; dogfood-run-#2/OpenAI scope archived); 2026-07-03 Phase 36 descope (SIGN-02/03/04 → Future).*
+*Last updated: 2026-07-12 — minted REFAC-01..12 for Phase 41 (non-breaking refactoring review; REFAC-NN maps 1:1 to seed item NN; REFAC-03 recorded as pre-satisfied by Phase 40). Two Out-of-Scope rows added (Status.Phase Enum marker → v1alpha4 crank; Phase 40 WR findings → code-review fix track). Previously: 2026-07-06 minted CRANK-01..07 for Phase 40; 2026-07-04 merge of the parallel "Flood Tide" session; 2026-07-03 Phase 36 descope (SIGN-02/03/04 → Future).*
