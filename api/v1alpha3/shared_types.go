@@ -419,3 +419,28 @@ const (
 	// gate catches task-level cycles only (conservative by construction).
 	ReasonGlobalCycleDetected = "GlobalCycleDetected"
 )
+
+// LevelPhase constants for Status.Phase on the five level kinds (Milestone,
+// Phase, Plan, Task, Wave). Distinct from Project's own Phase* vocabulary
+// (project_types.go), which has a different value set entirely — the two
+// namespaces are kept separate in this package rather than collapsed, so a
+// per-kind duplicate block is not used. Field type stays string (no
+// +kubebuilder:validation:Enum) — this is a non-breaking cleanup (Phase 41
+// D-03): it closes the "typo compiles silently" failure class without
+// changing the CRD schema.
+const (
+	// LevelPhasePending is the initial phase before any reconcile has run.
+	LevelPhasePending = "Pending"
+	// LevelPhaseRunning is set when dispatch is actively proceeding.
+	LevelPhaseRunning = "Running"
+	// LevelPhaseSucceeded is the terminal success phase.
+	LevelPhaseSucceeded = "Succeeded"
+	// LevelPhaseFailed is the terminal failure phase.
+	LevelPhaseFailed = "Failed"
+	// LevelPhaseAwaitingApproval is set when a gate-policy hook has parked
+	// dispatch at this level pending an operator `tide approve`.
+	LevelPhaseAwaitingApproval = "AwaitingApproval"
+	// LevelPhaseZeroMembers is Wave-only: set by the wave aggregator when a
+	// Wave's TaskRefs is empty (no member Tasks were ever assigned to it).
+	LevelPhaseZeroMembers = "ZeroMembers"
+)
