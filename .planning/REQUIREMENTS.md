@@ -67,13 +67,13 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 Added 2026-07-06 (Phase 40 rescope discussion; IDs minted at plan time per 40-CONTEXT.md Claude's Discretion). One full version-lifecycle turn: v1alpha3 in, v1alpha1 + v1alpha2 out. Decisions locked in `.planning/phases/40-deprecate-v1alpha1-api/40-CONTEXT.md` (D-01..D-12).
 
-- [ ] **CRANK-01**: `api/v1alpha3` exists as the copy-and-reshape of v1alpha2 — `SchemaRevision` enum `v1alpha3`, dead `ProjectSpec.ModelSelection` dropped (D-10), storageversion markers moved atomically, `LevelOverrides` docs carry the artifact-first semantics — with CRDs and the tide-crds chart regenerating reproducibly
-- [ ] **CRANK-02**: Envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1` (D-08, kubeadm pattern) — the old CRD-group string is rejected under test, the tide-push/tide-eval literal drift is closed, and doc.go's superseded v1beta1 bump plan is erased
-- [ ] **CRANK-03**: Every consumer (controllers, webhooks, dispatch, CLI, dashboard, Job images, tests, live fixtures) runs on v1alpha3; the SchemaRevision guard is generalized to a two-constant crank mechanism (D-04); owner-ref dual-accepts are dropped (D-05)
-- [ ] **CRANK-04**: `subagent.levels` semantics renamed per the DECIDED todo mapping (D-02/D-11) — each `levels.X` key resolves the model that plans level X, implemented as override-key mapping with dispatch identity (envelope Level, Job labels, subagent template selection) unchanged; the resolved model is logged at all 5 dispatch sites
-- [ ] **CRANK-05**: `api/v1alpha1` and `api/v1alpha2` deleted; 6 single-version CRD manifests; `verify-no-aggregates` hardened to a version-agnostic fail-closed glob in the same commit (D-12 mandatory); `PROJECT` metadata fixed; dogfood strict-decode coverage relocated, not lost
-- [ ] **CRANK-06**: Deep docs/samples accuracy pass (D-06): migration chapter with the levels-remap table; INSTALL/gates/git-hosts/project-authoring/README examples on v1alpha3 + `schemaRevision`; 12 samples renamed with kustomization in lockstep; SECURITY.md/rbac.md conversion-webhook staleness fixed while audit snapshots stay untouched (D-12)
-- [ ] **CRANK-07**: End state enforced: a CI-wired `verify-no-legacy-api-refs` gate (zero v1alpha1/v1alpha2 references outside the sanctioned exclusion set) proven alive by a seeded-failure check, and full `make test-int` green on the final tree
+- [x] **CRANK-01**: `api/v1alpha3` exists as the copy-and-reshape of v1alpha2 — `SchemaRevision` enum `v1alpha3`, dead `ProjectSpec.ModelSelection` dropped (D-10), storageversion markers moved atomically, `LevelOverrides` docs carry the artifact-first semantics — with CRDs and the tide-crds chart regenerating reproducibly
+- [x] **CRANK-02**: Envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1` (D-08, kubeadm pattern) — the old CRD-group string is rejected under test, the tide-push/tide-eval literal drift is closed, and doc.go's superseded v1beta1 bump plan is erased
+- [x] **CRANK-03**: Every consumer (controllers, webhooks, dispatch, CLI, dashboard, Job images, tests, live fixtures) runs on v1alpha3; the SchemaRevision guard is generalized to a two-constant crank mechanism (D-04); owner-ref dual-accepts are dropped (D-05)
+- [x] **CRANK-04**: `subagent.levels` semantics renamed per the DECIDED todo mapping (D-02/D-11) — each `levels.X` key resolves the model that plans level X, implemented as override-key mapping with dispatch identity (envelope Level, Job labels, subagent template selection) unchanged; the resolved model is logged at all 5 dispatch sites
+- [x] **CRANK-05**: `api/v1alpha1` and `api/v1alpha2` deleted; 6 single-version CRD manifests; `verify-no-aggregates` hardened to a version-agnostic fail-closed glob in the same commit (D-12 mandatory); `PROJECT` metadata fixed; dogfood strict-decode coverage relocated, not lost
+- [x] **CRANK-06**: Deep docs/samples accuracy pass (D-06): migration chapter with the levels-remap table; INSTALL/gates/git-hosts/project-authoring/README examples on v1alpha3 + `schemaRevision`; 12 samples renamed with kustomization in lockstep; SECURITY.md/rbac.md conversion-webhook staleness fixed while audit snapshots stay untouched (D-12)
+- [x] **CRANK-07**: End state enforced: a CI-wired `verify-no-legacy-api-refs` gate (zero v1alpha1/v1alpha2 references outside the sanctioned exclusion set) proven alive by a seeded-failure check, and full `make test-int` green on the final tree
 
 ## Future Requirements
 
@@ -140,13 +140,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DEBT-01 | Phase 38 | Complete (Phase 39) |
 | DEBT-02 | Phase 38 | Complete (Phase 39) |
 | DEBT-03 | Phase 38 | Complete |
-| CRANK-01 | Phase 40 | Pending |
-| CRANK-02 | Phase 40 | Pending |
-| CRANK-03 | Phase 40 | Pending |
-| CRANK-04 | Phase 40 | Pending |
-| CRANK-05 | Phase 40 | Pending |
-| CRANK-06 | Phase 40 | Pending |
-| CRANK-07 | Phase 40 | Pending |
+| CRANK-01 | Phase 40 | Complete |
+| CRANK-02 | Phase 40 | Complete |
+| CRANK-03 | Phase 40 | Complete |
+| CRANK-04 | Phase 40 | Complete |
+| CRANK-05 | Phase 40 | Complete |
+| CRANK-06 | Phase 40 | Complete |
+| CRANK-07 | Phase 40 | Complete |
 
 **Coverage:**
 

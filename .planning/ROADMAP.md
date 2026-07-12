@@ -258,7 +258,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
-| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 7/7 | Complete   | 2026-07-12 |
+| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 7/7 | Complete    | 2026-07-12 |
 
 ### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
