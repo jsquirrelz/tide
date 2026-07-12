@@ -258,14 +258,14 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 36. Signed Commits + Bot Identity | v1.0.7 | 4/4 | Complete    | 2026-07-08 |
 | 37. Dashboard Surfaces — Artifact View, Project View, Log-Drawer States | v1.0.7 | 12/12 | Complete|  |
 | 38. Small Independents — Pricing Accuracy, promptFile, Telemetry Nudge, Tech-Debt Carry | v1.0.7 | 7/7 | Complete    | 2026-07-11 |
-| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 6/7 | In Progress|  |
+| 40. Deprecate v1alpha1 API (Full Version-Lifecycle Turn) | v1.0.7 | 7/7 | Complete   | 2026-07-12 |
 
 ### Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)
 
 **Goal:** One full API-version crank: introduce v1alpha3 as the sole served+storage version for all 6 CRDs — carrying the folded `subagent.levels` semantic rename (DECIDED mapping in the 2026-07-03 todo) plus user-approved batchable schema fixes — then remove v1alpha1 AND v1alpha2 entirely (Go packages, CRD blocks, chart copies, scheme registrations, stale comments). Reinstall-only migration per Phase 23 D-09; SchemaRevision guard generalized as the permanent crank mechanism; owner-ref dual-accepts dropped; deep docs/samples sweep (INSTALL/gates/git-hosts/project-authoring examples are broken today); envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`. Decisions locked in `40-CONTEXT.md`.
 **Requirements**: CRANK-01, CRANK-02, CRANK-03, CRANK-04, CRANK-05, CRANK-06, CRANK-07
 **Depends on:** Phase 39
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -285,7 +285,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 40-07-PLAN.md — Closeout: verify-no-legacy-api-refs CI gate + full test-int phase gate — wave 4
+- [x] 40-07-PLAN.md — Closeout: verify-no-legacy-api-refs CI gate + full test-int phase gate — wave 4
 
 ### Phase 41: Refactoring Review — Non-Breaking Cleanup (12 items)
 
