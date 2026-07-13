@@ -563,7 +563,7 @@ func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Projec
 	// Position: BEFORE pool acquire and BEFORE Job creation (Pitfall 2).
 	if checkBillingHalt(project) {
 		logf.FromContext(ctx).V(1).Info("dispatch held: project billing halt",
-			level, objName, "project", project.Name)
+			"level", level, "name", objName, "project", project.Name)
 		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
 	}
 	// Phase 25 DISP-02 / D-02b: conservative failure halt hold.
@@ -571,14 +571,14 @@ func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Projec
 	// Park (never fail); cleared by `tide resume --retry-failed`.
 	if checkFailureHalt(project) {
 		logf.FromContext(ctx).V(1).Info("dispatch held: project failure halt (conservative profile)",
-			level, objName, "project", project.Name)
+			"level", level, "name", objName, "project", project.Name)
 		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
 	}
 	// Phase 14 BUDGET-02 / D-04: BudgetBlocked hold (operator cap) — separate from
 	// BillingHalt (provider billing); both may be true simultaneously.
 	if checkBudgetBlocked(project) && !budget.IsBypassed(project, time.Now()) {
 		logf.FromContext(ctx).V(1).Info("dispatch held: project budget blocked",
-			level, objName, "project", project.Name)
+			"level", level, "name", objName, "project", project.Name)
 		return true, ctrl.Result{RequeueAfter: 30 * time.Second}
 	}
 	// Phase 28 IMPORT-01: park planner dispatch until import completes.
@@ -587,7 +587,7 @@ func checkDispatchHolds(ctx context.Context, project *tideprojectv1alpha3.Projec
 		c := meta.FindStatusCondition(project.Status.Conditions, tideprojectv1alpha3.ConditionImportComplete)
 		if c == nil || c.Status != metav1.ConditionTrue {
 			logf.FromContext(ctx).V(1).Info("import pending; holding planner dispatch",
-				level, objName, "project", project.Name)
+				"level", level, "name", objName, "project", project.Name)
 			return true, ctrl.Result{RequeueAfter: 5 * time.Second}
 		}
 	}
