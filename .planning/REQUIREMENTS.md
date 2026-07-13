@@ -79,18 +79,18 @@ Added 2026-07-06 (Phase 40 rescope discussion; IDs minted at plan time per 40-CO
 
 Added 2026-07-12 (minted at plan time per 41-CONTEXT.md D-08, one ID per seed item — REFAC-NN maps 1:1 to seed item NN in `.planning/todos/pending/2026-07-09-phase-41-refactoring-review.md`). Non-breaking cleanup: no CRD schema changes, no API version changes, no new capabilities; behavior invariance is the contract (existing suites stay green), with two sanctioned observable exceptions (REFAC-09 polarity per D-04; REFAC-11 making a dead config knob live). Decisions locked in `.planning/phases/41-.../41-CONTEXT.md` (D-01..D-09).
 
-- [ ] **REFAC-01**: Typed Status.Phase constants for the five level kinds (Milestone/Phase/Plan/Task/Wave) in `api/v1alpha3` (`LevelPhase*` block, Project-pattern precedent); all ~117 non-test literal sites in `internal/controller` + `cmd` swept; field type stays `string`, zero CRD regen diff (D-03)
-- [ ] **REFAC-02**: `checkBillingHalt`/`checkFailureHalt` (both loops)/`checkBudgetBlocked` delegate to `meta.IsStatusConditionTrue` behind unchanged nil-safe wrappers
+- [x] **REFAC-01**: Typed Status.Phase constants for the five level kinds (Milestone/Phase/Plan/Task/Wave) in `api/v1alpha3` (`LevelPhase*` block, Project-pattern precedent); all ~117 non-test literal sites in `internal/controller` + `cmd` swept; field type stays `string`, zero CRD regen diff (D-03)
+- [x] **REFAC-02**: `checkBillingHalt`/`checkFailureHalt` (both loops)/`checkBudgetBlocked` delegate to `meta.IsStatusConditionTrue` behind unchanged nil-safe wrappers
 - [x] **REFAC-03**: Stale scheme comment + duplicated AddToScheme in `cmd/manager/main.go`. **Already satisfied — resolved by Phase 40's consumer-migration crank (verified 2026-07-11: single `tidev1alpha3.AddToScheme` call, comment accurate); dropped from Phase 41 scope per 41-CONTEXT.md.**
-- [ ] **REFAC-04**: Dead code deleted end-to-end: `gateDispatch`/`ensureJob` (grep contracts historical), the dead `SubagentImage` reconciler-struct field ×5 + main.go wiring + test fixtures, `WaveReconciler.PlannerPool`/`ExecutorPool` (never read) — live SubagentImage surfaces (podjob backend, resolveImage JobSpec population, --subagent-image flag) untouched
-- [ ] **REFAC-05**: Zero mojibake byte sequences in `dispatch_helpers.go` (13 lines) and `internal/subagent/anthropic/subagent.go` (9 lines); comment-only diff
-- [ ] **REFAC-06**: One envtest reconcile-retry driver family (`reconcileWithRetry` + result-returning core) using `apierrors.IsConflict`; the three receiver-typed duplicates deleted and ~89 call sites repointed; FULL `internal/controller` package green (OQ-2: no `-run` narrowing)
-- [ ] **REFAC-07**: Shared `checkDispatchHolds` in `dispatch_helpers.go` carries the planner-tier project-scoped hold chain (Billing→Failure→Budget→Import, 30s/30s/30s/5s) for Milestone/Phase/Plan — one controller migrated per task; Task's divergent chain (Import second + reservation headroom) preserved as-is, documented in code + follow-up todo (resolved plan-time decision on RESEARCH Pitfall 1)
-- [ ] **REFAC-08**: `PlannerReconcilerDeps` carrier (8 dispatch-tier fields) on all FOUR planner reconcilers including Project (Pitfall 2), built once in main.go; wiring-lock tests extended to assert non-nil Deps for all four
-- [ ] **REFAC-09**: `ConditionParentUnresolved` polarity normalized to True==unresolved (D-04) in milestone/phase `surfaceParentRefUnresolved`, with the clear-to-False/`ReasonParentResolved` half added on parent resolve; consumers/tests swept in the same commit; observable change documented
-- [ ] **REFAC-10**: Approve-consume two-step (`consumeApproveAndResume`), the 15 `patch{Level}{Outcome}` bodies (leaf status-mutation primitive), and 4 `countChild*` bodies extracted as shared functions with thin typed wrappers (triggerBoundaryPush/spawnReporterIfNeeded shape); flat state machines untouched (D-09)
-- [ ] **REFAC-11**: Magic literals centralized: wave-paused/wave-index/attempt label keys in `internal/owner`, raw `tideproject.k8s/project` sites on `owner.LabelProject`, credproxy endpoint + planner Iterations=20 constants; `SharedPVCName` field + accessor added to Milestone/Phase/Plan/Task reconcilers and wired from main.go so `--workspaces-pvc-name` is honored by every dispatch Job (Pitfall 3: latent config bug, not style)
-- [ ] **REFAC-12**: AGENTS.md Logging section codifies the codebase's lowercase-initial convention (88 real sites); zero log-message edits (D-05 — load-bearing test/verification greps preserved)
+- [x] **REFAC-04**: Dead code deleted end-to-end: `gateDispatch`/`ensureJob` (grep contracts historical), the dead `SubagentImage` reconciler-struct field ×5 + main.go wiring + test fixtures, `WaveReconciler.PlannerPool`/`ExecutorPool` (never read) — live SubagentImage surfaces (podjob backend, resolveImage JobSpec population, --subagent-image flag) untouched
+- [x] **REFAC-05**: Zero mojibake byte sequences in `dispatch_helpers.go` (13 lines) and `internal/subagent/anthropic/subagent.go` (9 lines); comment-only diff
+- [x] **REFAC-06**: One envtest reconcile-retry driver family (`reconcileWithRetry` + result-returning core) using `apierrors.IsConflict`; the three receiver-typed duplicates deleted and ~89 call sites repointed; FULL `internal/controller` package green (OQ-2: no `-run` narrowing)
+- [x] **REFAC-07**: Shared `checkDispatchHolds` in `dispatch_helpers.go` carries the planner-tier project-scoped hold chain (Billing→Failure→Budget→Import, 30s/30s/30s/5s) for Milestone/Phase/Plan — one controller migrated per task; Task's divergent chain (Import second + reservation headroom) preserved as-is, documented in code + follow-up todo (resolved plan-time decision on RESEARCH Pitfall 1)
+- [x] **REFAC-08**: `PlannerReconcilerDeps` carrier (8 dispatch-tier fields) on all FOUR planner reconcilers including Project (Pitfall 2), built once in main.go; wiring-lock tests extended to assert non-nil Deps for all four
+- [x] **REFAC-09**: `ConditionParentUnresolved` polarity normalized to True==unresolved (D-04) in milestone/phase `surfaceParentRefUnresolved`, with the clear-to-False/`ReasonParentResolved` half added on parent resolve; consumers/tests swept in the same commit; observable change documented
+- [x] **REFAC-10**: Approve-consume two-step (`consumeApproveAndResume`), the 15 `patch{Level}{Outcome}` bodies (leaf status-mutation primitive), and 4 `countChild*` bodies extracted as shared functions with thin typed wrappers (triggerBoundaryPush/spawnReporterIfNeeded shape); flat state machines untouched (D-09)
+- [x] **REFAC-11**: Magic literals centralized: wave-paused/wave-index/attempt label keys in `internal/owner`, raw `tideproject.k8s/project` sites on `owner.LabelProject`, credproxy endpoint + planner Iterations=20 constants; `SharedPVCName` field + accessor added to Milestone/Phase/Plan/Task reconcilers and wired from main.go so `--workspaces-pvc-name` is honored by every dispatch Job (Pitfall 3: latent config bug, not style)
+- [x] **REFAC-12**: AGENTS.md Logging section codifies the codebase's lowercase-initial convention (88 real sites); zero log-message edits (D-05 — load-bearing test/verification greps preserved)
 
 ## Future Requirements
 
@@ -166,18 +166,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CRANK-05 | Phase 40 | Complete |
 | CRANK-06 | Phase 40 | Complete |
 | CRANK-07 | Phase 40 | Complete |
-| REFAC-01 | Phase 41 (plan 41-04) | Pending |
-| REFAC-02 | Phase 41 (plan 41-01) | Pending |
+| REFAC-01 | Phase 41 (plan 41-04) | Complete |
+| REFAC-02 | Phase 41 (plan 41-01) | Complete |
 | REFAC-03 | Phase 41 | Complete (Phase 40) |
-| REFAC-04 | Phase 41 (plan 41-03) | Pending |
-| REFAC-05 | Phase 41 (plan 41-01) | Pending |
-| REFAC-06 | Phase 41 (plan 41-02) | Pending |
-| REFAC-07 | Phase 41 (plan 41-05) | Pending |
-| REFAC-08 | Phase 41 (plan 41-06) | Pending |
-| REFAC-09 | Phase 41 (plan 41-08) | Pending |
-| REFAC-10 | Phase 41 (plan 41-07) | Pending |
-| REFAC-11 | Phase 41 (plan 41-09) | Pending |
-| REFAC-12 | Phase 41 (plan 41-01) | Pending |
+| REFAC-04 | Phase 41 (plan 41-03) | Complete |
+| REFAC-05 | Phase 41 (plan 41-01) | Complete |
+| REFAC-06 | Phase 41 (plan 41-02) | Complete |
+| REFAC-07 | Phase 41 (plan 41-05) | Complete |
+| REFAC-08 | Phase 41 (plan 41-06) | Complete |
+| REFAC-09 | Phase 41 (plan 41-08) | Complete |
+| REFAC-10 | Phase 41 (plan 41-07) | Complete |
+| REFAC-11 | Phase 41 (plan 41-09) | Complete |
+| REFAC-12 | Phase 41 (plan 41-01) | Complete |
 
 **Coverage:**
 
