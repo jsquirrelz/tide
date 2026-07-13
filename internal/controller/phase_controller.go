@@ -258,7 +258,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
 		// harmless (single-flight no-ops while busy; clean-tree skips empty commits).
 		if project := r.resolveProject(ctx, ph); project != nil {
-			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 				logger.Info("artifact push trigger failed at parked phase (non-fatal)", "phase", ph.Name, "error", apErr.Error())
 			}
 		}
@@ -496,7 +496,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage)
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName())
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}
@@ -587,7 +587,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 					// BEFORE the gate-park return. Park arm ONLY (not succeed) so it never
 					// preempts the boundary push, which shares the deterministic Job name
 					// (R-05). The parked-arm retry re-attempts until it lands.
-					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "phase", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 						logger.Info("artifact push trigger failed at phase park (non-fatal)", "phase", ph.Name, "error", apErr.Error())
 					}
 					return r.patchPhaseAwaitingApproval(ctx, ph, policy)

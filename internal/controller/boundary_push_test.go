@@ -616,7 +616,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 
 		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-cum-parent"}}
 		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
-			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})
+			"ghcr.io/jsquirrelz/tide-push:test", defaultSharedPVCName, ProviderDefaults{})
 		Expect(err).NotTo(HaveOccurred())
 
 		var job batchv1.Job
@@ -655,7 +655,7 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 
 		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-busy-parent"}}
 		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
-			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})
+			"ghcr.io/jsquirrelz/tide-push:test", defaultSharedPVCName, ProviderDefaults{})
 		Expect(errors.Is(err, errGitWriterBusy)).To(BeTrue(), "expected errGitWriterBusy, got: %v", err)
 
 		var job batchv1.Job
@@ -671,13 +671,13 @@ var _ = Describe("triggerBoundaryPush — cumulative set + D-02 gate (Phase 34)"
 
 		parent := &tideprojectv1alpha3.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "tbp-idem-parent"}}
 		Expect(triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
-			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})).To(Succeed())
+			"ghcr.io/jsquirrelz/tide-push:test", defaultSharedPVCName, ProviderDefaults{})).To(Succeed())
 
 		// Second call: the Job already exists (deterministic name) — must
 		// return nil without erroring, and must NOT be blocked by its own
 		// Job showing up in the D-02 gate (self-exclusion, Pitfall 7).
 		err := triggerBoundaryPush(ctx, k8sClient, k8sClient.Scheme(), parent, proj, "milestone",
-			"ghcr.io/jsquirrelz/tide-push:test", ProviderDefaults{})
+			"ghcr.io/jsquirrelz/tide-push:test", defaultSharedPVCName, ProviderDefaults{})
 		Expect(err).NotTo(HaveOccurred())
 	})
 })

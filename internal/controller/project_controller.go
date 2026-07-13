@@ -1840,7 +1840,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// planner-completed map, immediately after the reporter spawn. The Project has no
 	// approve gate (D-02 auto-proceed), so the completion-site trigger suffices — no
 	// parked-arm retry. Log-and-continue: the next boundary push self-heals on failure.
-	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+	if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "project", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 		logger.Info("artifact push trigger failed at project completion (non-fatal)", "project", project.Name, "error", apErr.Error())
 	}
 

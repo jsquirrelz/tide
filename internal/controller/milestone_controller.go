@@ -264,7 +264,7 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		if ms.Spec.ProjectRef != "" {
 			var p tideprojectv1alpha3.Project
 			if err := r.Get(ctx, client.ObjectKey{Namespace: ms.Namespace, Name: ms.Spec.ProjectRef}, &p); err == nil {
-				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+				if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, &p, "milestone", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 					logf.FromContext(ctx).Info("artifact push trigger failed at parked milestone (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
 				}
 			}
@@ -559,7 +559,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// isFirstCompletion tracks whether this is the initial observation of the planner
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage)
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage, r.sharedPVCName())
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}
@@ -666,7 +666,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 					// integration, which share the deterministic Job name (R-05 single-
 					// flight). The Step-1a parked-arm retry re-attempts until it lands.
 					// Log-and-continue — artifact-push failure must not fail the park.
-					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "milestone", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 						logger.Info("artifact push trigger failed at milestone park (non-fatal)", "milestone", ms.Name, "error", apErr.Error())
 					}
 					return r.patchMilestoneAwaitingApproval(ctx, ms, policy)

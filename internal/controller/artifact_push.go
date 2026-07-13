@@ -172,6 +172,10 @@ func buildArtifactStageMessage(level string) string {
 //   - empty cumulative map → skip: nothing planner-completed yet.
 //   - deterministic push Job already exists → no-op nil (single-flight; the
 //     cumulative map self-heals on the next push).
+//
+// pvcName follows the triggerBoundaryPush contract: the caller's configured
+// shared-PVC name (r.sharedPVCName()), empty falling back to
+// defaultSharedPVCName.
 func triggerArtifactPush(
 	ctx context.Context,
 	c client.Client,
@@ -179,6 +183,7 @@ func triggerArtifactPush(
 	project *tideprojectv1alpha3.Project,
 	level string,
 	tidePushImage string,
+	pvcName string,
 	helmDefaults ProviderDefaults,
 ) error {
 	logger := logf.FromContext(ctx)
@@ -232,7 +237,10 @@ func triggerArtifactPush(
 		AgentName:      agentName,
 		AgentEmail:     agentEmail,
 	}
-	pushJob := buildPushJob(project, defaultSharedPVCName, pushOpts, scheme)
+	if pvcName == "" {
+		pvcName = defaultSharedPVCName
+	}
+	pushJob := buildPushJob(project, pvcName, pushOpts, scheme)
 	if cErr := c.Create(ctx, pushJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {
 			return fmt.Errorf("create artifact push job: %w", cErr)

@@ -86,6 +86,10 @@ const (
 // When ReporterImage is set but the parent Project is unresolved, no spawn
 // happens and isFirstCompletion stays false (mirrors the prior inline blocks
 // in milestone_controller.go / phase_controller.go).
+//
+// pvcName is the caller's configured shared-PVC name (r.sharedPVCName()) so
+// the reporter mounts the same claim the planner Job wrote out.json to;
+// BuildReporterJob falls back to defaultSharedPVCName when empty.
 func spawnReporterIfNeeded(
 	ctx context.Context,
 	c client.Client,
@@ -94,6 +98,7 @@ func spawnReporterIfNeeded(
 	project *tideprojectv1alpha3.Project,
 	parentKind string,
 	reporterImage string,
+	pvcName string,
 ) (bool, error) {
 	logger := logf.FromContext(ctx)
 	if reporterImage == "" {
@@ -111,7 +116,7 @@ func spawnReporterIfNeeded(
 			return false, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 		}
 		// Not found — spawn it (first completion observation).
-		reporterJob := BuildReporterJob(parent, project, defaultSharedPVCName, string(parent.GetUID()), parentKind,
+		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind,
 			ReporterOptions{ReporterImage: reporterImage}, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {

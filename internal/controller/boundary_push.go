@@ -73,6 +73,10 @@ var errGitWriterBusy = errors.New("git-writer busy: another run-branch writer Jo
 // git-writer Job (wave-integration or boundary-push); if one is active,
 // return errGitWriterBusy so the caller requeues instead of racing a second
 // writer onto the run branch.
+//
+// pvcName is the caller's configured shared-PVC name (r.sharedPVCName()) so
+// the push Job mounts the same claim the dispatch Jobs write to; empty falls
+// back to defaultSharedPVCName.
 func triggerBoundaryPush(
 	ctx context.Context,
 	c client.Client,
@@ -81,6 +85,7 @@ func triggerBoundaryPush(
 	project *tideprojectv1alpha3.Project,
 	level string,
 	tidePushImage string,
+	pvcName string,
 	helmDefaults ProviderDefaults,
 ) error {
 	logger := logf.FromContext(ctx)
@@ -147,7 +152,9 @@ func triggerBoundaryPush(
 		return fmt.Errorf("build commit message for %s boundary: %w", level, err)
 	}
 
-	pvcName := defaultSharedPVCName
+	if pvcName == "" {
+		pvcName = defaultSharedPVCName
+	}
 
 	// D-03/D-07: cumulative Succeeded-branch set, recomputed via a live List
 	// every time — whichever level's trigger wins the deterministic
@@ -205,6 +212,9 @@ func triggerBoundaryPush(
 //
 // Returns apierrors.IsAlreadyExists-tolerant: AlreadyExists is treated as
 // success (idempotent dispatch).
+//
+// pvcName follows the triggerBoundaryPush contract: the caller's configured
+// shared-PVC name, empty falling back to defaultSharedPVCName.
 func triggerWaveIntegrationJob(
 	ctx context.Context,
 	c client.Client,
@@ -214,6 +224,7 @@ func triggerWaveIntegrationJob(
 	waveIndex int,
 	branches []string,
 	tidePushImage string,
+	pvcName string,
 	helmDefaults ProviderDefaults,
 ) error {
 	if project == nil || project.Spec.Git == nil || project.Spec.Git.RepoURL == "" {
@@ -223,7 +234,9 @@ func triggerWaveIntegrationJob(
 		return nil
 	}
 
-	pvcName := defaultSharedPVCName
+	if pvcName == "" {
+		pvcName = defaultSharedPVCName
+	}
 	jobName := fmt.Sprintf("tide-push-wave-%s-%d", plan.UID, waveIndex)
 	commitMsg := fmt.Sprintf("tide: integrate wave %d", waveIndex)
 
@@ -269,12 +282,12 @@ func triggerWaveIntegrationJob(
 // (so the operator-visible Status.Phase=Succeeded transition happens
 // after the push trigger).
 func (r *MilestoneReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "milestone", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PhaseReconciler entry point.
 func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "phase", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults)
 }
 
 // maybeTriggerBoundaryPush is the PlanReconciler entry point. Plan boundary
@@ -288,5 +301,5 @@ func (r *PhaseReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent c
 // anyway (CR-03 note), so the old per-caller collection here was always
 // dead code in practice.
 func (r *PlanReconciler) maybeTriggerBoundaryPush(ctx context.Context, parent client.Object, project *tideprojectv1alpha3.Project) error {
-	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults)
+	return triggerBoundaryPush(ctx, r.Client, r.Scheme, parent, project, "plan", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults)
 }

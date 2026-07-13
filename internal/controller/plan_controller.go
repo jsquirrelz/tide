@@ -253,7 +253,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		// AwaitingApproval early-return cannot permanently swallow it. Re-triggers are
 		// harmless (single-flight no-ops while busy; clean-tree skips empty commits).
 		if project := r.resolveProjectForPlan(ctx, plan); project != nil {
-			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+			if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 				logf.FromContext(ctx).Info("artifact push trigger failed at parked plan (non-fatal)", "plan", plan.Name, "error", apErr.Error())
 			}
 		}
@@ -543,7 +543,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	isFirstCompletion := false
 	if r.Deps.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
-		pvcName := defaultSharedPVCName
+		pvcName := r.sharedPVCName()
 		var existingReporterJob batchv1.Job
 		if gErr := r.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: plan.Namespace}, &existingReporterJob); gErr != nil {
 			if !apierrors.IsNotFound(gErr) {
@@ -665,7 +665,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					// preempts the plan boundary push, which carries the task-branch
 					// integration (D-04) and shares the deterministic Job name (R-05). The
 					// parked-arm retry re-attempts until it lands.
-					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); apErr != nil {
+					if apErr := triggerArtifactPush(ctx, r.Client, r.Scheme, project, "plan", r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); apErr != nil {
 						logger.Info("artifact push trigger failed at plan park (non-fatal)", "plan", plan.Name, "error", apErr.Error())
 					}
 					return r.patchPlanAwaitingApproval(ctx, plan, policy)
@@ -1049,7 +1049,7 @@ func (r *PlanReconciler) reconcileWaveBoundary(
 	}
 
 	// Dispatch the integration Job.
-	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.Deps.TidePushImage, r.Deps.HelmProviderDefaults); err != nil {
+	if err := triggerWaveIntegrationJob(ctx, r.Client, r.Scheme, plan, project, waveNum, branches, r.Deps.TidePushImage, r.sharedPVCName(), r.Deps.HelmProviderDefaults); err != nil {
 		return ctrl.Result{}, true, err
 	}
 	// Requeue to wait for the Job to complete (RESPONSIBILITY A on next cycle).

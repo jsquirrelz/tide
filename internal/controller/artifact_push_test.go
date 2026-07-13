@@ -113,7 +113,7 @@ func TestArtifactPush_TriggerCreatesJobWithStageEnvelopes(t *testing.T) {
 		WithObjects(project, milestone("m-alpha", "uid-ma", "Succeeded")).
 		Build()
 
-	if err := triggerArtifactPush(context.Background(), c, s, project, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+	if err := triggerArtifactPush(context.Background(), c, s, project, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 		t.Fatalf("triggerArtifactPush: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestArtifactPush_SingleFlightNoOp(t *testing.T) {
 		WithObjects(project, milestone("m-alpha", "uid-ma", "Succeeded"), existing).
 		Build()
 
-	if err := triggerArtifactPush(context.Background(), c, s, project, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+	if err := triggerArtifactPush(context.Background(), c, s, project, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 		t.Fatalf("triggerArtifactPush (single-flight): %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 
 	t.Run("nil project", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithScheme(s).Build()
-		if err := triggerArtifactPush(context.Background(), c, s, nil, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+		if err := triggerArtifactPush(context.Background(), c, s, nil, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 			t.Errorf("nil project should skip without error: %v", err)
 		}
 	})
@@ -175,7 +175,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 		p := artifactTestProject()
 		p.Spec.Git = nil
 		c := fake.NewClientBuilder().WithScheme(s).WithObjects(p).Build()
-		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 			t.Errorf("git-less project should skip without error: %v", err)
 		}
 		var job batchv1.Job
@@ -187,7 +187,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 	t.Run("empty image", func(t *testing.T) {
 		p := artifactTestProject()
 		c := fake.NewClientBuilder().WithScheme(s).WithObjects(p, milestone("m-alpha", "uid-ma", "Succeeded")).Build()
-		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "", ProviderDefaults{}); err != nil {
+		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 			t.Errorf("empty image should skip without error: %v", err)
 		}
 		var job batchv1.Job
@@ -200,7 +200,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 		p := artifactTestProject()
 		p.Status.Git.BranchName = ""
 		c := fake.NewClientBuilder().WithScheme(s).WithObjects(p, milestone("m-alpha", "uid-ma", "Succeeded")).Build()
-		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 			t.Errorf("no run branch should skip without error: %v", err)
 		}
 		var job batchv1.Job
@@ -215,7 +215,7 @@ func TestArtifactPush_GuardChainSkips(t *testing.T) {
 		// (A still-planning milestone would NOT make the map empty: its existence
 		// proves the project planner authored it, so the Project itself qualifies.)
 		c := fake.NewClientBuilder().WithScheme(s).WithObjects(p).Build()
-		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", ProviderDefaults{}); err != nil {
+		if err := triggerArtifactPush(context.Background(), c, s, p, "milestone", "tide-push:latest", defaultSharedPVCName, ProviderDefaults{}); err != nil {
 			t.Errorf("empty map should skip without error: %v", err)
 		}
 		var job batchv1.Job
