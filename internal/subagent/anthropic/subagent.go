@@ -19,7 +19,7 @@ limitations under the License.
 // code lives here, NOT in pkg/dispatch, pkg/controller, or pkg/dag — the
 // firewall is enforced at build time by tools/analyzers/providerfirewall.
 //
-// HARN-06 decision (03-RESEARCH Â§"Alternatives Considered"): we shell out to
+// HARN-06 decision (03-RESEARCH §"Alternatives Considered"): we shell out to
 // the `claude` CLI rather than embedding the Anthropic Go SDK. The CLI bundles
 // the agent loop, hooks, MCP, skills, and bash/file tools that would otherwise
 // have to be re-implemented in Go. Phase 3 does not depend on the Anthropic
@@ -27,7 +27,7 @@ limitations under the License.
 //
 // CLAUDE.md anti-pattern guardrails baked in:
 //   - NEVER mount the host claude config dir — the --bare flag (RESEARCH
-//     Â§"Critical new finding") skips auto-discovery of hooks/skills/plugins/MCP
+//     §"Critical new finding") skips auto-discovery of hooks/skills/plugins/MCP
 //     and any CLAUDE-doc auto-memory, so the per-Pod runtime is hermetic.
 //   - NEVER use OAuth headless — claude-code#29983, #7100 break it. We pin
 //     ANTHROPIC_API_KEY to the signed token minted by the controller and
@@ -60,7 +60,7 @@ import (
 // they disagree, we refuse to dispatch (Pitfall 14 mitigation).
 const vendorSentinel = "anthropic"
 
-// paramsAllowList enforces Q3 RESOLVED (03-RESEARCH Â§"Open Questions" line
+// paramsAllowList enforces Q3 RESOLVED (03-RESEARCH §"Open Questions" line
 // 933): unknown Provider.Params keys are rejected at startup. The fail-fast
 // posture catches typos at apply time rather than letting them silently
 // disappear into a passthrough. Add new keys here only after wiring the
@@ -200,7 +200,7 @@ func NewWithExec(opts Options, execFunc func(ctx context.Context, name string, a
 //     filesystem for prompt content (CLAUDE.md anti-pattern).
 //  4. Build `claude -p <rendered> --model <Provider.Model> --output-format
 //     stream-json --verbose --include-partial-messages --bare` (the --bare
-//     flag is REQUIRED per RESEARCH Â§"Critical new finding").
+//     flag is REQUIRED per RESEARCH §"Critical new finding").
 //  5. Wire credproxy env: ANTHROPIC_BASE_URL = in.ProxyEndpoint;
 //     ANTHROPIC_API_KEY = in.SignedToken (never the raw key);
 //     NODE_EXTRA_CA_CERTS = /etc/tide/proxy/ca.crt.
