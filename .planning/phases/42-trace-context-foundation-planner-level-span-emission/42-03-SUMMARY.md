@@ -121,3 +121,7 @@ Known gap for a future GSD cycle (not this plan's scope): this worktree needs `m
 ---
 *Phase: 42-trace-context-foundation-planner-level-span-emission*
 *Completed: 2026-07-15*
+
+## Self-Check: PASSED
+
+All 12 created/modified files verified present on disk (4 Go types files, 4 generated CRD YAMLs, 4 generated Helm chart CRD templates, deferred-items.md). Both commit hashes (`9bd8520`, `141a560`) verified present in `git log --oneline --all`.
