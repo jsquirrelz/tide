@@ -3,6 +3,7 @@ module github.com/jsquirrelz/tide
 go 1.26.0
 
 require (
+	github.com/Arize-ai/openinference/go/openinference-semantic-conventions v0.1.1
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-git/go-git/v5 v5.19.0
 	github.com/go-logr/logr v1.4.3
