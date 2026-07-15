@@ -182,7 +182,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 42-05-PLAN.md — Plan/Project handler wiring + envtest specs + full Layer A phase gate
+- [x] 42-05-PLAN.md — Plan/Project handler wiring + envtest specs + full Layer A phase gate
 
 ### Phase 43: Task-Level Parity + Trace-Context Propagation
 
@@ -271,7 +271,7 @@ Plans:
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
-| 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 4/5 | In Progress|  |
+| 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete   | 2026-07-15 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 0/TBD | Not started | - |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/TBD | Not started | - |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
