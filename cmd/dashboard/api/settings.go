@@ -48,9 +48,8 @@ type SettingsHandler struct {
 }
 
 // repoSettings mirrors the TS ProjectSettings.repo shape (plan 37-05). BaseRef
-// is a forward-declared field: the Phase-35 Spec.Git.BaseRef had not landed at
-// 37-07 execution time, so it serializes as "" (the UI renders the HEAD-default
-// label). Wire it to Spec.Git.BaseRef once that field exists.
+// mirrors Spec.Git.BaseRef: empty means the remote HEAD default branch (the UI
+// renders the HEAD-default label).
 type repoSettings struct {
 	RepoURL    string `json:"repoURL"`
 	BaseRef    string `json:"baseRef"`
@@ -158,8 +157,6 @@ func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha3.P
 	settings := projectSettings{
 		OutcomePrompt: p.Spec.OutcomePrompt,
 		Repo: repoSettings{
-			// BaseRef intentionally "" — Spec.Git.BaseRef not present in schema
-			// at 37-07 execution time (Phase 35 field not yet landed).
 			BranchName: p.Status.Git.BranchName,
 		},
 		Models: modelSettings{
@@ -182,9 +179,10 @@ func (h *SettingsHandler) writeSettings(w http.ResponseWriter, p *tidev1alpha3.P
 		},
 		Secrets: buildSecretRefs(p),
 	}
-	// Nil-safe repo URL: Git is a pointer, elided when the Project is git-less.
+	// Nil-safe repo URL/baseRef: Git is a pointer, elided when the Project is git-less.
 	if p.Spec.Git != nil {
 		settings.Repo.RepoURL = p.Spec.Git.RepoURL
+		settings.Repo.BaseRef = p.Spec.Git.BaseRef
 	}
 
 	// Raw spec YAML — server-rendered from the typed Spec. The k8s YAML
