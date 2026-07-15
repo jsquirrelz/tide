@@ -14,12 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Phase 4 Plan 03 Task 1: failing tests for the five OpenInference attribute
+// Phase 4 Plan 03 Task 1: failing tests for the OpenInference attribute
 // helpers (D-O4). These tests lock the spec's flat-keyed encoding into the
 // repo so that any future drift in either Arize's OpenInference spec OR our
 // implementation surfaces loudly. The "no payload helper" test (Test 6) is
 // the D-O5 enforcement at the public API surface — there must NEVER be a
 // helper that accepts inline message content as a top-level attribute value.
+//
+// Phase 42 Plan 01: keys now resolve from the official
+// openinference-semantic-conventions Go module (ATTR-03/D-05/D-06); three
+// keys with no module counterpart moved to the tide.* namespace; TokenCount
+// gained llm.token_count.total (ATTR-02/D-08); AgentInvocation gained a
+// leading system parameter (D-07); LLMIdentity/FailureDetail/EnvelopeDegraded
+// are new helpers.
 package otelai
 
 import (
@@ -33,7 +40,8 @@ import (
 )
 
 // TestLLMInputMessages — flat-keyed `llm.input_messages.<i>.message.role` /
-// `.content` encoding per OpenInference spec (RESEARCH.md §625-658).
+// `.content` encoding per OpenInference spec (RESEARCH.md §625-658). Keys are
+// module-backed but byte-identical to the pre-Phase-42 hand-rolled encoding.
 func TestLLMInputMessages(t *testing.T) {
 	got := LLMInputMessages([]Message{
 		{Role: "user", Content: "hi"},
@@ -67,51 +75,106 @@ func TestLLMOutputMessages(t *testing.T) {
 	}
 }
 
-// TestTokenCount — four int attrs. Total is NOT computed (consumer can sum).
-// Anthropic cache-read / cache-write tokens flow into prompt_details.* per spec.
+// TestTokenCount — five int attrs (ATTR-02/D-08): the original four-way split
+// plus llm.token_count.total = prompt + completion. `prompt` is now documented
+// to carry the FULL prompt count INCLUDING the cache_read/cache_write subsets
+// — the re-mapping itself happens at the call site (plan 42-04), not here.
 func TestTokenCount(t *testing.T) {
-	got := TokenCount(100, 50, 10, 5)
+	got := TokenCount(1000, 300, 200, 100)
 	want := []attribute.KeyValue{
-		attribute.Int("llm.token_count.prompt", 100),
-		attribute.Int("llm.token_count.completion", 50),
-		attribute.Int("llm.token_count.prompt_details.cache_read", 10),
-		attribute.Int("llm.token_count.prompt_details.cache_write", 5),
+		attribute.Int("llm.token_count.prompt", 1000),
+		attribute.Int("llm.token_count.completion", 300),
+		attribute.Int("llm.token_count.prompt_details.cache_read", 200),
+		attribute.Int("llm.token_count.prompt_details.cache_write", 100),
+		attribute.Int("llm.token_count.total", 1300),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("TokenCount = %v, want %v", got, want)
 	}
-	if len(got) != 4 {
-		t.Errorf("TokenCount returned %d entries, want exactly 4", len(got))
+	if len(got) != 5 {
+		t.Errorf("TokenCount returned %d entries, want exactly 5", len(got))
 	}
 }
 
-// TestAgentInvocation — four attrs identifying the orchestrator's subagent
-// dispatch site. `openinference.span.kind` is the spec-required discriminator;
-// `llm.system` is `anthropic` (the only v1 backend); `agent.name` is the
-// `tide.dispatch.<level>` span-name convention; `agent.invocation.level` is
-// the TIDE-specific hierarchy level the dispatch represents.
+// TestAgentInvocation — five attrs identifying the orchestrator's subagent
+// dispatch site. D-07: llm.system is now a leading caller-supplied parameter,
+// not a hardcoded "anthropic" constant. D-05: agent.role/agent.invocation.level
+// have no module counterpart and live under tide.*.
 func TestAgentInvocation(t *testing.T) {
-	got := AgentInvocation("tide.dispatch.milestone", "planner", "milestone")
+	got := AgentInvocation("anthropic", "tide.dispatch.milestone", "planner", "milestone")
 	want := []attribute.KeyValue{
 		attribute.String("openinference.span.kind", "AGENT"),
 		attribute.String("llm.system", "anthropic"),
 		attribute.String("agent.name", "tide.dispatch.milestone"),
-		attribute.String("agent.role", "planner"),
-		attribute.String("agent.invocation.level", "milestone"),
+		attribute.String("tide.role", "planner"),
+		attribute.String("tide.invocation.level", "milestone"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AgentInvocation = %v, want %v", got, want)
 	}
 }
 
-// TestArtifactPath — single attribute.KeyValue (NOT a slice). This is the
-// only payload-reference helper per D-O5: it emits a PVC path, never inlined
-// content. Bounds span attribute size to ~256 bytes max.
+// TestArtifactPath — single attribute.KeyValue (NOT a slice). D-05: the key is
+// now tide.artifact_path — the gen_ai.artifact_path namespace squat is dead.
 func TestArtifactPath(t *testing.T) {
 	got := ArtifactPath("/workspace/envelopes/abc.jsonl")
-	want := attribute.String("gen_ai.artifact_path", "/workspace/envelopes/abc.jsonl")
+	want := attribute.String("tide.artifact_path", "/workspace/envelopes/abc.jsonl")
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ArtifactPath = %v, want %v", got, want)
+	}
+}
+
+// TestLLMIdentity — ATTR-01: llm.provider always; llm.model_name ONLY when
+// model is non-empty (Pitfall 5 — never emit an empty-string llm.model_name).
+func TestLLMIdentity(t *testing.T) {
+	t.Run("with model", func(t *testing.T) {
+		got := LLMIdentity("anthropic", "claude-opus-4-8")
+		want := []attribute.KeyValue{
+			attribute.String("llm.provider", "anthropic"),
+			attribute.String("llm.model_name", "claude-opus-4-8"),
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LLMIdentity(\"anthropic\", \"claude-opus-4-8\") = %v, want %v", got, want)
+		}
+		if len(got) != 2 {
+			t.Errorf("LLMIdentity with model returned %d entries, want exactly 2", len(got))
+		}
+	})
+
+	t.Run("empty model omits llm.model_name", func(t *testing.T) {
+		got := LLMIdentity("anthropic", "")
+		want := []attribute.KeyValue{
+			attribute.String("llm.provider", "anthropic"),
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LLMIdentity(\"anthropic\", \"\") = %v, want %v", got, want)
+		}
+		if len(got) != 1 {
+			t.Errorf("LLMIdentity with empty model returned %d entries, want exactly 1 (no llm.model_name)", len(got))
+		}
+	})
+}
+
+// TestFailureDetail — D-03: exit code + reason as tide.* span attributes
+// (no module counterpart exists for either).
+func TestFailureDetail(t *testing.T) {
+	got := FailureDetail(2, "cap-hit")
+	want := []attribute.KeyValue{
+		attribute.Int("tide.exit_code", 2),
+		attribute.String("tide.reason", "cap-hit"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FailureDetail(2, \"cap-hit\") = %v, want %v", got, want)
+	}
+}
+
+// TestEnvelopeDegraded — D-04: single marker attribute for a span whose
+// envelope could not be read.
+func TestEnvelopeDegraded(t *testing.T) {
+	got := EnvelopeDegraded()
+	want := attribute.Bool("tide.envelope.degraded", true)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("EnvelopeDegraded() = %v, want %v", got, want)
 	}
 }
 
