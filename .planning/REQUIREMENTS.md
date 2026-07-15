@@ -68,26 +68,24 @@ Deferred to later milestones:
 
 ## Traceability
 
-Filled by roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRACE-01 | — | Pending |
-| TRACE-02 | — | Pending |
-| TRACE-03 | — | Pending |
-| ATTR-01 | — | Pending |
-| ATTR-02 | — | Pending |
-| ATTR-03 | — | Pending |
-| PROP-01 | — | Pending |
-| PROP-02 | — | Pending |
-| MSG-01 | — | Pending |
-| MSG-02 | — | Pending |
-| MSG-03 | — | Pending |
-| ADAPT-01 | — | Pending |
-| PHX-01 | — | Pending |
-| PHX-02 | — | Pending |
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
-| OBS-03 | — | Pending |
-| OBS-04 | — | Pending |
-| PROOF-01 | — | Pending |
+| TRACE-01 | Phase 43 | Pending |
+| TRACE-02 | Phase 43 | Pending |
+| TRACE-03 | Phase 44 | Pending |
+| ATTR-01 | Phase 42 | Pending |
+| ATTR-02 | Phase 42 | Pending |
+| ATTR-03 | Phase 42 | Pending |
+| PROP-01 | Phase 43 | Pending |
+| PROP-02 | Phase 43 | Pending |
+| MSG-01 | Phase 44 | Pending |
+| MSG-02 | Phase 44 | Pending |
+| MSG-03 | Phase 44 | Pending |
+| ADAPT-01 | Phase 45 | Pending |
+| PHX-01 | Phase 47 | Pending |
+| PHX-02 | Phase 47 | Pending |
+| OBS-01 | Phase 46 | Pending |
+| OBS-02 | Phase 46 | Pending |
+| OBS-03 | Phase 46 | Pending |
+| OBS-04 | Phase 46 | Pending |
+| PROOF-01 | Phase 47 | Pending |
