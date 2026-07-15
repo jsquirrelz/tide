@@ -172,9 +172,9 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 Plans:
 **Wave 1**
 
-- [ ] 42-01-PLAN.md — Adopt openinference-semantic-conventions v0.1.1 + rework pkg/otelai attrs (D-05/D-06/D-07/D-08; blocking legitimacy checkpoint)
-- [ ] 42-02-PLAN.md — Pure trace-context primitives: TraceIDFromUID / FormatTraceparent / ExtractRemoteParent (Phase 43 seam; Option A independent roots)
-- [ ] 42-03-PLAN.md — Span-emission idempotency marker fields on all four planner CRD statuses + manifest regen
+- [x] 42-01-PLAN.md — Adopt openinference-semantic-conventions v0.1.1 + rework pkg/otelai attrs (D-05/D-06/D-07/D-08; blocking legitimacy checkpoint)
+- [x] 42-02-PLAN.md — Pure trace-context primitives: TraceIDFromUID / FormatTraceparent / ExtractRemoteParent (Phase 43 seam; Option A independent roots)
+- [x] 42-03-PLAN.md — Span-emission idempotency marker fields on all four planner CRD statuses + manifest regen
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -271,7 +271,7 @@ Plans:
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
-| 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 0/TBD | Not started | - |
+| 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 3/5 | In Progress|  |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 0/TBD | Not started | - |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/TBD | Not started | - |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
