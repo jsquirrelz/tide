@@ -1,155 +1,166 @@
-# Stack Research — TIDE v1.0.7 First-Run Paper Cuts
+# Stack Research — TIDE v1.0.8 "Phoenix Rising"
 
-**Domain:** Kubernetes operator additions — GPG-signed bot commits, Claude 5 pricing rows, promptFile, dashboard artifact views (Run Integrity & Operator Ergonomics)
-**Researched:** 2026-07-03
-**Confidence:** HIGH — every load-bearing claim below was verified against a primary source today (go-git `options.go`, TIDE's own `go.mod`, npm registry JSON, official Anthropic pricing docs fetched live). The generic web-provider confidence classifier tiers raw search results LOW; per-claim confidence is noted in Sources where it diverges.
+**Domain:** OpenInference span emission (Go, K8s operator) + self-hosted Arize Phoenix on Kubernetes
+**Researched:** 2026-07-15
+**Confidence:** HIGH — every dependency claim below was verified against the locally-vendored `go.opentelemetry.io/otel*` v1.43.0 source (module cache), the Arize Phoenix Helm chart's `Chart.yaml`/`values.yaml` fetched live from `main`, and the OpenInference Go module's `go.mod`/`pkg.go.dev` page. Two items (exact chart/app version, and the OpenInference Go module's pre-1.0 status) are flagged MEDIUM because they move on a near-daily release cadence — re-verify the pinned numbers immediately before the implementation phase.
 
-**Scope note:** This milestone needs almost no new stack. The existing validated stack (Go 1.26, controller-runtime v0.24.x, go-git v5, React 18 + Tailwind v4 dashboard) covers the integration-miss gate, `spec.git.baseRef`, log-drawer states, and the Prometheus setup step with zero additions. New surface: **one Go dep promotion** (indirect → direct), **three npm packages**, and **one data-only pricing table**.
+**Scope note:** This is an *additions* pass on top of an already-pinned stack (OTel Go v1.43, `pkg/otelai` helpers, `internal/otelinit` provider). The single biggest finding: **the Go-side span-emission mechanics need zero new go.mod dependencies** — W3C propagation, retroactive timestamps, and remote-span-context reconstruction are already present in the pinned `go.opentelemetry.io/otel` v1.43.0 family. The real additions are (1) one small official OpenInference Go module to replace hand-rolled attribute-key strings, and (2) a self-hosted Phoenix Helm chart (external install, not a TIDE subchart, per the TELEM-01 precedent).
 
 ## Recommended Stack
 
-### Core Technologies (new for v1.0.7)
+### Core Technologies (new for v1.0.8)
 
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `github.com/ProtonMail/go-crypto/openpgp` | **v1.1.6** (promote indirect → direct) | Pure-Go GPG: parse armored private key from a K8s Secret, sign commits | Already in TIDE's dependency graph — pinned as an *indirect* dep of go-git v5.19.0 (`go.mod:43`). go-git's `CommitOptions.SignKey` is typed as `*openpgp.Entity` from **this fork specifically**, so it is the only compatible choice. Zero new supply-chain surface, no `gpg` binary in any image. |
-| go-git v5 `CommitOptions.SignKey` | v5.19.0 (already pinned) | Sign at all three commit sites (harness, integrate, tide-push) | Verified against `options.go`: `SignKey *openpgp.Entity` — "nil means the commit will not be signed. The private key must be present and already decrypted." go-git produces the armored detached OpenPGP signature internally; the signing call site is a one-field change per `Commit()`. |
-| `react-markdown` | **v10.1.0** | Render planning artifacts (MILESTONE.md, PLAN.md) in the dashboard artifact view | Verified on npm 2026-07-03; peerDeps `react >=18` — compatible with the dashboard's React 18.3.1. Renders markdown to real React elements with **no `dangerouslySetInnerHTML`** — XSS-safe by construction, which matters because artifacts are LLM-authored content. |
-| `remark-gfm` | **v4.0.1** | GFM tables, task lists, strikethrough in artifacts | Verified on npm. Planner templates emit GFM tables (task tables, dependency tables); CommonMark-only rendering would break the approve-gate review surface. |
-| `@tailwindcss/typography` | **v0.5.20** | `prose` styling for rendered markdown | Verified on npm; peerDep `tailwindcss >=3.0.0 \|\| >=4.0.0` — compatible with the dashboard's Tailwind ^4.3.0. Register in CSS (v4 style, no config file): `@plugin "@tailwindcss/typography";` |
+| `go.opentelemetry.io/otel/propagation` | **v1.43.0 (already pinned, zero bump)** | W3C `traceparent` inject/extract across the manager → K8s Job pod boundary | Sub-package of the core `go.opentelemetry.io/otel` module already required at v1.43.0 — confirmed present in the local module cache (`$GOMODCACHE/go.opentelemetry.io/otel@v1.43.0/propagation/trace_context.go`). `propagation.TraceContext{}.Inject(ctx, propagation.MapCarrier{})` produces the header string to set as a Job pod env var; `.Extract(ctx, carrier)` on the reporter/executor side reconstructs a *remote* `SpanContext` via `trace.ContextWithRemoteSpanContext`. No new dependency, no version change. |
+| `go.opentelemetry.io/otel/trace` `WithTimestamp` | **v1.43.0 (already pinned)** | Retroactive span creation with explicit start/end timestamps, driven from `events.jsonl` capture (which already has real wall-clock times per line) | Verified directly against the vendored source: `trace.WithTimestamp(t time.Time) SpanEventOption` (`trace@v1.43.0/config.go:251`) — `SpanEventOption` satisfies both `SpanStartOption` and `SpanEndOption`, so the exact same call works at `tracer.Start(ctx, name, trace.WithTimestamp(startTime))` and `span.End(trace.WithTimestamp(endTime))`. This is the whole mechanism the reporter Job needs to synthesize spans after the fact from a JSONL log — no separate "backdated span" API exists or is needed. |
+| `go.opentelemetry.io/otel/trace` `NewSpanContext` / `ContextWithRemoteSpanContext` | **v1.43.0 (already pinned)** | Reconstruct the manager's dispatch-span identity inside the reporter Job process so synthesized spans parent under the correct trace | Verified present (`trace@v1.43.0/trace.go:244`, `context.go:29`). This is the seam the milestone's runtime-neutrality constraint depends on: the manager injects `traceparent`; both the JSONL-synthesizing adapter (today) and a self-instrumenting LangGraph runtime (future) extract it identically via `propagation.TraceContext{}`, so neither cares which side created the parent. |
+| `github.com/Arize-ai/openinference/go/openinference-semantic-conventions` | **v0.1.1** (tagged 2026-05-22; independently-versioned Go submodule, `go 1.25` floor — satisfied by TIDE's `go 1.26.0`) | Canonical, spec-generated attribute-key constants (`LLMInputMessages`, `LLMTokenCountPromptDetailsCacheRead`, `SpanKindAgent`, etc.) | **New dependency, zero transitive deps** (`go.mod` is two lines: module + `go 1.25`). Replaces the hand-rolled string constants in `pkg/otelai/attrs.go` (`keyLLMInputMessagesPrefix = "llm.input_messages"` etc.) with the package Arize itself generates from the Python source-of-truth spec. Directly serves the milestone's runtime-neutrality requirement #3 ("attribute/span-kind conventions follow OpenInference semconv exactly ... so Phoenix queries survive the runtime migration") — importing the canonical constants makes spec drift a compile-time `go get -u` diff instead of a silent string mismatch against a future `openinference-instrumentation-langchain`-authored span. Verified the constant *values* already match `pkg/otelai`'s hand-rolled ones (`llm.token_count.prompt_details.cache_read` / `cache_write` are identical strings) — this is a safe, behavior-preserving swap. |
+| `github.com/Arize-ai/openinference/go/openinference-instrumentation` | **v0.1.1** (same tag/repo as above) | Context-attribute propagation (`session.id`, `metadata`) and `OPENINFERENCE_HIDE_*`-driven masking, if TIDE later wants to redact prompt/response content from spans | Optional for the milestone's stated scope (dispatch-chain + LLM-message spans) but same-repo, same-version, zero-friction addition — only pull it in if a masking/redaction requirement surfaces. Its one dependency is `go.opentelemetry.io/otel/trace` (already pinned). Not required to ship v1.0.8; listed so the decision to defer it is explicit rather than an oversight. |
 
-### Pricing table rows (data, not a dependency)
+### Supporting technology: Self-hosted Arize Phoenix (Kubernetes)
 
-Verified 2026-07-03 against `platform.claude.com/docs/en/pricing.md` (official, fetched live) and cross-checked against the models overview page. All USD per MTok; all values are exact integer cents at MTok granularity, so `CostSpentCents` math stays integral.
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| Phoenix Helm chart | `oci://registry-1.docker.io/arizephoenix/phoenix-helm` **chart 10.0.0** (`appVersion: "18.0.0"`, image tag `arizephoenix/phoenix:version-18.0.0-nonroot`) | Self-hosted trace store + UI + OTLP ingest, installed as a documented separate `helm install`, NOT a TIDE subchart | Official chart, published by the Arize maintainers directly to Docker Hub OCI (verified `Chart.yaml` on `main`: `type: application`, `dependencies: [postgres@1.5.8 condition postgresql.enabled]`). Matches the milestone's stated posture exactly ("no subchart dependency, no version coupling to Arize's chart" — the TELEM-01 pattern already used for Prometheus in v1.0.7). **Caveat (MEDIUM confidence on the exact number):** this chart ships near-daily (9.0.14 → 9.0.22 → 10.0.0 across ~9 days as of this research date) — re-check the current chart/app version immediately before authoring INSTALL.md, and pin the exact version string in both `values.yaml` examples and CI, never `latest`/floating. |
+| Bundled PostgreSQL (`postgresql.enabled: true`, chart **default**) | groundhog2k `postgres` chart **v1.5.8** (Phoenix chart's own pinned dependency) | Phoenix's own trace/eval/dataset store | This is Phoenix's storage, **not** TIDE's — does not touch TIDE's own "CRD-`.status`-only, no external DB" constraint (that constraint governs TIDE's orchestration state; Phoenix is an external, optional observability sink TIDE merely emits OTLP to). Recommend documenting this as the default path for the recipe: it is the chart's tested happy path, and Phoenix's own docs state Postgres is recommended for production ("Cannot be enabled simultaneously with `persistence.enabled=true`" — the two storage modes are mutually exclusive at the chart level). |
+| SQLite-on-PVC alternative (`persistence.enabled: true`, `postgresql.enabled: false`) | N/A (bundled in the `arizephoenix/phoenix` image) | Lightweight single-binary storage for a kind/dev cluster or a low-traffic self-host | Default PVC size **20Gi**, `ReadWriteOnce`. Good fit for TIDE's own dev loop (kind clusters, `kind-tide-dogfood`-style throwaway or durable-but-single-operator clusters) where a second Postgres pod is pure overhead. Document as the "quickstart / single-operator" path, Postgres as the "durable / production" path — mirrors the chart's own two documented strategies exactly, don't invent a third. |
+| OTLP ports: **4317** (gRPC) / **6006** (HTTP + UI) | Chart defaults, unconfigurable via `server.port` for HTTP only | Where TIDE's already-pinned `otlptracegrpc` exporter connects | TIDE's `internal/otelinit/provider.go` already builds an OTLP **gRPC** exporter (`otlptracegrpc.New`), so target Phoenix's **4317** gRPC port, not the 6006 HTTP/UI port. Confirmed via Phoenix's `docs/phoenix/self-hosting/configuration.mdx`: "By default, port 6006 is used for the UI and OTLP traces via HTTP, while port 4317 is used for OTLP traces via gRPC." No TIDE code path uses `otlptracehttp` — don't introduce it just to hit 6006. |
 
-| Model ID | Input | Output | Cache read (0.1×) | 5m cache write (1.25×) | 1h cache write (2×) |
-|----------|-------|--------|-------------------|------------------------|---------------------|
-| `claude-fable-5` | $10.00 | $50.00 | $1.00 | $12.50 | $20.00 |
-| `claude-opus-4-8` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
-| `claude-opus-4-7` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
-| `claude-opus-4-6` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
-| `claude-sonnet-5` (standard, from 2026-09-01) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
-| `claude-sonnet-5` (intro, through 2026-08-31) | $2.00 | $10.00 | $0.20 | $2.50 | $4.00 |
-| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
-| `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 | $2.00 |
+### What this milestone needs NO new dependency for
 
-**Notes for the implementation:**
-
-- **Sonnet 5 is date-dependent.** Recommend encoding the **standard** ($3/$15) rate, not the intro rate: a tally that slightly overcounts during the intro window is conservative for `absoluteCapCents` enforcement and needs no code change on 2026-09-01. If exactness is wanted, add an effective-date column — but that's schema complexity for a two-month window.
-- **Match exact IDs, not prefixes.** The 2.8× overcount came from unknown IDs falling back to the most-expensive tier. Current-generation IDs are dateless pinned snapshots (`claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-5`), but **Haiku 4.5's full ID is dated**: `claude-haiku-4-5-20251001` — the API may report either the alias or the full ID depending on surface. Add both spellings (or normalize by stripping a trailing `-YYYYMMDD` before lookup).
-- **Fallback behavior should warn, not silently price at max.** Keep a most-expensive fallback for cap safety, but emit a log line / condition when an unpriced model ID is encountered — that's the observable that would have caught this bug on day one.
-- Cache multipliers (0.1× read, 1.25× 5m write, 2× 1h write) are uniform across models, so the table can store base input/output only and derive cache rates — fewer rows to keep current.
+| Capability | Covered by |
+|---|---|
+| W3C `traceparent` propagation into Job pod env | `propagation.TraceContext{}` + `propagation.MapCarrier` — already in pinned `go.opentelemetry.io/otel` v1.43.0 |
+| Retroactive span start/end timestamps | `trace.WithTimestamp(t)` — already in pinned `go.opentelemetry.io/otel/trace` v1.43.0 |
+| Remote parent SpanContext reconstruction (reporter Job continuing the manager's trace) | `trace.NewSpanContext` + `trace.ContextWithRemoteSpanContext` — already in pinned `go.opentelemetry.io/otel/trace` v1.43.0 |
+| OTLP auth header injection if Phoenix `auth.enableAuth` is left at its chart default (`true`) | `OTEL_EXPORTER_OTLP_HEADERS` env var — `otlptracegrpc.New` reads it automatically via the shared `oconf` package whenever the caller does **not** pass an explicit `WithHeaders(...)` option (TIDE's `provider.go` doesn't), per the sibling `otlpmetrichttp`/`otlptracehttp` doc comments in the same SDK family. Set it from a K8s Secret in the chart, no code change. |
+| Routing traces to a named Phoenix project | `OTEL_RESOURCE_ATTRIBUTES=openinference.project.name=tide` — TIDE's `resource.WithFromEnv()` already honors `OTEL_RESOURCE_ATTRIBUTES`; the `openinference.project.name` key is Phoenix's documented canonical resource attribute (confirmed against `docs/phoenix/tracing/concepts-tracing/otel-openinference/resource.mdx`). **Important:** the alternative `x-project-name` HTTP header is HTTP-OTLP-only and does **not** work over gRPC — don't reach for it. |
+| Reporter Job emitting OTel spans as a second binary | Reuse `internal/otelinit.NewTracerProvider` from `cmd/tide-reporter/main.go`. Confirmed by grep that `otelinit` is currently wired into `cmd/manager/main.go` only (`cmd/manager/otel_test.go`, `internal/otelinit/provider_test.go`) — `cmd/tide-reporter` has none yet. This is new *call-site* wiring, not a new dependency; same package, same module. |
 
 ## Installation
 
 ```bash
-# Go — promote existing indirect dep to direct (no version change; go-git v5.19.0 pins v1.1.6)
-go get github.com/ProtonMail/go-crypto@v1.1.6 && go mod tidy
-
-# Dashboard (dashboard/web/)
-npm install react-markdown@10.1.0 remark-gfm@4.0.1
-npm install -D @tailwindcss/typography@0.5.20
+# Go — new OpenInference semconv + instrumentation modules (zero transitive deps beyond
+# go.opentelemetry.io/otel/trace, already required)
+go get github.com/Arize-ai/openinference/go/openinference-semantic-conventions@v0.1.1
+go get github.com/Arize-ai/openinference/go/openinference-instrumentation@v0.1.1   # only if masking/context-propagation is in scope
+go mod tidy
 ```
 
-```css
-/* dashboard/web CSS entry — Tailwind v4 plugin registration */
-@import "tailwindcss";
-@plugin "@tailwindcss/typography";
+```bash
+# Self-hosted Phoenix — separate helm release, NOT a TIDE chart dependency
+export CHART_URL=oci://registry-1.docker.io/arizephoenix/phoenix-helm
+export CHART_VERSION=10.0.0   # RE-VERIFY at implementation time — chart ships ~daily
+
+# Quickstart / single-operator (SQLite on PVC, no Postgres pod):
+helm install tide-phoenix $CHART_URL --version $CHART_VERSION \
+  --namespace tide-observability --create-namespace \
+  --set postgresql.enabled=false \
+  --set persistence.enabled=true \
+  --set auth.enableAuth=false   # lab/demo only — see "What NOT to Use"
+
+# Durable / production (bundled Postgres, chart default):
+helm install tide-phoenix $CHART_URL --version $CHART_VERSION \
+  --namespace tide-observability --create-namespace
+  # postgresql.enabled=true and auth.enableAuth=true are chart defaults;
+  # supply auth.secret + OTEL_EXPORTER_OTLP_HEADERS wiring — see Integration Notes
+```
+
+```bash
+# Point TIDE's already-pinned OTLP exporter at Phoenix (bare host:port, NO scheme —
+# see the WithEndpoint pitfall below)
+helm upgrade tide ./charts/tide \
+  --set otel.exporter.endpoint="tide-phoenix.tide-observability.svc.cluster.local:4317" \
+  --set otel.serviceName="tide-controller-manager"
 ```
 
 ## Integration Notes
 
-### GPG signing (pure-Go, no gpg binary)
+### The `otel.exporter.endpoint` value MUST be bare `host:port`, no scheme
+
+`internal/otelinit/provider.go` reads `OTEL_EXPORTER_OTLP_ENDPOINT` with plain `os.Getenv` and passes it straight into `otlptracegrpc.WithEndpoint(endpoint)`. The OTel Go SDK's own doc comment for that option is explicit: *"The provided endpoint should resemble `example.com:4317` (no scheme or path)."* Because TIDE calls `WithEndpoint` explicitly (rather than relying on the SDK's own env-var autoconfigure path, which *does* accept a scheme via `WithEndpointURL`), setting the chart's `otel.exporter.endpoint` to `http://tide-phoenix...:4317` (the form the raw OTLP env-var spec technically allows) will NOT work here — use `tide-phoenix.tide-observability.svc.cluster.local:4317`. This is a pre-existing nuance in `provider.go`, not a new bug, but it is exactly the kind of thing that will silently no-op a Phoenix recipe if copy-pasted from generic OTel docs. Document this explicitly in INSTALL.md/observability.md.
+
+### Phoenix's chart-level `auth.enableAuth` default is `true` — the raw Docker image default is `false`
+
+Verified directly against the chart's `values.yaml` on `main`: `auth.enableAuth: true` is the **Helm chart's** opinionated default, even though Phoenix's own app-level docs say "Authentication is disabled by default" (true only for a bare `docker run`). Two supported recipe shapes:
+
+- **Lab/demo (fastest path to a queryable trace tree):** `--set auth.enableAuth=false`. Zero secrets to manage, matches a throwaway kind cluster's ergonomics. Call this out as explicitly non-production in the docs.
+- **Durable:** leave `auth.enableAuth=true`, supply `auth.secret` (a K8s Secret carrying `PHOENIX_SECRET` + admin password per the chart's documented keys), mint a Phoenix API key, and set `OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <api-key>` on TIDE's manager/reporter Pods (sourced from a Secret, `EnvFrom`/`valueFrom.secretKeyRef` — same pattern already used at the three git-identity commit sites in `push_helpers.go`). No code change: `otlptracegrpc.New` picks up `OTEL_EXPORTER_OTLP_HEADERS` automatically because `provider.go` never calls `WithHeaders(...)` explicitly.
+
+### Retroactive span synthesis shape (reporter Job, `internal/reporter`)
+
+The reporter Job already parses the same stream-json shape via `internal/subagent/anthropic/stream_parser.go` (used live during dispatch) — the events.jsonl-driven span synthesis is a second consumer of that same per-line shape, read after the fact from the PVC-mounted `events.jsonl`. Per-line, each event already carries a real timestamp, so the synthesis loop is:
 
 ```go
-import "github.com/ProtonMail/go-crypto/openpgp"
-
-entities, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(armoredKeyFromSecret))
-// validate: len(entities) >= 1, entities[0].PrivateKey != nil
-// if entities[0].PrivateKey.Encrypted → Decrypt(passphrase) (entity + signing subkeys), or reject with a clear condition
-_, err = wt.Commit(msg, &git.CommitOptions{
-    Author:  &object.Signature{Name: botName, Email: botEmail, When: time.Now()},
-    SignKey: entities[0],
-})
+ctx := propagation.TraceContext{}.Extract(context.Background(),
+    propagation.MapCarrier{"traceparent": os.Getenv("TRACEPARENT")})
+tracer := otel.Tracer("tide-reporter")
+for _, ev := range events {
+    _, span := tracer.Start(ctx, spanNameFor(ev), trace.WithTimestamp(ev.StartTime))
+    span.SetAttributes(otelai.AgentInvocation(...)...)
+    span.End(trace.WithTimestamp(ev.EndTime))
+}
 ```
 
-- **`SignKey` over `Signer`.** `CommitOptions` has both; `Signer` (an interface, takes precedence over `SignKey`) is the seam for non-OpenPGP schemes (SSH signing) later. For this milestone `SignKey` is the minimal change at all three commit sites; wrap key loading in one shared helper so a future `Signer` swap is one function. Neither field is deprecated (verified against `options.go`).
-- **Key must be decrypted before use** — go-git will not prompt. Recommend documenting the Secret contract as an *unencrypted* armored private key (`gpg --export-secret-keys --armor`), with an optional `passphrase` Secret key handled via `PrivateKey.Decrypt` on the entity **and each signing subkey** if provided.
-- **GitHub/GitLab "Verified" badge** requires (a) the committer email to match a UID on the key and (b) the public key uploaded to the bot account. The signing work is therefore coupled to the "bot identity uniformly configurable" fix — the hardcoded tide-push identity would break verification if it diverges from the key's UID. One config surface (name, email, secretRef) feeding all three sites.
-- **Secret reach:** signing happens wherever `Commit()` runs. If the harness commit site executes in the subagent container (not the manager), the key Secret must be projected there too — same pattern as the existing git-push creds, but audit all three sites' pod specs.
-- **Optionality:** nil `SignKey` = unsigned commit, so "no secretRef configured → unsigned" falls out naturally; no flag plumbing needed beyond the Secret resolution.
+This is the exact mechanism the runtime-neutrality constraint depends on: a future self-instrumenting LangGraph runtime extracts the same injected `traceparent` and emits real-time spans via `openinference-instrumentation-langchain` instead — the reporter's synthesis path and the runtime's native path are structurally identical consumers of the same seam, gated by the "self-instrumenting capability flag" the milestone already specifies (reporter skips synthesis when the runtime self-instruments, avoiding double spans).
 
-### promptFile (outcomePrompt from file) — both routes are zero-dependency
+### `pkg/otelai` migration is additive, not a rewrite
 
-| Route | Mechanism | Costs |
-|-------|-----------|-------|
-| **CLI-side inlining (recommended)** | `tide apply --prompt-file ./prompt.md` reads the file and sets `spec.outcomePrompt` before create | None: no CRD change beyond docs, no controller change, no RBAC change, no drift semantics. `kubectl`-only users inline the text themselves (status quo). |
-| ConfigMap keyRef | `spec.outcomePromptFrom.configMapKeyRef` (reuse `corev1.ConfigMapKeySelector` — already vendored via `k8s.io/api`); controller resolves via the existing client `Get` | New CRD field + CEL (`outcomePrompt` XOR `outcomePromptFrom`), controller Role needs ConfigMap `get` in watch namespaces, and drift semantics: prompt must be resolved **once** (snapshot into status or an annotation at Initialize) or a mid-run ConfigMap edit changes replanning behavior. |
-
-Recommendation: ship CLI-side inlining now; it's the operator-ergonomics fix the first run actually surfaced (a human authoring a long prompt in an editor). Add the ConfigMap route only if a GitOps consumer asks — and note the size ceiling either way: CRD objects live under etcd's ~1.5 MiB request cap, ConfigMaps under a documented 1 MiB data cap, so any realistic prompt fits both.
-
-### Dashboard artifact transport — ConfigMap persistence over reader Jobs
-
-**Recommendation: controller writes each planning artifact into a per-artifact ConfigMap at the level boundary** (owner-ref'd to the level CRD, labeled for lookup), and the chi dashboard handler serves it via the manager's existing cached client.
-
-- **Size:** ConfigMap data (data + binaryData combined) is capped at **1 MiB** (Kubernetes docs; etcd request cap ~1.5 MiB behind it). TIDE planning artifacts are typically 5–50 KiB — two orders of magnitude of headroom. Guard anyway: truncate at ~900 KiB with a "see git" marker rather than failing the boundary.
-- **Why not a reader Job:** the artifact PVC is **RWO** — on a multi-node cluster a reader pod can hit volume-attach conflicts with a running task pod on another node (exactly the multi-node infra the next milestone targets); plus pod-startup latency (seconds) on every approve-gate view, plus Job GC and RBAC for log streaming. The three ad-hoc reader pods in the first run are the symptom this feature removes — don't automate the symptom.
-- **Why this doesn't violate CRD-status-only persistence:** the ConfigMap is a *display cache*, not truth — git (pushed at level boundaries) remains the artifact source of truth, and the ConfigMap is rederivable/deletable. Do **not** put artifact bodies in CRD `.status` (etcd per-object budget is the reason that constraint exists).
-- **Markdown rendering:** `react-markdown` + `remark-gfm` + `prose` classes (versions above). v10 removed the `className` prop — wrap: `<div className="prose prose-invert max-w-none"><ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown></div>`. Do **not** add `rehype-raw`: it re-enables raw-HTML passthrough and reintroduces injection risk from model-authored artifacts.
-
-### Features needing NO stack additions
-
-| Feature | Covered by |
-|---------|-----------|
-| Integration-miss gate (serialize merges, reachability check, `lastPushedSHA`) | go-git v5.19.0: existing merge plumbing + `repo.ResolveRevision`, `object.Commit.IsAncestor` for reachability; serialization is a controller-side mutex/workqueue concern |
-| `spec.git.baseRef` | `repo.ResolveRevision(plumbing.Revision(ref))` resolves branch/tag/SHA; reject unresolvable with a clear condition — no new dep |
-| Log-drawer loading/streaming/pod-gone states | Existing SSE + client-go pod log API; pure frontend state-machine work |
-| Prometheus setup step | Docs (INSTALL.md), chart NOTES.txt, dashboard banner — no code deps; keep `prometheus.enabled=false` default per existing anti-pattern |
-| v1.0.6 tech-debt carry (RetryOnConflict, plannerConcurrency default, test-tier split) | `k8s.io/client-go/util/retry` already vendored |
+`pkg/otelai/attrs.go`'s public surface (`LLMInputMessages`, `LLMOutputMessages`, `TokenCount`, `AgentInvocation`, `ArtifactPath`) stays — only the private `key*` string constants get sourced from `openinference-semantic-conventions` instead of being hand-typed. Confirmed value-for-value match on the token-count keys already in use, so this is a safe swap, not a behavior change. This also gains TIDE the constants it doesn't have yet but the spec defines (`LLMModelName`, `LLMProvider`, `LLMTokenCountTotal`, `MessageToolCalls`) for free, without hand-typing them — useful groundwork for whichever future phase adds `llm.model_name`/`llm.provider` attributes (both present in the OpenInference spec's example trace output but absent from TIDE's current `AgentInvocation` helper, which hard-codes `llm.system=anthropic` as a comment-documented future extension point).
 
 ## Alternatives Considered
 
 | Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| `CommitOptions.SignKey` | `CommitOptions.Signer` interface | When adding a second signature scheme (SSH signing / KMS-held keys). Takes precedence over SignKey; same package. Wrap key loading in one helper now so this swap stays cheap. |
-| ProtonMail/go-crypto v1.1.6 (go-git's pin) | Bumping go-crypto to latest (v1.3.x) | Only if go-git itself bumps it. Independent bumps risk type/behavior skew with go-git's internal signing path — same coupling rule as `k8s.io/*`. |
-| ConfigMap artifact cache | In-namespace PVC reader Job | If artifacts routinely exceed ~1 MiB (they don't) or if raw task *diffs* (potentially large) later need serving — then a streaming reader is worth its latency. |
-| ConfigMap artifact cache | go-git read of the bare repo from the manager | If the manager already has the project PVC mounted at dashboard-serve time; avoids the copy. Verify mount topology before choosing — RWO makes this fragile on multi-node. |
-| CLI-side prompt inlining | `spec.outcomePromptFrom.configMapKeyRef` | GitOps pipelines that can't shell out to `tide`; costs a CRD field, RBAC, and resolve-once snapshot semantics. |
-| react-markdown | `marked`/`markdown-it` + DOMPurify | Never for this dashboard — string-HTML pipelines need a sanitizer and `dangerouslySetInnerHTML`; react-markdown avoids the class of bug entirely for LLM-authored input. |
-| Standard Sonnet 5 pricing row | Effective-dated intro pricing rows | Only if budget-tally exactness during Jul–Aug 2026 matters more than schema simplicity; intro window ends 2026-08-31. |
+|-------------|-------------|--------------------------|
+| Hand-rolled `pkg/otelai` constants stay, backed by `openinference-semantic-conventions` v0.1.1 | Keep the fully hand-rolled string constants (status quo) | Only if the pre-1.0 versioning of the official Go module (v0.1.1, tagged May 2026) is judged too immature to depend on. Given the module is zero-dependency and Arize-maintained as the Go port of the Python source-of-truth, the drift risk of staying hand-rolled is higher than the churn risk of a thin, dependency-free constants package. |
+| Phoenix's bundled Postgres (chart default) for the "durable" recipe path | External/self-managed PostgreSQL via `database.url` | If the operator already runs a PostgreSQL fleet (e.g. via an operator like CloudNativePG) and wants Phoenix to reuse it rather than provisioning a second, chart-owned Postgres pod + PVC. The chart supports this via `postgresql.enabled=false` + `database.url` — worth a one-line callout in the docs, not the primary documented path. |
+| SQLite-on-PVC for the "quickstart" recipe path | In-memory SQLite (`persistence.inMemory=true`) | Only for genuinely ephemeral demo/CI runs where losing all trace history on pod restart is acceptable — don't default a documented recipe to this, it will surprise a first-time operator. |
+| OTLP **gRPC** (port 4317) | OTLP **HTTP** (port 6006, `/v1/traces`) | Never for this milestone — TIDE has zero code paths using `otlptracehttp`, and switching would be a real dependency + code change for no benefit (gRPC is already wired, already the pinned exporter). Keep HTTP as "Phoenix also supports this if you're not using TIDE's exporter" trivia in the docs, not a recommendation. |
+| Documented separate `helm install` for Phoenix (TELEM-01 pattern) | Phoenix as a TIDE chart `dependencies:` subchart | If the project ever wants a true one-command `helm install tide` bring-up of the whole observability stack. Explicitly rejected by the milestone's own framing ("no subchart dependency, no version coupling to Arize's chart") and consistent with how Prometheus was handled in v1.0.7 — a subchart dependency means every TIDE chart bump has to track Arize's ~daily release cadence, which is untenable. |
 
 ## What NOT to Use
 
 | Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `golang.org/x/crypto/openpgp` | Frozen/deprecated upstream **and** type-incompatible: go-git's `SignKey` is ProtonMail's `openpgp.Entity`, not x/crypto's | `github.com/ProtonMail/go-crypto/openpgp` |
-| Shelling out to a `gpg` binary | Adds a binary + keyring state to every image; breaks the pure-Go constraint; keyring permissions in containers are a known pain | go-git `SignKey` (pure Go) |
-| Artifact bodies in CRD `.status` | Blows the per-object etcd budget the CRD-status-only constraint depends on | Per-artifact ConfigMap display cache (git = truth) |
-| `rehype-raw` / `dangerouslySetInnerHTML` in the artifact view | Re-enables HTML injection from model-authored markdown | react-markdown's default (raw HTML rendered as text) |
-| Prefix/substring model-ID matching in the pricing table | The `-fast`, dated-snapshot, and Bedrock-prefixed variants make prefix matching wrong in both directions | Exact-ID lookup with a normalizer for trailing `-YYYYMMDD`, plus a logged most-expensive fallback |
-| Hardcoding "$2/$10" for Sonnet 5 | Intro pricing expires 2026-08-31 → silent *under*count after that, the inverse of the bug being fixed | Standard $3/$15 row (conservative during intro) |
+|-------|-----|--------------|
+| `openinference-instrumentation-anthropic-sdk-go` (Go auto-instrumentor for `anthropics/anthropic-sdk-go`) | Requires `anthropic-sdk-go` **v1.43+** (needs `option.Middleware`, added in that release) — TIDE pins the Anthropic Go SDK at **v1.42.x**, below the floor. More fundamentally, it instruments *direct Go-SDK `/v1/messages` calls*; TIDE's subagent dispatch shells out to the `claude` CLI as a subprocess (`internal/subagent/anthropic/subagent.go`), so there is no in-process Anthropic Go SDK call to attach middleware to on today's dispatch path. | The events.jsonl-driven synthesis path in `internal/reporter` (this milestone). Revisit this package specifically if/when the deferred CACHE-F1 direct-SDK backend ships (per project memory: "direct-SDK subagent backend that sets the system prompt explicitly ... places `cache_control` breakpoints") — that backend would make in-process Go SDK calls and could genuinely use this middleware instead of JSONL-parsing. |
+| `otlptracehttp` exporter | Would require a second code path, a second pinned dependency, and targets Phoenix's HTTP port (6006) which TIDE has never used — `otlptracegrpc` is already fully wired and works with Phoenix's 4317 gRPC port out of the box. | Existing `otlptracegrpc` (already pinned v1.43.0) |
+| `auth.enableAuth=false` as the ONLY documented Phoenix recipe | It is the chart's non-default, and shipping it as the sole documented path would silently produce an unauthenticated trace store as the "official" TIDE recipe — a real security regression for anyone following INSTALL.md verbatim on a shared cluster. | Document both paths (see Integration Notes); make the "durable" (auth-on) path the one shown first, lab/demo path second and explicitly labeled non-production. |
+| Pinning Phoenix's chart with `latest`/no version, or trusting the number in this doc without re-checking | The chart shipped 9 versions in roughly as many days at research time (`9.0.14` → `10.0.0`); the number here will likely be stale by the time this phase executes. | Pin an exact `--version` string, verified fresh, in both the `helm install` docs and any CI step that exercises the recipe. |
+| A LangGraph-side Go equivalent for span emission | LangGraph is Python-only; there is no Go LangGraph runtime to instrument, so this concern doesn't apply to the Go side at all. | N/A — the runtime-neutrality contract is trace-context-compatibility (W3C `traceparent` + matching OpenInference attribute keys), not a shared code path. |
 
 ## Version Compatibility
 
 | Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| ProtonMail/go-crypto v1.1.6 | go-git v5.19.0 | go-git's `go.mod` dictates this pin; never bump independently (same rule as `k8s.io/*` ← controller-runtime) |
-| react-markdown 10.1.0 | React ≥18 (dashboard: 18.3.1 ✓) | v10 removed `className` prop — style via a wrapper element |
-| remark-gfm 4.0.1 | react-markdown 10.x (unified v11 ecosystem) | Both on `unified@^11` / `remark-parse@^11` — matched majors |
-| @tailwindcss/typography 0.5.20 | tailwindcss ≥4 (dashboard: ^4.3.0 ✓) | v4 registration is CSS `@plugin`, not `tailwind.config.js` |
+|---------|------------------|-------|
+| `go.opentelemetry.io/otel/propagation` v1.43.0 | `go.opentelemetry.io/otel` v1.43.0 (already pinned) | Same module, no separate version to track — bundled in the core `otel` require line already in `go.mod`. |
+| `go.opentelemetry.io/otel/trace` v1.43.0 `WithTimestamp`/`NewSpanContext` | `go.opentelemetry.io/otel/sdk` v1.43.0 (already pinned) | Both already required at identical `v1.43.0`; no coupling risk — this is the existing "otel trace API is v1.x stable" rule already documented in `CLAUDE.md`. |
+| `github.com/Arize-ai/openinference/go/openinference-semantic-conventions` v0.1.1 | Go `1.25` floor | TIDE's `go 1.26.0` directive satisfies this with headroom. Zero transitive dependencies — cannot introduce a version conflict elsewhere in `go.mod`. |
+| `github.com/Arize-ai/openinference/go/openinference-instrumentation` v0.1.1 | `go.opentelemetry.io/otel/trace` v1.43.0 | Its only dependency is the trace API already pinned; safe to add independently of the semconv package. |
+| `openinference-instrumentation-langchain` (Python, future LangGraph runtime, **not installed by this milestone**) | `langchain-core` 1.x + partner packages (`langchain-anthropic`, etc.); Python `>=3.10,<3.15` | Latest `0.1.67` (released 2026-07-01). Recorded here only so the Go-side attribute keys can be cross-checked against it: it emits the same flat `llm.input_messages.N.message.role/content` encoding and the same `OpenInferenceSpanKindValues` enum (`TOOL`, `CHAIN`, `LLM`, `RETRIEVER`, `EMBEDDING`, `AGENT`, `RERANKER`, `UNKNOWN`, `GUARDRAIL`, `EVALUATOR`, `PROMPT`) that the Go semconv module above exports — confirming the two sides will produce Phoenix-queryable-identical spans without any TIDE-side translation layer. |
+| Phoenix Helm chart 10.0.0 | `postgres` subchart (groundhog2k) v1.5.8, pinned by Phoenix's own `Chart.yaml` | Do not bump the bundled Postgres subchart independently — same "let the parent's go.mod/Chart.yaml dictate" rule TIDE already applies to `k8s.io/*` and `ProtonMail/go-crypto`. |
 
 ## Sources
 
-- `go-git/go-git` `options.go` (master, fetched 2026-07-03) — `CommitOptions.SignKey` / `Signer` field declarations, decrypted-key requirement, precedence, no deprecation — HIGH (primary source)
-- `/Users/justinsearles/Workspace/repos/tide/go.mod` — go-git v5.19.0 pinned; ProtonMail/go-crypto v1.1.6 already indirect — HIGH (local evidence)
-- `platform.claude.com/docs/en/pricing.md` + `docs/en/about-claude/models/overview.md` (fetched live 2026-07-03) — full per-model input/output/cache-read/5m-write/1h-write table; Sonnet 5 intro pricing through 2026-08-31; cache multipliers 0.1×/1.25×/2× — HIGH (official docs, cross-checked against the claude-api skill's cached table dated 2026-06-24)
-- npm registry (`registry.npmjs.org`, fetched 2026-07-03) — react-markdown 10.1.0 (peer react ≥18), remark-gfm 4.0.1, @tailwindcss/typography 0.5.20 (peer tailwindcss ≥4) — HIGH (primary source)
-- [react-markdown changelog](https://github.com/remarkjs/react-markdown/blob/main/changelog.md) — v10 `className` removal, v9 React-18 floor — HIGH
-- Kubernetes ConfigMap documentation (concepts/configuration/configmap) — 1 MiB data cap — HIGH (stable documented limit)
-- [tailwindcss-typography](https://github.com/tailwindlabs/tailwindcss-typography) + [Tailwind v4 plugin discussion](https://github.com/tailwindlabs/tailwindcss/discussions/14551) — `@plugin` registration in v4 — MEDIUM (community-confirmed, matches npm peerDeps)
-- Supporting search results: [go-git commit signature verification](https://darkowlzz.github.io/post/git-commit-signature-verification/), [react-markdown repo](https://github.com/remarkjs/react-markdown), [remark-gfm repo](https://github.com/remarkjs/remark-gfm)
+- `go.opentelemetry.io/otel@v1.43.0` local module cache (`propagation/trace_context.go`, verified live) — HIGH (primary source, matches pinned `go.mod`)
+- `go.opentelemetry.io/otel/trace@v1.43.0` local module cache (`config.go:251` `WithTimestamp`, `trace.go:244` `NewSpanContext`, `context.go:29` `ContextWithRemoteSpanContext`) — HIGH (primary source)
+- Context7 `/open-telemetry/opentelemetry-go` — `WithEndpoint`/`WithHeaders` env-var-fallback doc comments (otlptracegrpc/otlptracehttp/otlpmetrichttp share the `oconf` config package) — HIGH
+- [Phoenix self-hosting: Kubernetes (Helm)](https://arize.com/docs/phoenix/self-hosting/deployment-options/kubernetes-helm) — install commands, OCI chart URL — HIGH (official docs, fetched live)
+- [Phoenix self-hosting: configuration](https://arize.com/docs/phoenix/self-hosting/configuration) via Context7 `/arize-ai/phoenix` — `PHOENIX_PORT` (6006), `PHOENIX_GRPC_PORT` (4317) — HIGH (official docs)
+- `https://raw.githubusercontent.com/Arize-ai/phoenix/main/helm/Chart.yaml` (fetched live 2026-07-15) — chart version 10.0.0, appVersion 18.0.0, postgres subchart 1.5.8 pin — HIGH (primary source, but MEDIUM confidence the number is still current given ~daily release cadence)
+- `https://raw.githubusercontent.com/Arize-ai/phoenix/main/helm/values.yaml` (fetched live 2026-07-15) — `auth.enableAuth: true` default, `postgresql.enabled: true` default, `persistence.enabled: false` default, image `arizephoenix/phoenix:version-18.0.0-nonroot` — HIGH (primary source)
+- [Phoenix: authentication](https://github.com/arize-ai/phoenix/blob/main/docs/phoenix/self-hosting/features/authentication.mdx) via Context7 — `PHOENIX_ENABLE_AUTH`/`PHOENIX_SECRET`, app-level default is disabled (contrasted with the chart's own `true` default) — HIGH
+- [Phoenix: setup-projects](https://github.com/arize-ai/phoenix/blob/main/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-projects.mdx) via Context7 — `openinference.project.name` resource attribute, `x-project-name` header is HTTP-OTLP-only — HIGH
+- Docker Hub `arizephoenix/phoenix-helm` tags page (fetched live 2026-07-15) — release cadence evidence (9.0.14 → 10.0.0 across ~9 days) — HIGH (primary source)
+- [OpenInference spec: semantic_conventions.md](https://github.com/arize-ai/openinference/blob/main/spec/semantic_conventions.md) via Context7 `/arize-ai/openinference` — flat-key message encoding, span-kind enum — HIGH
+- [OpenInference Go semantic-conventions README + go.mod](https://github.com/arize-ai/openinference/blob/main/go/openinference-semantic-conventions/README.md) (fetched live) — module path, `go 1.25`, exported constants — HIGH
+- [pkg.go.dev: openinference-semantic-conventions](https://pkg.go.dev/github.com/Arize-ai/openinference/go/openinference-semantic-conventions) (fetched live 2026-07-15) — v0.1.1, published 2026-05-22, full constant listing — HIGH
+- [pkg.go.dev: openinference-instrumentation (Go)](https://pkg.go.dev/github.com/Arize-ai/openinference/go/openinference-instrumentation) (fetched live) — v0.1.1, suppression/propagation/masking API, dependency on `otel/trace` — HIGH
+- [openinference-instrumentation-anthropic-sdk-go](https://github.com/Arize-ai/openinference/tree/main/go/openinference-instrumentation-anthropic-sdk-go) — `anthropic-sdk-go` v1.43+ floor (`option.Middleware`) — MEDIUM (WebSearch-summarized, not primary-source-fetched, but consistent with the module's stated purpose)
+- [openinference-instrumentation-langchain PyPI](https://pypi.org/project/openinference-instrumentation-langchain/) (fetched live 2026-07-15) — v0.1.67, released 2026-07-01, `langchain-core` + partner packages — HIGH (primary source)
+- Local repo grounding: `go.mod` (`go 1.26.0`, `go.opentelemetry.io/otel*` v1.43.0 pins), `charts/tide/values.yaml:410-415` (`otel.exporter.endpoint: ""` already present), `internal/otelinit/provider.go`, `pkg/otelai/attrs.go`, `cmd/tide-reporter/main.go`, `internal/controller/push_helpers.go` (existing `corev1.EnvVar` pattern for per-Job env injection) — HIGH (primary source, read directly)
 
 ---
-*Stack research for: TIDE v1.0.7 First-Run Paper Cuts*
-*Researched: 2026-07-03*
+*Stack research for: TIDE v1.0.8 "Phoenix Rising" — OpenInference trace emission + self-hosted Arize Phoenix*
+*Researched: 2026-07-15*
+

@@ -1,222 +1,173 @@
 # Feature Research
 
-**Domain:** K8s-native workflow orchestrator — first-run operator ergonomics (v1.0.7 First-Run Paper Cuts)
-**Researched:** 2026-07-03
-**Confidence:** MEDIUM-HIGH (git-host verification rules HIGH from official docs; dashboard/UX conventions MEDIUM from ecosystem survey)
+**Domain:** LLM/agent trace observability integration (OpenInference spans → self-hosted Arize Phoenix) for a Kubernetes-native hierarchical agent orchestrator
+**Researched:** 2026-07-15
+**Confidence:** HIGH (Phoenix/OpenInference specifics grounded in Context7 + official docs; comparable-orchestrator landscape MEDIUM — thinner official documentation)
 
-Scope: how the v1.0.7 target capabilities work in comparable tools (Renovate, Dependabot, Argo CD/Workflows, Tekton, kubebuilder-ecosystem operators) and what operators expect. The two run-integrity features (integration-miss gate, pricing table) are TIDE-internal correctness fixes with no external comparable — they appear in the landscape tables but the ecosystem research below covers the five behavior-shaped features: baseRef, signed commits, promptFile, dashboard artifact/log surfaces, telemetry setup nudge.
+## Context: what already exists in TIDE
 
-## Ecosystem Findings (per question)
+This is additive research — TIDE already has the seams this milestone needs to fill:
 
-### 1. Base-ref selection for automation-created branches
-
-How comparable tools do it:
-
-- **Dependabot** — `target-branch` per `package-ecosystem` block in `dependabot.yml`. Branch name only. Applies to version updates only (security updates always target the default branch). Unknown branch → run fails with a config error surfaced in the Dependabot UI; no silent fallback.
-- **Renovate** — `baseBranches` array (multiple branches, regex patterns supported). Missing branch → warning/error in the job log, not silent.
-- **Argo CD** — `spec.source.targetRevision` accepts branch, tag, or commit SHA (also `HEAD`). Unresolvable ref → app creation **rejected** with `Unable to resolve 'X' to a commit SHA`, and at sync time a `ComparisonError` condition on the Application. The resolved SHA is stamped in `status.sync.revision`. Docs recommend explicit branch/SHA over `HEAD`.
-- **Tekton** — git-clone task `revision` param (branch/tag/SHA; empty = remote default branch). Bad ref → TaskRun `Failed` with the raw git stderr in the step log; historically rough edges around tag refs (tektoncd/pipeline#2425).
-- **Argo Workflows** — GitArtifact `revision`; notably rejects the fully-qualified `refs/heads/*` form (argo-workflows#5629) — accept short names, be liberal in what the field takes or document the accepted forms precisely.
-
-**Operator expectations distilled:**
-1. One optional string field accepting branch OR tag OR SHA — tools that split these into separate fields are the minority; a single `revision`-style string is the convention.
-2. Default = the remote's default branch when unset (never require it).
-3. **Fail fast with a typed condition** — reject at admission/first-reconcile with a message naming the unresolvable ref (Argo CD's `Unable to resolve 'X' to a commit SHA` is the canonical wording), never mid-run.
-4. **Pin the resolved SHA in status** (Argo CD `status.sync.revision` pattern) so the run is reproducible even if the branch moves — pairs naturally with the planned `status.git.lastPushedSHA`.
-
-TIDE's planned `spec.git.baseRef` + reject-unresolvable-with-condition matches the ecosystem exactly. The one addition worth making: stamp `status.git.baseSHA` (resolved at run start) alongside `lastPushedSHA`.
-
-### 2. Bot commit signing + Verified badges
-
-Verification rules per host (this is where bots most often "sign but never verify"):
-
-- **GitHub** — a signature shows **Verified** only when: (a) the signature is cryptographically valid, (b) the public key is registered on a GitHub account, and (c) the **committer email matches an identity (UID) on the key AND a verified email on that account**. GPG and SSH signing keys are both supported. Hosted bots (Dependabot, the Mend Renovate app) get Verified *without* managing keys — they commit via the GitHub API as a GitHub App, and **GitHub signs with its own key**. That route requires committing via the REST API, not `git push` — unavailable to TIDE's generic-git-remote architecture.
-- **GitLab** — committer email must match a **verified email of the GPG key's owner account**; GitLab verifies against its own keyring (no keyservers). SSH-signed commits also supported. Well-documented failure mode: valid key + mismatched committer email → "Unverified" (gitlab-org/gitlab#29368).
-- **Gitea** — marks Verified only if the key is registered on a Gitea account **and the committer email is registered on the account that owns the key** (the documented Renovate+Gitea recipe: gitAuthor email must match the bot account's email or "the commits sign but never verify"). Gitea uniquely also supports instance-level signing (`SIGNING_NAME`/`SIGNING_EMAIL`) and allows signer ≠ committer in some flows — but the portable rule is the same email-match triple.
-
-Self-hosted **Renovate** is the closest architectural comparable to TIDE (signs locally, pushes over git): a single env var (`RENOVATE_GIT_PRIVATE_KEY`, ASCII-armored GPG private key) + the constraint that `gitAuthor` name/email must match the key's UID. That is exactly the shape TIDE plans: optional Secret ref carrying the armored key + uniformly configurable bot identity.
-
-**Operator expectations distilled:**
-1. GPG (openpgp) is the interop-widest choice — all three hosts verify it; SSH signing is newer and Gitea/GitLab support lags versions. Pure-Go `openpgp` + go-git's `CommitOptions.SignKey` is the standard implementation path (no gpg binary in the container).
-2. Signing must be **uniform across every commit site** — a run with mixed Verified/unverified commits reads worse than unsigned (TIDE's tide-push hardcoded identity is precisely this bug class).
-3. **Document the email-match triple** (key UID = committer email = registered bot-account email) — it's the #1 support issue for every bot that signs; the feature is incomplete without that doc paragraph.
-4. Key passphrase support: armored keys in Secrets are conventionally unencrypted (Renovate's is); supporting passphrases is optional polish.
-5. Anti-pattern for TIDE: the GitHub-App API-commit route — host-specific, violates the no-hard-coded-git-host constraint.
-
-### 3. Prompt-from-file config UX
-
-Kubernetes ecosystem patterns for "a chunk of text the user authored in a file":
-
-- **valueFrom-style union in the CRD** — inline field XOR ConfigMap/Secret key selector, mutually exclusive, CEL/webhook-validated. Canonical examples: KubeVirt `userData` vs `userDataSecretRef`, Grafana Operator dashboard `json` vs `configMapRef` vs `url`, Prometheus Operator's `additionalScrapeConfigs` SecretKeySelector. This is the pattern when the content must be **cluster-resident and GitOps-manageable** independent of the CR.
-- **CLI-side file expansion** — the client reads the file and inlines it into the spec at apply time (`kubectl create configmap --from-file` is the archetype). This is the pattern when the field is small, immutable-per-run, and the pain being solved is *authoring YAML multiline strings*, not content lifecycle.
-- Size bounds: ConfigMaps cap at 1 MiB; whole CR objects at etcd's ~1.5 MiB. Outcome prompts are KBs — both routes fit trivially.
-
-**Which fits TIDE:** the pain from the first run is authoring ergonomics (writing a long prompt as a YAML block scalar), not prompt lifecycle. A ConfigMap ref buys nothing here and costs: a second object to create/RBAC/garbage-collect, a watch (or a deliberate no-watch policy — and a mutable prompt under a running Project is semantically wrong anyway), and a resolution failure mode. **CLI-side `--prompt-file` (or `promptFile:` in the tide CLI's project file, expanded before apply) is the low-complexity, convention-consistent route.** The CRD keeps one field, `spec.outcomePrompt`, and stays the single source of truth. A `configMapRef` union can be added later behind the same field pair without breaking anything if GitOps-managed prompts become a real demand.
-
-### 4. Artifact/log review surfaces at approval gates
-
-- **Argo Workflows UI** — clicking a node opens a panel with INPUTS/OUTPUTS artifact lists (download links; in-browser preview for some types) plus a logs tab. When the pod is GC'd, the UI falls back to **archived logs** from the artifact repository — the interim state literally renders *"Still waiting for data or an error? Try getting logs from the artifacts."* This fallback is chronically buggy (issues #12948, #8814, #12759, #13785: "artifact not found: main-logs", 500s, per-node-type gaps) — the ecosystem lesson is that **the fallback state must be explicit and tested per node type**, not best-effort.
-- **Tekton Dashboard** — live logs stream from the pod; when the pod is gone it shows *"Unable to fetch logs"* and supports a configured **external logs fallback service** (`--external-logs`, object-storage-backed); Tekton Results persists logs past pruning. Again: an explicit "pod gone → here's the fallback (or here's why there isn't one)" state.
-- **Argo CD** — approval-adjacent review happens against *rendered manifests + diff view*, i.e. the reviewed artifact is shown **in-UI, rendered**, not as a download link. That's the right analogy for TIDE's approve gates: the operator is approving `MILESTONE.md`/phase briefs/`PLAN.md` — rendered markdown in the dashboard, not a raw-file download.
-
-**Operator expectations distilled:**
-1. At an approve gate, the artifact under review is viewable **in the dashboard, rendered** (markdown), one click from the gated node. The first external run needed three ad-hoc PVC reader pods for this — the exact failure these tools' artifact viewers exist to prevent.
-2. Log surfaces have a **mandatory tri-state**: loading (spinner + "connecting to pod"), streaming (live tail), and pod-gone (explicit message + fallback if any). A silently empty drawer is indistinguishable from broken — TIDE's current state.
-3. TIDE has a structural advantage over Argo/Tekton here: artifacts already live on the run PVC and are pushed to git at level boundaries. The dashboard's manager API can serve them from the PVC directly — no object-storage artifact repo needed (Argo's biggest fallback-complexity source). For the pod-gone log state, v1.0.7 does *not* need log archiving (Argo's experience says it's a tarpit); an honest "pod completed and was garbage-collected — see the task's result envelope / artifact" message is the table-stakes fix, with envelope stdout/stderr capture as the cheap fallback if the envelope already carries it.
-
-### 5. "Telemetry disabled" empty states + setup nudges
-
-- **NOTES.txt convention** — Go-templated conditional blocks keyed on values: when an optional integration is off, print a short warning naming the flag, the exact enable command (`helm upgrade ... --set prometheus.enabled=true`), and a docs link. Keep it brief (it prints on install/upgrade/status); point to README/INSTALL for depth. kube-prometheus-stack-family charts and most ServiceMonitor-optional charts do exactly this. TIDE's `prometheus.enabled=false` default (chosen to avoid ServiceMonitor CRD-not-found) makes the nudge mandatory — dark-by-default without a nudge reads as broken telemetry.
-- **Dashboard empty-state convention** — the load-bearing distinction is **"disabled by configuration" vs "enabled but no data" vs "error"**. A good disabled-state banner: states that telemetry is off (not failing), shows the one-line enable step, links docs. Tools that conflate "no data" with "not configured" generate a steady stream of confused issues; the fix is always the same explicit banner.
-- **INSTALL.md step** — a numbered optional step ("Enable telemetry") mirroring the NOTES.txt text, so the three surfaces (INSTALL, NOTES.txt, dashboard banner) say the same thing with the same command.
+- `pkg/otelai/attrs.go` — five OpenInference attribute helpers (`LLMInputMessages`, `LLMOutputMessages`, `TokenCount`, `AgentInvocation`, `ArtifactPath`) exist and are unit-tested, but have **zero production call sites** (confirmed: no `tracer.Start` outside `internal/otelinit`).
+- `internal/otelinit/provider.go` — env-driven `TracerProvider` construction; no-op when `otel.exporter.endpoint` is empty.
+- `charts/tide/values.yaml` (`otel:` block) — OTLP gRPC endpoint, `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG` (default `parentbased_traceidratio` @ 0.1), service name — all wired and chart-templated already. **Sampling controls are table stakes TIDE already ships**; this milestone doesn't need to build them.
+- Per-Task `events.jsonl` — the raw Claude Code stream-json capture (comment in `stream_parser.go` confirms `session_id`, `model_usage`, durations "ride through... untouched for Phase 4 OpenInference parsing"). This is the reporter's raw material for LLM message-array spans.
+- Dashboard Telemetry tab (`TelemetryView.tsx`) — Prometheus-backed cost/token/cache panels, polling every 60s, graceful degradation states. No trace/span awareness today — it queries `tide_*` counters, not OTel data.
+- `Project.Spec.Subagent.Levels.<level>.Model` — model identifier is already known per-level at dispatch time (manager holds it before every Job creation).
 
 ## Feature Landscape
 
 ### Table Stakes (Users Expect These)
 
+An operator who deploys "OpenTelemetry + self-hosted Phoenix" for a hierarchical orchestrator expects Phoenix to look and behave like it does for any other agent framework. Missing any of these makes the integration feel broken or half-wired, even though "some spans exist."
+
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Integration-miss gate (serialize/retry task→run-branch merges; gate `Complete` on reachability; `status.git.lastPushedSHA`) | A run stamped `Complete` with a deliverable silently missing breaks the core trust contract; every CI system treats "reported success = artifacts present" as axiomatic | MEDIUM | TIDE-internal, no ecosystem comparable needed. Mechanical degenerate case of the verify-stage seed |
-| Claude 5 pricing rows | Budget meter overcounting 2.8× makes `absoluteCapCents` useless; correct pricing per model is assumed | LOW | Pure table addition + fallback-tier audit. Keep the "unknown model → most-expensive tier" fallback but log it loudly |
-| `spec.git.baseRef` accepting branch/tag/SHA, default = remote default branch | Every comparable (Dependabot `target-branch`, Renovate `baseBranches`, Argo CD `targetRevision`, Tekton `revision`) offers this; single-string field is the convention | LOW-MEDIUM | Reject unresolvable ref at first reconcile with a typed condition (Argo CD wording is canonical). Stamp resolved `status.git.baseSHA`. Document accepted forms (avoid Argo Workflows' `refs/heads/*` rejection surprise) |
-| Uniform, configurable bot identity across all three commit sites | Mixed identities/signatures across one run's commits read as broken; prerequisite for verification email-match | LOW | tide-push currently hardcodes it — fix regardless of signing |
-| Dashboard artifact view at gated Planning-DAG nodes (rendered markdown) | Argo CD reviews rendered manifests in-UI; Argo Workflows shows per-node artifacts. Operators expect to review what they're approving without `kubectl exec`/reader pods | MEDIUM | Serve from run PVC via manager API — TIDE needs no artifact-repo object storage. This is the approve-gate review surface, the milestone's biggest ergonomics win |
-| Log-drawer tri-state (loading / streaming / pod-gone) | Every workflow dashboard (Argo, Tekton) has explicit states; silently empty = indistinguishable from broken | LOW-MEDIUM | Pod-gone state: honest message + point to result envelope/artifact. Do NOT build log archiving (see anti-features) |
-| Telemetry-disabled nudge (NOTES.txt conditional + INSTALL.md step + dashboard banner) | Dark-by-default (`prometheus.enabled=false`) without a nudge reads as broken telemetry; NOTES.txt conditional warnings are standard chart practice | LOW | Same enable command verbatim on all three surfaces. Banner must distinguish "disabled by config" from "no data" |
-| promptFile via CLI-side expansion (`--prompt-file` / `promptFile:` expanded to `spec.outcomePrompt` at apply) | `kubectl --from-file` archetype; solves the actual pain (YAML block-scalar authoring) with zero new CRD surface | LOW | CRD unchanged; single source of truth stays `spec.outcomePrompt` |
+| Real parent/child span tree matching the M→P→P→T hierarchy | Phoenix's core UI *is* the nested trace tree (`AGENT → LLM/TOOL → ...`); a flat list of unrelated root spans is the single biggest "this doesn't work" complaint pattern for agent tracing | MEDIUM | W3C `traceparent` env-var propagation across pod boundaries (Job env / envelope) is a standard, well-established pattern — validates the milestone's locked design (manager creates dispatch span, injects `traceparent` into the Job env). Confirmed via OTel docs: env vars are the conventional carrier when processes, not in-proc calls, are the trust boundary. |
+| Correct `openinference.span.kind` per dispatch site | Phoenix renders/queries differently per span kind; `AGENT` vs generic spans changes icon, grouping, and detail-panel layout | LOW | Already coded: `AgentInvocation()` hardcodes `spanKindAgent = "AGENT"`. OpenInference's own definition of AGENT ("higher-level reasoning that acts on tools using LLM guidance") matches every TIDE dispatch level, since each level *is* an LLM-backed subagent authoring an artifact — not just a workflow step. Keep AGENT for all five levels; do not introduce CHAIN as a "grouping folder" span unless a level genuinely delegates without LLM reasoning (none currently do). |
+| `llm.model_name` + `llm.provider` attributes on every LLM/AGENT span | **Phoenix will not compute cost or populate its LLM detail view without these** — confirmed required alongside token counts (Context7: "Model information: `llm.model_name` ... `llm.provider`"). | LOW | **Gap found**: `pkg/otelai/attrs.go` emits `llm.system="anthropic"` (a different, non-cost-bearing attribute) but has no `llm.model_name`/`llm.provider` helper today. Must add before Phoenix's built-in cost rollup is usable — otherwise every span shows `$0.00`/blank cost, which reads as "broken," not "not configured." |
+| `llm.token_count.total` attribute | Phoenix's documented required-attribute list for cost tracking includes `total`, not just `prompt`/`completion` | LOW | `TokenCount()` currently emits `prompt`/`completion`/`cache_read`/`cache_write` but no `total`. Cheap addition (sum at the call site or in the helper) — same call site as the model_name/provider gap above. |
+| LLM input/output message arrays visible in Phoenix's trace detail view | This is the literal headline value proposition of the milestone ("real OpenTelemetry spans... including full LLM input/output message arrays") — an operator opening Phoenix and seeing empty/truncated message content is the single worst first impression | HIGH | Helpers exist (`LLMInputMessages`/`LLMOutputMessages`) but have zero call sites. The reporter Job is the only in-namespace place that can read `events.jsonl` off the PVC (manager cannot mount project PVCs — already an established TIDE constraint from the envelopes-as-artifacts decision). Requires the explicit D-O5 payload-boundary call named in the milestone: full message content as inline attribute VALUES is the whole point here, but very large multi-turn conversations (tool-heavy Claude Code sessions) can produce large attribute strings — this is an **OTLP-transport/Phoenix-render-time concern, not an etcd concern** (traces never touch CRD `.status`, so the project's own "keep CRDs small" persistence rule does not apply here — a different persistence path entirely). Recommend a pragmatic cap (e.g. truncate individual message content at some threshold with an explicit "truncated" marker) rather than an unbounded inline dump, to keep OTLP export batches and Phoenix's span-attribute table renderable. |
+| Self-hosted Phoenix reachable at the chart's existing `otel.exporter.endpoint` | The chart already exposes this env-driven hook; users expect a documented recipe, not a from-scratch integration exercise | LOW | Phoenix ships an **official OCI Helm chart** (`oci://registry-1.docker.io/arizephoenix/phoenix-helm`) — `helm install phoenix $CHART_URL`. Installed **separately** from TIDE's chart (no subchart dependency, matches the milestone's locked constraint). Exposes OTLP gRPC on 4317 / HTTP on 4318, web UI on 6006. |
+| Phoenix persistence that survives pod restarts | An operator who loses all traces on the first Phoenix pod restart will conclude self-hosting "doesn't work" | LOW–MEDIUM | Two supported paths: SQLite-on-PVC (fine for single-operator/dev, TIDE's kind/minikube posture) or Postgres (**bundled as part of Phoenix's own Helm chart** — this is Phoenix's subchart, not TIDE's, so it doesn't violate TIDE's "no subchart dependency" rule, which is about TIDE's *own* chart not vendoring Phoenix). Document both; default recommendation should match TIDE's existing dev-cluster posture (PVC-backed SQLite for kind, note Postgres for production). |
+| Model/cost/duration attributes sourced from data the manager already holds | Re-deriving cost/duration independently in the tracing path risks a second, disagreeing number | LOW | Manager already computes cost via v1.0.7's exact-ID pricing engine and holds `Model` per level at dispatch time — the span attributes should be populated from these same values, not recomputed. |
+| Trace context survives across the reporter Job (not just manager→executor) | The milestone explicitly requires LLM message-array spans to parent correctly under the manager's dispatch span — a disconnected reporter trace defeats the whole "one navigable tree" value prop | MEDIUM | Same `traceparent` carrier as the manager→Task Job hop, but now manager→reporter Job. Confirms as the same solved pattern, applied twice. |
 
 ### Differentiators (Competitive Advantage)
 
+Not required for the milestone's stated Target Features, but exploit what TIDE already has (the dashboard, the CRD status model, the multi-level hierarchy) in ways most agent-tracing integrations don't bother with because most callers aren't Kubernetes orchestrators with a persistent control plane.
+
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| GPG-signed bot commits (pure-Go openpgp, optional Secret ref) | Verified badges on orchestrator commits across GitHub/GitLab/Gitea; self-hosted Renovate is the only comparable that does portable local signing — hosted bots cheat via host APIs | MEDIUM | go-git `CommitOptions.SignKey`. Opt-in (unset Secret ref = unsigned, today's behavior). MUST ship with the email-match-triple doc (key UID = committer email = bot-account verified email) per host, or users file "signs but never verifies" issues |
-| Project view (outcome prompt + settings in dashboard) | Operators reviewing a gate want the run's intent visible next to it; comparable dashboards show the app/workflow spec | LOW | Read-only render of Project spec; pairs with artifact view |
-| PVC-direct artifact serving (no artifact-repo dependency) | Argo's artifact-fallback bug tail comes from object-storage indirection; TIDE's PVC + git-boundary-push design lets the dashboard serve artifacts with zero extra infra | — | Architectural advantage to preserve, not a work item — don't add an object-store artifact repo |
-| `status.git.baseSHA` pinning | Reproducibility: the run records what it branched from even if the ref moves (Argo CD `status.sync.revision` pattern) | LOW | Cheap addition riding the baseRef work |
+| Dashboard → Phoenix trace URL deep link | Click a Task/Plan row in TIDE's dashboard, land directly on that span's Phoenix trace (`{phoenix-url}/projects/{project}/traces/{trace_id}`) — closes the loop between "what happened" (dashboard) and "why" (trace detail with full message content) | MEDIUM | Requires: (1) persisting `trace_id`/`span_id` somewhere the dashboard's API can read — a new CRD `.status` field per level is the natural fit (16 bytes for a trace ID, well within the "keep per-Task CRDs small" rule); (2) a configured Phoenix base URL in chart values for the dashboard to build the link from. Not in this milestone's stated Target Features (which stop at emission + install docs + one live proof) — recommend as the natural v1.x follow-up, not scope creep into this milestone. |
+| `session.id` = Project UID for cross-trace/cross-resumption grouping | TIDE resumability means a single logical "run" can span multiple manager restarts or multiple root traces (e.g., if trace context isn't preserved across a manager crash/restart). Phoenix's `ProjectSession` concept rolls up token/cost/latency **across multiple traces** under one session — this is a close semantic match, and Phoenix's own session GraphQL API already computes `tokenUsage`/`costSummary` rollups for free. | LOW | `setSession()`/`session.id` attribute is a one-line addition once the AGENT span exists. Gives a second, independently-computed cost/token rollup (Phoenix's session view) that can cross-check TIDE's own Prometheus-based budget rollup — valuable for catching the class of accounting bugs the project has hit before (the Claude-5 budget overcount, the adoption-lifecycle rollup gap). |
+| `metadata` / `tag.tags` carrying TIDE identifiers (phase/plan/task name, wave index, gate profile, failure-halt state) | Phoenix's filter DSL queries on `metadata`/`tag.tags` — lets an operator filter Phoenix's UI by "show me every AGENT span from Phase 12" or "every span from a conservative-profile run" without leaving Phoenix | LOW | Cheap: these are strings/JSON the manager already has in scope at span-creation time. High leverage for an operator debugging one wave among many. |
+| Runtime-neutral adapter with self-instrumenting capability flag | Forward-compatible with the already-locked LangGraph beachhead: a future LangGraph subagent emits OpenInference spans natively (`openinference-instrumentation-langchain`), so the reporter's `events.jsonl` parser must be skippable per-runtime to avoid **double-emitting spans** for the same dispatch | MEDIUM | Already named as a locked constraint in `PROJECT.md`, not optional — listed here because it's a genuine differentiator versus bolt-on tracing integrations that don't anticipate a second, self-instrumenting runtime arriving later. The adapter boundary is what keeps this from becoming a rewrite when LangGraph lands. |
+| `graph.node.id` / `graph.node.parent_id` explicit DAG attributes | OpenInference's spec defines these specifically for representing multi-agent/execution-graph structure independent of the OTel span-parent relationship | LOW | Optional/nice-to-have — TIDE's dispatch hierarchy is already a strict tree (each level has exactly one parent), so standard OTel span nesting already gives Phoenix's trace-tree view everything it needs. These attributes matter more for graphs with genuine fan-in (multiple parents) or cross-links, which TIDE's Execution DAG has at the *task* level within a plan (siblings, dependents) but Phoenix's span tree doesn't natively render non-tree graphs — low priority, would need its own visualization work Phoenix doesn't provide out of the box. |
+| 100%-sample default (or an explicit low-volume override) instead of the chart's current 10% | TIDE's dispatch volume is nothing like a high-QPS web service — a single Milestone run might produce a few dozen to a few hundred spans total, not millions. At 10% `traceidratio` sampling, an operator watching one Milestone run has a 90% chance any given Phase/Plan/Task span never reaches Phoenix at all, which will read as "half the traces are missing," not "sampling is working as designed." | LOW | Not new code — this is a values.yaml default reconsideration, already fully wired. Flagging because "sampling controls" was explicitly named in the research question and the current default is tuned for the wrong traffic shape for this milestone's use case. |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
 | Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| ConfigMap-ref promptFile (`spec.promptRef`) | "K8s-native", GitOps-manageable prompts | Second object lifecycle (create/RBAC/GC), resolution failure modes, and mutable-prompt-under-running-Project semantics that are wrong anyway; solves lifecycle when the pain is authoring | CLI-side expansion now; a valueFrom-style union (`outcomePrompt` XOR `promptRef`, CEL mutual exclusion) can be added compatibly later if GitOps demand materializes |
-| GitHub-App API-commit signing ("GitHub signs for you") | Zero key management, how Dependabot/hosted-Renovate get Verified | Requires committing via GitHub's REST API, not `git push` — hard-codes one git host, violating TIDE's portability constraint | Local GPG signing over the generic git remote (self-hosted-Renovate model) |
-| Log archiving to object storage (Argo `archiveLogs` model) | "Logs survive pod GC" | Argo's own docs say don't rely on it; its fallback UI is a multi-year bug tail (artifact-not-found, 500s, per-node-type gaps); adds an artifact-repo dependency TIDE deliberately doesn't have | Explicit pod-gone state + result-envelope stdout/stderr as the reviewable residue; artifacts (the actual deliverables) are already on PVC + git |
-| Auto-fallback when baseRef unresolvable ("just use default branch") | "Don't fail my run over a typo" | Silent fallback = run built from the wrong base, discovered after spend; every comparable fails fast instead | Typed condition + clear message at first reconcile, before any subagent spend |
-| SSH commit signing (instead of / alongside GPG) | Simpler key format, newer hotness | Verification support is uneven across GitLab/Gitea versions; GPG verifies everywhere; supporting both doubles the doc/test matrix | GPG-only for v1.0.7; SSH signing later if demanded |
-| In-dashboard approve/reject buttons on the new artifact view | "I can see it, let me approve it" | Breaks the v1 read-only-dashboard decision (single auth surface via CLI/kubectl) | Artifact view shows the gate state + the exact `tide approve` command to copy |
+|---------|---------------|------------------|-------------|
+| Bespoke trace-viewer UI inside TIDE's own dashboard | "Why make the operator leave the dashboard?" | Phoenix already *is* a purpose-built trace UI (tree view, message detail, session rollups, filter DSL) — reimplementing any meaningful subset is wasted effort competing with a tool this milestone exists specifically to adopt | Dashboard → Phoenix deep link (see Differentiators) — link out, don't rebuild |
+| An OTel Collector middle-tier (à la Argo Workflows' Collector+Tempo+Grafana+Prometheus stack) | "Best practice" pattern seen in generic K8s tracing writeups | Phoenix **already doubles as its own OTLP collector** (ingests gRPC/HTTP directly) — adding a Collector between the manager and Phoenix is an unnecessary hop for this milestone's scale, and tail-based sampling (the main reason to run a Collector) requires all spans of a trace to land on the same Collector instance, which is real operational complexity TIDE doesn't need yet | Point `otel.exporter.endpoint` straight at Phoenix's OTLP port; revisit a Collector only if trace volume across many concurrent Projects genuinely grows past what head-based sampling can manage |
+| Vendoring/subcharting Arize's Phoenix Helm chart into `charts/tide/` | "One `helm install` for everything" convenience | Couples TIDE's release cadence to Arize's chart versions, contradicts the pattern already used successfully for Prometheus/Grafana (`prometheus.enabled=false` default, documented-install posture per TELEM-01), and locks operators who already run Phoenix for other apps into a second, TIDE-owned instance | Documented separate install (`INSTALL.md`/`observability.md` recipe using Phoenix's own official chart), `otel.exporter.endpoint` as the only coupling point — this is already the locked decision in `PROJECT.md`, confirmed correct against how Phoenix actually ships |
+| Inlining full envelope/artifact PVC content into span attribute values | "More detail is always better" | Violates the already-code-enforced D-O5 boundary (`TestNoPayloadHelperOnPublicSurface` exists specifically to prevent this); large inlined payloads bloat OTLP export batches and make Phoenix's attribute table slow/unreadable; conflates two different persistence paths (artifact PVC vs span attribute) that TIDE deliberately kept separate | `ArtifactPath()` attribute (a reference) for large artifacts; reserve inline message-array attributes for the bounded conversational turns Phoenix's UI is actually built to render |
+| Treating Phoenix's own cost rollup as authoritative / reconciling it against TIDE's budget engine | "One number to trust" instinct once both surfaces show a dollar figure | Phoenix computes cost from its own pricing table (Settings > Models, independently maintained) against whatever `llm.model_name` string TIDE's spans happen to carry; TIDE's own budget engine uses exact-ID pricing wired directly into the manager (the thing that gates spend). These two numbers **will** drift on pricing-table lag or model-string mismatches, and reconciling them is real, ongoing maintenance work with no operator-facing payoff | Populate `llm.model_name`/`llm.provider` accurately so Phoenix's number is *directionally* useful for spot-checking, but keep TIDE's CRD-status budget/cost rollup as the sole gate-enforcement source of truth — never let Phoenix's number block or unblock spend |
 
 ## Feature Dependencies
 
 ```
-Artifact view (approve-gate surface)
-    └──requires──> manager API endpoint serving PVC artifacts
-    └──enhanced by──> Project view (spec/settings render — same read-only API surface)
+[Manager dispatch-chain span emission]
+    └──requires──> [W3C traceparent propagation into Job env] (shared pattern, used twice)
+                       └──requires──> [envelope/env carrier field already exists as a plumbing point on the Job spec]
 
-Log-drawer tri-state
-    └──requires──> same manager API/SSE surface (pod-log proxy states)
+[LLM message-array spans (reporter)]
+    └──requires──> [events.jsonl capture] (already exists)
+    └──requires──> [D-O5 payload-boundary decision: inline vs. truncate vs. ArtifactPath] (explicit open call this milestone must make)
+    └──requires──> [W3C traceparent propagation into reporter Job env] (same mechanism as manager→Task)
 
-Signed commits
-    └──requires──> uniform configurable bot identity (email-match rule spans all 3 commit sites)
-    └──interacts──> integration-miss gate (both touch the same 3 commit sites; sign the
-                    merge commits the gate serializes — land gate first or together)
+[Phoenix built-in cost/token rollup]
+    └──requires──> [llm.model_name attribute] (GAP — not in pkg/otelai today)
+    └──requires──> [llm.provider attribute] (GAP — not in pkg/otelai today)
+    └──requires──> [llm.token_count.total attribute] (GAP — TokenCount() omits it today)
 
-spec.git.baseRef
-    └──independent; pairs with──> status.git.lastPushedSHA (both live in status.git)
+[Self-hosted Phoenix surface]
+    └──requires──> [chart otel.exporter.endpoint wiring] (already exists)
+    └──requires──> [Phoenix official Helm chart / manifests, installed separately]
 
-Telemetry nudge (NOTES.txt + INSTALL + banner)
-    └──requires──> dashboard knowing prometheus.enabled state (chart → manager config → API)
+[Dashboard → Phoenix trace URL deep link] (differentiator, not this milestone's core scope)
+    └──requires──> [trace_id/span_id persisted to CRD .status per level] (new field, small)
+    └──requires──> [Phoenix base URL configured in chart values]
+    └──enhances──> [Manager dispatch-chain span emission]
 
-promptFile (CLI-side)
-    └──independent──> touches tide CLI only; no CRD/controller change
+[session.id = Project UID grouping] (differentiator)
+    └──enhances──> [Manager dispatch-chain span emission]
+    └──conflicts with nothing──> additive attribute only
 
-Pricing table ──independent
-Integration-miss gate ──independent (headline; touches integrate + push + Complete gating)
+[Runtime-neutral adapter / self-instrumenting capability flag]
+    └──requires──> [Subagent interface seam already exists]
+    └──enhances──> [LLM message-array spans] (prevents double-emission once LangGraph lands)
 ```
 
 ### Dependency Notes
 
-- **Signed commits require identity uniformity first:** the Verified badge depends on committer email matching the key UID and the bot account's verified email at *every* commit site; the hardcoded tide-push identity must become configurable before (or with) signing, or some commits verify and others don't.
-- **Signed commits interact with the integration-miss gate:** both touch the harness/integrate/tide-push commit sites. Sequencing them in the same phase (or gate-first) avoids double-touching merge-commit creation.
-- **Artifact view, project view, and log-drawer states share one surface:** all three are read-only manager-API + dashboard work; batching them into one dashboard phase amortizes the API plumbing.
-- **Banner needs config plumbing:** the dashboard can't render "telemetry disabled" without the manager exposing whether metrics/ServiceMonitor are enabled — small chart→manager→API thread.
+- **Phoenix cost/token rollup requires attribute additions TIDE doesn't have today** — this is the single most important dependency to surface for the roadmap: the milestone's plain-language goal ("traces are observable... with real spans") is achievable without touching `pkg/otelai/attrs.go`'s public surface, but Phoenix's *cost display specifically* silently fails (renders blank/zero) without `llm.model_name`/`llm.provider`/`llm.token_count.total`. Any phase that claims "cost is visible in Phoenix" as a deliverable needs this addition explicitly in scope, not assumed to fall out of `TokenCount()`/`AgentInvocation()` as they exist today.
+- **The D-O5 payload-boundary decision is genuinely open, not a rubber stamp** — the existing `pkg/otelai` code enforces "no inline payload helper" as a hard invariant (a test fails the build if one is added), but this milestone's headline feature is precisely "full LLM input/output message arrays" in spans. Squaring these two requires either (a) a scoped exception for message-array content specifically (distinct from generic "payload"), or (b) a size-bounded inline strategy (truncate + reference ArtifactPath for overflow). This is a real design decision for the roadmap to schedule deliberately, not a mechanical wiring task.
+- **Dashboard deep-linking depends on a new CRD status field** — small, but it's a schema change (v1alpha3 is the sole served version per v1.0.7's API lifecycle crank), so it should land in the same phase as any other v1alpha3 field additions this milestone might need, not as an afterthought bolted onto a later phase.
+- **Self-hosted Phoenix has no dependency on TIDE code changes at all** — it's purely a docs + `otel.exporter.endpoint` values.yaml default deliverable, and can be authored/verified in parallel with the Go-side span emission work.
 
 ## MVP Definition
 
-### Launch With (v1.0.7)
+### Launch With (v1.0.8 — matches PROJECT.md's stated Target Features exactly)
 
-- [ ] Integration-miss gate + `status.git.lastPushedSHA` — run-integrity headline; trust in `Complete` is the product
-- [ ] Claude 5 pricing rows — budget meter correctness; blocks trustworthy second run
-- [ ] `spec.git.baseRef` with fail-fast condition (+ `status.git.baseSHA` stamp) — low cost, ecosystem-standard shape
-- [ ] Uniform configurable bot identity + GPG signing behind optional Secret ref + email-match docs — the docs are part of the feature
-- [ ] promptFile via CLI-side expansion — lowest-complexity route, no CRD change
-- [ ] Dashboard: artifact view at gated nodes (rendered), project view, log-drawer tri-state — the approve-gate review surface
-- [ ] Telemetry nudge: NOTES.txt conditional + INSTALL.md step + dashboard banner (same command on all three)
-- [ ] v1.0.6 tech-debt carry (RetryOnConflict hardening, plannerConcurrency default 4, envtest tier split)
+- [ ] Dispatch-chain span emission (manager) at all five hierarchy levels — AGENT span kind, `agent.invocation.level`, cost/duration/token attributes sourced from data the manager already holds — *essential: this is the milestone's core value proposition, and the helper functions already exist, just unused*
+- [ ] `llm.model_name` + `llm.provider` + `llm.token_count.total` attribute additions to `pkg/otelai` — *essential: without these, Phoenix's cost/LLM-detail view silently renders blank, which will read as "broken" not "working as designed"*
+- [ ] W3C `traceparent` propagation into Task Job env AND reporter Job env — *essential: this is what makes the five-level hierarchy render as one navigable tree instead of disconnected root spans*
+- [ ] LLM message-array spans (reporter, from `events.jsonl`) with an explicit, documented payload-boundary decision (inline-bounded vs. reference) — *essential: named explicitly in the milestone's Target Features as the headline capability*
+- [ ] Self-hosted Phoenix install recipe (INSTALL.md/observability.md) using Phoenix's official OCI chart, `otel.exporter.endpoint` wiring, NOTES.txt nudge — *essential: stated Target Feature, zero TIDE code dependency, can run in parallel*
+- [ ] Live end-to-end proof: one real run's trace tree visible and queryable in Phoenix — *essential: stated Target Feature, the acceptance bar for the milestone*
 
 ### Add After Validation (v1.x)
 
-- [ ] `promptRef` ConfigMap union — trigger: real GitOps-managed-prompt demand
-- [ ] SSH commit signing — trigger: user demand + Gitea/GitLab version support stabilizing
-- [ ] Result-envelope stdout/stderr surfaced in the pod-gone log state — trigger: operators still wanting post-GC log residue after the honest empty state ships
+- [ ] Dashboard → Phoenix trace URL deep link — *trigger: once trace_id is flowing and stable, and once the dashboard's existing CRD-status read path has a natural field to extend*
+- [ ] `session.id` = Project UID grouping for cross-trace/cross-resumption cost rollup — *trigger: once multi-restart resumption scenarios are actually exercised in dogfooding and the "does trace context survive a manager restart" question has a concrete answer*
+- [ ] `metadata`/`tag.tags` enrichment (phase/plan/wave/gate-profile) for Phoenix filter-DSL queries — *trigger: cheap, could plausibly land in this milestone if time allows, but not load-bearing for the acceptance bar*
+- [ ] Sampling default reconsideration (10% → 100% or a TIDE-appropriate default) — *trigger: after the first live proof run, to confirm the "half my spans are missing" failure mode is real at TIDE's actual dispatch volume*
 
 ### Future Consideration (v2+)
 
-- [ ] Verify-tier LLM subagents (seed) — deferred by milestone decision; mechanical case ships now
-- [ ] Log persistence/archiving — only if the envelope-residue approach proves insufficient; Argo's experience says avoid
+- [ ] Native LangGraph self-instrumentation + adapter skip-if-native flag — *defer: blocked on the LangGraph specialist beachhead itself, which is explicitly sequenced after this milestone; the adapter *seam* must exist now (already locked as a constraint) but the actual flag-flip logic has nothing to activate until LangGraph subagents exist*
+- [ ] Direct-SDK subagent backend trace refinement (ties to CACHE-F1) — *defer: CACHE-F1 itself is an unscheduled follow-up; tracing refinements on a backend that doesn't exist yet are premature*
+- [ ] OTel Collector middle-tier / tail-based sampling — *defer: no evidence TIDE's dispatch volume needs this; revisit only if many concurrent Projects genuinely produce trace volume head-based sampling can't manage*
+- [ ] `graph.node.id`/`graph.node.parent_id` explicit DAG attributes for non-tree Execution DAG structure — *defer: Phoenix has no first-class visualization for this beyond standard span nesting; would require bespoke work on a tool this milestone is deliberately not trying to extend*
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Integration-miss gate | HIGH | MEDIUM | P1 |
-| Pricing table (Claude 5 rows) | HIGH | LOW | P1 |
-| Dashboard artifact view (gate surface) | HIGH | MEDIUM | P1 |
-| Log-drawer tri-state | MEDIUM | LOW-MEDIUM | P1 |
-| `spec.git.baseRef` | MEDIUM | LOW-MEDIUM | P1 |
-| Bot identity uniformity | MEDIUM | LOW | P1 (prereq for signing) |
-| GPG-signed commits + docs | MEDIUM | MEDIUM | P2 |
-| promptFile (CLI-side) | MEDIUM | LOW | P2 |
-| Project view | MEDIUM | LOW | P2 |
-| Telemetry nudge (3 surfaces) | MEDIUM | LOW | P2 |
-| Tech-debt carry | MEDIUM | LOW-MEDIUM | P2 |
+|---------|------------|----------------------|----------|
+| Dispatch-chain AGENT span emission (5 levels) | HIGH | MEDIUM | P1 |
+| `llm.model_name`/`llm.provider`/`token_count.total` attrs | HIGH | LOW | P1 |
+| `traceparent` propagation (Task + reporter Jobs) | HIGH | MEDIUM | P1 |
+| LLM message-array spans + payload-boundary decision | HIGH | HIGH | P1 |
+| Self-hosted Phoenix install docs | HIGH | LOW | P1 |
+| Live e2e trace-tree proof | HIGH | LOW (proof, not build) | P1 |
+| Dashboard → Phoenix trace URL deep link | MEDIUM | MEDIUM | P2 |
+| `session.id` = Project UID grouping | MEDIUM | LOW | P2 |
+| `metadata`/`tag.tags` enrichment | LOW–MEDIUM | LOW | P2 |
+| Sampling default reconsideration | MEDIUM | LOW | P2 |
+| Native LangGraph self-instrumentation adapter flag | HIGH (future) | MEDIUM | P3 |
+| OTel Collector / tail-based sampling | LOW (now) | HIGH | P3 |
+| `graph.node.*` DAG attributes | LOW | MEDIUM | P3 |
 
-## Competitor Feature Analysis
+## Competitor / Comparable-Orchestrator Feature Analysis
 
-| Feature | Renovate/Dependabot | Argo CD/Workflows/Tekton | Our Approach |
-|---------|---------------------|--------------------------|--------------|
-| Base-ref config | `baseBranches` array / `target-branch` per block; config error on missing branch | `targetRevision` / `revision` single string (branch/tag/SHA); Argo CD rejects unresolvable with "Unable to resolve to a commit SHA", pins resolved SHA in status | Single optional `spec.git.baseRef` string; fail-fast typed condition; stamp resolved SHA in `status.git` |
-| Verified bot commits | Hosted: GitHub App API commits (GitHub's key). Self-hosted: armored GPG key env var + gitAuthor email match | N/A (don't author commits as bots the same way) | Self-hosted-Renovate model: armored GPG key in Secret ref, go-git SignKey, uniform identity, email-match-triple docs for GitHub/GitLab/Gitea |
-| Prompt/config from file | N/A | Inline vs `workflowTemplateRef`; ecosystem valueFrom unions (KubeVirt, Grafana Operator) | CLI-side file expansion into the existing inline field; union deferred |
-| Artifact review at gates | N/A (PR diff IS the review surface) | Argo Workflows node panel artifact lists; Argo CD rendered-manifest diff; Tekton external-logs fallback | Rendered markdown artifacts served from run PVC via manager API; no object-store dependency |
-| Logs after pod GC | N/A | Argo `archiveLogs` → artifact repo (buggy fallback UI); Tekton `--external-logs` service | Explicit pod-gone state, no archiving; envelope residue as cheap fallback later |
-| Optional-telemetry nudge | N/A | Standard NOTES.txt conditionals in ServiceMonitor-optional charts | Conditional NOTES.txt + INSTALL step + dashboard "disabled by config" banner, identical enable command |
+| Capability | LangGraph Platform (LangSmith) | Argo Workflows | Dagster | TIDE's Approach |
+|------------|--------------------------------|-----------------|---------|------------------|
+| Native LLM/agent tracing | Yes — purpose-built, LangSmith SDK is the primary path (lower overhead than OTel per LangChain's own docs); **added full end-to-end OpenTelemetry support** as a secondary, standards-based path (send to LangSmith or any OTel backend) | No — Argo's own OTel support instruments the **workflow-controller and argoexec** (generic K8s workflow-step spans: DAG structure, step timing), not LLM-specific attributes; ships its own Collector+Tempo+Prometheus+Grafana stack for this | Thin — surfaces token/credit usage as **asset metadata** via its OpenAI integration, not OpenInference/GenAI-semconv spans; no first-class agent trace tree found in current docs | OpenInference-on-OTel spans emitted natively from the orchestrator's own dispatch/reconcile path — closer to LangGraph Platform's "standards-based OTel" posture than to Argo's generic-workflow-spans or Dagster's asset-metadata posture |
+| Session/conversation grouping | Yes — LangSmith threads/sessions native | No — no session concept, workflows are the unit | No — assets are the unit, no session concept | Phoenix's `session.id`/`ProjectSession` is available and a strong semantic match for TIDE's own Project-as-a-run concept (differentiator, not yet built) |
+| Self-hosted OSS trace backend | LangSmith is not self-hostable OSS at this tier; OTel path lets you point at any backend (Phoenix, Jaeger, etc.) instead | Self-hosted by construction (it's a K8s controller); ships its own observability stack as part of its OTel getting-started guide | Self-hosted by construction; observability story is thinner for LLM-specific data | Matches: OTel-standard emission + a documented, separately-installed self-hosted Phoenix — no vendor lock to a hosted SaaS trace backend |
+| Hierarchical multi-agent trace tree | Yes — LangGraph's graph structure maps naturally to nested spans in LangSmith | Partial — DAG structure is visible as workflow steps, but not as LLM-aware AGENT/LLM/TOOL spans | No — asset lineage graph exists but isn't a trace/span concept | TIDE's five-level hierarchy (Milestone→Phase→Plan→Task→Wave) maps directly onto nested AGENT spans — this is the milestone's core bet, and it's a stronger structural fit than any of the three comparables, none of which have a fixed hierarchical-agent-dispatch model to begin with |
+
+**Takeaway:** TIDE's problem shape (a fixed five-level agent-dispatch hierarchy, each level itself an LLM-backed subagent, running as isolated K8s Jobs) doesn't have a close analog among these three. LangGraph Platform is the closest in spirit (standards-based OTel emission, session grouping, self-hostable trace backend of choice) but its unit of work is an in-process graph, not cross-pod K8s Jobs — so its OTel support doesn't have to solve the `traceparent`-across-process-boundary problem TIDE's Job-per-dispatch model requires. Argo and Dagster's observability stories are generic-workflow or asset-lineage flavored, not agent/LLM-native — confirming that OpenInference-on-OTel is a genuine differentiator for a K8s-native orchestrator, not table stakes the ecosystem already provides for free.
 
 ## Sources
 
-**Base-ref selection (MEDIUM-HIGH):**
-- [Dependabot options reference — GitHub Docs](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) (target-branch; version-updates-only)
-- [Argo CD tracking strategies](https://argo-cd.readthedocs.io/en/stable/user-guide/tracking_strategies/) (targetRevision forms)
-- [argo-cd#7282 — "Unable to resolve to a commit SHA"](https://github.com/argoproj/argo-cd/issues/7282) (fail-fast behavior)
-- [argo-workflows#5629 — refs/heads/* rejected](https://github.com/argoproj/argo-workflows/issues/5629); [tektoncd/pipeline#2425 — tag revision handling](https://github.com/tektoncd/pipeline/issues/2425)
-
-**Signed commits (HIGH — official docs):**
-- [About commit signature verification — GitHub Docs](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification); [Using a verified email address in your GPG key](https://docs.github.com/en/authentication/troubleshooting-commit-signature-verification/using-a-verified-email-address-in-your-gpg-key)
-- [Sign commits with GPG — GitLab Docs](https://docs.gitlab.com/user/project/repository/signed_commits/gpg/); [gitlab#29368 — email-mismatch → unverified](https://gitlab.com/gitlab-org/gitlab/-/issues/29368)
-- [GPG/SSH Commit Signatures — Gitea Docs](https://docs.gitea.com/administration/signing)
-- [renovate discussion #22751 — self-hosted verified commits](https://github.com/renovatebot/renovate/discussions/22751); [Signed Renovate commits on Gitea (2026)](https://johanneskueber.com/posts/2026-05-26-sign-renovate-commits/); [GitHub community #50055 — commit signing with GitHub Apps](https://github.com/orgs/community/discussions/50055)
-
-**promptFile patterns (MEDIUM):**
-- [Kubernetes configuration patterns, Part 2 — Red Hat Developer](https://developers.redhat.com/blog/2021/05/05/kubernetes-configuration-patterns-part-2-patterns-for-kubernetes-controllers) (large config → ConfigMap ref; validated config → inline)
-- [ConfigMaps — Kubernetes docs](https://kubernetes.io/docs/concepts/configuration/configmap/) (1 MiB limit)
-
-**Artifact/log surfaces (MEDIUM):**
-- [Configuring Archive Logs — Argo Workflows docs](https://argo-workflows.readthedocs.io/en/latest/configure-archive-logs/) ("does not recommend relying on Argo to archive logs")
-- [argo-workflows discussion #7656](https://github.com/argoproj/argo-workflows/discussions/7656), [#12948](https://github.com/argoproj/argo-workflows/issues/12948), [#8814](https://github.com/argoproj/argo-workflows/issues/8814), [#12759](https://github.com/argoproj/argo-workflows/issues/12759) (fallback bug tail)
-- [Tekton Dashboard logs-persistence walkthrough](https://github.com/tektoncd/dashboard/blob/main/docs/walkthrough/walkthrough-logs.md) (external-logs fallback, "Unable to fetch logs")
-
-**Telemetry nudges (MEDIUM):**
-- [Creating a NOTES.txt File — Helm docs](https://helm.sh/docs/chart_template_guide/notes_files/); [NOTES.txt guide — devopscube](https://devopscube.com/helm-notes-txt-file/) (conditional sections, keep brief)
+- Context7 `/arize-ai/phoenix` — span kinds, common attributes (`session.id`, `user.id`, `metadata`, `tag.tags`), session GraphQL rollups, cost-tracking required attributes, project-routing resource attributes (all HIGH confidence, official docs)
+- [OpenInference Semantic Conventions spec](https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md) — span kind definitions (LLM/TOOL/AGENT/CHAIN/etc.), `graph.node.id`/`graph.node.parent_id` — HIGH confidence, canonical spec
+- [Phoenix Self-Hosting — Kubernetes/Helm](https://arize.com/docs/phoenix/self-hosting/deployment-options/kubernetes-helm) — OCI chart reference, install commands, Postgres bundling — MEDIUM confidence (WebFetch summary; port/resource details not fully confirmed in fetched content)
+- [Phoenix Cost Tracking docs](https://arize.com/docs/phoenix/tracing/how-to-tracing/cost-tracking) — required attributes for cost calc (`llm.model_name`, `llm.provider`, `llm.token_count.*`) — HIGH confidence via Context7
+- [Phoenix Authentication docs](https://arize.com/docs/phoenix/self-hosting/features/authentication) — OSS self-hosted has no auth by default, opt-in via `PHOENIX_ENABLE_AUTH` — MEDIUM confidence (WebSearch summary)
+- [Phoenix Sessions tutorial](https://github.com/arize-ai/phoenix/blob/main/docs/phoenix/tracing/tutorial/sessions.mdx) — `session.id` propagation pattern (Python `using_session`, TS `setSession`) — HIGH confidence via Context7
+- TIDE repo ground-truth: `pkg/otelai/attrs.go`, `pkg/otelai/attrs_test.go`, `internal/otelinit/provider.go`, `charts/tide/values.yaml` (otel block), `internal/subagent/anthropic/stream_parser.go`, `dashboard/web/src/components/TelemetryView.tsx`, `.planning/PROJECT.md` — direct repo inspection, HIGH confidence
+- [Red Hat: Distributed tracing for agentic workflows with OpenTelemetry](https://developers.redhat.com/articles/2026/04/06/distributed-tracing-agentic-workflows-opentelemetry) — general agent-tracing pattern context — MEDIUM confidence (single-source WebSearch summary)
+- [Argo Workflows OpenTelemetry getting-started](https://argo-workflows.readthedocs.io/en/latest/telemetry-getting-started/) — Argo's Collector+Tempo+Prometheus+Grafana pattern, workflow-controller/argoexec span scope — MEDIUM confidence (WebSearch summary)
+- [LangChain: Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry) / [LangSmith OTel blog post](https://blog.langchain.com/end-to-end-opentelemetry-langsmith/) — LangSmith native vs. OTel tracing tradeoffs — MEDIUM confidence (WebSearch summary)
+- [Dagster: Building AI Products That Scale](https://dagster.io/blog/building-ai-products-that-scale) — Dagster's asset-metadata approach to LLM cost/token visibility — LOW-MEDIUM confidence (thin official documentation found; no dedicated OpenLLMetry integration confirmed)
+- [OneUpTime: Environment Variables as Context Propagation Carriers](https://oneuptime.com/blog/post/2026-02-06-environment-variables-context-propagation-carriers/view) — `TRACEPARENT`/`TRACESTATE` env-var carrier pattern for cross-process K8s workloads — MEDIUM confidence (WebSearch summary, pattern is well-established/uncontroversial)
 
 ---
-*Feature research for: TIDE v1.0.7 — First-Run Paper Cuts (Run Integrity & Operator Ergonomics)*
-*Researched: 2026-07-03*
+*Feature research for: LLM/agent trace observability (OpenInference + self-hosted Phoenix) on TIDE, a Kubernetes-native hierarchical agent orchestrator*
+*Researched: 2026-07-15*
+

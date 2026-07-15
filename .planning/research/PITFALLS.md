@@ -1,355 +1,260 @@
-# Domain Pitfalls — v1.0.7 First-Run Paper Cuts: Run Integrity & Operator Ergonomics
+# Domain Pitfalls — v1.0.8 Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix
 
-**Domain:** Adding first-external-run fixes to a shipped Go controller-runtime operator (TIDE v1.0.6)
-**Feature areas covered:** (1) integration-miss gate / git integrate serialization, (2) GPG-signed bot commits via pure-Go openpgp, (3) `spec.git.baseRef` CRD field + CEL, (4) ConfigMap-based artifact persistence for the dashboard artifact view, (5) Claude 5 pricing-table rows, (6) Prometheus setup documentation, plus v1.0.6 tech-debt carry
-**Researched:** 2026-07-03
-**Confidence:** HIGH for codebase-grounded pitfalls (direct inspection of `pkg/git/integrate.go`, `internal/subagent/anthropic/pricing.go`, `cmd/tide-push/main.go`, `api/v1alpha2/`, `charts/`), HIGH for pricing facts (claude-api skill, verified 2026-07-03), MEDIUM for web-verified ecosystem claims (per classify-confidence seam: cross-verified websearch/webfetch)
+**Domain:** Adding OpenTelemetry/OpenInference span emission to a shipped Go controller-runtime operator (TIDE v1.0.7) whose dispatch chain runs across three separate pod types (long-running manager, short-lived per-Task subagent Jobs, short-lived in-namespace reporter Jobs), plus documenting a self-hosted Arize Phoenix install for an 8 GiB dev VM.
 
-**Binding constraints that pitfalls below must not violate:** CRD-`.status`-only persistence (no external DB); the Helm chart is a FIXED contract (binary catches up to chart; schema changes ride a chart version bump); wave-boundary failure semantics stay exact; planner/executor pools stay separately sized; waves are derived, never cached.
+**Researched:** 2026-07-15
+
+**Confidence:** HIGH for codebase-grounded pitfalls (direct inspection of `pkg/otelai/`, `internal/otelinit/provider.go`, `internal/subagent/anthropic/subagent.go`, `internal/harness/redact/`, `cmd/tide-reporter/main.go`, `internal/controller/task_controller.go`, `charts/tide/values.yaml`); HIGH for OTel Go SDK defaults and Phoenix Helm-chart mechanics (Context7-verified against `arize-ai/phoenix` docs + `open-telemetry/opentelemetry-go` source); MEDIUM for LangGraph self-instrumentation propagation specifics (WebSearch-verified against the OTel spec's env-carrier page, but the concrete `openinference-instrumentation-langchain` behavior in TIDE's own future adapter is not yet built, so the failure mode is inferred from the general OTel pattern, not observed).
+
+**Binding constraints these pitfalls must not violate:** D-O5 (no payload-bearing helper on `pkg/otelai`'s public surface — `TestNoPayloadHelperOnPublicSurface` already enforces this at the attribute-construction layer, but does NOT stop a call site from passing raw secret-laden text into the existing `Content` field); CRD-`.status`-only persistence (any "have I emitted this span" guard must not balloon `.status`); never bake a sampler into Go code (`OTEL_TRACES_SAMPLER`/`_ARG` stay env-driven per the existing `TestNoWithSamplerInSource` guard); no subchart dependency / no version coupling to Arize's Helm chart (self-host recipe stays documented-install, not vendored).
 
 ---
 
 ## Critical Pitfalls
 
-### P1: Serializing the integrate race at the wrong layer (file locks on the PVC)
+### Pitfall 1: `events.jsonl` is deliberately unredacted — the reporter is the missing secret/PII scrub boundary
 
 **What goes wrong:**
-The observed race (first external run, 2026-07-03): two same-wave tasks both reached Succeeded, both worktree branches got their authored commit, but only one `tide: integrate` merge landed on the run branch — the other was silently lost, and the run shipped `Complete` missing a declared deliverable. `IntegrateTaskBranches` (`pkg/git/integrate.go`) shells out to `git merge --no-ff` inside a *single shared* integration worktree at `worktrees/run-<branch>/` on the RWO PVC. Two near-simultaneous integrations in the same worktree hit git's single-writer model: the loser either fails loudly on `index.lock` ("File exists") *or* — worse — silently loses work, because the index has one slot per path and operations that read HEAD+index (merge, checkout) don't know another process committed moments earlier. The idempotent worktree-provision check (`strings.Contains(msg, "already exists")` at integrate.go:76) can also mask a half-provisioned worktree from a concurrent racer.
-
-The tempting fix — an `flock`/lockfile on the PVC guarding the integration worktree — trades one race for a worse operational failure: a pod OOM-killed or evicted mid-merge leaves a stale lockfile (a lockfile-existence protocol, unlike a kernel flock, does not release on process death), deadlocking every subsequent integration until a human deletes it. And any future move from RWO to RWX/NFS breaks `flock` semantics entirely.
+The per-Task audit log the milestone plans to parse for `LLMInputMessages`/`LLMOutputMessages` is written by `ParseStream(stdout, eventsFile)` in `internal/subagent/anthropic/subagent.go:311-331`, and the code comment is explicit: *"Phase 4 OpenInference parsing reads this file untouched; we tee every line through ParseStream as it arrives"* (subagent.go:308-310). That file is the **raw** Claude CLI `stream-json` output — it is never passed through `internal/harness/redact.RedactingWriter`, the six-pattern secret denylist (`sk-ant-api03-*`, `sk-*`, `ghp_/ghs_*`, `xox[abp]-*`, `AKIA*`, JWT) that HARN-04 already applies to the *separate* stdout capture path used for git-commit content. Credproxy (`internal/credproxy/doc.go`) only protects TIDE's own `ANTHROPIC_API_KEY` — it says nothing about a secret the *model itself* reads out of the target repo (a committed `.env`, a leaked key in a code comment, a customer credential pasted into a Project outcome prompt) and echoes back into its own output. If the in-namespace reporter naively feeds `events.jsonl` message content into `otelai.LLMInputMessages`/`LLMOutputMessages`, whatever leaked into that stream ships straight into Phoenix's database — bypassing every redaction layer TIDE already built for the git-push path.
 
 **Why it happens:**
-The integration step is invoked from tide-push Jobs (`cmd/tide-push --integrate-task-branches=...`, dispatched via `internal/controller/boundary_push.go` at two call sites) — Job-level concurrency is controlled by the K8s control plane, not by anything on the filesystem, so filesystem locking looks like the local fix.
+The comment that makes `events.jsonl` "untouched" was written for a *different* reason (full-fidelity OpenInference parsing) than the reason it's dangerous (no redaction pass exists on this path at all). It reads as intentional and correct, which makes it easy to build the reporter's span emission directly on top of the raw file without noticing the redaction gap it inherits.
 
 **How to avoid:**
-Serialize at the control plane, where TIDE already has a single writer: the controller. Options in order of preference:
-1. **Single-dispatcher rule:** the controller never has two integrate-carrying push Jobs in flight for the same project. It already tracks Job state; gate dispatch of a new integrate Job on the previous one's terminal state (mirror the D3 in-flight `client.List` count-gate pattern from v1.0.6 Phase 32 — but note that pattern *parks* excess dispatches; here the parked integrate must be *queued and re-dispatched*, not dropped).
-2. **Batch, don't race:** collect the wave's Succeeded task branches and pass them as one ordered `--integrate-task-branches` list to one Job (the loop in integrate.go is already sequential and ordered). This is the degenerate-case fix and preserves wave throughput completely — see P2.
-3. If a filesystem lock is unavoidable, use kernel `flock(2)` (auto-released on process death), never a lockfile-existence protocol, and add a lease TTL anyway.
+Give the reporter its own scrub boundary — reuse `redact.SecretPatterns` (the compiled regexp list, not the streaming `RedactingWriter`, since the reporter operates on already-buffered message strings, not a live stream) as a required pass over `Message.Content` before calling `LLMInputMessages`/`LLMOutputMessages`. Treat this as the span-emission equivalent of credproxy's environment boundary: the reporter is the one place that has both the raw payload and the outbound network hop to an external-ish system (Phoenix), exactly like credproxy is the one place with both the raw key and the outbound HTTP call.
 
-**Warning signs:** A plan that adds `os.OpenFile(lockpath, O_CREATE|O_EXCL)` or a `.lock` file next to the bare repo; any design that assumes "the PVC serializes access"; integrate logic that catches and ignores `index.lock` errors.
+**Warning signs:** A reporter/parser PR that calls `otelai.LLMInputMessages` with content read straight from `events.jsonl` with no intermediate transform; no new test asserting a known secret pattern is absent from emitted span attributes; `redact` package imported nowhere under `internal/reporter/`.
 
-**Phase to address:** Integration-miss gate phase (the run-integrity headline). This is the core mechanism decision — make it explicitly at planning, not mid-execution.
+**Phase to address:** LLM message-array spans (in-namespace emitter) — the phase that reads `events.jsonl` and calls the OpenInference message-array helpers.
 
 ---
 
-### P2: Over-serialization — locking task execution instead of just the run-branch write
+### Pitfall 2: Full message-array inlining collides with OTLP/gRPC's 4 MB message ceiling — and Phoenix's own docs call this out as a top pitfall
 
 **What goes wrong:**
-The serialization fix creeps upward: a mutex/gate ends up around task Job dispatch or wave advancement instead of around the integrate step alone. Wave parallelism — the whole point of derived waves — silently degrades to sequential execution. On a 6-task wave that's a 6× wall-clock regression, and it violates the spec's wave-boundary contract (same-wave siblings were declared independent and must run concurrently).
+`pkg/otelai.LLMInputMessages`/`LLMOutputMessages` flatten a message slice into `2*N` string-valued attributes with **no size guard** (`pkg/otelai/attrs.go:94-107` — the loop has no length check). A single Task's prompt can already legitimately include rendered repo context, a diff, or planner instructions; if the reporter inlines the full `events.jsonl` message content rather than deferring to `ArtifactPath`, one large Task can produce a span whose attribute payload alone approaches or exceeds gRPC's default 4 MB max-receive-message size. Arize's own docs name this exact failure mode: *"gRPC has message-size limits, and spans exceeding 4 MB (often due to large attributes like full document text ... can hit these limits"* — and the failure is a batch-level `ResourceExhausted` rejection, not a graceful per-span truncation, so a single oversized span can cause the **whole batch** (potentially several unrelated spans queued in the same `BatchSpanProcessor` flush) to be dropped.
 
 **Why it happens:**
-"Serialize the integration" is ambiguous about scope. The safest-*looking* interpretation (serialize everything that touches git) includes the per-task worktree commits in `internal/harness/commit.go` — but those write to *per-task* worktrees/branches and don't race each other; only the shared run-branch integration worktree is contended.
+D-O5 already anticipated *some* form of this ("never inline LLM payload as a span attr") and locked the public surface to exactly two message-array helpers plus `ArtifactPath` — but the enforcement test (`TestNoPayloadHelperOnPublicSurface`) only forbids a *new named helper*; it does nothing to stop a call site from passing the full raw content into the existing `Content` field. The milestone's own target-feature text ("LLM message-array spans ... including full LLM input/output message arrays") explicitly asks for the risky shape.
 
 **How to avoid:**
-State the invariant precisely in the plan: **tasks execute and commit to their own worktree branches fully in parallel; only merges into the run branch serialize.** Integration is O(seconds) per task; serializing it costs nothing measurable. Add an integration-tier test with a 2-parallel-task wave (the todo already calls for this repro in the kind suite) and assert both task pods overlapped in time while both integrate commits landed.
+Resolve D-O5's payload-boundary decision with an explicit size threshold, not a binary "always inline" choice: inline via `LLMInputMessages`/`LLMOutputMessages` only under a documented byte ceiling (comfortably below 4 MB with room for the rest of the batch — Phoenix's docs suggest truncating via `TraceConfig` or chunking on the server side, but TIDE's own emitter is the cheaper place to cap it), and fall back to `ArtifactPath` for anything larger. Make the threshold a named constant next to `pkg/otelai`'s existing constants so it is discoverable and testable.
 
-**Warning signs:** A semaphore acquired before `r.Create(job)` for task Jobs; wave N+1 tasks observably starting one-at-a-time; test assertions that pass with sequential execution.
+**Warning signs:** No byte-length check anywhere between `events.jsonl` parsing and `LLMInputMessages` construction; integration tests only exercise small fixture prompts; no test that dispatches (or synthesizes) a multi-hundred-KB message and asserts graceful `ArtifactPath` fallback instead of an OTLP export error.
 
-**Phase to address:** Integration-miss gate phase — encode the invariant in the phase's success criteria.
+**Phase to address:** LLM message-array spans (in-namespace emitter) — this is the D-O5 payload-boundary decision the milestone already flags as required.
 
 ---
 
-### P3: A non-idempotent completeness gate — counting merge commits instead of asking git about reachability
+### Pitfall 3: Reconcile-loop semantics give span creation no natural idempotency — unlike Job `Create`, duplicate span emission is not self-healing
 
 **What goes wrong:**
-The new gate ("every Succeeded task's worktree branch has a merge commit reachable from the run branch before boundary push / Complete") gets implemented as "count `tide: integrate` merge commits == count Succeeded tasks." That breaks three ways:
-1. **Retry double-merge:** re-running `git merge --no-ff <already-merged-branch>` prints "Already up to date" and creates *no* commit — a retried integration after a partial failure yields fewer merge commits than tasks, permanently failing the gate even though every branch IS integrated.
-2. **Empty-diff tasks:** a task can succeed with no file changes (its branch tip == the base). There is no merge commit to find; the gate must accept an explicit empty-diff marker (the todo already anticipates this).
-3. **Restart re-derivation:** per the resumability constraint, a fresh controller must be able to re-evaluate the gate from git + the completed-task set alone — not from an in-memory "merges I performed" list, and not from anything cached in `.status` (waves are derived, never cached; the same discipline applies here).
-
-**How to avoid:**
-The idempotent predicate is `git merge-base --is-ancestor <task-branch-tip> <run-branch>` (exit 0 = integrated), evaluated per Succeeded task at gate time. It is true after a `--no-ff` merge, true after a retried no-op merge, true for a fast-forward, and rederivable after restart. Record the gate *outcome* as a status condition (with the failing task UIDs in the message), but always recompute from git.
-
-**Warning signs:** Gate logic that greps `git log` for the `tide: integrate` message format; a `.status` field storing "integratedTaskUIDs" that the gate trusts without re-verification; gate failures on tasks whose diff was empty.
-
-**Phase to address:** Integration-miss gate phase. Also stamp `status.git.lastPushedSHA` here (the lease bookkeeping shares the gap per the findings) — and note its update is a Project-status write racing the usage-rollup writers, so it needs the same `RetryOnConflict` + `MergeFromWithOptimisticLock` pattern as the W1 tech-debt item (see P12).
-
----
-
-### P4: Signing the integrate merge commits — go-git can't do it, and the obvious workarounds silently break history
-
-**What goes wrong:**
-The signed-commits plan says "sign at all three commit sites via go-git `CommitOptions.SignKey`." Two of the three sites (harness `internal/harness/commit.go`, tide-push staging commits via `pkg/git/commit.go`) use go-git and can take `SignKey`. The third — the integrate merge commits in `pkg/git/integrate.go` — **shells out to the git CLI** precisely because go-git v5 only implements `FastForwardMerge` (`ErrUnsupportedMergeStrategy` for everything else; this is the documented D-01 rationale in the file header). The git CLI signs via an external `gpg` program — which the "no gpg binary in images" decision forbids. Naive workarounds each fail:
-- `git merge --no-commit` + go-git `wt.Commit(...)` with SignKey: go-git's commit builds parents from HEAD only — it does not read `MERGE_HEAD` — so the "merge" commit gets one parent, silently flattening the wave-parallelism topology the `--no-ff` design exists to preserve (and breaking P3's ancestry predicate for the merged branch).
-- Leaving integrate commits unsigned: on repos with branch protection requiring signed commits, the push is rejected outright — TIDE hard-blocks (the exact scenario the feature exists to fix); on ordinary repos the run branch shows a mix of Verified and Unverified commits.
+`TaskReconciler` already requeues itself constantly while a Task is in flight — `internal/controller/task_controller.go` alone has requeue delays of 5s, 10s, and 30s scattered across more than half a dozen gate branches. Every one of those re-entries re-runs the reconcile function from the top. TIDE's existing dispatch code tolerates this because Job creation is idempotent-by-construction (`BuildReporterJob`'s deterministic `tide-reporter-<parentUID>` name plus an `AlreadyExists`-is-success check, mirrored across `push_helpers.go`). **Span creation has no equivalent.** `tracer.Start(...)` mints a brand-new random span ID (and, if called with no propagated parent context, a brand-new random trace ID) on every call — there is no "AlreadyExists" outcome at the OTel API level. If the "create the dispatch span" logic is wired into the reconcile body without a guard keyed off something more durable than the in-memory reconcile invocation, a single real dispatch can emit dozens of near-duplicate spans into Phoenix, and — worse — if any of those reconcile passes fail to correctly propagate the *same* parent trace context, some of those duplicates become entirely disconnected root traces (trace fragmentation: what should be one dispatch-chain tree per run shows up as several unrelated stubs).
 
 **Why it happens:**
-"Three commit sites" reads as three instances of the same change; they are two go-git sites and one CLI site with a fundamentally different signing path.
+Controller-runtime is level-triggered by design — that's a feature for reconciling state, not a request/response model where "start span, do work, end span" happens exactly once per invocation the way it does in a typical HTTP handler. Code ported mentally from that request/response model (the shape nearly all OTel Go examples use) breaks silently here.
 
 **How to avoid:**
-Decide the mechanism at planning, as a first-class design choice. Viable options:
-1. **Pure-Go `gpg.program` shim:** ship a tiny Go binary (the images already carry Go binaries) that implements the `gpg --status-fd=2 -bsau <key>` interface git invokes for signing, backed by ProtonMail/go-crypto; wire it via `git -c gpg.program=/usr/local/bin/tide-gpg-shim merge ...`. Keeps the CLI merge, keeps `--no-ff`, no gpg binary.
-2. **Plumbing-level merge commit via go-git:** run `git merge --no-commit --no-ff`, read the resulting index tree and `MERGE_HEAD`, then construct the merge commit object *manually* (two `ParentHashes`, signed) via go-git's object storage. Correct but the most code; must be tested against conflict states.
-3. **Explicitly scope v1.0.7 to sign only the two go-git sites** and document the integrate-commit gap — acceptable only if the docs say "require-signed-commits branch protection is not yet supported," which undercuts the feature's stated purpose. Prefer 1.
+Gate span creation the same way Job creation is already gated: only create the dispatch span on the specific state-transition edge (e.g., the reconcile pass that *first* creates the dispatch Job), and only close/end it on the specific edge where the Job reaches a terminal state — using existing status-condition transitions as the guard, not "did I already do this" checks against ephemeral in-memory state. Persist the minimum needed to resume the span across reconciles (the propagated `SpanContext`, serialized as a W3C `traceparent` string) somewhere already durable — the envelope or a status field already being added for the trace-context contract — rather than inventing new bookkeeping.
 
-**Warning signs:** A PLAN.md that lists `pkg/git/integrate.go` in `files_modified` with only a `SignKey` plumb-through; a test that asserts signatures on task commits but never inspects an integrate merge commit; merge commits with one parent appearing on the run branch.
+**Warning signs:** Span-emission code called unconditionally near the top of `Reconcile()`; no test that calls `Reconcile()` twice for the same object and asserts exactly one span was started; Phoenix showing the same `tide.dispatch.<level>` span name many times per single real dispatch, most with near-zero duration.
 
-**Phase to address:** Signed-commits phase — flag it `research: true`; the shim-vs-plumbing choice deserves a spike.
+**Phase to address:** Dispatch-chain span emission (manager) — the phase that hooks span creation into the reconcilers.
 
 ---
 
-### P5: Signed-but-Unverified — key/identity mismatches that only surface on the git host
+### Pitfall 4: Short-lived Jobs drop spans on exit — the manager's flush discipline does not automatically extend to `tide-reporter`
 
 **What goes wrong:**
-Everything signs cleanly in-cluster, but GitHub/GitLab/Gitea still show **Unverified**. The signature is cryptographically fine; the *verification policy* fails. Verified (MEDIUM confidence, GitHub docs): the **committer** email (not author) must match an email in the signing key's UID identities *and* be a verified email on the account that uploaded the public key. Failure modes specific to this codebase:
-- `cmd/tide-push/main.go:134` hardcodes `tide-bot@tideproject.k8s` — a non-routable domain no account can verify. Until bot identity is uniformly configurable across all three sites (the todo's second half), signing produces Unverified badges by construction.
-- The three sites read identity from different places today (env in harness/integrate, hardcoded in tide-push); if one site's email drifts from the key's UID, only that site's commits show Unverified — a confusing partial state.
-- Expired keys or expired signing subkeys: ProtonMail/go-crypto's signing-key selection returns no usable key → hard error at commit time, deep inside a Job, hours into a run.
-- Container clock skew: a signature timestamped before the key's creation time (or after expiry) verifies as invalid. VM-based nodes (minikube on macOS — the actual first-run host) drift.
-
-**How to avoid:**
-- Make identity + key a single configuration unit: one Secret ref, one bot name/email pair, plumbed identically to all three sites; validate at Project admission (or first reconcile) that the configured email appears in the key's UIDs — fail early with a condition, not at commit #47.
-- Document the machine-account recipe (the todo's `docs/project-authoring.md` item): create machine user → verify email → upload public key → the committer email TIDE must be configured with. GitHub noreply addresses work and avoid needing a routable domain.
-- Reject expired keys and passphrase-protected keys at load time with explicit errors (see P6).
-- Verification test must go end-to-end: `git verify-commit` in-cluster proves the signature; only a live push to a real host proves the *badge*. Include one manual verify step against a real GitHub repo in UAT.
-
-**Warning signs:** UAT criteria that say "commits are signed" without "commits show Verified on the host"; different `TIDE_BOT_EMAIL` defaults across the three binaries after the change.
-
-**Phase to address:** Signed-commits phase (identity unification is a prerequisite task, not a follow-up).
-
----
-
-### P6: Passphrase-protected and multi-entity armored keys — go-git won't decrypt, and picking `entities[0]` blindly
-
-**What goes wrong:**
-go-git's `SignKey` contract (HIGH confidence, pkg.go.dev): the private key "must be present and already decrypted." An operator exports with `gpg --export-secret-keys --armor` — which preserves the passphrase protection — and TIDE fails at signing time with an opaque go-crypto error. Separately, `openpgp.ReadArmoredKeyRing` returns an `EntityList`; keyrings routinely contain multiple entities, and an entity may have a certify-only primary with a signing subkey. Grabbing `entities[0]` and its primary private key signs with the wrong key material or fails on a sign-incapable primary.
-
-**How to avoid:**
-- v1.0.7 scope decision: **reject passphrase-protected keys with a clear condition message** ("export an unprotected key: `gpg --export-secret-keys` after removing the passphrase, or generate a dedicated no-passphrase signing key for the machine account"). Supporting a passphrase means a second Secret key (`GIT_SIGNING_KEY_PASSPHRASE`) and calling `entity.PrivateKey.Decrypt()` *plus every signing subkey's* `Decrypt()` — fine as a follow-up, silent-failure-prone as an unplanned add-on.
-- Select the signing entity/key deliberately: iterate the EntityList, use go-crypto's signing-key selection (validity at current time, sign-capable), and error if zero or >1 candidates unless configured.
-- Load and validate the key **once at reconcile/admission**, not per-commit — a bad key should surface as a Project condition before any subagent spends tokens.
-
-**Warning signs:** `keyring[0]` in the diff; no test fixture with (a) passphrase-protected key, (b) expired key, (c) two-entity keyring; signing errors that only appear in Job pod logs (which GC — see P14).
-
-**Phase to address:** Signed-commits phase.
-
----
-
-### P7: Signing key exfiltration — the harness commit site runs inside pods executing LLM-authored code
-
-**What goes wrong:**
-"Sign at all three commit sites" mounts the armored private key (via the Secret ref) into the **task executor pod** — the same pod where a Claude-driven subagent runs arbitrary tool commands against the workspace. A prompt-injected or simply misbehaving agent can read the key material (`cat` the mounted Secret, `env`) and exfiltrate it in a commit, artifact, or network call. The key then signs *anything* as the trusted bot identity — the feature meant to increase trust becomes a signing oracle.
+`internal/otelinit/provider.go` builds the SDK `TracerProvider` with `sdktrace.WithBatcher(exp)` — the OTel Go SDK's default `BatchSpanProcessor` batches for up to 5 seconds (`DefaultScheduleDelay`) before exporting. `cmd/manager/main.go` gets this right today: it captures `otelShutdown` from `otelinit.NewTracerProvider` and explicitly `defer`s a bounded-context `Shutdown` call tied to `ctrl.SetupSignalHandler()` (main.go:260-284), so the batch processor flushes before the long-running process exits. **`cmd/tide-reporter/main.go` has none of this scaffolding.** It is a genuinely one-shot binary — parse flags, do the work, `os.Exit` with 0/1/2 — with no signal-handled shutdown path today. If a future change simply calls `otelinit.NewTracerProvider()` inside `tide-reporter`'s `main()` to start emitting the reporter-synthesized LLM spans, and does not *also* copy the manager's deferred-`Shutdown`-before-exit pattern, every reporter run will construct spans that never leave the process — Phoenix will show dispatch spans (from the long-running manager) with no LLM children at all, and it will look like the emitter never ran, not like a flush bug.
 
 **Why it happens:**
-The three commit sites have different trust levels: integrate and tide-push run TIDE-controlled binaries in TIDE-controlled Jobs; the harness commit happens in the subagent pod *after* untrusted code executed in the same filesystem/process tree.
+The manager's correct pattern is buried in a `main.go` most reporter-focused work won't touch; `otelinit.NewTracerProvider` returns a `ShutdownFunc` that is trivially easy to `_ =` away or forget entirely on a binary whose only existing exit paths are three bare `os.Exit(N)` calls.
 
 **How to avoid:**
-Options, decide at planning:
-1. **Sign only at integrate + tide-push** (controller-trust sites). Task worktree commits stay unsigned; every commit *reachable from the pushed run branch tip via first-parent* is a signed merge/staging commit. Caveat: "require signed commits" branch protection checks *all* commits on the branch, so this still fails hard-protected repos — pair with option 2 if that matters.
-2. Restructure the harness so the commit happens in a separate step/container after the agent process exits (init/sidecar split or a post-step in the Job), so the key is never mounted while agent code runs.
-3. Accept and document the risk explicitly (single-operator clusters, key scoped to a machine account with access to only the target repo). Minimum bar: the docs must say the signing key's blast radius is the machine account.
-Whichever option: mount the Secret only into containers that need it, never into the subagent container's env.
+Any binary that calls `otelinit.NewTracerProvider` MUST call the returned `ShutdownFunc` with a bounded context on every exit path (success, generic failure, and invariant-violation) before the process returns — not just the success path. Consider adding a `TestReporterCallsTracerShutdown` source-grep test mirroring the existing `TestNoWithSamplerInSource` pattern so this is enforced the same way D-O5 and Pitfall 24 already are.
 
-**Warning signs:** The chart mounting `git.signingKeySecretRef` into the subagent container spec; docs recipe that suggests reusing a personal GPG key.
+**Warning signs:** `tide-reporter`'s exit paths call `os.Exit` directly instead of returning through a single `defer`-friendly `run()` (worth checking — some exit paths may already bypass `defer` entirely, which would defeat even a correctly-placed `defer shutdown()`); Phoenix showing dispatch spans with zero children; no explicit `Shutdown` call anywhere under `cmd/tide-reporter/`.
 
-**Phase to address:** Signed-commits phase — this is a scope-defining decision point (ASK-FIRST per operating notes).
+**Phase to address:** LLM message-array spans (in-namespace emitter) — this is exactly the phase that turns `tide-reporter` from a K8s-API-only binary into an OTel-emitting one.
 
 ---
 
-### P8: `baseRef` silently pruned by a stale CRD schema — the chart-skew trap
+### Pitfall 5: Retroactive span synthesis across three pods' clocks can render visually "broken" traces in Phoenix
 
 **What goes wrong:**
-CRDs ship in a **separate chart** (`charts/tide-crds`) from the manager (`charts/tide`). An operator upgrades the app chart/image to 1.0.7 but not the CRD chart (or Helm's crds-handling means the schema never updated). The 1.0.7 CLI/controller sets `spec.git.baseRef`; the API server's structural-schema pruning **silently drops the unknown field** — no error, no warning. The run branches from HEAD, and the operator only notices when the run's diff is against the wrong base. Same trap for any new optional field this milestone adds.
+The dispatch chain spans three separate pods with three separate clocks: the manager (creates the dispatch span, e.g. at Job-create time), the subagent Job pod (writes `events.jsonl` with its own wall-clock timestamps per stream event), and the reporter Job pod (runs later, in a different pod, and is the one that will call `span.Start`/`span.End` with explicit historical timestamps reconstructed from `events.jsonl` to synthesize the LLM child spans). Explicit timestamps (`trace.WithTimestamp(...)` on start, an explicit end time on `span.End`) do not interact with the sampler (sampling is a trace-ID hash, not a time-based decision) — but they are exactly as trustworthy as the clock that produced them. Any meaningful clock skew between the subagent pod's node and the reporter pod's node (or between either and the manager's node, if the dispatch span's own start/end times are also stamped from a different clock) can put a synthesized LLM child span's timestamps outside its parent dispatch span's `[start, end]` window. Phoenix (like every trace UI) renders that as a visibly broken waterfall — child bars extending past the parent, or negative-looking durations — which reads as "the instrumentation is buggy" even though every individual span's *content* is correct.
 
 **Why it happens:**
-Pruning is by design for structural schemas; unknown fields are removed, not rejected. Two-chart distribution makes version skew an ordinary operator mistake.
+Normal OTel instrumentation creates and ends spans in real time on one machine, so this class of bug doesn't exist by construction. TIDE's design is different on purpose (the reporter can't emit spans as the LLM call happens — it isn't even running yet) — that's a legitimate three-pod retroactive-synthesis pattern, but it inherits every synchronized-clocks assumption baked into how trace-viewer UIs render span nesting.
 
 **How to avoid:**
-- INSTALL/upgrade docs: CRD chart upgrades **first**, always, with the matching version (this is the operational meaning of "binary catches up to chart").
-- Cheap runtime guard: when the controller resolves a Project and `spec.git.baseRef` semantics matter, it reads the object the API server stored — if the CLI is the setter, have `tide` CLI read back the applied object and warn when the field it sent is absent. Alternatively (better): the controller can check the CRD's served schema for the field at startup and set a degraded condition.
-- The kind-suite regression: apply a 1.0.6-schema CRD + 1.0.7 Project manifest and assert the failure mode is *loud*.
+Prefer monotonic, self-consistent timestamps over multi-clock ones where possible: derive the dispatch span's end time from the *same* source (`events.jsonl`'s own last-event timestamp, or the Job's `completionTime` as read by the same reconciler that created the span) rather than "whenever the reconciler happened to observe completion." If K8s NTP/chrony skew across nodes is a real risk in the target clusters (kind's single-node dev clusters won't show this; a multi-node production cluster might), document it as a known limitation of the synthesis approach rather than silently trusting it. At minimum, clamp synthesized child-span timestamps to fall within the parent's observed window before calling `span.End`, so a clock anomaly degrades to "slightly imprecise" rather than "visually inverted."
 
-**Warning signs:** `kubectl get project -o yaml` missing a field the manifest set; support reports of "baseRef ignored".
+**Warning signs:** No test asserts synthesized child-span timestamps are `>= parent.start` and `<= parent.end`; the end-to-end proof screenshot is captured on a single-node kind cluster only (where this bug class can't surface) with no multi-node validation noted anywhere.
 
-**Phase to address:** baseRef phase (and note it generically for promptFile if that lands as a spec field).
+**Phase to address:** End-to-end proof — this is exactly the kind of defect that only surfaces when a live trace tree is actually rendered and inspected, not from unit tests of the attribute helpers.
 
 ---
 
-### P9: `baseRef` dropped in the v1alpha1⇄v1alpha2 conversion round-trip
+### Pitfall 6: `parentbased_traceidratio` at the chart's default 0.1 is a per-*run* coin flip, not a per-span filter — Phoenix will look empty on 9 of 10 single-run demos
 
 **What goes wrong:**
-`v1alpha2` is the storage version (`+kubebuilder:storageversion` across `api/v1alpha2/*_types.go`) and `v1alpha1` is still served with conversion in place. Adding `BaseRef` only to `v1alpha2.GitConfig` means any client interaction through the v1alpha1 endpoint (an old CLI, stored automation manifests, `kubectl get project.v1alpha1...` + re-apply) round-trips storage→v1alpha1→storage and **drops the field** unless the conversion carries it. Silent, intermittent, and dependent on which apiVersion each client speaks — the nastiest kind of drift.
+The chart default (`charts/tide/values.yaml`, `otel.tracesSampler = parentbased_traceidratio`, `otel.tracesSamplerArg = "0.1"`) is documented in `docs/observability.md` and enforced via Pitfall 24 (`internal/otelinit/provider.go` explicitly must not call `WithSampler` in code). Because the milestone's design has the manager create ONE root dispatch span per run (per the runtime-neutrality constraint: "manager creates the dispatch span and injects W3C `traceparent`... so synthesized and native spans parent identically") and every other span in the entire Milestone→Phase→Plan→Task tree descends from it via propagated context, `ParentBased` sampling makes exactly **one** sampling decision for the **entire run** — the ratio sampler evaluates the root trace ID once, and every descendant inherits that single sampled/not-sampled verdict. At `arg=0.1`, roughly 9 out of 10 single-project runs will produce **zero** spans in Phoenix, not "10% of the expected spans." An operator running the milestone's own documented quickstart once, on one project, has a 90% chance of concluding the feature doesn't work.
+
+**Why it happens:**
+`parentbased_traceidratio` is usually explained (and usually behaves) as "sample X% of requests" in request/response systems with many independent root traces per process lifetime. TIDE's dispatch-chain design deliberately collapses an entire multi-hour run into one trace, which turns the same sampler into an entirely different statistical object: a single low-probability event gating the whole run's observability, not a smoothing knob over many events.
 
 **How to avoid:**
-Add the field to **both** versions and both conversion directions (the mechanical option, preferred over annotation-preservation gymnastics for a simple string field). Add a round-trip fuzz/unit test for GitConfig conversion — kubebuilder's conversion test scaffolding covers exactly this. Grep the conversion functions for every new field this milestone adds before closing the phase.
+The install/quickstart documentation (and the milestone's own end-to-end proof run) must explicitly override `tracesSamplerArg=1.0` (or `otel.tracesSampler=always_on`) for first-run verification and any single-project demo, with an explicit callout that `0.1` is a steady-state/production default meant for clusters running many concurrent projects, not a single dogfood run. Consider also documenting per-signal guidance: always-sample runs that hit a `BillingHalt`/`FailureHalt` condition (rare, high-value-to-debug) versus ratio-sample routine successful runs — noted as a candidate for the tail-sampling collector already flagged in `docs/observability.md`'s "What's coming" section, not a v1.0.8 requirement.
 
-**Warning signs:** New field present in only one `api/v1alphaN/project_types.go`; conversion functions untouched in the diff that adds a spec field.
+**Warning signs:** The end-to-end proof's install command reuses the chart's bare defaults; the observability doc's Phoenix section doesn't mention overriding `tracesSamplerArg`; a bug report reads "Phoenix shows nothing" filed against a real, successful run.
 
-**Phase to address:** baseRef phase.
-
----
-
-### P10: CEL/defaulting on the new optional field breaking existing stored objects and SSA ownership
-
-**What goes wrong:**
-Three related traps when adding validated optional fields to a served CRD under upgrade:
-1. **CEL must guard absence:** a rule like `self.baseRef.matches(...)` errors on objects without the field; every rule touching an optional field needs `!has(self.git.baseRef) || ...`. Kubebuilder markers make this easy to forget because the rule sits on the parent struct.
-2. **Ratcheting doesn't cover transition rules:** CRD validation ratcheting is GA in 1.33 (TIDE's floor), so a new rule that stored objects violate won't block untouched-field updates — *except* rules referencing `oldSelf`, which are never ratcheted (MEDIUM confidence, KEP-4008). An immutability rule (`self == oldSelf`) on baseRef would be reasonable (changing the base mid-run is nonsense) but will fire on adopted/imported objects the moment any writer touches the field — including a defaulting mutation.
-3. **Defaulting surprises under SSA:** giving baseRef a `+kubebuilder:default` (e.g. `""`) materializes the field on every object at next write, changes "absent means HEAD" into "empty-string means HEAD" (two states, one meaning — CEL and controller logic must now handle both), and under server-side apply the API server's defaulted value competes for field ownership with whatever manager applied the spec. Keep **absent** as the only "use HEAD" encoding: no default marker, `omitempty`, nil-safe controller reads.
-
-**How to avoid:** As above per trap; plus validate against a cluster upgraded *from* 1.0.6 state in the kind suite (apply 1.0.6 Projects, upgrade CRDs, exercise updates). Prefer rejecting unresolvable refs at **reconcile with a clear condition** (the todo's stated design) over trying to validate ref-existence in CEL — CEL cannot see the remote repo, and pushing that check into admission would just fail with a worse message.
-
-**Warning signs:** `kubectl apply` on a pre-existing Project failing after the CRD upgrade; `metadata.managedFields` showing two managers owning `spec.git.baseRef`; CEL cost-budget errors on the Project CRD (rules on large structs multiply).
-
-**Phase to address:** baseRef phase.
+**Phase to address:** Self-hosted Phoenix surface (documented-install posture) for the doc fix; End-to-end proof for catching it live before it ships.
 
 ---
 
-### P11: ConfigMap artifact persistence — etcd caps, informer-cache blow-up, and ownership/GC mistakes
+### Pitfall 7: Double-instrumentation when a self-instrumenting runtime (LangGraph) doesn't receive the propagated trace context
 
 **What goes wrong:**
-If the dashboard artifact view lands on the "reporter writes each artifact into a ConfigMap" transport (one of the three options in the todo), four traps stack:
-1. **Size:** etcd's ~1.5 MiB limit is on the whole *request* (object + envelope); practical ConfigMap payload ceiling is ~1 MiB. `PLAN.md` and `children/*.json` grow with plan complexity — a 44-plan import-scale run would produce artifacts that flirt with the cap. Un-capped writes fail with `etcdserver: request is too large` *from the reporter Job*, failing a run over a UI feature.
-2. **Manager cache:** the first `client.Get` of a ConfigMap through the manager's default (cached) client starts an informer that lists-and-watches **all ConfigMaps in the watch namespace(s)** — now including every large artifact CM — ballooning manager memory. Use `cache.Options.ByObject[&corev1.ConfigMap{}] = {Label: tideArtifactSelector}` or read via `mgr.GetAPIReader()` (uncached) on demand; the dashboard's chi server can also just use the uncached reader since it's a low-QPS human surface.
-3. **Ownership/GC:** owner references must point at a **same-namespace** namespaced owner; a cross-namespace ownerRef makes GC treat the owner as absent and deletes the CM. Own the artifact CM by the in-namespace CR (Phase/Plan) whose envelope produced it, so the existing owner-cascade cleans up; label with the CR UID for the dashboard query (UIDs fit the 63-char label-value limit).
-4. **Truth drift (PERSIST-02 smell):** ConfigMaps are a *display cache* of PVC artifacts. The moment resume/import logic reads a CM instead of the PVC artifact, the artifacts-as-source-of-truth constraint is violated. The dashboard reads CMs; the orchestrator never does.
+The milestone's own runtime-neutrality constraints already name this risk and propose the fix (a self-instrumenting capability flag so the reporter skips synthesis for runtimes that emit natively). The pitfall is in the failure mode if that flag or the underlying context handoff is wrong in either direction: (a) if the LangGraph subagent's `openinference-instrumentation-langchain` auto-instrumentation is not given the manager's propagated trace context, it starts its **own** root trace with a fresh random trace ID — the dispatch span (from the manager) and the LLM spans (natively emitted by LangGraph) end up in two disconnected traces in Phoenix instead of one tree, defeating the entire "dispatch-chain span emission" goal for that runtime; (b) if the capability flag is missing, stale, or defaults wrong, the reporter *also* synthesizes LLM spans from whatever event log LangGraph's runtime leaves behind — producing genuine duplicate spans (double-counted tokens/cost in any Phoenix aggregation that sums `llm.token_count.*` across a project).
 
-**How to avoid:** Cap at a fixed budget (e.g. 512 KiB per artifact), truncate tail-first with an explicit `--- truncated: full artifact at <pvc path> ---` marker the UI renders (see UX table), configure the cache selector in the same PR that adds the first ConfigMap read, and write an envtest asserting a >1 MiB artifact produces a truncated CM rather than a failed reporter Job.
-
-**Warning signs:** Manager RSS jump after the dashboard phase merges; reporter Job failures mentioning "request is too large"; `kubectl get cm -A | wc -l` growth without corresponding cleanup after milestone archive.
-
-**Phase to address:** Dashboard artifact-view phase — transport choice (reader-Job vs ConfigMap vs git) is the phase's opening decision; if ConfigMap wins, these four are the acceptance checklist.
-
----
-
-### P12: Pricing rows that fix the overcount but introduce an *undercount* on cache writes — and a table that quietly re-rots
-
-**What goes wrong:**
-The headline fix is mechanical: `claude-sonnet-5` is missing from `priceTable`, so every Sonnet-5 dispatch bills at the conservative fable-5 tier ($10/$50) — the observed 2.8× overcount ($10.86 tallied vs $3.84 actual). But three subtler traps ride along (pricing facts HIGH confidence, claude-api skill 2026-07-03):
-1. **Cache-write TTL multiplier:** the table hard-codes `cacheWrite = 1.25× input` — that's the **5-minute** TTL rate; **1-hour TTL writes cost 2×**. The stream parser (`internal/subagent/anthropic/stream_parser.go`) reads only the total `cache_creation_input_tokens` and has no `ephemeral_5m`/`ephemeral_1h` breakdown. If the `claude` CLI dispatch surface writes 1h-TTL cache entries, TIDE *undercounts* cache-write spend by 1.6× — the first undercount in a system whose stated invariant is "never silently under-report spend" (T-09-01). Verify empirically which TTL the CLI uses (the credproxy tee from the CACHE-01 spike is the ready-made instrument), or price cache writes at 2× as the conservative bound.
-2. **Sonnet 5 intro pricing:** the sticker is $3/$15/MTok, but an introductory **$2/$10 applies through 2026-08-31**. A correct sticker-priced table still overcounts ~1.5× vs the console until September. Encode sticker prices (conservative direction is correct for cap enforcement) but *document the expected console delta* in the row comment — otherwise the next tally-vs-console comparison re-files this as a bug.
-3. **Fallback visibility:** the `pricing: unknown model` warning goes to the subagent pod's stderr — pods that Job-TTL GC (the exact blind spot the log-drawer fix addresses). The first run's operator only found it by luck. Surface table misses as a Prometheus counter and/or a Project condition, not just stderr; the conservative fallback should be loud at the *project* level.
-Also: the table exact-matches the resolved model string. Dated IDs (`claude-haiku-4-5-20251001`) or provider-prefixed IDs (`anthropic.claude-…` on Bedrock, when that backend lands) miss the table and silently hit the fallback.
-
-**How to avoid:** Add rows `claude-sonnet-5` ($3/$15), keep `claude-fable-5` ($10/$50) and `claude-opus-4-8` ($5/$25) — both already present and correct — with cache read 0.10× / write 1.25× *after* verifying the CLI's cache TTL; extend `hack/check-pricing-drift.sh` (per D-03 it drift-checks weekly) to cover the new rows and the intro-pricing expiry date; add the unknown-model metric.
-
-**Warning signs:** `grep 'pricing: unknown model'` non-empty in any run's subagent logs; `BudgetStatus.CostSpentCents` diverging >2× from console; cache-heavy runs (post-CACHE-F1) tallying *below* console.
-
-**Phase to address:** Pricing-table phase (small, but pair it with the telemetry surface so the fallback is observable).
-
----
-
-### P13: Prometheus docs that produce a ServiceMonitor nobody scrapes
-
-**What goes wrong:**
-The operator follows the new INSTALL.md telemetry step: installs kube-prometheus-stack, sets `prometheus.enabled=true`, the ServiceMonitor renders — and every dashboard panel stays empty. kube-prometheus-stack defaults `serviceMonitorSelectorNilUsesHelmValues: true`, meaning Prometheus selects **only** ServiceMonitors labeled `release: <prometheus-helm-release-name>` (MEDIUM confidence, prometheus-community #1631 et al.). TIDE's ServiceMonitor carries TIDE's labels, not the Prometheus release's, so it is silently ignored. This is the single most-reported failure mode of the entire kube-prometheus-stack ecosystem, and a doc step that omits it ships a broken recipe.
-
-Second-order trap: templating the ServiceMonitor behind `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"` instead of the current explicit `prometheus.enabled` values toggle — Capabilities is empty under `helm template`/`--dry-run` and under GitOps client-side rendering (Flux/Argo), making behavior differ between `helm install` and GitOps. Keep the explicit toggle (current design is right; don't "improve" it).
+**Why it happens:**
+The OTel ecosystem's standard subprocess-boundary carrier is the `TRACEPARENT`/`TRACESTATE` environment variables (this is the documented pattern at `opentelemetry.io/docs/specs/otel/context/env-carriers`), but auto-instrumentation libraries commonly assume in-process context propagation (a parent span already active in the same process) or HTTP-header extraction — **not** automatic environment-variable extraction on process start. Reading `TRACEPARENT` from the environment and attaching it as the active context before the LangGraph graph is invoked is application code the future subagent adapter has to write explicitly; it does not happen "for free" just because the env var is set on the Job.
 
 **How to avoid:**
-The INSTALL.md step must include one of, explicitly: (a) a chart value to stamp extra labels on TIDE's ServiceMonitor (`prometheus.serviceMonitor.additionalLabels.release=<their-release>`) — add this value if it doesn't exist, it rides a chart version bump per the FIXED-contract rule; or (b) instruct setting `prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false` on their stack. End the doc step with a *verification command* — "Prometheus → Status → Targets shows `tide-manager`" or the equivalent `curl`/`promtool` check — so a silent non-scrape is caught in the setup flow, not weeks later. Pin the kube-prometheus-stack version the recipe was tested against; its values keys move across majors.
+Treat the W3C trace-context contract as the durable seam it's already designed to be (per the milestone's own decision), but write an explicit integration test — even a stub-runtime one — asserting that a synthetic `TRACEPARENT` injected into a Job's env is actually extracted and becomes the active context before any span starts, so this isn't discovered for the first time when the LangGraph beachhead milestone lands. Keep the self-instrumenting capability flag as a single source of truth the reporter reads at parse time (not a runtime-guessed heuristic like "does `events.jsonl` contain OpenInference-shaped events already") so there's no ambiguity window where both paths fire.
 
-**Warning signs:** `kubectl get servicemonitor` shows the object but the Prometheus targets page doesn't list it; docs PR with no verification step; NOTES.txt warning only covering `enabled=false` and not the label-selector case.
+**Warning signs:** No test exercises the env-carrier extraction path end-to-end; the capability flag has no default-safe value (i.e., an unset flag should default to "synthesize," never to "assume native," since a false "native" assumption silently produces zero spans rather than duplicates); Phoenix showing two same-timeframe, unconnected traces for what was one dispatch.
 
-**Phase to address:** Prometheus setup-step phase (docs + chart NOTES.txt + the dashboard banner in the same phase — see UX table).
+**Phase to address:** Flagged now as a design constraint (already captured in PROJECT.md's runtime-neutrality section) but the actual double-emission failure mode won't be exercisable until the LangGraph beachhead milestone. Worth a lightweight contract test in this milestone's End-to-end proof phase so the seam is proven before a second runtime depends on it.
+
+---
+
+### Pitfall 8: Phoenix's three friendliest-looking defaults — ephemeral SQLite, infinite retention, no auth — compound into a real exposure on this system specifically
+
+**What goes wrong:**
+Three independently-documented Phoenix defaults each look like a reasonable "just try it" posture but stack badly for TIDE's use case:
+1. **Ephemeral by default.** Phoenix's own persistence docs state plainly: *"By default, Phoenix uses a file-based SQLite database... stores traces in a temporary folder... this default setup is ephemeral — data will be lost when the container stops unless backed by a persistent volume."* A quickstart that doesn't set `PHOENIX_WORKING_DIR` (or the Helm chart's `persistence.enabled=true` + PVC) to a real volume loses the entire trace history on the next pod restart/reschedule — trivially likely on a kind dev cluster that gets torn down and recreated per the project's own documented "clean-run" recipes.
+2. **Infinite retention by default.** `database.defaultRetentionPolicyDays` (Helm) / `PHOENIX_DEFAULT_RETENTION_POLICY_DAYS` defaults to `0` = never expire. Combined with the milestone's plan to embed *full message arrays* (repo content, diffs, prompts) as span attributes, an unattended multi-day dogfood habit fills disk with no natural ceiling.
+3. **No authentication by default.** Enabling auth requires explicitly setting `PHOENIX_ENABLE_AUTH=true` plus `PHOENIX_SECRET` and `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` (or the Helm chart's `auth.*` values) — until that's done, Phoenix's UI, REST, GraphQL, and gRPC surfaces are all unauthenticated. This is the real analog of the "credproxy exists to keep keys out" question for span *payloads*: credproxy solved the API-key leakage problem, but a LAN-reachable, unauthenticated Phoenix instance holding full prompt/completion history (including whatever repo content per Pitfall 1/2 made it in) is its own, separate secret-exposure surface that nothing else in TIDE's threat model currently covers.
+
+**Why it happens:**
+Each default is individually defensible for Phoenix's primary use case (a data scientist's laptop, single-user, throwaway experiments) and none of the three official docs flags the combination as risky — that judgment is specific to TIDE embedding full source-repo content in spans and running on a shared/LAN-reachable dev cluster rather than a laptop.
+
+**How to avoid:**
+The self-host documentation (INSTALL.md / observability.md) should not just show `helm install` with bare defaults. It should explicitly set: a PV-backed `persistence.enabled=true` (or Postgres via `postgresql.enabled=true`) with a size appropriate to the target cluster (see Pitfall 9), a non-infinite `database.defaultRetentionPolicyDays` matching the project's own `prometheus.retentionTime` documentation pattern (`docs/observability.md` already has precedent for this kind of "size it for your run cadence" callout), and `PHOENIX_ENABLE_AUTH=true` with credentials sourced from a K8s Secret — mirroring the credential-Secret pattern TIDE already uses everywhere else (git creds, LLM API keys).
+
+**Warning signs:** The install recipe's `helm install` command has no `--set` overrides at all; no PVC visible via `kubectl get pvc` after following the doc; Phoenix's login page never appears (i.e., auth was never turned on) when the Service type is anything other than a loopback-only `ClusterIP` accessed via `kubectl port-forward`.
+
+**Phase to address:** Self-hosted Phoenix surface (documented-install posture) — this is precisely the INSTALL.md/observability.md recipe phase.
+
+---
+
+### Pitfall 9: Phoenix's own Helm defaults (20Gi PVC, optional bundled Postgres pod) collide with the project's already-tight 8 GiB dev-VM budget
+
+**What goes wrong:**
+Phoenix's Helm chart defaults both the SQLite-persistence PVC size and the bundled `postgresql.storage.requestedSize` to `20Gi`, and enabling the bundled Postgres subchart adds a whole separate pod (with its own memory footprint) to a cluster. TIDE's own operating notes already document that the dev Docker VM is ~7.65 GiB and that running two single-node clusters (or, by extension, two memory-hungry workloads) concurrently OOM-kills the node (exit 137) — the existing guidance is "one heavy run at a time, delete-recreate-prewarm." Installing Phoenix's default configuration alongside a live `kind` cluster already running credproxy + tide-eval containers (the project's documented `make eval` recipe) risks reproducing exactly that OOM pattern, and a 20Gi PVC request against a constrained VM's disk budget can fail to provision or starve other workloads even before memory becomes the bottleneck.
+
+**Why it happens:**
+Phoenix's defaults are sized for its primary deployment target (a dedicated observability namespace on a real cluster), not for the "everything runs on one developer's Docker Desktop VM" constraint that is specific to how this project does its own dev/test cycles.
+
+**How to avoid:**
+The self-host recipe should explicitly right-size for the documented dev-VM constraint: a small `persistence.size` (a few Gi, not 20Gi, is plenty for dogfood-scale trace volumes once retention is bounded per Pitfall 8), skip the bundled Postgres subchart for dev/kind installs (SQLite-on-PV is sufficient at this scale; Postgres is the production-durability upgrade path, not the default), and fold "install Phoenix" into the project's existing "one heavy workload at a time" discipline rather than assuming it's cheap to run alongside everything else.
+
+**Warning signs:** The install doc copies Phoenix's example `values.yaml` verbatim; a dogfood run against a fresh `kind-tide-dogfood`-style cluster with Phoenix already installed starts failing with pod evictions or exit 137 that weren't happening before Phoenix was added.
+
+**Phase to address:** Self-hosted Phoenix surface (documented-install posture).
 
 ---
 
 ## Technical Debt Patterns
 
 | Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Sign only the two go-git commit sites, defer integrate merges (P4 option 3) | Ships fast, no shim | Mixed Verified/Unverified history; hard-fails signed-commit branch protection — the feature's headline use case | Only with explicit docs caveat; prefer the gpg-shim |
-| Reject passphrase-protected signing keys instead of supporting decryption | Avoids a second Secret key + subkey-decrypt plumbing | Operators with org key policies can't use the feature | Acceptable for v1.0.7 with a clear error message; revisit on demand |
-| Completeness gate stores its verdict in `.status` and trusts it on resume | Skips a git subprocess per resume | Violates rederivability; stale verdict after manual git surgery (the first run was recovered via manual `format-patch`!) | Never — condition may cache the *last* verdict but gate must recompute |
-| Price all cache writes at 1.25× without verifying CLI cache TTL | No spike needed | Silent undercount (1.6×) on cache-heavy runs if CLI uses 1h TTL — inverts the T-09-01 invariant | Never — one teed request or usage-breakdown check settles it |
-| Hand-edit `charts/tide/values.yaml` configmap default 16→4 without a chart version bump | One-line fix | Breaks the FIXED-contract rule; installed releases keep the old rendered value anyway | Never — ride the 1.0.7 chart bump, note the changed default in upgrade notes |
-| Copy heavy controller-envtest specs to a new tier by file move without a suite-count assertion | Quick tier split | Specs can silently run in *neither* tier (build tags / Ginkgo label filters miss) | Acceptable only with a "total spec count conserved" CI check |
-| ConfigMap artifacts without a cache `ByObject` selector | One less config change | Manager memory scales with every ConfigMap in watched namespaces | Never — same PR |
+|----------|-------------------|-----------------|------------------|
+| Always inline full message content via `LLMInputMessages`/`LLMOutputMessages`, skip `ArtifactPath` entirely | Simpler reporter code; no separate fetch path needed in Phoenix's UI | OTLP size-limit failures (Pitfall 2) + unbounded PII/secret exposure into Phoenix's default-infinite-retention store (Pitfall 1, 8) | Never for real target repos; borderline acceptable only for the milestone's own small, already-public demo/dogfood repo where content has no confidentiality requirement |
+| Copy `otelinit.NewTracerProvider()` into `tide-reporter`'s `main()` without also copying the manager's deferred-shutdown pattern | Fast to wire, "it compiles" | Every reporter run silently drops its spans (Pitfall 4) — looks like a config bug, not a code bug, and is hard to diagnose from Phoenix alone | Never — the shutdown call is required, not optional, for any short-lived binary that constructs a batching exporter |
+| Wire span creation directly into `Reconcile()` with no state-transition guard | No new status fields, no new bookkeeping | Cardinality explosion of duplicate/fragmented spans on every real dispatch (Pitfall 3), visible the first time a Task takes more than a few requeue cycles | Never in production paths; acceptable only in a throwaway spike/prototype never wired to the real chart |
+| Ship the Phoenix install doc with bare `helm install` defaults | Fewer lines in the doc, faster to write | Ephemeral traces on pod restart, unbounded disk growth, unauthenticated LAN exposure (Pitfall 8), and VM resource contention (Pitfall 9) | Never for the documented install recipe; acceptable only as an explicitly-labeled "quick local smoke test, not for real use" snippet, if one is included at all |
 
 ## Integration Gotchas
 
 | Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| git CLI ↔ go-git in one worktree | Assuming go-git commit after `git merge --no-commit` produces a merge commit | go-git builds parents from HEAD only (ignores MERGE_HEAD) — construct parents explicitly or sign via gpg-program shim (P4) |
-| GitHub/GitLab/Gitea Verified badge | Testing `git verify-commit` locally and calling it done | The badge additionally requires committer-email ∈ key UIDs ∈ account verified emails; test against a real host once (P5) |
-| ProtonMail/go-crypto keyring load | `ReadArmoredKeyRing(...)[0]` + primary private key | Deliberate signing-key selection (validity, sign-capable, subkeys); reject ambiguity (P6) |
-| CRD upgrade via `tide-crds` chart | Upgrading app chart only | CRD chart first, always; new spec fields silently prune against old schemas (P8) |
-| v1alpha1⇄v1alpha2 conversion | Adding the field to storage version only | Both versions + both conversion directions + round-trip test (P9) |
-| controller-runtime cached client + ConfigMaps | `client.Get` a CM through the manager client "because it's there" | `ByObject` label-selected cache or `GetAPIReader()` for on-demand dashboard reads (P11) |
-| kube-prometheus-stack | "ServiceMonitor exists ⇒ scraped" | `release:` label or `serviceMonitorSelectorNilUsesHelmValues=false`; verify on the Targets page (P13) |
-| Claude CLI usage JSON | Reading only `cache_creation_input_tokens` total | Check the `cache_creation` 5m/1h breakdown (or tee one request) before choosing the cache-write multiplier (P12) |
-| promptFile via ConfigMap ref (if that route wins) | Inlining the CM content into `spec.outcomePrompt` at CLI time and calling it a "ref" | Decide CLI-inline vs true CM-ref at planning; a true ref needs size cap + immutability expectations (an edited CM mid-run changes resumption semantics — artifacts-as-truth says snapshot it) |
+|-------------|-----------------|-------------------|
+| Phoenix Helm chart persistence | Setting both `persistence.enabled=true` and `postgresql.enabled=true` (mutually exclusive — chart's own NOTES.txt warns on this), or leaving both false with no `database.url` configured (silently falls back to an ephemeral temp-dir SQLite DB) | Pick exactly one persistence strategy explicitly in the install recipe; never leave the operator to discover the mutual-exclusion rule from a chart warning after the fact |
+| Phoenix OTLP endpoint wiring | Pointing TIDE's `otel.exporter.endpoint` at Phoenix's UI/HTTP port (6006, which also serves OTLP/HTTP) while TIDE's exporter code (`otlptracegrpc.New` in `internal/otelinit/provider.go`) is gRPC-only | Point at Phoenix's gRPC OTLP port (4317, `host:port` with no scheme) — the only protocol TIDE's exporter code speaks; there is no OTLP/HTTP exporter in the codebase to fall back to |
+| LangGraph self-instrumentation (`openinference-instrumentation-langchain`) | Assuming the auto-instrumentor discovers the manager's propagated trace context automatically from the Job's environment | Explicitly extract `TRACEPARENT`/`TRACESTATE` env vars into an OTel `Context` via the W3C propagator and attach it as the active context before invoking the graph — this is adapter code that has to be written, not a free auto-instrumentation behavior |
+| Phoenix authentication | Leaving `PHOENIX_ENABLE_AUTH` unset once the Service is reachable beyond `kubectl port-forward` loopback (e.g., a NodePort/LoadBalancer for LAN demo access) | Set `PHOENIX_ENABLE_AUTH=true` + `PHOENIX_SECRET` + `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` via a K8s Secret whenever the Service type is anything other than loopback-only access |
 
 ## Performance Traps
 
 | Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Serializing task dispatch instead of run-branch merges | Wave wall-clock ≈ sum of task times | P2 invariant + overlap assertion in kind suite | Any wave with ≥2 tasks |
-| Un-selectored ConfigMap informer | Manager RSS climbs with cluster CM count | `ByObject` label selector / uncached reader | Clusters with many/large CMs (cert bundles, Helm release CMs) |
-| Label-selector LIST for artifact CMs per dashboard render | Dashboard latency on busy namespaces | Fine at TIDE scale (one human, one run); index by UID label; don't add a watch per render | ~thousands of CMs per namespace — not expected in v1 |
-| Per-task integrate push Jobs (one Job per task branch) | Job churn, pod scheduling latency dominates integration | Batch the wave's branches into one ordered Job invocation (P1 option 2) | Waves ≥ ~4 tasks on small nodes (the 7.65 GiB constraint) |
-| Reader-Job-per-click artifact transport (if that option wins) | Approve-gate review takes ~pod-startup-seconds per artifact | Cache last-read artifact; or prefer ConfigMap transport for planning artifacts | Every gate review — this is the surface's hot path |
+|------|----------|------------|-----------------|
+| Inlining full message arrays as span attributes on every dispatch | OTLP export `ResourceExhausted` errors; whole batches (including unrelated spans) silently dropped | Byte-length threshold before choosing `LLMInputMessages`/`ArtifactPath` (Pitfall 2) | A single large diff/prompt can trip this well before "at scale" — one oversized Task is enough |
+| Default `BatchSpanProcessor` queue (2048 spans) under a bursty wave of many Tasks completing near-simultaneously | Spans silently dropped with only an SDK-internal log line, no user-visible error | Explicit `WithMaxQueueSize`/`WithMaxExportBatchSize` sizing for the manager's realistic peak wave fan-out, or accept the drop for low-value spans | Unlikely at today's dispatch volumes but unverified — no test asserts a bound on concurrent in-flight spans per wave |
+| Unauthenticated Phoenix + infinite retention on a disk-constrained dev VM | Dev VM disk fills silently across many dogfood runs, degrading unrelated workloads (kind, credproxy, tide-eval) sharing the same VM | Explicit, non-infinite `database.defaultRetentionPolicyDays` set in the install doc, not left at the chart default | First multi-day or multi-run dogfood session left unattended |
 
 ## Security Mistakes
 
 | Mistake | Risk | Prevention |
 |---------|------|------------|
-| Mounting the GPG private key into subagent (LLM-executing) pods | Prompt-injected agent exfiltrates the key; attacker signs as the trusted bot | Sign only in controller-trust Jobs, or isolate the harness commit step from the agent process; document blast radius (P7) |
-| Reusing a personal GPG key for the bot | Compromise burns the human's identity | Docs mandate a dedicated machine account + dedicated key |
-| Logging the armored key or its fingerprint-adjacent material on load errors | Key material in pod logs / log aggregation | Error messages name the Secret and the failure class, never key bytes; redact via existing `internal/harness/redact` patterns |
-| `baseRef` accepted as arbitrary string passed to `git` argv | Argument-injection-shaped refs (`--upload-pack=...`) | Validate refname format (CEL `matches` on safe charset + controller-side `git check-ref-format` equivalent); resolve via explicit `refs/heads/`→tag→SHA fallback as the todo specifies |
-| Artifact ConfigMaps readable cluster-wide | Planning artifacts can contain repo internals / prompt content | Keep CMs in the project namespace under existing namespace-scoped RBAC; no new ClusterRole rules for the dashboard read path |
+| Treating a self-hosted, LAN-only Phoenix as inherently safe because "it's internal" | Full prompt/completion history — including whatever repo content or credentials leaked into `events.jsonl` — is readable by anyone who can reach the Service, with zero authentication by default | `PHOENIX_ENABLE_AUTH=true` in the documented install recipe as a default, not an opt-in afterthought |
+| Assuming credproxy's key-isolation means span payloads are already "safe" | Credproxy only protects `ANTHROPIC_API_KEY`; it has no visibility into secrets the model reads from repo files and echoes into its own output, which flow straight into `events.jsonl` and then into span attribute values | Apply `redact.SecretPatterns` (or an equivalent scrub) to message content at the reporter's span-emission boundary — the direct analog of credproxy's env-var boundary (Pitfall 1) |
+| Hardcoding a future Phoenix auth token as a plain env var if `OTEL_EXPORTER_OTLP_HEADERS` is ever wired for authenticated export | Token visible to anyone with pod-read RBAC via `kubectl get pod -o yaml`, same class of leak credproxy exists to prevent for the Anthropic key | Reference the token via a K8s Secret using the same pattern already established for git creds and LLM API keys — never a literal `value:` in a chart template |
 
 ## UX Pitfalls
 
 | Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Log drawer renders empty for GC'd pods | "Empty component indistinguishable from broken" (verbatim first-run finding) | Three explicit states: loading / streaming / "logs no longer available (pod garbage-collected)"; backend returns a distinguishable pod-gone response, not an empty 200 |
-| Truncated artifact shown without a marker | Operator approves a gate having read half a PLAN.md | Visible truncation banner + PVC path + byte counts (P11) |
-| Telemetry-disabled shown as empty panels | Operator assumes the dashboard is broken; telemetry stays dark (first-run finding) | Distinguish three states: `prometheus.enabled=false` → banner with the enable recipe; Prometheus unreachable → error state; reachable-but-no-data-yet → "waiting for first scrape (~30–60s)" |
-| Budget tally silently priced at conservative fallback | Operator distrusts the whole budget meter (2.8× event) | Unknown-model condition/metric + a dashboard hint when fallback pricing is active (P12) |
-| Gate failure message without task identity | Operator can't tell *which* task's work is missing | Completeness-gate condition lists failing task UIDs + branch names (P3) |
+|---------|--------------|-------------------|
+| Operator follows the quickstart once, on one project, at the chart's default 10% sample rate, and sees an empty Phoenix UI | Concludes the whole milestone's headline feature is broken on the very first try (Pitfall 6) | Quickstart doc explicitly overrides `tracesSamplerArg=1.0` for first-run/single-project verification, with a clear callout distinguishing it from the steady-state production default |
+| `ArtifactPath` attribute renders in Phoenix as an opaque PVC path string with no click-through | Operator hits a dead end trying to see the actual payload that was deferred out of the span | Document the `tide artifact-get <namespace>/<project>/<path>` recipe directly next to the Phoenix screenshot in `observability.md`, mirroring the dashboard's existing click-through pattern |
+| Dispatch spans and reporter-synthesized LLM spans use similar generic names with no visual distinction between "still waiting on the subagent" and "reporter hasn't run yet" | Operator can't tell from the trace tree alone whether a stalled trace means a slow LLM call or a stuck/failed reporter Job | Distinct span names/kinds for the manager's dispatch span vs. the reporter's LLM child span, consistent with `AgentInvocation`'s existing `agent.role` (planner\|executor) vocabulary |
 
 ## "Looks Done But Isn't" Checklist
 
-- [ ] **Integration serialization:** passes with 1 task — verify with a **2+ parallel-task wave in kind**, asserting task-pod time overlap AND both integrate commits reachable (P1/P2).
-- [ ] **Completeness gate:** passes on fresh runs — verify it also passes after (a) a retried integration, (b) an empty-diff task, (c) a controller restart mid-boundary (P3).
-- [ ] **`lastPushedSHA`:** stamped on the happy path — verify under a concurrent usage-rollup status write (RetryOnConflict + optimistic lock, W1 pattern).
-- [ ] **Signed commits:** `git verify-commit` green in-cluster — verify the **Verified badge on a real git host**, including one integrate merge commit and one tide-push commit (P4/P5).
-- [ ] **Signing key absent:** feature off = byte-identical behavior to 1.0.6 (unsigned, current identity defaults) — regression-test the nil path.
-- [ ] **baseRef:** works via v1alpha2 — verify a v1alpha1 round-trip preserves it, and an unresolvable ref yields the documented condition, not a worktree-add stack trace (P9/P10).
-- [ ] **CRD upgrade:** 1.0.6→1.0.7 upgrade path exercised in kind with pre-existing Projects (ratcheting + pruning behavior observed, not assumed) (P8/P10).
-- [ ] **Pricing:** new rows present — verify the CLI cache-TTL question is answered with evidence (teed request or usage breakdown), and `hack/check-pricing-drift.sh` covers the new rows (P12).
-- [ ] **Prometheus step:** doc followed on a clean cluster ends with TIDE visible on the **Targets page**, not just a rendered ServiceMonitor (P13).
-- [ ] **Envtest tier split:** total executed spec count across tiers equals the pre-split count (no spec runs in zero tiers).
-- [ ] **Chart values:** every new value (`git.signingKeySecretRef`, ServiceMonitor labels, plannerConcurrency default) landed via a chart version bump with the binary reading chart-first (FIXED contract).
+- [ ] **Span emission wired in the manager:** often missing the reporter-side LLM child spans entirely — verify Phoenix shows `LLMInputMessages`/`LLMOutputMessages` nested *under* the dispatch span, not just a bare `AGENT`-kind span with no children.
+- [ ] **Self-hosted Phoenix "works":** often missing PV-backed persistence — verify by restarting the Phoenix pod and confirming prior traces still query afterward, not just that traces appeared once during the demo.
+- [ ] **Trace-context propagation "works":** often missing the failure/timeout path — verify a Failed or timed-out Task still produces a properly closed span in Phoenix, not a span that never receives an `End()` call.
+- [ ] **Sampler "configured":** often missing that the chart's `0.1` default was never overridden for the milestone's own end-to-end proof run — verify the actual install command used for the proof screenshot explicitly set `tracesSamplerArg`.
+- [ ] **D-O5 payload boundary "decided":** often missing an actual size/redaction guard at the call site, not just a doc-level decision — verify a synthetic oversized (>1 MB) or secret-containing message dispatched through the real path neither errors the OTLP exporter nor leaks the secret pattern into an emitted span.
 
 ## Recovery Strategies
 
 | Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Integration miss shipped again (gate bug) | MEDIUM | Same as first run: `git format-patch` from the PVC bare repo's task branch, apply to run branch, force-with-lease push; then treat as gate regression with the branch preserved as fixture |
-| Stale lockfile deadlock (if P1 ignored) | LOW | Delete lock on PVC via reader pod; then replace lockfile with control-plane serialization |
-| Unverified badges post-release | LOW | Config-only: fix bot email / upload key to machine account; already-pushed commits stay Unverified (history rewrite not sanctioned) — document, don't rewrite |
-| Field pruned by stale CRD | LOW | Upgrade `tide-crds` chart, re-apply Project; no data loss (field was never stored) |
-| Oversized artifact CM failing reporter Jobs | MEDIUM | Hotfix cap+truncate; delete failed CMs by label; artifacts remain intact on PVC (truth untouched) |
-| Undercounted budget discovered mid-run | MEDIUM | `absoluteCapCents` is the backstop — lower it to compensate while the multiplier fix ships; reconcile against provider console |
+|---------|-----------------|------------------|
+| Duplicate/fragmented traces from ungated reconcile-loop span creation (Pitfall 3) | MEDIUM | Add the state-transition guard, redeploy; already-ingested bad spans stay wrong in Phoenix's history but self-correct going forward — bound their visible lifetime with a sane retention policy (Pitfall 8) rather than manually purging |
+| Dropped spans from an unflushed short-lived Job (Pitfall 4) | LOW | Add the missing `defer shutdown(ctx)` across every `tide-reporter` exit path, rebuild the image, redeploy — pure code fix, no data-model change |
+| Orphaned LangGraph traces from missing context extraction (Pitfall 7) | MEDIUM | Fix the extraction code in the LangGraph subagent adapter; historical orphaned traces stay disconnected in Phoenix but are harmless noise, not a correctness bug, unless retention cost makes cleanup worthwhile |
+| Secret/PII already ingested into Phoenix's database (Pitfall 1) | HIGH | No automatic scrub-after-ingest exists; recovery is manual trace/project deletion via Phoenix's admin API/UI plus rotating whatever credential leaked — treat with the same severity as any other secret-leak incident, not as a trace-hygiene cleanup task |
 
 ## Pitfall-to-Phase Mapping
 
 | Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| P1/P2/P3 (race, over-serialization, gate idempotency) | Integration-miss gate phase | 2-parallel-task kind repro: overlap + both merges + gate green after retry/restart/empty-diff |
-| P4/P5/P6/P7 (merge signing, badge policy, key handling, key exposure) | Signed-commits phase — **flag `research: true`** (gpg-shim vs plumbing spike; key-exposure scope decision is ASK-FIRST) | Verified badge on real host incl. integrate commit; key-error conditions surface pre-spend; nil-key path unchanged |
-| P8/P9/P10 (pruning, conversion, CEL/defaulting) | baseRef phase | kind upgrade-path test from 1.0.6 state; conversion round-trip test; unresolvable-ref condition |
-| P11 (ConfigMap persistence) | Dashboard artifact-view phase (transport decision first) | >1 MiB artifact → truncated CM + marker; manager RSS flat; owner-cascade cleanup observed |
-| P12 (pricing under/overcount, fallback visibility) | Pricing-table phase | Tally within expected delta of console on a live spot-check; unknown-model metric fires in a fixture |
-| P13 (ServiceMonitor not scraped, empty-panel UX) | Prometheus setup-step phase | Clean-cluster doc walkthrough ends on Targets page; dashboard shows banner when disabled |
-| Tech-debt carry (W1 RetryOnConflict, configmap default, envtest tiers) | Tech-debt phase | W1 marker test; chart bump renders 4; spec-count conservation check |
+|---------|-------------------|----------------|
+| 1 — unredacted `events.jsonl` into spans | LLM message-array spans (in-namespace emitter) | Test asserts a known secret pattern injected into a fixture `events.jsonl` never appears in emitted span attribute values |
+| 2 — OTLP 4 MB ceiling from full inlining | LLM message-array spans (in-namespace emitter) | Test dispatches/synthesizes an oversized message and asserts `ArtifactPath` fallback, not an OTLP export error |
+| 3 — reconcile-loop span duplication/fragmentation | Dispatch-chain span emission (manager) | Test calls `Reconcile()` twice for the same object and asserts exactly one dispatch span was started and correctly parented |
+| 4 — short-lived Job drops spans on exit | LLM message-array spans (in-namespace emitter) | `tide-reporter` integration test confirms spans reach a fake OTLP collector before the process exits on every exit path |
+| 5 — cross-pod clock skew in synthesized spans | End-to-end proof | Test/assertion that synthesized child-span timestamps fall within `[parent.start, parent.end]` |
+| 6 — `parentbased_traceidratio` per-run coin flip | Self-hosted Phoenix surface (docs) | Quickstart doc reviewed to confirm it overrides `tracesSamplerArg` for single-run verification; live proof run screenshot uses the override |
+| 7 — double-instrumentation with a self-instrumenting runtime | Design constraint captured now; contract-tested in End-to-end proof | Stub-runtime test confirms `TRACEPARENT` env-carrier extraction actually activates the propagated context before span creation |
+| 8 — Phoenix's ephemeral/infinite-retention/no-auth defaults | Self-hosted Phoenix surface (docs) | Install recipe reviewed for explicit `persistence`/`database.defaultRetentionPolicyDays`/`PHOENIX_ENABLE_AUTH` overrides; `kubectl get pvc` and Phoenix login page both verified present after following the doc |
+| 9 — Phoenix resource footprint vs. 8 GiB dev VM | Self-hosted Phoenix surface (docs) | Install recipe reviewed for right-sized `persistence.size` and skips the bundled Postgres subchart for dev/kind installs |
 
 ## Sources
 
-- Direct code inspection (HIGH): `pkg/git/integrate.go`, `pkg/git/commit.go`, `cmd/tide-push/main.go`, `internal/controller/boundary_push.go`, `internal/controller/push_helpers.go`, `internal/subagent/anthropic/pricing.go`, `internal/subagent/anthropic/stream_parser.go`, `internal/harness/`, `api/v1alpha1|2/project_types.go`, `charts/tide` + `charts/tide-crds`
-- First-run findings (HIGH): `.planning/todos/pending/2026-07-03-*.md` (integration miss, pricing, signed commits, baseRef, prometheus, dashboard), `.planning/PROJECT.md`
-- Claude pricing & cache economics (HIGH): claude-api skill (cached 2026-06-24, read 2026-07-03) — Sonnet 5 $3/$15 sticker with $2/$10 intro through 2026-08-31; cache read ~0.1×, write 1.25× (5m TTL) / 2× (1h TTL)
-- go-git `CommitOptions.SignKey`/`Signer` contract + merge limitation (MEDIUM per seam, official docs): [pkg.go.dev go-git v5](https://pkg.go.dev/github.com/go-git/go-git/v5)
-- GitHub Verified requirements (MEDIUM per seam, official docs): [About commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification), [Using a verified email address in your GPG key](https://docs.github.com/en/authentication/troubleshooting-commit-signature-verification/using-a-verified-email-address-in-your-gpg-key)
-- CRD validation ratcheting (MEDIUM per seam): [KEP-4008 CRD ratcheting](https://github.com/kubernetes/enhancements/tree/master/keps/sig-api-machinery/4008-crd-ratcheting), [k8s CRD docs](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/)
-- kube-prometheus-stack selector trap (MEDIUM per seam): [prometheus-community/helm-charts#1631](https://github.com/prometheus-community/helm-charts/issues/1631), [#2381](https://github.com/prometheus-community/helm-charts/issues/2381)
-- git single-writer locking / parallel-agent worktree races (MEDIUM per seam): [git-worktree docs](https://git-scm.com/docs/git-worktree/2.33.0), [anthropics/claude-code#55724](https://github.com/anthropics/claude-code/issues/55724), [dev.to index.lock](https://dev.to/rijultp/fixing-common-git-lock-errors-understanding-and-recovering-from-gitindexlock-47ej)
+- Codebase (HIGH confidence, direct inspection): `pkg/otelai/attrs.go`, `pkg/otelai/doc.go`, `internal/otelinit/provider.go`, `internal/subagent/anthropic/subagent.go`, `internal/harness/redact/patterns.go`, `internal/harness/redact/redact.go`, `internal/harness/harness.go`, `internal/credproxy/doc.go`, `cmd/tide-reporter/main.go`, `internal/controller/task_controller.go`, `internal/controller/reporter_jobspec.go`, `charts/tide/values.yaml`, `docs/observability.md`, `.planning/PROJECT.md` (v1.0.8 Current Milestone section)
+- [Phoenix — Persistence](https://arize.com/docs/phoenix/deployment/persistence) — SQLite default ephemerality, `PHOENIX_WORKING_DIR`, `PHOENIX_SQL_DATABASE_URL`, `PHOENIX_DEFAULT_RETENTION_POLICY_DAYS` (Context7-verified, HIGH confidence)
+- [Phoenix — Authentication](https://arize.com/docs/phoenix/self-hosting/features/authentication) — `PHOENIX_ENABLE_AUTH`, `PHOENIX_SECRET`, `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD`, bearer-token/API-key model (WebSearch + Context7-verified, HIGH confidence)
+- Arize Phoenix OpenInference exporter docs, "Common Pitfalls" section (via Context7 `/arize-ai/phoenix`, source `docs/phoenix/tracing/concepts-tracing/otel-openinference/exporter.mdx`) — gRPC 4 MB message-size limit, exporter-timeout-vs-processor-timeout interaction (HIGH confidence, official docs)
+- Arize Phoenix Helm chart `helm/README.md` and `helm/templates/NOTES.txt` (via Context7 `/arize-ai/phoenix`) — `persistence.enabled`/`postgresql.enabled` mutual exclusion, default `20Gi` storage sizing, `database.defaultRetentionPolicyDays` (HIGH confidence, official chart source)
+- Phoenix ports/transport reference (via Context7 `/arize-ai/phoenix`, source `docs/phoenix/self-hosting/configuration.mdx` and `docs/phoenix/tracing/concepts-tracing/otel-openinference/exporter.mdx`) — OTLP gRPC on 4317, OTLP/HTTP+UI on 6006 (HIGH confidence)
+- Community/blog resource-sizing discussion (WebSearch, MEDIUM confidence — no single authoritative "minimum requirements" page found; figures are practitioner-reported, ranging 1–3 GiB RAM for small deployments, 20,000-span in-memory queue at ~50 KiB/span)
+- [OpenTelemetry — Environment Variables as Context Propagation Carriers](https://opentelemetry.io/docs/specs/otel/context/env-carriers/) — `TRACEPARENT`/`TRACESTATE` as the standard subprocess-boundary carrier convention (WebSearch-verified against the official OTel spec site, HIGH confidence)
+- `open-telemetry/opentelemetry-go` `BatchSpanProcessor` defaults (`DefaultScheduleDelay`=5000ms, `DefaultMaxQueueSize`=2048, `DefaultExportTimeout`=30000ms) and the general "short-lived process drops spans without an explicit flush/shutdown" failure mode (WebSearch, cross-referenced against multiple independent write-ups, MEDIUM-HIGH confidence — exact default values corroborated by the SDK's own godoc, referenced but not directly re-fetched in this pass)
+- Existing project memory (`CLAUDE.md` Operating Notes) — 8 GiB dev VM constraint, "one heavy run at a time" OOM-avoidance discipline used to ground Pitfall 9's resource-collision reasoning (HIGH confidence, first-party project record)
 
 ---
-*Pitfalls research for: TIDE v1.0.7 First-Run Paper Cuts*
-*Researched: 2026-07-03*
+*Pitfalls research for: Adding OpenInference trace emission + self-hosted Arize Phoenix to TIDE (v1.0.8)*
+*Researched: 2026-07-15*
+
