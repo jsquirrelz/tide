@@ -167,7 +167,14 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   2. Each of those spans also carries `llm.token_count.total` alongside the existing prompt/completion/cache-split token attributes (ATTR-02).
   3. Every attribute key emitted by `pkg/otelai` resolves from the official `openinference-semantic-conventions` Go module rather than a hand-rolled string constant, so the same keys `openinference-instrumentation-langchain` will emit natively already match (ATTR-03).
 
-**Plans**: TBD
+**Plans**: 5 plans (3 waves)
+
+Plans:
+- [ ] 42-01-PLAN.md — Adopt openinference-semantic-conventions v0.1.1 + rework pkg/otelai attrs (D-05/D-06/D-07/D-08; blocking legitimacy checkpoint)
+- [ ] 42-02-PLAN.md — Pure trace-context primitives: TraceIDFromUID / FormatTraceparent / ExtractRemoteParent (Phase 43 seam; Option A independent roots)
+- [ ] 42-03-PLAN.md — Span-emission idempotency marker fields on all four planner CRD statuses + manifest regen
+- [ ] 42-04-PLAN.md — Shared retroactive span synthesizer + Milestone/Phase handler wiring + envtest specs
+- [ ] 42-05-PLAN.md — Plan/Project handler wiring + envtest specs + full Layer A phase gate
 
 ### Phase 43: Task-Level Parity + Trace-Context Propagation
 
