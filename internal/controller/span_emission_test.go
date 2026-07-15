@@ -14,12 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Phase 42 Plan 04 Task 3: envtest SpanEmission specs — Milestone + Phase
-// levels, proven against a real in-memory OTel span exporter (ATTR-01/
-// ATTR-02, D-01..D-04). Mirrors child_rollup_idempotency_test.go's direct-
-// call shape (r.handleJobCompletion(ctx, obj, completedJob), never a full
-// Reconcile round-trip) — synthetic Jobs are constructed in-memory since the
-// handler only reads Status fields, no cluster Job object needed.
+// Phase 42 Plan 04 Task 3 (Milestone + Phase) and Plan 05 Task 2 (Plan +
+// Project): envtest SpanEmission specs for all four planner levels, proven
+// against a real in-memory OTel span exporter (ATTR-01/ATTR-02, D-01..D-04).
+// Mirrors child_rollup_idempotency_test.go's direct-call shape
+// (r.handle{JobCompletion,PlannerJobCompletion,ProjectJobCompletion}(ctx, obj,
+// completedJob), never a full Reconcile round-trip) — synthetic Jobs are
+// constructed in-memory since the handler only reads Status fields, no
+// cluster Job object needed.
 package controller
 
 import (
@@ -519,5 +521,398 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		var fresh tideprojectv1alpha3.Phase
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &fresh)).To(Succeed())
 		Expect(fresh.Status.PhaseSpanEmittedUID).To(BeEmpty())
+	})
+})
+
+// ─── Plan level ──────────────────────────────────────────────────────────────
+
+var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const (
+		sePlanProjName = "span-emission-plan-proj"
+		sePlanMSName   = "span-emission-plan-ms"
+		sePlanPhName   = "span-emission-plan-ph"
+		sePlanName     = "span-emission-plan"
+	)
+
+	var (
+		envReader *mapEnvReader
+		exp       *tracetest.InMemoryExporter
+		prevTP    oteltrace.TracerProvider
+	)
+
+	BeforeEach(func() {
+		spanEmissionProject(ctx, sePlanProjName, "claude-test-model")
+		ms := &tideprojectv1alpha3.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: sePlanMSName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: sePlanProjName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(sePlanMSName, "default", &tideprojectv1alpha3.Milestone{})
+		ph := &tideprojectv1alpha3.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: sePlanPhName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: sePlanMSName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(sePlanPhName, "default", &tideprojectv1alpha3.Phase{})
+		envReader = newMapEnvReader()
+
+		exp = tracetest.NewInMemoryExporter()
+		prevTP = otel.GetTracerProvider()
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+	})
+
+	AfterEach(func() {
+		otel.SetTracerProvider(prevTP)
+
+		plan := &tideprojectv1alpha3.Plan{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, plan); err == nil {
+			plan.Finalizers = nil
+			_ = k8sClient.Update(ctx, plan)
+			_ = k8sClient.Delete(ctx, plan)
+		}
+		ph := &tideprojectv1alpha3.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: sePlanPhName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha3.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: sePlanMSName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		cleanupSpanEmissionProject(ctx, sePlanProjName)
+	})
+
+	newPlanReconciler := func() *PlanReconciler {
+		return &PlanReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
+			},
+			PlannerPool: newPlannerPoolForTest(),
+			// ReporterImage empty: isFirstCompletion=true without a PVC.
+		}
+	}
+
+	// resolveProjectForPlan resolves the project via Plan.Spec.PhaseRef →
+	// Phase.Spec.MilestoneRef → Milestone.Spec.ProjectRef (mirrors
+	// child_rollup_idempotency_test.go's Plan-level fixture chain).
+	createPlan := func() *tideprojectv1alpha3.Plan {
+		plan := &tideprojectv1alpha3.Plan{
+			ObjectMeta: metav1.ObjectMeta{Name: sePlanName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: sePlanPhName},
+		}
+		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+		waitForCacheSync(sePlanName, "default", &tideprojectv1alpha3.Plan{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, plan)).To(Succeed())
+
+		statusPatch := client.MergeFrom(plan.DeepCopy())
+		plan.Status.Phase = "Running"
+		Expect(k8sClient.Status().Patch(ctx, plan, statusPatch)).To(Succeed())
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, plan)).To(Succeed())
+		return plan
+	}
+
+	It("emits one attribute-complete AGENT span and is idempotent", func() {
+		plan := createPlan()
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(plan.UID),
+			Usage: pkgdispatch.Usage{
+				InputTokens:         700,
+				OutputTokens:        300,
+				CacheReadTokens:     200,
+				CacheCreationTokens: 100,
+			},
+		})
+
+		r := newPlanReconciler()
+
+		// First call: emits the span.
+		_, err := r.handlePlannerJobCompletion(ctx, plan, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1), "exactly one span must be recorded on first observation")
+		span := spans[0]
+		Expect(span.Name).To(Equal("tide.dispatch.plan"))
+		Expect(span.StartTime).To(BeTemporally("==", start))
+		Expect(span.EndTime).To(BeTemporally("==", end))
+		Expect(span.Status.Code).To(Equal(codes.Ok))
+
+		modelVal, ok := attrValue(span.Attributes, "llm.model_name")
+		Expect(ok).To(BeTrue(), "span missing llm.model_name")
+		Expect(modelVal.AsString()).To(Equal("claude-test-model"))
+
+		providerVal, ok := attrValue(span.Attributes, "llm.provider")
+		Expect(ok).To(BeTrue(), "span missing llm.provider")
+		Expect(providerVal.AsString()).To(Equal("anthropic"))
+
+		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
+		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
+
+		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
+		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Plan
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.PlanSpanEmittedUID).To(Equal(jobName),
+				"PlanSpanEmittedUID must be set to the planner Job name")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Second call with the SAME completedJob, after re-fetching plan (marker
+		// now set) — D-02/Pitfall 2: no duplicate span.
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, plan)).To(Succeed())
+		_, err = r.handlePlannerJobCompletion(ctx, plan, job)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exp.GetSpans()).To(HaveLen(1), "second call with the same Job must not emit a duplicate span")
+	})
+
+	It("failed Job → Error span with condition-derived end time", func() {
+		plan := createPlan()
+
+		start := time.Now().Add(-5 * time.Minute)
+		failedAt := time.Now()
+		jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+		job := failedPlannerJob(jobName, start, failedAt)
+
+		envReader.SetOut(string(plan.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:  string(plan.UID),
+			ExitCode: 2,
+			Reason:   "cap-hit",
+		})
+
+		r := newPlanReconciler()
+		_, err := r.handlePlannerJobCompletion(ctx, plan, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1))
+		span := spans[0]
+		Expect(span.Status.Code).To(Equal(codes.Error))
+		Expect(span.Status.Description).To(Equal("cap-hit"))
+		Expect(span.EndTime).To(BeTemporally("==", failedAt))
+
+		exitCodeVal, ok := attrValue(span.Attributes, "tide.exit_code")
+		Expect(ok).To(BeTrue(), "span missing tide.exit_code")
+		Expect(exitCodeVal.AsInt64()).To(BeNumerically("==", 2))
+
+		reasonVal, ok := attrValue(span.Attributes, "tide.reason")
+		Expect(ok).To(BeTrue(), "span missing tide.reason")
+		Expect(reasonVal.AsString()).To(Equal("cap-hit"))
+	})
+
+	It("nil completedJob → zero spans", func() {
+		plan := createPlan()
+
+		r := newPlanReconciler()
+		_, err := r.handlePlannerJobCompletion(ctx, plan, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(HaveLen(0))
+
+		var fresh tideprojectv1alpha3.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
+		Expect(fresh.Status.PlanSpanEmittedUID).To(BeEmpty())
+	})
+})
+
+// ─── Project level ───────────────────────────────────────────────────────────
+
+var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const seProjName = "span-emission-project"
+
+	var (
+		envReader *mapEnvReader
+		exp       *tracetest.InMemoryExporter
+		prevTP    oteltrace.TracerProvider
+	)
+
+	BeforeEach(func() {
+		spanEmissionProject(ctx, seProjName, "claude-test-model")
+		envReader = newMapEnvReader()
+
+		exp = tracetest.NewInMemoryExporter()
+		prevTP = otel.GetTracerProvider()
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+	})
+
+	AfterEach(func() {
+		otel.SetTracerProvider(prevTP)
+		cleanupSpanEmissionProject(ctx, seProjName)
+	})
+
+	newProjectReconciler := func() *ProjectReconciler {
+		return &ProjectReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
+			},
+			PlannerPool: newPlannerPoolForTest(),
+			// ReporterImage empty: isFirstCompletion=true without a PVC.
+		}
+	}
+
+	// loadProject re-fetches the BeforeEach-created Project (server-assigned
+	// UID) and sets Status.Phase=Running, mirroring
+	// project_rollup_idempotency_test.go's fixture shape.
+	loadProject := func() *tideprojectv1alpha3.Project {
+		proj := &tideprojectv1alpha3.Project{}
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, proj)).To(Succeed())
+
+		statusPatch := client.MergeFrom(proj.DeepCopy())
+		proj.Status.Phase = "Running"
+		Expect(k8sClient.Status().Patch(ctx, proj, statusPatch)).To(Succeed())
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, proj)).To(Succeed())
+		return proj
+	}
+
+	It("emits one attribute-complete AGENT span and is idempotent", func() {
+		proj := loadProject()
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-project-%s-1", proj.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		// Project-level envelope self-keys on project.UID for both parentUID
+		// and taskUID — the Project IS the parent at this level (handler
+		// calls ReadOut(ctx, string(project.UID), string(project.UID))).
+		envReader.SetOut(string(proj.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(proj.UID),
+			Usage: pkgdispatch.Usage{
+				InputTokens:         700,
+				OutputTokens:        300,
+				CacheReadTokens:     200,
+				CacheCreationTokens: 100,
+			},
+		})
+
+		r := newProjectReconciler()
+
+		// First call: emits the span.
+		_, err := r.handleProjectJobCompletion(ctx, proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1), "exactly one span must be recorded on first observation")
+		span := spans[0]
+		Expect(span.Name).To(Equal("tide.dispatch.project"))
+		Expect(span.StartTime).To(BeTemporally("==", start))
+		Expect(span.EndTime).To(BeTemporally("==", end))
+		Expect(span.Status.Code).To(Equal(codes.Ok))
+
+		modelVal, ok := attrValue(span.Attributes, "llm.model_name")
+		Expect(ok).To(BeTrue(), "span missing llm.model_name")
+		Expect(modelVal.AsString()).To(Equal("claude-test-model"))
+
+		providerVal, ok := attrValue(span.Attributes, "llm.provider")
+		Expect(ok).To(BeTrue(), "span missing llm.provider")
+		Expect(providerVal.AsString()).To(Equal("anthropic"))
+
+		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
+		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
+
+		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
+		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Project
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(jobName),
+				"PlannerSpanEmittedUID must be set to the planner Job name")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Second call with the SAME completedJob, after re-fetching proj (marker
+		// now set) — D-02/Pitfall 2: no duplicate span. Asserts span count == 1
+		// AND the marker remains stamped with the Job name (plan 42-05 acceptance
+		// criteria).
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, proj)).To(Succeed())
+		_, err = r.handleProjectJobCompletion(ctx, proj, job)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exp.GetSpans()).To(HaveLen(1), "second call with the same Job must not emit a duplicate span")
+
+		var fresh tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
+		Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(jobName),
+			"PlannerSpanEmittedUID must remain set to the planner Job name after the idempotent second call")
+	})
+
+	It("failed Job → Error span with condition-derived end time", func() {
+		proj := loadProject()
+
+		start := time.Now().Add(-5 * time.Minute)
+		failedAt := time.Now()
+		jobName := fmt.Sprintf("tide-project-%s-1", proj.UID)
+		job := failedPlannerJob(jobName, start, failedAt)
+
+		envReader.SetOut(string(proj.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:  string(proj.UID),
+			ExitCode: 2,
+			Reason:   "cap-hit",
+		})
+
+		r := newProjectReconciler()
+		_, err := r.handleProjectJobCompletion(ctx, proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1))
+		span := spans[0]
+		Expect(span.Status.Code).To(Equal(codes.Error))
+		Expect(span.Status.Description).To(Equal("cap-hit"))
+		Expect(span.EndTime).To(BeTemporally("==", failedAt))
+
+		exitCodeVal, ok := attrValue(span.Attributes, "tide.exit_code")
+		Expect(ok).To(BeTrue(), "span missing tide.exit_code")
+		Expect(exitCodeVal.AsInt64()).To(BeNumerically("==", 2))
+
+		reasonVal, ok := attrValue(span.Attributes, "tide.reason")
+		Expect(ok).To(BeTrue(), "span missing tide.reason")
+		Expect(reasonVal.AsString()).To(Equal("cap-hit"))
+	})
+
+	It("nil completedJob → zero spans", func() {
+		proj := loadProject()
+
+		r := newProjectReconciler()
+		_, err := r.handleProjectJobCompletion(ctx, proj, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(HaveLen(0))
+
+		var fresh tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
+		Expect(fresh.Status.PlannerSpanEmittedUID).To(BeEmpty())
 	})
 })
