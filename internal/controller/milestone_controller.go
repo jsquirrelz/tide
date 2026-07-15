@@ -550,6 +550,32 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		logger.V(1).Info("no env reader; skipping tiny-status read (nil-EnvReader unit-test path)", "milestone", ms.Name)
 	}
 
+	// Phase 42 D-01/D-02/D-04: synthesize exactly one retroactive AGENT span
+	// per planner Job attempt, gated by the durable MilestoneSpanEmittedUID
+	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// existing MilestoneRolledUpUID marker below is envReadOK-gated by design
+	// and would re-emit a degraded span on every reconcile forever if reused
+	// here). Pattern 3: the helper itself no-ops on a nil completedJob
+	// (already TTL-GC'd) or a Job with no resolvable timestamps.
+	if completedJob != nil && ms.Status.MilestoneSpanEmittedUID != completedJob.Name {
+		if synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK) {
+			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &tideprojectv1alpha3.Milestone{}
+				if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+					return err
+				}
+				if latest.Status.MilestoneSpanEmittedUID == completedJob.Name {
+					return nil // already set by a concurrent reconcile — idempotent
+				}
+				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+				latest.Status.MilestoneSpanEmittedUID = completedJob.Name
+				return r.Status().Patch(ctx, latest, markerPatch)
+			}); mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("patch MilestoneSpanEmittedUID: %w", mErr)
+			}
+		}
+	}
+
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the PVC and materializes Phase children.
 	// Children arrive via the Owns(&Phase{}) watch once the reporter creates them.
