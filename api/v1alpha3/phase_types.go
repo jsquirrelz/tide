@@ -61,6 +61,14 @@ type PhaseStatus struct {
 	// per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
 	// +optional
 	PhaseRolledUpUID string `json:"phaseRolledUpUID,omitempty"`
+
+	// PhaseSpanEmittedUID is the name of the planner Job whose completion has
+	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+	// emission INDEPENDENT of envReadOK — deliberately not reusing
+	// PhaseRolledUpUID, whose envReadOK gating would re-emit degraded spans on
+	// every reconcile (Pitfall 2). Phase 42 D-02/D-04.
+	// +optional
+	PhaseSpanEmittedUID string `json:"phaseSpanEmittedUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

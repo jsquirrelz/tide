@@ -151,6 +151,14 @@ spec:
                   Mirrors the project-level budget rollup marker at the Phase level
                   per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
                 type: string
+              phaseSpanEmittedUID:
+                description: |-
+                  PhaseSpanEmittedUID is the name of the planner Job whose completion has
+                  already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+                  emission INDEPENDENT of envReadOK — deliberately not reusing
+                  PhaseRolledUpUID, whose envReadOK gating would re-emit degraded spans on
+                  every reconcile (Pitfall 2). Phase 42 D-02/D-04.
+                type: string
             type: object
         required:
         - spec
