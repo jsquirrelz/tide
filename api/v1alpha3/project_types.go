@@ -514,6 +514,16 @@ type ProjectStatus struct {
 	// non-terminal BoundaryPushed condition for observability + bounded recovery.
 	// +optional
 	BoundaryPush BoundaryPushStatus `json:"boundaryPush,omitempty"`
+
+	// PlannerSpanEmittedUID is the name of the planner Job whose completion has
+	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+	// emission INDEPENDENT of envReadOK — deliberately not reusing
+	// Budget.PlannerRolledUpUID, whose envReadOK gating would re-emit degraded
+	// spans on every reconcile (Pitfall 2). Placed directly on ProjectStatus
+	// (NOT Budget-nested): budget rollup is cost bookkeeping, span emission is
+	// telemetry bookkeeping with no budget relationship. Phase 42 D-02/D-04.
+	// +optional
+	PlannerSpanEmittedUID string `json:"plannerSpanEmittedUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

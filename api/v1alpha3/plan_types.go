@@ -118,6 +118,14 @@ type PlanStatus struct {
 	// +optional
 	PlanRolledUpUID string `json:"planRolledUpUID,omitempty"`
 
+	// PlanSpanEmittedUID is the name of the planner Job whose completion has
+	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+	// emission INDEPENDENT of envReadOK — deliberately not reusing
+	// PlanRolledUpUID, whose envReadOK gating would re-emit degraded spans on
+	// every reconcile (Pitfall 2). Phase 42 D-02/D-04.
+	// +optional
+	PlanSpanEmittedUID string `json:"planSpanEmittedUID,omitempty"`
+
 	// WaveIntegration records the bounded auto-retry state of the current
 	// wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
 	// reconcileWaveBoundary advances to a new blocking wave.
