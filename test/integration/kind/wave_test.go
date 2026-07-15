@@ -89,8 +89,8 @@ var _ = Describe("Three-task wave success (AC1)", Label("kind"), func() {
 	})
 
 	AfterEach(func() {
-		deleteNamespace(testNS)
-		deleteNamespace(fixtureNS)
+		deleteNamespaceAndWait(testNS)
+		deleteNamespaceAndWait(fixtureNS)
 		if CurrentSpecReport().Failed() {
 			exportKindLogs()
 		}
