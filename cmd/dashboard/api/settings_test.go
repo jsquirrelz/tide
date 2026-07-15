@@ -59,6 +59,7 @@ func fullSettingsProject() *tidev1alpha3.Project {
 			OutcomePrompt:  "Build the thing end to end",
 			Git: &tidev1alpha3.GitConfig{
 				RepoURL:        "https://example.com/repo.git",
+				BaseRef:        "release/v2",
 				CredsSecretRef: "git-creds",
 			},
 			Subagent: tidev1alpha3.SubagentConfig{
@@ -106,7 +107,7 @@ func TestSettingsFullyPopulated(t *testing.T) {
 	if ps.OutcomePrompt != "Build the thing end to end" {
 		t.Errorf("outcomePrompt=%q", ps.OutcomePrompt)
 	}
-	if ps.Repo.RepoURL != "https://example.com/repo.git" || ps.Repo.BranchName != "tide/run-prj-1-1" {
+	if ps.Repo.RepoURL != "https://example.com/repo.git" || ps.Repo.BranchName != "tide/run-prj-1-1" || ps.Repo.BaseRef != "release/v2" {
 		t.Errorf("repo=%+v", ps.Repo)
 	}
 	if ps.Models.Milestone != "claude-opus" || ps.Models.Task != "claude-haiku" {
@@ -203,7 +204,7 @@ func TestSettingsHonestDefaults(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	if ps.Repo.BaseRef != "" {
-		t.Errorf("baseRef=%q want empty (HEAD-default; field not yet in schema)", ps.Repo.BaseRef)
+		t.Errorf("baseRef=%q want empty (HEAD default)", ps.Repo.BaseRef)
 	}
 	if ps.Repo.RepoURL != "" || ps.Repo.BranchName != "" {
 		t.Errorf("git-less repo settings should be empty, got %+v", ps.Repo)
