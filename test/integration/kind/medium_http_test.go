@@ -290,7 +290,7 @@ var _ = Describe("Medium http transport", Label("kind"), Ordered, func() {
 			dumpNamespaceState(mediumHTTPNamespace)
 			exportKindLogs()
 		}
-		deleteNamespace(mediumHTTPNamespace)
+		deleteNamespaceAndWait(mediumHTTPNamespace)
 	})
 
 	// -------------------------------------------------------------------------
@@ -464,7 +464,7 @@ data:
 		// hierarchy away (a function-level defer would run ahead of this and
 		// destroy the evidence — why previous failures left no diagnosable
 		// state). Project cleanup itself belongs to AfterAll's
-		// deleteNamespace; this is the container's final spec.
+		// deleteNamespaceAndWait; this is the container's final spec.
 		DeferCleanup(func() {
 			if CurrentSpecReport().Failed() {
 				dumpNamespaceState(mediumHTTPNamespace)

@@ -60,7 +60,7 @@ var _ = Describe("Push lease semantics (ART-06 / D-B5 / D-B6)", Label("kind"), f
 	})
 
 	AfterEach(func() {
-		deleteNamespace(pushLeaseNS)
+		deleteNamespaceAndWait(pushLeaseNS)
 		if CurrentSpecReport().Failed() {
 			exportKindLogs()
 		}

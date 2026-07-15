@@ -148,7 +148,7 @@ data:
 			dumpNamespaceState(integrationMissNamespace)
 			exportKindLogs()
 		}
-		deleteNamespace(integrationMissNamespace)
+		deleteNamespaceAndWait(integrationMissNamespace)
 	})
 
 	// -------------------------------------------------------------------
@@ -162,7 +162,7 @@ data:
 			withGit(integrationMissTargetRepo, "tide-secrets"))
 		By("Creating single-wave Project " + projName)
 		Expect(createFixture(ctx, proj)).To(Succeed())
-		// No deferred Delete: cleanup belongs to AfterAll's deleteNamespace.
+		// No deferred Delete: cleanup belongs to AfterAll's deleteNamespaceAndWait.
 		// A function-level defer fires BEFORE any failure diagnostics run
 		// (Ginkgo failure unwinds the It body first), cascading the whole
 		// hierarchy away and leaving nothing to dump. DeferCleanup runs

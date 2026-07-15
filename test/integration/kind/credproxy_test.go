@@ -61,7 +61,7 @@ var _ = Describe("Credproxy sidecar topology and startup signal (AC5 / HARN-03)"
 	})
 
 	AfterEach(func() {
-		deleteNamespace(credproxyNS)
+		deleteNamespaceAndWait(credproxyNS)
 		if CurrentSpecReport().Failed() {
 			exportKindLogs()
 		}
