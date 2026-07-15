@@ -1,0 +1,93 @@
+# Requirements — v1.0.8 Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix
+
+## v1.0.8 Requirements
+
+Requirements for this milestone. Each maps to roadmap phases. Grounded in `.planning/research/` (SUMMARY/STACK/FEATURES/ARCHITECTURE/PITFALLS, committed `c817f95`/`99d12bd`) and the runtime-neutrality constraints locked in PROJECT.md.
+
+### Dispatch-Chain Span Emission (TRACE)
+
+- [ ] **TRACE-01**: The manager emits retroactive OpenInference `AGENT` spans (`trace.WithTimestamp` start/end) at all five level-completion sites (Project/Milestone/Phase/Plan/Task), carrying model, cost, duration, and token attributes sourced from the same envelope/status data the budget tally already uses — never recomputed
+- [ ] **TRACE-02**: One run renders as ONE navigable trace: the trace ID derives deterministically from the Project UID (128-bit ↔ OTel TraceID), and every level's span parents correctly under its parent level's span
+- [ ] **TRACE-03**: Every span-emitting one-shot binary (reporter; any Job-side emitter) carries the TracerProvider construction AND the deferred-Shutdown flush discipline — a short-lived process must not silently drop its batch
+
+### OpenInference Attribute Completeness (ATTR)
+
+- [ ] **ATTR-01**: Every AGENT/LLM span carries `llm.model_name` and `llm.provider` — the attributes Phoenix requires to compute cost and populate its LLM detail view (absent today; without them Phoenix renders $0.00/blank, reading as broken)
+- [ ] **ATTR-02**: `llm.token_count.total` is emitted alongside the existing prompt/completion/cache splits (Phoenix's documented cost-tracking requirement)
+- [ ] **ATTR-03**: `pkg/otelai` attribute keys are backed by the official `openinference-semantic-conventions` Go module instead of hand-rolled strings, so emitted attributes stay convention-identical to what `openinference-instrumentation-langchain` will emit natively (runtime-migration survival)
+
+### Trace-Context Propagation (PROP)
+
+- [ ] **PROP-01**: W3C `traceparent` is injected as data into both the subagent Job env and the reporter Job env; child-process spans parent under the manager's dispatch span — the runtime-neutral contract, applied at both pod hops
+- [ ] **PROP-02**: Per-level trace/span IDs persist in a small CRD `.status.trace` field (bytes, not payloads — within the keep-CRDs-small rule), serving as the durable parent carrier across reconciles and the dashboard's read path for deep links
+
+### LLM Message-Array Spans (MSG)
+
+- [ ] **MSG-01**: The executor (Task) level gains an `events.jsonl` reader — a trace-only reporter mode (no child-CR materialization) — closing the gap where the richest LLM conversation currently has no in-namespace consumer at all
+- [ ] **MSG-02**: `LLMInputMessages`/`LLMOutputMessages` are populated from `events.jsonl` ONLY after passing the existing `internal/harness/redact.SecretPatterns` pass — the file is written raw/unredacted by design and must never reach Phoenix unfiltered
+- [ ] **MSG-03**: Message attributes are size-guarded under the OTLP 4 MB ceiling: per-message truncation with explicit truncation markers, plus `ArtifactPath(events.jsonl)` on the same span as the full-fidelity reference — and the D-O5 payload-boundary decision (inline-bounded + reference) is documented, with the `TestNoPayloadHelperOnPublicSurface` guard updated deliberately, not deleted
+
+### Runtime-Neutral Adapter Seam (ADAPT)
+
+- [ ] **ADAPT-01**: The events.jsonl→spans synthesizer is a per-runtime adapter behind the Subagent seam: a self-instrumenting capability flag travels as data (via the manager's resolved `Provider.Vendor`), the reporter skips synthesis when set, and a contract test proves a self-instrumenting runtime produces no duplicate spans
+
+### Self-Hosted Phoenix Surface (PHX)
+
+- [ ] **PHX-01**: INSTALL.md/observability.md document a self-hosted Phoenix recipe using Phoenix's official OCI Helm chart, covering BOTH storage paths (PVC-backed SQLite for kind/dev matching TIDE's posture; bundled Postgres for durability) and calling out the chart's `auth.enableAuth=true` default (opposite of the raw image default)
+- [ ] **PHX-02**: The `otel.exporter.endpoint` wiring is documented end-to-end — including the bare `host:port` requirement (`otlptracegrpc.WithEndpoint` silently breaks on scheme-prefixed values) — and NOTES.txt nudges toward the Phoenix step when tracing is dark
+
+### Observability Add-Ons (OBS)
+
+- [ ] **OBS-01**: The chart's trace-sampler default changes 0.1 → 1.0 (TIDE's dispatch volume is dozens-to-hundreds of spans per run, not web-service QPS; at 10% a demo run has a 90% chance any given span never reaches Phoenix), with the opt-down documented for high-volume installs
+- [ ] **OBS-02**: Every span carries `session.id` = Project UID, so Phoenix's session view computes independent token/cost rollups — a free cross-check against TIDE's budget tally (the accounting-bug class hit twice before)
+- [ ] **OBS-03**: Spans carry `metadata`/`tag.tags` enrichment (level kind + name, wave index, gate profile, failure-halt state) so operators can filter Phoenix's DSL by "every span from Phase N" or "every conservative-profile run" without leaving Phoenix
+- [ ] **OBS-04**: The TIDE dashboard deep-links each Planning/Execution DAG node to its Phoenix trace (`{phoenixBaseURL}/…/{trace_id}`), reading IDs from `.status.trace` (PROP-02) with a `phoenix.baseURL` chart value; absent config renders no link (no dead buttons)
+
+### End-to-End Proof (PROOF)
+
+- [ ] **PROOF-01**: A live run's complete five-level trace tree — including redacted message arrays at the Task level — is visible and queryable in a self-hosted Phoenix, with evidence (screenshots + trace IDs) captured at milestone close; this is the milestone's acceptance bar
+
+## Future Requirements
+
+Deferred to later milestones:
+
+- **Signed commits (SIGN-02/03/04)** — GPG signing at all three commit sites, key validation, Verified-badge docs (deferred from v1.0.7; analysis preserved in the v1.0.7 archive)
+- **Verify-tier LLM subagents** — the vNext Specialist Verify Tier + LangGraph beachhead milestone (framing docs in `.planning/milestones/`)
+- **CACHE-F1 direct-SDK backend** — cross-pod prompt caching via a direct-SDK subagent (todo pending); the `openinference-instrumentation-anthropic-sdk-go` auto-instrumentor becomes relevant only then (needs SDK ≥ v1.43; TIDE pins v1.42.x)
+- **LangGraph native-emission flag-flip** — ADAPT-01 ships the seam + contract test now; the actual skip-synthesis activation waits for the LangGraph runtime to exist
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Bespoke trace-viewer UI in TIDE's dashboard | Phoenix IS the purpose-built trace UI this milestone adopts; the OBS-04 deep link closes the loop — link out, don't rebuild |
+| OTel Collector middle tier / tail-based sampling | No evidence TIDE's dispatch volume needs it; head sampling at 1.0 suffices for the traffic shape |
+| `graph.node.id`/`graph.node.parent_id` DAG attributes | Phoenix has no first-class non-tree visualization; standard span nesting already renders TIDE's strict tree |
+| Phoenix as a TIDE chart subchart or bundled manifests | Documented-install posture locked at scoping — no version coupling to Arize's near-daily chart releases |
+| Metrics migration to OTel | client_golang/Prometheus stays the metrics train (pinned stack decision); this milestone is traces only |
+
+## Traceability
+
+Filled by roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TRACE-01 | — | Pending |
+| TRACE-02 | — | Pending |
+| TRACE-03 | — | Pending |
+| ATTR-01 | — | Pending |
+| ATTR-02 | — | Pending |
+| ATTR-03 | — | Pending |
+| PROP-01 | — | Pending |
+| PROP-02 | — | Pending |
+| MSG-01 | — | Pending |
+| MSG-02 | — | Pending |
+| MSG-03 | — | Pending |
+| ADAPT-01 | — | Pending |
+| PHX-01 | — | Pending |
+| PHX-02 | — | Pending |
+| OBS-01 | — | Pending |
+| OBS-02 | — | Pending |
+| OBS-03 | — | Pending |
+| OBS-04 | — | Pending |
+| PROOF-01 | — | Pending |
