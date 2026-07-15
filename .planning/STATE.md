@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0.7
 milestone_name: "— First-Run Paper Cuts: Run Integrity & Operator Ergonomics"
-status: milestone_complete
-stopped_at: Milestone complete (Phase 41 was final phase)
-last_updated: 2026-07-13T17:19:29.323Z
-last_activity: 2026-07-12 -- Phase 41 execution started
+status: Awaiting next milestone
+stopped_at: Phase 41 context gathered (auto)
+last_updated: "2026-07-15T08:20:06.454Z"
+last_activity: 2026-07-15 — Milestone v1.0.7 completed and archived
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 49
-  completed_plans: 51
-  percent: 86
+  completed_plans: 49
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 41
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-13
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Milestone v1.0.7 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-15 — Milestone v1.0.7 completed and archived
 
 ## Performance Metrics
 
@@ -127,15 +125,20 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ## Deferred Items
 
-Items acknowledged and carried forward at v1.0.6 milestone close (2026-06-29):
+Items acknowledged and deferred at v1.0.7 milestone close (2026-07-15):
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| quick_tasks | 20 | Stale historical capture-log entries (260521–260625 era), long resolved |
-| todos | 1 | historical |
-| uat_gaps | 1 | partial-status historical entry |
+| debug_sessions | 1 | layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; both local envtest runs 2026-07-15 were 56/56 green, so the repro is CI-specific; session stays open |
+| quick_tasks | 24 | SUMMARY frontmatter `status:` field missing/unknown — audit-scanner bookkeeping only; the work itself shipped (incl. 260715-4jd/-5r8 closed this session with green verifies) |
+| todos | 4 | signed-commits-verified-badge (GPG scope = SIGN-02/03/04, Future Requirements) · project-dispatch-missing-failurehalt-gate + task-dispatch-gate-order-divergence (audit W-2, next-milestone candidates) · cache-f1-direct-sdk-cross-pod-caching (vNext+) |
+| uat_gaps | 1 | scanner false-positive: 37-UAT.md is status `passed` with 0 open scenarios |
 
-v1.0.6 tech-debt carried INTO this milestone as requirements: W1 → DEBT-01, W2 → DEBT-02, envtest tier split → DEBT-03 (all Phase 38).
+Five 2026-07-03 first-run todos were CLOSED (not deferred) at this milestone close — resolved by shipped phases: log-drawer + artifact-view → Phase 37, baseref → Phase 35, subagent-override-slot → Phase 40 (CRANK-04), wave-parallel-integration-miss → Phase 34.
+
+Tech-debt carried OUT of v1.0.7 (full list in [milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md)): W-2 FailureHalt/gate-order divergences (todos above), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
+
+Items carried forward from v1.0.6 close (2026-06-29): 20 stale historical quick-task capture-log entries (260521–260625 era, long resolved — superset counted in the 24 above), 1 historical todo, 1 partial-status historical UAT entry. v1.0.6 tech-debt carried INTO v1.0.7 as requirements was retired: W1 → DEBT-01 ✓, W2 → DEBT-02 ✓, envtest tier split → DEBT-03 ✓ (Phases 38/39).
 
 ## Session Continuity
 
@@ -145,4 +148,4 @@ Resume file: .planning/phases/41-refactoring-review-non-breaking-cleanup-12-item
 
 ## Operator Next Steps
 
-- Plan the first phase: `/gsd-plan-phase 34`
+- Start the next milestone with /gsd-new-milestone

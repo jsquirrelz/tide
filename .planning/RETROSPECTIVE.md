@@ -70,6 +70,37 @@ Closed the four code-level defects dogfood run #2b surfaced on the v1.0.5 import
 
 ---
 
+## Milestone: v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics
+
+**Shipped:** 2026-07-15 (tag `v1.0.7`) | **Phases:** 8 (34–41, incl. folded-in 39) | **Plans:** 51
+
+### What Was Built
+Everything the first external-repo run surfaced short of new subagent stages: the run-integrity gate (serialized flock merges, git-recomputed completeness gate on boundary push, `lastPushedSHA` lease), console-accurate Claude-5 pricing (exact-ID + probed 125/100 cache-write multiplier + observable fallback), git ergonomics (baseRef, uniform agent identity, promptFile), the dashboard as an approve-gate review surface (git-as-artifact-store + gitfetch, settings view, honest log-drawer states), telemetry setup guidance — plus two appended structural turns: the Phase 40 v1alpha3 crank (v1alpha1+v1alpha2 deleted, `subagent.levels` rename, CI-gated) and the Phase 41 12-item refactoring review. Audit `tech_debt`, 44/44, 0 blockers; `make test-int` fully green at close.
+
+### What Worked
+- **The milestone audit as a working session, not a report.** It found Phase 37 formally unverified (no VERIFICATION.md despite a passed 8/8 live UAT), spawned the verifier to close it, and surfaced doc drift (BASE checkboxes, the never-propagated DASH-02 git-transport reword) that got fixed on the spot.
+- **Root-causing the "flake" instead of relabeling it.** The close-out full-suite run came back 25/26; the red was traced to a real harness race (fire-and-forget `deleteNamespace` + shared namespace constants → recreate-while-Terminating) and fixed in the same session (quick 260715-4jd), after which the suite ran 26/26. The NO-FLAKE-TOLERANCE Makefile doctrine proved itself.
+- **Mid-phase design reversal handled cleanly:** DASH-02's ConfigMap display cache was superseded by git-as-artifact-store during discussion (user rejected truncation), and the phase delivered the better design — the only miss was not propagating the reword to REQUIREMENTS/ROADMAP (caught at audit).
+
+### What Was Inefficient
+- **Two full kind-suite runs (~35 min each) at close** because the first surfaced the harness race. Unavoidable given the doctrine, but the race itself dated from Phase 04.1-era test scaffolding — a periodic harness-hygiene pass over shared-namespace patterns would have caught it cheaply.
+- **Phase 37 closed without its verifier artifact** — 12/12 plans + REVIEW + UAT existed but nobody ran `/gsd:verify-work`-equivalent; the audit had to backfill it. Verify-before-close should be part of phase closeout, not milestone closeout.
+- **The SDK's auto-extracted MILESTONES.md accomplishments were unusable** (raw "One-liner:" placeholders and task headers) — hand-curated at close. SUMMARY frontmatter hygiene (`one_liner`, `requirements_completed`) remains unfixed across milestones.
+
+### Patterns Established
+- Milestone-close chain that works end-to-end: audit (with inline gap-closure) → tech-debt-weight quick fixes (W-1 baseRef wire) → full-suite green evidence → archive/evolve/tag.
+- Evidence-currency rule: the close-out suite run must be on the FINAL tree (post-refactor REFAC-11 PVC wiring was exercised green only because the suite re-ran after Phase 41).
+
+### Key Lessons
+- A missing VERIFICATION.md is invisible until milestone close unless the audit checks for it — phase "Complete" status in STATE.md said nothing about verifier artifacts.
+- Fixture/harness races hide behind "environmental" labels: the same failure signature (PVC never Bound) had three distinct root causes across this repo's history (provisioner pressure, missing SA, namespace-Terminating race) — grep the harness before blaming the environment.
+
+### Cost Observations
+- Model mix: planners fable/opus, executors sonnet, verifier opus, integration-checker + audit inline fable. Fable available again this milestone (planner quick tasks ran on it).
+- Notable: the audit→close chain (integration check, Phase-37 verification, race root-cause + fix, 2 full kind runs, 2 quick tasks, archive/evolve) ran autonomously in one session; the only human decision was close-first sequencing.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -78,11 +109,14 @@ Closed the four code-level defects dogfood run #2b surfaced on the v1.0.5 import
 |-----------|--------|-------|------------|
 | v1.0.0 | 14 dirs (1–11 + inserts) | 137 | Built the operator end-to-end; rc-gated release with $0 DinD dry-run |
 | v1.0.1 | 6 (12–17) | 38 | Trustworthiness pass driven by dogfood run-1 findings; findings-as-regression-tests; audit→closure-phase loop |
+| v1.0.6 | 3 (31–33) | 8 | Corrective-patch cadence (~2 days); adversarial code review as standard post-verify gate |
+| v1.0.7 | 8 (34–41) | 51 | Audit-as-working-session (inline gap closure + quick fixes); NO-FLAKE-TOLERANCE doctrine proven; full-suite-on-final-tree evidence rule |
 
 ### Recurring Friction (verify whether next milestone fixes it)
 
-1. Executor leaves SUMMARY `requirements_completed` empty → manual coverage cross-check at audit (v1.0.0 and v1.0.1).
-2. Administrative quick-task status fields never flipped → carried as deferred items at both closes (11 at v1.0.0, 15 at v1.0.1).
+1. Executor leaves SUMMARY `requirements_completed` empty → manual coverage cross-check at audit (v1.0.0, v1.0.1, and again v1.0.7 — all null; VERIFICATION.md tables used as fallback source).
+2. Administrative quick-task status fields never flipped → carried as deferred items at every close (11 at v1.0.0, 15 at v1.0.1, 20 at v1.0.6, 24 at v1.0.7).
+3. Phase closes without its VERIFICATION.md unless the phase chain runs the verifier — backfilled at audit for Phase 37 (v1.0.7); consider making verify a hard phase-closeout step.
 
 ### Top Lessons (Verified Across Milestones)
 

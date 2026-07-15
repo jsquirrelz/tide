@@ -1,5 +1,23 @@
 # Milestones
 
+## v1.0.7 First-Run Paper Cuts: Run Integrity & Operator Ergonomics (Shipped: 2026-07-15)
+
+**Phases completed:** 8 phases (34–41, incl. folded-in 39), 51 plans
+**Timeline:** 2026-06-29 → 2026-07-15 · 193 commits · 951 files (+60.6k/−61.8k — net-negative from the Phase 40 API deletion)
+**Audit:** tech_debt — 44/44 requirements satisfied, 0 blockers ([milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md)) · full `make test-int` green at close (envtest 56/56, kind 26/26, MAKE_EXIT=0)
+**Known deferred items at close:** 30 acknowledged (see STATE.md Deferred Items) — mostly historical bookkeeping; substantive carries are the W-2 dispatch-gate divergence todos, W-4 CRD pattern-lock re-establishment, and the Phase 36 'bot' vocabulary residue.
+
+**Key accomplishments:**
+
+- **Run integrity (the headline):** a pushed run branch provably contains every Succeeded task's work — final-wave integration fixed, wave-parallel merges serialized behind kernel flock, boundary push gated on `git merge-base --is-ancestor` completeness with a sticky `integration-incomplete` condition, `status.git.lastPushedSHA` stamped and armed as the force-with-lease fence, and a kind regression test reproducing the original 2-parallel-task miss.
+- **Budget tally matches the provider console:** Claude 5 family models price at real per-MTok rates via exact-ID lookup + `-YYYYMMDD` normalizer (the 2.8× first-run overcount is a pinned regression test), the cache-write multiplier was empirically probed (125/100, 5m TTL), and unknown-model fallback is now observable as a durable condition + Prometheus counter.
+- **Dashboard is a sufficient approve-gate review surface:** planning artifacts stage to the run branch (`.tide/planning/`, git-as-artifact-store — reworded from the ConfigMap design mid-phase) and render markdown in a node artifact viewer beside the approve action; a project settings view (secret names only, never values); honest log-drawer loading/streaming/pod-gone states — no more ad-hoc PVC reader pods. Verified live in an 8/8 autonomous Playwright UAT.
+- **Full API version-lifecycle crank:** v1alpha3 is the sole served+storage version for all 6 CRDs — `subagent.levels` semantic rename (closes the silent top-level-model fallback), envelope contract decoupled to `dispatch.tideproject.k8s/v1alpha1`, v1alpha1+v1alpha2 Go packages deleted (~330 files repointed), and a CI-wired `verify-no-legacy-api-refs` gate proven alive by seeded failure.
+- **Git ergonomics:** `spec.git.baseRef` (branch/tag/SHA) with typed fail-fast on unresolvable refs and `status.git.baseSHA` stamping; agent identity uniformly configurable at all three commit sites (`spec.git.agentName`/`agentEmail` → chart → compiled `TIDE Agent <tide-agent@tideproject.k8s>`); `tide apply --prompt-file`.
+- **12-item refactoring review landed as non-breaking cleanup:** typed LevelPhase constants (~117 sites), shared `checkDispatchHolds`/`PlannerReconcilerDeps` extractions, `ConditionParentUnresolved` polarity fix, one envtest retry-driver family (~59 call sites repointed), and label/PVC-name centralization that made the latent dead `--workspaces-pvc-name` flag live end-to-end.
+
+---
+
 ## v1.0.6 Adoption-Path Correctness & Dispatch Safety (Shipped: 2026-06-29)
 
 **Phases completed:** 3 phases, 8 plans, 12 tasks
