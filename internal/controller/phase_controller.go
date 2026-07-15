@@ -491,6 +491,32 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		logger.V(1).Info("no env reader; skipping tiny-status read", "phase", ph.Name)
 	}
 
+	// Phase 42 D-01/D-02/D-04: synthesize exactly one retroactive AGENT span
+	// per planner Job attempt, gated by the durable PhaseSpanEmittedUID
+	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// existing PhaseRolledUpUID marker below is envReadOK-gated by design and
+	// would re-emit a degraded span on every reconcile forever if reused
+	// here). Pattern 3: the helper itself no-ops on a nil completedJob
+	// (already TTL-GC'd) or a Job with no resolvable timestamps.
+	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != completedJob.Name {
+		if synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK) {
+			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &tideprojectv1alpha3.Phase{}
+				if err := r.Get(ctx, client.ObjectKeyFromObject(ph), latest); err != nil {
+					return err
+				}
+				if latest.Status.PhaseSpanEmittedUID == completedJob.Name {
+					return nil // already set by a concurrent reconcile — idempotent
+				}
+				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+				latest.Status.PhaseSpanEmittedUID = completedJob.Name
+				return r.Status().Patch(ctx, latest, markerPatch)
+			}); mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("patch PhaseSpanEmittedUID: %w", mErr)
+			}
+		}
+	}
+
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the PVC and materializes Plan children.
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
