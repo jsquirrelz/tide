@@ -535,6 +535,32 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		envReadOK = true
 	}
 
+	// Phase 42 D-01/D-02/D-04: synthesize exactly one retroactive AGENT span
+	// per planner Job attempt, gated by the durable PlanSpanEmittedUID
+	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// existing PlanRolledUpUID marker below is envReadOK-gated by design
+	// and would re-emit a degraded span on every reconcile forever if reused
+	// here). Pattern 3: the helper itself no-ops on a nil completedJob
+	// (already TTL-GC'd) or a Job with no resolvable timestamps.
+	if completedJob != nil && plan.Status.PlanSpanEmittedUID != completedJob.Name {
+		if synthesizePlannerSpan(ctx, "plan", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK) {
+			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &tideprojectv1alpha3.Plan{}
+				if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+					return err
+				}
+				if latest.Status.PlanSpanEmittedUID == completedJob.Name {
+					return nil // already set by a concurrent reconcile — idempotent
+				}
+				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+				latest.Status.PlanSpanEmittedUID = completedJob.Name
+				return r.Status().Patch(ctx, latest, markerPatch)
+			}); mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("patch PlanSpanEmittedUID: %w", mErr)
+			}
+		}
+	}
+
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the PVC and materializes Task children.
 	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
