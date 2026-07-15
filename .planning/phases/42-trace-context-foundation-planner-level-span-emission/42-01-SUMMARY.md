@@ -111,3 +111,7 @@ None — no external service configuration required. The module is a zero-transi
 ---
 *Phase: 42-trace-context-foundation-planner-level-span-emission*
 *Completed: 2026-07-15*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present (go.mod, go.sum, pkg/otelai/attrs.go, pkg/otelai/attrs_test.go, pkg/otelai/doc.go, this SUMMARY.md). All task commits confirmed in git log (`32adad4` RED, `1f2a7f2` GREEN, `e9b5528` guard test + doc.go).
