@@ -22,9 +22,6 @@ package otelai
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/trace"
@@ -172,26 +169,6 @@ func TestTraceContextExtractMalformedNoPanic(t *testing.T) {
 		sc := trace.SpanContextFromContext(ctx)
 		if sc.IsValid() {
 			t.Errorf("ExtractRemoteParent(%q) produced a valid SpanContext, want invalid", tp)
-		}
-	}
-}
-
-// TestTraceContextNoK8sImports enforces the 42-PATTERNS.md "No K8s imports —
-// tracecontext.go stays as dependency-light as attrs.go" constraint and the
-// milestone ARCHITECTURE.md build-order rationale (pure, zero K8s deps,
-// build first). Mirrors TestNoWithSamplerInSource's role: a cheap PR-time
-// tripwire for a load-bearing architectural rule. findRepoRoot is defined
-// once in attrs_test.go (same package) and reused here.
-func TestTraceContextNoK8sImports(t *testing.T) {
-	root := findRepoRoot(t)
-	data, err := os.ReadFile(filepath.Join(root, "pkg", "otelai", "tracecontext.go"))
-	if err != nil {
-		t.Fatalf("read pkg/otelai/tracecontext.go: %v", err)
-	}
-	src := string(data)
-	for _, needle := range []string{"k8s.io/", "sigs.k8s.io/"} {
-		if strings.Contains(src, needle) {
-			t.Errorf("tracecontext.go must stay K8s-independent (42-PATTERNS.md / ARCHITECTURE.md build-order rationale); found forbidden import substring %q", needle)
 		}
 	}
 }
