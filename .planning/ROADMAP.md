@@ -188,17 +188,17 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 
 ### Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States
 
-**Goal**: The dashboard is a sufficient approve-gate review surface — operators read the planning artifacts a node produced, the project's outcome prompt and settings, and honest log-drawer states, without spinning up ad-hoc PVC reader pods. Three features sharing one read-only manager-API surface; the reporter's ConfigMap display cache is the transport (PVC/git remain source of truth).
+**Goal**: The dashboard is a sufficient approve-gate review surface — operators read the planning artifacts a node produced, the project's outcome prompt and settings, and honest log-drawer states, without spinning up ad-hoc PVC reader pods. Three features sharing one read-only manager-API surface; git is the artifact transport — staged envelopes on the run branch read via gitfetch (reworded per 37-CONTEXT.md; PVC/git remain source of truth).
 **Depends on**: Nothing (independent of Phases 34–36; sequenced last among the big items so the UI consumes a settled reporter ConfigMap contract, which this phase also delivers — DASH-02 lands before/with DASH-01)
 **Requirements**: DASH-01, DASH-02, DASH-03, DASH-04
 **Success Criteria** (what must be TRUE):
 
   1. Clicking any Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); on a gate-parked node the artifact renders beside the approve action — an approve decision needs no PVC reader pod.
-  2. Planning artifacts persist as size-capped, owner-ref'd ConfigMaps written at reporter materialization time; an oversize artifact renders with a visible truncation marker, and deleting the owning CR garbage-collects its artifact ConfigMaps (PVC/git stay source of truth).
+  2. Planning artifacts are committed to the run branch under `.tide/planning/<kind>/<name>/` at reporter-materialization time and served through the manager's gitfetch store — full artifact visibility with no truncation anywhere in the pipeline (PVC/git stay source of truth). *(Reworded per 37-CONTEXT.md D-01..D-04 — git transport superseded the original ConfigMap display-cache design during phase discussion.)*
   3. The operator can read the outcome prompt and project settings in a dashboard project view.
   4. The log drawer always renders an explicit state — loading, streaming, or pod-gone — and is never silently empty.
 
-**Plans**: 9/10 plans executed
+**Plans**: 12/12 plans executed
 
 - [x] 37-01-PLAN.md
 - [x] 37-02-PLAN.md
@@ -209,7 +209,9 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 - [x] 37-07-PLAN.md
 - [x] 37-08-PLAN.md
 - [x] 37-09-PLAN.md
-- [ ] 37-10-PLAN.md
+- [x] 37-10-PLAN.md
+- [x] 37-11-PLAN.md
+- [x] 37-12-PLAN.md
 
 **UI hint**: yes
 

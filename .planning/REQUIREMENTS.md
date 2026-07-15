@@ -30,9 +30,9 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 
 ### Git Base Ref (BASE)
 
-- [ ] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
-- [ ] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
-- [ ] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests
+- [x] **BASE-01**: Operator can set `spec.git.baseRef` (branch, tag, or SHA) to base a run on a non-default ref; absent field keeps current HEAD behavior (no default marker)
+- [x] **BASE-02**: An unresolvable baseRef fails fast with a typed condition (classify-don't-retry), not a cryptic worktree-add failure
+- [x] **BASE-03**: The resolved base SHA is stamped in `status.git.baseSHA`; the field exists in both API versions with conversion round-trip and CRD upgrade-path tests *(the "both API versions" clause is structurally obsolete post-Phase-40 single-version crank; round-trip coverage relocated to the v1alpha3 upgrade-path tests)*
 
 ### Agent Identity (SIGN)
 
@@ -47,7 +47,7 @@ Carried in from a parallel session that started a different (now-superseded) v1.
 ### Dashboard Visibility (DASH)
 
 - [x] **DASH-01**: Clicking a Planning DAG node shows the artifacts it produced, markdown-rendered (children JSON pretty-printed); gate-parked nodes surface the artifact beside the approve action
-- [ ] **DASH-02**: Planning artifacts are persisted as size-capped, owner-ref'd ConfigMaps at reporter materialization time (display cache with truncation markers; PVC/git remain source of truth)
+- [x] **DASH-02**: Planning artifacts are committed to the run branch under `.tide/planning/<kind>/<name>/` at reporter-materialization time (via `tide-push --stage-envelopes`) and served to the dashboard through the manager's gitfetch store — full artifact visibility, no truncation anywhere in the pipeline; PVC/git remain source of truth *(reworded per 37-CONTEXT.md D-01..D-04, which superseded the original size-capped ConfigMap display-cache wording during phase discussion)*
 - [x] **DASH-03**: Operator can read the outcome prompt and project settings in a dashboard project view
 - [x] **DASH-04**: The log drawer renders explicit loading / streaming / pod-gone states (never silently empty)
 
@@ -141,12 +141,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INTEG-03 | Phase 34 | Complete |
 | INTEG-04 | Phase 34 | Complete |
 | INTEG-05 | Phase 34 | Complete |
-| BASE-01 | Phase 35 | Pending |
-| BASE-02 | Phase 35 | Pending |
-| BASE-03 | Phase 35 | Pending |
+| BASE-01 | Phase 35 | Complete |
+| BASE-02 | Phase 35 | Complete |
+| BASE-03 | Phase 35 | Complete |
 | SIGN-01 | Phase 36 | Complete |
 | DASH-01 | Phase 37 | Complete |
-| DASH-02 | Phase 37 | Pending |
+| DASH-02 | Phase 37 | Complete |
 | DASH-03 | Phase 37 | Complete |
 | DASH-04 | Phase 37 | Complete |
 | COST-01 | Phase 38 | Complete |
