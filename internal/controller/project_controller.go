@@ -1736,6 +1736,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		// PROP-01/D-02: no TraceParent — Project is the trace root, its dispatch
+		// Job legitimately carries no TRACEPARENT (no parent span exists above it).
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {
@@ -1897,7 +1899,10 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
-				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
+				ReporterOptions{
+					ReporterImage: r.Deps.ReporterImage,
+					TraceParent:   traceparentForLevel(project, project.Status.ProjectTraceSpanID),
+				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)

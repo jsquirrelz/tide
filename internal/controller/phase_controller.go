@@ -408,6 +408,19 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "phase", "model", envIn.Provider.Model, "image", resolvedImage)
+
+	// PROP-01: Phase's immediate parent is Milestone — a genuinely new fetch
+	// (mirrors the identical fetch in handleJobCompletion). A missing
+	// MilestoneRef or a failed Get degrades to an empty hex, which
+	// traceparentForLevel/FormatTraceparent already turn into an omitted env
+	// var rather than a malformed one.
+	parentSpanIDHex := ""
+	if ph.Spec.MilestoneRef != "" {
+		var parentMs tideprojectv1alpha3.Milestone
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ph.Spec.MilestoneRef}, &parentMs); err == nil {
+			parentSpanIDHex = parentMs.Status.MilestoneTraceSpanID
+		}
+	}
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            ph,
@@ -425,6 +438,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		TraceParent:          traceparentForLevel(project, parentSpanIDHex),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ph, r.Scheme); err != nil {
@@ -575,7 +589,8 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName())
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName(),
+		traceparentForLevel(project, ph.Status.PhaseTraceSpanID))
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

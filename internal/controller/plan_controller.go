@@ -428,6 +428,19 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "plan", "model", envIn.Provider.Model, "image", resolvedImage)
+
+	// PROP-01: Plan's immediate parent is Phase — resolveProjectForPlan's label
+	// fast-path never touches Phase, so this is a genuinely new fetch (mirrors
+	// the identical fetch in handlePlannerJobCompletion). A missing PhaseRef or
+	// a failed Get degrades to an empty hex, which traceparentForLevel/
+	// FormatTraceparent already turn into an omitted env var.
+	parentSpanIDHex := ""
+	if plan.Spec.PhaseRef != "" {
+		var parentPh tideprojectv1alpha3.Phase
+		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parentPh); err == nil {
+			parentSpanIDHex = parentPh.Status.PhaseTraceSpanID
+		}
+	}
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            plan,
@@ -445,6 +458,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		TraceParent:          traceparentForLevel(project, parentSpanIDHex),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, plan, r.Scheme); err != nil {
@@ -630,7 +644,10 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
-				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
+				ReporterOptions{
+					ReporterImage: r.Deps.ReporterImage,
+					TraceParent:   traceparentForLevel(project, plan.Status.PlanTraceSpanID),
+				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
