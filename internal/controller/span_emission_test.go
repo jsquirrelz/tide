@@ -47,7 +47,14 @@ import (
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
+
+// seededParentSpanIDHex is a fixed, valid 16-hex-char SpanID used to seed a
+// parent level's persisted {Level}TraceSpanID field before invoking a child
+// level's completion handler — proving real parent-child SpanContext
+// threading (TRACE-02) rather than an independent root.
+const seededParentSpanIDHex = "b7ad6b7169203331"
 
 // spanEmissionProject creates a minimal auto-gated Project with the given
 // Subagent.Model, waits for cache, and returns it. Mirrors
@@ -196,6 +203,14 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 	It("emits one attribute-complete AGENT span and is idempotent", func() {
 		ms := createMilestone()
 
+		// TRACE-02: seed the immediate parent's (Project) persisted span ID
+		// so this level's span is properly parented, not an independent root.
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSProjName, Namespace: "default"}, &proj)).To(Succeed())
+		projPatch := client.MergeFrom(proj.DeepCopy())
+		proj.Status.ProjectTraceSpanID = seededParentSpanIDHex
+		Expect(k8sClient.Status().Patch(ctx, &proj, projPatch)).To(Succeed())
+
 		start := time.Now().Add(-5 * time.Minute)
 		end := time.Now()
 		jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
@@ -245,11 +260,24 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 		Expect(ok).To(BeTrue(), "span missing openinference.span.kind")
 		Expect(kindVal.AsString()).To(Equal("AGENT"))
 
+		// TRACE-02: deterministic TraceID derived from Project.UID, and real
+		// parent linkage to the seeded ProjectTraceSpanID (Remote, since the
+		// parent SpanContext is reconstructed from durable status, not a
+		// locally-held live span).
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()))
+		Expect(span.Parent.SpanID().String()).To(Equal(seededParentSpanIDHex))
+		Expect(span.Parent.IsRemote()).To(BeTrue())
+
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.MilestoneSpanEmittedUID).To(Equal(string(job.UID)),
 				"MilestoneSpanEmittedUID must be set to the planner Job UID")
+			// PROP-02: this level's own span ID is durably persisted.
+			g.Expect(fresh.Status.MilestoneTraceSpanID).To(Equal(span.SpanContext.SpanID().String()),
+				"MilestoneTraceSpanID must be set to this level's own synthesized SpanID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching ms (marker
@@ -435,6 +463,17 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 	It("emits one attribute-complete AGENT span and is idempotent", func() {
 		ph := createPhase()
 
+		// TRACE-02: seed the immediate parent's (Milestone) persisted span ID
+		// so this level's span is properly parented, not an independent root.
+		var parentMs tideprojectv1alpha3.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHMSName, Namespace: "default"}, &parentMs)).To(Succeed())
+		msPatch := client.MergeFrom(parentMs.DeepCopy())
+		parentMs.Status.MilestoneTraceSpanID = seededParentSpanIDHex
+		Expect(k8sClient.Status().Patch(ctx, &parentMs, msPatch)).To(Succeed())
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHProjName, Namespace: "default"}, &proj)).To(Succeed())
+
 		start := time.Now().Add(-5 * time.Minute)
 		end := time.Now()
 		jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
@@ -475,11 +514,22 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
 		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
 
+		// TRACE-02: deterministic TraceID derived from Project.UID, and real
+		// parent linkage to the seeded MilestoneTraceSpanID.
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()))
+		Expect(span.Parent.SpanID().String()).To(Equal(seededParentSpanIDHex))
+		Expect(span.Parent.IsRemote()).To(BeTrue())
+
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Phase
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.PhaseSpanEmittedUID).To(Equal(string(job.UID)),
 				"PhaseSpanEmittedUID must be set to the planner Job UID")
+			// PROP-02: this level's own span ID is durably persisted.
+			g.Expect(fresh.Status.PhaseTraceSpanID).To(Equal(span.SpanContext.SpanID().String()),
+				"PhaseTraceSpanID must be set to this level's own synthesized SpanID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching ph — no
@@ -488,6 +538,42 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		_, err = r.handleJobCompletion(ctx, ph, job)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(exp.GetSpans()).To(HaveLen(1), "second call with the same Job must not emit a duplicate span")
+	})
+
+	// Unnested-fallback (Pitfall 2 bounded degradation): if the immediate
+	// parent's persisted span ID is unavailable (Milestone never got its own
+	// span emitted, so MilestoneTraceSpanID is still empty), Phase's span
+	// still emits — unnested (invalid Parent SpanID) but still carrying the
+	// deterministic TraceID, never blocked on the parent's state.
+	It("unnested fallback: parent Milestone has no persisted span ID yet", func() {
+		ph := createPhase()
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHProjName, Namespace: "default"}, &proj)).To(Succeed())
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		envReader.SetOut(string(ph.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(ph.UID),
+			Usage:   pkgdispatch.Usage{InputTokens: 100, OutputTokens: 50},
+		})
+
+		r := newPhaseReconciler()
+		_, err := r.handleJobCompletion(ctx, ph, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1))
+		span := spans[0]
+		Expect(span.Parent.SpanID().IsValid()).To(BeFalse(),
+			"span must be unnested (no valid parent) when the parent's span ID was never persisted")
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()),
+			"TraceID must still be the deterministic one even for an unnested span")
 	})
 
 	It("failed Job → Error span with condition-derived end time", func() {
@@ -640,6 +726,17 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 	It("emits one attribute-complete AGENT span and is idempotent", func() {
 		plan := createPlan()
 
+		// TRACE-02: seed the immediate parent's (Phase) persisted span ID so
+		// this level's span is properly parented, not an independent root.
+		var parentPh tideprojectv1alpha3.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanPhName, Namespace: "default"}, &parentPh)).To(Succeed())
+		phPatch := client.MergeFrom(parentPh.DeepCopy())
+		parentPh.Status.PhaseTraceSpanID = seededParentSpanIDHex
+		Expect(k8sClient.Status().Patch(ctx, &parentPh, phPatch)).To(Succeed())
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanProjName, Namespace: "default"}, &proj)).To(Succeed())
+
 		start := time.Now().Add(-5 * time.Minute)
 		end := time.Now()
 		jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
@@ -685,11 +782,22 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
 		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
 
+		// TRACE-02: deterministic TraceID derived from Project.UID, and real
+		// parent linkage to the seeded PhaseTraceSpanID.
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()))
+		Expect(span.Parent.SpanID().String()).To(Equal(seededParentSpanIDHex))
+		Expect(span.Parent.IsRemote()).To(BeTrue())
+
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Plan
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.PlanSpanEmittedUID).To(Equal(string(job.UID)),
 				"PlanSpanEmittedUID must be set to the planner Job UID")
+			// PROP-02: this level's own span ID is durably persisted.
+			g.Expect(fresh.Status.PlanTraceSpanID).To(Equal(span.SpanContext.SpanID().String()),
+				"PlanTraceSpanID must be set to this level's own synthesized SpanID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching plan (marker
@@ -861,11 +969,21 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
 		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
 
+		// D-02: Project is the trace root — no parent span exists, but the
+		// TraceID is still the deterministic one derived from its own UID.
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()))
+		Expect(span.Parent.SpanID().IsValid()).To(BeFalse(), "Project's span must have no valid parent (D-02 root)")
+
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Project
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
 			g.Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(string(job.UID)),
 				"PlannerSpanEmittedUID must be set to the planner Job UID")
+			// PROP-02: this level's own span ID is durably persisted.
+			g.Expect(fresh.Status.ProjectTraceSpanID).To(Equal(span.SpanContext.SpanID().String()),
+				"ProjectTraceSpanID must be set to this level's own synthesized SpanID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching proj (marker

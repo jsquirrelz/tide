@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -577,7 +579,38 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			// path accrues no duplicate span).
 			logger.Error(mErr, "PlanSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "plan", plan.Name)
 		} else if stamped {
-			synthesizePlannerSpan(ctx, "plan", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
+			// TRACE-02: Plan's immediate parent is Phase — resolveProjectForPlan's
+			// label fast-path never touches Phase, so this is a genuinely new
+			// fetch (RESEARCH.md A3). A missing PhaseRef or a failed Get degrades
+			// to an unnested span (zero parentSpanID) rather than blocking
+			// emission — the span still groups by the deterministic TraceID.
+			var parentSpanID trace.SpanID
+			if plan.Spec.PhaseRef != "" {
+				var parentPh tideprojectv1alpha3.Phase
+				if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parentPh); err == nil {
+					parentSpanID = spanIDFromHexOrZero(parentPh.Status.PhaseTraceSpanID)
+				}
+			}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "plan", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				plan.Status.PlanTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha3.Plan{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.PlanTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "PlanTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "plan", plan.Name)
+				}
+			}
 		}
 	}
 

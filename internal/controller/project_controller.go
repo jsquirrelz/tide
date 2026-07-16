@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1848,7 +1850,28 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			// path accrues no duplicate span).
 			logger.Error(mErr, "PlannerSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "project", project.Name)
 		} else if stamped {
-			synthesizePlannerSpan(ctx, "project", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
+			// D-02: Project is the root of the trace — no parent span exists.
+			parentSpanID := trace.SpanID{}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "project", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				project.Status.ProjectTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tidev1alpha3.Project{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.ProjectTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "ProjectTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "project", project.Name)
+				}
+			}
 		}
 	}
 

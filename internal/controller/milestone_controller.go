@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -592,7 +594,33 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			// path accrues no duplicate span).
 			logger.Error(mErr, "MilestoneSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "milestone", ms.Name)
 		} else if stamped {
-			synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
+			// TRACE-02: Milestone's immediate parent is Project, already fully
+			// resolved above — guard project != nil to avoid a nil-pointer
+			// dereference (a nil project also makes the synthesizer a no-op).
+			var parentSpanID trace.SpanID
+			if project != nil {
+				parentSpanID = spanIDFromHexOrZero(project.Status.ProjectTraceSpanID)
+			}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				ms.Status.MilestoneTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha3.Milestone{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.MilestoneTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "MilestoneTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "milestone", ms.Name)
+				}
+			}
 		}
 	}
 
