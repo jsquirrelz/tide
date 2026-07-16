@@ -543,6 +543,10 @@ func main() {
 			ReserveEstimateCents: budgetReservePerDispatchCents,
 			// Phase 14 D-02: pricing overrides forwarded opaquely to executor Jobs.
 			PricingOverridesJSON: pricingOverridesJSON,
+			// Phase 44 MSG-01/TRACE-03/D-06: trace-only reporter spawn deps —
+			// mirrors plannerDeps' ReporterImage/OTLPEndpoint above.
+			ReporterImage: reporterImage,
+			OTLPEndpoint:  otlpEndpoint,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
