@@ -527,6 +527,16 @@ type ProjectStatus struct {
 	// relationship. Phase 42 D-02/D-04.
 	// +optional
 	PlannerSpanEmittedUID string `json:"plannerSpanEmittedUID,omitempty"`
+
+	// ProjectTraceSpanID is this level's own synthesized dispatch-span OTel
+	// SpanID hex, persisted as the durable parent carrier for child-level
+	// spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+	// stores the TraceID — always re-derivable from Project.UID via
+	// otelai.TraceIDFromUID (D-03/D-04). Placed directly on ProjectStatus
+	// (NOT Budget-nested), mirroring PlannerSpanEmittedUID's placement: span
+	// identity is telemetry bookkeeping with no budget relationship.
+	// +optional
+	ProjectTraceSpanID string `json:"projectTraceSpanID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
