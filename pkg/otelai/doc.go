@@ -35,10 +35,14 @@ limitations under the License.
 // masquerades as spec vocabulary. Callers apply these helpers' output via
 // Span.SetAttributes(...).
 //
-// # Public surface (8 helpers)
+// # Public surface (11 helpers)
 //
-//   - LLMInputMessages(msgs)        → []attribute.KeyValue (2*N entries, flat-keyed)
-//   - LLMOutputMessages(msgs)       → []attribute.KeyValue (2*N entries, flat-keyed)
+//   - LLMInputMessages(msgs)        → []attribute.KeyValue (2*N entries,
+//     flat-keyed; PLUS 3 more per Message.ToolCalls entry and 2-3 more per
+//     Message.Contents entry when populated — Phase 44 D-03 spec-native
+//     tool-call/reasoning-block encoding. Nil ToolCalls/Contents preserves
+//     the legacy 2*N-only shape.)
+//   - LLMOutputMessages(msgs)       → same shape, `llm.output_messages.` prefix
 //   - TokenCount(p, c, cr, cw)      → []attribute.KeyValue (exactly 5 entries,
 //     including llm.token_count.total = p+c per Phoenix's cost formula, D-08)
 //   - AgentInvocation(sys,n,r,lvl)  → []attribute.KeyValue (exactly 5 entries;
@@ -51,28 +55,49 @@ limitations under the License.
 //     tide.exit_code / tide.reason, D-03)
 //   - EnvelopeDegraded()            → attribute.KeyValue   (exactly 1 entry;
 //     tide.envelope.degraded=true, D-04)
+//   - LLMSpanKind()                 → attribute.KeyValue   (exactly 1 entry;
+//     openinference.span.kind=LLM, Phase 44 D-01/D-03 — the LLM-kind sibling
+//     of AgentInvocation's hardcoded SpanKindAgent)
+//   - TimingSynthetic()             → attribute.KeyValue   (exactly 1 entry;
+//     tide.trace.timing_synthetic=true marker, Phase 44 Claude's-Discretion
+//     timing floor)
+//   - ParseDegraded()               → attribute.KeyValue   (exactly 1 entry;
+//     tide.trace.parse_degraded=true marker, Phase 44 D-11)
 //
 // Pure trace-context primitives (TraceIDFromUID, FormatTraceparent,
 // ExtractRemoteParent) live in tracecontext.go, authored by the sibling
 // Phase 42 plan 42-02 — they are NOT payload-bearing attribute helpers and
-// are exempt from the "8 helpers" count above.
+// are exempt from the "11 helpers" count above.
 //
 // # D-O5 — no payload inlining
 //
 // There is NO InlinePayload helper. There is NO RawContent helper. There is
-// NO Body helper. Inlining LLM payloads as span attribute VALUES is a known
-// failure mode (etcd bloat, collector OOM, PII leakage into long-term
-// trace storage). Use ArtifactPath to reference the full event log on the
-// shared PVC instead. The unit test TestNoPayloadHelperOnPublicSurface
-// source-greps attrs.go to enforce this at PR-review time — any future
-// helper named Payload/InlinePayload/RawContent/Body/MessageBody fails CI.
+// NO Body helper. Inlining a raw, unredacted, unbounded LLM payload as a
+// span attribute VALUE is a known failure mode (etcd bloat, collector OOM,
+// PII/secret leakage into long-term trace storage). The unit test
+// TestNoPayloadHelperOnPublicSurface source-greps attrs.go to enforce this
+// at PR-review time — any future helper named
+// Payload/InlinePayload/RawContent/Body/MessageBody fails CI. This
+// enforcement is unchanged by Phase 44.
 //
-// The Message struct's `Content` field exists ONLY so callers can choose
-// to emit message text VERBATIM via LLMInputMessages / LLMOutputMessages
-// when they have already decided the payload is safe (e.g. system prompts).
-// Per D-O5 production-path callers SHOULD prefer ArtifactPath; the helpers
-// support both shapes so test fixtures and trusted system-prompt cases
-// remain expressible.
+// Phase 44 evolves the CONTRACT, not the guard: the boundary is now
+// bounded-inline PLUS ArtifactPath co-attribute, not "always defer to
+// ArtifactPath." A production caller (internal/reporter's tracesynth.go)
+// MAY inline message content via LLMInputMessages / LLMOutputMessages once
+// it has passed the mandatory redact-then-truncate pipeline: (1)
+// internal/harness/redact.String — the full SecretPatterns denylist pass
+// (MSG-02) — THEN (2) per-message head+tail truncation (MSG-03/D-08).
+// Never the reverse: D-09 requires redaction before truncation, because a
+// truncation cut can split a secret so the pattern no longer matches. The
+// SAME span also carries an ArtifactPath co-attribute referencing the
+// full-fidelity, unredacted events.jsonl on the shared PVC, so a trace
+// consumer always has a path to the complete record even when the inline
+// value was bounded.
+//
+// The Message struct's `Content` field carries this bounded-inline text.
+// Test fixtures and trusted system-prompt cases may still populate it
+// directly without the pipeline; production call sites MUST run the
+// redact-then-truncate pipeline first (MSG-02/MSG-03/D-09).
 //
 // # Sampler interplay
 //

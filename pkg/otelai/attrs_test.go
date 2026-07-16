@@ -115,6 +115,117 @@ func TestAgentInvocation(t *testing.T) {
 	}
 }
 
+// TestLLMOutputMessagesToolCalls — Phase 44 D-03: a message's ToolCalls
+// entries emit spec-native message.tool_calls.<j>.tool_call.{id,function.name,
+// function.arguments} attributes via the module's own
+// LLMOutputMessageToolCallKey indexer, in addition to the legacy role/content
+// pair. Exact key strings asserted per MSG-related acceptance criteria.
+func TestLLMOutputMessagesToolCalls(t *testing.T) {
+	got := LLMOutputMessages([]Message{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{ID: "toolu_1", Name: "Bash", ArgumentsJSON: `{"command":"ls"}`},
+			},
+		},
+	})
+	want := []attribute.KeyValue{
+		attribute.String("llm.output_messages.0.message.role", "assistant"),
+		attribute.String("llm.output_messages.0.message.content", ""),
+		attribute.String("llm.output_messages.0.message.tool_calls.0.tool_call.id", "toolu_1"),
+		attribute.String("llm.output_messages.0.message.tool_calls.0.tool_call.function.name", "Bash"),
+		attribute.String("llm.output_messages.0.message.tool_calls.0.tool_call.function.arguments", `{"command":"ls"}`),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LLMOutputMessages (tool calls) = %v, want %v", got, want)
+	}
+}
+
+// TestLLMOutputMessagesReasoningContent — Phase 44 D-03: a message's
+// Contents entries emit spec-native message.contents.<k>.message_content.
+// {type,text,signature} attributes via constant-composed keys (no public
+// module indexer exists for message.contents). Exact key strings asserted.
+func TestLLMOutputMessagesReasoningContent(t *testing.T) {
+	got := LLMOutputMessages([]Message{
+		{
+			Role: "assistant",
+			Contents: []MessageContent{
+				{Type: "reasoning", Text: "Let me read...", Signature: "EpICCmUIDhgC"},
+			},
+		},
+	})
+	want := []attribute.KeyValue{
+		attribute.String("llm.output_messages.0.message.role", "assistant"),
+		attribute.String("llm.output_messages.0.message.content", ""),
+		attribute.String("llm.output_messages.0.message.contents.0.message_content.type", "reasoning"),
+		attribute.String("llm.output_messages.0.message.contents.0.message_content.text", "Let me read..."),
+		attribute.String("llm.output_messages.0.message.contents.0.message_content.signature", "EpICCmUIDhgC"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LLMOutputMessages (reasoning content) = %v, want %v", got, want)
+	}
+}
+
+// TestLLMOutputMessagesReasoningContentOmitsEmptySignature — input-side
+// tool_result-derived content blocks carry no signature; the attribute must
+// be omitted entirely rather than emitted as an empty string.
+func TestLLMOutputMessagesReasoningContentOmitsEmptySignature(t *testing.T) {
+	got := LLMOutputMessages([]Message{
+		{
+			Role:     "assistant",
+			Contents: []MessageContent{{Type: "text", Text: "hi"}},
+		},
+	})
+	for _, kv := range got {
+		if string(kv.Key) == "llm.output_messages.0.message.contents.0.message_content.signature" {
+			t.Errorf("expected no signature attribute when Signature is empty, got %v", got)
+		}
+	}
+}
+
+// TestLLMOutputMessagesLegacyShapeUnchanged — Phase 44 backward
+// compatibility (D-03): nil ToolCalls and nil Contents must emit exactly
+// the legacy 2-key role/content shape, byte-identical to pre-Phase-44
+// behavior — zero behavior change for Phase 42 call sites.
+func TestLLMOutputMessagesLegacyShapeUnchanged(t *testing.T) {
+	got := LLMOutputMessages([]Message{{Role: "assistant", Content: "ok"}})
+	want := []attribute.KeyValue{
+		attribute.String("llm.output_messages.0.message.role", "assistant"),
+		attribute.String("llm.output_messages.0.message.content", "ok"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LLMOutputMessages (legacy shape) = %v, want %v", got, want)
+	}
+}
+
+// TestLLMSpanKind — Phase 44 D-01/D-03: the LLM-kind sibling of
+// AgentInvocation's hardcoded SpanKindAgent.
+func TestLLMSpanKind(t *testing.T) {
+	got := LLMSpanKind()
+	want := attribute.String("openinference.span.kind", "LLM")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LLMSpanKind() = %v, want %v", got, want)
+	}
+}
+
+// TestTimingSynthetic — Phase 44 Claude's-Discretion timing-floor marker.
+func TestTimingSynthetic(t *testing.T) {
+	got := TimingSynthetic()
+	want := attribute.Bool("tide.trace.timing_synthetic", true)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("TimingSynthetic() = %v, want %v", got, want)
+	}
+}
+
+// TestParseDegraded — Phase 44 D-11 marker.
+func TestParseDegraded(t *testing.T) {
+	got := ParseDegraded()
+	want := attribute.Bool("tide.trace.parse_degraded", true)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseDegraded() = %v, want %v", got, want)
+	}
+}
+
 // TestArtifactPath — single attribute.KeyValue (NOT a slice). D-05: the key is
 // now tide.artifact_path — the gen_ai.artifact_path namespace squat is dead.
 func TestArtifactPath(t *testing.T) {
@@ -184,6 +295,13 @@ func TestEnvelopeDegraded(t *testing.T) {
 // it accepts raw payload bytes/strings as an attribute value. If a future
 // refactor adds `InlinePayload(...)` or `RawContent(...)` etc., this test
 // fails loudly and forces a planner-checkpoint conversation.
+//
+// Phase 44 update (MSG-03, deliberate — the forbidden-name list itself is
+// UNCHANGED): D-O5's contract evolved from "always defer to ArtifactPath" to
+// "bounded-inline (redact-then-truncate) PLUS ArtifactPath co-attribute"
+// (see doc.go). This guard still enforces the same invariant either way —
+// no helper may accept RAW, unredacted, unbounded payload content as a
+// top-level attribute value.
 func TestNoPayloadHelperOnPublicSurface(t *testing.T) {
 	root := findRepoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "pkg", "otelai", "attrs.go"))
@@ -238,6 +356,9 @@ func TestKeysUseSemconvModule(t *testing.T) {
 // TestEmptyInputsNoPanic — defensive against nil / empty slice arguments.
 // Result may be either nil or an empty slice — both are acceptable. The
 // invariant: NO PANIC, NO out-of-bounds.
+//
+// Phase 44 extension: nil/empty ToolCalls and Contents on a populated
+// Message (the new D-03 extension paths) must not panic either.
 func TestEmptyInputsNoPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -249,6 +370,14 @@ func TestEmptyInputsNoPanic(t *testing.T) {
 	}
 	if got := LLMOutputMessages([]Message{}); len(got) != 0 {
 		t.Errorf("LLMOutputMessages([]) returned %d entries, want 0", len(got))
+	}
+	// D-03 extension paths: nil and empty-slice ToolCalls/Contents.
+	got := LLMOutputMessages([]Message{
+		{Role: "assistant", Content: "ok", ToolCalls: nil, Contents: nil},
+		{Role: "assistant", Content: "ok", ToolCalls: []ToolCall{}, Contents: []MessageContent{}},
+	})
+	if len(got) != 4 {
+		t.Errorf("LLMOutputMessages(nil/empty ToolCalls+Contents) returned %d entries, want exactly 4 (legacy 2-per-message shape)", len(got))
 	}
 }
 
