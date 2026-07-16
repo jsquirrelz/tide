@@ -129,6 +129,14 @@ type PlanStatus struct {
 	// +optional
 	PlanSpanEmittedUID string `json:"planSpanEmittedUID,omitempty"`
 
+	// PlanTraceSpanID is this level's own synthesized dispatch-span OTel
+	// SpanID hex, persisted as the durable parent carrier for child-level
+	// spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+	// stores the TraceID — always re-derivable from Project.UID via
+	// otelai.TraceIDFromUID (D-03/D-04).
+	// +optional
+	PlanTraceSpanID string `json:"planTraceSpanID,omitempty"`
+
 	// WaveIntegration records the bounded auto-retry state of the current
 	// wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
 	// reconcileWaveBoundary advances to a new blocking wave.

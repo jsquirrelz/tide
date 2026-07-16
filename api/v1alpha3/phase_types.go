@@ -72,6 +72,14 @@ type PhaseStatus struct {
 	// Phase 42 D-02/D-04.
 	// +optional
 	PhaseSpanEmittedUID string `json:"phaseSpanEmittedUID,omitempty"`
+
+	// PhaseTraceSpanID is this level's own synthesized dispatch-span OTel
+	// SpanID hex, persisted as the durable parent carrier for child-level
+	// spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+	// stores the TraceID — always re-derivable from Project.UID via
+	// otelai.TraceIDFromUID (D-03/D-04).
+	// +optional
+	PhaseTraceSpanID string `json:"phaseTraceSpanID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
