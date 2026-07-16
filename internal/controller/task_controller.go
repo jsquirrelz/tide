@@ -27,12 +27,15 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -816,6 +819,19 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logger.Info("resolved subagent dispatch", "level", "task", "model", resolvedModel, "image", resolvedImage)
+	// PROP-01: Task's dispatch-hop TRACEPARENT is sourced from the IMMEDIATE
+	// PARENT's (Plan's) persisted span ID — resolveProject's label fast-path
+	// never touches Plan, so this is a genuinely new fetch (mirrors Plan's own
+	// Phase fetch, RESEARCH.md A3). A missing PlanRef or a failed Get degrades
+	// to an empty TraceParent (traceparentForLevel/FormatTraceparent already
+	// return "" for a zero/invalid parent) rather than blocking dispatch.
+	var parentPlanSpanHex string
+	if task.Spec.PlanRef != "" {
+		var parentPlan tideprojectv1alpha3.Plan
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &parentPlan); err == nil {
+			parentPlanSpanHex = parentPlan.Status.PlanTraceSpanID
+		}
+	}
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindExecutor,
 		Task:                 task,
@@ -834,6 +850,7 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		ProjectUID:           string(project.UID),
 		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		TraceParent:          traceparentForLevel(project, parentPlanSpanHex),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, task, r.Scheme); err != nil {
@@ -917,10 +934,94 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 	)
 }
 
+// emitTaskSpanOnce synthesizes at most one retroactive AGENT span per
+// executor Job attempt (TRACE-01), mirroring the four planner levels'
+// marker-gated call sites — Plan's is the closest receiver-type analog
+// (43-PATTERNS.md). Gated by the TaskSpanEmittedUID marker keyed by
+// completedJob.UID (D-02/D-04, generalized from the four-level pattern);
+// mark-then-emit ordering (42-REVIEW WR-01): the marker is stamped durably
+// BEFORE emission, so a crash between stamp and emission loses only that
+// attempt's span, never double-counts.
+//
+// Generalized Option B (43-CONTEXT decision / RESEARCH Pitfall 1-A2): this
+// method is called from BOTH of handleJobCompletion's envelope-dependent
+// terminal sites — once from the EnvelopeReadFailed branch with
+// envReadOK=false, once immediately after a successful envelope read
+// (before the OutputValidationError/OutputPathsViolation/standard-result
+// branch divergence) with envReadOK=true — so every one of Task's four
+// terminal paths gets exactly one span.
+func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job, out pkgdispatch.EnvelopeOut, envReadOK bool) {
+	logger := logf.FromContext(ctx)
+
+	if completedJob == nil || project == nil || task.Status.TaskSpanEmittedUID == string(completedJob.UID) || !plannerSpanResolvable(completedJob) {
+		return
+	}
+
+	stamped := false
+	if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &tideprojectv1alpha3.Task{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(task), latest); err != nil {
+			return err
+		}
+		if latest.Status.TaskSpanEmittedUID == string(completedJob.UID) {
+			return nil // already stamped by a concurrent reconcile — its stamper emits
+		}
+		markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		latest.Status.TaskSpanEmittedUID = string(completedJob.UID)
+		if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
+			return err
+		}
+		stamped = true
+		return nil
+	}); mErr != nil {
+		logger.Error(mErr, "TaskSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "task", task.Name)
+		return
+	}
+	if !stamped {
+		return
+	}
+
+	// TRACE-02: Task's immediate parent is Plan — resolveProject's label
+	// fast-path never touches Plan, so this is a genuinely new fetch (mirrors
+	// Plan's own Phase fetch, RESEARCH.md A3). A missing PlanRef or a failed
+	// Get degrades to an unnested span (zero parentSpanID) rather than
+	// blocking emission — the span still groups by the deterministic TraceID.
+	var parentSpanID trace.SpanID
+	if task.Spec.PlanRef != "" {
+		var parentPlan tideprojectv1alpha3.Plan
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.PlanRef}, &parentPlan); err == nil {
+			parentSpanID = spanIDFromHexOrZero(parentPlan.Status.PlanTraceSpanID)
+		}
+	}
+
+	thisSpanID, emitted := synthesizePlannerSpan(ctx, "task", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+	if !emitted {
+		return
+	}
+	// Mirror in-memory unconditionally so same-reconcile downstream logic
+	// reads it even if the persistence patch below fails.
+	task.Status.TaskTraceSpanID = thisSpanID.String()
+	if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &tideprojectv1alpha3.Task{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(task), latest); err != nil {
+			return err
+		}
+		tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		latest.Status.TaskTraceSpanID = thisSpanID.String()
+		return r.Status().Patch(ctx, latest, tracePatch)
+	}); tErr != nil {
+		// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch from
+		// the marker stamp above (the span ID isn't known until
+		// synthesizePlannerSpan returns).
+		logger.Error(tErr, "TaskTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "task", task.Name)
+	}
+}
+
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
 // budget, and patches Task.Status to the terminal state.
 //
 //nolint:unparam // ctrl.Result kept so callers can `return r.handleJobCompletion(...)` in the reconcile chain
+//nolint:gocyclo // flat state machine of mutually-exclusive completion arms; splitting obscures the contract (commit 9cae6bb precedent)
 func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -937,6 +1038,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// Read the EnvelopeOut from the PVC-backed reader (Blocker #2/#3 path).
 	out, err := r.Deps.EnvReader.ReadOut(ctx, string(project.UID), string(task.UID))
 	if err != nil {
+		// TRACE-01/D-07: EnvelopeReadFailed is the only Task terminal path
+		// reachable with envReadOK=false — the degraded-envelope span (Option B,
+		// 43-05-PLAN.md call site 1). Emitted BEFORE the terminal status patch
+		// below (span-loss-averse ordering).
+		r.emitTaskSpanOnce(ctx, task, project, completedJob, pkgdispatch.EnvelopeOut{}, false)
+
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
@@ -955,6 +1062,12 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// to envelope-less failures is a deliberate non-goal of this gap closure.
 		return ctrl.Result{}, nil
 	}
+
+	// TRACE-01/D-07: call site 2, positioned BEFORE the OutputValidationError/
+	// OutputPathsViolation/standard-result branch divergence (Option B,
+	// generalized — 43-05-PLAN.md) — one call covers all three post-read
+	// terminal paths uniformly with envReadOK=true.
+	r.emitTaskSpanOnce(ctx, task, project, completedJob, out, true)
 
 	// Output-path validation (Warning #5 — wires HARN-05 into dispatch chain).
 	// Performed controller-side in Phase 2 (RESEARCH.md Responsibility Map deviation).
