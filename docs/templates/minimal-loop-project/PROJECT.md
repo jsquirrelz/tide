@@ -21,6 +21,10 @@
 
 - `<Security, compatibility, regulatory, operational, or delivery constraint>`
 
+## Risk posture
+
+`<How much failure and rework is acceptable in pursuit of speed — e.g., conservative on security-adjacent surfaces, experimental on prototypes. The autonomy grants below should be consistent with this.>`
+
 ## Authority and autonomy
 
 | Decision | Authority |

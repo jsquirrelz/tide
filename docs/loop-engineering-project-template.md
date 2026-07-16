@@ -4,11 +4,21 @@
 
 **Purpose:** Provide the smallest useful set of durable planning artifacts while keeping execution evidence in CI, traces, and run artifacts.
 
-The copyable files live in [`docs/templates/minimal-loop-project/`](templates/minimal-loop-project/).
+The copyable files live in [`docs/templates/minimal-loop-project/`](templates/minimal-loop-project/). A filled-in example — a log-redaction pipeline with one slice, two contracts, and a runnable eval — lives in [`docs/templates/minimal-loop-project-example/`](templates/minimal-loop-project-example/).
+
+**Relationship to TIDE:** this template is standalone methodology, not TIDE's planning hierarchy. TIDE's five levels (Milestone → Phase → Plan → Task → Wave — see [`concepts.md`](concepts.md)) describe how the orchestrator decomposes and dispatches work; the five surfaces below describe what any repository should persist while agents work on it. In particular, a Task file here is an immutable implementation contract — not a TIDE `Task` CRD, which is a DAG node derived from a plan and dispatched in waves. The pack copies into any repository, TIDE-driven or not.
 
 ## Principle
 
 Do not create one planning hierarchy for every AI-engineering loop. The [oversight, system, product, task, and execution loops](https://arize.com/blog/what-is-a-loop-in-ai-engineering-anyway/) describe processes operating at different feedback scopes; they are not five new document trees.
+
+The five loops, by feedback scope:
+
+- **Execution** — one bounded attempt: edit, run, read tool/compile/test feedback, repeat.
+- **Task** — attempts against one locked contract: dispatch, judge evidence, retry or supersede.
+- **System** — the machinery shared across Tasks: prompts, models, tools, harnesses, evaluators.
+- **Product** — whether accepted Tasks add up to outcomes users can observe.
+- **Oversight** — whether the product remains worth its budget, risk, and opportunity cost.
 
 Use five durable repository surfaces:
 
@@ -67,25 +77,27 @@ Retry count alone does not prove a system defect. A difficult individual Task st
 ```text
 draft Task
   -> review its scope and executable exit signals
-  -> lock/version the contract
-  -> dispatch using that exact version
+  -> lock the contract by committing it
+  -> dispatch using that exact commit
   -> generate evidence
   -> accept, retry, escalate, or supersede
 ```
 
-At lock time, record or derive a content hash. Every run should identify the exact Project, architecture, Spec, Task, evaluator, prompt/runtime, and model versions it used.
+A Task contract is in exactly one state:
+
+| State | Meaning | Transitions to |
+| --- | --- | --- |
+| `Draft` | Refinable; not dispatchable | `Locked` |
+| `Locked` | Immutable; dispatch references the locking commit | `Superseded` |
+| `Superseded` | Replaced by a newer contract that names it in `Supersedes` | terminal |
+
+A slice moves `Draft → Active → Closed`, or to `Culled` when oversight withdraws it. `Active` means at least one of its contracts is locked or dispatched; `Closed` requires the slice's observable outcome demonstrated, not merely every Task accepted.
+
+Locking is a commit: the commit that flips `Contract state` to `Locked` fixes the contract's exact text, and git content-addresses it — `git show <sha>:tasks/<task>.md` reproduces precisely what was dispatched. No separate content hash is needed; runs record the locking commit (or the file's blob hash) in their evidence. Every run should identify the exact Project, architecture, Spec, Task, evaluator, prompt/runtime, and model versions it used.
 
 ## Evidence contract
 
-CI and task runs should generate at least:
-
-- Task and Spec identifiers and versions.
-- Commands and evaluator versions executed.
-- Test and evaluation results.
-- Changed-file manifest.
-- Runtime, model, and prompt version.
-- Cost, duration, and resource usage when applicable.
-- Terminal reason and any bounded feedback passed to a new attempt.
+The canonical list of fields every CI and task run must produce lives in the pack at [`evals/README.md`](templates/minimal-loop-project/evals/README.md), so it travels with the copied template and Task contracts can reference it without duplicating it.
 
 Keep detailed evidence in CI artifacts, trace storage, or a run store. Commit evidence only when it is itself a release or compliance artifact. Avoid a manually curated `evidence/` hierarchy that can drift from what actually ran.
 
@@ -108,5 +120,7 @@ This prevents an implementation agent from silently expanding the platform, weak
 5. Split it into bounded contracts using `tasks/TASK.template.md`.
 6. Implement the slice's closing signals under `evals/` before increasing autonomy.
 7. Configure CI to retain generated evidence and require the relevant evaluators.
+
+The [example project](templates/minimal-loop-project-example/) shows each artifact filled in for one small, real slice — use it to calibrate how much detail a field needs.
 
 Start with supervised outer loops. Increase autonomy separately for execution, task, product, and system work only after their closing signals have proven reliable.

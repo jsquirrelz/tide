@@ -25,6 +25,18 @@ Every evaluation should define:
 
 Use exit code `0` for pass and non-zero for failure unless the surrounding framework defines a stronger result protocol. Emit structured result data when scores, confidence, or multiple assertions matter.
 
+## Run evidence contract
+
+This list is canonical — Task contracts reference it rather than duplicating it. Every CI and task run must generate at least:
+
+- Task and Spec identifiers, and the Task contract's locking commit (or blob hash).
+- Commands and evaluator versions executed.
+- Test and evaluation results.
+- Changed-file manifest.
+- Runtime, model, and prompt version.
+- Cost, duration, and resource usage when applicable.
+- Terminal reason and any bounded feedback passed to a new attempt.
+
 ## Integrity rules
 
 - Do not change a system candidate and its evaluator in the same experiment.

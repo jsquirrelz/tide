@@ -1,9 +1,11 @@
 # Slice: `<observable product outcome>`
 
 **ID:** `<slice-id>`
-**Status:** Draft
+**Status:** Draft — one of `Draft`, `Active`, `Closed`, `Culled`
 **Owner:** `<human or accountable team>`
 **Risk:** `<low / medium / high>`
+
+`Active` means at least one contract is locked or dispatched. `Closed` requires the observable outcome below demonstrated, not merely every Task accepted. `Culled` means oversight withdrew the slice.
 
 ## Outcome
 
@@ -37,7 +39,7 @@
 
 ## Product evaluation
 
-- **Command/scenario:** `<path under evals/ or CI command>`
-- **Evidence:** `<artifact, trace, metric, or user observation retained by the run>`
+- [ ] `<path under evals/ or CI command>` — evidence: `<artifact, trace, metric, or user observation retained by the run>`
+- [ ] `<additional scenario when the outcome needs more than one closing signal>`
 
 Passing every Task is necessary but not sufficient: this slice closes only when its observable outcome is demonstrated.

@@ -22,6 +22,8 @@ This document describes architecture that has been accepted. Proposals and specu
 
 - `<State dependency rules that must remain true.>`
 
+The layered shape above is illustrative, not mandated — record whatever direction your architecture actually enforces, and pair it with a check below.
+
 ## Data ownership and persistence
 
 | Data | Source of truth | Writer | Readers | Retention |
