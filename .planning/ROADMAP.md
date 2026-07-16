@@ -240,7 +240,7 @@ Plans:
 
 **Wave 3** *(blocked on 44-03)*
 
-- [ ] 44-04-PLAN.md — tide-reporter --trace-only mode + TracerProvider lifecycle with shutdown-on-every-exit-path (TRACE-03) + combined-run synth step
+- [x] 44-04-PLAN.md — tide-reporter --trace-only mode + TracerProvider lifecycle with shutdown-on-every-exit-path (TRACE-03) + combined-run synth step
 
 **Wave 4** *(blocked on 44-02 + 44-04)*
 
@@ -305,7 +305,7 @@ Plans:
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 3/5 | In Progress|  |
+| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 4/5 | In Progress|  |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
