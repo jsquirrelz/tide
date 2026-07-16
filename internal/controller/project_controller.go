@@ -1775,7 +1775,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 // T-09-13 mitigation: spawn is idempotent — AlreadyExists on Create is treated
 // as success, so a re-enqueue from the reporter Job's own completion does no harm.
 //
-//nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
+//nolint:unparam,gocyclo // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain; a flat state machine of mutually-exclusive completion arms — splitting obscures the contract (parity with the other three level handlers)
 func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tidev1alpha3.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
