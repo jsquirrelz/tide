@@ -100,3 +100,25 @@ func (w *RedactingWriter) Close() error {
 	}
 	return nil
 }
+
+// String applies [SecretPatterns] to a single in-memory string and returns
+// the redacted result. Unlike RedactingWriter (stream-oriented, tail-keep
+// buffered across Write calls to defend against a pattern straddling a chunk
+// boundary), String operates on a fully-materialized string in one pass —
+// the correct shape for per-message redaction (MSG-02), where the entire
+// message content is already available before it is ever emitted onto a
+// span.
+//
+// D-09 (locked, non-negotiable): callers MUST call String BEFORE any
+// truncation step. Truncating first can split a secret across the cut so
+// the pattern no longer matches, leaving a partial credential visible in the
+// emitted output — the same class of bug RedactingWriter's tail-keep buffer
+// defends against for streaming chunk boundaries. See CONTEXT.md D-09 and
+// RESEARCH.md Pitfall 4 ("Truncating before redacting").
+func String(s string) string {
+	b := []byte(s)
+	for _, re := range SecretPatterns {
+		b = re.ReplaceAll(b, []byte("[REDACTED]"))
+	}
+	return string(b)
+}
