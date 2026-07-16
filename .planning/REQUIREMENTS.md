@@ -24,8 +24,8 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 ### LLM Message-Array Spans (MSG)
 
 - [ ] **MSG-01**: The executor (Task) level gains an `events.jsonl` reader — a trace-only reporter mode (no child-CR materialization) — closing the gap where the richest LLM conversation currently has no in-namespace consumer at all
-- [ ] **MSG-02**: `LLMInputMessages`/`LLMOutputMessages` are populated from `events.jsonl` ONLY after passing the existing `internal/harness/redact.SecretPatterns` pass — the file is written raw/unredacted by design and must never reach Phoenix unfiltered
-- [ ] **MSG-03**: Message attributes are size-guarded under the OTLP 4 MB ceiling: per-message truncation with explicit truncation markers, plus `ArtifactPath(events.jsonl)` on the same span as the full-fidelity reference — and the D-O5 payload-boundary decision (inline-bounded + reference) is documented, with the `TestNoPayloadHelperOnPublicSurface` guard updated deliberately, not deleted
+- [x] **MSG-02**: `LLMInputMessages`/`LLMOutputMessages` are populated from `events.jsonl` ONLY after passing the existing `internal/harness/redact.SecretPatterns` pass — the file is written raw/unredacted by design and must never reach Phoenix unfiltered
+- [x] **MSG-03**: Message attributes are size-guarded under the OTLP 4 MB ceiling: per-message truncation with explicit truncation markers, plus `ArtifactPath(events.jsonl)` on the same span as the full-fidelity reference — and the D-O5 payload-boundary decision (inline-bounded + reference) is documented, with the `TestNoPayloadHelperOnPublicSurface` guard updated deliberately, not deleted
 
 ### Runtime-Neutral Adapter Seam (ADAPT)
 
@@ -79,8 +79,8 @@ Deferred to later milestones:
 | PROP-01 | Phase 43 | Complete |
 | PROP-02 | Phase 43 | Complete |
 | MSG-01 | Phase 44 | Pending |
-| MSG-02 | Phase 44 | Pending |
-| MSG-03 | Phase 44 | Pending |
+| MSG-02 | Phase 44 | Complete |
+| MSG-03 | Phase 44 | Complete |
 | ADAPT-01 | Phase 45 | Pending |
 | PHX-01 | Phase 47 | Pending |
 | PHX-02 | Phase 47 | Pending |
