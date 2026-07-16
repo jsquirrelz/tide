@@ -1,9 +1,9 @@
 ---
 phase: 43
 slug: task-level-parity-trace-context-propagation
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-16
 ---
 
@@ -73,11 +73,11 @@ created: 2026-07-16
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 1200s (`make test-heavy` full-suite ceiling)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 1200s (`make test-heavy` full-suite ceiling)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-16 (gsd-plan-checker verification: 0 blockers, 5 non-blocking hygiene warnings — see 43-01..43-05 PLAN.md for detail)
