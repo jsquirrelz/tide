@@ -17,6 +17,7 @@ limitations under the License.
 package controller_test
 
 import (
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -137,6 +138,59 @@ func TestBuildReporterJob_Args(t *testing.T) {
 			t.Errorf("expected arg %q not present in %v", arg, args)
 		}
 	}
+}
+
+// TestBuildReporterJob_TraceparentArg asserts BuildReporterJob carries
+// --traceparent=<value> in the container Args (not Env — Pitfall 3) when
+// ReporterOptions.TraceParent is set, and omits it entirely when empty.
+func TestBuildReporterJob_TraceparentArg(t *testing.T) {
+	const traceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-c",
+			UID:       "project-uid-4",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-3",
+			Namespace: "ns-c",
+			UID:       "parent-uid-4",
+		},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when set", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			TraceParent:   traceParent,
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-4", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--traceparent=" + traceParent
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("absent when empty", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-4", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if strings.HasPrefix(a, "--traceparent") {
+				t.Errorf("did not expect a --traceparent arg when TraceParent is empty, got %v", args)
+			}
+		}
+	})
 }
 
 // TestBuildReporterJob_OwnerRef asserts owner ref is set to the parent (not necessarily the project).

@@ -77,6 +77,13 @@ type ReporterOptions struct {
 	// images.tideReporter.repository:tag. The :v0.1.0-dev tag tracks main
 	// and is NOT a release-stable placeholder.
 	ReporterImage string
+
+	// TraceParent is the W3C traceparent for the spawning level's OWN
+	// just-synthesized span — the reporter's future Phase 44 message spans
+	// nest under THIS level's dispatch, not the grandparent (Phase 43 PROP-01).
+	// Consumed starting Phase 44; carried as an Arg, not Env, matching this
+	// file's 100% Args-based convention (Pitfall 3).
+	TraceParent string
 }
 
 // BuildReporterJob constructs the K8s batchv1.Job that runs the in-namespace
@@ -134,6 +141,11 @@ func BuildReporterJob(
 		"--parent-name=" + parent.GetName(),
 		"--parent-namespace=" + parent.GetNamespace(),
 		"--parent-kind=" + parentKind,
+	}
+	// Phase 43 PROP-01: --traceparent Arg, not Env (Pitfall 3 — this file is
+	// 100% Args-based via stdlib flag; zero Env entries on the reporter container).
+	if opts.TraceParent != "" {
+		args = append(args, "--traceparent="+opts.TraceParent)
 	}
 
 	// resolvedPVCName defaults to the project-shared PVC name when the caller
