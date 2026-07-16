@@ -516,3 +516,204 @@ func TestBuildReporterJob_EmptyImageStillBuilds(t *testing.T) {
 		t.Error("expected non-nil Job even when image is empty")
 	}
 }
+
+// TestBuildReporterJob_OTLPEndpointEnv asserts that setting opts.OTLPEndpoint
+// stamps exactly two container Env entries: OTEL_EXPORTER_OTLP_ENDPOINT (the
+// forwarded manager value) and the hardcoded OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6
+// literal (T-44-04 mitigation; RESEARCH Size-Boundary Model).
+func TestBuildReporterJob_OTLPEndpointEnv(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-l",
+			UID:       "project-uid-14",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-12",
+			Namespace: "ns-l",
+			UID:       "parent-uid-14",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{
+		ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		OTLPEndpoint:  "collector:4317",
+	}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-14", "Milestone", opts, scheme)
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	want := map[string]string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT":   "collector:4317",
+		"OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "6",
+	}
+	if len(env) != len(want) {
+		t.Fatalf("expected exactly %d Env entries, got %d: %v", len(want), len(env), env)
+	}
+	for _, e := range env {
+		wantVal, ok := want[e.Name]
+		if !ok {
+			t.Errorf("unexpected Env entry %q", e.Name)
+			continue
+		}
+		if e.Value != wantVal {
+			t.Errorf("expected Env %s=%q, got %q", e.Name, wantVal, e.Value)
+		}
+	}
+}
+
+// TestBuildReporterJob_NoOTLPEndpointNoEnv asserts that when OTLPEndpoint is
+// empty, the container Env is empty — byte-identical posture to today (the
+// reporter's otelinit falls back to its no-op TracerProvider).
+func TestBuildReporterJob_NoOTLPEndpointNoEnv(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-m",
+			UID:       "project-uid-15",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-13",
+			Namespace: "ns-m",
+			UID:       "parent-uid-15",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-15", "Milestone", opts, scheme)
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	if len(env) != 0 {
+		t.Errorf("expected zero Env entries when OTLPEndpoint is empty, got %v", env)
+	}
+}
+
+// TestBuildReporterJob_TraceOnly asserts the trace-only Job shape: a distinct
+// name keyed on the completed dispatch Job's UID (never colliding with the
+// materialization reporter's "tide-reporter-<parentUID>" name), minimal Args
+// with no parent-CR flags, and everything else (SA/PVC subPath/SecurityContext/
+// role label) identical to the materialization shape.
+func TestBuildReporterJob_TraceOnly(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-n",
+			UID:       "project-uid-16",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-14",
+			Namespace: "ns-n",
+			UID:       "parent-uid-16",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{
+		ReporterImage:   "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		TraceOnly:       true,
+		TraceOnlyJobKey: "job-uid-123",
+	}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-9", "Milestone", opts, scheme)
+
+	wantName := "tide-reporter-trace-job-uid-123"
+	if job.Name != wantName {
+		t.Errorf("expected Job name=%q, got %q", wantName, job.Name)
+	}
+
+	args := job.Spec.Template.Spec.Containers[0].Args
+	wantPresent := []string{"--trace-only", "--workspace=/workspace", "--task-uid=task-uid-9"}
+	for _, want := range wantPresent {
+		found := false
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	}
+	wantAbsentPrefixes := []string{"--parent-name", "--parent-namespace", "--parent-kind"}
+	for _, prefix := range wantAbsentPrefixes {
+		for _, a := range args {
+			if strings.HasPrefix(a, prefix) {
+				t.Errorf("did not expect arg with prefix %q in trace-only Args, got %v", prefix, args)
+			}
+		}
+	}
+
+	// Shared shape assertions — identical to the materialization Job.
+	if job.Spec.Template.Spec.ServiceAccountName != "tide-reporter" {
+		t.Errorf("expected ServiceAccountName=tide-reporter, got %q", job.Spec.Template.Spec.ServiceAccountName)
+	}
+	const roleKey = "tideproject.k8s/role"
+	if job.Labels[roleKey] != "reporter" {
+		t.Errorf("expected job label %s=reporter, got %q", roleKey, job.Labels[roleKey])
+	}
+	sc := job.Spec.Template.Spec.Containers[0].SecurityContext
+	if sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Error("expected trace-only shape to keep hardened SecurityContext (RunAsNonRoot=true)")
+	}
+	foundSubPath := false
+	for _, vm := range job.Spec.Template.Spec.Containers[0].VolumeMounts {
+		if vm.MountPath == "/workspace" {
+			foundSubPath = true
+			wantSubPath := "project-uid-16/workspace"
+			if vm.SubPath != wantSubPath {
+				t.Errorf("expected SubPath=%q, got %q", wantSubPath, vm.SubPath)
+			}
+		}
+	}
+	if !foundSubPath {
+		t.Error("no volumeMount at /workspace found in trace-only shape")
+	}
+}
+
+// TestBuildReporterJob_TraceOnlyFalseUnchanged is the regression guard: with
+// TraceOnly left at its zero value (false), the materialization name/args
+// shape is byte-identical to today's (pre-Phase-44) behavior.
+func TestBuildReporterJob_TraceOnlyFalseUnchanged(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-o",
+			UID:       "project-uid-17",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-15",
+			Namespace: "ns-o",
+			UID:       "parent-uid-17",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-17", "Milestone", opts, scheme)
+
+	wantName := "tide-reporter-parent-uid-17"
+	if job.Name != wantName {
+		t.Errorf("expected Job name=%q, got %q", wantName, job.Name)
+	}
+	args := job.Spec.Template.Spec.Containers[0].Args
+	wantArgs := map[string]bool{
+		"--workspace=/workspace":       false,
+		"--project-uid=project-uid-17": false,
+		"--task-uid=task-uid-17":       false,
+		"--parent-name=ms-15":          false,
+		"--parent-namespace=ns-o":      false,
+		"--parent-kind=Milestone":      false,
+	}
+	for _, a := range args {
+		wantArgs[a] = true
+	}
+	for arg, found := range wantArgs {
+		if !found {
+			t.Errorf("expected arg %q not present in %v", arg, args)
+		}
+	}
+}
