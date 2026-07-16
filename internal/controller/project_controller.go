@@ -1736,6 +1736,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		// PROP-01/D-02: no TraceParent — Project is the trace root, its dispatch
+		// Job legitimately carries no TRACEPARENT (no parent span exists above it).
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {

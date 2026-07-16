@@ -460,6 +460,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		// PROP-01: Milestone's immediate parent is Project, already resolved
+		// above — no new fetch needed.
+		TraceParent: traceparentForLevel(project, project.Status.ProjectTraceSpanID),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
