@@ -17,19 +17,35 @@ limitations under the License.
 // Command tide-reporter is the in-namespace reader Job binary (Phase 9 Option C).
 //
 // The reporter Job is spawned by the Manager after a dispatch Job completes. It
-// mounts the project-namespace PVC at /workspace (subPath {project-uid}/workspace),
-// reads out.json from /workspace/envelopes/{task-uid}/out.json — a SAME-namespace
-// read (the #11/#12 fix) — resolves the parent CR by name to obtain its live UID,
-// and creates the child CRs via an in-cluster controller-runtime client using the
-// least-privilege tide-reporter SA.
+// runs in one of two modes:
+//
+//   - Combined (materialization) mode: mounts the project-namespace PVC at
+//     /workspace (subPath {project-uid}/workspace), reads out.json from
+//     /workspace/envelopes/{task-uid}/out.json — a SAME-namespace read (the
+//     #11/#12 fix) — resolves the parent CR by name to obtain its live UID,
+//     and creates the child CRs via an in-cluster controller-runtime client
+//     using the least-privilege tide-reporter SA. Before any of that, it
+//     best-effort synthesizes LLM message-array spans from events.jsonl
+//     (Phase 44 MSG-01) — placed before the client build so a failed
+//     planner Job with no/partial out.json still emits its conversation
+//     spans (D-05).
+//   - Trace-only mode (--trace-only, Phase 44 MSG-01): reads events.jsonl
+//     only, emits message-array spans parented under --traceparent, and
+//     always exits 0 — no child-CR materialization, no K8s client built.
 //
 // Idempotent by the spec-ref guard in internal/reporter.ChildrenAlreadyMaterialized.
 //
 // Exit-code map:
 //
-//	0 — success: children created (or already existed — idempotent)
+//	0 — success: children created (or already existed — idempotent); ALWAYS
+//	    for a --trace-only run regardless of synth/export outcome
 //	1 — generic failure (K8s API error, unmarshal error)
 //	2 — invariant violation (missing args, parent not found, allowlist rejection)
+//
+// A distinct, non-exit-code-affecting failure class (Phase 44 D-10): LLM
+// message-array synth/export errors are logged to stderr but NEVER change
+// the exit code above — in trace-only mode the run still exits 0, and in
+// combined mode the materialization outcome above is authoritative.
 package main
 
 import (
@@ -42,7 +58,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"go.opentelemetry.io/otel"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -51,9 +69,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/otelinit"
 	"github.com/jsquirrelz/tide/internal/reporter"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
+
+// newTracerProvider is a package-level seam over otelinit.NewTracerProvider
+// so tests can inject a stub TracerProvider/ShutdownFunc pair — otelinit
+// itself reads OTEL_EXPORTER_OTLP_ENDPOINT and sets the global provider, so
+// tests cannot inject an exporter through it directly. Mirrors
+// buildFakeClient's "construct only what the test needs" minimalism.
+var newTracerProvider = otelinit.NewTracerProvider
 
 // reporterConfig is the parsed CLI configuration passed by value into run()
 // so tests can drive it without setting os.Args.
@@ -65,6 +92,7 @@ type reporterConfig struct {
 	ParentNamespace string // K8s namespace of the parent CR
 	ParentKind      string // Kind of the parent CR: Project | Milestone | Phase | Plan
 	TraceParent     string // W3C traceparent for this level's own span (consumed starting Phase 44)
+	TraceOnly       bool   // Phase 44 MSG-01: synthesize LLM message-array spans only, no materialization
 }
 
 const (
@@ -93,6 +121,8 @@ func parseFlags(args []string) (reporterConfig, error) {
 	parentNamespace := fs.String("parent-namespace", "", "namespace of the parent CR")
 	parentKind := fs.String("parent-kind", "", "Kind of the parent CR: Project | Milestone | Phase | Plan")
 	traceParent := fs.String("traceparent", "", "W3C traceparent for this level's own span (consumed starting Phase 44)")
+	traceOnly := fs.Bool("trace-only", false,
+		"synthesize LLM message-array spans from events.jsonl only; no child-CR materialization (Phase 44 MSG-01)")
 
 	if err := fs.Parse(args); err != nil {
 		return reporterConfig{}, err
@@ -106,6 +136,7 @@ func parseFlags(args []string) (reporterConfig, error) {
 		ParentNamespace: *parentNamespace,
 		ParentKind:      *parentKind,
 		TraceParent:     *traceParent,
+		TraceOnly:       *traceOnly,
 	}, nil
 }
 
@@ -135,7 +166,40 @@ func run(ctx context.Context, cfg reporterConfig, stdout io.Writer, stderr io.Wr
 func runWithClient(
 	ctx context.Context, cfg reporterConfig, _ io.Writer, stderr io.Writer, clientOverride client.Client,
 ) int {
-	// 1. Validate required flags.
+	// 0. TracerProvider lifecycle (TRACE-03/D-12) — FIRST action, before any
+	// flag validation, so every subsequent exit path (including the
+	// invariant-violation returns below) flushes the batch span processor.
+	// D-10: otel init failure must never fail the reporter run — log and
+	// continue with a no-op shutdown, mirroring the tracing-dark posture.
+	tp, otelShutdown, err := newTracerProvider(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "tide-reporter: otel init failed: %v\n", err)
+		otelShutdown = func(context.Context) error { return nil }
+	}
+	_ = tp // captured by the global otel handle set inside newTracerProvider
+	defer func() {
+		// D-12: bounded flush timeout — a hung collector delays exit by at
+		// most this bound; the drop is logged, never fails the run.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(stderr, "tide-reporter: otel shutdown failed: %v\n", err)
+		}
+	}()
+
+	// 1. Trace-only mode (Phase 44 MSG-01, D-10): only --task-uid is
+	// required — no parent-CR flags, no K8s client. Always exits 0
+	// regardless of synth/export outcome.
+	if cfg.TraceOnly {
+		if cfg.TaskUID == "" {
+			fmt.Fprintf(stderr, "tide-reporter: --task-uid is required\n")
+			return exitInvariant
+		}
+		synthesizeSpans(ctx, cfg, stderr)
+		return exitSuccess
+	}
+
+	// 2. Validate required flags (combined/materialization mode).
 	if cfg.TaskUID == "" {
 		fmt.Fprintf(stderr, "tide-reporter: --task-uid is required\n")
 		return exitInvariant
@@ -153,7 +217,14 @@ func runWithClient(
 		return exitInvariant
 	}
 
-	// 2. Build the K8s client (or use the injected test override).
+	// 3. Best-effort LLM message-array synth (D-02/D-05/D-10). Runs BEFORE
+	// the client build below — placement is load-bearing: a failed planner
+	// Job may have no readable out.json (invariant exit further down), and
+	// D-05 requires its conversation spans to still emit. synth needs no
+	// K8s client and never influences the exit code returned from here on.
+	synthesizeSpans(ctx, cfg, stderr)
+
+	// 4. Build the K8s client (or use the injected test override).
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(tidev1alpha3.AddToScheme(scheme))
@@ -175,7 +246,7 @@ func runWithClient(
 		}
 	}
 
-	// 3. Read out.json from the local (same-namespace) PVC.
+	// 5. Read out.json from the local (same-namespace) PVC.
 	// The reader Job mounts subPath {project-uid}/workspace at /workspace so the
 	// path is /workspace/envelopes/<taskUID>/out.json — same-namespace read (#11/#12 fix).
 	outPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "out.json")
@@ -191,13 +262,13 @@ func runWithClient(
 		return exitInvariant
 	}
 
-	// 4. Resolve the parent CR by name to obtain its live UID (needed for ownerRef).
+	// 6. Resolve the parent CR by name to obtain its live UID (needed for ownerRef).
 	parent, exitCode := resolveParent(ctx, c, cfg, stderr)
 	if exitCode != exitSuccess {
 		return exitCode
 	}
 
-	// 5. Check idempotency: if children are already materialized, exit 0.
+	// 7. Check idempotency: if children are already materialized, exit 0.
 	already, err := reporter.ChildrenAlreadyMaterialized(ctx, c, parent)
 	if err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: idempotency check: %v\n", err)
@@ -209,7 +280,7 @@ func runWithClient(
 		return exitSuccess
 	}
 
-	// 6. Materialize children via K8s API.
+	// 8. Materialize children via K8s API.
 	if err := reporter.MaterializeChildCRDs(ctx, c, scheme, parent, envOut.ChildCRDs); err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: materialize: %v\n", err)
 		// allowlist rejections and spec violations are invariant (2), not generic (1).
@@ -219,6 +290,40 @@ func runWithClient(
 	fmt.Fprintf(stderr, "tide-reporter: materialized %d child CRDs for %s/%s\n",
 		len(envOut.ChildCRDs), cfg.ParentKind, cfg.ParentName)
 	return exitSuccess
+}
+
+// synthesizeSpans is the best-effort LLM message-array-span step (Phase 44
+// MSG-01). It reads events.jsonl (plus in.json for the call-1 seed prompt)
+// under cfg.Workspace/envelopes/cfg.TaskUID, extracts the remote parent from
+// cfg.TraceParent so emitted spans nest under the level's own AGENT span,
+// and calls reporter.EmitSpans on the global tracer newTracerProvider set.
+//
+// NEVER influences runWithClient's exit code (D-10) — errors are logged to
+// stderr and otherwise swallowed. Called from both the trace-only branch and
+// the combined-mode path (before the K8s client is built), so a failed
+// planner Job with no/partial out.json still gets its conversation spans
+// (D-05). Reporter-synthesized span IDs mint fresh per run, so a Job retry
+// re-running this step emits a duplicate span rather than failing the retry.
+func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) {
+	eventsPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "events.jsonl")
+	inJSONPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "in.json")
+
+	parentCtx := otelai.ExtractRemoteParent(ctx, cfg.TraceParent)
+	if cfg.TraceParent == "" {
+		fmt.Fprintf(stderr, "tide-reporter: no --traceparent supplied — spans emit unparented\n")
+	}
+
+	calls, err := reporter.ReconstructConversation(eventsPath, inJSONPath, cfg.Workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "tide-reporter: reconstruct conversation: %v\n", err)
+		return
+	}
+
+	tracer := otel.Tracer("tide.reporter")
+	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
+	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath); err != nil {
+		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
+	}
 }
 
 // resolveParent fetches the parent CR by {namespace, name, kind} from the K8s API
