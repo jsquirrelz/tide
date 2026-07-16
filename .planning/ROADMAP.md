@@ -236,7 +236,7 @@ Plans:
 
 **Wave 2** *(blocked on 44-01)*
 
-- [ ] 44-03-PLAN.md — internal/reporter/tracesynth.go: events.jsonl→LLM-span synthesizer, redact-before-truncate, triple size guard, batch-aggregate proof
+- [x] 44-03-PLAN.md — internal/reporter/tracesynth.go: events.jsonl→LLM-span synthesizer, redact-before-truncate, triple size guard, batch-aggregate proof
 
 **Wave 3** *(blocked on 44-03)*
 
@@ -305,7 +305,7 @@ Plans:
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 2/5 | In Progress|  |
+| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 3/5 | In Progress|  |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
