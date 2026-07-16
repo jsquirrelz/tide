@@ -84,12 +84,57 @@ type ReporterOptions struct {
 	// Consumed starting Phase 44; carried as an Arg, not Env, matching this
 	// file's 100% Args-based convention (Pitfall 3).
 	TraceParent string
+
+	// OTLPEndpoint is the manager's own OTEL_EXPORTER_OTLP_ENDPOINT value,
+	// forwarded so the reporter's otelinit.NewTracerProvider resolves the
+	// SAME collector the manager uses (Phase 44 TRACE-03/D-06). Unlike
+	// TraceParent this IS carried as Env (not Args) — it targets the
+	// reporter's own TracerProvider bootstrap, mirroring how the manager
+	// itself reads it via os.Getenv, not a CLI flag. When empty, no Env is
+	// set at all and the reporter's otelinit falls back to its no-op
+	// provider (materialization-mode posture, D-06).
+	OTLPEndpoint string
+
+	// TraceOnly selects the Phase 44 trace-only Job shape (spawned by plan
+	// 44-05 for completed Task dispatch Jobs) instead of the materialization
+	// reporter shape: a distinct name keyed on TraceOnlyJobKey and a minimal
+	// Args set with no parent-CR flags (trace-only mode makes no K8s API
+	// calls, so the least-privilege tide-reporter SA is reused unwidened —
+	// T-44-06). Zero value (false) is the existing materialization shape,
+	// byte-identical to pre-Phase-44 behavior.
+	TraceOnly bool
+
+	// TraceOnlyJobKey is the completed dispatch Job's UID, keying the
+	// trace-only Job's deterministic name ("tide-reporter-trace-<key>") so
+	// it can never collide with the materialization reporter's
+	// "tide-reporter-<parentUID>" name — a failed-then-retried planner Job's
+	// trace-only spawn can never block a later materialization spawn. Only
+	// consulted when TraceOnly is true.
+	TraceOnlyJobKey string
 }
 
 // BuildReporterJob constructs the K8s batchv1.Job that runs the in-namespace
-// reporter process in the project namespace.
+// reporter process in the project namespace. Supports two shapes, selected by
+// opts.TraceOnly:
 //
-// Identity:
+//   - Materialization shape (opts.TraceOnly == false, the default): reads
+//     out.json from the PVC and materializes child CRDs — this is the
+//     original (Phase 09) shape, unchanged unless opts.OTLPEndpoint is set.
+//
+//   - Trace-only shape (opts.TraceOnly == true, added Phase 44): spawned by
+//     plan 44-05 for a completed Task dispatch Job to synthesize LLM
+//     message-array spans from events.jsonl. Makes no K8s API calls (no
+//     parent CRD to materialize against), so its Args omit all parent-CR
+//     flags and its Job name is keyed on opts.TraceOnlyJobKey (the completed
+//     dispatch Job's UID) rather than the parent's UID — this keeps it from
+//     ever colliding with a materialization reporter Job for the same parent
+//     (a failed-then-retried planner Job's trace-only spawn can never block
+//     a later materialization spawn).
+//
+// Both shapes share: SA, PVC volume/subPath, SecurityContext, role labels,
+// BackoffLimit/TTL, and ownerRef via owner.EnsureOwnerRef.
+//
+// Identity (materialization shape):
 //
 //   - Name: "tide-reporter-<parentUID>" — deterministic per parent; AlreadyExists
 //     on Create is idempotent success (mirrors tide-push-%s / tide-clone-%s naming
@@ -105,13 +150,21 @@ type ReporterOptions struct {
 // Pod spec:
 //
 //   - ServiceAccountName: "tide-reporter" (least-privilege create+get on the
-//     five TIDE CRD Kinds — plan 09-04 SA+Role+RoleBinding).
+//     five TIDE CRD Kinds — plan 09-04 SA+Role+RoleBinding). Reused unwidened
+//     for the trace-only shape (T-44-06 — trace-only mode never builds a K8s
+//     client, so no RBAC widening is needed).
 //
 //   - PVC subPath: <project.UID>/workspace → /workspace (same layout the dispatch
 //     Job wrote out.json into — the load-bearing same-namespace fix).
 //
-//   - Args: --workspace, --project-uid, --task-uid (envelope key), --parent-name,
-//     --parent-namespace, --parent-kind. Mirrors plan 09-05 reporter flag set.
+//   - Args (materialization): --workspace, --project-uid, --task-uid (envelope
+//     key), --parent-name, --parent-namespace, --parent-kind. Mirrors plan
+//     09-05 reporter flag set. Args (trace-only): --trace-only, --workspace,
+//     --task-uid only — no parent-CR flags.
+//
+//   - Env: empty unless opts.OTLPEndpoint is set (Phase 44 D-06/T-44-04), in
+//     which case OTEL_EXPORTER_OTLP_ENDPOINT + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6
+//     are added — see the ReporterOptions.OTLPEndpoint doc comment.
 //
 //   - SecurityContext: RunAsNonRoot + drop ALL capabilities (mirrors jobspec.go
 //     hardened subagent context — reporter is trusted write; least-privilege).
@@ -134,18 +187,49 @@ func BuildReporterJob(
 	opts ReporterOptions,
 	scheme *runtime.Scheme,
 ) *batchv1.Job {
-	args := []string{
-		"--workspace=/workspace",
-		"--project-uid=" + string(project.UID),
-		"--task-uid=" + taskUID,
-		"--parent-name=" + parent.GetName(),
-		"--parent-namespace=" + parent.GetNamespace(),
-		"--parent-kind=" + parentKind,
+	// Phase 44: trace-only shape omits all parent-CR flags (--project-uid/
+	// --parent-name/--parent-namespace/--parent-kind) — trace-only mode makes
+	// no K8s API calls, so the least-privilege tide-reporter SA is reused
+	// unwidened (T-44-06). The materialization shape is unchanged.
+	var args []string
+	if opts.TraceOnly {
+		args = []string{
+			"--trace-only",
+			"--workspace=/workspace",
+			"--task-uid=" + taskUID,
+		}
+	} else {
+		args = []string{
+			"--workspace=/workspace",
+			"--project-uid=" + string(project.UID),
+			"--task-uid=" + taskUID,
+			"--parent-name=" + parent.GetName(),
+			"--parent-namespace=" + parent.GetNamespace(),
+			"--parent-kind=" + parentKind,
+		}
 	}
 	// Phase 43 PROP-01: --traceparent Arg, not Env (Pitfall 3 — this file is
 	// 100% Args-based via stdlib flag; zero Env entries on the reporter container).
 	if opts.TraceParent != "" {
 		args = append(args, "--traceparent="+opts.TraceParent)
+	}
+
+	// Phase 44 D-06/T-44-04: reporter container Env — empty unless the
+	// manager has an OTLP endpoint configured. OTEL_EXPORTER_OTLP_ENDPOINT
+	// forwards the SAME collector value the manager's own otelinit reads, so
+	// the reporter's TracerProvider resolves it identically.
+	// OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 is a hardcoded literal (NOT a Helm
+	// value — values.yaml is a FIXED contract): 6 spans x 512 KiB whole-span
+	// cap = 3 MiB per export batch, ~25% headroom under the 4 MiB OTLP gRPC
+	// ceiling (RESEARCH Size-Boundary Model). The pinned OTel SDK's
+	// NewBatchSpanProcessor reads this env automatically — zero otelinit
+	// changes required.
+	var env []corev1.EnvVar
+	if opts.OTLPEndpoint != "" {
+		env = []corev1.EnvVar{
+			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: opts.OTLPEndpoint},
+			{Name: "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", Value: "6"},
+		}
 	}
 
 	// resolvedPVCName defaults to the project-shared PVC name when the caller
@@ -173,12 +257,19 @@ func BuildReporterJob(
 		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 
+	// jobName: the materialization shape keys on the parent UID (deterministic
+	// per parent, AlreadyExists on Create is idempotent success, D-B5). The
+	// trace-only shape keys on TraceOnlyJobKey (the completed dispatch Job's
+	// UID) instead, in the "tide-reporter-trace-" namespace so it can never
+	// collide with a materialization reporter's name for the same parent.
+	jobName := fmt.Sprintf("tide-reporter-%s", parent.GetUID())
+	if opts.TraceOnly {
+		jobName = "tide-reporter-trace-" + opts.TraceOnlyJobKey
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			// Deterministic name keyed on the parent UID so that two concurrent
-			// reconcile passes for the same parent both produce the same name and
-			// only one Create succeeds (AlreadyExists = idempotent, D-B5 pattern).
-			Name:      fmt.Sprintf("tide-reporter-%s", parent.GetUID()),
+			Name:      jobName,
 			Namespace: project.Namespace,
 			Labels:    roleLabels,
 		},
@@ -207,6 +298,7 @@ func BuildReporterJob(
 							Name:  reporterContainerName,
 							Image: opts.ReporterImage,
 							Args:  args,
+							Env:   env,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      reporterWorkspaceVolume,

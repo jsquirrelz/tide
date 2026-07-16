@@ -545,7 +545,7 @@ func TestBuildReporterJob_OTLPEndpointEnv(t *testing.T) {
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	want := map[string]string{
-		"OTEL_EXPORTER_OTLP_ENDPOINT":   "collector:4317",
+		"OTEL_EXPORTER_OTLP_ENDPOINT":    "collector:4317",
 		"OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "6",
 	}
 	if len(env) != len(want) {
