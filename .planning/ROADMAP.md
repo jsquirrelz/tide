@@ -205,7 +205,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 43-03-PLAN.md — Parenting retrofit: two-sided `synthesizePlannerSpan` signature, deterministic TraceID, immediate-parent fetches, second status patch at all four planner completion handlers + envtest linkage/persistence assertions
+- [x] 43-03-PLAN.md — Parenting retrofit: two-sided `synthesizePlannerSpan` signature, deterministic TraceID, immediate-parent fetches, second status patch at all four planner completion handlers + envtest linkage/persistence assertions
 
 **Wave 3** *(blocked on Wave 2; 04 ∥ 05)*
 
@@ -286,7 +286,7 @@ Plans:
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 2/5 | In Progress|  |
+| 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 3/5 | In Progress|  |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/TBD | Not started | - |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
