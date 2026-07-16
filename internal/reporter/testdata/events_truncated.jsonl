@@ -1,0 +1,11 @@
+{"type":"system","subtype":"init","session_id":"sess-01","model":"claude-sonnet-4-6"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_call1","model":"claude-sonnet-4-6","usage":{"input_tokens":120,"cache_creation_input_tokens":10,"cache_read_input_tokens":5}}}}
+{"type":"assistant","message":{"id":"msg_call1","model":"claude-sonnet-4-6","content":[{"type":"thinking","thinking":"Let me look at the plan first.","signature":"sig-abc123"}]}}
+{"type":"assistant","message":{"id":"msg_call1","model":"claude-sonnet-4-6","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"/plan.md"}}]}}
+{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":45}}}
+{"type":"stream_event","event":{"type":"message_stop"}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"file contents here"}]},"timestamp":"2026-07-16T10:00:00Z"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_01b","content":"secondary tool result: sk-ant-api03-aBcDeFgHiJkLmNoPqRsTuV leaked"}]},"timestamp":"2026-07-16T10:00:05Z"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_call2","model":"claude-sonnet-4-6","usage":{"input_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":120}}}}
+{"type":"assistant","message":{"id":"msg_call2","model":"claude-sonnet-4-6","content":[{"type":"tool_use","id":"toolu_02","name":"Bash","input":{"command":"go test ./..."}}]}}
+this is not valid json, the stream got cut off mid-call
