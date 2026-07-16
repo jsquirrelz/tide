@@ -207,3 +207,58 @@ func TestRedactingWriter_FlushesOnClose(t *testing.T) {
 		t.Errorf("after Close got %q, want %q", dst.String(), input)
 	}
 }
+
+// TestString runs String against the exact same secret fixtures proven
+// against TestRedactingWriter (MSG-02: the non-streaming pass must apply the
+// same SecretPatterns denylist).
+func TestString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "PassthroughInnocuous",
+			input: "the cat sat on the mat",
+			want:  "the cat sat on the mat",
+		},
+		{
+			name:  "RedactsAnthropicKey",
+			input: "here is sk-ant-api03-aBcDeFgHiJkLmNoPqRsTuV the rest",
+			want:  "here is [REDACTED] the rest",
+		},
+		{
+			name:  "RedactsJWT",
+			input: "token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c end",
+			want:  "token: [REDACTED] end",
+		},
+		{
+			name:  "RedactsAWSKey",
+			input: "key=AKIAIOSFODNN7EXAMPLE something",
+			want:  "key=[REDACTED] something",
+		},
+		{
+			name:  "RedactsGitHubPAT",
+			input: "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh12",
+			want:  "GITHUB_TOKEN=[REDACTED]",
+		},
+		{
+			name:  "RedactsSlackToken",
+			input: "slack=xoxb-1234567890-abcdef done",
+			want:  "slack=[REDACTED] done",
+		},
+		{
+			name:  "EmptyStringReturnsEmpty",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := String(tc.input); got != tc.want {
+				t.Errorf("String(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

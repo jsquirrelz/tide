@@ -17,6 +17,8 @@ limitations under the License.
 package otelai
 
 import (
+	"fmt"
+
 	semconv "github.com/Arize-ai/openinference/go/openinference-semantic-conventions"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -28,19 +30,62 @@ import (
 // Arize OpenInference spec (May 2026).
 //
 // Content is the raw message text used ONLY for outbound serialization into
-// the attribute VALUE — there is no validation, escaping, or transformation;
-// callers MUST decide whether to populate Content with the real payload or
-// to defer to ArtifactPath (D-O5: prefer PVC paths over inlined payload).
+// the attribute VALUE — there is no validation, escaping, or transformation.
+// Per the Phase 44 D-O5 contract (see doc.go), production callers populate
+// Content with bounded-inline text that has already passed the mandatory
+// redact-then-truncate pipeline (internal/harness/redact.String, then
+// per-message truncation, D-09) and pair the span with an ArtifactPath
+// co-attribute referencing the full-fidelity record.
+//
+// ToolCalls and Contents are optional Phase 44 (D-03) extensions for
+// spec-native tool-call and structured-content-block (e.g. reasoning/
+// "thinking") encoding. Nil (the zero value) preserves the legacy flat
+// role/content-only encoding — zero behavior change for pre-Phase-44 call
+// sites.
 type Message struct {
 	Role    string
 	Content string
+
+	// ToolCalls carries this message's tool invocations, encoded via the
+	// module's own message.tool_calls indexer family (D-03: the pinned
+	// openinference-semantic-conventions v0.1.1 module carries these keys,
+	// so tool calls get spec-native encoding rather than being stringified
+	// into Content).
+	ToolCalls []ToolCall
+
+	// Contents carries this message's structured content blocks — e.g. an
+	// Anthropic `thinking` block, encoded as message_content.type=
+	// "reasoning" (D-03) — via the module's message.contents family.
+	Contents []MessageContent
+}
+
+// ToolCall is one tool invocation within a message's message.tool_calls
+// array (D-03). ArgumentsJSON carries the raw JSON-encoded arguments string
+// exactly as observed on the wire — this package does not parse, validate,
+// or re-serialize it.
+type ToolCall struct {
+	ID            string
+	Name          string
+	ArgumentsJSON string
+}
+
+// MessageContent is one structured content block within a message's
+// message.contents array (D-03) — e.g. a "reasoning" (Anthropic `thinking`)
+// block. Signature carries the opaque provider reasoning-continuity token
+// verbatim (the module's own doc comment: "opaque provider
+// reasoning-continuity fields"); omitted from the emitted attributes when
+// empty (input-side tool_result blocks carry none).
+type MessageContent struct {
+	Type      string
+	Text      string
+	Signature string
 }
 
 // TIDE-custom keys with no counterpart in the official
 // openinference-semantic-conventions Go module (D-05 rename bucket — the
 // module was downloaded and read directly at plan-authoring time; none of
-// these six exist anywhere in it). Every other attribute key emitted by this
-// package resolves from the semconv.* constants below — see
+// these eight exist anywhere in it). Every other attribute key emitted by
+// this package resolves from the semconv.* constants below — see
 // TestKeysUseSemconvModule (attrs_test.go) for the source-grep guard that
 // enforces this split at PR-review time (ATTR-03).
 const (
@@ -50,6 +95,16 @@ const (
 	keyExitCode             = "tide.exit_code"
 	keyReason               = "tide.reason"
 	keyEnvelopeDegraded     = "tide.envelope.degraded"
+	// keyTimingSynthetic is Phase 44's D-05/Claude's-Discretion timing-floor
+	// marker: events.jsonl carries no absolute timestamp for
+	// message_start/message_stop/assistant events, so a per-call LLM span's
+	// timing is interpolated/proportional rather than measured. No module
+	// counterpart exists.
+	keyTimingSynthetic = "tide.trace.timing_synthetic"
+	// keyParseDegraded is Phase 44's D-05/D-11 marker: the conversation was
+	// reconstructed from an events.jsonl stream with skipped or truncated
+	// lines (tolerant-skip parse posture). No module counterpart exists.
+	keyParseDegraded = "tide.trace.parse_degraded"
 )
 
 // LLMInputMessages flattens a slice of input messages into OpenInference's
@@ -74,16 +129,31 @@ func LLMOutputMessages(msgs []Message) []attribute.KeyValue {
 	return flattenMessages(false, msgs)
 }
 
-// flattenMessages emits the 2*N flat-keyed attributes for a per-index
+// flattenMessages emits the flat-keyed attributes for a per-index
 // `<prefix>.<i>.message.role` / `<prefix>.<i>.message.content` pairing,
 // using the module's own indexer helpers so the emitted key strings track
 // the spec exactly. Internal helper — the public surface is
 // LLMInputMessages / LLMOutputMessages so that the D-O5 enforcement test
 // sees exactly two payload-bearing public functions.
+//
+// Phase 44 (D-03) extension: when a message's ToolCalls or Contents field is
+// non-empty, additional spec-native attributes are appended per tool call /
+// content block via the module's own indexers (tool calls) or
+// constant-composed keys (content blocks — the module has no public
+// message.contents indexer). Nil ToolCalls/Contents emits exactly the legacy
+// 2-attribute-per-message shape — zero behavior change for pre-Phase-44
+// call sites.
 func flattenMessages(input bool, msgs []Message) []attribute.KeyValue {
 	if len(msgs) == 0 {
 		return nil
 	}
+	prefix := semconv.LLMOutputMessages
+	toolCallKey := semconv.LLMOutputMessageToolCallKey
+	if input {
+		prefix = semconv.LLMInputMessages
+		toolCallKey = semconv.LLMInputMessageToolCallKey
+	}
+
 	out := make([]attribute.KeyValue, 0, 2*len(msgs))
 	for i, m := range msgs {
 		roleKey, contentKey := semconv.LLMOutputMessageRoleKey(i), semconv.LLMOutputMessageContentKey(i)
@@ -94,8 +164,37 @@ func flattenMessages(input bool, msgs []Message) []attribute.KeyValue {
 			attribute.String(roleKey, m.Role),
 			attribute.String(contentKey, m.Content),
 		)
+
+		for j, c := range m.ToolCalls {
+			out = append(out,
+				attribute.String(toolCallKey(i, j, semconv.ToolCallID), c.ID),
+				attribute.String(toolCallKey(i, j, semconv.ToolCallFunctionName), c.Name),
+				attribute.String(toolCallKey(i, j, semconv.ToolCallFunctionArgumentsJSON), c.ArgumentsJSON),
+			)
+		}
+
+		for k, mc := range m.Contents {
+			out = append(out,
+				attribute.String(messageContentKey(prefix, i, k, semconv.MessageContentType), mc.Type),
+				attribute.String(messageContentKey(prefix, i, k, semconv.MessageContentText), mc.Text),
+			)
+			if mc.Signature != "" {
+				out = append(out, attribute.String(messageContentKey(prefix, i, k, semconv.MessageContentSignature), mc.Signature))
+			}
+		}
 	}
 	return out
+}
+
+// messageContentKey composes the "<prefix>.<i>.message.contents.<k>.<child>"
+// key from semconv constants (D-03). There is no public indexer for
+// message.contents in the vendored module — unlike
+// LLM{Input,Output}MessageToolCallKey — so this composition is the correct
+// shape: it satisfies TestKeysUseSemconvModule (the guard rejects raw
+// "llm."-prefixed string literals, not constant-composed keys) while never
+// hand-typing a spec-family literal.
+func messageContentKey(prefix string, i, k int, child string) string {
+	return fmt.Sprintf("%s.%d.%s.%d.%s", prefix, i, semconv.MessageContents, k, child)
 }
 
 // TokenCount returns the five token-accounting attributes per the
@@ -207,4 +306,39 @@ func FailureDetail(exitCode int, reason string) []attribute.KeyValue {
 //   - tide.envelope.degraded=true
 func EnvelopeDegraded() attribute.KeyValue {
 	return attribute.Bool(keyEnvelopeDegraded, true)
+}
+
+// LLMSpanKind returns the single attribute marking a span as an LLM-kind
+// span (openinference.span.kind=LLM). AgentInvocation hardcodes
+// semconv.SpanKindAgent and is NOT reusable for this purpose — LLMSpanKind
+// is the sibling helper for the per-API-call spans internal/reporter's
+// tracesynth.go emits (Phase 44 D-01), so tracesynth never hand-rolls
+// "openinference.span.kind".
+//
+//   - openinference.span.kind=LLM
+func LLMSpanKind() attribute.KeyValue {
+	return attribute.String(semconv.OpenInferenceSpanKind, semconv.SpanKindLLM)
+}
+
+// TimingSynthetic returns the single Phase 44 marker attribute (see
+// keyTimingSynthetic above for the key) for a span whose start/end
+// timestamps are interpolated or proportionally derived rather than
+// measured from a real in-band timestamp. events.jsonl carries no absolute
+// timestamp for message_start/message_stop/assistant events (RESEARCH.md
+// "Timestamps — confirmed asymmetric, not absent") — this is the
+// Claude's-Discretion timing floor CONTEXT.md mandates whenever a span's
+// timing is synthesized rather than measured. Value is always true; mirrors
+// EnvelopeDegraded's marker-attribute convention.
+func TimingSynthetic() attribute.KeyValue {
+	return attribute.Bool(keyTimingSynthetic, true)
+}
+
+// ParseDegraded returns the single D-11 marker attribute (see
+// keyParseDegraded above for the key) for a span whose conversation was
+// reconstructed from an events.jsonl stream containing skipped or truncated
+// lines (tolerant-skip parse posture, matching ParseStream's own defensive
+// posture). Value is always true; mirrors EnvelopeDegraded's
+// marker-attribute convention.
+func ParseDegraded() attribute.KeyValue {
+	return attribute.Bool(keyParseDegraded, true)
 }
