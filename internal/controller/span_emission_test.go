@@ -41,6 +41,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -210,6 +211,17 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 		projPatch := client.MergeFrom(proj.DeepCopy())
 		proj.Status.ProjectTraceSpanID = seededParentSpanIDHex
 		Expect(k8sClient.Status().Patch(ctx, &proj, projPatch)).To(Succeed())
+		// Wait for the manager's cache (mgrClient, read by the reconciler
+		// below via r.Client) to observe this write — k8sClient.Status().Patch
+		// goes straight to the API server; the informer watch that backs
+		// mgrClient's cache syncs asynchronously. Without this wait the
+		// reconciler's own Get can race the watch and read a stale
+		// (pre-patch) parent, intermittently producing a zero parentSpanID.
+		Eventually(func(g Gomega) {
+			var synced tideprojectv1alpha3.Project
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSProjName, Namespace: "default"}, &synced)).To(Succeed())
+			g.Expect(synced.Status.ProjectTraceSpanID).To(Equal(seededParentSpanIDHex))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 		start := time.Now().Add(-5 * time.Minute)
 		end := time.Now()
@@ -470,6 +482,14 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		msPatch := client.MergeFrom(parentMs.DeepCopy())
 		parentMs.Status.MilestoneTraceSpanID = seededParentSpanIDHex
 		Expect(k8sClient.Status().Patch(ctx, &parentMs, msPatch)).To(Succeed())
+		// Wait for the manager's cache to observe this write before the
+		// reconciler's own Get reads it below — same race guarded against at
+		// every other level's seed step in this file.
+		Eventually(func(g Gomega) {
+			var synced tideprojectv1alpha3.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHMSName, Namespace: "default"}, &synced)).To(Succeed())
+			g.Expect(synced.Status.MilestoneTraceSpanID).To(Equal(seededParentSpanIDHex))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 		var proj tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHProjName, Namespace: "default"}, &proj)).To(Succeed())
@@ -733,6 +753,14 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		phPatch := client.MergeFrom(parentPh.DeepCopy())
 		parentPh.Status.PhaseTraceSpanID = seededParentSpanIDHex
 		Expect(k8sClient.Status().Patch(ctx, &parentPh, phPatch)).To(Succeed())
+		// Wait for the manager's cache to observe this write before the
+		// reconciler's own Get reads it below — same race guarded against at
+		// every other level's seed step in this file.
+		Eventually(func(g Gomega) {
+			var synced tideprojectv1alpha3.Phase
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanPhName, Namespace: "default"}, &synced)).To(Succeed())
+			g.Expect(synced.Status.PhaseTraceSpanID).To(Equal(seededParentSpanIDHex))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
 
 		var proj tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanProjName, Namespace: "default"}, &proj)).To(Succeed())
@@ -1047,5 +1075,419 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 		var fresh tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
 		Expect(fresh.Status.PlannerSpanEmittedUID).To(BeEmpty())
+	})
+})
+
+// ─── Task level ──────────────────────────────────────────────────────────────
+
+// Plan 43-05: TRACE-01 closes the last dispatch-chain gap. Task's
+// handleJobCompletion has FOUR terminal paths (versus the planner levels'
+// one) — the generalized Option B decision (43-05-PLAN.md) places two
+// emitTaskSpanOnce call sites so every one is covered: the EnvelopeReadFailed
+// branch (envReadOK=false) and a single site immediately after a successful
+// envelope read, BEFORE the OutputValidationError/OutputPathsViolation/
+// standard-result branch divergence (envReadOK=true).
+var _ = Describe("SpanEmission — Task level", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const (
+		seTaskProjName = "span-emission-task-proj"
+		seTaskMSName   = "span-emission-task-ms"
+		seTaskPhName   = "span-emission-task-ph"
+		seTaskPlanName = "span-emission-task-plan"
+		seTaskName     = "span-emission-task"
+	)
+
+	var (
+		envReader *mapEnvReader
+		exp       *tracetest.InMemoryExporter
+		prevTP    oteltrace.TracerProvider
+	)
+
+	BeforeEach(func() {
+		// 42-REVIEW WR-04: TracerProvider capture + swap FIRST, before any
+		// failable fixture step (see the Milestone-level BeforeEach).
+		exp = tracetest.NewInMemoryExporter()
+		prevTP = otel.GetTracerProvider()
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+
+		spanEmissionProject(ctx, seTaskProjName, "claude-test-model")
+		ms := &tideprojectv1alpha3.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: seTaskMSName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: seTaskProjName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(seTaskMSName, "default", &tideprojectv1alpha3.Milestone{})
+		ph := &tideprojectv1alpha3.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: seTaskPhName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: seTaskMSName},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(seTaskPhName, "default", &tideprojectv1alpha3.Phase{})
+		envReader = newMapEnvReader()
+	})
+
+	AfterEach(func() {
+		otel.SetTracerProvider(prevTP)
+
+		task := &tideprojectv1alpha3.Task{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, task); err == nil {
+			task.Finalizers = nil
+			_ = k8sClient.Update(ctx, task)
+			_ = k8sClient.Delete(ctx, task)
+		}
+		plan := &tideprojectv1alpha3.Plan{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: seTaskPlanName, Namespace: "default"}, plan); err == nil {
+			plan.Finalizers = nil
+			_ = k8sClient.Update(ctx, plan)
+			_ = k8sClient.Delete(ctx, plan)
+		}
+		ph := &tideprojectv1alpha3.Phase{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: seTaskPhName, Namespace: "default"}, ph); err == nil {
+			ph.Finalizers = nil
+			_ = k8sClient.Update(ctx, ph)
+			_ = k8sClient.Delete(ctx, ph)
+		}
+		ms := &tideprojectv1alpha3.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: seTaskMSName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		cleanupSpanEmissionProject(ctx, seTaskProjName)
+	})
+
+	newTaskReconcilerForSpanEmission := func() *TaskReconciler {
+		return &TaskReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: TaskReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
+			},
+		}
+	}
+
+	createTaskPlan := func() *tideprojectv1alpha3.Plan {
+		plan := &tideprojectv1alpha3.Plan{
+			ObjectMeta: metav1.ObjectMeta{Name: seTaskPlanName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: seTaskPhName},
+		}
+		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+		waitForCacheSync(seTaskPlanName, "default", &tideprojectv1alpha3.Plan{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskPlanName, Namespace: "default"}, plan)).To(Succeed())
+		return plan
+	}
+
+	// createSETask builds the Task fixture. DeclaredOutputPaths is always
+	// non-empty (CRD schema requires MinItems=1 — task_types.go has no
+	// +optional on this field), but the output-path-validation block in
+	// handleJobCompletion additionally requires Status.StartedAt != nil to
+	// activate (task_controller.go ~962) — setStartedAt controls that
+	// independently so most specs skip the block entirely.
+	createSETask := func(setStartedAt bool) *tideprojectv1alpha3.Task {
+		task := &tideprojectv1alpha3.Task{
+			ObjectMeta: metav1.ObjectMeta{Name: seTaskName, Namespace: "default"},
+			Spec: tideprojectv1alpha3.TaskSpec{
+				PlanRef:             seTaskPlanName,
+				FilesTouched:        []string{"src/main.go"},
+				PromptPath:          "envelopes/test/children/" + seTaskName + ".json",
+				DeclaredOutputPaths: []string{"artifacts/out.txt"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, task)).To(Succeed())
+		waitForCacheSync(seTaskName, "default", &tideprojectv1alpha3.Task{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, task)).To(Succeed())
+
+		statusPatch := client.MergeFrom(task.DeepCopy())
+		task.Status.Phase = "Running"
+		if setStartedAt {
+			past := metav1.NewTime(time.Now().Add(-1 * time.Minute))
+			task.Status.StartedAt = &past
+		}
+		Expect(k8sClient.Status().Patch(ctx, task, statusPatch)).To(Succeed())
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, task)).To(Succeed())
+		return task
+	}
+
+	It("emits one attribute-complete, Plan-parented AGENT span and is idempotent", func() {
+		createTaskPlan()
+		task := createSETask(false)
+
+		// TRACE-02: seed the immediate parent's (Plan) persisted span ID so
+		// this level's span is properly parented, not an independent root.
+		var parentPlan tideprojectv1alpha3.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskPlanName, Namespace: "default"}, &parentPlan)).To(Succeed())
+		planPatch := client.MergeFrom(parentPlan.DeepCopy())
+		parentPlan.Status.PlanTraceSpanID = seededParentSpanIDHex
+		Expect(k8sClient.Status().Patch(ctx, &parentPlan, planPatch)).To(Succeed())
+		// Wait for the manager's cache to observe this write before the
+		// reconciler's own Get reads it below — same race guarded against at
+		// every other level's seed step in this file.
+		Eventually(func(g Gomega) {
+			var synced tideprojectv1alpha3.Plan
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskPlanName, Namespace: "default"}, &synced)).To(Succeed())
+			g.Expect(synced.Status.PlanTraceSpanID).To(Equal(seededParentSpanIDHex))
+		}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskProjName, Namespace: "default"}, &proj)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-task-%s-1", task.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID: string(task.UID),
+			Result:  "success",
+			Usage: pkgdispatch.Usage{
+				InputTokens:         700,
+				OutputTokens:        300,
+				CacheReadTokens:     200,
+				CacheCreationTokens: 100,
+			},
+			CompletedAt: end,
+		})
+
+		r := newTaskReconcilerForSpanEmission()
+
+		// First call: emits the span.
+		_, err := r.handleJobCompletion(ctx, task, &proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1), "exactly one span must be recorded on first observation")
+		span := spans[0]
+		Expect(span.Name).To(Equal("tide.dispatch.task"))
+		Expect(span.StartTime).To(BeTemporally("==", start))
+		Expect(span.EndTime).To(BeTemporally("==", end))
+		Expect(span.Status.Code).To(Equal(codes.Ok))
+
+		roleVal, ok := attrValue(span.Attributes, "tide.role")
+		Expect(ok).To(BeTrue(), "span missing tide.role")
+		Expect(roleVal.AsString()).To(Equal("executor"), "Task's role is executor, not planner (POOL-01)")
+
+		levelVal, ok := attrValue(span.Attributes, "tide.invocation.level")
+		Expect(ok).To(BeTrue(), "span missing tide.invocation.level")
+		Expect(levelVal.AsString()).To(Equal("task"))
+
+		kindVal, ok := attrValue(span.Attributes, "openinference.span.kind")
+		Expect(ok).To(BeTrue(), "span missing openinference.span.kind")
+		Expect(kindVal.AsString()).To(Equal("AGENT"))
+
+		modelVal, ok := attrValue(span.Attributes, "llm.model_name")
+		Expect(ok).To(BeTrue(), "span missing llm.model_name")
+		Expect(modelVal.AsString()).To(Equal("claude-test-model"))
+
+		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
+		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
+
+		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
+		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
+		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+
+		// TRACE-02: deterministic TraceID derived from Project.UID, and real
+		// parent linkage to the seeded PlanTraceSpanID.
+		expectedTID, tErr := otelai.TraceIDFromUID(string(proj.UID))
+		Expect(tErr).NotTo(HaveOccurred())
+		Expect(span.SpanContext.TraceID().String()).To(Equal(expectedTID.String()))
+		Expect(span.Parent.SpanID().String()).To(Equal(seededParentSpanIDHex))
+		Expect(span.Parent.IsRemote()).To(BeTrue())
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Task
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.TaskSpanEmittedUID).To(Equal(string(job.UID)),
+				"TaskSpanEmittedUID must be set to the executor Job UID")
+			// PROP-02: this level's own span ID is durably persisted, read
+			// fresh from the API (not the in-memory object).
+			g.Expect(fresh.Status.TaskTraceSpanID).To(Equal(span.SpanContext.SpanID().String()),
+				"TaskTraceSpanID must be set to this level's own synthesized SpanID")
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		// Second call with the SAME completedJob, after re-fetching task
+		// (marker now set) — D-02/Pitfall 2 generalized: no duplicate span.
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, task)).To(Succeed())
+		_, err = r.handleJobCompletion(ctx, task, &proj, job)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exp.GetSpans()).To(HaveLen(1), "second call with the same Job must not emit a duplicate span")
+	})
+
+	It("failed Job → Error span with FailureDetail attributes", func() {
+		createTaskPlan()
+		task := createSETask(false)
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskProjName, Namespace: "default"}, &proj)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		failedAt := time.Now()
+		jobName := fmt.Sprintf("tide-task-%s-1", task.UID)
+		job := failedPlannerJob(jobName, start, failedAt)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:     string(task.UID),
+			ExitCode:    2,
+			Reason:      "cap-hit",
+			Result:      "cap-hit",
+			CompletedAt: failedAt,
+		})
+
+		r := newTaskReconcilerForSpanEmission()
+		_, err := r.handleJobCompletion(ctx, task, &proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1))
+		span := spans[0]
+		Expect(span.Status.Code).To(Equal(codes.Error))
+		Expect(span.Status.Description).To(Equal("cap-hit"))
+		Expect(span.EndTime).To(BeTemporally("==", failedAt))
+
+		exitCodeVal, ok := attrValue(span.Attributes, "tide.exit_code")
+		Expect(ok).To(BeTrue(), "span missing tide.exit_code")
+		Expect(exitCodeVal.AsInt64()).To(BeNumerically("==", 2))
+
+		reasonVal, ok := attrValue(span.Attributes, "tide.reason")
+		Expect(ok).To(BeTrue(), "span missing tide.reason")
+		Expect(reasonVal.AsString()).To(Equal("cap-hit"))
+	})
+
+	It("nil completedJob → zero spans", func() {
+		createTaskPlan()
+		task := createSETask(false)
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskProjName, Namespace: "default"}, &proj)).To(Succeed())
+
+		r := newTaskReconcilerForSpanEmission()
+		_, err := r.handleJobCompletion(ctx, task, &proj, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(BeEmpty())
+
+		var fresh tideprojectv1alpha3.Task
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, &fresh)).To(Succeed())
+		Expect(fresh.Status.TaskSpanEmittedUID).To(BeEmpty())
+	})
+
+	It("EnvelopeReadFailed → degraded span AND Task still lands Failed/EnvelopeReadFailed (D-07)", func() {
+		createTaskPlan()
+		task := createSETask(false)
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskProjName, Namespace: "default"}, &proj)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-task-%s-1", task.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		// Deliberately no SetOut for task.UID: ReadOut returns "no envelope
+		// out for task UID" — the ONLY Task terminal path reachable with
+		// envReadOK=false (call site 1, inside the EnvelopeReadFailed
+		// branch), generalized Option B (43-05-PLAN.md).
+
+		r := newTaskReconcilerForSpanEmission()
+		_, err := r.handleJobCompletion(ctx, task, &proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1))
+		span := spans[0]
+
+		degradedVal, ok := attrValue(span.Attributes, "tide.envelope.degraded")
+		Expect(ok).To(BeTrue(), "span missing tide.envelope.degraded")
+		Expect(degradedVal.AsBool()).To(BeTrue())
+
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "degraded span must not carry token-count attribute %q", key)
+		}
+
+		// Existing behavior preserved: the Task still lands terminal
+		// Failed/EnvelopeReadFailed — span emission is additive, not a
+		// behavior change (43-05-PLAN.md Task 1 acceptance criteria).
+		// Eventually: mgrClient reads through the manager's cache, which
+		// syncs asynchronously after r.Status().Patch's write to the API
+		// server (same convention as the persistence checks above).
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Task
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseFailed))
+			failedCond := meta.FindStatusCondition(fresh.Status.Conditions, tideprojectv1alpha3.ConditionFailed)
+			g.Expect(failedCond).NotTo(BeNil(), "Task must carry a Failed condition")
+			g.Expect(failedCond.Reason).To(Equal("EnvelopeReadFailed"))
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
+	It("output-path-validation block entered → call-site-2 span already persisted through the skipped-validation fallback", func() {
+		createTaskPlan()
+		// setStartedAt=true activates the output-path-validation block
+		// (task_controller.go ~962: DeclaredOutputPaths non-empty AND
+		// Status.StartedAt != nil). The hardcoded taskWorkspaceRoot
+		// ("/workspaces/<project.UID>/workspace") does not exist in envtest
+		// and cannot be created here (this sandbox's root filesystem is
+		// read-only outside /tmp and the repo checkout), so
+		// validateControllerOutputPaths degrades to skipped=true
+		// (errors.Is(err, fs.ErrNotExist)) rather than a real vErr or
+		// violations — the same environmental limit the pre-existing
+		// TestTaskReconciler_OnJobSucceeded_FlagsOutputPathsViolation test
+		// already hedges on (task_controller_test.go, "Either way, task
+		// moves to terminal state"). What IS provable here: call site 2 sits
+		// BEFORE this block, so entering and falling through it neither
+		// duplicates nor loses the already-emitted span.
+		task := createSETask(true)
+
+		var proj tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskProjName, Namespace: "default"}, &proj)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-task-%s-1", task.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		envReader.SetOut(string(task.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:     string(task.UID),
+			Result:      "success",
+			CompletedAt: end,
+			Usage: pkgdispatch.Usage{
+				InputTokens:  500,
+				OutputTokens: 100,
+			},
+		})
+
+		r := newTaskReconcilerForSpanEmission()
+		_, err := r.handleJobCompletion(ctx, task, &proj, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		spans := exp.GetSpans()
+		Expect(spans).To(HaveLen(1),
+			"call site 2 must emit exactly one span even when the output-path-validation block subsequently runs")
+		span := spans[0]
+		Expect(span.Status.Code).To(Equal(codes.Ok))
+
+		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
+		Expect(ok).To(BeTrue(), "envReadOK=true span must still carry token-count attributes")
+		Expect(promptVal.AsInt64()).To(BeNumerically("==", 500))
+
+		// Task still reaches a terminal phase — the validation block's
+		// skipped fallback does not wedge the reconcile.
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Task
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seTaskName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.Phase).To(Equal(tideprojectv1alpha3.LevelPhaseSucceeded))
+		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 })
