@@ -590,7 +590,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName(),
-		traceparentForLevel(project, ph.Status.PhaseTraceSpanID))
+		traceparentForLevel(project, ph.Status.PhaseTraceSpanID), r.Deps.OTLPEndpoint)
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

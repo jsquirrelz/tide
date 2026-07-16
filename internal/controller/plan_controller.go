@@ -647,6 +647,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				ReporterOptions{
 					ReporterImage: r.Deps.ReporterImage,
 					TraceParent:   traceparentForLevel(project, plan.Status.PlanTraceSpanID),
+					OTLPEndpoint:  r.Deps.OTLPEndpoint,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

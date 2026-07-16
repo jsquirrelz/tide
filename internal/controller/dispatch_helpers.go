@@ -100,6 +100,7 @@ func spawnReporterIfNeeded(
 	reporterImage string,
 	pvcName string,
 	traceParent string,
+	otlpEndpoint string,
 ) (bool, error) {
 	logger := logf.FromContext(ctx)
 	if reporterImage == "" {
@@ -118,7 +119,7 @@ func spawnReporterIfNeeded(
 		}
 		// Not found — spawn it (first completion observation).
 		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind,
-			ReporterOptions{ReporterImage: reporterImage, TraceParent: traceParent}, scheme)
+			ReporterOptions{ReporterImage: reporterImage, TraceParent: traceParent, OTLPEndpoint: otlpEndpoint}, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
 				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
@@ -208,6 +209,12 @@ type PlannerReconcilerDeps struct {
 	// PricingOverridesJSON is the validated D-02 override JSON forwarded
 	// opaquely to planner Jobs as TIDE_PRICING_OVERRIDES_JSON.
 	PricingOverridesJSON string
+
+	// OTLPEndpoint is the manager's own OTEL_EXPORTER_OTLP_ENDPOINT, forwarded
+	// into reporter Job env so the reporter's TracerProvider resolves the same
+	// collector (Phase 44 TRACE-03/D-06); empty = tracing dark, reporter env
+	// omitted.
+	OTLPEndpoint string
 }
 
 // levelOverrideKey maps a dispatch level (the 5-valued identity string
