@@ -212,7 +212,25 @@ Plans:
   3. Message-array spans stay under the OTLP 4 MB ceiling: content above the documented byte threshold truncates with an explicit truncation marker and carries `ArtifactPath(events.jsonl)` on the same span for full-fidelity reference; `TestNoPayloadHelperOnPublicSurface` is updated deliberately to reflect the new bounded-payload surface, not deleted (MSG-03).
   4. `tide-reporter` — a short-lived, `os.Exit`-driven one-shot binary — calls its TracerProvider's deferred Shutdown on every exit path, so killing the process mid-batch never silently drops spans (TRACE-03).
 
-**Plans**: TBD
+**Plans**: 5 plans (4 waves)
+
+Plans:
+**Wave 1**
+
+- [ ] 44-01-PLAN.md — redact.String + pkg/otelai tool-call/reasoning encoding, LLMSpanKind, markers, D-O5 doc/guard evolution
+- [ ] 44-02-PLAN.md — ReporterOptions OTLP env forwarding + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 + trace-only Job shape + four planner spawn sites
+
+**Wave 2** *(blocked on 44-01)*
+
+- [ ] 44-03-PLAN.md — internal/reporter/tracesynth.go: events.jsonl→LLM-span synthesizer, redact-before-truncate, triple size guard, batch-aggregate proof
+
+**Wave 3** *(blocked on 44-03)*
+
+- [ ] 44-04-PLAN.md — tide-reporter --trace-only mode + TracerProvider lifecycle with shutdown-on-every-exit-path (TRACE-03) + combined-run synth step
+
+**Wave 4** *(blocked on 44-02 + 44-04)*
+
+- [ ] 44-05-PLAN.md — Task trace-only reporter spawn (D-06 gated) + manager deps wiring + envtest proof
 
 ### Phase 45: Runtime-Neutral Adapter Seam
 
@@ -273,7 +291,7 @@ Plans:
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 0/TBD | Not started | - |
-| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/TBD | Not started | - |
+| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/5 | Planned | - |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
