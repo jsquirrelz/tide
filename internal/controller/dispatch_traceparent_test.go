@@ -172,6 +172,19 @@ var _ = Describe("Dispatch traceparent propagation (PROP-01)", Label("envtest", 
 			ph.Status.PhaseTraceSpanID = seededParentSpanIDHex
 			Expect(k8sClient.Status().Patch(ctx, ph, phPatch)).To(Succeed())
 
+			// Wait for the manager's cache-backed client to observe THIS specific
+			// status field before driving dispatch — Plan's dispatch-prep reads
+			// the parent Phase via r.Get (cache-backed), and the Job is created
+			// only once (later reconcileWithRetry attempts hit the AlreadyExists
+			// idempotent path without re-reading the parent). Without this guard
+			// the spec would race the informer's watch delivery exactly like the
+			// pre-existing cache-lag flake in span_emission_test.go:270.
+			Eventually(func(g Gomega) {
+				var fresh tideprojectv1alpha3.Phase
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: tpDispatchPhName, Namespace: "default"}, &fresh)).To(Succeed())
+				g.Expect(fresh.Status.PhaseTraceSpanID).To(Equal(seededParentSpanIDHex))
+			}, 5*time.Second, 50*time.Millisecond).Should(Succeed())
+
 			expectedTraceID, err := otelai.TraceIDFromUID(string(proj.UID))
 			Expect(err).NotTo(HaveOccurred())
 			expectedTraceparent := fmt.Sprintf("00-%s-%s-01", expectedTraceID.String(), seededParentSpanIDHex)
@@ -307,10 +320,17 @@ var _ = Describe("Dispatch traceparent propagation (PROP-01)", Label("envtest", 
 
 			// PROP-02: the expected span-ID segment comes from the re-fetched
 			// CRD status, not a hardcoded value — proves emit → persist → mirror
-			// → reporter threading end-to-end in one reconcile.
+			// → reporter threading end-to-end in one reconcile. The persistence
+			// patch inside handleJobCompletion writes through the same
+			// cache-backed client this Get reads from — Eventually absorbs the
+			// informer's watch-delivery lag between that write and this read
+			// (mirrors span_emission_test.go's identical MilestoneTraceSpanID
+			// persistence assertion).
 			var refreshed tideprojectv1alpha3.Milestone
-			Expect(mgrClient.Get(ctx, types.NamespacedName{Name: tpReporterMSName, Namespace: "default"}, &refreshed)).To(Succeed())
-			Expect(refreshed.Status.MilestoneTraceSpanID).NotTo(BeEmpty())
+			Eventually(func(g Gomega) {
+				g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: tpReporterMSName, Namespace: "default"}, &refreshed)).To(Succeed())
+				g.Expect(refreshed.Status.MilestoneTraceSpanID).NotTo(BeEmpty())
+			}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 			expectedArg := fmt.Sprintf("--traceparent=00-%s-%s-01", expectedTraceID.String(), refreshed.Status.MilestoneTraceSpanID)
 
