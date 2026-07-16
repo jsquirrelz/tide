@@ -30,6 +30,7 @@ limitations under the License.
 package reporter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -37,9 +38,35 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/jsquirrelz/tide/internal/harness/redact"
 	"github.com/jsquirrelz/tide/internal/subagent/common"
 	"github.com/jsquirrelz/tide/pkg/otelai"
 )
+
+// maxMessageContentBytes is the D-08 per-message truncation floor (MSG-03).
+// Positioned ~1 KiB above the real p99 single-turn size (31,020 B) observed
+// across 3,217 real conversation turns (RESEARCH.md Size-Boundary Model) —
+// this threshold almost never fires on real conversational content and
+// exists specifically as a backstop against one pathological turn (e.g. a
+// tool result that dumps an entire generated file).
+const maxMessageContentBytes = 32 * 1024
+
+// maxSpanPayloadBytes is the whole-span secondary backstop (RESEARCH.md
+// Size-Boundary Model) bounding the SUM of one LLM span's
+// LLMInputMessages+LLMOutputMessages attribute bytes. The real max observed
+// per-call payload is 334 KiB, so this will not trigger on real content
+// today but bounds future growth (larger repos, more turns per call)
+// without requiring per-message truncation to shrink an already-small
+// aggregate.
+const maxSpanPayloadBytes = 512 * 1024
+
+// truncationHalf is the D-08 head/tail split: keep the first and last half
+// of maxMessageContentBytes, eliding the middle with an explicit marker.
+const truncationHalf = maxMessageContentBytes / 2
 
 // Usage carries one CallSpan's per-call (message_start + message_delta)
 // token accounting (D-04).
@@ -283,7 +310,7 @@ func ReconstructConversation(eventsPath, inJSONPath, workspaceRoot string) ([]Ca
 	if err != nil {
 		return nil, fmt.Errorf("ReconstructConversation: open %q: %w", eventsPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only fixture/PVC file; close error is non-actionable cleanup
 
 	var conversation []otelai.Message
 	firstCallDegraded := false
@@ -398,4 +425,149 @@ func ReconstructConversation(eventsPath, inJSONPath, workspaceRoot string) ([]Ca
 	}
 
 	return calls, nil
+}
+
+// truncateHeadTail returns s unchanged when len(s) <= limit; otherwise
+// returns the first truncationHalf bytes + an explicit marker citing the
+// elided byte count + the last truncationHalf bytes (D-08 head+tail shape —
+// conversations carry signal at both ends). Byte-safe splitting may cut
+// mid-UTF-8-rune, acceptable for a pathological-input backstop that almost
+// never fires on real content (RESEARCH.md Size-Boundary Model).
+//
+// MUST only ever be called AFTER redact.String on the same string (D-09,
+// locked, non-negotiable) — see redactTruncate, the sole call-site wrapper.
+func truncateHeadTail(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	head := s[:truncationHalf]
+	tail := s[len(s)-truncationHalf:]
+	elided := len(s) - 2*truncationHalf
+	return fmt.Sprintf("%s[... %d bytes truncated by TIDE ...]%s", head, elided, tail)
+}
+
+// redactTruncate is the sole call-site for the D-09 locked ordering:
+// redact.String FIRST, then truncateHeadTail SECOND. Truncating first can
+// split a secret across the cut so the pattern no longer matches, leaving a
+// partial credential visible (RESEARCH.md Pitfall 4) — never reverse this
+// order.
+func redactTruncate(s string) string {
+	redacted := redact.String(s)
+	return truncateHeadTail(redacted, maxMessageContentBytes)
+}
+
+// boundedMessageAttrs applies the D-09 redact-then-truncate pipeline to
+// every message's Content, ToolCall.ArgumentsJSON, and reasoning
+// Contents[].Text, then enforces the maxSpanPayloadBytes whole-span budget
+// on this side's (input or output) total attribute bytes. When the budget
+// is exceeded, the side degrades to role-only messages (content, tool
+// calls, and reasoning blocks all dropped) rather than attempting to
+// truncate dozens of already-small messages individually. Returns the
+// flattened OpenInference attributes plus whether this side degraded.
+func boundedMessageAttrs(input bool, msgs []otelai.Message) ([]attribute.KeyValue, bool) {
+	bounded := make([]otelai.Message, len(msgs))
+	total := 0
+	for i, m := range msgs {
+		bm := otelai.Message{Role: m.Role}
+		bm.Content = redactTruncate(m.Content)
+		total += len(bm.Content)
+		for _, tc := range m.ToolCalls {
+			btc := otelai.ToolCall{
+				ID:            tc.ID,
+				Name:          tc.Name,
+				ArgumentsJSON: redactTruncate(tc.ArgumentsJSON),
+			}
+			total += len(btc.ArgumentsJSON)
+			bm.ToolCalls = append(bm.ToolCalls, btc)
+		}
+		for _, c := range m.Contents {
+			bc := otelai.MessageContent{
+				Type:      c.Type,
+				Text:      redactTruncate(c.Text),
+				Signature: c.Signature,
+			}
+			total += len(bc.Text)
+			bm.Contents = append(bm.Contents, bc)
+		}
+		bounded[i] = bm
+	}
+
+	if total > maxSpanPayloadBytes {
+		roleOnly := make([]otelai.Message, len(msgs))
+		for i, m := range msgs {
+			roleOnly[i] = otelai.Message{Role: m.Role}
+		}
+		if input {
+			return otelai.LLMInputMessages(roleOnly), true
+		}
+		return otelai.LLMOutputMessages(roleOnly), true
+	}
+
+	if input {
+		return otelai.LLMInputMessages(bounded), false
+	}
+	return otelai.LLMOutputMessages(bounded), false
+}
+
+// EmitSpans creates one LLM-kind child span per CallSpan under ctx's
+// SpanContext (the caller extracts the parented context from --traceparent
+// before calling), applying the redact-then-truncate pipeline (D-09) plus
+// the whole-span budget (boundedMessageAttrs) to every message before
+// calling otelai.LLMInputMessages/LLMOutputMessages. Spans are flat siblings
+// under ctx — mirrors what openinference-instrumentation-langchain emits
+// natively (runtime-neutrality lock) — and are created and closed within a
+// single loop iteration, never held open across a return.
+//
+// artifactPath (the workspace-relative events.jsonl path, e.g.
+// "envelopes/<taskUID>/events.jsonl") is stamped on EVERY span via
+// otelai.ArtifactPath — a superset of MSG-03's truncation-time requirement;
+// the full-fidelity pointer is always useful.
+//
+// Errors are reserved for programming-level failures; content-level
+// problems (oversized messages, degraded calls) degrade to marker
+// attributes rather than failing the run (D-10/D-11).
+func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artifactPath string) error {
+	for _, call := range calls {
+		spanName := call.Model
+		if spanName == "" {
+			spanName = "llm"
+		}
+
+		startTime := call.StartTime
+		if startTime.IsZero() {
+			startTime = time.Now()
+		}
+		_, span := tracer.Start(ctx, spanName, trace.WithTimestamp(startTime))
+
+		inputAttrs, inputDegraded := boundedMessageAttrs(true, call.InputMessages)
+		outputAttrs, outputDegraded := boundedMessageAttrs(false, call.OutputMessages)
+
+		span.SetAttributes(otelai.LLMSpanKind())
+		// D-07: provider is deliberately hardcoded "anthropic" — this
+		// synthesizer parses the Anthropic CLI stream format specifically;
+		// Phase 45's adapter seam is where runtime-neutral dispatch lands.
+		span.SetAttributes(otelai.LLMIdentity("anthropic", call.Model)...)
+		span.SetAttributes(inputAttrs...)
+		span.SetAttributes(outputAttrs...)
+		span.SetAttributes(otelai.TokenCount(
+			// D-08: prompt = uncached + cache-read + cache-write subsets.
+			call.Usage.InputTokens+call.Usage.CacheReadTokens+call.Usage.CacheCreationTokens,
+			call.Usage.OutputTokens,
+			call.Usage.CacheReadTokens,
+			call.Usage.CacheCreationTokens,
+		)...)
+		span.SetAttributes(otelai.ArtifactPath(artifactPath))
+		span.SetAttributes(otelai.TimingSynthetic())
+		if call.Degraded || inputDegraded || outputDegraded {
+			span.SetAttributes(otelai.ParseDegraded())
+		}
+		span.SetStatus(codes.Ok, "")
+
+		endTime := call.EndTime
+		if endTime.IsZero() {
+			endTime = time.Now()
+		}
+		span.End(trace.WithTimestamp(endTime))
+	}
+	return nil
 }

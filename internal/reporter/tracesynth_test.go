@@ -385,8 +385,8 @@ func TestEmitSpans_WholeSpanBudget(t *testing.T) {
 	exp := setupSpanExporter(t)
 	tracer := otel.Tracer("test")
 
-	var inputMsgs []otelai.Message
-	for i := 0; i < 20; i++ {
+	inputMsgs := make([]otelai.Message, 0, 20)
+	for range 20 {
 		inputMsgs = append(inputMsgs, otelai.Message{Role: "user", Content: strings.Repeat("z", 30000)})
 	}
 	calls := []CallSpan{
@@ -480,9 +480,9 @@ func TestEmitSpans_BatchAggregateUnderCeiling(t *testing.T) {
 	tracer := tp.Tracer("test")
 
 	const turnSize = 4800 // real-sized: well under the 32 KiB per-message floor
-	var calls []CallSpan
-	var ctxMsgs []otelai.Message
-	for i := 0; i < 32; i++ {
+	calls := make([]CallSpan, 0, 32)
+	ctxMsgs := make([]otelai.Message, 0, 64)
+	for range 32 {
 		ctxMsgs = append(ctxMsgs, otelai.Message{Role: "user", Content: strings.Repeat("x", turnSize)})
 		input := append([]otelai.Message(nil), ctxMsgs...)
 		calls = append(calls, CallSpan{
