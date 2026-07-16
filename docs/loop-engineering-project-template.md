@@ -4,7 +4,7 @@
 
 **Purpose:** Provide the smallest useful set of durable planning artifacts while keeping execution evidence in CI, traces, and run artifacts.
 
-The copyable files live in [`docs/templates/minimal-loop-project/`](templates/minimal-loop-project/). A filled-in example — a log-redaction pipeline with one slice, two contracts, and a runnable eval — lives in [`docs/templates/minimal-loop-project-example/`](templates/minimal-loop-project-example/).
+The copyable files live in [`docs/templates/minimal-loop-project/`](templates/minimal-loop-project/). A filled-in example — a log-redaction pipeline with one slice, two contracts, and a runnable eval — lives in [`docs/examples/minimal-loop-project/`](examples/minimal-loop-project/).
 
 **Relationship to TIDE:** this template is standalone methodology, not TIDE's planning hierarchy. TIDE's five levels (Milestone → Phase → Plan → Task → Wave — see [`concepts.md`](concepts.md)) describe how the orchestrator decomposes and dispatches work; the five surfaces below describe what any repository should persist while agents work on it. In particular, a Task file here is an immutable implementation contract — not a TIDE `Task` CRD, which is a DAG node derived from a plan and dispatched in waves. The pack copies into any repository, TIDE-driven or not.
 
@@ -121,6 +121,6 @@ This prevents an implementation agent from silently expanding the platform, weak
 6. Implement the slice's closing signals under `evals/` before increasing autonomy.
 7. Configure CI to retain generated evidence and require the relevant evaluators.
 
-The [example project](templates/minimal-loop-project-example/) shows each artifact filled in for one small, real slice — use it to calibrate how much detail a field needs.
+The [example project](examples/minimal-loop-project/) shows each artifact filled in for one small, real slice — use it to calibrate how much detail a field needs.
 
 Start with supervised outer loops. Increase autonomy separately for execution, task, product, and system work only after their closing signals have proven reliable.
