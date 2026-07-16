@@ -1902,6 +1902,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 				ReporterOptions{
 					ReporterImage: r.Deps.ReporterImage,
 					TraceParent:   traceparentForLevel(project, project.Status.ProjectTraceSpanID),
+					OTLPEndpoint:  r.Deps.OTLPEndpoint,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

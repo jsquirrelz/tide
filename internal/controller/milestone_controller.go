@@ -637,7 +637,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
 	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage, r.sharedPVCName(),
-		traceparentForLevel(project, ms.Status.MilestoneTraceSpanID))
+		traceparentForLevel(project, ms.Status.MilestoneTraceSpanID), r.Deps.OTLPEndpoint)
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

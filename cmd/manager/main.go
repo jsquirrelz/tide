@@ -277,6 +277,12 @@ func main() {
 	}
 	_ = tp // captured by the global otel handle; named here only so it
 	// remains visible if a future caller wants to thread it explicitly.
+
+	// Phase 44 TRACE-03/D-06: capture the SAME env var otelinit just read
+	// above so the reporter Job's own TracerProvider resolves the identical
+	// collector (forwarded via PlannerReconcilerDeps.OTLPEndpoint below).
+	// Empty = tracing dark; the reporter env block is omitted entirely.
+	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	defer func() {
 		// Bounded shutdown — the batch processor flushes outstanding
 		// spans to the collector before the process exits. Use
@@ -429,6 +435,7 @@ func main() {
 		ReporterImage:        reporterImage,
 		HelmProviderDefaults: helmProviderDefaults,
 		PricingOverridesJSON: pricingOverridesJSON,
+		OTLPEndpoint:         otlpEndpoint,
 	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
