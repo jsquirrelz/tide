@@ -146,3 +146,18 @@ The unit-test helper `setupSpanExporter` (`span_emission_unit_test.go:48-55`) al
 _Reviewed: 2026-07-15T23:52:07Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## Fix Disposition (2026-07-16, post-review --fix pass)
+
+All 4 WARNING findings fixed and verified on `main` (13/13 SpanEmission envtest specs + RollupIdempotency regression guard green):
+
+| Finding | Outcome | Commit |
+|---------|---------|--------|
+| WR-01 (at-least-once duplicate emission) | fixed — mark-then-emit ordering, `plannerSpanResolvable` predicate; duplicates impossible, at-most-once documented | `c936762` + `9cae6bb` |
+| WR-02 (marker stored Job name, not UID) | fixed — `string(completedJob.UID)` at all four levels; CRDs regenerated | `4cc9f68` |
+| WR-03 (marker-patch failure blocked pipeline) | fixed — log-and-continue degrade; reporter/rollup/gates always proceed | `9b9b396` |
+| WR-04 (nil TracerProvider restore in tests) | fixed — capture/swap before failable fixture steps | `b4b15f2` |
+
+The 5 INFO findings remain open (documented above) — candidates for a later cleanup pass.
