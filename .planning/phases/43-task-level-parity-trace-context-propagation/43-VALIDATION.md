@@ -38,15 +38,21 @@ created: 2026-07-16
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 43-01-01 | 01 | 0 | PROP-02 | — | N/A | envtest | `go test ./... -run TestCRDTypes` (new field compiles + CRD manifests regen) | ❌ W0 | ⬜ pending |
-| 43-0X-0X | TBD | TBD | TRACE-01 | — | N/A | envtest (Ginkgo) | `go test ./internal/controller/... -ginkgo.label-filter='heavy' -ginkgo.focus='SpanEmission — Task level'` | ❌ W0 | ⬜ pending |
-| 43-0X-0X | TBD | TBD | TRACE-02 | — | N/A | envtest (Ginkgo) | same file, new `span.Parent.SpanID()` / `span.SpanContext.TraceID()` assertions per existing `Describe` block | ❌ W0 | ⬜ pending |
-| 43-0X-0X | TBD | TBD | PROP-01 | — | N/A | unit | `go test ./internal/dispatch/podjob/... -run TestBuildJobSpec` / `go test ./internal/controller/... -run TestBuildReporterJob` | ❌ W0 | ⬜ pending |
-| 43-0X-0X | TBD | TBD | PROP-02 | — | N/A | envtest (Ginkgo) | same `span_emission_test.go` specs — assert on the re-fetched CRD's status field | ❌ W0 | ⬜ pending |
+| 43-01-01 | 01 | 1 | PROP-02 | — | N/A | build + source | `go build ./api/...` + field greps (six new status fields compile) | ✅ types files exist | ⬜ pending |
+| 43-01-02 | 01 | 1 | PROP-02 | — | N/A | manifests | `make manifests generate && git diff --exit-code config/crd/bases/` (idempotent regen, new JSON props present) | ✅ | ⬜ pending |
+| 43-02-01 | 02 | 1 | PROP-01 | T-43-03 | manager-authored value only | unit | `go test ./internal/dispatch/podjob/ -run TestBuildJobSpec -count=1` | ✅ jobspec_test.go (assertions added same task) | ⬜ pending |
+| 43-02-02 | 02 | 1 | PROP-01 | T-43-04 | unknown-flag crash contract preserved | unit | `go test ./internal/controller/ -run TestBuildReporterJob -count=1` + `go test ./cmd/tide-reporter/ -count=1` | ✅ reporter_jobspec_test.go / main_test.go (assertions added same task) | ⬜ pending |
+| 43-03-01 | 03 | 2 | TRACE-02 | T-43-07 | TraceIDFromUID error → skip emission | unit | `go test ./internal/controller/ -run 'TestSynthesizePlannerSpan\|TestSpanIDFromHexOrZero\|TestTraceparentForLevel' -count=1` | ✅ span_emission_unit_test.go (updated same task) | ⬜ pending |
+| 43-03-02 | 03 | 2 | TRACE-02, PROP-02 | — | N/A | envtest (Ginkgo) | `make test-heavy` — new `span.Parent.SpanID()` / `span.SpanContext.TraceID()` / re-fetched `.status.{Level}TraceSpanID` assertions in all four planner `Describe` blocks | ✅ span_emission_test.go (assertions added same task) | ⬜ pending |
+| 43-04-01 | 04 | 3 | PROP-01 | T-43-08 | parent-status-sourced env | build + unit | `go build ./...` + `go test ./internal/controller/ -run TestTraceparentForLevel -count=1` | ✅ | ⬜ pending |
+| 43-04-02 | 04 | 3 | PROP-01 | T-43-08 | own-span reporter Args | build | `go build ./...` + `go vet ./internal/controller/` | ✅ | ⬜ pending |
+| 43-04-03 | 04 | 3 | PROP-01 | — | N/A | envtest (Ginkgo) | `make test-heavy` — new `dispatch_traceparent_test.go`: full W3C string on dispatch Job env + reporter Job Args | ❌ W0 — file created in this task | ⬜ pending |
+| 43-05-01 | 05 | 3 | TRACE-01 | T-43-10/T-43-11 | envelope data → attributes only, never SpanContext | build + lint | `go build ./...` + `golangci-lint run internal/controller/task_controller.go` | ✅ | ⬜ pending |
+| 43-05-02 | 05 | 3 | TRACE-01, TRACE-02, PROP-01, PROP-02 | — | N/A | envtest (Ginkgo) | `make test-heavy` — `-ginkgo.focus='SpanEmission — Task level'` block + `task_dispatch_traceparent_test.go`; phase gate `make test-int-fast` | ❌ W0 — Describe block + file created in this task | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
-*Task IDs/plans/waves are TBD — this phase has no plans yet; the planner assigns exact task IDs. The requirement/test-command mapping above is locked from RESEARCH.md and must be preserved when the planner fills in task IDs.*
+*Task IDs assigned by the planner 2026-07-16 (plans 43-01…43-05). The requirement/test-command mapping locked from RESEARCH.md is preserved: TRACE-01 → `SpanEmission — Task level` focus; TRACE-02 → parent/TraceID assertions per Describe block; PROP-01 → TestBuildJobSpec/TestBuildReporterJob (unit) + controller-level envtest; PROP-02 → re-fetched CRD status assertions. Wave 0 test scaffolds land in the same plan/task as their implementation (test-with-change), so no standalone Wave 0 plan exists.*
 
 ---
 

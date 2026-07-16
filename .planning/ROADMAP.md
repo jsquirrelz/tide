@@ -196,7 +196,21 @@ Plans:
   3. W3C `traceparent` is present as data in both the subagent Job's env and the reporter Job's env at dispatch time — the runtime-neutral contract applied at both pod hops, so a child process's own spans (synthesized today, self-instrumented in a future runtime) parent identically either way (PROP-01).
   4. Each level's trace/span IDs persist in that level's `.status.trace` field after completion — a durable, re-readable parent-carrier surviving reconciler restarts (PROP-02).
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+**Wave 1** *(parallel, independent)*
+
+- [ ] 43-01-PLAN.md — Durable `{Level}TraceSpanID` fields on all five CRD statuses + Task's `TaskSpanEmittedUID` marker + CRD manifest regen (PROP-02 surface)
+- [ ] 43-02-PLAN.md — Traceparent carriers in both Job builders (BuildOptions/ReporterOptions) + tide-reporter `--traceparent` flag registration (crash-loop guard)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 43-03-PLAN.md — Parenting retrofit: two-sided `synthesizePlannerSpan` signature, deterministic TraceID, immediate-parent fetches, second status patch at all four planner completion handlers + envtest linkage/persistence assertions
+
+**Wave 3** *(blocked on Wave 2; 04 ∥ 05)*
+
+- [ ] 43-04-PLAN.md — Real traceparent values at both pod hops for the four planner levels (dispatch-prep TRACEPARENT env + reporter `--traceparent` Args) + envtest proof
+- [ ] 43-05-PLAN.md — Task-level parity: `emitTaskSpanOnce` covering all four terminal paths (generalized Option B), `TaskTraceSpanID` persistence, Task dispatch hop + fifth envtest Describe block
 
 ### Phase 44: LLM Message-Array Spans + D-O5 Redaction/Size Boundary
 
