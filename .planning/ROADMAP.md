@@ -231,8 +231,8 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 44-01-PLAN.md — redact.String + pkg/otelai tool-call/reasoning encoding, LLMSpanKind, markers, D-O5 doc/guard evolution
-- [ ] 44-02-PLAN.md — ReporterOptions OTLP env forwarding + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 + trace-only Job shape + four planner spawn sites
+- [x] 44-01-PLAN.md — redact.String + pkg/otelai tool-call/reasoning encoding, LLMSpanKind, markers, D-O5 doc/guard evolution
+- [x] 44-02-PLAN.md — ReporterOptions OTLP env forwarding + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 + trace-only Job shape + four planner spawn sites
 
 **Wave 2** *(blocked on 44-01)*
 
@@ -305,7 +305,7 @@ Plans:
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 0/5 | Planned | - |
+| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 2/5 | In Progress|  |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
