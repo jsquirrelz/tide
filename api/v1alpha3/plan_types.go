@@ -118,11 +118,14 @@ type PlanStatus struct {
 	// +optional
 	PlanRolledUpUID string `json:"planRolledUpUID,omitempty"`
 
-	// PlanSpanEmittedUID is the name of the planner Job whose completion has
+	// PlanSpanEmittedUID is the UID of the planner Job whose completion has
 	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
 	// emission INDEPENDENT of envReadOK — deliberately not reusing
 	// PlanRolledUpUID, whose envReadOK gating would re-emit degraded spans on
-	// every reconcile (Pitfall 2). Phase 42 D-02/D-04.
+	// every reconcile (Pitfall 2). Keyed by Job UID, not name: planner Job names
+	// are deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID (D-02: each retry attempt produces its own span).
+	// Phase 42 D-02/D-04.
 	// +optional
 	PlanSpanEmittedUID string `json:"planSpanEmittedUID,omitempty"`
 

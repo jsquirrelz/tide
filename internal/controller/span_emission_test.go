@@ -83,10 +83,12 @@ func cleanupSpanEmissionProject(ctx context.Context, name string) {
 
 // succeededPlannerJob builds an in-memory (never created in the cluster)
 // terminal Job with a Complete condition. handleJobCompletion only reads
-// Status fields off the object it is handed directly.
+// Status fields off the object it is handed directly. The synthetic UID
+// stands in for the server-assigned one: the SpanEmittedUID marker is keyed
+// by Job UID, not name (42-REVIEW WR-02 / D-02).
 func succeededPlannerJob(name string, start, end time.Time) *batchv1.Job {
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid")},
 		Status: batchv1.JobStatus{
 			StartTime:      &metav1.Time{Time: start},
 			CompletionTime: &metav1.Time{Time: end},
@@ -100,9 +102,10 @@ func succeededPlannerJob(name string, start, end time.Time) *batchv1.Job {
 // failedPlannerJob builds an in-memory terminal Job with a Failed condition
 // and NO CompletionTime (Pitfall 1 — CompletionTime is nil on every failed
 // Job; the end timestamp must come from the condition's LastTransitionTime).
+// Synthetic UID for the same WR-02 reason as succeededPlannerJob.
 func failedPlannerJob(name string, start, failedAt time.Time) *batchv1.Job {
 	return &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		ObjectMeta: metav1.ObjectMeta{Name: name, UID: types.UID(name + "-uid")},
 		Status: batchv1.JobStatus{
 			StartTime: &metav1.Time{Time: start},
 			Conditions: []batchv1.JobCondition{
@@ -239,8 +242,8 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSName, Namespace: "default"}, &fresh)).To(Succeed())
-			g.Expect(fresh.Status.MilestoneSpanEmittedUID).To(Equal(jobName),
-				"MilestoneSpanEmittedUID must be set to the planner Job name")
+			g.Expect(fresh.Status.MilestoneSpanEmittedUID).To(Equal(string(job.UID)),
+				"MilestoneSpanEmittedUID must be set to the planner Job UID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching ms (marker
@@ -467,8 +470,8 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Phase
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &fresh)).To(Succeed())
-			g.Expect(fresh.Status.PhaseSpanEmittedUID).To(Equal(jobName),
-				"PhaseSpanEmittedUID must be set to the planner Job name")
+			g.Expect(fresh.Status.PhaseSpanEmittedUID).To(Equal(string(job.UID)),
+				"PhaseSpanEmittedUID must be set to the planner Job UID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching ph — no
@@ -675,8 +678,8 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Plan
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
-			g.Expect(fresh.Status.PlanSpanEmittedUID).To(Equal(jobName),
-				"PlanSpanEmittedUID must be set to the planner Job name")
+			g.Expect(fresh.Status.PlanSpanEmittedUID).To(Equal(string(job.UID)),
+				"PlanSpanEmittedUID must be set to the planner Job UID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching plan (marker
@@ -849,14 +852,14 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Project
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
-			g.Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(jobName),
-				"PlannerSpanEmittedUID must be set to the planner Job name")
+			g.Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(string(job.UID)),
+				"PlannerSpanEmittedUID must be set to the planner Job UID")
 		}, 5*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		// Second call with the SAME completedJob, after re-fetching proj (marker
 		// now set) — D-02/Pitfall 2: no duplicate span. Asserts span count == 1
-		// AND the marker remains stamped with the Job name (plan 42-05 acceptance
-		// criteria).
+		// AND the marker remains stamped with the Job UID (plan 42-05 acceptance
+		// criteria, WR-02: UID-keyed).
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, proj)).To(Succeed())
 		_, err = r.handleProjectJobCompletion(ctx, proj, job)
 		Expect(err).NotTo(HaveOccurred())
@@ -864,8 +867,8 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 
 		var fresh tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
-		Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(jobName),
-			"PlannerSpanEmittedUID must remain set to the planner Job name after the idempotent second call")
+		Expect(fresh.Status.PlannerSpanEmittedUID).To(Equal(string(job.UID)),
+			"PlannerSpanEmittedUID must remain set to the planner Job UID after the idempotent second call")
 	})
 
 	It("failed Job → Error span with condition-derived end time", func() {

@@ -493,7 +493,10 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 
 	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
 	// per planner Job attempt, gated by the durable PhaseSpanEmittedUID
-	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// marker keyed by Job UID (42-REVIEW WR-02: planner Job names are
+	// deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID — D-02 requires each attempt to produce its own span) —
+	// INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
 	// existing PhaseRolledUpUID marker below is envReadOK-gated by design and
 	// would re-emit a degraded span on every reconcile forever if reused
 	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
@@ -504,18 +507,18 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
 	// a Job with no resolvable timestamps — checked BEFORE stamping so a
 	// stamp is never wasted on an unemittable span.
-	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != completedJob.Name && plannerSpanResolvable(completedJob) {
+	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tideprojectv1alpha3.Phase{}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(ph), latest); err != nil {
 				return err
 			}
-			if latest.Status.PhaseSpanEmittedUID == completedJob.Name {
+			if latest.Status.PhaseSpanEmittedUID == string(completedJob.UID) {
 				return nil // already stamped by a concurrent reconcile — its stamper emits
 			}
 			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
-			latest.Status.PhaseSpanEmittedUID = completedJob.Name
+			latest.Status.PhaseSpanEmittedUID = string(completedJob.UID)
 			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
 				return err
 			}

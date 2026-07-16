@@ -1802,7 +1802,10 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 
 	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
 	// per planner Job attempt, gated by the durable PlannerSpanEmittedUID
-	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// marker keyed by Job UID (42-REVIEW WR-02: planner Job names are
+	// deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID — D-02 requires each attempt to produce its own span) —
+	// INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
 	// existing PlannerRolledUpUID marker below is envReadOK-gated by design
 	// and would re-emit a degraded span on every reconcile forever if reused
 	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
@@ -1819,18 +1822,18 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// planning cost, but a span records that a Job ran in THIS cluster — an
 	// import with no real completed Job never reaches this point at all
 	// (the completedJob != nil gate above handles it naturally).
-	if completedJob != nil && project.Status.PlannerSpanEmittedUID != completedJob.Name && plannerSpanResolvable(completedJob) {
+	if completedJob != nil && project.Status.PlannerSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tidev1alpha3.Project{}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
 				return err
 			}
-			if latest.Status.PlannerSpanEmittedUID == completedJob.Name {
+			if latest.Status.PlannerSpanEmittedUID == string(completedJob.UID) {
 				return nil // already stamped by a concurrent reconcile — its stamper emits
 			}
 			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
-			latest.Status.PlannerSpanEmittedUID = completedJob.Name
+			latest.Status.PlannerSpanEmittedUID = string(completedJob.UID)
 			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
 				return err
 			}

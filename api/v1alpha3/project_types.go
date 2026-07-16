@@ -515,13 +515,16 @@ type ProjectStatus struct {
 	// +optional
 	BoundaryPush BoundaryPushStatus `json:"boundaryPush,omitempty"`
 
-	// PlannerSpanEmittedUID is the name of the planner Job whose completion has
+	// PlannerSpanEmittedUID is the UID of the planner Job whose completion has
 	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
 	// emission INDEPENDENT of envReadOK — deliberately not reusing
 	// Budget.PlannerRolledUpUID, whose envReadOK gating would re-emit degraded
-	// spans on every reconcile (Pitfall 2). Placed directly on ProjectStatus
-	// (NOT Budget-nested): budget rollup is cost bookkeeping, span emission is
-	// telemetry bookkeeping with no budget relationship. Phase 42 D-02/D-04.
+	// spans on every reconcile (Pitfall 2). Keyed by Job UID, not name: planner
+	// Job names are deterministic, so a deleted-and-recreated attempt reuses the
+	// name but never the UID (D-02: each retry attempt produces its own span).
+	// Placed directly on ProjectStatus (NOT Budget-nested): budget rollup is
+	// cost bookkeeping, span emission is telemetry bookkeeping with no budget
+	// relationship. Phase 42 D-02/D-04.
 	// +optional
 	PlannerSpanEmittedUID string `json:"plannerSpanEmittedUID,omitempty"`
 }

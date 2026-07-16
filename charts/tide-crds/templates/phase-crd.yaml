@@ -153,11 +153,14 @@ spec:
                 type: string
               phaseSpanEmittedUID:
                 description: |-
-                  PhaseSpanEmittedUID is the name of the planner Job whose completion has
+                  PhaseSpanEmittedUID is the UID of the planner Job whose completion has
                   already had its dispatch span synthesized. Gates one-span-per-Job-attempt
                   emission INDEPENDENT of envReadOK — deliberately not reusing
                   PhaseRolledUpUID, whose envReadOK gating would re-emit degraded spans on
-                  every reconcile (Pitfall 2). Phase 42 D-02/D-04.
+                  every reconcile (Pitfall 2). Keyed by Job UID, not name: planner Job names
+                  are deterministic, so a deleted-and-recreated attempt reuses the name but
+                  never the UID (D-02: each retry attempt produces its own span).
+                  Phase 42 D-02/D-04.
                 type: string
             type: object
         required:
