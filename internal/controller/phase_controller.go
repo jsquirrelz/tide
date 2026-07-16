@@ -525,9 +525,14 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 			stamped = true
 			return nil
 		}); mErr != nil {
-			return ctrl.Result{}, fmt.Errorf("patch PhaseSpanEmittedUID: %w", mErr)
-		}
-		if stamped {
+			// 42-REVIEW WR-03: telemetry bookkeeping is subordinate to pipeline
+			// progression — a persistent status-patch failure must not block the
+			// reporter spawn, budget rollup, or gate hooks below. No error return,
+			// no requeue: the marker is still unset, so the next watch-driven
+			// reconcile retries the stamp (mark-then-emit guarantees this degrade
+			// path accrues no duplicate span).
+			logger.Error(mErr, "PhaseSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "phase", ph.Name)
+		} else if stamped {
 			synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
 		}
 	}

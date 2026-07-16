@@ -584,9 +584,14 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			stamped = true
 			return nil
 		}); mErr != nil {
-			return ctrl.Result{}, fmt.Errorf("patch MilestoneSpanEmittedUID: %w", mErr)
-		}
-		if stamped {
+			// 42-REVIEW WR-03: telemetry bookkeeping is subordinate to pipeline
+			// progression — a persistent status-patch failure must not block the
+			// reporter spawn, budget rollup, or gate hooks below. No error return,
+			// no requeue: the marker is still unset, so the next watch-driven
+			// reconcile retries the stamp (mark-then-emit guarantees this degrade
+			// path accrues no duplicate span).
+			logger.Error(mErr, "MilestoneSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "milestone", ms.Name)
+		} else if stamped {
 			synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
 		}
 	}
