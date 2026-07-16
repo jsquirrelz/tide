@@ -12,9 +12,9 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### OpenInference Attribute Completeness (ATTR)
 
-- [ ] **ATTR-01**: Every AGENT/LLM span carries `llm.model_name` and `llm.provider` — the attributes Phoenix requires to compute cost and populate its LLM detail view (absent today; without them Phoenix renders $0.00/blank, reading as broken)
-- [ ] **ATTR-02**: `llm.token_count.total` is emitted alongside the existing prompt/completion/cache splits (Phoenix's documented cost-tracking requirement)
-- [ ] **ATTR-03**: `pkg/otelai` attribute keys are backed by the official `openinference-semantic-conventions` Go module instead of hand-rolled strings, so emitted attributes stay convention-identical to what `openinference-instrumentation-langchain` will emit natively (runtime-migration survival)
+- [x] **ATTR-01**: Every AGENT/LLM span carries `llm.model_name` and `llm.provider` — the attributes Phoenix requires to compute cost and populate its LLM detail view (absent today; without them Phoenix renders $0.00/blank, reading as broken)
+- [x] **ATTR-02**: `llm.token_count.total` is emitted alongside the existing prompt/completion/cache splits (Phoenix's documented cost-tracking requirement)
+- [x] **ATTR-03**: `pkg/otelai` attribute keys are backed by the official `openinference-semantic-conventions` Go module instead of hand-rolled strings, so emitted attributes stay convention-identical to what `openinference-instrumentation-langchain` will emit natively (runtime-migration survival)
 
 ### Trace-Context Propagation (PROP)
 
@@ -73,9 +73,9 @@ Deferred to later milestones:
 | TRACE-01 | Phase 43 | Pending |
 | TRACE-02 | Phase 43 | Pending |
 | TRACE-03 | Phase 44 | Pending |
-| ATTR-01 | Phase 42 | Pending |
-| ATTR-02 | Phase 42 | Pending |
-| ATTR-03 | Phase 42 | Pending |
+| ATTR-01 | Phase 42 | Complete |
+| ATTR-02 | Phase 42 | Complete |
+| ATTR-03 | Phase 42 | Complete |
 | PROP-01 | Phase 43 | Pending |
 | PROP-02 | Phase 43 | Pending |
 | MSG-01 | Phase 44 | Pending |
