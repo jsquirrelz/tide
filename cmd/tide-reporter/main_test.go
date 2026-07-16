@@ -18,6 +18,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,7 +29,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/internal/otelinit"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
 
 // buildScheme returns a *runtime.Scheme with TIDE types registered.
@@ -353,5 +359,277 @@ func TestParseFlagsUnknownFlagErrors(t *testing.T) {
 	_, err := parseFlags([]string{"--bogus=1"})
 	if err == nil {
 		t.Fatal("parseFlags: expected error for unknown flag --bogus, got nil")
+	}
+}
+
+// ─── Phase 44 MSG-01/TRACE-03: trace-only mode + shutdown-on-every-path ────
+
+// shutdownRecorder captures whether the newTracerProvider seam's returned
+// ShutdownFunc was invoked and whether the context it was called with
+// carried a deadline — the TRACE-03/D-12 bounded-flush discipline this test
+// file exists to prove.
+type shutdownRecorder struct {
+	invoked     bool
+	hadDeadline bool
+}
+
+func (r *shutdownRecorder) shutdown(ctx context.Context) error {
+	r.invoked = true
+	_, r.hadDeadline = ctx.Deadline()
+	return nil
+}
+
+// installStubTracerProvider overrides the package-level newTracerProvider
+// seam for the duration of the test with a stub wired to exp (synchronous
+// sdktrace.WithSyncer — no flush needed for the span-content assertions in
+// TestRunTraceOnly_EmitsSpans) and a shutdownRecorder standing in for
+// otelinit's real ShutdownFunc. WithSyncer is used here despite TRACE-03
+// being about the async batch path: this seam test proves Shutdown is
+// INVOKED with a bounded ctx on every runWithClient exit path (the
+// discipline); the SDK's own contract guarantees Shutdown drains the batch
+// queue, and that batch-drain behavior is covered by 44-03's
+// TestEmitSpans_BatchAggregateUnderCeiling ForceFlush/Shutdown path. Both
+// the seam and the global otel provider are restored via t.Cleanup, mirror-
+// ing setupSpanExporter's prev-provider restore discipline in
+// internal/controller/span_emission_unit_test.go.
+func installStubTracerProvider(t *testing.T, exp sdktrace.SpanExporter) *shutdownRecorder {
+	t.Helper()
+	rec := &shutdownRecorder{}
+	prevSeam := newTracerProvider
+	prevProvider := otel.GetTracerProvider()
+	newTracerProvider = func(context.Context) (trace.TracerProvider, otelinit.ShutdownFunc, error) {
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
+		otel.SetTracerProvider(tp)
+		return tp, rec.shutdown, nil
+	}
+	t.Cleanup(func() {
+		newTracerProvider = prevSeam
+		otel.SetTracerProvider(prevProvider)
+	})
+	return rec
+}
+
+// writeTraceOnlyFixture writes a small (2-call) events.jsonl + in.json pair
+// under workspace/envelopes/<taskUID> — reuses 44-03's fixture SHAPE
+// (message_start/assistant/message_delta/message_stop cycles) without
+// depending on internal/reporter/testdata's file paths.
+func writeTraceOnlyFixture(t *testing.T, workspace, taskUID string) {
+	t.Helper()
+	dir := filepath.Join(workspace, "envelopes", taskUID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll %q: %v", dir, err)
+	}
+	const events = `{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_call1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}}
+{"type":"assistant","message":{"id":"msg_call1","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hello"}]}}
+{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":5}}}
+{"type":"stream_event","event":{"type":"message_stop"}}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_call2","model":"claude-sonnet-4-6","usage":{"input_tokens":20}}}}
+{"type":"assistant","message":{"id":"msg_call2","model":"claude-sonnet-4-6","content":[{"type":"text","text":"world"}]}}
+{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":8}}}
+{"type":"stream_event","event":{"type":"message_stop"}}
+`
+	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(events), 0o644); err != nil {
+		t.Fatalf("WriteFile events.jsonl: %v", err)
+	}
+	const inJSON = `{"prompt":"do the thing"}`
+	if err := os.WriteFile(filepath.Join(dir, "in.json"), []byte(inJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile in.json: %v", err)
+	}
+}
+
+// Test 9: TestRunWithClient_ShutdownOnEveryExitPath — table-driven over 4
+// distinct exit paths; asserts the newTracerProvider seam's ShutdownFunc was
+// invoked with a bounded (deadline-bearing) context on EVERY path,
+// regardless of the exit code returned.
+func TestRunWithClient_ShutdownOnEveryExitPath(t *testing.T) {
+	cases := []struct {
+		name     string
+		buildCfg func(t *testing.T) (reporterConfig, client.Client)
+		wantExit int
+	}{
+		{
+			name: "missing task-uid",
+			buildCfg: func(t *testing.T) (reporterConfig, client.Client) {
+				return reporterConfig{}, buildFakeClient(t)
+			},
+			wantExit: exitInvariant,
+		},
+		{
+			name: "trace-only success",
+			buildCfg: func(t *testing.T) (reporterConfig, client.Client) {
+				workspace := t.TempDir()
+				taskUID := "task-shutdown-trace"
+				writeTraceOnlyFixture(t, workspace, taskUID)
+				return reporterConfig{TraceOnly: true, TaskUID: taskUID, Workspace: workspace}, buildFakeClient(t)
+			},
+			wantExit: exitSuccess,
+		},
+		{
+			name: "combined missing out.json",
+			buildCfg: func(t *testing.T) (reporterConfig, client.Client) {
+				workspace := t.TempDir()
+				c := buildFakeClient(t, &tidev1alpha3.Milestone{
+					ObjectMeta: metav1.ObjectMeta{Name: "m-shutdown", Namespace: "default"},
+				})
+				return reporterConfig{
+					Workspace: workspace, TaskUID: "task-no-out", ParentName: "m-shutdown",
+					ParentNamespace: "default", ParentKind: "Milestone",
+				}, c
+			},
+			wantExit: exitInvariant,
+		},
+		{
+			name: "combined happy path",
+			buildCfg: func(t *testing.T) (reporterConfig, client.Client) {
+				workspace := t.TempDir()
+				taskUID := "task-shutdown-happy"
+				parentName := "parent-shutdown-happy"
+				milestone := &tidev1alpha3.Milestone{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: parentName, Namespace: "default", UID: types.UID("uid-shutdown-happy"),
+					},
+				}
+				envOut := pkgdispatch.EnvelopeOut{
+					ChildCRDs: []pkgdispatch.ChildCRDSpec{
+						{Kind: "Phase", Name: "phase-shutdown", Spec: phaseSpec(t, parentName)},
+					},
+				}
+				writeOutJSON(t, workspace, taskUID, envOut)
+				return reporterConfig{
+					Workspace: workspace, TaskUID: taskUID, ParentName: parentName,
+					ParentNamespace: "default", ParentKind: "Milestone",
+				}, buildFakeClient(t, milestone)
+			},
+			wantExit: exitSuccess,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exp := tracetest.NewInMemoryExporter()
+			rec := installStubTracerProvider(t, exp)
+			cfg, c := tc.buildCfg(t)
+
+			var stderr bytes.Buffer
+			code := runWithClient(context.Background(), cfg, nil, &stderr, c)
+			if code != tc.wantExit {
+				t.Fatalf("runWithClient exit=%d, want %d; stderr=%q", code, tc.wantExit, stderr.String())
+			}
+			if !rec.invoked {
+				t.Errorf("otelShutdown was not invoked (TRACE-03 violated)")
+			}
+			if !rec.hadDeadline {
+				t.Errorf("otelShutdown ctx carried no deadline (D-12 bound not applied)")
+			}
+		})
+	}
+}
+
+// Test 10: TestRunTraceOnly_EmitsSpans — a trace-only run against a fixture
+// workspace emits at least one span whose TraceID matches the injected
+// traceparent's TraceID, proving ExtractRemoteParent-based parenting.
+func TestRunTraceOnly_EmitsSpans(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir()
+	taskUID := "task-trace-only-emits"
+	writeTraceOnlyFixture(t, workspace, taskUID)
+
+	traceID, err := trace.TraceIDFromHex("0af7651916cd43dd8448eb211c80319c")
+	if err != nil {
+		t.Fatalf("TraceIDFromHex: %v", err)
+	}
+	spanID, err := trace.SpanIDFromHex("b7ad6b7169203331")
+	if err != nil {
+		t.Fatalf("SpanIDFromHex: %v", err)
+	}
+	traceParent := otelai.FormatTraceparent(traceID, spanID, true)
+
+	cfg := reporterConfig{
+		TraceOnly: true, TaskUID: taskUID, Workspace: workspace, TraceParent: traceParent,
+	}
+
+	var stderr bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr, nil)
+	if code != exitSuccess {
+		t.Fatalf("runWithClient exit=%d, want exitSuccess; stderr=%q", code, stderr.String())
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) == 0 {
+		t.Fatal("got 0 spans, want at least 1")
+	}
+	for i, span := range spans {
+		if span.SpanContext.TraceID() != traceID {
+			t.Errorf("span[%d].TraceID = %s, want %s (parenting via --traceparent)", i, span.SpanContext.TraceID(), traceID)
+		}
+	}
+}
+
+// Test 11: TestRunTraceOnly_MissingEventsStillExitsZero — D-10: an empty
+// workspace (no events.jsonl at all) still exits 0, emits zero spans, and
+// logs an error line.
+func TestRunTraceOnly_MissingEventsStillExitsZero(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir() // deliberately empty — no envelopes dir
+	cfg := reporterConfig{TraceOnly: true, TaskUID: "task-trace-only-missing", Workspace: workspace}
+
+	var stderr bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr, nil)
+	if code != exitSuccess {
+		t.Fatalf("runWithClient exit=%d, want exitSuccess (D-10); stderr=%q", code, stderr.String())
+	}
+	if len(exp.GetSpans()) != 0 {
+		t.Errorf("got %d spans, want 0 (no events.jsonl present)", len(exp.GetSpans()))
+	}
+	if stderr.Len() == 0 {
+		t.Error("expected an error line on stderr for missing events.jsonl, got none")
+	}
+}
+
+// Test 12: TestRunCombined_SynthFailureDoesNotChangeExit — D-10: a combined
+// (materialization) run with out.json present but events.jsonl ABSENT
+// synthesizes nothing, logs the failure, and still exits exactly like
+// TestRunHappyPath — materialization's outcome is authoritative.
+func TestRunCombined_SynthFailureDoesNotChangeExit(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir()
+	taskUID := "task-combined-no-events"
+	parentName := "parent-combined-no-events"
+	parentNS := "default"
+
+	milestone := &tidev1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: parentName, Namespace: parentNS, UID: types.UID("uid-combined-no-events"),
+		},
+	}
+	envOut := pkgdispatch.EnvelopeOut{
+		ChildCRDs: []pkgdispatch.ChildCRDSpec{
+			{Kind: "Phase", Name: "phase-combined-no-events", Spec: phaseSpec(t, parentName)},
+		},
+	}
+	writeOutJSON(t, workspace, taskUID, envOut) // out.json present; events.jsonl absent
+
+	c := buildFakeClient(t, milestone)
+	cfg := reporterConfig{
+		Workspace: workspace, TaskUID: taskUID, ParentName: parentName,
+		ParentNamespace: parentNS, ParentKind: "Milestone",
+	}
+
+	var stderr bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr, c)
+	if code != exitSuccess {
+		t.Fatalf("runWithClient exit=%d, want exitSuccess (synth failure must not change materialization outcome); stderr=%q",
+			code, stderr.String())
+	}
+
+	var ph tidev1alpha3.Phase
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: parentNS, Name: "phase-combined-no-events"}, &ph); err != nil {
+		t.Errorf("Get Phase: %v (materialization should succeed despite missing events.jsonl)", err)
 	}
 }
