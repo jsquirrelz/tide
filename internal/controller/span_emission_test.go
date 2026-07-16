@@ -132,12 +132,18 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 	)
 
 	BeforeEach(func() {
-		spanEmissionProject(ctx, seMSProjName, "claude-test-model")
-		envReader = newMapEnvReader()
-
+		// 42-REVIEW WR-04: capture + swap the global TracerProvider FIRST —
+		// before any failable fixture step. If spanEmissionProject fails its
+		// Expect, Ginkgo still runs AfterEach; restoring a never-captured
+		// (nil) prevTP would poison the otel global and panic every
+		// subsequent otel.Tracer call in the package. Mirrors
+		// setupSpanExporter's ordering in span_emission_unit_test.go.
 		exp = tracetest.NewInMemoryExporter()
 		prevTP = otel.GetTracerProvider()
 		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+
+		spanEmissionProject(ctx, seMSProjName, "claude-test-model")
+		envReader = newMapEnvReader()
 	})
 
 	AfterEach(func() {
@@ -358,6 +364,12 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 	)
 
 	BeforeEach(func() {
+		// 42-REVIEW WR-04: TracerProvider capture + swap FIRST, before any
+		// failable fixture step (see the Milestone-level BeforeEach).
+		exp = tracetest.NewInMemoryExporter()
+		prevTP = otel.GetTracerProvider()
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+
 		spanEmissionProject(ctx, sePHProjName, "claude-test-model")
 		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: sePHMSName, Namespace: "default"},
@@ -366,10 +378,6 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
 		waitForCacheSync(sePHMSName, "default", &tideprojectv1alpha3.Milestone{})
 		envReader = newMapEnvReader()
-
-		exp = tracetest.NewInMemoryExporter()
-		prevTP = otel.GetTracerProvider()
-		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
 	})
 
 	AfterEach(func() {
@@ -546,6 +554,12 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 	)
 
 	BeforeEach(func() {
+		// 42-REVIEW WR-04: TracerProvider capture + swap FIRST, before any
+		// failable fixture step (see the Milestone-level BeforeEach).
+		exp = tracetest.NewInMemoryExporter()
+		prevTP = otel.GetTracerProvider()
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+
 		spanEmissionProject(ctx, sePlanProjName, "claude-test-model")
 		ms := &tideprojectv1alpha3.Milestone{
 			ObjectMeta: metav1.ObjectMeta{Name: sePlanMSName, Namespace: "default"},
@@ -560,10 +574,6 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
 		waitForCacheSync(sePlanPhName, "default", &tideprojectv1alpha3.Phase{})
 		envReader = newMapEnvReader()
-
-		exp = tracetest.NewInMemoryExporter()
-		prevTP = otel.GetTracerProvider()
-		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
 	})
 
 	AfterEach(func() {
@@ -753,12 +763,14 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 	)
 
 	BeforeEach(func() {
-		spanEmissionProject(ctx, seProjName, "claude-test-model")
-		envReader = newMapEnvReader()
-
+		// 42-REVIEW WR-04: TracerProvider capture + swap FIRST, before any
+		// failable fixture step (see the Milestone-level BeforeEach).
 		exp = tracetest.NewInMemoryExporter()
 		prevTP = otel.GetTracerProvider()
 		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp)))
+
+		spanEmissionProject(ctx, seProjName, "claude-test-model")
+		envReader = newMapEnvReader()
 	})
 
 	AfterEach(func() {
