@@ -384,6 +384,35 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 			Expect(found).To(BeFalse(), "degraded span must not carry token-count attribute %q", key)
 		}
 	})
+
+	It("does not stamp MilestoneSpanEmittedUID when project resolution fails (CR-01)", func() {
+		// 43-REVIEW CR-01: an unresolvable ProjectRef must leave the marker
+		// unstamped so a later reconcile (once the transient failure clears)
+		// still gets a chance to emit — mirrors Task's project != nil guard.
+		ms := &tideprojectv1alpha3.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: seMSName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: "does-not-exist"},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(seMSName, "default", &tideprojectv1alpha3.Milestone{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSName, Namespace: "default"}, ms)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		r := newMilestoneReconciler()
+		_, err := r.handleJobCompletion(ctx, ms, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(BeEmpty(), "no span may be emitted when project is unresolvable")
+
+		var latest tideprojectv1alpha3.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSName, Namespace: "default"}, &latest)).To(Succeed())
+		Expect(latest.Status.MilestoneSpanEmittedUID).To(BeEmpty(),
+			"marker must stay unstamped so a future reconcile with a resolvable project can still emit this attempt's span")
+	})
 })
 
 // ─── Phase level ─────────────────────────────────────────────────────────────
@@ -639,6 +668,35 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &fresh)).To(Succeed())
 		Expect(fresh.Status.PhaseSpanEmittedUID).To(BeEmpty())
 	})
+
+	It("does not stamp PhaseSpanEmittedUID when project resolution fails (CR-01)", func() {
+		// 43-REVIEW CR-01: an unresolvable MilestoneRef (so resolveProject
+		// returns nil) must leave the marker unstamped so a later reconcile
+		// still gets a chance to emit.
+		ph := &tideprojectv1alpha3.Phase{
+			ObjectMeta: metav1.ObjectMeta{Name: sePHName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PhaseSpec{MilestoneRef: "does-not-exist"},
+		}
+		Expect(k8sClient.Create(ctx, ph)).To(Succeed())
+		waitForCacheSync(sePHName, "default", &tideprojectv1alpha3.Phase{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, ph)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		r := newPhaseReconciler()
+		_, err := r.handleJobCompletion(ctx, ph, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(BeEmpty(), "no span may be emitted when project is unresolvable")
+
+		var latest tideprojectv1alpha3.Phase
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &latest)).To(Succeed())
+		Expect(latest.Status.PhaseSpanEmittedUID).To(BeEmpty(),
+			"marker must stay unstamped so a future reconcile with a resolvable project can still emit this attempt's span")
+	})
 })
 
 // ─── Plan level ──────────────────────────────────────────────────────────────
@@ -882,6 +940,35 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		var fresh tideprojectv1alpha3.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
 		Expect(fresh.Status.PlanSpanEmittedUID).To(BeEmpty())
+	})
+
+	It("does not stamp PlanSpanEmittedUID when project resolution fails (CR-01)", func() {
+		// 43-REVIEW CR-01: no project-label fast-path and an unresolvable
+		// PhaseRef (so resolveProjectForPlan returns nil) must leave the
+		// marker unstamped so a later reconcile still gets a chance to emit.
+		plan := &tideprojectv1alpha3.Plan{
+			ObjectMeta: metav1.ObjectMeta{Name: sePlanName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.PlanSpec{PhaseRef: "does-not-exist"},
+		}
+		Expect(k8sClient.Create(ctx, plan)).To(Succeed())
+		waitForCacheSync(sePlanName, "default", &tideprojectv1alpha3.Plan{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, plan)).To(Succeed())
+
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		jobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+		job := succeededPlannerJob(jobName, start, end)
+
+		r := newPlanReconciler()
+		_, err := r.handlePlannerJobCompletion(ctx, plan, job)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(exp.GetSpans()).To(BeEmpty(), "no span may be emitted when project is unresolvable")
+
+		var latest tideprojectv1alpha3.Plan
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &latest)).To(Succeed())
+		Expect(latest.Status.PlanSpanEmittedUID).To(BeEmpty(),
+			"marker must stay unstamped so a future reconcile with a resolvable project can still emit this attempt's span")
 	})
 })
 

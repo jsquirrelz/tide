@@ -571,7 +571,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
 	// a Job with no resolvable timestamps — checked BEFORE stamping so a
 	// stamp is never wasted on an unemittable span.
-	if completedJob != nil && ms.Status.MilestoneSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
+	if completedJob != nil && project != nil && ms.Status.MilestoneSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tideprojectv1alpha3.Milestone{}
