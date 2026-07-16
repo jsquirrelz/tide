@@ -119,6 +119,15 @@ type TaskReconcilerDeps struct {
 	// does not interpret prices — it passes the validated string through.
 	// Wired in Plan 14-05.
 	PricingOverridesJSON string
+
+	// ReporterImage is the image ref for the trace-only tide-reporter Job
+	// spawned at Task completion (Phase 44 MSG-01); empty = spawn skipped —
+	// mirrors PlannerReconcilerDeps.ReporterImage.
+	ReporterImage string
+
+	// OTLPEndpoint is the D-06 spawn gate + Job-env forwarding value; empty =
+	// no trace-only spawns, zero Job churn on plain clusters.
+	OTLPEndpoint string
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -1017,6 +1026,73 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 	}
 }
 
+// spawnTaskTraceReporterIfNeeded idempotently spawns a Phase 44 MSG-01
+// trace-only tide-reporter Job for a completed Task dispatch Job attempt —
+// the Task level's first in-namespace consumer of its own conversation
+// (D-02/D-05: every terminal path, success and failure, gets a spawn attempt).
+// Observability never gates Task's terminal-state machinery — contrast
+// spawnReporterIfNeeded's error return: every failure here logs and
+// continues, never a requeue error, so a broken trace-only spawn path can
+// never wedge Task completion.
+//
+// Guards, in order: a nil completedJob or project skips (nothing resolvable
+// to spawn against); r.Deps.OTLPEndpoint == "" skips BEFORE any API call
+// (D-06 — the same value forwarded into the Job env; zero Job churn on plain
+// clusters); r.Deps.ReporterImage == "" skips (no image configured).
+//
+// Idempotency: the Job name is deterministic per completed-Job-attempt
+// ("tide-reporter-trace-"+completedJob.UID) — a retried Task Job has a new
+// UID and so gets its own trace-only spawn (its own conversation span set),
+// while a re-reconcile of the SAME completed Job finds the existing
+// trace-only Job and skips (Get→NotFound→Create, AlreadyExists on Create is
+// idempotent success — mirrors spawnReporterIfNeeded's shape).
+//
+// TraceParent: emitTaskSpanOnce mirrors TaskTraceSpanID onto the in-memory
+// task object unconditionally after emission, in the SAME reconcile this
+// method is called from immediately after — so reading task.Status here is
+// correct even before emitTaskSpanOnce's own persistence patch lands. An
+// empty span ID degrades to traceparentForLevel returning "" — the Job omits
+// --traceparent and the reporter emits unparented spans (bounded
+// degradation, matching Phase 43's precedent).
+func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job) {
+	logger := logf.FromContext(ctx)
+
+	if completedJob == nil || project == nil {
+		return
+	}
+	if r.Deps.OTLPEndpoint == "" {
+		return
+	}
+	if r.Deps.ReporterImage == "" {
+		return
+	}
+
+	jobName := "tide-reporter-trace-" + string(completedJob.UID)
+	var existing batchv1.Job
+	if gErr := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &existing); gErr == nil {
+		return // already spawned for this attempt (T-09-13-style idempotency)
+	} else if !apierrors.IsNotFound(gErr) {
+		logger.Error(gErr, "get trace-only reporter Job failed (non-fatal); spawn deferred to a later reconcile", "job", jobName)
+		return
+	}
+
+	traceOnlyJob := BuildReporterJob(task, project, r.sharedPVCName(), string(task.UID), "Task",
+		ReporterOptions{
+			ReporterImage:   r.Deps.ReporterImage,
+			OTLPEndpoint:    r.Deps.OTLPEndpoint,
+			TraceOnly:       true,
+			TraceOnlyJobKey: string(completedJob.UID),
+			TraceParent:     traceparentForLevel(project, task.Status.TaskTraceSpanID),
+		}, r.Scheme)
+	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
+		if !apierrors.IsAlreadyExists(cErr) {
+			logger.Error(cErr, "create trace-only reporter Job failed (non-fatal, observability never gates)", "job", jobName)
+		}
+		return
+	}
+	logger.Info("spawned trace-only reporter Job", "job", jobName, "task", task.Name)
+}
+
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up
 // budget, and patches Task.Status to the terminal state.
 //
@@ -1043,6 +1119,9 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// 43-05-PLAN.md call site 1). Emitted BEFORE the terminal status patch
 		// below (span-loss-averse ordering).
 		r.emitTaskSpanOnce(ctx, task, project, completedJob, pkgdispatch.EnvelopeOut{}, false)
+		// MSG-01/D-05: failed Tasks are the highest-value debugging trace —
+		// spawn the trace-only reporter here too, not just on the success path.
+		r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob)
 
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
@@ -1068,6 +1147,10 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// generalized — 43-05-PLAN.md) — one call covers all three post-read
 	// terminal paths uniformly with envReadOK=true.
 	r.emitTaskSpanOnce(ctx, task, project, completedJob, out, true)
+	// MSG-01: covers the three post-read terminal paths uniformly (standard
+	// result, OutputValidationError, OutputPathsViolation) — one call, same
+	// D-06-gated idempotent spawn as the EnvelopeReadFailed call site above.
+	r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob)
 
 	// Output-path validation (Warning #5 — wires HARN-05 into dispatch chain).
 	// Performed controller-side in Phase 2 (RESEARCH.md Responsibility Map deviation).
