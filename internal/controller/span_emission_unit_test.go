@@ -135,6 +135,62 @@ func TestSpanEndTimeNeitherCondition(t *testing.T) {
 	}
 }
 
+// ─── plannerSpanResolvable ─────────────────────────────────────────────────
+
+// TestPlannerSpanResolvable — 42-REVIEW WR-01: the mark-then-emit entry gate.
+// A stamp is only allowed when a span is guaranteed emittable (non-nil Job,
+// StartTime populated, end timestamp resolvable), so a durable marker can
+// never suppress a span that was never exported.
+func TestPlannerSpanResolvable(t *testing.T) {
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+
+	cases := []struct {
+		name string
+		job  *batchv1.Job
+		want bool
+	}{
+		{name: "nil job (TTL-GC'd)", job: nil, want: false},
+		{
+			name: "no StartTime",
+			job: &batchv1.Job{Status: batchv1.JobStatus{
+				CompletionTime: &metav1.Time{Time: end},
+			}},
+			want: false,
+		},
+		{
+			name: "no resolvable end timestamp",
+			job: &batchv1.Job{Status: batchv1.JobStatus{
+				StartTime: &metav1.Time{Time: start},
+			}},
+			want: false,
+		},
+		{
+			name: "succeeded (CompletionTime)",
+			job: &batchv1.Job{Status: batchv1.JobStatus{
+				StartTime:      &metav1.Time{Time: start},
+				CompletionTime: &metav1.Time{Time: end},
+			}},
+			want: true,
+		},
+		{
+			name: "failed (JobFailed LastTransitionTime)",
+			job: &batchv1.Job{Status: batchv1.JobStatus{
+				StartTime: &metav1.Time{Time: start},
+				Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, LastTransitionTime: metav1.Time{Time: end}},
+				},
+			}},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		if got := plannerSpanResolvable(tc.job); got != tc.want {
+			t.Errorf("plannerSpanResolvable(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // ─── synthesizePlannerSpan ─────────────────────────────────────────────────
 
 func TestSynthesizePlannerSpanNilJob(t *testing.T) {

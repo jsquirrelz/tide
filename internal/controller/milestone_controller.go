@@ -550,29 +550,41 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		logger.V(1).Info("no env reader; skipping tiny-status read (nil-EnvReader unit-test path)", "milestone", ms.Name)
 	}
 
-	// Phase 42 D-01/D-02/D-04: synthesize exactly one retroactive AGENT span
+	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
 	// per planner Job attempt, gated by the durable MilestoneSpanEmittedUID
 	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
 	// existing MilestoneRolledUpUID marker below is envReadOK-gated by design
 	// and would re-emit a degraded span on every reconcile forever if reused
-	// here). Pattern 3: the helper itself no-ops on a nil completedJob
-	// (already TTL-GC'd) or a Job with no resolvable timestamps.
-	if completedJob != nil && ms.Status.MilestoneSpanEmittedUID != completedJob.Name {
-		if synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK) {
-			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &tideprojectv1alpha3.Milestone{}
-				if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
-					return err
-				}
-				if latest.Status.MilestoneSpanEmittedUID == completedJob.Name {
-					return nil // already set by a concurrent reconcile — idempotent
-				}
-				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
-				latest.Status.MilestoneSpanEmittedUID = completedJob.Name
-				return r.Status().Patch(ctx, latest, markerPatch)
-			}); mErr != nil {
-				return ctrl.Result{}, fmt.Errorf("patch MilestoneSpanEmittedUID: %w", mErr)
+	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
+	// stamped durably BEFORE the span is exported — the optimistic-lock patch
+	// closes the stale-cache re-entry window, making duplicate emission
+	// impossible; a crash between stamp and emission loses that attempt's
+	// span, preferred over double-counting tokens/cost in Phoenix. Pattern 3:
+	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
+	// a Job with no resolvable timestamps — checked BEFORE stamping so a
+	// stamp is never wasted on an unemittable span.
+	if completedJob != nil && ms.Status.MilestoneSpanEmittedUID != completedJob.Name && plannerSpanResolvable(completedJob) {
+		stamped := false
+		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &tideprojectv1alpha3.Milestone{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+				return err
 			}
+			if latest.Status.MilestoneSpanEmittedUID == completedJob.Name {
+				return nil // already stamped by a concurrent reconcile — its stamper emits
+			}
+			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			latest.Status.MilestoneSpanEmittedUID = completedJob.Name
+			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
+				return err
+			}
+			stamped = true
+			return nil
+		}); mErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch MilestoneSpanEmittedUID: %w", mErr)
+		}
+		if stamped {
+			synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
 		}
 	}
 

@@ -66,12 +66,34 @@ func spanEndTime(job *batchv1.Job) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// synthesizePlannerSpan synthesizes exactly one retroactive AGENT span for a
+// plannerSpanResolvable reports whether a retroactive span can be
+// synthesized for the Job at all: non-nil (not yet TTL-GC'd), a populated
+// StartTime, and a resolvable end timestamp (spanEndTime — Pattern 3: never
+// fabricate wall-clock substitutes). Callers MUST gate the SpanEmittedUID
+// marker stamp on this predicate: mark-then-emit ordering (42-REVIEW WR-01)
+// stamps the marker BEFORE emitting, and a stamp without a subsequent
+// emission would suppress the attempt's span forever.
+func plannerSpanResolvable(job *batchv1.Job) bool {
+	if job == nil || job.Status.StartTime == nil {
+		return false
+	}
+	_, ok := spanEndTime(job)
+	return ok
+}
+
+// synthesizePlannerSpan synthesizes a retroactive AGENT span for a
 // planner-level Job's completion (D-01: succeeded AND failed; D-02: one span
 // per Job attempt, marker-gated by the caller — see 42-PATTERNS.md's
-// deliberate deviations from the *RolledUpUID skeleton). Returns true only
-// when a span was actually emitted — the caller stamps its level's
-// SpanEmittedUID marker on true, independent of envReadOK (D-04).
+// deliberate deviations from the *RolledUpUID skeleton). Emission is
+// at-most-once, never exactly-once (42-REVIEW WR-01): the caller durably
+// stamps its level's SpanEmittedUID marker BEFORE calling (mark-then-emit,
+// entry gated on plannerSpanResolvable), independent of envReadOK (D-04).
+// Duplicate export is therefore impossible; a crash between stamp and
+// emission loses that attempt's span — span loss is preferred over
+// double-counted tokens/cost in Phoenix, whose cost views sum
+// llm.token_count.* across spans. Returns true when a span was emitted
+// (false only via the defensive re-check of the same preconditions
+// plannerSpanResolvable already gated for the caller).
 //
 // level is one of "milestone" | "phase" | "plan" | "project" — the same
 // literal ResolveProvider's dispatch sites already pass.

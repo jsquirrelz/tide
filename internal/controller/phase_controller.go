@@ -491,29 +491,41 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		logger.V(1).Info("no env reader; skipping tiny-status read", "phase", ph.Name)
 	}
 
-	// Phase 42 D-01/D-02/D-04: synthesize exactly one retroactive AGENT span
+	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
 	// per planner Job attempt, gated by the durable PhaseSpanEmittedUID
 	// marker — INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
 	// existing PhaseRolledUpUID marker below is envReadOK-gated by design and
 	// would re-emit a degraded span on every reconcile forever if reused
-	// here). Pattern 3: the helper itself no-ops on a nil completedJob
-	// (already TTL-GC'd) or a Job with no resolvable timestamps.
-	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != completedJob.Name {
-		if synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK) {
-			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				latest := &tideprojectv1alpha3.Phase{}
-				if err := r.Get(ctx, client.ObjectKeyFromObject(ph), latest); err != nil {
-					return err
-				}
-				if latest.Status.PhaseSpanEmittedUID == completedJob.Name {
-					return nil // already set by a concurrent reconcile — idempotent
-				}
-				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
-				latest.Status.PhaseSpanEmittedUID = completedJob.Name
-				return r.Status().Patch(ctx, latest, markerPatch)
-			}); mErr != nil {
-				return ctrl.Result{}, fmt.Errorf("patch PhaseSpanEmittedUID: %w", mErr)
+	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
+	// stamped durably BEFORE the span is exported — the optimistic-lock patch
+	// closes the stale-cache re-entry window, making duplicate emission
+	// impossible; a crash between stamp and emission loses that attempt's
+	// span, preferred over double-counting tokens/cost in Phoenix. Pattern 3:
+	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
+	// a Job with no resolvable timestamps — checked BEFORE stamping so a
+	// stamp is never wasted on an unemittable span.
+	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != completedJob.Name && plannerSpanResolvable(completedJob) {
+		stamped := false
+		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &tideprojectv1alpha3.Phase{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(ph), latest); err != nil {
+				return err
 			}
+			if latest.Status.PhaseSpanEmittedUID == completedJob.Name {
+				return nil // already stamped by a concurrent reconcile — its stamper emits
+			}
+			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			latest.Status.PhaseSpanEmittedUID = completedJob.Name
+			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
+				return err
+			}
+			stamped = true
+			return nil
+		}); mErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch PhaseSpanEmittedUID: %w", mErr)
+		}
+		if stamped {
+			synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
 		}
 	}
 
