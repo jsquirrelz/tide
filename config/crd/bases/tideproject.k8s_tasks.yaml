@@ -295,6 +295,18 @@ spec:
                   window (Warning #5 / HARN-05).
                 format: date-time
                 type: string
+              taskSpanEmittedUID:
+                description: |-
+                  TaskSpanEmittedUID is the UID of the executor Job whose completion has
+                  already had its dispatch span synthesized. Mirrors {Level}SpanEmittedUID
+                  on the four planner-level Status structs (Phase 43 TRACE-01).
+                type: string
+              taskTraceSpanID:
+                description: |-
+                  TaskTraceSpanID is the OTel SpanID of this Task's own synthesized span,
+                  persisted for Phase 46's dashboard deep-link (OBS-04). Never store the
+                  TraceID — always re-derivable from Project.UID via otelai.TraceIDFromUID.
+                type: string
             type: object
         required:
         - spec

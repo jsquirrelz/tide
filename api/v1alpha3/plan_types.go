@@ -118,6 +118,25 @@ type PlanStatus struct {
 	// +optional
 	PlanRolledUpUID string `json:"planRolledUpUID,omitempty"`
 
+	// PlanSpanEmittedUID is the UID of the planner Job whose completion has
+	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+	// emission INDEPENDENT of envReadOK — deliberately not reusing
+	// PlanRolledUpUID, whose envReadOK gating would re-emit degraded spans on
+	// every reconcile (Pitfall 2). Keyed by Job UID, not name: planner Job names
+	// are deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID (D-02: each retry attempt produces its own span).
+	// Phase 42 D-02/D-04.
+	// +optional
+	PlanSpanEmittedUID string `json:"planSpanEmittedUID,omitempty"`
+
+	// PlanTraceSpanID is this level's own synthesized dispatch-span OTel
+	// SpanID hex, persisted as the durable parent carrier for child-level
+	// spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+	// stores the TraceID — always re-derivable from Project.UID via
+	// otelai.TraceIDFromUID (D-03/D-04).
+	// +optional
+	PlanTraceSpanID string `json:"planTraceSpanID,omitempty"`
+
 	// WaveIntegration records the bounded auto-retry state of the current
 	// wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
 	// reconcileWaveBoundary advances to a new blocking wave.

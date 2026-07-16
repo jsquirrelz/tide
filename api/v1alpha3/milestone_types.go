@@ -65,6 +65,25 @@ type MilestoneStatus struct {
 	// per the D-03 level-specific marker pattern. Phase 31 ADOPT-04 / D-03.
 	// +optional
 	MilestoneRolledUpUID string `json:"milestoneRolledUpUID,omitempty"`
+
+	// MilestoneSpanEmittedUID is the UID of the planner Job whose completion has
+	// already had its dispatch span synthesized. Gates one-span-per-Job-attempt
+	// emission INDEPENDENT of envReadOK — deliberately not reusing
+	// MilestoneRolledUpUID, whose envReadOK gating would re-emit degraded spans on
+	// every reconcile (Pitfall 2). Keyed by Job UID, not name: planner Job names
+	// are deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID (D-02: each retry attempt produces its own span).
+	// Phase 42 D-02/D-04.
+	// +optional
+	MilestoneSpanEmittedUID string `json:"milestoneSpanEmittedUID,omitempty"`
+
+	// MilestoneTraceSpanID is this level's own synthesized dispatch-span OTel
+	// SpanID hex, persisted as the durable parent carrier for child-level
+	// spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+	// stores the TraceID — always re-derivable from Project.UID via
+	// otelai.TraceIDFromUID (D-03/D-04).
+	// +optional
+	MilestoneTraceSpanID string `json:"milestoneTraceSpanID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

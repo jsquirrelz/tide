@@ -64,6 +64,7 @@ type reporterConfig struct {
 	ParentName      string // K8s metadata.name of the parent CR
 	ParentNamespace string // K8s namespace of the parent CR
 	ParentKind      string // Kind of the parent CR: Project | Milestone | Phase | Plan
+	TraceParent     string // W3C traceparent for this level's own span (consumed starting Phase 44)
 }
 
 const (
@@ -75,8 +76,14 @@ const (
 	exitInvariant = 2
 )
 
-func main() {
-	fs := flag.NewFlagSet("tide-reporter", flag.ExitOnError)
+// parseFlags parses the reporter's CLI flags into a reporterConfig. Extracted
+// from main() so flag parsing is unit-testable (Phase 43 Pitfall 4): an Args
+// entry without a registered flag would crash-loop every reporter Job in the
+// cluster, so the flag set and BuildReporterJob's Args must stay in sync.
+// flag.ContinueOnError (not ExitOnError) lets callers observe the parse error
+// instead of the process exiting mid-test.
+func parseFlags(args []string) (reporterConfig, error) {
+	fs := flag.NewFlagSet("tide-reporter", flag.ContinueOnError)
 	workspace := fs.String("workspace", "/workspace",
 		"workspace root — out.json at <workspace>/envelopes/<task-uid>/out.json")
 	projectUID := fs.String("project-uid", "",
@@ -85,19 +92,28 @@ func main() {
 	parentName := fs.String("parent-name", "", "metadata.name of the parent CR (Project/Milestone/Phase/Plan)")
 	parentNamespace := fs.String("parent-namespace", "", "namespace of the parent CR")
 	parentKind := fs.String("parent-kind", "", "Kind of the parent CR: Project | Milestone | Phase | Plan")
+	traceParent := fs.String("traceparent", "", "W3C traceparent for this level's own span (consumed starting Phase 44)")
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "tide-reporter: flag parse: %v\n", err)
-		os.Exit(exitInvariant)
+	if err := fs.Parse(args); err != nil {
+		return reporterConfig{}, err
 	}
 
-	cfg := reporterConfig{
+	return reporterConfig{
 		Workspace:       *workspace,
 		ProjectUID:      *projectUID,
 		TaskUID:         *taskUID,
 		ParentName:      *parentName,
 		ParentNamespace: *parentNamespace,
 		ParentKind:      *parentKind,
+		TraceParent:     *traceParent,
+	}, nil
+}
+
+func main() {
+	cfg, err := parseFlags(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "tide-reporter: flag parse: %v\n", err)
+		os.Exit(exitInvariant)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

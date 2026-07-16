@@ -14,18 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Phase 4 Plan 03 Task 1: failing tests for the five OpenInference attribute
+// Phase 4 Plan 03 Task 1: failing tests for the OpenInference attribute
 // helpers (D-O4). These tests lock the spec's flat-keyed encoding into the
-// repo so that any future drift in either Arize's OpenInference spec OR our
-// implementation surfaces loudly. The "no payload helper" test (Test 6) is
+// repo so that any future divergence between Arize's OpenInference spec and
+// our implementation surfaces loudly. The "no payload helper" test (Test 6) is
 // the D-O5 enforcement at the public API surface — there must NEVER be a
 // helper that accepts inline message content as a top-level attribute value.
+//
+// Phase 42 Plan 01: keys now resolve from the official
+// openinference-semantic-conventions Go module (ATTR-03/D-05/D-06); three
+// keys with no module counterpart moved to the tide.* namespace; TokenCount
+// gained llm.token_count.total (ATTR-02/D-08); AgentInvocation gained a
+// leading system parameter (D-07); LLMIdentity/FailureDetail/EnvelopeDegraded
+// are new helpers.
 package otelai
 
 import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -33,7 +41,8 @@ import (
 )
 
 // TestLLMInputMessages — flat-keyed `llm.input_messages.<i>.message.role` /
-// `.content` encoding per OpenInference spec (RESEARCH.md §625-658).
+// `.content` encoding per OpenInference spec (RESEARCH.md §625-658). Keys are
+// module-backed but byte-identical to the pre-Phase-42 hand-rolled encoding.
 func TestLLMInputMessages(t *testing.T) {
 	got := LLMInputMessages([]Message{
 		{Role: "user", Content: "hi"},
@@ -67,51 +76,106 @@ func TestLLMOutputMessages(t *testing.T) {
 	}
 }
 
-// TestTokenCount — four int attrs. Total is NOT computed (consumer can sum).
-// Anthropic cache-read / cache-write tokens flow into prompt_details.* per spec.
+// TestTokenCount — five int attrs (ATTR-02/D-08): the original four-way split
+// plus llm.token_count.total = prompt + completion. `prompt` is now documented
+// to carry the FULL prompt count INCLUDING the cache_read/cache_write subsets
+// — the re-mapping itself happens at the call site (plan 42-04), not here.
 func TestTokenCount(t *testing.T) {
-	got := TokenCount(100, 50, 10, 5)
+	got := TokenCount(1000, 300, 200, 100)
 	want := []attribute.KeyValue{
-		attribute.Int("llm.token_count.prompt", 100),
-		attribute.Int("llm.token_count.completion", 50),
-		attribute.Int("llm.token_count.prompt_details.cache_read", 10),
-		attribute.Int("llm.token_count.prompt_details.cache_write", 5),
+		attribute.Int("llm.token_count.prompt", 1000),
+		attribute.Int("llm.token_count.completion", 300),
+		attribute.Int("llm.token_count.prompt_details.cache_read", 200),
+		attribute.Int("llm.token_count.prompt_details.cache_write", 100),
+		attribute.Int("llm.token_count.total", 1300),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("TokenCount = %v, want %v", got, want)
 	}
-	if len(got) != 4 {
-		t.Errorf("TokenCount returned %d entries, want exactly 4", len(got))
+	if len(got) != 5 {
+		t.Errorf("TokenCount returned %d entries, want exactly 5", len(got))
 	}
 }
 
-// TestAgentInvocation — four attrs identifying the orchestrator's subagent
-// dispatch site. `openinference.span.kind` is the spec-required discriminator;
-// `llm.system` is `anthropic` (the only v1 backend); `agent.name` is the
-// `tide.dispatch.<level>` span-name convention; `agent.invocation.level` is
-// the TIDE-specific hierarchy level the dispatch represents.
+// TestAgentInvocation — five attrs identifying the orchestrator's subagent
+// dispatch site. D-07: llm.system is now a leading caller-supplied parameter,
+// not a hardcoded "anthropic" constant. D-05: agent.role/agent.invocation.level
+// have no module counterpart and live under tide.*.
 func TestAgentInvocation(t *testing.T) {
-	got := AgentInvocation("tide.dispatch.milestone", "planner", "milestone")
+	got := AgentInvocation("anthropic", "tide.dispatch.milestone", "planner", "milestone")
 	want := []attribute.KeyValue{
 		attribute.String("openinference.span.kind", "AGENT"),
 		attribute.String("llm.system", "anthropic"),
 		attribute.String("agent.name", "tide.dispatch.milestone"),
-		attribute.String("agent.role", "planner"),
-		attribute.String("agent.invocation.level", "milestone"),
+		attribute.String("tide.role", "planner"),
+		attribute.String("tide.invocation.level", "milestone"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AgentInvocation = %v, want %v", got, want)
 	}
 }
 
-// TestArtifactPath — single attribute.KeyValue (NOT a slice). This is the
-// only payload-reference helper per D-O5: it emits a PVC path, never inlined
-// content. Bounds span attribute size to ~256 bytes max.
+// TestArtifactPath — single attribute.KeyValue (NOT a slice). D-05: the key is
+// now tide.artifact_path — the gen_ai.artifact_path namespace squat is dead.
 func TestArtifactPath(t *testing.T) {
 	got := ArtifactPath("/workspace/envelopes/abc.jsonl")
-	want := attribute.String("gen_ai.artifact_path", "/workspace/envelopes/abc.jsonl")
+	want := attribute.String("tide.artifact_path", "/workspace/envelopes/abc.jsonl")
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ArtifactPath = %v, want %v", got, want)
+	}
+}
+
+// TestLLMIdentity — ATTR-01: llm.provider always; llm.model_name ONLY when
+// model is non-empty (Pitfall 5 — never emit an empty-string llm.model_name).
+func TestLLMIdentity(t *testing.T) {
+	t.Run("with model", func(t *testing.T) {
+		got := LLMIdentity("anthropic", "claude-opus-4-8")
+		want := []attribute.KeyValue{
+			attribute.String("llm.provider", "anthropic"),
+			attribute.String("llm.model_name", "claude-opus-4-8"),
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LLMIdentity(\"anthropic\", \"claude-opus-4-8\") = %v, want %v", got, want)
+		}
+		if len(got) != 2 {
+			t.Errorf("LLMIdentity with model returned %d entries, want exactly 2", len(got))
+		}
+	})
+
+	t.Run("empty model omits llm.model_name", func(t *testing.T) {
+		got := LLMIdentity("anthropic", "")
+		want := []attribute.KeyValue{
+			attribute.String("llm.provider", "anthropic"),
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("LLMIdentity(\"anthropic\", \"\") = %v, want %v", got, want)
+		}
+		if len(got) != 1 {
+			t.Errorf("LLMIdentity with empty model returned %d entries, want exactly 1 (no llm.model_name)", len(got))
+		}
+	})
+}
+
+// TestFailureDetail — D-03: exit code + reason as tide.* span attributes
+// (no module counterpart exists for either).
+func TestFailureDetail(t *testing.T) {
+	got := FailureDetail(2, "cap-hit")
+	want := []attribute.KeyValue{
+		attribute.Int("tide.exit_code", 2),
+		attribute.String("tide.reason", "cap-hit"),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("FailureDetail(2, \"cap-hit\") = %v, want %v", got, want)
+	}
+}
+
+// TestEnvelopeDegraded — D-04: single marker attribute for a span whose
+// envelope could not be read.
+func TestEnvelopeDegraded(t *testing.T) {
+	got := EnvelopeDegraded()
+	want := attribute.Bool("tide.envelope.degraded", true)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("EnvelopeDegraded() = %v, want %v", got, want)
 	}
 }
 
@@ -145,6 +209,32 @@ func TestNoPayloadHelperOnPublicSurface(t *testing.T) {
 	}
 }
 
+// TestKeysUseSemconvModule — ATTR-03 enforcement at the source-grep level.
+// Reads the comment-stripped attrs.go and fails if it contains any
+// double-quoted string literal beginning with one of the four spec-family
+// prefixes (llm., openinference., gen_ai., agent.) — those MUST always
+// resolve from the openinference-semantic-conventions module's semconv.*
+// constants, never a hand-rolled literal. Only tide.* literals may remain
+// hand-rolled (D-05). Mirrors TestNoWithSamplerInSource's source-grep
+// convention (internal/otelinit/provider_test.go).
+//
+// Deliberately does NOT assert a module version pin — D-06 explicitly
+// declines that class of version-guard test; this guard enforces WHERE
+// keys come from, never WHICH version of the module is in go.mod.
+func TestKeysUseSemconvModule(t *testing.T) {
+	root := findRepoRoot(t)
+	data, err := os.ReadFile(filepath.Join(root, "pkg", "otelai", "attrs.go"))
+	if err != nil {
+		t.Fatalf("read pkg/otelai/attrs.go: %v", err)
+	}
+	stripped := stripGoComments(string(data))
+
+	forbidden := regexp.MustCompile(`"(llm\.|openinference\.|gen_ai\.|agent\.)`)
+	if m := forbidden.FindString(stripped); m != "" {
+		t.Errorf("ATTR-03 violation: pkg/otelai/attrs.go contains a hand-rolled spec-family string literal (%s...) outside a comment — every spec-backed key must resolve from the openinference-semantic-conventions module (semconv.* constants); only tide.* keys may be hand-rolled (D-05)", m)
+	}
+}
+
 // TestEmptyInputsNoPanic — defensive against nil / empty slice arguments.
 // Result may be either nil or an empty slice — both are acceptable. The
 // invariant: NO PANIC, NO out-of-bounds.
@@ -160,6 +250,44 @@ func TestEmptyInputsNoPanic(t *testing.T) {
 	if got := LLMOutputMessages([]Message{}); len(got) != 0 {
 		t.Errorf("LLMOutputMessages([]) returned %d entries, want 0", len(got))
 	}
+}
+
+// stripGoComments removes single-line (`// ...`) and block (`/* ... */`)
+// comments from Go source so that text inside comments doesn't count toward
+// grep-based source assertions. Mirrored verbatim from
+// internal/otelinit/provider_test.go's stripGoComments — kept as a local
+// copy so pkg/otelai doesn't depend on a testing helper from another
+// package. The implementation is intentionally simple — it does NOT
+// understand backtick strings or context-aware lexing — but is sufficient
+// for attrs.go, which has no string literal containing a backtick-quoted
+// spec-family prefix.
+func stripGoComments(src string) string {
+	var out strings.Builder
+	out.Grow(len(src))
+	i := 0
+	for i < len(src) {
+		// Block comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '*' {
+			end := strings.Index(src[i+2:], "*/")
+			if end == -1 {
+				return out.String()
+			}
+			i += 2 + end + 2
+			continue
+		}
+		// Line comment.
+		if i+1 < len(src) && src[i] == '/' && src[i+1] == '/' {
+			nl := strings.IndexByte(src[i:], '\n')
+			if nl == -1 {
+				return out.String()
+			}
+			i += nl
+			continue
+		}
+		out.WriteByte(src[i])
+		i++
+	}
+	return out.String()
 }
 
 // findRepoRoot walks up from the test's CWD until it finds go.mod. Tests run

@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -426,6 +428,19 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "plan", "model", envIn.Provider.Model, "image", resolvedImage)
+
+	// PROP-01: Plan's immediate parent is Phase — resolveProjectForPlan's label
+	// fast-path never touches Phase, so this is a genuinely new fetch (mirrors
+	// the identical fetch in handlePlannerJobCompletion). A missing PhaseRef or
+	// a failed Get degrades to an empty hex, which traceparentForLevel/
+	// FormatTraceparent already turn into an omitted env var.
+	parentSpanIDHex := ""
+	if plan.Spec.PhaseRef != "" {
+		var parentPh tideprojectv1alpha3.Phase
+		if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parentPh); err == nil {
+			parentSpanIDHex = parentPh.Status.PhaseTraceSpanID
+		}
+	}
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            plan,
@@ -443,6 +458,7 @@ func (r *PlanReconciler) reconcilePlannerDispatch(ctx context.Context, plan *tid
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		TraceParent:          traceparentForLevel(project, parentSpanIDHex),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, plan, r.Scheme); err != nil {
@@ -535,6 +551,83 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		envReadOK = true
 	}
 
+	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
+	// per planner Job attempt, gated by the durable PlanSpanEmittedUID
+	// marker keyed by Job UID (42-REVIEW WR-02: planner Job names are
+	// deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID — D-02 requires each attempt to produce its own span) —
+	// INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// existing PlanRolledUpUID marker below is envReadOK-gated by design
+	// and would re-emit a degraded span on every reconcile forever if reused
+	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
+	// stamped durably BEFORE the span is exported — the optimistic-lock patch
+	// closes the stale-cache re-entry window, making duplicate emission
+	// impossible; a crash between stamp and emission loses that attempt's
+	// span, preferred over double-counting tokens/cost in Phoenix. Pattern 3:
+	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
+	// a Job with no resolvable timestamps — checked BEFORE stamping so a
+	// stamp is never wasted on an unemittable span.
+	if completedJob != nil && project != nil && plan.Status.PlanSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
+		stamped := false
+		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &tideprojectv1alpha3.Plan{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+				return err
+			}
+			if latest.Status.PlanSpanEmittedUID == string(completedJob.UID) {
+				return nil // already stamped by a concurrent reconcile — its stamper emits
+			}
+			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			latest.Status.PlanSpanEmittedUID = string(completedJob.UID)
+			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
+				return err
+			}
+			stamped = true
+			return nil
+		}); mErr != nil {
+			// 42-REVIEW WR-03: telemetry bookkeeping is subordinate to pipeline
+			// progression — a persistent status-patch failure must not block the
+			// reporter spawn, budget rollup, or gate hooks below. No error return,
+			// no requeue: the marker is still unset, so the next watch-driven
+			// reconcile retries the stamp (mark-then-emit guarantees this degrade
+			// path accrues no duplicate span).
+			logger.Error(mErr, "PlanSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "plan", plan.Name)
+		} else if stamped {
+			// TRACE-02: Plan's immediate parent is Phase — resolveProjectForPlan's
+			// label fast-path never touches Phase, so this is a genuinely new
+			// fetch (RESEARCH.md A3). A missing PhaseRef or a failed Get degrades
+			// to an unnested span (zero parentSpanID) rather than blocking
+			// emission — the span still groups by the deterministic TraceID.
+			var parentSpanID trace.SpanID
+			if plan.Spec.PhaseRef != "" {
+				var parentPh tideprojectv1alpha3.Phase
+				if err := r.Get(ctx, client.ObjectKey{Namespace: plan.Namespace, Name: plan.Spec.PhaseRef}, &parentPh); err == nil {
+					parentSpanID = spanIDFromHexOrZero(parentPh.Status.PhaseTraceSpanID)
+				}
+			}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "plan", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				plan.Status.PlanTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha3.Plan{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.PlanTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "PlanTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "plan", plan.Name)
+				}
+			}
+		}
+	}
+
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the PVC and materializes Task children.
 	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
@@ -551,7 +644,10 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
-				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
+				ReporterOptions{
+					ReporterImage: r.Deps.ReporterImage,
+					TraceParent:   traceparentForLevel(project, plan.Status.PlanTraceSpanID),
+				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)

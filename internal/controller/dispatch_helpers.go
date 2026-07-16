@@ -99,6 +99,7 @@ func spawnReporterIfNeeded(
 	parentKind string,
 	reporterImage string,
 	pvcName string,
+	traceParent string,
 ) (bool, error) {
 	logger := logf.FromContext(ctx)
 	if reporterImage == "" {
@@ -117,7 +118,7 @@ func spawnReporterIfNeeded(
 		}
 		// Not found — spawn it (first completion observation).
 		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind,
-			ReporterOptions{ReporterImage: reporterImage}, scheme)
+			ReporterOptions{ReporterImage: reporterImage, TraceParent: traceParent}, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
 				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)

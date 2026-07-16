@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1734,6 +1736,8 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		// PROP-01/D-02: no TraceParent — Project is the trace root, its dispatch
+		// Job legitimately carries no TRACEPARENT (no parent span exists above it).
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, project, r.Scheme); err != nil {
@@ -1775,7 +1779,7 @@ func (r *ProjectReconciler) reconcileProjectPlannerDispatch(ctx context.Context,
 // T-09-13 mitigation: spawn is idempotent — AlreadyExists on Create is treated
 // as success, so a re-enqueue from the reporter Job's own completion does no harm.
 //
-//nolint:unparam // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain
+//nolint:unparam,gocyclo // ctrl.Result kept so callers can `return r.handleProjectJobCompletion(...)` in the reconcile chain; a flat state machine of mutually-exclusive completion arms — splitting obscures the contract (parity with the other three level handlers)
 func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, project *tidev1alpha3.Project, completedJob *batchv1.Job) (ctrl.Result, error) {
 	logger := logf.FromContext(ctx)
 
@@ -1800,6 +1804,79 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		logger.V(1).Info("no env reader; skipping tiny-status read", "project", project.Name)
 	}
 
+	// Phase 42 D-01/D-02/D-04: synthesize at most one retroactive AGENT span
+	// per planner Job attempt, gated by the durable PlannerSpanEmittedUID
+	// marker keyed by Job UID (42-REVIEW WR-02: planner Job names are
+	// deterministic, so a deleted-and-recreated attempt reuses the name but
+	// never the UID — D-02 requires each attempt to produce its own span) —
+	// INDEPENDENT of envReadOK and isFirstCompletion (Pitfall 2: the
+	// existing PlannerRolledUpUID marker below is envReadOK-gated by design
+	// and would re-emit a degraded span on every reconcile forever if reused
+	// here). Ordering is mark-then-emit (42-REVIEW WR-01): the marker is
+	// stamped durably BEFORE the span is exported — the optimistic-lock patch
+	// closes the stale-cache re-entry window, making duplicate emission
+	// impossible; a crash between stamp and emission loses that attempt's
+	// span, preferred over double-counting tokens/cost in Phoenix. Pattern 3:
+	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
+	// a Job with no resolvable timestamps — checked BEFORE stamping so a
+	// stamp is never wasted on an unemittable span.
+	//
+	// Deliberately NOT inside the D-11/R-13 ImportSource suppression branch
+	// below: that branch exists to prevent double-COUNTING of a prior run's
+	// planning cost, but a span records that a Job ran in THIS cluster — an
+	// import with no real completed Job never reaches this point at all
+	// (the completedJob != nil gate above handles it naturally).
+	if completedJob != nil && project.Status.PlannerSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
+		stamped := false
+		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &tidev1alpha3.Project{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+				return err
+			}
+			if latest.Status.PlannerSpanEmittedUID == string(completedJob.UID) {
+				return nil // already stamped by a concurrent reconcile — its stamper emits
+			}
+			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			latest.Status.PlannerSpanEmittedUID = string(completedJob.UID)
+			if err := r.Status().Patch(ctx, latest, markerPatch); err != nil {
+				return err
+			}
+			stamped = true
+			return nil
+		}); mErr != nil {
+			// 42-REVIEW WR-03: telemetry bookkeeping is subordinate to pipeline
+			// progression — a persistent status-patch failure must not block the
+			// reporter spawn, budget rollup, or gate hooks below. No error return,
+			// no requeue: the marker is still unset, so the next watch-driven
+			// reconcile retries the stamp (mark-then-emit guarantees this degrade
+			// path accrues no duplicate span).
+			logger.Error(mErr, "PlannerSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "project", project.Name)
+		} else if stamped {
+			// D-02: Project is the root of the trace — no parent span exists.
+			parentSpanID := trace.SpanID{}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "project", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				project.Status.ProjectTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tidev1alpha3.Project{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.ProjectTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "ProjectTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "project", project.Name)
+				}
+			}
+		}
+	}
+
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the namespace PVC and materializes Milestone
 	// children via the K8s API. Children arrive via the Owns(&Milestone{}) watch.
@@ -1822,7 +1899,10 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			}
 			isFirstCompletion = true
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
-				ReporterOptions{ReporterImage: r.Deps.ReporterImage}, r.Scheme)
+				ReporterOptions{
+					ReporterImage: r.Deps.ReporterImage,
+					TraceParent:   traceparentForLevel(project, project.Status.ProjectTraceSpanID),
+				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {
 					return ctrl.Result{}, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
