@@ -104,3 +104,12 @@ None - no external service configuration required.
 ---
 *Phase: 44-llm-message-array-spans-d-o5-redaction-size-boundary*
 *Completed: 2026-07-16*
+
+## Self-Check: PASSED
+
+- FOUND: internal/controller/reporter_jobspec.go
+- FOUND: .planning/phases/44-llm-message-array-spans-d-o5-redaction-size-boundary/44-02-SUMMARY.md
+- FOUND commit: 8212e05 (test)
+- FOUND commit: e6354d0 (feat)
+- FOUND commit: b2c300b (feat)
+- FOUND commit: d716134 (docs: SUMMARY)
