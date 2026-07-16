@@ -32,14 +32,36 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	tideprojectv1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 	pkgdispatch "github.com/jsquirrelz/tide/pkg/dispatch"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
+
+// testProjectUID is a canonical, hyphenated K8s-UID-shaped fixture UID (32
+// hex chars once dashes are stripped) — the shape otelai.TraceIDFromUID
+// requires to derive a valid, non-zero deterministic TraceID. Tests that
+// need synthesizePlannerSpan to actually emit (i.e. a non-nil project) use
+// this exact UID unless the test is specifically about a different UID.
+const testProjectUID = "11111111-1111-1111-1111-111111111111"
+
+// fixtureProject builds a minimal Project with a valid-shaped UID and the
+// given model, sufficient for synthesizePlannerSpan's nil-safety and
+// deterministic-TraceID requirements.
+func spanEmissionFixtureProject(uid, model string) *tideprojectv1alpha3.Project {
+	return &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID(uid)},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Subagent: tideprojectv1alpha3.SubagentConfig{Model: model},
+		},
+	}
+}
 
 // setupSpanExporter swaps the global TracerProvider for an in-memory one
 // (synchronous WithSyncer — no flush needed), restoring the previous
@@ -195,9 +217,12 @@ func TestPlannerSpanResolvable(t *testing.T) {
 
 func TestSynthesizePlannerSpanNilJob(t *testing.T) {
 	exp := setupSpanExporter(t)
-	got := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, nil, pkgdispatch.EnvelopeOut{}, false)
-	if got {
-		t.Errorf("synthesizePlannerSpan(nil job) = true, want false")
+	gotID, gotOK := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, nil, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if gotOK {
+		t.Errorf("synthesizePlannerSpan(nil job) ok = true, want false")
+	}
+	if gotID.IsValid() {
+		t.Errorf("synthesizePlannerSpan(nil job) spanID = %v, want zero", gotID)
 	}
 	if len(exp.GetSpans()) != 0 {
 		t.Errorf("synthesizePlannerSpan(nil job) recorded %d spans, want 0", len(exp.GetSpans()))
@@ -221,11 +246,7 @@ func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 			},
 		},
 	}
-	project := &tideprojectv1alpha3.Project{
-		Spec: tideprojectv1alpha3.ProjectSpec{
-			Subagent: tideprojectv1alpha3.SubagentConfig{Model: "claude-test-model"},
-		},
-	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
 	out := pkgdispatch.EnvelopeOut{
 		Usage: pkgdispatch.Usage{
 			InputTokens:         700,
@@ -235,8 +256,8 @@ func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 		},
 	}
 
-	got := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, out, true)
-	if !got {
+	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(succeeded) = false, want true")
 	}
 
@@ -311,9 +332,10 @@ func TestSynthesizePlannerSpanFailed(t *testing.T) {
 		},
 	}
 	out := pkgdispatch.EnvelopeOut{ExitCode: 2, Reason: "cap-hit"}
+	project := spanEmissionFixtureProject(testProjectUID, "")
 
-	got := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, job, out, true)
-	if !got {
+	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(failed) = false, want true")
 	}
 
@@ -361,14 +383,10 @@ func TestSynthesizePlannerSpanDegradedEnvelope(t *testing.T) {
 			},
 		},
 	}
-	project := &tideprojectv1alpha3.Project{
-		Spec: tideprojectv1alpha3.ProjectSpec{
-			Subagent: tideprojectv1alpha3.SubagentConfig{Model: "claude-test-model"},
-		},
-	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
 
-	got := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false)
-	if !got {
+	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(degraded) = false, want true")
 	}
 
@@ -397,10 +415,13 @@ func TestSynthesizePlannerSpanDegradedEnvelope(t *testing.T) {
 	}
 }
 
-// TestSynthesizePlannerSpanNilProjectEmptyModel — Pitfall 5: a nil project
-// with no Helm default resolves the model to "" — the span must omit
-// llm.model_name entirely rather than emit an empty string.
-func TestSynthesizePlannerSpanNilProjectEmptyModel(t *testing.T) {
+// TestSynthesizePlannerSpanNilProjectSkipsEmission — TRACE-02/Pitfall 5:
+// Phase 43 deliberately changes Phase 42's nil-tolerant emission. A nil
+// project has no deterministic TraceID, so emitting a span for it would
+// break the one-trace-per-Project guarantee — span loss is preferred over
+// an unanchored span; the caller gets (zero SpanID, false) and no span is
+// exported.
+func TestSynthesizePlannerSpanNilProjectSkipsEmission(t *testing.T) {
 	exp := setupSpanExporter(t)
 
 	start := mustTime(t, "2026-07-15T10:00:00Z")
@@ -415,22 +436,247 @@ func TestSynthesizePlannerSpanNilProjectEmptyModel(t *testing.T) {
 		},
 	}
 
-	got := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false)
-	if !got {
-		t.Fatalf("synthesizePlannerSpan(nil project) = false, want true")
+	gotID, gotOK := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if gotOK {
+		t.Errorf("synthesizePlannerSpan(nil project) ok = true, want false")
+	}
+	if gotID.IsValid() {
+		t.Errorf("synthesizePlannerSpan(nil project) spanID = %v, want zero", gotID)
+	}
+	if len(exp.GetSpans()) != 0 {
+		t.Errorf("synthesizePlannerSpan(nil project) recorded %d spans, want 0 (no deterministic TraceID available)", len(exp.GetSpans()))
+	}
+}
+
+// ─── parenting / TraceID / return-value coverage (Phase 43 TRACE-02) ───────
+
+// TestSynthesizePlannerSpanDeterministicTraceID — every emitted span's
+// TraceID equals otelai.TraceIDFromUID(project.UID), independent of level or
+// parentSpanID (D-01).
+func TestSynthesizePlannerSpanDeterministicTraceID(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	expectedTID, err := otelai.TraceIDFromUID(string(project.UID))
+	if err != nil {
+		t.Fatalf("otelai.TraceIDFromUID(%q): %v", project.UID, err)
+	}
+
+	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
 
 	spans := exp.GetSpans()
 	if len(spans) != 1 {
-		t.Fatalf("synthesizePlannerSpan(nil project) recorded %d spans, want exactly 1", len(spans))
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	if got := spans[0].SpanContext.TraceID(); got != expectedTID {
+		t.Errorf("span TraceID = %v, want %v (otelai.TraceIDFromUID(project.UID))", got, expectedTID)
+	}
+}
+
+// TestSynthesizePlannerSpanParentLinkage — a non-zero parentSpanID produces
+// a span whose Parent.SpanID() equals it (real parent-child threading,
+// RESEARCH Pattern 2 — one SpanContext construction, no custom IDGenerator).
+func TestSynthesizePlannerSpanParentLinkage(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	parentSpanID, err := trace.SpanIDFromHex("0102030405060708")
+	if err != nil {
+		t.Fatalf("trace.SpanIDFromHex: %v", err)
+	}
+
+	_, gotOK := synthesizePlannerSpan(context.Background(), "phase", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, parentSpanID)
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	if got := spans[0].Parent.SpanID(); got != parentSpanID {
+		t.Errorf("span Parent.SpanID() = %v, want %v", got, parentSpanID)
+	}
+}
+
+// TestSynthesizePlannerSpanRootWhenParentZero — a zero parentSpanID (D-02:
+// Project's own case) produces a span with no valid parent, while the
+// TraceID is still the deterministic one derived from Project.UID.
+func TestSynthesizePlannerSpanRootWhenParentZero(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	expectedTID, err := otelai.TraceIDFromUID(string(project.UID))
+	if err != nil {
+		t.Fatalf("otelai.TraceIDFromUID(%q): %v", project.UID, err)
+	}
+
+	_, gotOK := synthesizePlannerSpan(context.Background(), "project", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
 	}
 	span := spans[0]
-
-	provider, ok := attrValue(span.Attributes, "llm.provider")
-	if !ok || provider.AsString() != "anthropic" {
-		t.Errorf("llm.provider attribute = %v (found=%v), want %q", provider, ok, "anthropic")
+	if span.Parent.SpanID().IsValid() {
+		t.Errorf("span.Parent.SpanID() valid = true, want false (root span, D-02)")
 	}
-	if _, ok := attrValue(span.Attributes, "llm.model_name"); ok {
-		t.Errorf("llm.model_name attribute present, want absent (Pitfall 5: empty model omitted)")
+	if got := span.SpanContext.TraceID(); got != expectedTID {
+		t.Errorf("span TraceID = %v, want %v (still deterministic for a root span)", got, expectedTID)
+	}
+}
+
+// TestSynthesizePlannerSpanReturnsOwnSpanID — the returned SpanID is the
+// minted span's own identity (span.SpanContext.SpanID()), not the parent's —
+// this is the value the caller persists to {Level}TraceSpanID (PROP-02).
+func TestSynthesizePlannerSpanReturnsOwnSpanID(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	gotID, gotOK := synthesizePlannerSpan(context.Background(), "plan", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	if want := spans[0].SpanContext.SpanID(); gotID != want {
+		t.Errorf("returned SpanID = %v, want %v (the exported span's own SpanID)", gotID, want)
+	}
+}
+
+// TestSynthesizePlannerSpanTaskRoleExecutor — level "task" derives
+// tide.role=executor (POOL-01 vocabulary), unlike the four planner levels
+// which all derive tide.role=planner (asserted already by the
+// SucceededComplete test).
+func TestSynthesizePlannerSpanTaskRoleExecutor(t *testing.T) {
+	exp := setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	_, gotOK := synthesizePlannerSpan(context.Background(), "task", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+	}
+	role, ok := attrValue(spans[0].Attributes, "tide.role")
+	if !ok || role.AsString() != "executor" {
+		t.Errorf("tide.role attribute = %v (found=%v), want %q", role, ok, "executor")
+	}
+}
+
+// ─── spanIDFromHexOrZero ────────────────────────────────────────────────────
+
+func TestSpanIDFromHexOrZero(t *testing.T) {
+	valid, err := trace.SpanIDFromHex("0102030405060708")
+	if err != nil {
+		t.Fatalf("trace.SpanIDFromHex: %v", err)
+	}
+	cases := []struct {
+		name string
+		hex  string
+		want trace.SpanID
+	}{
+		{name: "valid 16-hex", hex: "0102030405060708", want: valid},
+		{name: "empty", hex: "", want: trace.SpanID{}},
+		{name: "malformed", hex: "not-a-span-id", want: trace.SpanID{}},
+	}
+	for _, tc := range cases {
+		if got := spanIDFromHexOrZero(tc.hex); got != tc.want {
+			t.Errorf("spanIDFromHexOrZero(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// ─── traceparentForLevel ────────────────────────────────────────────────────
+
+func TestTraceparentForLevel(t *testing.T) {
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+	traceID, err := otelai.TraceIDFromUID(string(project.UID))
+	if err != nil {
+		t.Fatalf("otelai.TraceIDFromUID(%q): %v", project.UID, err)
+	}
+	spanID, err := trace.SpanIDFromHex("0102030405060708")
+	if err != nil {
+		t.Fatalf("trace.SpanIDFromHex: %v", err)
+	}
+	want := "00-" + traceID.String() + "-" + spanID.String() + "-01"
+
+	if got := traceparentForLevel(project, "0102030405060708"); got != want {
+		t.Errorf("traceparentForLevel(project, valid hex) = %q, want %q", got, want)
+	}
+	if got := traceparentForLevel(nil, "0102030405060708"); got != "" {
+		t.Errorf("traceparentForLevel(nil project, valid hex) = %q, want %q", got, "")
+	}
+	if got := traceparentForLevel(project, ""); got != "" {
+		t.Errorf("traceparentForLevel(project, empty hex) = %q, want %q", got, "")
 	}
 }

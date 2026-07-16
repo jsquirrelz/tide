@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -406,6 +408,19 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 	// D-02 / T-40-12: log the resolved model at dispatch — previously the
 	// resolved model appeared nowhere outside the PVC envelope.
 	logf.FromContext(ctx).Info("resolved subagent dispatch", "level", "phase", "model", envIn.Provider.Model, "image", resolvedImage)
+
+	// PROP-01: Phase's immediate parent is Milestone — a genuinely new fetch
+	// (mirrors the identical fetch in handleJobCompletion). A missing
+	// MilestoneRef or a failed Get degrades to an empty hex, which
+	// traceparentForLevel/FormatTraceparent already turn into an omitted env
+	// var rather than a malformed one.
+	parentSpanIDHex := ""
+	if ph.Spec.MilestoneRef != "" {
+		var parentMs tideprojectv1alpha3.Milestone
+		if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ph.Spec.MilestoneRef}, &parentMs); err == nil {
+			parentSpanIDHex = parentMs.Status.MilestoneTraceSpanID
+		}
+	}
 	opts := podjob.BuildOptions{
 		Kind:                 podjob.JobKindPlanner,
 		ParentObj:            ph,
@@ -423,6 +438,7 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		TraceParent:          traceparentForLevel(project, parentSpanIDHex),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ph, r.Scheme); err != nil {
@@ -507,7 +523,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
 	// a Job with no resolvable timestamps — checked BEFORE stamping so a
 	// stamp is never wasted on an unemittable span.
-	if completedJob != nil && ph.Status.PhaseSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
+	if completedJob != nil && project != nil && ph.Status.PhaseSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tideprojectv1alpha3.Phase{}
@@ -533,7 +549,38 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 			// path accrues no duplicate span).
 			logger.Error(mErr, "PhaseSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "phase", ph.Name)
 		} else if stamped {
-			synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
+			// TRACE-02: Phase's immediate parent is Milestone — a genuinely new
+			// fetch (Immediate-Parent-Fetch Asymmetry, RESEARCH.md A3). A missing
+			// MilestoneRef or a failed Get degrades to an unnested span (zero
+			// parentSpanID) rather than blocking emission — the span still groups
+			// by the deterministic TraceID.
+			var parentSpanID trace.SpanID
+			if ph.Spec.MilestoneRef != "" {
+				var parentMs tideprojectv1alpha3.Milestone
+				if err := r.Get(ctx, client.ObjectKey{Namespace: ph.Namespace, Name: ph.Spec.MilestoneRef}, &parentMs); err == nil {
+					parentSpanID = spanIDFromHexOrZero(parentMs.Status.MilestoneTraceSpanID)
+				}
+			}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				ph.Status.PhaseTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha3.Phase{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(ph), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.PhaseTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "PhaseTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "phase", ph.Name)
+				}
+			}
 		}
 	}
 
@@ -542,7 +589,8 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName())
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName(),
+		traceparentForLevel(project, ph.Status.PhaseTraceSpanID))
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/trace"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -458,6 +460,9 @@ func (r *MilestoneReconciler) reconcilePlannerDispatch(ctx context.Context, ms *
 		ProjectUID:           string(project.UID),
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
+		// PROP-01: Milestone's immediate parent is Project, already resolved
+		// above — no new fetch needed.
+		TraceParent: traceparentForLevel(project, project.Status.ProjectTraceSpanID),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ms, r.Scheme); err != nil {
@@ -566,7 +571,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
 	// a Job with no resolvable timestamps — checked BEFORE stamping so a
 	// stamp is never wasted on an unemittable span.
-	if completedJob != nil && ms.Status.MilestoneSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
+	if completedJob != nil && project != nil && ms.Status.MilestoneSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tideprojectv1alpha3.Milestone{}
@@ -592,7 +597,33 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			// path accrues no duplicate span).
 			logger.Error(mErr, "MilestoneSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "milestone", ms.Name)
 		} else if stamped {
-			synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK)
+			// TRACE-02: Milestone's immediate parent is Project, already fully
+			// resolved above — guard project != nil to avoid a nil-pointer
+			// dereference (a nil project also makes the synthesizer a no-op).
+			var parentSpanID trace.SpanID
+			if project != nil {
+				parentSpanID = spanIDFromHexOrZero(project.Status.ProjectTraceSpanID)
+			}
+			thisSpanID, emitted := synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			if emitted {
+				// Mirror in-memory unconditionally so same-reconcile downstream
+				// logic reads it even if the persistence patch below fails.
+				ms.Status.MilestoneTraceSpanID = thisSpanID.String()
+				if tErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					latest := &tideprojectv1alpha3.Milestone{}
+					if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+						return err
+					}
+					tracePatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+					latest.Status.MilestoneTraceSpanID = thisSpanID.String()
+					return r.Status().Patch(ctx, latest, tracePatch)
+				}); tErr != nil {
+					// PROP-02/Pitfall 2: non-fatal — this is a SEPARATE, later patch
+					// from the marker stamp above (the span ID isn't known until
+					// synthesizePlannerSpan returns).
+					logger.Error(tErr, "MilestoneTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "milestone", ms.Name)
+				}
+			}
 		}
 	}
 
@@ -605,7 +636,8 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// isFirstCompletion tracks whether this is the initial observation of the planner
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage, r.sharedPVCName())
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.Deps.ReporterImage, r.sharedPVCName(),
+		traceparentForLevel(project, ms.Status.MilestoneTraceSpanID))
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

@@ -167,6 +167,18 @@ type TaskStatus struct {
 
 	// +optional
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
+
+	// TaskSpanEmittedUID is the UID of the executor Job whose completion has
+	// already had its dispatch span synthesized. Mirrors {Level}SpanEmittedUID
+	// on the four planner-level Status structs (Phase 43 TRACE-01).
+	// +optional
+	TaskSpanEmittedUID string `json:"taskSpanEmittedUID,omitempty"`
+
+	// TaskTraceSpanID is the OTel SpanID of this Task's own synthesized span,
+	// persisted for Phase 46's dashboard deep-link (OBS-04). Never store the
+	// TraceID — always re-derivable from Project.UID via otelai.TraceIDFromUID.
+	// +optional
+	TaskTraceSpanID string `json:"taskTraceSpanID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

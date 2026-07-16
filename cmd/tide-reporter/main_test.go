@@ -322,3 +322,36 @@ func TestRunMissingFlags(t *testing.T) {
 		})
 	}
 }
+
+// Test 7: parseFlags accepts --traceparent and returns it verbatim on cfg
+// (Phase 43 PROP-01/Pitfall 4 — the flag must exist in the same commit that
+// BuildReporterJob starts emitting the --traceparent Arg).
+func TestParseFlagsTraceparent(t *testing.T) {
+	const traceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+	cfg, err := parseFlags([]string{
+		"--traceparent=" + traceParent,
+		"--project-uid=x",
+		"--task-uid=t",
+		"--parent-name=p",
+		"--parent-namespace=ns",
+		"--parent-kind=Milestone",
+	})
+	if err != nil {
+		t.Fatalf("parseFlags: unexpected error: %v", err)
+	}
+	if cfg.TraceParent != traceParent {
+		t.Errorf("cfg.TraceParent = %q, want %q", cfg.TraceParent, traceParent)
+	}
+}
+
+// Test 8: parseFlags rejects an unknown flag — proves the crash-on-unknown
+// contract survived the flag.ExitOnError → flag.ContinueOnError extraction
+// (Pitfall 4: an unregistered Arg must still be a hard failure, not silently
+// ignored).
+func TestParseFlagsUnknownFlagErrors(t *testing.T) {
+	_, err := parseFlags([]string{"--bogus=1"})
+	if err == nil {
+		t.Fatal("parseFlags: expected error for unknown flag --bogus, got nil")
+	}
+}

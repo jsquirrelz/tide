@@ -981,3 +981,83 @@ func TestBuildJobSpec_PricingOverridesJSON_AbsentWhenEmpty(t *testing.T) {
 		})
 	}
 }
+
+// ---- Phase 43 PROP-01: TRACEPARENT env transport ----
+
+// TestBuildJobSpec_TraceparentEnvPresentWhenSet verifies that BuildOptions.TraceParent,
+// when non-empty, stamps TRACEPARENT on the subagent container with the exact value —
+// on both executor and planner Kinds (D-05: all five levels' dispatch Jobs).
+func TestBuildJobSpec_TraceparentEnvPresentWhenSet(t *testing.T) {
+	const traceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+	cases := map[string]BuildOptions{
+		"executor": func() BuildOptions {
+			o := buildTestOptions()
+			o.TraceParent = traceParent
+			return o
+		}(),
+		"planner": func() BuildOptions {
+			o := buildPlannerTestOptions()
+			o.TraceParent = traceParent
+			return o
+		}(),
+	}
+
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			job := BuildJobSpec(opts)
+			containers := job.Spec.Template.Spec.Containers
+			if len(containers) == 0 {
+				t.Fatal("no containers in pod spec")
+			}
+			subagent := containers[0]
+			var found bool
+			var gotVal string
+			for _, e := range subagent.Env {
+				if e.Name == "TRACEPARENT" {
+					found = true
+					gotVal = e.Value
+				}
+			}
+			if !found {
+				t.Errorf("%s: subagent missing TRACEPARENT env var when TraceParent is set", name)
+			}
+			if gotVal != traceParent {
+				t.Errorf("%s: TRACEPARENT = %q; want %q", name, gotVal, traceParent)
+			}
+		})
+	}
+}
+
+// TestBuildJobSpec_TraceparentEnvAbsentWhenEmpty verifies that an empty
+// BuildOptions.TraceParent does NOT stamp TRACEPARENT on any container — zero
+// behavior change for the sole genuinely-parentless case (Project's own dispatch).
+func TestBuildJobSpec_TraceparentEnvAbsentWhenEmpty(t *testing.T) {
+	cases := map[string]BuildOptions{
+		"executor": buildTestOptions(),        // TraceParent is zero value = ""
+		"planner":  buildPlannerTestOptions(), // same
+	}
+
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			if opts.TraceParent != "" {
+				t.Fatalf("%s: test fixture invariant broken: expected empty TraceParent", name)
+			}
+			job := BuildJobSpec(opts)
+			for _, c := range job.Spec.Template.Spec.Containers {
+				for _, e := range c.Env {
+					if e.Name == "TRACEPARENT" {
+						t.Errorf("%s: container %q should NOT carry TRACEPARENT when TraceParent is empty", name, c.Name)
+					}
+				}
+			}
+			for _, c := range job.Spec.Template.Spec.InitContainers {
+				for _, e := range c.Env {
+					if e.Name == "TRACEPARENT" {
+						t.Errorf("%s: init container %q should NOT carry TRACEPARENT when TraceParent is empty", name, c.Name)
+					}
+				}
+			}
+		})
+	}
+}

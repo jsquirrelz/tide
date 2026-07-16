@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.8
 milestone_name: Phoenix Rising — OpenInference Trace Emission + Self-Hosted Phoenix
 status: executing
-stopped_at: Phase 44 context gathered
+stopped_at: Phase 44 planned (5 plans) — ready to execute
 last_updated: "2026-07-16T22:09:26.675Z"
-last_activity: 2026-07-16 -- Phase 44 planning complete
+last_activity: 2026-07-16 -- Phase 43 complete (merged); Phase 44 planning complete
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 10
   percent: 17
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-15)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 43 — task level parity + trace context propagation
+**Current focus:** Phase 44 — LLM message-array spans + D-O5 redaction/size boundary
 
 ## Current Position
 
-Phase: 43
+Phase: 44
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-07-16 -- Phase 44 planning complete
+Last activity: 2026-07-16 -- Phase 43 complete (merged); Phase 44 planning complete
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -89,7 +89,7 @@ Tech-debt carried into v1.0.8 window: W-2 FailureHalt/gate-order divergences (to
 ## Session Continuity
 
 Last session: 2026-07-16T20:41:20.157Z
-Stopped at: Phase 44 context gathered
+Stopped at: Phase 44 planned — ready to execute
 Resume file: .planning/phases/44-llm-message-array-spans-d-o5-redaction-size-boundary/44-CONTEXT.md
 
 ## Operator Next Steps

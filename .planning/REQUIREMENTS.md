@@ -6,8 +6,8 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### Dispatch-Chain Span Emission (TRACE)
 
-- [ ] **TRACE-01**: The manager emits retroactive OpenInference `AGENT` spans (`trace.WithTimestamp` start/end) at all five level-completion sites (Project/Milestone/Phase/Plan/Task), carrying model, cost, duration, and token attributes sourced from the same envelope/status data the budget tally already uses — never recomputed
-- [ ] **TRACE-02**: One run renders as ONE navigable trace: the trace ID derives deterministically from the Project UID (128-bit ↔ OTel TraceID), and every level's span parents correctly under its parent level's span
+- [x] **TRACE-01**: The manager emits retroactive OpenInference `AGENT` spans (`trace.WithTimestamp` start/end) at all five level-completion sites (Project/Milestone/Phase/Plan/Task), carrying model, cost, duration, and token attributes sourced from the same envelope/status data the budget tally already uses — never recomputed
+- [x] **TRACE-02**: One run renders as ONE navigable trace: the trace ID derives deterministically from the Project UID (128-bit ↔ OTel TraceID), and every level's span parents correctly under its parent level's span
 - [ ] **TRACE-03**: Every span-emitting one-shot binary (reporter; any Job-side emitter) carries the TracerProvider construction AND the deferred-Shutdown flush discipline — a short-lived process must not silently drop its batch
 
 ### OpenInference Attribute Completeness (ATTR)
@@ -18,8 +18,8 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### Trace-Context Propagation (PROP)
 
-- [ ] **PROP-01**: W3C `traceparent` is injected as data into both the subagent Job env and the reporter Job env; child-process spans parent under the manager's dispatch span — the runtime-neutral contract, applied at both pod hops
-- [ ] **PROP-02**: Per-level trace/span IDs persist in a small CRD `.status.trace` field (bytes, not payloads — within the keep-CRDs-small rule), serving as the durable parent carrier across reconciles and the dashboard's read path for deep links
+- [x] **PROP-01**: W3C `traceparent` is injected as data into both the subagent Job env and the reporter Job env; child-process spans parent under the manager's dispatch span — the runtime-neutral contract, applied at both pod hops
+- [x] **PROP-02**: Per-level trace/span IDs persist in a small CRD `.status.trace` field (bytes, not payloads — within the keep-CRDs-small rule), serving as the durable parent carrier across reconciles and the dashboard's read path for deep links
 
 ### LLM Message-Array Spans (MSG)
 
@@ -70,14 +70,14 @@ Deferred to later milestones:
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRACE-01 | Phase 43 | Pending |
-| TRACE-02 | Phase 43 | Pending |
+| TRACE-01 | Phase 43 | Complete |
+| TRACE-02 | Phase 43 | Complete |
 | TRACE-03 | Phase 44 | Pending |
 | ATTR-01 | Phase 42 | Complete |
 | ATTR-02 | Phase 42 | Complete |
 | ATTR-03 | Phase 42 | Complete |
-| PROP-01 | Phase 43 | Pending |
-| PROP-02 | Phase 43 | Pending |
+| PROP-01 | Phase 43 | Complete |
+| PROP-02 | Phase 43 | Complete |
 | MSG-01 | Phase 44 | Pending |
 | MSG-02 | Phase 44 | Pending |
 | MSG-03 | Phase 44 | Pending |

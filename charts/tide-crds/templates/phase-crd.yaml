@@ -162,6 +162,14 @@ spec:
                   never the UID (D-02: each retry attempt produces its own span).
                   Phase 42 D-02/D-04.
                 type: string
+              phaseTraceSpanID:
+                description: |-
+                  PhaseTraceSpanID is this level's own synthesized dispatch-span OTel
+                  SpanID hex, persisted as the durable parent carrier for child-level
+                  spans and Phase 46's dashboard deep-link (Phase 43 PROP-02). Never
+                  stores the TraceID — always re-derivable from Project.UID via
+                  otelai.TraceIDFromUID (D-03/D-04).
+                type: string
             type: object
         required:
         - spec

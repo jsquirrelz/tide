@@ -151,6 +151,14 @@ type BuildOptions struct {
 	// Populated at the controller call site in Plan 14-05 (not in this plan).
 	PricingOverridesJSON string
 
+	// TraceParent is the W3C traceparent string for this level's own subagent
+	// dispatch Job, sourced from the IMMEDIATE PARENT's persisted span ID
+	// (Phase 43 PROP-01). Empty when there is genuinely no parent span yet
+	// available (Project's own dispatch is the sole such case — FormatTraceparent
+	// already returns "" for a zero/invalid parent, so no special-case branch
+	// is needed at the call site).
+	TraceParent string
+
 	// EstimatedCostCents is the D-05 pre-charge estimate in cents. Stamped as
 	// label tideproject.k8s/estimated-cost on executor Jobs so that
 	// budget.RederiveReservations can restore the in-process ReservationStore
@@ -397,6 +405,16 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		subagentEnv = append(subagentEnv, corev1.EnvVar{
 			Name:  "TIDE_PRICING_OVERRIDES_JSON",
 			Value: opts.PricingOverridesJSON,
+		})
+	}
+	// Phase 43 PROP-01: stamp TRACEPARENT only when the immediate parent's span ID
+	// is available. Empty when there is genuinely no parent span (Project's own
+	// dispatch is the sole such case). TRACEPARENT is the standard OTel
+	// autoinstrumentation env var — the runtime-neutral contract per PROJECT.md.
+	if opts.TraceParent != "" {
+		subagentEnv = append(subagentEnv, corev1.EnvVar{
+			Name:  "TRACEPARENT",
+			Value: opts.TraceParent,
 		})
 	}
 	// cascade-13: only wire the localhost-credproxy plumbing (base-url + cert trust + cert
