@@ -1151,6 +1151,9 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 
 	// Standard result interpretation.
 	patch := client.MergeFrom(task.DeepCopy())
+	//nolint:goconst // "cap-hit" is a well-known EnvelopeOut.Result value shared across
+	// internal/harness, pkg/otelai, and this package's test fixtures; a constant here
+	// wouldn't reduce the raw-literal count package-wide and would need to span packages.
 	if out.ExitCode != 0 || out.Result == "cap-hit" || out.Result == outputPathsViolation {
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
 		reason := conditionReasonFromEnvelopeResult(out.Result, out.ExitCode)

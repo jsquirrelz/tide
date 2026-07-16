@@ -341,7 +341,7 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 		_, err := r.handleJobCompletion(ctx, ms, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(exp.GetSpans()).To(HaveLen(0))
+		Expect(exp.GetSpans()).To(BeEmpty())
 
 		var fresh tideprojectv1alpha3.Milestone
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seMSName, Namespace: "default"}, &fresh)).To(Succeed())
@@ -662,7 +662,7 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		_, err := r.handleJobCompletion(ctx, ph, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(exp.GetSpans()).To(HaveLen(0))
+		Expect(exp.GetSpans()).To(BeEmpty())
 
 		var fresh tideprojectv1alpha3.Phase
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePHName, Namespace: "default"}, &fresh)).To(Succeed())
@@ -935,7 +935,7 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		_, err := r.handlePlannerJobCompletion(ctx, plan, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(exp.GetSpans()).To(HaveLen(0))
+		Expect(exp.GetSpans()).To(BeEmpty())
 
 		var fresh tideprojectv1alpha3.Plan
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: sePlanName, Namespace: "default"}, &fresh)).To(Succeed())
@@ -1157,7 +1157,7 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 		_, err := r.handleProjectJobCompletion(ctx, proj, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(exp.GetSpans()).To(HaveLen(0))
+		Expect(exp.GetSpans()).To(BeEmpty())
 
 		var fresh tideprojectv1alpha3.Project
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: seProjName, Namespace: "default"}, &fresh)).To(Succeed())
