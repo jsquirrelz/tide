@@ -80,6 +80,17 @@ type PhaseStatus struct {
 	// otelai.TraceIDFromUID (D-03/D-04).
 	// +optional
 	PhaseTraceSpanID string `json:"phaseTraceSpanID,omitempty"`
+
+	// PhaseReporterSpawnedUID is the UID of the completed planner Job whose
+	// reporter Job has been spawned for this level — the durable gate closing
+	// the CR-01 window where the name-only spawn gate re-opens after the
+	// reporter Job's 300s TTL-GC and a sustained-reconcile parent re-Creates a
+	// duplicate reporter with recomputed options (Phase 47 gap-closure; mirrors
+	// PhaseRolledUpUID's role for budget rollup). The value is the completed
+	// Job's UID, falling back to the deterministic planner-Job name when the
+	// caller observes a nil Job object.
+	// +optional
+	PhaseReporterSpawnedUID string `json:"phaseReporterSpawnedUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

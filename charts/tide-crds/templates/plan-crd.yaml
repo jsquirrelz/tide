@@ -173,6 +173,17 @@ spec:
                 type: integer
               phase:
                 type: string
+              planReporterSpawnedUID:
+                description: |-
+                  PlanReporterSpawnedUID is the UID of the completed planner Job whose
+                  reporter Job has been spawned for this level — the durable gate closing
+                  the CR-01 window where the name-only spawn gate re-opens after the
+                  reporter Job's 300s TTL-GC and a sustained-reconcile parent re-Creates a
+                  duplicate reporter with recomputed options (Phase 47 gap-closure; mirrors
+                  PlanRolledUpUID's role for budget rollup). The value is the completed
+                  Job's UID, falling back to the deterministic planner-Job name when the
+                  caller observes a nil Job object.
+                type: string
               planRolledUpUID:
                 description: |-
                   PlanRolledUpUID is the name of this Plan's planner Job whose Usage

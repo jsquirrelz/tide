@@ -537,6 +537,19 @@ type ProjectStatus struct {
 	// identity is telemetry bookkeeping with no budget relationship.
 	// +optional
 	ProjectTraceSpanID string `json:"projectTraceSpanID,omitempty"`
+
+	// ProjectReporterSpawnedUID is the UID of the completed planner Job whose
+	// reporter Job has been spawned for this level — the durable gate closing
+	// the CR-01 window where the name-only spawn gate re-opens after the
+	// reporter Job's 300s TTL-GC and a sustained-reconcile parent re-Creates a
+	// duplicate reporter with recomputed options (Phase 47 gap-closure; mirrors
+	// Budget.PlannerRolledUpUID's role for budget rollup). Placed directly on
+	// ProjectStatus (NOT Budget-nested), mirroring PlannerSpanEmittedUID's
+	// placement: spawn identity is telemetry bookkeeping with no budget
+	// relationship. The value is the completed Job's UID, falling back to the
+	// deterministic planner-Job name when the caller observes a nil Job object.
+	// +optional
+	ProjectReporterSpawnedUID string `json:"projectReporterSpawnedUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

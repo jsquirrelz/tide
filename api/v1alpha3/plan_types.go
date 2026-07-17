@@ -137,6 +137,17 @@ type PlanStatus struct {
 	// +optional
 	PlanTraceSpanID string `json:"planTraceSpanID,omitempty"`
 
+	// PlanReporterSpawnedUID is the UID of the completed planner Job whose
+	// reporter Job has been spawned for this level — the durable gate closing
+	// the CR-01 window where the name-only spawn gate re-opens after the
+	// reporter Job's 300s TTL-GC and a sustained-reconcile parent re-Creates a
+	// duplicate reporter with recomputed options (Phase 47 gap-closure; mirrors
+	// PlanRolledUpUID's role for budget rollup). The value is the completed
+	// Job's UID, falling back to the deterministic planner-Job name when the
+	// caller observes a nil Job object.
+	// +optional
+	PlanReporterSpawnedUID string `json:"planReporterSpawnedUID,omitempty"`
+
 	// WaveIntegration records the bounded auto-retry state of the current
 	// wave-integration Job (Phase 34 D-04). Reset (Wave/Attempts) whenever
 	// reconcileWaveBoundary advances to a new blocking wave.
