@@ -41,10 +41,28 @@ limitations under the License.
 // BYPASS-03 established convention for this class of proof).
 //
 // Scope (deliberate, per plan): milestone stands in for the shared-helper
-// shape (milestone/phase/plan all route through spawnReporterIfNeeded with
-// the identical gate+stamp idiom) — one representative spec pins all three.
-// Project's inline arm and Task's trace-only path are structurally distinct
-// code and each get their own spec.
+// shape (milestone/phase all route through spawnReporterIfNeeded with the
+// identical gate+stamp idiom) — one representative spec pins both. Project's
+// inline arm, Plan's inline arm, and Task's trace-only path are structurally
+// distinct code; project and task each get their own spec.
+//
+// CR-01 re-fix (Phase 47 gap-closure #2): the first-generation marker above
+// closed only the reporter-Job-GC window and left a SECOND window open. The
+// marker is stamped in TWO key spaces — the live planner Job's UID (when a Job
+// is present on the reconcile) and the deterministic level name (when
+// completedJob is nil). A level that stays Running past its planner Job's 600s
+// TTL-GC first stamps the UID, then re-enters handleJobCompletion with
+// completedJob == nil and recomputes spawnKey to the NAME; a UID can never
+// equal that name, so the old equality gate reopened and spawned a duplicate
+// reporter (the first was already gone at its own 300s TTL). The two
+// "planner-Job TTL-GC re-entry" specs at the bottom of this file pin that
+// transition shut: the FIRST completion carries a live planner Job (marker =
+// UID), the SECOND carries completedJob == nil (spawnKey = name). The
+// reporter-Job-GC specs above intentionally keep BOTH completions on the
+// nil-Job path, so the marker there is a name in both — they never exercise
+// the UID→name transition, hence these dedicated specs. Task is exempt: its
+// handler early-returns on completedJob == nil, so it never reaches the
+// nil-Job key-space recompute.
 package controller
 
 import (
@@ -191,11 +209,14 @@ var _ = Describe("ReporterSpawnIdempotency — Milestone level (shared-helper sh
 		Expect(afterSecond.Status.MilestoneReporterSpawnedUID).To(Equal(milestoneJobName),
 			"marker must still hold the original spawn key after the skipped re-drive")
 
-		// Negative control: diverge the marker to simulate a DISTINCT attempt
-		// key (the plan's own "resetting the marker" allowance for this
-		// proof) — a mismatched marker must still spawn a fresh reporter,
-		// proving the gate is per-attempt equality, not a permanent one-shot
-		// latch once any reporter has ever been observed.
+		// Negative control: a genuinely NEW attempt still spawns, proving the
+		// gate is per-attempt on the live-Job path (case a) and not a permanent
+		// one-shot latch. After the CR-01 re-fix, the nil-Job short-circuit
+		// (case b) treats ANY non-empty marker as "already spawned" — so a fresh
+		// spawn now requires a live planner Job (non-nil completedJob) whose UID
+		// differs from the stored marker (a mismatched marker on the nil-Job path
+		// no longer re-opens the gate; that was the CR-01 bug). Diverge the marker
+		// first so the new live-Job attempt is unambiguously distinct.
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSName, Namespace: "default"}, ms)).To(Succeed())
 		markerResetPatch := client.MergeFrom(ms.DeepCopy())
 		ms.Status.MilestoneReporterSpawnedUID = "stale-attempt-key"
@@ -211,18 +232,21 @@ var _ = Describe("ReporterSpawnIdempotency — Milestone level (shared-helper sh
 			g.Expect(ms.Status.MilestoneReporterSpawnedUID).To(Equal("stale-attempt-key"))
 		}, "5s", "100ms").Should(Succeed(), "cache must observe the marker reset before re-driving completion")
 
-		_, err = r.handleJobCompletion(ctx, ms, nil)
+		distinctStart := time.Now().Add(-5 * time.Minute)
+		distinctEnd := time.Now()
+		distinctJob := succeededPlannerJob("rsi-ms-distinct-attempt", distinctStart, distinctEnd)
+		_, err = r.handleJobCompletion(ctx, ms, distinctJob)
 		Expect(err).NotTo(HaveOccurred())
 
 		Eventually(func() error {
 			return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
-		}, "5s", "100ms").Should(Succeed(), "a distinct (mismatched) attempt key must spawn a fresh reporter Job")
+		}, "5s", "100ms").Should(Succeed(), "a distinct live-Job attempt must spawn a fresh reporter Job")
 
 		Eventually(func(g Gomega) {
 			var fresh tideprojectv1alpha3.Milestone
 			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSName, Namespace: "default"}, &fresh)).To(Succeed())
-			g.Expect(fresh.Status.MilestoneReporterSpawnedUID).To(Equal(milestoneJobName),
-				"marker must advance back to the current spawn key after the fresh spawn")
+			g.Expect(fresh.Status.MilestoneReporterSpawnedUID).To(Equal(string(distinctJob.UID)),
+				"marker must advance to the distinct attempt's live-Job UID after the fresh spawn")
 		}, "5s", "100ms").Should(Succeed())
 	})
 })
@@ -488,5 +512,235 @@ var _ = Describe("ReporterSpawnIdempotency — Task level (trace-only path)", La
 		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiTaskName, Namespace: "default"}, &afterSecond)).To(Succeed())
 		Expect(afterSecond.Status.TaskTraceReporterSpawnedUID).To(Equal(string(completedJob.UID)),
 			"marker must still hold the original spawn key after the skipped re-drive")
+	})
+})
+
+// ─── Milestone level — planner-Job TTL-GC re-entry (CR-01 re-fix regression pin) ──
+//
+// Unlike the reporter-Job-GC milestone spec above (which drives BOTH completions
+// with a nil completedJob, stamping the marker to the deterministic name), this
+// spec drives the FIRST completion with a LIVE planner Job so the marker is
+// stamped in the UID key space, then re-enters with completedJob == nil (the
+// planner Job's own 600s TTL-GC) so spawnKey is recomputed to the name. That
+// UID(marker) vs name(spawnKey) mismatch is the exact window the first-generation
+// marker left open; the alreadySpawned predicate now honors the non-empty marker
+// directly on the nil-Job path. Milestone stands in for phase (same shared-helper
+// gate+stamp idiom).
+var _ = Describe("ReporterSpawnIdempotency — Milestone level (planner-Job TTL-GC re-entry)", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const (
+		rsiMSGCProjName = "reporter-spawn-idem-ms-gc-proj"
+		rsiMSGCName     = "reporter-spawn-idem-ms-gc"
+	)
+
+	var envReader *mapEnvReader
+
+	BeforeEach(func() {
+		childRollupProject(ctx, rsiMSGCProjName)
+		envReader = newMapEnvReader()
+	})
+
+	AfterEach(func() {
+		ms := &tideprojectv1alpha3.Milestone{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, ms); err == nil {
+			ms.Finalizers = nil
+			_ = k8sClient.Update(ctx, ms)
+			_ = k8sClient.Delete(ctx, ms)
+		}
+		cleanupChildRollupProject(ctx, rsiMSGCProjName)
+
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			if strings.HasPrefix(j.Name, "tide-reporter-") || strings.HasPrefix(j.Name, "tide-milestone-") {
+				_ = k8sClient.Delete(ctx, &j, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			}
+		}
+	})
+
+	It("honors the durable marker when the planner Job is TTL-GC'd (completedJob UID→nil-name), spawning no duplicate reporter", func() {
+		ms := &tideprojectv1alpha3.Milestone{
+			ObjectMeta: metav1.ObjectMeta{Name: rsiMSGCName, Namespace: "default"},
+			Spec:       tideprojectv1alpha3.MilestoneSpec{ProjectRef: rsiMSGCProjName},
+		}
+		Expect(k8sClient.Create(ctx, ms)).To(Succeed())
+		waitForCacheSync(rsiMSGCName, "default", &tideprojectv1alpha3.Milestone{})
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, ms)).To(Succeed())
+
+		statusPatch := client.MergeFrom(ms.DeepCopy())
+		ms.Status.Phase = "Running"
+		Expect(k8sClient.Status().Patch(ctx, ms, statusPatch)).To(Succeed())
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, ms)).To(Succeed())
+
+		envReader.SetOut(string(ms.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(ms.UID),
+			ExitCode:   0,
+			ChildCount: 0,
+			Usage: pkgdispatch.Usage{
+				InputTokens:        900,
+				OutputTokens:       150,
+				EstimatedCostCents: 21,
+			},
+		})
+
+		r := &MilestoneReconciler{
+			Client: mgrClient,
+			Scheme: k8sClient.Scheme(),
+			Deps: PlannerReconcilerDeps{
+				Dispatcher:     &stubDispatcher{},
+				EnvReader:      envReader,
+				CredproxyImage: testCredproxyImage,
+				SigningKey:     testSigningKey,
+				ReporterImage:  testReporterImage,
+				HelmProviderDefaults: ProviderDefaults{
+					Image: testSubagentImage,
+				},
+			},
+			PlannerPool: newPlannerPoolForTest(),
+		}
+
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", ms.UID)
+
+		// First completion with the planner Job PRESENT (non-nil completedJob):
+		// spawnKey is the live Job's UID, so the durable marker is stamped in the
+		// UID key space — NOT the deterministic milestoneJobName.
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		plannerJob := succeededPlannerJob("rsi-ms-gc-planner", start, end)
+		_, err := r.handleJobCompletion(ctx, ms, plannerJob)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+		}, "5s", "100ms").Should(Succeed(), "reporter Job must be spawned on first completion")
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Milestone
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.MilestoneReporterSpawnedUID).To(Equal(string(plannerJob.UID)),
+				"marker must be stamped to the live planner Job's UID (not the deterministic name) on first completion")
+		}, "5s", "100ms").Should(Succeed())
+
+		// Reporter's own 300s TTL-GC: delete the reporter Job and wait to NotFound
+		// so the shared helper's inner name-based Get cannot mask the gate.
+		Expect(k8sClient.Delete(ctx, &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: reporterJobName, Namespace: "default"},
+		}, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
+		Eventually(func() bool {
+			return apierrors.IsNotFound(mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{}))
+		}, "5s", "100ms").Should(BeTrue(), "reporter Job must be gone (300s reporter TTL-GC simulated)")
+
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, ms)).To(Succeed())
+
+		// Planner Job's 600s TTL-GC: the next reconcile can no longer find the
+		// planner Job, so completedJob == nil while the milestone is still Running.
+		// Pre-fix, spawnKey recomputes to milestoneJobName (a NAME) and
+		// marker(UID) != spawnKey(name) reopened the gate → a second reporter.
+		_, err = r.handleJobCompletion(ctx, ms, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		Consistently(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+		}, "3s", "200ms").Should(MatchError(ContainSubstring("not found")),
+			"the nil-Job re-entry must NOT recompute a name key and re-create the reporter")
+
+		var afterSecond tideprojectv1alpha3.Milestone
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiMSGCName, Namespace: "default"}, &afterSecond)).To(Succeed())
+		Expect(afterSecond.Status.MilestoneReporterSpawnedUID).To(Equal(string(plannerJob.UID)),
+			"marker must still hold the original planner-Job UID after the skipped nil-Job re-drive")
+	})
+})
+
+// ─── Project level — planner-Job TTL-GC re-entry (CR-01 re-fix regression pin) ──
+//
+// The project inline-arm analogue of the milestone spec above: first completion
+// carries a live planner Job (marker = UID), then the nil-Job re-entry (planner
+// Job 600s TTL-GC) recomputes spawnKey to plannerJobName. Pre-fix, marker(UID) !=
+// spawnKey(name) reopened the inline gate and re-Created the reporter.
+var _ = Describe("ReporterSpawnIdempotency — Project level (planner-Job TTL-GC re-entry)", Label("envtest", "heavy"), func() {
+	ctx := context.Background()
+
+	const rsiProjGCName = "reporter-spawn-idem-project-gc"
+
+	BeforeEach(func() {
+		ensurePVC(ctx, qqhPVCName, "default")
+	})
+
+	AfterEach(func() {
+		qqhCleanupProject(ctx, rsiProjGCName)
+		var jobs batchv1.JobList
+		_ = k8sClient.List(ctx, &jobs, client.InNamespace("default"))
+		for i := range jobs.Items {
+			j := jobs.Items[i]
+			if strings.HasPrefix(j.Name, "tide-project-") || strings.HasPrefix(j.Name, "tide-reporter-") {
+				_ = k8sClient.Delete(ctx, &j, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			}
+		}
+	})
+
+	It("honors the durable marker when the project planner Job is TTL-GC'd (completedJob UID→nil-name), spawning no duplicate reporter", func() {
+		proj := qqhCreateProject(ctx, rsiProjGCName)
+
+		envReader := newMapEnvReader()
+		r := qqhBuildReconciler(envReader)
+
+		envReader.SetOut(string(proj.UID), pkgdispatch.EnvelopeOut{
+			TaskUID:    string(proj.UID),
+			ExitCode:   0,
+			ChildCount: 0,
+			Usage: pkgdispatch.Usage{
+				InputTokens:        700,
+				OutputTokens:       120,
+				EstimatedCostCents: 64,
+			},
+		})
+
+		reporterJobName := fmt.Sprintf("tide-reporter-%s", proj.UID)
+
+		// First completion with the planner Job PRESENT: marker stamped in the UID
+		// key space.
+		start := time.Now().Add(-5 * time.Minute)
+		end := time.Now()
+		plannerJob := succeededPlannerJob("rsi-project-gc-planner", start, end)
+		_, err := r.handleProjectJobCompletion(ctx, proj, plannerJob)
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+		}, "5s", "100ms").Should(Succeed(), "reporter Job must be spawned on first completion")
+
+		Eventually(func(g Gomega) {
+			var fresh tideprojectv1alpha3.Project
+			g.Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiProjGCName, Namespace: "default"}, &fresh)).To(Succeed())
+			g.Expect(fresh.Status.ProjectReporterSpawnedUID).To(Equal(string(plannerJob.UID)),
+				"marker must be stamped to the live planner Job's UID (not the deterministic name) on first completion")
+		}, "5s", "100ms").Should(Succeed())
+
+		// Reporter's own 300s TTL-GC.
+		Expect(k8sClient.Delete(ctx, &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: reporterJobName, Namespace: "default"},
+		}, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
+		Eventually(func() bool {
+			return apierrors.IsNotFound(mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{}))
+		}, "5s", "100ms").Should(BeTrue(), "reporter Job must be gone (300s reporter TTL-GC simulated)")
+
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiProjGCName, Namespace: "default"}, proj)).To(Succeed())
+
+		// Planner Job's 600s TTL-GC: nil-Job re-entry recomputes spawnKey to the
+		// name — the durable marker (UID) must still short-circuit the inline arm.
+		_, err = r.handleProjectJobCompletion(ctx, proj, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		Consistently(func() error {
+			return mgrClient.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: "default"}, &batchv1.Job{})
+		}, "3s", "200ms").Should(MatchError(ContainSubstring("not found")),
+			"the nil-Job re-entry must NOT recompute a name key and re-create the reporter")
+
+		var afterSecond tideprojectv1alpha3.Project
+		Expect(mgrClient.Get(ctx, types.NamespacedName{Name: rsiProjGCName, Namespace: "default"}, &afterSecond)).To(Succeed())
+		Expect(afterSecond.Status.ProjectReporterSpawnedUID).To(Equal(string(plannerJob.UID)),
+			"marker must still hold the original planner-Job UID after the skipped nil-Job re-drive")
 	})
 })
