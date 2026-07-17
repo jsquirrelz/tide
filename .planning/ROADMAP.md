@@ -313,7 +313,7 @@ Plans:
 
 **Wave 2** *(47-03 blocked on 47-01/47-02)*
 
-- [ ] 47-03-PLAN.md — Fresh chart-pin re-check + INSTALL.md "Enable tracing (Phoenix)" + observability.md reference recipe (both storage paths, auth-ON, headers chain)
+- [x] 47-03-PLAN.md — Fresh chart-pin re-check + INSTALL.md "Enable tracing (Phoenix)" + observability.md reference recipe (both storage paths, auth-ON, headers chain)
 
 **Wave 3** *(47-04 blocked on 47-03 — the recipe is proven by following it)*
 
@@ -342,4 +342,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 2/5 | In Progress|  |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 3/5 | In Progress|  |
