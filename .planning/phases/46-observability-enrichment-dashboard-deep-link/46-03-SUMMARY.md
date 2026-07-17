@@ -136,3 +136,7 @@ None - no external service configuration required. (The Phoenix self-host recipe
 ---
 *Phase: 46-observability-enrichment-dashboard-deep-link*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All 9 modified files + SUMMARY.md verified present on disk; all 3 commits (`cf9c950`, `82273b5`, plan-summary commit) verified present in `git log --oneline --all`.
