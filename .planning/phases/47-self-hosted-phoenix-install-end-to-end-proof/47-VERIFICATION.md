@@ -1,8 +1,16 @@
 ---
 phase: 47-self-hosted-phoenix-install-end-to-end-proof
 verified: 2026-07-17T20:10:41Z
-status: human_needed
-score: 3/3 roadmap truths verified; 4/4 prior code gaps closed
+status: verified
+human_sign_off:
+  by: human
+  at: 2026-07-17T22:20:26Z
+  outcome: >
+    Both human_verification items accepted at v1.0.8 milestone close. PROOF-01 accepted as
+    met (all four evidence PNGs reviewed); "redacted message arrays" clause accepted as
+    satisfied by proven-safe pass-through (0-hit key search over 392 spans + unit-tested
+    chokepoint). See 47-HUMAN-UAT.md for the recorded rationale.
+score: 3/3 roadmap truths verified; 4/4 prior code gaps closed; 2/2 human items signed off
 overrides_applied: 0
 re_verification:
   previous_status: gaps_found
@@ -50,7 +58,7 @@ human_verification:
 
 **Phase Goal:** An operator can stand up a self-hosted Phoenix from documented, non-default-safe overrides, point TIDE's existing `otel.exporter.endpoint` chart value at it, and see a real run's complete five-level trace tree — including redacted message arrays — rendered and queryable. This is the milestone's acceptance bar.
 **Verified:** 2026-07-17T20:10:41Z
-**Status:** human_needed
+**Status:** verified (human sign-off recorded 2026-07-17 — both PROOF-01 acceptance items accepted; see 47-HUMAN-UAT.md)
 **Re-verification:** Yes — after gap closure (plans 47-06 → 47-10 + post-code-review re-fix `37f4a46`/`271df2a`)
 
 ## Re-Verification Summary
