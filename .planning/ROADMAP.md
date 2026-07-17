@@ -281,9 +281,9 @@ Plans:
 Plans:
 **Wave 1** *(parallel, independent)*
 
-- [ ] 46-01-PLAN.md — otelai SessionID/Metadata/Tags helpers + ReporterOptions/CLI transport + EmitSpans enrichment (reporter side)
-- [ ] 46-02-PLAN.md — Sampler default 0.1→1.0 (every surface) + phoenix.baseURL chart value + helm render gates + honest opt-down docs
-- [ ] 46-03-PLAN.md — Dashboard backend: PHOENIX_BASE_URL config chain + traceId/traceSpanId on projectDetail/childRef/taskDetail
+- [x] 46-01-PLAN.md — otelai SessionID/Metadata/Tags helpers + ReporterOptions/CLI transport + EmitSpans enrichment (reporter side)
+- [x] 46-02-PLAN.md — Sampler default 0.1→1.0 (every surface) + phoenix.baseURL chart value + helm render gates + honest opt-down docs
+- [x] 46-03-PLAN.md — Dashboard backend: PHOENIX_BASE_URL config chain + traceId/traceSpanId on projectDetail/childRef/taskDetail
 
 **Wave 2** *(46-04 blocked on 46-01; 46-05 blocked on 46-03)*
 
@@ -323,5 +323,5 @@ Plans:
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
-| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/5 | Not started | - |
+| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 3/5 | In Progress|  |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
