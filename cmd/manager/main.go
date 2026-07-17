@@ -282,7 +282,11 @@ func main() {
 	// above so the reporter Job's own TracerProvider resolves the identical
 	// collector (forwarded via PlannerReconcilerDeps.OTLPEndpoint below).
 	// Empty = tracing dark; the reporter env block is omitted entirely.
+	// Phase 47 PHX-02/D-08: sibling read of OTEL_EXPORTER_OTLP_HEADERS so the
+	// reporter Job's TracerProvider can also authenticate to an auth-enabled
+	// collector (forwarded via PlannerReconcilerDeps.OTLPHeaders below).
 	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	otlpHeaders := os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")
 	defer func() {
 		// Bounded shutdown — the batch processor flushes outstanding
 		// spans to the collector before the process exits. Use
@@ -436,6 +440,7 @@ func main() {
 		HelmProviderDefaults: helmProviderDefaults,
 		PricingOverridesJSON: pricingOverridesJSON,
 		OTLPEndpoint:         otlpEndpoint,
+		OTLPHeaders:          otlpHeaders,
 	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
@@ -547,6 +552,7 @@ func main() {
 			// mirrors plannerDeps' ReporterImage/OTLPEndpoint above.
 			ReporterImage: reporterImage,
 			OTLPEndpoint:  otlpEndpoint,
+			OTLPHeaders:   otlpHeaders,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
