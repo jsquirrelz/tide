@@ -1,4 +1,14 @@
 import "@testing-library/jest-dom";
+import { configure } from "@testing-library/react";
+
+// Raise the async-utility timeout above @testing-library's 1000ms default.
+// Under vitest's parallel runner the CPU is shared across many suites, so an
+// async findBy*/waitFor render can occasionally exceed 1000ms of wall-clock
+// even though its element mounts promptly once React is scheduled (the
+// ArtifactViewer "artifact-json" tab-switch flake under full-suite load). A
+// findBy resolves the instant its element appears, so a higher ceiling costs
+// passing tests nothing and removes the load-induced false timeout.
+configure({ asyncUtilTimeout: 5000 });
 
 // jsdom polyfills required by @xyflow/react v12 (plan 04-13).
 //
