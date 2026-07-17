@@ -66,6 +66,17 @@ spec:
         - name: PROM_ENDPOINT
           value: {{ quote .Values.prometheus.endpoint }}
         {{- end }}
+        {{- /* Phoenix dashboard deep-link target (Phase 46 OBS-04). Read by
+        cmd/dashboard/main.go to populate GET /api/v1/config's phoenixBaseURL
+        field. Emitted ONLY when phoenix.baseURL is non-empty — the empty
+        string IS the sentinel (no PROMETHEUS_ENABLED-style always-rendered
+        boolean twin; unlike PROM_ENDPOINT there is no legacy fallback to
+        disambiguate). Template comment so the default render carries no
+        PHOENIX_BASE_URL text at all (render gates grep rendered output). */}}
+        {{- if .Values.phoenix.baseURL }}
+        - name: PHOENIX_BASE_URL
+          value: {{ quote .Values.phoenix.baseURL }}
+        {{- end }}
         {{- /* Umbrella telemetry signal (Phase 38 D-14). Always rendered:
         read by cmd/dashboard/main.go to distinguish disabled-by-config (this
         var "false") from no-data (enabled, queries return empty). An explicit

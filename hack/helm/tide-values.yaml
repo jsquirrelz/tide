@@ -405,14 +405,31 @@ prometheus:
 #   - exporter.endpoint = "otel-collector:4317" → OTLP gRPC exporter
 #
 # Sampler is env-driven (NOT WithSampler in code, per Pitfall 24 mitigation):
-# OTEL_TRACES_SAMPLER + OTEL_TRACES_SAMPLER_ARG. Defaults trace 10% of root
-# spans (`parentbased_traceidratio` arg `0.1`).
+# OTEL_TRACES_SAMPLER + OTEL_TRACES_SAMPLER_ARG. Default now traces 100% of
+# root spans (`parentbased_traceidratio` arg `1.0` — v1.0.8 OBS-01). TIDE's
+# dispatch volume is dozens-to-hundreds of spans per run, not web-service
+# QPS, so full sampling is the right default. High-volume installs that want
+# to opt down should read docs/observability.md's opt-down section FIRST —
+# it documents a real sampled-flag coherence caveat (D-02) before lowering
+# this value; below 1.0 only the run's root span is ratio-gated, not every
+# descendant span.
 otel:
   exporter:
     endpoint: ""
   tracesSampler: "parentbased_traceidratio"
-  tracesSamplerArg: "0.1"
+  tracesSamplerArg: "1.0"
   serviceName: "tide-controller-manager"
+
+# Self-hosted Arize Phoenix dashboard deep-link (Phase 46 OBS-04 config
+# root). Base URL of a self-hosted Phoenix instance — install docs land in
+# Phase 47. When set, the dashboard's GET /api/v1/config reports it as
+# phoenixBaseURL and the SPA renders a deep-link affordance from a span to
+# its Phoenix trace/span view. Empty default (the sentinel) means
+# phoenixBaseURL "" and the SPA renders NO deep-link affordance at all — no
+# dead buttons. Requires Phoenix >= 14.2.0 (the /redirects/ shareable-URL
+# routes the deep link targets).
+phoenix:
+  baseURL: ""
 
 # Single shared RWX PVC for all Projects' workspaces (Blocker #2/#3 fix —
 # RESEARCH.md Open Question #2 RESOLVED with the single-shared-PVC + subPath architecture).

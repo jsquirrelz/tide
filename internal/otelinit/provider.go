@@ -53,10 +53,10 @@ type ShutdownFunc func(context.Context) error
 // IMPORTANT (Pitfall 24): this constructor MUST NOT pass WithSampler(...) to
 // sdktrace.NewTracerProvider. Doing so silently overrides the env-driven
 // OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG configuration. The Helm
-// chart sets OTEL_TRACES_SAMPLER=parentbased_traceidratio + arg 0.1 by
-// default; any in-code WithSampler call invalidates that contract.
-// The companion test TestNoWithSamplerInSource source-greps this file to
-// enforce the rule at PR time.
+// chart sets OTEL_TRACES_SAMPLER=parentbased_traceidratio + arg 1.0 by
+// default (100% sampling — v1.0.8 OBS-01); any in-code WithSampler call
+// invalidates that contract. The companion test TestNoWithSamplerInSource
+// source-greps this file to enforce the rule at PR time.
 func NewTracerProvider(ctx context.Context) (trace.TracerProvider, ShutdownFunc, error) {
 	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 	if endpoint == "" {
@@ -105,7 +105,7 @@ func NewTracerProvider(ctx context.Context) (trace.TracerProvider, ShutdownFunc,
 	// governs (Pitfall 24, D-O3). The SDK's default when no WithSampler is
 	// supplied is ParentBased(AlwaysSample); the env var overrides that
 	// default per the OTel spec. Helm chart default is
-	// parentbased_traceidratio with arg 0.1 (10% sampling).
+	// parentbased_traceidratio with arg 1.0 (100% sampling — v1.0.8 OBS-01).
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(res),
