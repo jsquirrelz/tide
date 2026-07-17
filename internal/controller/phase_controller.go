@@ -597,7 +597,6 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// The reporter reads out.json from the PVC and materializes Plan children.
 	// Children arrive via the Owns(&Plan{}) watch once the reporter creates them.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
-	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	//
 	// Phase 47 CR-01 gap-closure: spawnReporterIfNeeded's own Get→IsNotFound→Create
 	// gate is name-only — it re-opens after the reporter Job's 300s TTL-GC
@@ -605,24 +604,27 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// duplicate reporter with freshly-recomputed ReporterOptions. spawnKey is the
 	// durable per-attempt guard: the completed planner Job's UID, falling back to
 	// the deterministic phaseJobName when completedJob is nil (already TTL-GC'd or
-	// never observed). When the marker already matches, this completion has
-	// already spawned its reporter — skip the Create call entirely.
+	// never observed).
 	phaseJobName := fmt.Sprintf("tide-phase-%s-1", ph.UID)
 	spawnKey := phaseJobName
 	if completedJob != nil {
 		spawnKey = string(completedJob.UID)
 	}
-	var isFirstCompletion bool
-	if ph.Status.PhaseReporterSpawnedUID == spawnKey {
-		isFirstCompletion = false
-	} else {
+	// Phase 47 CR-01 re-fix: once ANY marker is set, a later nil-Job reconcile
+	// (planner Job GC'd at its 600s TTL) must NOT recompute a name-derived key and
+	// re-open the gate. The stored marker is the live Job UID (stamped while the Job
+	// was present); a UID can never equal the deterministic name, so honor a
+	// non-empty marker directly on the nil-Job path. Only when a Job IS present
+	// (a genuinely new attempt) does the per-attempt UID equality decide.
+	alreadySpawned := ph.Status.PhaseReporterSpawnedUID != "" &&
+		(completedJob == nil || ph.Status.PhaseReporterSpawnedUID == spawnKey)
+	if !alreadySpawned {
 		skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "phase", r.Deps.HelmProviderDefaults).Vendor)
 		// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME inputs
 		// this level's AGENT span used above, so the reporter's LLM spans carry
 		// byte-identical session.id/metadata/tags.
 		enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "phase", ph.Name, "")
-		var spawnErr error
-		isFirstCompletion, spawnErr = spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
+		_, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
 			ReporterImage:     r.Deps.ReporterImage,
 			TraceParent:       traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
 			OTLPEndpoint:      r.Deps.OTLPEndpoint,
@@ -637,11 +639,11 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		}
 		// Stamp the durable marker once a reporter Job verifiably exists for this
 		// attempt (newly-Created, AlreadyExists, or found-by-name — spawnErr==nil
-		// covers all three via spawnReporterIfNeeded's contract). Deliberately
-		// unconditional on isFirstCompletion: this also back-fills the marker for
-		// reporters spawned before this fix landed. WR-03: on RetryOnConflict
-		// exhaustion, return the error to requeue — the marker must be durable
-		// before the TTL-GC window re-opens the name-only gate.
+		// covers all three via spawnReporterIfNeeded's contract). Stamped on every
+		// spawn path so it also back-fills the marker for reporters spawned before
+		// this fix landed. WR-03: on RetryOnConflict exhaustion, return the error to
+		// requeue — the marker must be durable before the TTL-GC window re-opens the
+		// name-only gate.
 		if project != nil && r.Deps.ReporterImage != "" {
 			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				latest := &tideprojectv1alpha3.Phase{}
@@ -666,7 +668,14 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
 	// durable PhaseRolledUpUID marker (lives in CRD .status, survives restart)
 	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
-	if isFirstCompletion && envReadOK && project != nil {
+	//
+	// Phase 47 WR-01: the rollup is decoupled from isFirstCompletion — after the
+	// CR-01 re-fix, isFirstCompletion is true only on the single reconcile that
+	// spawns, so a transient RollUpUsage failure there would never be retried and
+	// the spend would be silently lost. The durable PhaseRolledUpUID marker is the
+	// sole exactly-once guard (mirrors the *SpanEmittedUID idiom): every later
+	// reconcile retries until RollUpUsage succeeds, then latches.
+	if envReadOK && project != nil {
 		if ph.Status.PhaseRolledUpUID != phaseJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "phase planner budget rollup failed (non-fatal)", "phase", ph.Name)

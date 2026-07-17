@@ -1894,7 +1894,6 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// Spawn the tide-reporter reader Job in the project namespace (Option C).
 	// The reporter reads out.json from the namespace PVC and materializes Milestone
 	// children via the K8s API. Children arrive via the Owns(&Milestone{}) watch.
-	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	//
 	// Phase 47 CR-01 gap-closure: the inline Get→IsNotFound→Create gate below is
 	// name-only — it re-opens after the reporter Job's 300s TTL-GC
@@ -1902,20 +1901,24 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// duplicate reporter with freshly-recomputed ReporterOptions. spawnKey is the
 	// durable per-attempt guard: the completed planner Job's UID, falling back to
 	// the deterministic plannerJobName when completedJob is nil (already TTL-GC'd
-	// or never observed). When the marker already matches, this completion has
-	// already spawned its reporter — skip the whole block entirely.
+	// or never observed).
 	plannerJobName := fmt.Sprintf("tide-project-%s-1", project.UID)
 	spawnKey := plannerJobName
 	if completedJob != nil {
 		spawnKey = string(completedJob.UID)
 	}
-	isFirstCompletion := false
-	if project.Status.ProjectReporterSpawnedUID == spawnKey {
-		isFirstCompletion = false
+	// Phase 47 CR-01 re-fix: once ANY marker is set, a later nil-Job reconcile
+	// (planner Job GC'd at its 600s TTL) must NOT recompute a name-derived key and
+	// re-open the gate. The stored marker is the live Job UID (stamped while the Job
+	// was present); a UID can never equal the deterministic name, so honor a
+	// non-empty marker directly on the nil-Job path. Only when a Job IS present
+	// (a genuinely new attempt) does the per-attempt UID equality decide.
+	alreadySpawned := project.Status.ProjectReporterSpawnedUID != "" &&
+		(completedJob == nil || project.Status.ProjectReporterSpawnedUID == spawnKey)
+	if alreadySpawned {
+		// Already spawned for this attempt (durable marker honored) — skip the Create.
 	} else if r.Deps.ReporterImage == "" {
 		logger.Info("skipping reporter Job spawn: ReporterImage not configured", "project", project.Name)
-		// No reporter → treat as first completion for budget rollup.
-		isFirstCompletion = true
 	} else {
 		pvcName := r.sharedPVCName()
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", project.UID)
@@ -1927,7 +1930,6 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			if !apierrors.IsNotFound(gErr) {
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
-			isFirstCompletion = true
 			skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "project", r.Deps.HelmProviderDefaults).Vendor)
 			// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME
 			// inputs this level's AGENT span used above, so the reporter's LLM
@@ -1957,12 +1959,12 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		}
 		// Stamp the durable marker: a reporter Job verifiably exists for this
 		// attempt (newly-Created, AlreadyExists, or found-by-name — every branch
-		// above reaches here without an early return). Deliberately unconditional
-		// on isFirstCompletion: this also back-fills the marker for reporters
-		// spawned before this fix landed. Use a fresh Project re-fetch in the
-		// RetryOnConflict closure, mirroring the PlannerRolledUpUID stamp below.
-		// WR-03: on RetryOnConflict exhaustion, return the error to requeue — the
-		// marker must be durable before the TTL-GC window re-opens the name gate.
+		// above reaches here without an early return). Stamped on every spawn path
+		// so it also back-fills the marker for reporters spawned before this fix
+		// landed. Use a fresh Project re-fetch in the RetryOnConflict closure,
+		// mirroring the PlannerRolledUpUID stamp below. WR-03: on RetryOnConflict
+		// exhaustion, return the error to requeue — the marker must be durable
+		// before the TTL-GC window re-opens the name gate.
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			latest := &tidev1alpha3.Project{}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(project), latest); err != nil {
@@ -2000,9 +2002,16 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// was declared earlier (Phase 47 CR-01 spawn-marker gate) — reused here.
 	// D-11/R-13: budget rollup is suppressed unconditionally for imported envelopes —
 	// the prior run already counted the planning cost; rolling up here would double-count.
+	//
+	// Phase 47 WR-01: the rollup is decoupled from isFirstCompletion — after the
+	// CR-01 re-fix, isFirstCompletion is true only on the single reconcile that
+	// spawns, so a transient RollUpUsage failure there would never be retried and
+	// the spend would be silently lost. The durable PlannerRolledUpUID marker is
+	// the sole exactly-once guard: every later reconcile retries until RollUpUsage
+	// succeeds, then latches.
 	if project.Spec.ImportSource != nil {
 		logger.V(1).Info("skipping budget rollup: project has importSource (D-11)", "project", project.Name)
-	} else if isFirstCompletion && envReadOK {
+	} else if envReadOK {
 		if project.Status.Budget.PlannerRolledUpUID != plannerJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
 				logger.Error(rollErr, "project planner budget rollup failed (non-fatal)", "project", project.Name)
