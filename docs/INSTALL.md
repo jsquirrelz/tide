@@ -214,6 +214,66 @@ Navigate to **Status → Targets** and confirm the `tide-...-metrics` endpoint s
 
 **Existing Prometheus (not kube-prometheus-stack):** your prometheus-operator must select the `tide-system` namespace and the ServiceMonitor's labels (`control-plane: controller-manager` plus the chart's standard labels) — or add whatever label your `serviceMonitorSelector` requires, as in step 3. Then set `prometheus.endpoint` to your Prometheus service URL instead of `http://prometheus-operated.monitoring:9090`.
 
+### Enable tracing (Phoenix)
+
+By default TIDE's OpenTelemetry tracing is dark — `otel.exporter.endpoint` is empty, so the dispatch-chain span tree (Milestone → Phase → Plan → Task → Wave, plus the redacted per-call LLM message spans) is never exported anywhere. This step wires a self-hosted [Arize Phoenix](https://phoenix.arize.com/) instance and points TIDE at it. Full reference detail — both storage strategies, sizing rationale, the complete headers-forwarding chain — lives in [docs/observability.md § Self-hosted Phoenix](observability.md#self-hosted-phoenix); this is the copy-pasteable quickstart.
+
+**1. Install Phoenix** (pinned chart version — never `latest`; re-verify the pin at `oci://registry-1.docker.io/arizephoenix/phoenix-helm` if you're reading this more than a few days after it last changed):
+
+```bash
+helm install tide-phoenix oci://registry-1.docker.io/arizephoenix/phoenix-helm \
+    --version 10.0.1 \
+    --namespace phoenix --create-namespace \
+    --set persistence.enabled=true \
+    --set persistence.size=2Gi \
+    --set postgresql.enabled=false \
+    --set database.defaultRetentionPolicyDays=7 \
+    --set service.type=ClusterIP \
+    --set ingress.enabled=false \
+    --set auth.enableAuth=true
+```
+
+This is the **SQLite-on-PVC** path — the right fit for a kind/dev cluster (small PVC, no extra Postgres pod). It's the only path this project's live proof exercises; the chart's own bundled-Postgres path is documented as the durable/production strategy in [docs/observability.md](observability.md#self-hosted-phoenix) but is not live-proven here — see that section for sizing rationale, retention tradeoffs, and the dev-only auth-off override. `auth.enableAuth=true` is the **chart's own default** (the opposite of the raw Phoenix image, which ships auth off) — this recipe keeps it on and pins the value explicitly for doc clarity.
+
+**2. Mint a Phoenix System API key and wire it into TIDE.** Read the chart-generated initial admin password out of the `phoenix-secret` Secret it created:
+
+```bash
+kubectl get secret phoenix-secret -n phoenix \
+    -o jsonpath='{.data.PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD}' | base64 -d; echo
+```
+
+Port-forward to the UI (`kubectl -n phoenix port-forward svc/tide-phoenix-svc 6006:6006`, then open http://localhost:6006) and log in as `admin@localhost` with that password — the chart's fallback default is the weak literal `admin`, so **change it at first login**. Then go to **Settings → API Keys** and create a System API key; this is the token TIDE's OTLP exporter authenticates with.
+
+Create the headers Secret from that key — **never paste the key into YAML**, the same `--from-literal` voice as the [Provider Secret](#provider-secret-anthropic_api_key) step below:
+
+```bash
+export PHOENIX_API_KEY='...'   # the System API key from Settings → API Keys
+kubectl create secret generic tide-otlp-headers -n tide-system \
+    --from-literal=OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${PHOENIX_API_KEY}"
+```
+
+Wire TIDE at Phoenix's OTLP gRPC endpoint and the headers Secret:
+
+```bash
+helm upgrade tide oci://ghcr.io/jsquirrelz/tide-charts/tide -n tide-system --reuse-values \
+    --set otel.exporter.endpoint=tide-phoenix-svc.phoenix.svc.cluster.local:4317 \
+    --set otel.exporter.headersSecretRef.name=tide-otlp-headers \
+    --set phoenix.baseURL=http://localhost:6006
+```
+
+> **The endpoint MUST be a bare `host:port` — never `http://` or `https://`.** TIDE's exporter (`otlptracegrpc`) silently rejects a scheme-prefixed value: no error, no crash — traces just never arrive, and the only symptom is an empty Phoenix. And **4317 is the OTLP gRPC port; 6006 is the HTTP UI** — pointing the exporter at 6006 fails the same silent way. Always target `4317`.
+
+Sampling needs no override here — the chart already defaults `otel.tracesSamplerArg` to `1.0` (every span exports), so a first run isn't a coin flip on an empty trace tree.
+
+**3. Verify** — this is the done signal:
+
+```bash
+kubectl -n phoenix port-forward svc/tide-phoenix-svc 6006:6006
+open http://localhost:6006
+```
+
+Log in and confirm the projects page loads. Traces appear after your next Project run completes a dispatch — Phoenix ingests retroactively, one span per completed level/call, not streamed live. Once `otel.exporter.endpoint` is set, the `helm upgrade tide` output above also stops printing the "tracing is dark" warning from `NOTES.txt`.
+
 ## Provider Secret (`ANTHROPIC_API_KEY`)
 
 The medium and large sample Projects drive real Claude calls and require an `ANTHROPIC_API_KEY`. The small sample uses the stub-subagent and skips this entirely.
