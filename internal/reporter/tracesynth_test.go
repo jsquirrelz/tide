@@ -527,6 +527,53 @@ func TestEmitSpans_BatchAggregateUnderCeiling(t *testing.T) {
 	}
 }
 
+// TestEmitSpans_ZeroTimeFallbacksPreserveOrdering — a CallSpan with either
+// timestamp zero (interpolation found no user event on that side) must still
+// emit EndTime >= StartTime: the missing side collapses onto the known side
+// (zero duration) rather than falling back to time.Now() on one side only,
+// which produced negative-duration first-call spans and latency-inflated
+// last-call spans on every real multi-call conversation.
+func TestEmitSpans_ZeroTimeFallbacksPreserveOrdering(t *testing.T) {
+	historical := time.Now().Add(-10 * time.Minute)
+
+	cases := []struct {
+		name  string
+		start time.Time
+		end   time.Time
+	}{
+		{"zero start, historical end (first call)", time.Time{}, historical},
+		{"historical start, zero end (last call)", historical, time.Time{}},
+		{"both zero", time.Time{}, time.Time{}},
+		{"end before start (defensive clamp)", historical.Add(time.Minute), historical},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exp := setupSpanExporter(t)
+			tracer := otel.Tracer("test")
+
+			calls := []CallSpan{{Model: "claude-test", StartTime: tc.start, EndTime: tc.end, TimingSynthetic: true}}
+			if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+				t.Fatalf("EmitSpans: %v", err)
+			}
+			spans := exp.GetSpans()
+			if len(spans) != 1 {
+				t.Fatalf("got %d spans, want 1", len(spans))
+			}
+			span := spans[0]
+			if span.EndTime.Before(span.StartTime) {
+				t.Errorf("span EndTime %v before StartTime %v — negative duration", span.EndTime, span.StartTime)
+			}
+			if !tc.start.IsZero() && !span.StartTime.Equal(tc.start) && !tc.end.Before(tc.start) {
+				t.Errorf("span StartTime = %v, want the supplied historical %v", span.StartTime, tc.start)
+			}
+			synthetic, ok := attrValue(span.Attributes, "tide.trace.timing_synthetic")
+			if !ok || !synthetic.AsBool() {
+				t.Errorf("span missing tide.trace.timing_synthetic=true")
+			}
+		})
+	}
+}
+
 // TestEmitSpans_WholeSpanBudgetJointAcrossSides — CR-01: maxSpanPayloadBytes
 // bounds the SUM of one span's input+output attribute bytes, not each side
 // independently. Two sides each under the cap alone but jointly over it must

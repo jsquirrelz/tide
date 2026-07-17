@@ -563,9 +563,26 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 			spanName = "llm"
 		}
 
-		startTime := call.StartTime
-		if startTime.IsZero() {
-			startTime = time.Now()
+		// Zero-time fallbacks preserve temporal ordering: the first call of a
+		// conversation has no preceding user timestamp (StartTime zero) while
+		// its EndTime is back-filled from a historical user event, and the
+		// last call has the inverse. Collapsing the missing side onto the
+		// known side yields a correctly-ordered zero-duration span instead of
+		// a negative-duration one (or one inflated by the Job-completion→
+		// reporter-spawn latency). All timing here is already stamped
+		// synthetic via otelai.TimingSynthetic below.
+		startTime, endTime := call.StartTime, call.EndTime
+		switch {
+		case startTime.IsZero() && !endTime.IsZero():
+			startTime = endTime
+		case !startTime.IsZero() && endTime.IsZero():
+			endTime = startTime
+		case startTime.IsZero() && endTime.IsZero():
+			now := time.Now()
+			startTime, endTime = now, now
+		}
+		if endTime.Before(startTime) {
+			endTime = startTime
 		}
 		_, span := tracer.Start(ctx, spanName, trace.WithTimestamp(startTime))
 
@@ -591,11 +608,6 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 			span.SetAttributes(otelai.ParseDegraded())
 		}
 		span.SetStatus(codes.Ok, "")
-
-		endTime := call.EndTime
-		if endTime.IsZero() {
-			endTime = time.Now()
-		}
 		span.End(trace.WithTimestamp(endTime))
 	}
 	return nil
