@@ -308,8 +308,8 @@ Plans:
 Plans:
 **Wave 1** *(parallel, independent)*
 
-- [ ] 47-01-PLAN.md — Go-side OTLP-headers threading (ReporterOptions + Deps + all 5 spawn sites) + unit-test pair
-- [ ] 47-02-PLAN.md — Chart-side headersSecretRef wiring + NOTES.txt tracing-dark nudge (augment-script + tracked sites) + offline render gates
+- [x] 47-01-PLAN.md — Go-side OTLP-headers threading (ReporterOptions + Deps + all 5 spawn sites) + unit-test pair
+- [x] 47-02-PLAN.md — Chart-side headersSecretRef wiring + NOTES.txt tracing-dark nudge (augment-script + tracked sites) + offline render gates
 
 **Wave 2** *(47-03 blocked on 47-01/47-02)*
 
@@ -342,4 +342,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 2/5 | In Progress|  |
