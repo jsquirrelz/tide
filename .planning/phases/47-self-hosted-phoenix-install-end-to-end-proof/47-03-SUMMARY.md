@@ -102,3 +102,12 @@ None - no external service configuration required. (The docs this plan authored 
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+- FOUND: docs/INSTALL.md
+- FOUND: docs/observability.md
+- FOUND: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-03-SUMMARY.md
+- FOUND commit: cadb827 (Task 1)
+- FOUND commit: 68ba5d4 (Task 2)
+- FOUND commit: 488fa69 (SUMMARY.md)
