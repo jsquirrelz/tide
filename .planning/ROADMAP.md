@@ -287,8 +287,8 @@ Plans:
 
 **Wave 2** *(46-04 blocked on 46-01; 46-05 blocked on 46-03)*
 
-- [ ] 46-04-PLAN.md — Manager-side enrichment on all five AGENT spans + D-03 token-count drop (all five levels, planner-corrected vs research's Task-only) + D-02 sampled-bit threading
-- [ ] 46-05-PLAN.md — SPA deep link: phoenixLink.ts + shared PhoenixTraceLink at both mount points (NodeDetailPanel + TaskDetailDrawer)
+- [x] 46-04-PLAN.md — Manager-side enrichment on all five AGENT spans + D-03 token-count drop (all five levels, planner-corrected vs research's Task-only) + D-02 sampled-bit threading
+- [x] 46-05-PLAN.md — SPA deep link: phoenixLink.ts + shared PhoenixTraceLink at both mount points (NodeDetailPanel + TaskDetailDrawer)
 
 ### Phase 47: Self-Hosted Phoenix Install + End-to-End Proof
 
@@ -323,5 +323,5 @@ Plans:
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
-| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 3/5 | In Progress|  |
+| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete   | 2026-07-17 |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
