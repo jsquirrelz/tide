@@ -335,7 +335,7 @@ Plans:
 
 **Wave 7 — gap closure** *(47-10 after 47-07)*
 
-- [ ] 47-10-PLAN.md — Envtest proof: TTL-GC'd reporter Job never re-created once the marker is set
+- [x] 47-10-PLAN.md — Envtest proof: TTL-GC'd reporter Job never re-created once the marker is set
 
 ## Progress
 
@@ -356,4 +356,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 9/10 | In Progress|  |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 10/10 | Complete   | 2026-07-17 |
