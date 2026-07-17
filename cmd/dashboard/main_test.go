@@ -69,6 +69,29 @@ func TestTelemetryEnabledFromEnv(t *testing.T) {
 	}
 }
 
+// TestPhoenixBaseURLFromEnv covers the Phase 46 OBS-04 / D-10 resolution:
+// PHOENIX_BASE_URL is a bare passthrough — unset yields "" (the no-link
+// sentinel), set yields the raw value with no normalization.
+func TestPhoenixBaseURLFromEnv(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *string // nil = unset
+		want  string
+	}{
+		{name: "unset", want: ""},
+		{name: "set", value: new("http://phoenix.tide-system:6006"), want: "http://phoenix.tide-system:6006"},
+		{name: "set with trailing slash — no server-side normalization", value: new("http://phoenix.tide-system:6006/"), want: "http://phoenix.tide-system:6006/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setOrUnsetEnv(t, "PHOENIX_BASE_URL", tt.value)
+			if got := phoenixBaseURLFromEnv(); got != tt.want {
+				t.Errorf("phoenixBaseURLFromEnv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // setOrUnsetEnv sets the env var when v is non-nil, otherwise guarantees it
 // is unset. t.Setenv registers restoration either way (its cleanup restores
 // the pre-test value even after os.Unsetenv).
@@ -101,6 +124,7 @@ func TestConfigRouteRegistered(t *testing.T) {
 		Log:              testr.New(t),
 		SPAFS:            spa,
 		TelemetryEnabled: true,
+		PhoenixBaseURL:   "http://phoenix.tide-system:6006",
 	})
 
 	// Route-table shape: GET /api/v1/config appears exactly once.
@@ -133,7 +157,8 @@ func TestConfigRouteRegistered(t *testing.T) {
 		t.Fatalf("status: want 200, got %d", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if got := strings.TrimSpace(string(body)); got != `{"telemetryEnabled":true}` {
-		t.Errorf("body: want %q, got %q", `{"telemetryEnabled":true}`, got)
+	want := `{"telemetryEnabled":true,"phoenixBaseURL":"http://phoenix.tide-system:6006"}`
+	if got := strings.TrimSpace(string(body)); got != want {
+		t.Errorf("body: want %q, got %q", want, got)
 	}
 }

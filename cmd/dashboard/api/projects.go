@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
 
 // ProjectsHandler serves GET /api/v1/projects + GET /api/v1/projects/{name}.
@@ -88,21 +89,35 @@ type budgetSummary struct {
 // The dashboard's PlanningDAGView (D-UI-SPEC §3) renders ProjectNode →
 // MilestoneNode → PhaseNode → PlanNode from this single payload — one
 // API round-trip per Project navigation event.
+//
+// TraceID/TraceSpanID (Phase 46 OBS-04 / D-11) carry the run's deep-link
+// trace identity: TraceID is deterministically derived from the Project's
+// UID via otelai.TraceIDFromUID (same UID always yields the same hex);
+// TraceSpanID mirrors Status.ProjectTraceSpanID directly. Both omitempty —
+// a derive error or a not-yet-synthesized span leaves the field absent,
+// never fabricated (T-46-02).
 type projectDetail struct {
 	projectSummary
-	Milestones []childRef `json:"milestones"`
-	Phases     []childRef `json:"phases"`
-	Plans      []childRef `json:"plans"`
+	TraceID     string     `json:"traceId,omitempty"`
+	TraceSpanID string     `json:"traceSpanId,omitempty"`
+	Milestones  []childRef `json:"milestones"`
+	Phases      []childRef `json:"phases"`
+	Plans       []childRef `json:"plans"`
 }
 
 // childRef is the minimal subset of a child CRD the Planning DAG needs:
 // the name, status.phase for the status badge, and the parent ref so
 // the dagre layout can wire up the edges client-side.
+//
+// TraceSpanID (Phase 46 OBS-04 / D-11) mirrors the child CR's own
+// {Level}TraceSpanID status field — the run-wide TraceID is carried once
+// on projectDetail, not repeated per child.
 type childRef struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-	Phase     string `json:"phase"`
-	Parent    string `json:"parent"`
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	Phase       string `json:"phase"`
+	Parent      string `json:"parent"`
+	TraceSpanID string `json:"traceSpanId,omitempty"`
 }
 
 // errorBody is the JSON shape returned on every non-2xx response.
@@ -242,6 +257,13 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha3.Proje
 
 	detail := projectDetail{
 		projectSummary: summarize(p, count),
+		TraceSpanID:    p.Status.ProjectTraceSpanID,
+	}
+	// TraceID (D-11): deterministic derivation from the Project's own UID.
+	// On error (e.g. a malformed test-fixture UID), leave TraceID empty —
+	// never fail the request (T-46-02: observability never gates).
+	if traceID, err := otelai.TraceIDFromUID(string(p.UID)); err == nil {
+		detail.TraceID = traceID.String()
 	}
 
 	// Milestones — filtered by Spec.ProjectRef == p.Name.
@@ -258,10 +280,11 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha3.Proje
 		}
 		milestoneNames[m.Name] = true
 		detail.Milestones = append(detail.Milestones, childRef{
-			Name:      m.Name,
-			Namespace: m.Namespace,
-			Phase:     m.Status.Phase,
-			Parent:    p.Name,
+			Name:        m.Name,
+			Namespace:   m.Namespace,
+			Phase:       m.Status.Phase,
+			Parent:      p.Name,
+			TraceSpanID: m.Status.MilestoneTraceSpanID,
 		})
 	}
 
@@ -279,10 +302,11 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha3.Proje
 		}
 		phaseNames[ph.Name] = true
 		detail.Phases = append(detail.Phases, childRef{
-			Name:      ph.Name,
-			Namespace: ph.Namespace,
-			Phase:     ph.Status.Phase,
-			Parent:    ph.Spec.MilestoneRef,
+			Name:        ph.Name,
+			Namespace:   ph.Namespace,
+			Phase:       ph.Status.Phase,
+			Parent:      ph.Spec.MilestoneRef,
+			TraceSpanID: ph.Status.PhaseTraceSpanID,
 		})
 	}
 
@@ -298,10 +322,11 @@ func (h *ProjectsHandler) buildDetail(ctx context.Context, p *tidev1alpha3.Proje
 			continue
 		}
 		detail.Plans = append(detail.Plans, childRef{
-			Name:      pl.Name,
-			Namespace: pl.Namespace,
-			Phase:     pl.Status.Phase,
-			Parent:    pl.Spec.PhaseRef,
+			Name:        pl.Name,
+			Namespace:   pl.Namespace,
+			Phase:       pl.Status.Phase,
+			Parent:      pl.Spec.PhaseRef,
+			TraceSpanID: pl.Status.PlanTraceSpanID,
 		})
 	}
 

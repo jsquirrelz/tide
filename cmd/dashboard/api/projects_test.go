@@ -22,9 +22,11 @@ import (
 	"github.com/go-logr/logr/testr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
 
 // newHandler returns a ProjectsHandler with a fake client populated with
@@ -712,5 +714,121 @@ func TestListProjectsActiveMilestoneCountCrossNamespace(t *testing.T) {
 	}
 	if byKey["ns-B/alpha"] != 2 {
 		t.Errorf("ns-B/alpha activeMilestoneCount=%d, want 2 (Pending + Running)", byKey["ns-B/alpha"])
+	}
+}
+
+// TestGetProjectTraceIdentityPopulated covers Phase 46 OBS-04 / D-11: a
+// Project with a UID and populated {Level}TraceSpanID status fields on
+// itself and its Milestone/Phase/Plan children yields a deterministic
+// traceId (same UID resolved twice → same hex) on projectDetail plus
+// traceSpanId on the detail and on each childRef.
+func TestGetProjectTraceIdentityPopulated(t *testing.T) {
+	p := newProject("alpha", "default", "Running")
+	p.UID = types.UID("550e8400-e29b-41d4-a716-446655440000")
+	p.Status.ProjectTraceSpanID = "aaaaaaaaaaaaaaaa"
+
+	m := newMilestone("m1", "default", "alpha", "Running")
+	m.Status.MilestoneTraceSpanID = "bbbbbbbbbbbbbbbb"
+
+	ph := newPhase("p1", "default", "m1", "Running")
+	ph.Status.PhaseTraceSpanID = "cccccccccccccccc"
+
+	pl := newPlan("pl1", "default", "p1", "Running")
+	pl.Status.PlanTraceSpanID = "dddddddddddddddd"
+
+	_, router := newHandler(t, p, m, ph, pl)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	wantTraceID, err := otelai.TraceIDFromUID(string(p.UID))
+	if err != nil {
+		t.Fatalf("TraceIDFromUID: %v", err)
+	}
+
+	fetch := func() projectDetail {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/api/v1/projects/alpha?namespace=default")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+		var detail projectDetail
+		if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return detail
+	}
+
+	detail := fetch()
+	if detail.TraceID != wantTraceID.String() {
+		t.Errorf("TraceID=%q want %q", detail.TraceID, wantTraceID.String())
+	}
+	if detail.TraceSpanID != "aaaaaaaaaaaaaaaa" {
+		t.Errorf("TraceSpanID=%q want aaaaaaaaaaaaaaaa", detail.TraceSpanID)
+	}
+
+	// Deterministic derivation: same UID resolved twice yields the same hex.
+	detail2 := fetch()
+	if detail2.TraceID != detail.TraceID {
+		t.Errorf("TraceID not deterministic: first=%q second=%q", detail.TraceID, detail2.TraceID)
+	}
+
+	byName := make(map[string]childRef)
+	for _, c := range detail.Milestones {
+		byName[c.Name] = c
+	}
+	for _, c := range detail.Phases {
+		byName[c.Name] = c
+	}
+	for _, c := range detail.Plans {
+		byName[c.Name] = c
+	}
+	if got := byName["m1"].TraceSpanID; got != "bbbbbbbbbbbbbbbb" {
+		t.Errorf("milestone m1 TraceSpanID=%q want bbbbbbbbbbbbbbbb", got)
+	}
+	if got := byName["p1"].TraceSpanID; got != "cccccccccccccccc" {
+		t.Errorf("phase p1 TraceSpanID=%q want cccccccccccccccc", got)
+	}
+	if got := byName["pl1"].TraceSpanID; got != "dddddddddddddddd" {
+		t.Errorf("plan pl1 TraceSpanID=%q want dddddddddddddddd", got)
+	}
+}
+
+// TestGetProjectTraceIdentityEmptyOmitted covers the D-11 omitempty
+// contract: a Project with no UID (the fake client's zero-value default)
+// and no {Level}TraceSpanID status fields set yields the trace-identity
+// JSON keys omitted entirely — not present as "", not fabricated.
+func TestGetProjectTraceIdentityEmptyOmitted(t *testing.T) {
+	_, router := newHandler(t,
+		newProject("alpha", "default", "Running"),
+		newMilestone("m1", "default", "alpha", "Running"),
+	)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/v1/projects/alpha?namespace=default")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var raw map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := raw["traceId"]; ok {
+		t.Errorf("traceId present in JSON, want omitted (omitempty)")
+	}
+	if _, ok := raw["traceSpanId"]; ok {
+		t.Errorf("traceSpanId present in JSON, want omitted (omitempty)")
+	}
+
+	milestones, _ := raw["milestones"].([]any)
+	if len(milestones) != 1 {
+		t.Fatalf("milestones len=%d want 1", len(milestones))
+	}
+	m0, _ := milestones[0].(map[string]any)
+	if _, ok := m0["traceSpanId"]; ok {
+		t.Errorf("childRef traceSpanId present in JSON, want omitted (omitempty)")
 	}
 }

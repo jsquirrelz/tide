@@ -92,6 +92,13 @@ type Dependencies struct {
 	// ConfigHandler exposes it to the UI so the Telemetry view's banner can
 	// distinguish disabled-by-config from no-data.
 	TelemetryEnabled bool
+
+	// PhoenixBaseURL is the operator-set Phoenix base URL (Phase 46 OBS-04
+	// / D-10). main.go resolves it from the PHOENIX_BASE_URL env (raw
+	// passthrough, empty is the no-link sentinel) and the ConfigHandler
+	// exposes it to the UI so the two dashboard deep-link mount points know
+	// where to send the operator.
+	PhoenixBaseURL string
 }
 
 // RegisterRoutes builds the dashboard's chi.Mux. DASH-05 invariant: EVERY
@@ -211,6 +218,7 @@ func RegisterRoutes(deps Dependencies) chi.Router {
 	// disabled-by-config from no-data. Always registered; GET-only (DASH-05).
 	configHandler := &dashboardapi.ConfigHandler{
 		TelemetryEnabled: deps.TelemetryEnabled,
+		PhoenixBaseURL:   deps.PhoenixBaseURL,
 		Log:              deps.Log,
 	}
 	r.Route("/api/v1", func(r chi.Router) {
