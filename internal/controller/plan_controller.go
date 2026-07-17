@@ -605,7 +605,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					parentSpanID = spanIDFromHexOrZero(parentPh.Status.PhaseTraceSpanID)
 				}
 			}
-			thisSpanID, emitted := synthesizePlannerSpan(ctx, "plan", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "plan", plan.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 			if emitted {
 				// Mirror in-memory unconditionally so same-reconcile downstream
 				// logic reads it even if the persistence patch below fails.

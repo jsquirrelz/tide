@@ -1003,7 +1003,7 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 		}
 	}
 
-	thisSpanID, emitted := synthesizePlannerSpan(ctx, "task", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+	thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "task", task.Name, task.Labels[owner.LabelWaveIndex], project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 	if !emitted {
 		return
 	}

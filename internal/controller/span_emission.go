@@ -30,6 +30,8 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -38,6 +40,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -94,14 +97,22 @@ func plannerSpanResolvable(job *batchv1.Job) bool {
 // entry gated on plannerSpanResolvable), independent of envReadOK (D-04).
 // Duplicate export is therefore impossible; a crash between stamp and
 // emission loses that attempt's span — span loss is preferred over
-// double-counted tokens/cost in Phoenix, whose cost views sum
-// llm.token_count.* across spans. Returns the minted span's own SpanID and
-// true when a span was emitted (zero SpanID and false when emission was
-// skipped — either the defensive re-check of plannerSpanResolvable's
-// preconditions, a nil project, or a TraceIDFromUID error).
+// double-counted cost in Phoenix (46 D-03: per-call LLM spans are the sole
+// llm.token_count.* source; see below). Returns the minted span's own
+// SpanID, the span's real sampled bit (trace.SpanContext.IsSampled(),
+// captured before End — PROP-02/D-02, Phase 46), and true when a span was
+// emitted (zero SpanID, sampled=true, false when emission was skipped —
+// either the defensive re-check of plannerSpanResolvable's preconditions, a
+// nil project, or a TraceIDFromUID error; sampled is meaningless in this
+// case and callers must gate on the third return value first).
 //
 // level is one of "milestone" | "phase" | "plan" | "project" | "task" — the
 // same literal ResolveProvider's dispatch sites already pass.
+//
+// levelName is the dispatching CR's own Name (ms.Name / ph.Name / plan.Name
+// / project.Name / task.Name) and waveIndex is Task's
+// tideproject.k8s/wave-index label value ("" at every other level) — both
+// feed buildLevelEnrichment below (46 D-05/D-06/OBS-03).
 //
 // parentSpanID (TRACE-02, Phase 43) is the immediate parent's own persisted
 // span ID — trace.SpanID{} (zero) for Project, the true root (D-02); the
@@ -124,28 +135,37 @@ func plannerSpanResolvable(job *batchv1.Job) bool {
 // already called at dispatch time) — never read from the envelope, which
 // never carried a model field at any layer (RESEARCH.md Pattern 1).
 //
-// Token accounting (ATTR-02, D-08 / Pitfall 4): promptTokens sums
-// InputTokens + CacheReadTokens + CacheCreationTokens — Phoenix's
-// llm.token_count.prompt encodes the FULL prompt including cache subsets,
-// not the uncached-only count. Degraded envelopes (envReadOK=false) carry
-// zero token-count attributes plus the tide.envelope.degraded marker
-// instead (D-04) — usage attributes are simply absent, never fabricated.
+// Token accounting (46 D-03, planner_correction — overturns the earlier
+// ATTR-02/D-08/Pitfall 4 design): this span carries NO llm.token_count.*
+// attribute at any level, succeeded or degraded. The reporter's
+// synthesizeSpans emits per-call LLM message spans on BOTH the combined-mode
+// path (all four planner levels) and the trace-only path (Task) — every
+// level has a sibling per-call span source — and Phoenix creates a SpanCost
+// row per span carrying llm.token_count.* with no span-kind gate (RESEARCH
+// A2). A rolled-up total on this AGENT span would double-count every run in
+// Phoenix's session/trace cost rollups, violating the LOCKED invariant that
+// per-call spans are the sole authoritative token-count source. Degraded
+// envelopes (envReadOK=false) still carry the tide.envelope.degraded marker
+// (D-04) — that marker is independent of token-count emission, which is now
+// unconditionally absent.
 //
 // End() is called explicitly (never deferred with a pre-branch timestamp):
 // the resolved end time differs per success/failure outcome.
 func synthesizePlannerSpan(
 	ctx context.Context,
 	level string,
+	levelName string,
+	waveIndex string,
 	project *tideprojectv1alpha3.Project,
 	helmDefaults ProviderDefaults,
 	completedJob *batchv1.Job,
 	out pkgdispatch.EnvelopeOut,
 	envReadOK bool,
 	parentSpanID trace.SpanID,
-) (trace.SpanID, bool) {
+) (trace.SpanID, bool, bool) {
 	endTime, ok := spanEndTime(completedJob)
 	if !ok || completedJob.Status.StartTime == nil {
-		return trace.SpanID{}, false
+		return trace.SpanID{}, true, false
 	}
 	startTime := completedJob.Status.StartTime.Time
 
@@ -153,12 +173,12 @@ func synthesizePlannerSpan(
 	// than emit an unanchored span that would break the one-trace guarantee.
 	if project == nil {
 		logf.FromContext(ctx).Info("skipping span emission: nil project (no deterministic TraceID available)", "level", level)
-		return trace.SpanID{}, false
+		return trace.SpanID{}, true, false
 	}
 	traceID, err := otelai.TraceIDFromUID(string(project.UID))
 	if err != nil {
 		logf.FromContext(ctx).Error(err, "skipping span emission: TraceIDFromUID failed", "level", level, "project", project.Name)
-		return trace.SpanID{}, false
+		return trace.SpanID{}, true, false
 	}
 
 	// D-02: Remote:true because parentSpanID (when non-zero) is reconstructed
@@ -188,16 +208,25 @@ func synthesizePlannerSpan(
 	span.SetAttributes(otelai.AgentInvocation(provider.Vendor, spanName, role, level)...)
 	span.SetAttributes(otelai.LLMIdentity(provider.Vendor, provider.Model)...)
 
-	if envReadOK {
-		// D-08/Pitfall 4: prompt = uncached + cache-read + cache-write subsets.
-		promptTokens := out.Usage.InputTokens + out.Usage.CacheReadTokens + out.Usage.CacheCreationTokens
-		span.SetAttributes(otelai.TokenCount(
-			int(promptTokens),
-			int(out.Usage.OutputTokens),
-			int(out.Usage.CacheReadTokens),
-			int(out.Usage.CacheCreationTokens),
-		)...)
-	} else {
+	// 46 D-05/OBS-02/OBS-03: session.id + metadata/tags, computed from the
+	// SAME buildLevelEnrichment inputs the level's reporter spawn uses (Task
+	// 2) so a Task's AGENT span and its reporter's LLM spans carry
+	// byte-identical values — Phoenix's ProjectSession groups on an exact
+	// session.id string match.
+	span.SetAttributes(otelai.SessionID(string(project.UID)))
+	md, tags := buildLevelEnrichment(project, level, levelName, waveIndex)
+	if md != "" {
+		span.SetAttributes(otelai.MetadataJSON(md))
+	}
+	if len(tags) > 0 {
+		span.SetAttributes(otelai.Tags(tags...))
+	}
+
+	// 46 D-03 (planner_correction, see the doc comment above): NO
+	// otelai.TokenCount call at any level — the per-call LLM spans the
+	// reporter emits are the sole llm.token_count.* source. The degraded
+	// marker below is independent of token-count emission.
+	if !envReadOK {
 		span.SetAttributes(otelai.EnvelopeDegraded())
 	}
 
@@ -210,8 +239,102 @@ func synthesizePlannerSpan(
 		span.SetStatus(codes.Ok, "")
 	}
 
+	// D-02/Phase 46: capture the real sampled bit BEFORE End() — End() does
+	// not change it, but the read is only meaningful pre-export.
+	sampled := span.SpanContext().IsSampled()
 	span.End(trace.WithTimestamp(endTime))
-	return span.SpanContext().SpanID(), true
+	return span.SpanContext().SpanID(), sampled, true
+}
+
+// buildLevelEnrichment computes the 46 D-05/D-06/OBS-03 metadata/tags
+// enrichment pair shared identically between a level's own AGENT span (via
+// synthesizePlannerSpan above) and every reporter-emitted LLM span for the
+// same dispatch (the caller threads the same md/tags into
+// ReporterOptions.MetadataJSON/Tags at the reporter spawn site) — Phoenix's
+// filter DSL and ProjectSession grouping require byte-identical values
+// across sibling spans (D-05).
+//
+// Metadata keys (D-08 — plain names; the tide.* namespace governs only the
+// top-level attribute key, not this JSON payload's internal keys):
+//
+//   - "level"           — one of milestone|phase|plan|project|task
+//   - "name"             — the dispatching CR's own Name (levelName)
+//   - "wave_index"       — included ONLY when waveIndex != "" (Task-only —
+//     read from the tideproject.k8s/wave-index label; D-07 only-if-free —
+//     planner levels never populate this key)
+//   - "gate_profile"     — project.Spec.Gates.{Milestone,Phase,Plan,Task}
+//     keyed on level; key is OMITTED for level=="project" (Gates has no
+//     Project field, Pitfall 5) and omitted whenever the resolved policy
+//     string is empty (unset)
+//   - "failure_profile"  — "strict" (the API default, when
+//     project.Spec.FailureProfile == "") or the lowercase
+//     Spec.FailureProfile value ("conservative")
+//   - "failure_halt"     — "true"/"false" from
+//     meta.IsStatusConditionTrue(project.Status.Conditions,
+//     tideprojectv1alpha3.ConditionFailureHalt)
+//
+// Tags (low-cardinality categorical filterables, D-06): [level], the
+// gate_profile value when present, the failure_profile value, and the
+// literal "failure-halt" appended only when that condition is true.
+//
+// Returns ("", nil) when project is nil (nil-safe, matches ResolveProvider's
+// convention) or on a JSON marshal error (practically impossible for this
+// map[string]string shape) — observability never gates, so callers treat an
+// empty metadata string as "omit the attribute", never a fabricated value.
+func buildLevelEnrichment(project *tideprojectv1alpha3.Project, level, levelName, waveIndex string) (string, []string) {
+	if project == nil {
+		return "", nil
+	}
+
+	md := map[string]string{
+		"level": level,
+		"name":  levelName,
+	}
+	if waveIndex != "" {
+		md["wave_index"] = waveIndex
+	}
+
+	var gateProfile string
+	if level != "project" {
+		switch level {
+		case "milestone":
+			gateProfile = string(project.Spec.Gates.Milestone)
+		case "phase":
+			gateProfile = string(project.Spec.Gates.Phase)
+		case "plan":
+			gateProfile = string(project.Spec.Gates.Plan)
+		case "task":
+			gateProfile = string(project.Spec.Gates.Task)
+		}
+	}
+	if gateProfile != "" {
+		md["gate_profile"] = gateProfile
+	}
+
+	failureProfile := string(project.Spec.FailureProfile)
+	if failureProfile == "" {
+		failureProfile = string(tideprojectv1alpha3.FailureProfileStrict)
+	}
+	md["failure_profile"] = failureProfile
+
+	failureHalt := meta.IsStatusConditionTrue(project.Status.Conditions, tideprojectv1alpha3.ConditionFailureHalt)
+	md["failure_halt"] = strconv.FormatBool(failureHalt)
+
+	encoded, err := json.Marshal(md)
+	if err != nil {
+		return "", nil
+	}
+
+	tags := []string{level}
+	if gateProfile != "" {
+		tags = append(tags, gateProfile)
+	}
+	tags = append(tags, failureProfile)
+	if failureHalt {
+		tags = append(tags, "failure-halt")
+	}
+
+	return string(encoded), tags
 }
 
 // spanIDFromHexOrZero parses a persisted status hex string into a

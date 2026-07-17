@@ -260,13 +260,18 @@ var _ = Describe("SpanEmission — Milestone level", Label("envtest", "heavy"), 
 		Expect(ok).To(BeTrue(), "span missing llm.provider")
 		Expect(providerVal.AsString()).To(Equal("anthropic"))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
-
-		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
-		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+		// 46 D-03: updated deliberately (not deleted, MSG-03 precedent) — AGENT
+		// spans no longer carry ANY llm.token_count.* attribute, even with
+		// envReadOK=true and a populated Usage. Per-call LLM spans (reporter
+		// synthesizeSpans) are the sole llm.token_count.* source (planner_correction).
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		kindVal, ok := attrValue(span.Attributes, "openinference.span.kind")
 		Expect(ok).To(BeTrue(), "span missing openinference.span.kind")
@@ -555,13 +560,18 @@ var _ = Describe("SpanEmission — Phase level", Label("envtest", "heavy"), func
 		Expect(ok).To(BeTrue(), "span missing llm.model_name")
 		Expect(modelVal.AsString()).To(Equal("claude-test-model"))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
-
-		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
-		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+		// 46 D-03: updated deliberately (not deleted, MSG-03 precedent) — AGENT
+		// spans no longer carry ANY llm.token_count.* attribute, even with
+		// envReadOK=true and a populated Usage. Per-call LLM spans (reporter
+		// synthesizeSpans) are the sole llm.token_count.* source (planner_correction).
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		// TRACE-02: deterministic TraceID derived from Project.UID, and real
 		// parent linkage to the seeded MilestoneTraceSpanID.
@@ -860,13 +870,18 @@ var _ = Describe("SpanEmission — Plan level", Label("envtest", "heavy"), func(
 		Expect(ok).To(BeTrue(), "span missing llm.provider")
 		Expect(providerVal.AsString()).To(Equal("anthropic"))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
-
-		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
-		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+		// 46 D-03: updated deliberately (not deleted, MSG-03 precedent) — AGENT
+		// spans no longer carry ANY llm.token_count.* attribute, even with
+		// envReadOK=true and a populated Usage. Per-call LLM spans (reporter
+		// synthesizeSpans) are the sole llm.token_count.* source (planner_correction).
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		// TRACE-02: deterministic TraceID derived from Project.UID, and real
 		// parent linkage to the seeded PhaseTraceSpanID.
@@ -1076,13 +1091,18 @@ var _ = Describe("SpanEmission — Project level", Label("envtest", "heavy"), fu
 		Expect(ok).To(BeTrue(), "span missing llm.provider")
 		Expect(providerVal.AsString()).To(Equal("anthropic"))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
-
-		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
-		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+		// 46 D-03: updated deliberately (not deleted, MSG-03 precedent) — AGENT
+		// spans no longer carry ANY llm.token_count.* attribute, even with
+		// envReadOK=true and a populated Usage. Per-call LLM spans (reporter
+		// synthesizeSpans) are the sole llm.token_count.* source (planner_correction).
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		// D-02: Project is the trace root — no parent span exists, but the
 		// TraceID is still the deterministic one derived from its own UID.
@@ -1372,13 +1392,18 @@ var _ = Describe("SpanEmission — Task level", Label("envtest", "heavy"), func(
 		Expect(ok).To(BeTrue(), "span missing llm.model_name")
 		Expect(modelVal.AsString()).To(Equal("claude-test-model"))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.prompt")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 1000))
-
-		totalVal, ok := attrValue(span.Attributes, "llm.token_count.total")
-		Expect(ok).To(BeTrue(), "span missing llm.token_count.total")
-		Expect(totalVal.AsInt64()).To(BeNumerically("==", 1300))
+		// 46 D-03: updated deliberately (not deleted, MSG-03 precedent) — AGENT
+		// spans no longer carry ANY llm.token_count.* attribute, even with
+		// envReadOK=true and a populated Usage. Per-call LLM spans (reporter
+		// synthesizeSpans) are the sole llm.token_count.* source (planner_correction).
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		// TRACE-02: deterministic TraceID derived from Project.UID, and real
 		// parent linkage to the seeded PlanTraceSpanID.
@@ -1565,9 +1590,16 @@ var _ = Describe("SpanEmission — Task level", Label("envtest", "heavy"), func(
 		span := spans[0]
 		Expect(span.Status.Code).To(Equal(codes.Ok))
 
-		promptVal, ok := attrValue(span.Attributes, "llm.token_count.prompt")
-		Expect(ok).To(BeTrue(), "envReadOK=true span must still carry token-count attributes")
-		Expect(promptVal.AsInt64()).To(BeNumerically("==", 500))
+		// 46 D-03: updated deliberately — envReadOK=true no longer implies
+		// token-count attributes on the AGENT span; per-call LLM spans carry them.
+		for _, key := range []attribute.Key{
+			"llm.token_count.prompt", "llm.token_count.completion",
+			"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+			"llm.token_count.total",
+		} {
+			_, found := attrValue(span.Attributes, key)
+			Expect(found).To(BeFalse(), "succeeded span must not carry token-count attribute %q (46 D-03)", key)
+		}
 
 		// Task still reaches a terminal phase — the validation block's
 		// skipped fallback does not wedge the reconcile.

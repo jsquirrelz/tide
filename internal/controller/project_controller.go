@@ -1854,7 +1854,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		} else if stamped {
 			// D-02: Project is the root of the trace — no parent span exists.
 			parentSpanID := trace.SpanID{}
-			thisSpanID, emitted := synthesizePlannerSpan(ctx, "project", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "project", project.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 			if emitted {
 				// Mirror in-memory unconditionally so same-reconcile downstream
 				// logic reads it even if the persistence patch below fails.

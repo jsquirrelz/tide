@@ -604,7 +604,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 			if project != nil {
 				parentSpanID = spanIDFromHexOrZero(project.Status.ProjectTraceSpanID)
 			}
-			thisSpanID, emitted := synthesizePlannerSpan(ctx, "milestone", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "milestone", ms.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 			if emitted {
 				// Mirror in-memory unconditionally so same-reconcile downstream
 				// logic reads it even if the persistence patch below fails.
