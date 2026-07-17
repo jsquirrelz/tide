@@ -90,6 +90,11 @@ const (
 // pvcName is the caller's configured shared-PVC name (r.sharedPVCName()) so
 // the reporter mounts the same claim the planner Job wrote out.json to;
 // BuildReporterJob falls back to defaultSharedPVCName when empty.
+//
+// skipMessageSpans (Phase 45/ADAPT-01) is the caller's fresh vendor
+// capability lookup result (pkgdispatch.SelfInstruments on the level's
+// resolved ProviderSpec.Vendor) — threaded straight into
+// ReporterOptions.SkipMessageSpans (D-04).
 func spawnReporterIfNeeded(
 	ctx context.Context,
 	c client.Client,
@@ -101,6 +106,7 @@ func spawnReporterIfNeeded(
 	pvcName string,
 	traceParent string,
 	otlpEndpoint string,
+	skipMessageSpans bool,
 ) (bool, error) {
 	logger := logf.FromContext(ctx)
 	if reporterImage == "" {
@@ -119,7 +125,12 @@ func spawnReporterIfNeeded(
 		}
 		// Not found — spawn it (first completion observation).
 		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind,
-			ReporterOptions{ReporterImage: reporterImage, TraceParent: traceParent, OTLPEndpoint: otlpEndpoint}, scheme)
+			ReporterOptions{
+				ReporterImage:    reporterImage,
+				TraceParent:      traceParent,
+				OTLPEndpoint:     otlpEndpoint,
+				SkipMessageSpans: skipMessageSpans,
+			}, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
 				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
