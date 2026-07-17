@@ -34,6 +34,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -728,6 +729,61 @@ func TestSynthesizePlannerSpanTaskRoleExecutor(t *testing.T) {
 	role, ok := attrValue(spans[0].Attributes, "tide.role")
 	if !ok || role.AsString() != "executor" {
 		t.Errorf("tide.role attribute = %v (found=%v), want %q", role, ok, "executor")
+	}
+}
+
+// TestSynthesizePlannerSpanTracingDarkNotEmitted (46-REVIEW WR-01) — with
+// the no-op TracerProvider installed (tracing-dark: empty
+// OTEL_EXPORTER_OTLP_ENDPOINT, the exact provider otelinit installs), the
+// noop Tracer.Start propagates the reconstructed parent SpanContext, so no
+// real SpanID is minted. synthesizePlannerSpan must return emitted=false —
+// NOT emitted=true with the parent's SpanID — or every completion handler
+// would persist "0000000000000000" (root / zero-hex parent) or the parent's
+// own span ID (real pre-dark parent hex) into {Level}TraceSpanID, which the
+// dashboard then renders as a dead Phoenix deep link.
+func TestSynthesizePlannerSpanTracingDarkNotEmitted(t *testing.T) {
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	realParent, err := trace.SpanIDFromHex("0102030405060708")
+	if err != nil {
+		t.Fatalf("trace.SpanIDFromHex: %v", err)
+	}
+
+	cases := []struct {
+		name         string
+		parentSpanID trace.SpanID
+	}{
+		// The Project root: zero parent → noop propagates the zero SpanID.
+		{name: "zero parent (root)", parentSpanID: trace.SpanID{}},
+		// A child whose parent hex is a real pre-dark span ID → noop
+		// propagates the PARENT's SpanID as the "minted" one.
+		{name: "real parent (pre-dark hex)", parentSpanID: realParent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotID, _, emitted := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, true, tc.parentSpanID)
+			if emitted {
+				t.Errorf("emitted = true, want false (no real span is minted under the no-op provider)")
+			}
+			if gotID.IsValid() {
+				t.Errorf("returned SpanID = %v, want zero — a handler persisting this would create a dead Phoenix deep link", gotID)
+			}
+		})
 	}
 }
 

@@ -103,8 +103,10 @@ func plannerSpanResolvable(job *batchv1.Job) bool {
 // captured before End — PROP-02/D-02, Phase 46), and true when a span was
 // emitted (zero SpanID, sampled=true, false when emission was skipped —
 // either the defensive re-check of plannerSpanResolvable's preconditions, a
-// nil project, or a TraceIDFromUID error; sampled is meaningless in this
-// case and callers must gate on the third return value first).
+// nil project, a TraceIDFromUID error, or a tracing-dark run in which the
+// no-op TracerProvider minted no real SpanID (46-REVIEW WR-01, see the
+// guard before the return); sampled is meaningless in this case and callers
+// must gate on the third return value first).
 //
 // level is one of "milestone" | "phase" | "plan" | "project" | "task" — the
 // same literal ResolveProvider's dispatch sites already pass.
@@ -243,7 +245,25 @@ func synthesizePlannerSpan(
 	// not change it, but the read is only meaningful pre-export.
 	sampled := span.SpanContext().IsSampled()
 	span.End(trace.WithTimestamp(endTime))
-	return span.SpanContext().SpanID(), sampled, true
+
+	// 46-REVIEW WR-01: a tracing-dark run (OTEL_EXPORTER_OTLP_ENDPOINT empty,
+	// the chart default) has otelinit install the no-op TracerProvider, whose
+	// Tracer.Start propagates the reconstructed parent SpanContext untouched —
+	// the "minted" SpanID is then the parent's: zero at the Project root, and
+	// zero again at every child level (each parents on the zero-hex the level
+	// above persisted). Returning emitted=true here would have the callers
+	// persist "0000000000000000" into {Level}TraceSpanID status, which the
+	// dashboard surfaces as a dead /redirects/spans/0000000000000000 Phoenix
+	// deep link once phoenix.baseURL is set. Return emitted=false instead —
+	// nothing is lost (the no-op provider exports nothing, so there is no
+	// span to link). The equality guard covers the same noop path when the
+	// parent hex is a REAL pre-dark span ID: propagating it as this level's
+	// own would corrupt parent-child linkage and deep-link identity alike.
+	thisSpanID := span.SpanContext().SpanID()
+	if !thisSpanID.IsValid() || thisSpanID == parentSpanID {
+		return trace.SpanID{}, true, false
+	}
+	return thisSpanID, sampled, true
 }
 
 // buildLevelEnrichment computes the 46 D-05/D-06/OBS-03 metadata/tags

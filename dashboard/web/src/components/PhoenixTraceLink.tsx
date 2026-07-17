@@ -36,8 +36,12 @@ export default function PhoenixTraceLink({
 }: PhoenixTraceLinkProps) {
   // Eligibility owned here (never duplicated at mount points): both baseURL
   // and spanId must be non-empty. traceId alone does not qualify — spanId is
-  // the signal that this node's span was actually emitted.
-  if (!baseURL || !spanId) return null;
+  // the signal that this node's span was actually emitted. An all-zero hex
+  // is "no span", never a linkable target: tracing-dark runs on pre-fix
+  // managers persisted "0000000000000000" into {Level}TraceSpanID, and those
+  // CRs outlive the manager upgrade (46-REVIEW WR-01 defense in depth — the
+  // write path no longer persists zero span IDs, this guards the read path).
+  if (!baseURL || !spanId || /^0+$/.test(spanId)) return null;
 
   const href = phoenixSpanURL(baseURL, spanId);
 

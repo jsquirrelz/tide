@@ -162,6 +162,34 @@ describe("NodeDetailPanel composition (37-08 App assembly)", () => {
     expect(within(panel).queryByTestId("phoenix-trace-link-row")).toBeNull();
   });
 
+  it("project node: PhoenixTraceLink renders nothing for an all-zero spanId (46-REVIEW WR-01)", async () => {
+    // Pre-upgrade CRs from tracing-dark runs persist "0000000000000000" in
+    // {Level}TraceSpanID — "no span", never a linkable Phoenix target.
+    mockSettings.mockResolvedValue(SETTINGS);
+    render(
+      <ToastProvider>
+        <NodeDetailPanel open kind="project" name="my-project" onClose={() => undefined}>
+          <PhoenixTraceLink
+            baseURL="http://phoenix:6006"
+            traceId="trace123"
+            spanId="0000000000000000"
+            edge="bottom"
+          />
+          <ProjectSettingsPanel
+            projectName="my-project"
+            statusPhase="Running"
+            budgetSpentCents={0}
+            budgetCapCents={10000}
+            conditions={[]}
+          />
+        </NodeDetailPanel>
+      </ToastProvider>,
+    );
+
+    const panel = await screen.findByTestId("node-detail-panel");
+    expect(within(panel).queryByTestId("phoenix-trace-link-row")).toBeNull();
+  });
+
   it("project node: PhoenixTraceLink renders nothing when spanId is absent (OBS-04)", async () => {
     mockSettings.mockResolvedValue(SETTINGS);
     render(
