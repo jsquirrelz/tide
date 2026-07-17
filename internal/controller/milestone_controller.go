@@ -645,23 +645,66 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// isFirstCompletion tracks whether this is the initial observation of the planner
 	// Job reaching terminal state (reporter Job not yet spawned). Used to guard the
 	// once-per-completion budget rollup below (plan 09-08 Defect C).
-	skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "milestone", r.Deps.HelmProviderDefaults).Vendor)
-	// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME inputs
-	// this level's AGENT span used above, so the reporter's LLM spans carry
-	// byte-identical session.id/metadata/tags.
-	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "milestone", ms.Name, "")
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
-		ReporterImage:     r.Deps.ReporterImage,
-		TraceParent:       traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
-		OTLPEndpoint:      r.Deps.OTLPEndpoint,
-		OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
-		SkipMessageSpans:  skipMessageSpans,
-		SessionID:         projectUID,
-		MetadataJSON:      enrichmentMD,
-		Tags:              enrichmentTags,
-	})
-	if spawnErr != nil {
-		return ctrl.Result{}, spawnErr
+	//
+	// Phase 47 CR-01 gap-closure: spawnReporterIfNeeded's own Get→IsNotFound→Create
+	// gate is name-only — it re-opens after the reporter Job's 300s TTL-GC
+	// (reporter_jobspec.go), letting a sustained-reconcile parent re-Create a
+	// duplicate reporter with freshly-recomputed ReporterOptions. spawnKey is the
+	// durable per-attempt guard: the completed planner Job's UID, falling back to
+	// the deterministic milestoneJobName when completedJob is nil (already TTL-GC'd
+	// or never observed). When the marker already matches, this completion has
+	// already spawned its reporter — skip the Create call entirely.
+	milestoneJobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
+	spawnKey := milestoneJobName
+	if completedJob != nil {
+		spawnKey = string(completedJob.UID)
+	}
+	var isFirstCompletion bool
+	if ms.Status.MilestoneReporterSpawnedUID == spawnKey {
+		isFirstCompletion = false
+	} else {
+		skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "milestone", r.Deps.HelmProviderDefaults).Vendor)
+		// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME inputs
+		// this level's AGENT span used above, so the reporter's LLM spans carry
+		// byte-identical session.id/metadata/tags.
+		enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "milestone", ms.Name, "")
+		var spawnErr error
+		isFirstCompletion, spawnErr = spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
+			ReporterImage:     r.Deps.ReporterImage,
+			TraceParent:       traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
+			OTLPEndpoint:      r.Deps.OTLPEndpoint,
+			OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+			SkipMessageSpans:  skipMessageSpans,
+			SessionID:         projectUID,
+			MetadataJSON:      enrichmentMD,
+			Tags:              enrichmentTags,
+		})
+		if spawnErr != nil {
+			return ctrl.Result{}, spawnErr
+		}
+		// Stamp the durable marker once a reporter Job verifiably exists for this
+		// attempt (newly-Created, AlreadyExists, or found-by-name — spawnErr==nil
+		// covers all three via spawnReporterIfNeeded's contract). Deliberately
+		// unconditional on isFirstCompletion: this also back-fills the marker for
+		// reporters spawned before this fix landed. WR-03: on RetryOnConflict
+		// exhaustion, return the error to requeue — the marker must be durable
+		// before the TTL-GC window re-opens the name-only gate.
+		if project != nil && r.Deps.ReporterImage != "" {
+			if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &tideprojectv1alpha3.Milestone{}
+				if err := r.Get(ctx, client.ObjectKeyFromObject(ms), latest); err != nil {
+					return err
+				}
+				if latest.Status.MilestoneReporterSpawnedUID == spawnKey {
+					return nil // already set by a concurrent reconcile — idempotent
+				}
+				markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+				latest.Status.MilestoneReporterSpawnedUID = spawnKey
+				return r.Status().Patch(ctx, latest, markerPatch)
+			}); mErr != nil {
+				return ctrl.Result{}, fmt.Errorf("patch MilestoneReporterSpawnedUID: %w", mErr)
+			}
+		}
 	}
 
 	// Plan 09-08 Defect C: roll up planner-level Usage to Project.Status.Budget
@@ -673,7 +716,6 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// Job's 300s TTL-GC window, causing double-count on halt→resume. Gate on the
 	// durable MilestoneRolledUpUID marker (lives in CRD .status, survives restart)
 	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
-	milestoneJobName := fmt.Sprintf("tide-milestone-%s-1", ms.UID)
 	if isFirstCompletion && envReadOK && project != nil {
 		if ms.Status.MilestoneRolledUpUID != milestoneJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
