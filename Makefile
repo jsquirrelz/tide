@@ -708,7 +708,7 @@ helm-rbac-assert: ## Assert dashboard ClusterRole verbs are read-only {get, list
 	@python3 hack/helm/assert-dashboard-rbac.py /tmp/tide-helm-render.yaml
 
 .PHONY: helm-telemetry-assert
-helm-telemetry-assert: ## Assert PROM_ENDPOINT/PHOENIX_BASE_URL env injection and telemetry render gates (Phase 16 TELEM-05 D-13 / Phase 46 OBS-01/OBS-04).
+helm-telemetry-assert: ## Assert PROM_ENDPOINT/PHOENIX_BASE_URL/OTEL_EXPORTER_OTLP_HEADERS env injection and telemetry render gates (Phase 16 TELEM-05 D-13 / Phase 46 OBS-01/OBS-04 / Phase 47 PHX-02/D-08).
 	@helm template charts/tide --set dashboard.enabled=true > /tmp/tide-helm-render.yaml
 	@python3 hack/helm/assert-prometheus-env.py /tmp/tide-helm-render.yaml --expect-absent
 	@helm template charts/tide --set dashboard.enabled=true --set prometheus.endpoint=http://prom:9090 > /tmp/tide-helm-render-prom.yaml
@@ -716,6 +716,9 @@ helm-telemetry-assert: ## Assert PROM_ENDPOINT/PHOENIX_BASE_URL env injection an
 	@python3 hack/helm/assert-phoenix-env.py /tmp/tide-helm-render.yaml --expect-absent
 	@helm template charts/tide --set dashboard.enabled=true --set phoenix.baseURL=http://phoenix:6006 > /tmp/tide-helm-render-phoenix.yaml
 	@python3 hack/helm/assert-phoenix-env.py /tmp/tide-helm-render-phoenix.yaml --expect-value http://phoenix:6006
+	@python3 hack/helm/assert-otlp-headers-env.py /tmp/tide-helm-render.yaml --expect-absent
+	@helm template charts/tide --set dashboard.enabled=true --set otel.exporter.headersSecretRef.name=tide-otlp-headers > /tmp/tide-helm-render-otlpheaders.yaml
+	@python3 hack/helm/assert-otlp-headers-env.py /tmp/tide-helm-render-otlpheaders.yaml --expect-secretref tide-otlp-headers OTEL_EXPORTER_OTLP_HEADERS
 	@bash hack/helm/assert-telemetry-render.sh
 
 .PHONY: helm-assert
