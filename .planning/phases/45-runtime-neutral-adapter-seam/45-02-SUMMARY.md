@@ -101,3 +101,7 @@ ADAPT-01 criteria 2 and 3 are satisfied on the reporter side. This plan is indep
 ---
 *Phase: 45-runtime-neutral-adapter-seam*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (`cmd/tide-reporter/main.go`, `cmd/tide-reporter/main_test.go`, `cmd/tide-reporter/adapter_seam_test.go`, `internal/reporter/tracesynth.go`, this SUMMARY.md). All 3 commit hashes (`10757a9`, `9f83245`, `93bd150`) confirmed present in `git log --oneline --all`.
