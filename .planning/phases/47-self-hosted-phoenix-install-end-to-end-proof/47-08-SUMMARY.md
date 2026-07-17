@@ -102,3 +102,7 @@ None - no external service configuration required.
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All created/modified files verified present (pkg/git/remote.go, pkg/git/remote_test.go, cmd/tide-push/main.go, cmd/tide-push/main_test.go, this SUMMARY.md); all three task/summary commits (`5c3e0c0`, `091350e`, `f5aa985`) verified present in `git log`.
