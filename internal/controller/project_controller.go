@@ -1919,8 +1919,8 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "project", project.Name, "")
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
 				ReporterOptions{
-					ReporterImage:    r.Deps.ReporterImage,
-					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
+					ReporterImage:     r.Deps.ReporterImage,
+					TraceParent:       traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
 					OTLPEndpoint:      r.Deps.OTLPEndpoint,
 					OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
 					SessionID:         string(project.UID),

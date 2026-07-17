@@ -651,8 +651,8 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	// byte-identical session.id/metadata/tags.
 	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "milestone", ms.Name, "")
 	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
-		ReporterImage:    r.Deps.ReporterImage,
-		TraceParent:      traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
+		ReporterImage:     r.Deps.ReporterImage,
+		TraceParent:       traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
 		OTLPEndpoint:      r.Deps.OTLPEndpoint,
 		OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
 		SkipMessageSpans:  skipMessageSpans,

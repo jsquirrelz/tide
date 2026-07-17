@@ -659,8 +659,8 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "plan", plan.Name, "")
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
 				ReporterOptions{
-					ReporterImage:    r.Deps.ReporterImage,
-					TraceParent:      traceparentForLevel(project, plan.Status.PlanTraceSpanID, sampled),
+					ReporterImage:     r.Deps.ReporterImage,
+					TraceParent:       traceparentForLevel(project, plan.Status.PlanTraceSpanID, sampled),
 					OTLPEndpoint:      r.Deps.OTLPEndpoint,
 					OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
 					SkipMessageSpans:  skipMessageSpans,
