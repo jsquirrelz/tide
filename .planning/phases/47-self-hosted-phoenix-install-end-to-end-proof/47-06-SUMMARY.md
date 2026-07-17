@@ -135,3 +135,7 @@ None - no external service configuration required. Operators applying this fix i
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All 11 modified files verified present on disk; all 4 commits (`75fc851`, `3e8b876`, `ec5372f`, `bf9cf21`) verified present in `git log --oneline --all`.
