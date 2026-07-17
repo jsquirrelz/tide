@@ -653,12 +653,12 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
 		ReporterImage:    r.Deps.ReporterImage,
 		TraceParent:      traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
-		OTLPEndpoint:     r.Deps.OTLPEndpoint,
-		OTLPHeaders:      r.Deps.OTLPHeaders,
-		SkipMessageSpans: skipMessageSpans,
-		SessionID:        projectUID,
-		MetadataJSON:     enrichmentMD,
-		Tags:             enrichmentTags,
+		OTLPEndpoint:      r.Deps.OTLPEndpoint,
+		OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+		SkipMessageSpans:  skipMessageSpans,
+		SessionID:         projectUID,
+		MetadataJSON:      enrichmentMD,
+		Tags:              enrichmentTags,
 	})
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr

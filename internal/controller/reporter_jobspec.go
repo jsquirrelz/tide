@@ -62,6 +62,19 @@ const (
 	// Jobs. Callers use this constant to discriminate reader Jobs from dispatch Jobs
 	// in the Job-completion handler (T-09-13 mitigation).
 	ReporterRoleLabel = "reporter"
+
+	// ReporterOTLPHeadersSecretName is the fixed name of the per-project-namespace
+	// Secret the reporter Job's OTEL_EXPORTER_OTLP_HEADERS env references via
+	// secretKeyRef. Mirrors the fixed-name tide-signing-key cross-namespace
+	// mirror convention (internal/dispatch/podjob/jobspec.go:345) — operators
+	// mirror the tide-system tide-otlp-headers Secret into each Project
+	// namespace under this same name (docs/INSTALL.md § Enable tracing).
+	ReporterOTLPHeadersSecretName = "tide-otlp-headers"
+
+	// ReporterOTLPHeadersSecretKey is the data key inside
+	// ReporterOTLPHeadersSecretName, matching the OTEL_EXPORTER_OTLP_HEADERS
+	// env var name the tide-system Secret already uses.
+	ReporterOTLPHeadersSecretKey = "OTEL_EXPORTER_OTLP_HEADERS"
 )
 
 // ReporterOptions carries everything the four planner-completion handlers
@@ -96,19 +109,26 @@ type ReporterOptions struct {
 	// provider (materialization-mode posture, D-06).
 	OTLPEndpoint string
 
-	// OTLPHeaders is the manager's own OTEL_EXPORTER_OTLP_HEADERS value,
-	// forwarded so the reporter Job's own TracerProvider authenticates to
-	// the SAME auth-enabled collector the manager uses (Phase 47 PHX-02/
-	// D-08). Carried as Env (mirroring OTLPEndpoint) because the pinned
-	// otlptracegrpc v1.43.0 honors OTEL_EXPORTER_OTLP_HEADERS automatically
-	// when WithHeaders is not called — no reporter-binary change needed.
-	// Only emitted when OTLPEndpoint is also non-empty (headers without an
-	// endpoint are meaningless). The value is a literal on the Job spec in
-	// the project namespace — accepted per threat T-47-02: Job-read RBAC
-	// in a project namespace already implies access to tide-secrets'
-	// ANTHROPIC_API_KEY, a strictly more sensitive credential than an
-	// ingest-scoped Phoenix token.
-	OTLPHeaders string
+	// OTLPHeadersSecret carries the per-project-namespace headers-Secret
+	// NAME to reference (never the decoded value) so the reporter Job's own
+	// TracerProvider authenticates to the SAME auth-enabled collector the
+	// manager uses (Phase 47 PHX-02/D-08). Emitted as a
+	// valueFrom.secretKeyRef against the fixed-name
+	// ReporterOTLPHeadersSecretName Secret (key ReporterOTLPHeadersSecretKey)
+	// mirrored into the project namespace — the same fixed-name convention
+	// as tide-signing-key. The pinned otlptracegrpc v1.43.0 honors
+	// OTEL_EXPORTER_OTLP_HEADERS automatically once resolved (no
+	// reporter-binary change needed). Only emitted when OTLPEndpoint is also
+	// non-empty (headers without an endpoint are meaningless). The
+	// secretKeyRef is Optional: the Job spec exposes only the Secret NAME —
+	// reading the token requires `get` on Secrets in that namespace, so
+	// Job-read RBAC alone never sees the credential (corrects the T-47-02
+	// rationale, which claimed RBAC equivalence with a strictly larger
+	// literal-value exposure). A missing mirror degrades the reporter to an
+	// unauthenticated export (dark traces) instead of blocking child-CRD
+	// materialization with CreateContainerConfigError, matching the Phase
+	// 44 D-10 exit-0/dark-pipe posture.
+	OTLPHeadersSecret string
 
 	// TraceOnly selects the Phase 44 trace-only Job shape (spawned by plan
 	// 44-05 for completed Task dispatch Jobs) instead of the materialization
@@ -210,9 +230,9 @@ type ReporterOptions struct {
 //
 //   - Env: empty unless opts.OTLPEndpoint is set (Phase 44 D-06/T-44-04), in
 //     which case OTEL_EXPORTER_OTLP_ENDPOINT + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6
-//     are added, plus OTEL_EXPORTER_OTLP_HEADERS when opts.OTLPHeaders is also
-//     set (Phase 47 PHX-02/D-08) — see the ReporterOptions.OTLPEndpoint and
-//     OTLPHeaders doc comments.
+//     are added, plus a secretKeyRef-sourced OTEL_EXPORTER_OTLP_HEADERS when
+//     opts.OTLPHeadersSecret is also set (Phase 47 PHX-02/D-08) — see the
+//     ReporterOptions.OTLPEndpoint and OTLPHeadersSecret doc comments.
 //
 //   - SecurityContext: RunAsNonRoot + drop ALL capabilities (mirrors jobspec.go
 //     hardened subagent context — reporter is trusted write; least-privilege).
@@ -301,8 +321,22 @@ func BuildReporterJob(
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: opts.OTLPEndpoint},
 			{Name: "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", Value: "6"},
 		}
-		if opts.OTLPHeaders != "" {
-			env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_HEADERS", Value: opts.OTLPHeaders})
+		if opts.OTLPHeadersSecret != "" {
+			// Optional=true: a missing per-namespace mirror degrades the
+			// reporter to an unauthenticated export (dark traces) rather
+			// than blocking child-CRD materialization with
+			// CreateContainerConfigError (T-47-06-02).
+			optionalTrue := true
+			env = append(env, corev1.EnvVar{
+				Name: ReporterOTLPHeadersSecretKey,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: opts.OTLPHeadersSecret},
+						Key:                  ReporterOTLPHeadersSecretKey,
+						Optional:             &optionalTrue,
+					},
+				},
+			})
 		}
 	}
 

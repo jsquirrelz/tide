@@ -1921,12 +1921,12 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 				ReporterOptions{
 					ReporterImage:    r.Deps.ReporterImage,
 					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
-					OTLPEndpoint:     r.Deps.OTLPEndpoint,
-					OTLPHeaders:      r.Deps.OTLPHeaders,
-					SessionID:        string(project.UID),
-					MetadataJSON:     enrichmentMD,
-					Tags:             enrichmentTags,
-					SkipMessageSpans: skipMessageSpans,
+					OTLPEndpoint:      r.Deps.OTLPEndpoint,
+					OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+					SessionID:         string(project.UID),
+					MetadataJSON:      enrichmentMD,
+					Tags:              enrichmentTags,
+					SkipMessageSpans:  skipMessageSpans,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

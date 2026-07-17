@@ -860,11 +860,11 @@ func TestBuildReporterJob_NoOTLPEndpointNoEnv(t *testing.T) {
 	}
 }
 
-// TestBuildReporterJob_OTLPHeadersEnv asserts that setting opts.OTLPHeaders
-// alongside a non-empty opts.OTLPEndpoint stamps a third Env entry,
-// OTEL_EXPORTER_OTLP_HEADERS, carrying the forwarded manager value — the
-// reporter's own otlptracegrpc TracerProvider honors this env automatically
-// (Phase 47 PHX-02/D-08).
+// TestBuildReporterJob_OTLPHeadersEnv asserts that setting
+// opts.OTLPHeadersSecret alongside a non-empty opts.OTLPEndpoint stamps a
+// third Env entry, OTEL_EXPORTER_OTLP_HEADERS, sourced via
+// valueFrom.secretKeyRef against the named Secret — never a literal Value
+// (Phase 47 PHX-02/D-08 / T-47-06-01 root-fix).
 func TestBuildReporterJob_OTLPHeadersEnv(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
 		ObjectMeta: metav1.ObjectMeta{
@@ -882,23 +882,27 @@ func TestBuildReporterJob_OTLPHeadersEnv(t *testing.T) {
 	}
 	scheme := newTestScheme()
 	opts := controller.ReporterOptions{
-		ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
-		OTLPEndpoint:  "collector:4317",
-		OTLPHeaders:   "Authorization=Bearer test-token",
+		ReporterImage:     "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		OTLPEndpoint:      "collector:4317",
+		OTLPHeadersSecret: controller.ReporterOTLPHeadersSecretName,
 	}
 	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-17", "Milestone", opts, scheme)
 
 	env := job.Spec.Template.Spec.Containers[0].Env
-	want := map[string]string{
+	wantLiteral := map[string]string{
 		"OTEL_EXPORTER_OTLP_ENDPOINT":    "collector:4317",
 		"OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "6",
-		"OTEL_EXPORTER_OTLP_HEADERS":     "Authorization=Bearer test-token",
 	}
-	if len(env) != len(want) {
-		t.Fatalf("expected exactly %d Env entries, got %d: %v", len(want), len(env), env)
+	if len(env) != len(wantLiteral)+1 {
+		t.Fatalf("expected exactly %d Env entries, got %d: %v", len(wantLiteral)+1, len(env), env)
 	}
-	for _, e := range env {
-		wantVal, ok := want[e.Name]
+	var headersEnv *corev1.EnvVar
+	for i, e := range env {
+		if e.Name == "OTEL_EXPORTER_OTLP_HEADERS" {
+			headersEnv = &env[i]
+			continue
+		}
+		wantVal, ok := wantLiteral[e.Name]
 		if !ok {
 			t.Errorf("unexpected Env entry %q", e.Name)
 			continue
@@ -907,10 +911,29 @@ func TestBuildReporterJob_OTLPHeadersEnv(t *testing.T) {
 			t.Errorf("expected Env %s=%q, got %q", e.Name, wantVal, e.Value)
 		}
 	}
+	if headersEnv == nil {
+		t.Fatal("expected an OTEL_EXPORTER_OTLP_HEADERS Env entry")
+	}
+	if headersEnv.Value != "" {
+		t.Errorf("expected OTEL_EXPORTER_OTLP_HEADERS.Value to be empty (no literal), got %q", headersEnv.Value)
+	}
+	if headersEnv.ValueFrom == nil || headersEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected OTEL_EXPORTER_OTLP_HEADERS.ValueFrom.SecretKeyRef to be set")
+	}
+	ref := headersEnv.ValueFrom.SecretKeyRef
+	if ref.Name != "tide-otlp-headers" {
+		t.Errorf("expected SecretKeyRef.Name=%q, got %q", "tide-otlp-headers", ref.Name)
+	}
+	if ref.Key != "OTEL_EXPORTER_OTLP_HEADERS" {
+		t.Errorf("expected SecretKeyRef.Key=%q, got %q", "OTEL_EXPORTER_OTLP_HEADERS", ref.Key)
+	}
+	if ref.Optional == nil || !*ref.Optional {
+		t.Error("expected SecretKeyRef.Optional to be a non-nil pointer to true")
+	}
 }
 
 // TestBuildReporterJob_OTLPHeadersWithoutEndpointNoEnv asserts that
-// OTLPHeaders alone (without OTLPEndpoint) never stamps any Env entry —
+// OTLPHeadersSecret alone (without OTLPEndpoint) never stamps any Env entry —
 // headers without an endpoint are meaningless, and the outer OTLPEndpoint
 // guard is preserved (Phase 47 PATTERNS open-question resolution).
 func TestBuildReporterJob_OTLPHeadersWithoutEndpointNoEnv(t *testing.T) {
@@ -930,14 +953,14 @@ func TestBuildReporterJob_OTLPHeadersWithoutEndpointNoEnv(t *testing.T) {
 	}
 	scheme := newTestScheme()
 	opts := controller.ReporterOptions{
-		ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
-		OTLPHeaders:   "Authorization=Bearer test-token",
+		ReporterImage:     "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		OTLPHeadersSecret: controller.ReporterOTLPHeadersSecretName,
 	}
 	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-18", "Milestone", opts, scheme)
 
 	env := job.Spec.Template.Spec.Containers[0].Env
 	if len(env) != 0 {
-		t.Errorf("expected zero Env entries when OTLPEndpoint is empty even with OTLPHeaders set, got %v", env)
+		t.Errorf("expected zero Env entries when OTLPEndpoint is empty even with OTLPHeadersSecret set, got %v", env)
 	}
 }
 
