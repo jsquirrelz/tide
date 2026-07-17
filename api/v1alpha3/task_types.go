@@ -179,6 +179,18 @@ type TaskStatus struct {
 	// TraceID — always re-derivable from Project.UID via otelai.TraceIDFromUID.
 	// +optional
 	TaskTraceSpanID string `json:"taskTraceSpanID,omitempty"`
+
+	// TaskTraceReporterSpawnedUID is the UID of the completed executor Job whose
+	// trace-only reporter Job has been spawned for this Task attempt — the
+	// durable gate closing the CR-01 window where the name-only spawn gate in
+	// spawnTaskTraceReporterIfNeeded re-opens after the reporter Job's 300s
+	// TTL-GC and a sustained-reconcile parent re-Creates a duplicate reporter
+	// with recomputed options (Phase 47 gap-closure; mirrors TaskSpanEmittedUID's
+	// per-attempt keying). The value is the completed Job's UID — Task always
+	// observes a non-nil completedJob at this call site, so there is no
+	// name-fallback branch here (unlike the four planner-level markers).
+	// +optional
+	TaskTraceReporterSpawnedUID string `json:"taskTraceReporterSpawnedUID,omitempty"`
 }
 
 // +kubebuilder:object:root=true

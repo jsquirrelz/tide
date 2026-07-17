@@ -1092,9 +1092,22 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 		return
 	}
 
+	// Phase 47 CR-01 gap-closure: the Get→IsNotFound→Create gate below is
+	// name-only — it re-opens after the reporter Job's 300s TTL-GC
+	// (reporter_jobspec.go), letting a sustained-reconcile parent re-Create a
+	// duplicate reporter with freshly-recomputed ReporterOptions. Task always
+	// observes a non-nil completedJob here (guarded above), so spawnKey is
+	// always the completed Job's UID — no name-fallback branch needed (unlike
+	// the four planner-level markers).
+	spawnKey := string(completedJob.UID)
+	if task.Status.TaskTraceReporterSpawnedUID == spawnKey {
+		return // already spawned for this attempt — durable marker guard
+	}
+
 	jobName := "tide-reporter-trace-" + string(completedJob.UID)
 	var existing batchv1.Job
 	if gErr := r.Get(ctx, client.ObjectKey{Namespace: project.Namespace, Name: jobName}, &existing); gErr == nil {
+		r.stampTaskTraceReporterSpawnedUID(ctx, task, spawnKey)
 		return // already spawned for this attempt (T-09-13-style idempotency)
 	} else if !apierrors.IsNotFound(gErr) {
 		logger.Error(gErr, "get trace-only reporter Job failed (non-fatal); spawn deferred to a later reconcile", "job", jobName)
@@ -1123,10 +1136,41 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {
 			logger.Error(cErr, "create trace-only reporter Job failed (non-fatal, observability never gates)", "job", jobName)
+			return
 		}
-		return
+		// AlreadyExists: idempotent success (T-09-13) — a reporter Job verifiably
+		// exists for this attempt, so the marker is stamped below same as Create.
+	} else {
+		logger.Info("spawned trace-only reporter Job", "job", jobName, "task", task.Name)
 	}
-	logger.Info("spawned trace-only reporter Job", "job", jobName, "task", task.Name)
+	r.stampTaskTraceReporterSpawnedUID(ctx, task, spawnKey)
+}
+
+// stampTaskTraceReporterSpawnedUID durably records that the trace-only
+// reporter Job for this Task attempt (spawnKey = completedJob.UID) has been
+// observed to exist — the CR-01 gate that survives the reporter Job's 300s
+// TTL-GC and manager restarts. Preserves spawnTaskTraceReporterIfNeeded's
+// deliberate non-fatal posture (Phase 44 MSG-01/D-05: observability never
+// gates Task's terminal-state machinery): on failure this logs and returns
+// rather than propagating an error, so the gate stays open and the next
+// reconcile retries the stamp — behavior degrades to pre-fix (possible
+// duplicate spawn on TTL-GC), never worse.
+func (r *TaskReconciler) stampTaskTraceReporterSpawnedUID(ctx context.Context, task *tideprojectv1alpha3.Task, spawnKey string) {
+	logger := logf.FromContext(ctx)
+	if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &tideprojectv1alpha3.Task{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(task), latest); err != nil {
+			return err
+		}
+		if latest.Status.TaskTraceReporterSpawnedUID == spawnKey {
+			return nil // already set by a concurrent reconcile — idempotent
+		}
+		markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		latest.Status.TaskTraceReporterSpawnedUID = spawnKey
+		return r.Status().Patch(ctx, latest, markerPatch)
+	}); mErr != nil {
+		logger.Error(mErr, "TaskTraceReporterSpawnedUID marker patch failed (non-fatal); gate stays open for retry on next reconcile", "task", task.Name)
+	}
 }
 
 // handleJobCompletion reads the EnvelopeOut, validates output paths, rolls up

@@ -642,8 +642,24 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// Children arrive via the Owns(&Task{}) / Owns(&Wave{}) watch once created.
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
+	//
+	// Phase 47 CR-01 gap-closure: the inline Get→IsNotFound→Create gate below is
+	// name-only — it re-opens after the reporter Job's 300s TTL-GC
+	// (reporter_jobspec.go), letting a sustained-reconcile parent re-Create a
+	// duplicate reporter with freshly-recomputed ReporterOptions. spawnKey is the
+	// durable per-attempt guard: the completed planner Job's UID, falling back to
+	// the deterministic planJobName when completedJob is nil (already TTL-GC'd or
+	// never observed). When the marker already matches, this completion has
+	// already spawned its reporter — skip the whole block entirely.
+	planJobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
+	spawnKey := planJobName
+	if completedJob != nil {
+		spawnKey = string(completedJob.UID)
+	}
 	isFirstCompletion := false
-	if r.Deps.ReporterImage != "" && project != nil {
+	if plan.Status.PlanReporterSpawnedUID == spawnKey {
+		isFirstCompletion = false
+	} else if r.Deps.ReporterImage != "" && project != nil {
 		reporterJobName := fmt.Sprintf("tide-reporter-%s", plan.UID)
 		pvcName := r.sharedPVCName()
 		var existingReporterJob batchv1.Job
@@ -678,6 +694,27 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 		} else {
 			logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
 		}
+		// Stamp the durable marker: a reporter Job verifiably exists for this
+		// attempt (newly-Created, AlreadyExists, or found-by-name — every branch
+		// above reaches here without an early return). Deliberately unconditional
+		// on isFirstCompletion: this also back-fills the marker for reporters
+		// spawned before this fix landed. WR-03: on RetryOnConflict exhaustion,
+		// return the error to requeue — the marker must be durable before the
+		// TTL-GC window re-opens the name-only gate.
+		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			latest := &tideprojectv1alpha3.Plan{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(plan), latest); err != nil {
+				return err
+			}
+			if latest.Status.PlanReporterSpawnedUID == spawnKey {
+				return nil // already set by a concurrent reconcile — idempotent
+			}
+			markerPatch := client.MergeFromWithOptions(latest.DeepCopy(), client.MergeFromWithOptimisticLock{})
+			latest.Status.PlanReporterSpawnedUID = spawnKey
+			return r.Status().Patch(ctx, latest, markerPatch)
+		}); mErr != nil {
+			return ctrl.Result{}, fmt.Errorf("patch PlanReporterSpawnedUID: %w", mErr)
+		}
 	} else if r.Deps.ReporterImage == "" {
 		isFirstCompletion = true
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured", "plan", plan.Name)
@@ -691,7 +728,6 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 	// durable PlanRolledUpUID marker (lives in CRD .status, survives restart)
 	// to guarantee exactly-once rollup regardless of TTL-GC (ADOPT-04).
 	// D-03a: the plan level previously had no marker — this is a new addition.
-	planJobName := fmt.Sprintf("tide-plan-%s-1", plan.UID)
 	if isFirstCompletion && envReadOK && project != nil {
 		if plan.Status.PlanRolledUpUID != planJobName {
 			if rollErr := budget.RollUpUsage(ctx, r.Client, project, out.Usage); rollErr != nil {
