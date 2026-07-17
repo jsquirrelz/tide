@@ -643,11 +643,13 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
 			isFirstCompletion = true
+			skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "plan", r.Deps.HelmProviderDefaults).Vendor)
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
 				ReporterOptions{
-					ReporterImage: r.Deps.ReporterImage,
-					TraceParent:   traceparentForLevel(project, plan.Status.PlanTraceSpanID),
-					OTLPEndpoint:  r.Deps.OTLPEndpoint,
+					ReporterImage:    r.Deps.ReporterImage,
+					TraceParent:      traceparentForLevel(project, plan.Status.PlanTraceSpanID),
+					OTLPEndpoint:     r.Deps.OTLPEndpoint,
+					SkipMessageSpans: skipMessageSpans,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

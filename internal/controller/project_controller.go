@@ -1898,11 +1898,13 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 				return ctrl.Result{}, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 			}
 			isFirstCompletion = true
+			skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "project", r.Deps.HelmProviderDefaults).Vendor)
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
 				ReporterOptions{
-					ReporterImage: r.Deps.ReporterImage,
-					TraceParent:   traceparentForLevel(project, project.Status.ProjectTraceSpanID),
-					OTLPEndpoint:  r.Deps.OTLPEndpoint,
+					ReporterImage:    r.Deps.ReporterImage,
+					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID),
+					OTLPEndpoint:     r.Deps.OTLPEndpoint,
+					SkipMessageSpans: skipMessageSpans,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

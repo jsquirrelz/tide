@@ -193,6 +193,78 @@ func TestBuildReporterJob_TraceparentArg(t *testing.T) {
 	})
 }
 
+// TestBuildReporterJob_SkipMessageSpansArg asserts BuildReporterJob carries
+// the bareword --skip-message-spans Arg (Args-only transport, D-04) when
+// ReporterOptions.SkipMessageSpans is true, in BOTH Job shapes (D-05's
+// "composes uniformly with both Job shapes"), and omits it entirely when
+// false (D-03 default-safe: absent means synthesize).
+func TestBuildReporterJob_SkipMessageSpansArg(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-c",
+			UID:       "project-uid-4",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-3",
+			Namespace: "ns-c",
+			UID:       "parent-uid-4",
+		},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when true (materialization shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage:    "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			SkipMessageSpans: true,
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-4", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		var found bool
+		for _, a := range args {
+			if a == "--skip-message-spans" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", "--skip-message-spans", args)
+		}
+	})
+
+	t.Run("present when true (trace-only shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage:    "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			TraceOnly:        true,
+			TraceOnlyJobKey:  "job-uid-skip-1",
+			SkipMessageSpans: true,
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-4", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		var found bool
+		for _, a := range args {
+			if a == "--skip-message-spans" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", "--skip-message-spans", args)
+		}
+	})
+
+	t.Run("absent when false", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-4", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if a == "--skip-message-spans" || strings.HasPrefix(a, "--skip-message-spans") {
+				t.Errorf("did not expect a --skip-message-spans arg when SkipMessageSpans is false, got %v", args)
+			}
+		}
+	})
+}
+
 // TestBuildReporterJob_OwnerRef asserts owner ref is set to the parent (not necessarily the project).
 func TestBuildReporterJob_OwnerRef(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{

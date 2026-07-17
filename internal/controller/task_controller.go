@@ -1076,13 +1076,15 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 		return
 	}
 
+	skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "task", r.Deps.HelmProviderDefaults).Vendor)
 	traceOnlyJob := BuildReporterJob(task, project, r.sharedPVCName(), string(task.UID), "Task",
 		ReporterOptions{
-			ReporterImage:   r.Deps.ReporterImage,
-			OTLPEndpoint:    r.Deps.OTLPEndpoint,
-			TraceOnly:       true,
-			TraceOnlyJobKey: string(completedJob.UID),
-			TraceParent:     traceparentForLevel(project, task.Status.TaskTraceSpanID),
+			ReporterImage:    r.Deps.ReporterImage,
+			OTLPEndpoint:     r.Deps.OTLPEndpoint,
+			TraceOnly:        true,
+			TraceOnlyJobKey:  string(completedJob.UID),
+			TraceParent:      traceparentForLevel(project, task.Status.TaskTraceSpanID),
+			SkipMessageSpans: skipMessageSpans,
 		}, r.Scheme)
 	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {
