@@ -661,11 +661,23 @@ func runPush(ctx context.Context, cfg pushConfig, stderr io.Writer) int {
 		return exitLeakBlocked
 	}
 
-	// D-B6: push with --force-with-lease against cfg.LastPushedSHA.
-	// First push (lease="") omits the lease via pkggit.Push contract. The
-	// push is idempotent: re-pushing an already-present run branch HEAD is a
-	// no-op fast-forward, so a retried boundary-push Job converges safely.
-	if err := pkggit.Push(ctx, repo, cfg.Branch, cfg.LastPushedSHA, pat); err != nil {
+	// D-B6: push with --force-with-lease against the effective lease anchor.
+	// The anchor is derived from the observed remote tip with an ancestry
+	// guard (Phase 47 gap #3): a stale cfg.LastPushedSHA is refreshed to the
+	// remote's actual tip when that tip is already-integrated local history
+	// (a TIDE wave-level push from the same shared-PVC repo), keeping every
+	// controller retry and bypass-annotation re-dispatch from flapping
+	// forever against a lease the remote has legitimately moved past.
+	// External advances still fail closed on the same exit-11/lease-rejected
+	// contract. First push (lease="") omits the lease via pkggit.Push
+	// contract. The push is idempotent: re-pushing an already-present run
+	// branch HEAD is a no-op fast-forward, so a retried boundary-push Job
+	// converges safely.
+	effectiveLease, rejected, rejectExit := deriveEffectiveLease(ctx, cfg, repo, pat, newHash, stderr)
+	if rejected {
+		return rejectExit
+	}
+	if err := pkggit.Push(ctx, repo, cfg.Branch, effectiveLease, pat); err != nil {
 		// DASH-02: an idempotent restage leaves the tree clean and HEAD already on
 		// the remote at the leased SHA, so the force-with-lease push is a no-op that
 		// go-git reports as NoErrAlreadyUpToDate. Treat it as success for cumulative
@@ -947,6 +959,86 @@ func commitOrReuseHead(
 		newHash = h
 	}
 	return newHash, scanBase, 0, false
+}
+
+// deriveEffectiveLease re-reads the ACTUAL remote tip of cfg.Branch via
+// pkggit.RemoteBranchTip and derives the --force-with-lease anchor Push
+// should use, guarded by ancestry (Phase 47 gap-closure #3 — the
+// boundary-push stale-lease defect: Status.Git.LastPushedSHA is asserted
+// verbatim on every retry, so a wave-level push that already advanced the
+// remote makes every retry fail identically). Because this runs inside
+// every push attempt — controller-driven retry or bypass-annotation
+// re-dispatch alike — one mechanism covers both paths.
+//
+// Returns the lease to pass to pkggit.Push. When rejected is true, an
+// external (non-integrated) remote advance was detected: the
+// lease-rejected envelope has already been written and the caller MUST
+// return rejectExit (exitLeaseFailed) WITHOUT calling pkggit.Push — D-B6's
+// protection against overwriting external/manual work stays intact.
+//
+// A remote-read failure or an ancestry-check failure both fall back to
+// cfg.LastPushedSHA unchanged (conservative degrade): the push itself then
+// surfaces any real transport problem through the existing
+// classifyPushError path, and no new envelope reason strings are
+// introduced.
+func deriveEffectiveLease(
+	ctx context.Context, cfg pushConfig, repo *gogit.Repository, pat string,
+	newHash plumbing.Hash, stderr io.Writer,
+) (lease string, rejected bool, rejectExit int) {
+	remoteTip, found, rtErr := pkggit.RemoteBranchTip(ctx, repo, cfg.Branch, pat)
+	if rtErr != nil {
+		fmt.Fprintf(stderr, "tide-push: remote branch tip read failed, falling back to configured lease %q: %v\n",
+			cfg.LastPushedSHA, redactPAT(rtErr.Error(), pat))
+		return cfg.LastPushedSHA, false, 0
+	}
+	if !found {
+		// First-push semantics: no ref on the remote yet, byte-identical to
+		// today's behavior via Push's empty-lease contract.
+		return "", false, 0
+	}
+	if remoteTip.String() == cfg.LastPushedSHA {
+		// Anchor still accurate — unchanged behavior.
+		return cfg.LastPushedSHA, false, 0
+	}
+
+	// The observed remote tip differs from our configured anchor. Guard the
+	// refresh with ancestry: only refresh when the remote's advance is
+	// already-integrated local history; otherwise this is external
+	// divergence and D-B6 must fail closed exactly as it does today.
+	remoteTipCommit, err := repo.CommitObject(remoteTip)
+	if err != nil {
+		fmt.Fprintf(stderr,
+			"tide-push: observed remote tip %s for %s not found locally — external divergence, stale anchor %s rejected\n",
+			remoteTip, cfg.Branch, cfg.LastPushedSHA)
+		writePushEnvelope(cfg, newHash.String(), exitLeaseFailed, "lease-rejected", nil, 0, "")
+		return "", true, exitLeaseFailed
+	}
+
+	headCommit, err := repo.CommitObject(newHash)
+	if err != nil {
+		fmt.Fprintf(stderr, "tide-push: CommitObject(newHash=%s) failed, falling back to configured lease: %v\n",
+			newHash, err)
+		return cfg.LastPushedSHA, false, 0
+	}
+
+	isAncestor, err := remoteTipCommit.IsAncestor(headCommit)
+	if err != nil {
+		fmt.Fprintf(stderr, "tide-push: ancestry check for observed remote tip %s failed, falling back to configured lease: %v\n",
+			remoteTip, err)
+		return cfg.LastPushedSHA, false, 0
+	}
+	if !isAncestor {
+		fmt.Fprintf(stderr,
+			"tide-push: observed remote tip %s for %s is not an ancestor of local HEAD — external divergence, stale anchor %s rejected\n",
+			remoteTip, cfg.Branch, cfg.LastPushedSHA)
+		writePushEnvelope(cfg, newHash.String(), exitLeaseFailed, "lease-rejected", nil, 0, "")
+		return "", true, exitLeaseFailed
+	}
+
+	fmt.Fprintf(stderr,
+		"tide-push: refreshing stale lease anchor %s -> observed remote tip %s for %s (already-integrated local history)\n",
+		cfg.LastPushedSHA, remoteTip, cfg.Branch)
+	return remoteTip.String(), false, 0
 }
 
 // verifyResult carries the D-06/INTEG-03 verify gate's outcome: either an

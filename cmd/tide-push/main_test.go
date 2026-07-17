@@ -401,6 +401,215 @@ func TestRunPushModeSubsequentPushHonorsLease(t *testing.T) {
 	}
 }
 
+// ---------- Test 3b: push mode, stale lease refreshed after an integrated
+// remote advance (Phase 47 gap #3 — the verifier-named scenario) ----------
+//
+// A wave-level push has landed on the remote between two boundary-push
+// attempts, so the controller's Status.Git.LastPushedSHA is stale by the
+// time the third push (a retry re-asserting the FIRST push's SHA) runs.
+// Because the wave-level push originated from the SAME workspace, its
+// commit is present in the local object DB and is an ancestor of the third
+// push's HEAD — deriveEffectiveLease must refresh the lease to the
+// observed remote tip and land the push, rather than flapping on a
+// non-fast-forward rejection forever.
+func TestRunPushModeRefreshesStaleLeaseAfterIntegratedRemoteAdvance(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "refresh")
+	ws := setupWorkspace(t, bareSrc, branch)
+	writeArtifact(t, ws, "artifacts/file-1.md", "# first push\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Push 1 — first push, lease "". Lands headSHA A.
+	cfg1 := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/file-1.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3b",
+	}
+	exit1, stderr1 := stderrAndRun(t, ctx, cfg1, "pat-1")
+	if exit1 != 0 {
+		t.Fatalf("push 1 exit=%d, stderr=%s", exit1, stderr1)
+	}
+	pr1 := readPushEnvelope(t, ws, "p3b")
+	if pr1.HeadSHA == "" {
+		t.Fatal("push 1: envelope.headSHA empty")
+	}
+
+	// Push 2 — simulates a wave-level push landing from the SAME workspace,
+	// honoring the accurate lease A. Lands headSHA B.
+	writeArtifact(t, ws, "artifacts/file-2.md", "# wave-level push\n")
+	cfg2 := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: pr1.HeadSHA,
+		CommitMessage: "tide: wave-level integration push",
+		ArtifactPaths: []string{"artifacts/file-2.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3b",
+	}
+	exit2, stderr2 := stderrAndRun(t, ctx, cfg2, "pat-2")
+	if exit2 != 0 {
+		t.Fatalf("push 2 exit=%d, stderr=%s", exit2, stderr2)
+	}
+	pr2 := readPushEnvelope(t, ws, "p3b")
+	if pr2.HeadSHA == pr1.HeadSHA {
+		t.Fatalf("push 2: envelope.headSHA didn't advance: %s == %s", pr2.HeadSHA, pr1.HeadSHA)
+	}
+
+	// Push 3 — the controller retries the FIRST boundary push, re-asserting
+	// the now-STALE lease A (simulating Status.Git.LastPushedSHA never
+	// having observed push 2). A third artifact stages a new commit C on
+	// top of the workspace's current local HEAD (which is already at B).
+	writeArtifact(t, ws, "artifacts/file-3.md", "# retried boundary push\n")
+	cfg3 := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: pr1.HeadSHA, // STALE — remote has already moved to B
+		CommitMessage: "tide: plan 03-foo authored + executed (retry)",
+		ArtifactPaths: []string{"artifacts/file-3.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3b",
+	}
+	exit3, stderr3 := stderrAndRun(t, ctx, cfg3, "pat-3")
+	if exit3 != 0 {
+		t.Fatalf("push 3 (stale-lease retry) exit=%d, want 0; stderr=%s", exit3, stderr3)
+	}
+	pr3 := readPushEnvelope(t, ws, "p3b")
+	if pr3.HeadSHA == pr2.HeadSHA {
+		t.Fatalf("push 3: envelope.headSHA didn't advance past wave-level push: %s == %s", pr3.HeadSHA, pr2.HeadSHA)
+	}
+
+	// The bare remote's branch tip must equal the third push's headSHA — the
+	// stale-anchor retry landed despite never having observed push 2.
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference bare branch: %v", err)
+	}
+	if ref.Hash().String() != pr3.HeadSHA {
+		t.Errorf("bare ref = %s, want push 3 envelope.headSHA = %s", ref.Hash(), pr3.HeadSHA)
+	}
+}
+
+// ---------- Test 3c: push mode, external remote advance still fails closed
+// (Phase 47 gap #3 — D-B6 protection intact) ----------
+//
+// The remote advances via a commit NOT present anywhere in the workspace's
+// object DB (a genuinely external/manual push). A retry with a stale lease
+// must still be rejected with exit 11 / reason lease-rejected, and the
+// remote's branch tip must be left untouched — refreshing the lease must
+// never degrade into a blind force push over real external work.
+func TestRunPushModeRejectsExternalRemoteAdvance(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "external")
+	ws := setupWorkspace(t, bareSrc, branch)
+	writeArtifact(t, ws, "artifacts/file-1.md", "# first push\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Push 1 — first push, lease "". Lands headSHA A.
+	cfg1 := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: "",
+		CommitMessage: "tide: plan 03-foo authored + executed",
+		ArtifactPaths: []string{"artifacts/file-1.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3c",
+	}
+	exit1, stderr1 := stderrAndRun(t, ctx, cfg1, "pat-1")
+	if exit1 != 0 {
+		t.Fatalf("push 1 exit=%d, stderr=%s", exit1, stderr1)
+	}
+	pr1 := readPushEnvelope(t, ws, "p3c")
+	if pr1.HeadSHA == "" {
+		t.Fatal("push 1: envelope.headSHA empty")
+	}
+
+	// Advance the remote EXTERNALLY: a separate PlainClone of bareSrc in
+	// another temp dir, commit, and push directly with go-git — this commit
+	// exists nowhere in the workspace's object DB.
+	extDir := filepath.Join(base, "external-clone")
+	extRepo, err := gogit.PlainClone(extDir, false, &gogit.CloneOptions{
+		URL:           "file://" + bareSrc,
+		ReferenceName: plumbing.NewBranchReferenceName(branch),
+		SingleBranch:  true,
+	})
+	if err != nil {
+		t.Fatalf("external PlainClone: %v", err)
+	}
+	extWT, err := extRepo.Worktree()
+	if err != nil {
+		t.Fatalf("external Worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(extDir, "external.txt"), []byte("external work\n"), 0o644); err != nil {
+		t.Fatalf("write external.txt: %v", err)
+	}
+	if _, err := extWT.Add("external.txt"); err != nil {
+		t.Fatalf("external Add: %v", err)
+	}
+	externalCommit, err := extWT.Commit("external manual commit", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "External", Email: "ext@example.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("external Commit: %v", err)
+	}
+	if err := extRepo.PushContext(ctx, &gogit.PushOptions{}); err != nil {
+		t.Fatalf("external Push: %v", err)
+	}
+	if externalCommit == plumbing.NewHash(pr1.HeadSHA) {
+		t.Fatal("external commit equals push-1 head — fixture broken")
+	}
+
+	// Push 2 — the controller retries with the now-STALE lease A (the
+	// remote actually sits at the external commit). A new artifact stages a
+	// local commit on top of the workspace's local HEAD (still at A).
+	writeArtifact(t, ws, "artifacts/file-2.md", "# retried boundary push\n")
+	cfg2 := pushConfig{
+		Mode:          "push",
+		Branch:        branch,
+		LastPushedSHA: pr1.HeadSHA, // STALE — remote has diverged externally
+		CommitMessage: "tide: plan 03-foo authored + executed (retry)",
+		ArtifactPaths: []string{"artifacts/file-2.md"},
+		Workspace:     ws,
+		ProjectUID:    "p3c",
+	}
+	exit2, stderr2 := stderrAndRun(t, ctx, cfg2, "pat-2")
+	if exit2 != exitLeaseFailed {
+		t.Fatalf("push 2 (external divergence) exit=%d, want %d (exitLeaseFailed); stderr=%s",
+			exit2, exitLeaseFailed, stderr2)
+	}
+	pr2 := readPushEnvelope(t, ws, "p3c")
+	if pr2.Reason != "lease-rejected" {
+		t.Errorf("envelope.reason = %q, want %q", pr2.Reason, "lease-rejected")
+	}
+
+	// The bare remote's branch tip must still equal the external commit —
+	// external work is preserved, nothing was force-pushed over it.
+	bareRepo, err := gogit.PlainOpen(bareSrc)
+	if err != nil {
+		t.Fatalf("PlainOpen bareSrc: %v", err)
+	}
+	ref, err := bareRepo.Reference(plumbing.NewBranchReferenceName(branch), false)
+	if err != nil {
+		t.Fatalf("Reference bare branch: %v", err)
+	}
+	if ref.Hash() != externalCommit {
+		t.Errorf("bare ref = %s, want external commit %s (external work must be preserved)", ref.Hash(), externalCommit)
+	}
+}
+
 // ---------- Test 4: push mode, never-targets-main guard ----------
 
 func TestRunPushModeRefusesMainBranch(t *testing.T) {
