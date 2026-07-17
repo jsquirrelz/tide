@@ -163,7 +163,7 @@ exporter endpoint → no-op `TracerProvider` (zero overhead, default).
 | -------------------------------- | -------------------------------- | -------------------------------- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`    | `otel.exporter.endpoint`         | `""` (→ no-op)                   |
 | `OTEL_TRACES_SAMPLER`            | `otel.tracesSampler`             | `parentbased_traceidratio`       |
-| `OTEL_TRACES_SAMPLER_ARG`        | `otel.tracesSamplerArg`          | `0.1`                            |
+| `OTEL_TRACES_SAMPLER_ARG`        | `otel.tracesSamplerArg`          | `1.0`                            |
 | `OTEL_SERVICE_NAME`              | `otel.serviceName`               | `tide-controller-manager`        |
 
 Enable a real exporter by pointing the chart at an OTLP collector:
@@ -176,6 +176,42 @@ helm upgrade tide ./charts/tide -n tide-system \
 The same env vars wire into the dashboard Deployment (with
 `OTEL_SERVICE_NAME=tide-dashboard` hardcoded so traces from the two
 processes are distinguishable in collectors).
+
+### Opting down from 100% sampling
+
+The chart defaults `otel.tracesSamplerArg` to `1.0` (v1.0.8 OBS-01) — TIDE's
+dispatch volume is dozens-to-hundreds of spans per run, not web-service QPS,
+so full sampling is the right default and a demo run no longer has a 90%
+per-run chance of an empty Phoenix. High-volume installs can opt down:
+
+```bash
+helm upgrade tide ./charts/tide -n tide-system \
+  --set otel.tracesSamplerArg=0.1
+```
+
+**Read this before opting down — the ratio does not do what it sounds like
+it does.** `parentbased_traceidratio` gates sampling decisions at the
+Project-level root span only. Once a run's root span IS sampled, every
+descendant level's AGENT spans (Milestone, Phase, Plan, Task) export in
+full — the ratio controls run-level visibility, not per-span volume. If the
+root is NOT sampled, descendant-level spans still export as an
+**orphaned/rootless trace fragment** in Phoenix: they carry no parent to
+attach to, so they show up disconnected from the run they belong to rather
+than simply not appearing.
+
+There is one coherent path within this limitation: each level's
+reporter-emitted LLM message spans (Phase 44) follow the `sampled` flag of
+the traceparent the manager hands that level's reporter Job. After this
+phase (Plan 46-04's D-02 fix), that flag carries the emitting span's real
+sampling decision, so a ratio-dropped Project root also drops its own
+reporter's LLM spans — no orphaned LLM-message fragment from the root
+level. The deeper cross-level cascade (a Milestone/Phase/Plan/Task AGENT
+span whose *own* sampling state doesn't propagate coherently to its child
+level's reporter) remains a documented limitation, not a bug fix candidate:
+closing it would require persisting a sampled bit durably across
+reconciler/controller boundaries (a schema change disproportionate to a
+case that's fully inert at the 1.0 default) and is deliberately out of
+scope.
 
 ### OpenInference attribute names
 
@@ -191,6 +227,38 @@ D-O5 is **enforced at the public API surface** via
 `TestNoPayloadHelperOnPublicSurface`: any future helper that accepts inline
 LLM payload bytes as a top-level attribute value fails CI. See
 `pkg/otelai/doc.go` for the spec citation.
+
+### Dashboard deep link to Phoenix (`phoenix.baseURL`)
+
+`phoenix.baseURL` is the base URL of a self-hosted Arize Phoenix instance —
+install instructions land in Phase 47; this section covers only the config
+value and what it wires up. Set it and the dashboard's `GET
+/api/v1/config` reports the value as `phoenixBaseURL`, which the SPA uses to
+render a deep-link affordance from a span/trace in the TIDE dashboard
+straight to its Phoenix view:
+
+```bash
+helm upgrade tide ./charts/tide -n tide-system \
+  --set phoenix.baseURL=http://phoenix.observability.svc:6006
+```
+
+The default is `""`. Empty means `phoenixBaseURL` reports `""` and the SPA
+renders **no deep-link affordance at all** — no dead buttons pointing at a
+Phoenix instance that doesn't exist.
+
+The deep link targets Phoenix's shareable-URL redirect routes,
+`/redirects/traces/{trace_id}` and `/redirects/spans/{span_id}`, which
+require **Phoenix >= 14.2.0**. These routes are project-agnostic — TIDE
+never needs to resolve or set a Phoenix project name for the deep link to
+work. (Phase 47's chart-pin re-check re-verifies the deployed chart's app
+version meets this floor before the install recipe ships as
+documented-working.)
+
+One related footnote: TIDE sets no `openinference.project.name` resource
+attribute on any span, so all TIDE traces land in Phoenix's default
+project. This only matters to an operator browsing Phoenix's project list
+directly instead of following the dashboard's deep link — the deep link
+itself needs no project name.
 
 ## Logs
 

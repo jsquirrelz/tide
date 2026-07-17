@@ -271,7 +271,32 @@ fi
 echo "PASS [G]: NOTES warning present by default, absent with prometheus.enabled=true"
 
 # ---------------------------------------------------------------------------
+# Permutation H — OTEL_TRACES_SAMPLER_ARG default 1.0 (Phase 46 OBS-01)
+#
+# Default render must carry `name: OTEL_TRACES_SAMPLER_ARG` followed by
+# `value: "1.0"` — the chart's trace-sampler default flipped from 0.1 to 1.0
+# (full sampling) because TIDE's dispatch volume is dozens-to-hundreds of
+# spans per run, not web-service QPS (v1.0.8 OBS-01).
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation H: default render — OTEL_TRACES_SAMPLER_ARG=1.0 (OBS-01) ---"
+
+RENDER_H="$(helm template "${CHART_DIR}" 2>&1)" \
+  || die "[H] helm template charts/tide (no overrides) exited non-zero:
+${RENDER_H}"
+
+if ! echo "${RENDER_H}" | grep -A1 -E '^[[:space:]]*-?[[:space:]]*name:[[:space:]]*OTEL_TRACES_SAMPLER_ARG[[:space:]]*$' \
+    | grep -qE '^[[:space:]]*value:[[:space:]]*"1\.0"[[:space:]]*$'; then
+  die "[H] OTEL_TRACES_SAMPLER_ARG default value is not \"1.0\" (OBS-01).
+otel.tracesSamplerArg must default to 1.0 in values.yaml (v1.0.8 OBS-01 —
+TIDE's dispatch volume is dozens-to-hundreds of spans per run, not
+web-service QPS); the env must render value: \"1.0\"."
+fi
+
+echo "PASS [H]: default render carries OTEL_TRACES_SAMPLER_ARG with value \"1.0\""
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "PASS: all 7 permutations passed — EC-7 render gate satisfied"
+echo "PASS: all 8 permutations passed — EC-7 + OBS-01 render gates satisfied"

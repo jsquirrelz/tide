@@ -38,9 +38,9 @@ limitations under the License.
 // The TracerProvider constructor MUST NOT pass sdktrace.WithSampler(...).
 // Doing so silently overrides the env-driven OTEL_TRACES_SAMPLER and
 // OTEL_TRACES_SAMPLER_ARG config. The Helm chart sets these to
-// parentbased_traceidratio / "0.1" by default (10% sampling). The
-// companion test TestNoWithSamplerInSource source-greps provider.go and
-// fails CI if a future refactor reintroduces WithSampler.
+// parentbased_traceidratio / "1.0" by default (100% sampling — v1.0.8
+// OBS-01). The companion test TestNoWithSamplerInSource source-greps
+// provider.go and fails CI if a future refactor reintroduces WithSampler.
 //
 // # Global TracerProvider
 //
