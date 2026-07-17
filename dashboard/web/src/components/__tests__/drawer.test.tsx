@@ -11,6 +11,7 @@ import TaskDetailDrawer, {
   type TaskDetailData,
 } from "../TaskDetailDrawer";
 import { ToastProvider } from "../ToastContainer";
+import { phoenixSpanURL } from "../../lib/phoenixLink";
 
 afterEach(() => {
   cleanup();
@@ -243,5 +244,88 @@ describe("TaskDetailDrawer — Test 9: 'Open log stream' button is wired to onOp
       fireEvent.click(btn);
     });
     expect(onOpenLogStream).toHaveBeenCalledWith("t1");
+  });
+});
+
+describe("TaskDetailDrawer — Test 10: PhoenixTraceLink deep link (plan 46-05, OBS-04)", () => {
+  const TASK_WITH_TRACE: TaskDetailData = {
+    ...TASK_RUNNING,
+    traceId: "trace123",
+    traceSpanId: "span456",
+  };
+
+  it("renders the link with correct href/target/rel when baseURL+spanId present", () => {
+    renderWithToast(
+      <TaskDetailDrawer
+        taskName="t1"
+        task={TASK_WITH_TRACE}
+        onClose={() => undefined}
+        onOpenLogStream={() => undefined}
+        phoenixBaseURL="http://phoenix:6006"
+      />,
+    );
+    const link = screen.getByTestId("phoenix-trace-link");
+    expect(link).toHaveAttribute(
+      "href",
+      phoenixSpanURL("http://phoenix:6006", "span456"),
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).toHaveTextContent("View trace in Phoenix");
+    expect(link).toHaveAttribute(
+      "aria-label",
+      "View trace in Phoenix — opens in new tab",
+    );
+  });
+
+  it("renders nothing when phoenixBaseURL is absent", () => {
+    renderWithToast(
+      <TaskDetailDrawer
+        taskName="t1"
+        task={TASK_WITH_TRACE}
+        onClose={() => undefined}
+        onOpenLogStream={() => undefined}
+      />,
+    );
+    expect(screen.queryByTestId("phoenix-trace-link-row")).toBeNull();
+  });
+
+  it("renders nothing when traceSpanId is absent", () => {
+    renderWithToast(
+      <TaskDetailDrawer
+        taskName="t1"
+        task={TASK_RUNNING}
+        onClose={() => undefined}
+        onOpenLogStream={() => undefined}
+        phoenixBaseURL="http://phoenix:6006"
+      />,
+    );
+    expect(screen.queryByTestId("phoenix-trace-link-row")).toBeNull();
+  });
+
+  it("places the link row after the metadata grid, before the Actions row", () => {
+    renderWithToast(
+      <TaskDetailDrawer
+        taskName="t1"
+        task={TASK_WITH_TRACE}
+        onClose={() => undefined}
+        onOpenLogStream={() => undefined}
+        phoenixBaseURL="http://phoenix:6006"
+      />,
+    );
+    const dialog = screen.getByRole("dialog");
+    const children = Array.from(dialog.children);
+    const metaIdx = children.findIndex(
+      (el) => el.getAttribute("data-testid") === "drawer-metadata",
+    );
+    const linkRowIdx = children.findIndex(
+      (el) => el.getAttribute("data-testid") === "phoenix-trace-link-row",
+    );
+    const actionsIdx = children.findIndex(
+      (el) => el.getAttribute("data-testid") === "drawer-actions",
+    );
+    expect(metaIdx).toBeGreaterThanOrEqual(0);
+    expect(linkRowIdx).toBeGreaterThan(metaIdx);
+    expect(actionsIdx).toBeGreaterThan(linkRowIdx);
   });
 });

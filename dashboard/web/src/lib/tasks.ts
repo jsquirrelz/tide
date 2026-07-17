@@ -118,6 +118,8 @@ function taskDetailJSONToData(t: TaskDetailJSON): TaskDetailData {
     envelopePath: t.envelopePath,
     elapsedText: t.elapsedText,
     conditions: t.conditions ?? [],
+    traceId: t.traceId,
+    traceSpanId: t.traceSpanId,
   };
 }
 
