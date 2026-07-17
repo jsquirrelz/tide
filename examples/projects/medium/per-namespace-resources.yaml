@@ -37,9 +37,10 @@
 #          TIDE_SIGNING_KEY: ${SIGNING_KEY}
 #        EOF
 #
-# kind/minikube note: The local-path storage class uses WaitForFirstConsumer binding.
-# The tide-projects PVC won't bind until a Pod is scheduled against it. For kind-based
-# installs, pre-warm with a busybox pod or let the clone Job trigger binding naturally.
+# kind/minikube note: The local-path storage class uses WaitForFirstConsumer binding
+# AND is ReadWriteOnce-only — the ReadWriteMany tide-projects PVC below never binds
+# on kind. See the README's Apply Sequence step 3b for the concrete delete+recreate
+# override (accessModes are immutable, so it can't be a kubectl patch).
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -53,8 +54,8 @@ metadata:
 spec:
   # ReadWriteMany is the production default (multiple Jobs can mount simultaneously).
   # On kind/minikube with local-path provisioner (ReadWriteOnce only), this PVC
-  # will not bind. For kind-based testing, change to ReadWriteOnce and ensure
-  # only one Job mounts at a time (enforced by wave sequencing).
+  # will not bind. See README step 3b (Apply Sequence) for the delete+recreate
+  # ReadWriteOnce override — accessModes are immutable so it cannot be patched.
   accessModes: [ReadWriteMany]
   resources:
     requests:

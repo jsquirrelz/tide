@@ -121,6 +121,34 @@ kubectl apply -f examples/projects/medium/demo-remote-pvc.yaml
 #    needs them in tide-sample-medium as well.)
 kubectl apply -f examples/projects/medium/per-namespace-resources.yaml
 
+# 3b. kind / RWO-only provisioners ONLY — skip on RWX-capable clusters.
+#
+#     WHY: per-namespace-resources.yaml ships tide-projects as ReadWriteMany
+#     (the production default), but kind's rancher.io/local-path provisioner
+#     is RWO-only — the RWX claim deadlocks at WaitForFirstConsumer and the
+#     controller never reaches the PVC-Bound gate. accessModes are immutable,
+#     so delete and recreate rather than patch (safe here: nothing has
+#     mounted the claim yet). RWO is correct on a single node — same-node
+#     pods share the mount, and wave sequencing keeps mounts serialized
+#     (mirrors hack/scripts/acceptance-v1.sh's small-sample override).
+kubectl delete pvc tide-projects -n tide-sample-medium
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tide-projects
+  namespace: tide-sample-medium
+  labels:
+    app.kubernetes.io/name: tide
+    app.kubernetes.io/managed-by: tide-sample
+    tideproject.k8s/sample: medium
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
 # 4. Mirror the signing-key Secret from tide-system.
 #    The signing key is cluster-unique and is provisioned by the chart in
 #    tide-system only. Extract and apply it to tide-sample-medium.
