@@ -85,14 +85,15 @@ var newTracerProvider = otelinit.NewTracerProvider
 // reporterConfig is the parsed CLI configuration passed by value into run()
 // so tests can drive it without setting os.Args.
 type reporterConfig struct {
-	Workspace       string // root, default "/workspace"; out.json at <workspace>/envelopes/<taskUID>/out.json
-	ProjectUID      string // informational — the PVC mount already resolves the subPath
-	TaskUID         string // keys out.json under <workspace>/envelopes/<taskUID>/out.json
-	ParentName      string // K8s metadata.name of the parent CR
-	ParentNamespace string // K8s namespace of the parent CR
-	ParentKind      string // Kind of the parent CR: Project | Milestone | Phase | Plan
-	TraceParent     string // W3C traceparent for this level's own span (consumed starting Phase 44)
-	TraceOnly       bool   // Phase 44 MSG-01: synthesize LLM message-array spans only, no materialization
+	Workspace        string // root, default "/workspace"; out.json at <workspace>/envelopes/<taskUID>/out.json
+	ProjectUID       string // informational — the PVC mount already resolves the subPath
+	TaskUID          string // keys out.json under <workspace>/envelopes/<taskUID>/out.json
+	ParentName       string // K8s metadata.name of the parent CR
+	ParentNamespace  string // K8s namespace of the parent CR
+	ParentKind       string // Kind of the parent CR: Project | Milestone | Phase | Plan
+	TraceParent      string // W3C traceparent for this level's own span (consumed starting Phase 44)
+	TraceOnly        bool   // Phase 44 MSG-01: synthesize LLM message-array spans only, no materialization
+	SkipMessageSpans bool   // Phase 45 ADAPT-01/D-05: self-instrumenting vendor — skip synthesizeSpans entirely
 }
 
 const (
@@ -123,20 +124,23 @@ func parseFlags(args []string) (reporterConfig, error) {
 	traceParent := fs.String("traceparent", "", "W3C traceparent for this level's own span (consumed starting Phase 44)")
 	traceOnly := fs.Bool("trace-only", false,
 		"synthesize LLM message-array spans from events.jsonl only; no child-CR materialization (Phase 44 MSG-01)")
+	skipMessageSpans := fs.Bool("skip-message-spans", false,
+		"skip LLM message-array-span synthesis (self-instrumenting vendor; D-03 default-safe: absent = synthesize)")
 
 	if err := fs.Parse(args); err != nil {
 		return reporterConfig{}, err
 	}
 
 	return reporterConfig{
-		Workspace:       *workspace,
-		ProjectUID:      *projectUID,
-		TaskUID:         *taskUID,
-		ParentName:      *parentName,
-		ParentNamespace: *parentNamespace,
-		ParentKind:      *parentKind,
-		TraceParent:     *traceParent,
-		TraceOnly:       *traceOnly,
+		Workspace:        *workspace,
+		ProjectUID:       *projectUID,
+		TaskUID:          *taskUID,
+		ParentName:       *parentName,
+		ParentNamespace:  *parentNamespace,
+		ParentKind:       *parentKind,
+		TraceParent:      *traceParent,
+		TraceOnly:        *traceOnly,
+		SkipMessageSpans: *skipMessageSpans,
 	}, nil
 }
 
@@ -314,6 +318,10 @@ func runWithClient(
 // per D-10: a failed sentinel read/write only logs — it never blocks
 // emission or the run.
 func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) {
+	if cfg.SkipMessageSpans {
+		fmt.Fprintf(stderr, "tide-reporter: self-instrumenting vendor — skipping message-span synthesis (D-05)\n")
+		return
+	}
 	eventsPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "events.jsonl")
 	inJSONPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "in.json")
 	sentinelPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, ".spans-emitted")

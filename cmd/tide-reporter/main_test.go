@@ -363,6 +363,45 @@ func TestParseFlagsUnknownFlagErrors(t *testing.T) {
 	}
 }
 
+// Test 8b: TestParseFlagsSkipMessageSpans — ADAPT-01/D-03 polarity: the
+// bareword --skip-message-spans flag maps onto the PARSED struct field
+// (Pitfall 3: a registered-but-never-copied flag silently no-ops); its
+// absence must parse to false (D-03 absent-means-synthesize).
+func TestParseFlagsSkipMessageSpans(t *testing.T) {
+	t.Run("present", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--skip-message-spans",
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if !cfg.SkipMessageSpans {
+			t.Errorf("cfg.SkipMessageSpans = false, want true when --skip-message-spans is present")
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if cfg.SkipMessageSpans {
+			t.Errorf("cfg.SkipMessageSpans = true, want false when --skip-message-spans is absent (D-03)")
+		}
+	})
+}
+
 // ─── Phase 44 MSG-01/TRACE-03: trace-only mode + shutdown-on-every-path ────
 
 // shutdownRecorder captures whether the newTracerProvider seam's returned
@@ -565,6 +604,42 @@ func TestRunTraceOnly_EmitsSpans(t *testing.T) {
 		if span.SpanContext.TraceID() != traceID {
 			t.Errorf("span[%d].TraceID = %s, want %s (parenting via --traceparent)", i, span.SpanContext.TraceID(), traceID)
 		}
+	}
+}
+
+// Test 10b: TestRunTraceOnly_SkipsSynthesisWhenFlagSet — ADAPT-01/D-05: the
+// inverse of TestRunTraceOnly_EmitsSpans. Against the SAME fixture that
+// normally yields spans, SkipMessageSpans: true must synthesize zero spans,
+// write no .spans-emitted sentinel, exit 0, and log the skip line on stderr.
+func TestRunTraceOnly_SkipsSynthesisWhenFlagSet(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir()
+	taskUID := "task-trace-only-skips"
+	writeTraceOnlyFixture(t, workspace, taskUID) // would normally yield 2 spans
+
+	cfg := reporterConfig{
+		TraceOnly: true, TaskUID: taskUID, Workspace: workspace, SkipMessageSpans: true,
+	}
+
+	var stderr bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr, nil)
+	if code != exitSuccess {
+		t.Fatalf("runWithClient exit=%d, want exitSuccess; stderr=%q", code, stderr.String())
+	}
+
+	if got := len(exp.GetSpans()); got != 0 {
+		t.Errorf("got %d spans, want 0 (synthesis must be skipped when SkipMessageSpans is set)", got)
+	}
+
+	sentinelPath := filepath.Join(workspace, "envelopes", taskUID, ".spans-emitted")
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(sentinel) err = %v, want a not-exist error (D-05: skipped run writes no sentinel)", err)
+	}
+
+	if !strings.Contains(stderr.String(), "skip") {
+		t.Errorf("stderr = %q, want a skip log line", stderr.String())
 	}
 }
 
