@@ -407,6 +407,33 @@ if ENV4_MARKER not in content:
         count=1,
     )
 
+# ── 8f2: Phase 47 (PHX-02/D-08) — OTLP auth header env injection ────────────
+# Adds a guarded OTEL_EXPORTER_OTLP_HEADERS env var on the manager container,
+# Secret-sourced via valueFrom.secretKeyRef, never a literal value — emitted
+# IFF otel.exporter.headersSecretRef.name is non-empty (self-hosted Phoenix
+# with auth enabled). Mirrors the dashboard container's hand-edited twin in
+# templates/dashboard-deployment.yaml. Anchored immediately after the Phase 4
+# OTel block (same anchor idiom as the phase9 reporter-env section).
+ENV47_MARKER = "# phase47-otlp-headers-env-injected"
+ENV47_BLOCK = """        {{- if .Values.otel.exporter.headersSecretRef.name }}
+        # Phase 47 PHX-02/D-08: OTLP auth header for auth-enabled collectors
+        # (self-hosted Phoenix). Secret-sourced only — never a literal value.
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.otel.exporter.headersSecretRef.name }}
+              key: {{ .Values.otel.exporter.headersSecretRef.key | default "OTEL_EXPORTER_OTLP_HEADERS" }}
+        {{- end }}
+        # phase47-otlp-headers-env-injected
+"""
+if ENV47_MARKER not in content:
+    content = re.sub(
+        r'(        # phase4-env-injected\n)',
+        r'\1' + ENV47_BLOCK,
+        content,
+        count=1,
+    )
+
 # ── 8g: podAnnotations passthrough on the manager pod template ───────────────
 # helmify emits only the static `kubectl.kubernetes.io/default-container: manager`
 # annotation on the pod template and drops any operator-supplied podAnnotations.

@@ -95,6 +95,16 @@ spec:
         - name: OTEL_SERVICE_NAME
           value: {{ quote .Values.otel.serviceName }}
         # phase4-env-injected
+        {{- if .Values.otel.exporter.headersSecretRef.name }}
+        # Phase 47 PHX-02/D-08: OTLP auth header for auth-enabled collectors
+        # (self-hosted Phoenix). Secret-sourced only — never a literal value.
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.otel.exporter.headersSecretRef.name }}
+              key: {{ .Values.otel.exporter.headersSecretRef.key | default "OTEL_EXPORTER_OTLP_HEADERS" }}
+        {{- end }}
+        # phase47-otlp-headers-env-injected
         - name: TIDE_REPORTER_IMAGE
           value: "{{ .Values.images.tideReporter.repository }}:{{ .Values.images.tideReporter.tag | default .Chart.AppVersion }}"
         # phase9-reporter-env-injected
