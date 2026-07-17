@@ -260,8 +260,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 45-01-PLAN.md — SelfInstruments capability table + ReporterOptions/BuildReporterJob transport + flag computation at all 5 reporter-spawn sites (manager side)
-- [ ] 45-02-PLAN.md — Reporter --skip-message-spans parse + synthesizeSpans sole skip point + D-09 stub-runtime contract test + tracesynth.go doc contract (reporter side)
+- [x] 45-01-PLAN.md — SelfInstruments capability table + ReporterOptions/BuildReporterJob transport + flag computation at all 5 reporter-spawn sites (manager side)
+- [x] 45-02-PLAN.md — Reporter --skip-message-spans parse + synthesizeSpans sole skip point + D-09 stub-runtime contract test + tracesynth.go doc contract (reporter side)
 
 ### Phase 46: Observability Enrichment + Dashboard Deep Link
 
@@ -310,6 +310,6 @@ Plans:
 | 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 45. Runtime-Neutral Adapter Seam | v1.0.8 | 0/TBD | Not started | - |
+| 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete   | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
