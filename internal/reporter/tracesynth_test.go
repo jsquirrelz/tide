@@ -526,3 +526,106 @@ func TestEmitSpans_BatchAggregateUnderCeiling(t *testing.T) {
 		t.Errorf("total spans exported across all batches = %d, want 32", totalSpans)
 	}
 }
+
+// TestEmitSpans_WholeSpanBudgetJointAcrossSides — CR-01: maxSpanPayloadBytes
+// bounds the SUM of one span's input+output attribute bytes, not each side
+// independently. Two sides each under the cap alone but jointly over it must
+// degrade — larger side first, remaining side kept when it fits alone — so a
+// 6-span batch stays under the 4 MiB OTLP ceiling.
+func TestEmitSpans_WholeSpanBudgetJointAcrossSides(t *testing.T) {
+	exp := setupSpanExporter(t)
+	tracer := otel.Tracer("test")
+
+	// input 360,000 B + output 240,000 B: each side < 512 KiB (524,288 B)
+	// alone; the sum (600,000 B) exceeds the joint budget.
+	inputMsgs := make([]otelai.Message, 0, 12)
+	for range 12 {
+		inputMsgs = append(inputMsgs, otelai.Message{Role: "user", Content: strings.Repeat("z", 30000)})
+	}
+	outputMsgs := make([]otelai.Message, 0, 8)
+	for range 8 {
+		outputMsgs = append(outputMsgs, otelai.Message{Role: "assistant", Content: strings.Repeat("w", 30000)})
+	}
+	calls := []CallSpan{
+		{Model: "claude-test", InputMessages: inputMsgs, OutputMessages: outputMsgs},
+	}
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+		t.Fatalf("EmitSpans: %v", err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	span := spans[0]
+
+	// The larger (input) side degraded to role-only.
+	for i := range inputMsgs {
+		key := attribute.Key(fmt.Sprintf("llm.input_messages.%d.message.content", i))
+		if val, ok := attrValue(span.Attributes, key); ok && val.AsString() != "" {
+			t.Errorf("degraded input side attribute %q = %d bytes, want empty", key, len(val.AsString()))
+		}
+	}
+	// The smaller (output) side fits the budget alone and keeps content.
+	outVal, ok := attrValue(span.Attributes, "llm.output_messages.0.message.content")
+	if !ok || len(outVal.AsString()) != 30000 {
+		t.Errorf("output side content len = %d (found=%v), want 30000 (kept — fits budget alone)", len(outVal.AsString()), ok)
+	}
+	degraded, ok := attrValue(span.Attributes, "tide.trace.parse_degraded")
+	if !ok || !degraded.AsBool() {
+		t.Errorf("span missing tide.trace.parse_degraded=true for joint-budget degrade")
+	}
+
+	// The whole-span invariant CR-01 exists for: total message attribute
+	// bytes on the span stay under maxSpanPayloadBytes.
+	totalMsgBytes := 0
+	for _, a := range span.Attributes {
+		k := string(a.Key)
+		if strings.HasPrefix(k, "llm.input_messages.") || strings.HasPrefix(k, "llm.output_messages.") {
+			totalMsgBytes += len(a.Value.Emit())
+		}
+	}
+	if totalMsgBytes > maxSpanPayloadBytes {
+		t.Errorf("span message attribute bytes = %d, want <= %d (joint whole-span budget)", totalMsgBytes, maxSpanPayloadBytes)
+	}
+}
+
+// TestEmitSpans_WholeSpanBudgetBothSidesOver — CR-01 second tier: when the
+// side surviving the first degrade STILL exceeds the joint budget alone,
+// both sides degrade to role-only.
+func TestEmitSpans_WholeSpanBudgetBothSidesOver(t *testing.T) {
+	exp := setupSpanExporter(t)
+	tracer := otel.Tracer("test")
+
+	// input 600,000 B and output 570,000 B: each side alone exceeds the
+	// 512 KiB budget.
+	inputMsgs := make([]otelai.Message, 0, 20)
+	for range 20 {
+		inputMsgs = append(inputMsgs, otelai.Message{Role: "user", Content: strings.Repeat("z", 30000)})
+	}
+	outputMsgs := make([]otelai.Message, 0, 19)
+	for range 19 {
+		outputMsgs = append(outputMsgs, otelai.Message{Role: "assistant", Content: strings.Repeat("w", 30000)})
+	}
+	calls := []CallSpan{
+		{Model: "claude-test", InputMessages: inputMsgs, OutputMessages: outputMsgs},
+	}
+	if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+		t.Fatalf("EmitSpans: %v", err)
+	}
+
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	for _, a := range spans[0].Attributes {
+		k := string(a.Key)
+		if strings.HasSuffix(k, ".message.content") && a.Value.AsString() != "" {
+			t.Errorf("attribute %q = %d bytes, want empty (both sides role-only)", k, len(a.Value.AsString()))
+		}
+	}
+	degraded, ok := attrValue(spans[0].Attributes, "tide.trace.parse_degraded")
+	if !ok || !degraded.AsBool() {
+		t.Errorf("span missing tide.trace.parse_degraded=true for double-sided degrade")
+	}
+}

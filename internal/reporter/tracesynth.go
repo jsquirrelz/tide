@@ -456,15 +456,12 @@ func redactTruncate(s string) string {
 	return truncateHeadTail(redacted, maxMessageContentBytes)
 }
 
-// boundedMessageAttrs applies the D-09 redact-then-truncate pipeline to
-// every message's Content, ToolCall.ArgumentsJSON, and reasoning
-// Contents[].Text, then enforces the maxSpanPayloadBytes whole-span budget
-// on this side's (input or output) total attribute bytes. When the budget
-// is exceeded, the side degrades to role-only messages (content, tool
-// calls, and reasoning blocks all dropped) rather than attempting to
-// truncate dozens of already-small messages individually. Returns the
-// flattened OpenInference attributes plus whether this side degraded.
-func boundedMessageAttrs(input bool, msgs []otelai.Message) ([]attribute.KeyValue, bool) {
+// boundMessages applies the D-09 redact-then-truncate pipeline to every
+// message's Content, ToolCall.ArgumentsJSON, and reasoning Contents[].Text,
+// returning the bounded copies plus the attribute-value bytes they
+// contribute to the span (message content, tool-call ID/name/arguments, and
+// reasoning text all counted).
+func boundMessages(msgs []otelai.Message) ([]otelai.Message, int) {
 	bounded := make([]otelai.Message, len(msgs))
 	total := 0
 	for i, m := range msgs {
@@ -477,7 +474,7 @@ func boundedMessageAttrs(input bool, msgs []otelai.Message) ([]attribute.KeyValu
 				Name:          tc.Name,
 				ArgumentsJSON: redactTruncate(tc.ArgumentsJSON),
 			}
-			total += len(btc.ArgumentsJSON)
+			total += len(btc.ID) + len(btc.Name) + len(btc.ArgumentsJSON)
 			bm.ToolCalls = append(bm.ToolCalls, btc)
 		}
 		for _, c := range m.Contents {
@@ -491,28 +488,61 @@ func boundedMessageAttrs(input bool, msgs []otelai.Message) ([]attribute.KeyValu
 		}
 		bounded[i] = bm
 	}
+	return bounded, total
+}
 
-	if total > maxSpanPayloadBytes {
-		roleOnly := make([]otelai.Message, len(msgs))
-		for i, m := range msgs {
-			roleOnly[i] = otelai.Message{Role: m.Role}
-		}
-		if input {
-			return otelai.LLMInputMessages(roleOnly), true
-		}
-		return otelai.LLMOutputMessages(roleOnly), true
+// roleOnlyMessages returns role-only copies of msgs (content, tool calls,
+// and reasoning blocks all dropped) — the degrade floor when the whole-span
+// budget is exceeded, rather than attempting to truncate dozens of
+// already-small messages individually.
+func roleOnlyMessages(msgs []otelai.Message) []otelai.Message {
+	roleOnly := make([]otelai.Message, len(msgs))
+	for i, m := range msgs {
+		roleOnly[i] = otelai.Message{Role: m.Role}
 	}
+	return roleOnly
+}
 
-	if input {
-		return otelai.LLMInputMessages(bounded), false
+// boundedSpanAttrs bounds BOTH sides of one span under a SINGLE
+// maxSpanPayloadBytes budget: the cap applies to the SUM of the span's
+// LLMInputMessages+LLMOutputMessages attribute bytes — the whole-span
+// invariant the reporter Job's OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 batch math
+// depends on (6 spans × 512 KiB = 3 MiB, ~25% headroom under the 4 MiB OTLP
+// gRPC ceiling; reporter_jobspec.go). When the joint budget is exceeded, the
+// larger side degrades to role-only messages first; if the remaining side
+// alone still exceeds the budget, it degrades too. Returns the flattened
+// OpenInference attributes for both sides plus per-side degrade flags.
+func boundedSpanAttrs(
+	inputMsgs, outputMsgs []otelai.Message,
+) (inputAttrs, outputAttrs []attribute.KeyValue, inputDegraded, outputDegraded bool) {
+	inBounded, inTotal := boundMessages(inputMsgs)
+	outBounded, outTotal := boundMessages(outputMsgs)
+
+	if inTotal+outTotal > maxSpanPayloadBytes {
+		if inTotal >= outTotal {
+			inBounded, inTotal = roleOnlyMessages(inputMsgs), 0
+			inputDegraded = true
+		} else {
+			outBounded, outTotal = roleOnlyMessages(outputMsgs), 0
+			outputDegraded = true
+		}
 	}
-	return otelai.LLMOutputMessages(bounded), false
+	if inTotal+outTotal > maxSpanPayloadBytes {
+		if inputDegraded {
+			outBounded = roleOnlyMessages(outputMsgs)
+			outputDegraded = true
+		} else {
+			inBounded = roleOnlyMessages(inputMsgs)
+			inputDegraded = true
+		}
+	}
+	return otelai.LLMInputMessages(inBounded), otelai.LLMOutputMessages(outBounded), inputDegraded, outputDegraded
 }
 
 // EmitSpans creates one LLM-kind child span per CallSpan under ctx's
 // SpanContext (the caller extracts the parented context from --traceparent
 // before calling), applying the redact-then-truncate pipeline (D-09) plus
-// the whole-span budget (boundedMessageAttrs) to every message before
+// the joint whole-span budget (boundedSpanAttrs) to every message before
 // calling otelai.LLMInputMessages/LLMOutputMessages. Spans are flat siblings
 // under ctx — mirrors what openinference-instrumentation-langchain emits
 // natively (runtime-neutrality lock) — and are created and closed within a
@@ -539,8 +569,7 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 		}
 		_, span := tracer.Start(ctx, spanName, trace.WithTimestamp(startTime))
 
-		inputAttrs, inputDegraded := boundedMessageAttrs(true, call.InputMessages)
-		outputAttrs, outputDegraded := boundedMessageAttrs(false, call.OutputMessages)
+		inputAttrs, outputAttrs, inputDegraded, outputDegraded := boundedSpanAttrs(call.InputMessages, call.OutputMessages)
 
 		span.SetAttributes(otelai.LLMSpanKind())
 		// D-07: provider is deliberately hardcoded "anthropic" — this
