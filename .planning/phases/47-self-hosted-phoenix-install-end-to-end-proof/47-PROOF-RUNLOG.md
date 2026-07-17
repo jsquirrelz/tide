@@ -184,3 +184,157 @@ Manager + dashboard pods Running; controller logs show all 6 reconcilers
 reservation store rederived at `totalReservedCents: 0` — no errors.
 
 **Zero API spend through end of Task 1.**
+
+## Task 2: Phoenix install, API key + headers Secret, tracing upgrade, no-spend checks
+
+### 1. Phoenix install (docs' pinned version + quickstart values, namespace `phoenix`)
+
+```bash
+helm install tide-phoenix oci://registry-1.docker.io/arizephoenix/phoenix-helm \
+    --version 10.0.1 \
+    --namespace phoenix --create-namespace \
+    --set persistence.enabled=true \
+    --set persistence.size=2Gi \
+    --set postgresql.enabled=false \
+    --set database.defaultRetentionPolicyDays=7 \
+    --set service.type=ClusterIP \
+    --set ingress.enabled=false \
+    --set auth.enableAuth=true
+kubectl -n phoenix rollout status deploy --timeout=5m
+```
+
+- `Pulled: registry-1.docker.io/arizephoenix/phoenix-helm:10.0.1` — same pin, same digest as the offline pre-flight render; no drift.
+- Chart NOTES printed a generic `WARNING: PostgreSQL is disabled but no external database is configured!` — this is the chart's own boilerplate warning that fires whenever `postgresql.enabled=false` regardless of the `persistence.enabled=true` SQLite-on-PVC alternative being correctly configured; not a doc bug (the SQLite path is documented by Arize as the deliberate alternative to the Postgres default, and the render's own `phoenix.validatePersistence` guard — which DOES understand the exclusivity — passed both offline and live). Not a divergence worth a doc edit; noting it here for completeness.
+- `deployment "tide-phoenix" successfully rolled out`.
+- `kubectl -n phoenix get pvc`: `tide-phoenix-data-pvc` **Bound**, capacity **2Gi**, RWO.
+- `helm list -n phoenix`: `tide-phoenix` / `phoenix-helm-10.0.1` / APP VERSION `18.1.0` — matches doc pin exactly.
+- `kubectl -n phoenix get svc`: **`tide-phoenix-svc`**, ClusterIP, ports `4317/TCP,6006/TCP,9090/TCP` — matches the offline render and every doc example verbatim.
+
+### 2. Admin password rotation + System API key mint (headless equivalent of the doc's UI click-path)
+
+`kubectl -n phoenix port-forward svc/tide-phoenix-svc 6006:6006` backgrounded; `curl http://localhost:6006/` → `200`.
+
+**Doc-vs-execution note (not a doc divergence — an execution-technique substitution):**
+`docs/INSTALL.md`'s documented flow (port-forward → log in via the UI at
+`admin@localhost` → change password at first login → **Settings → API Keys**
+→ create a System API key) is the correct guidance for a human operator and
+was independently confirmed accurate against Arize's own current
+authentication docs (Settings → API Keys is exactly right). This proof has no
+browser, so it drove the identical outcome through Phoenix's REST/GraphQL
+API — the officially documented non-interactive equivalent:
+
+1. Read `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD` from the chart-created
+   `phoenix-secret` Secret → decoded to the literal `admin` (the chart's weak
+   fallback default, exactly as the doc warns).
+2. `POST /auth/login` with `{"email":"admin@localhost","password":"admin"}` →
+   **204 No Content**, `Set-Cookie: phoenix-access-token=<JWT>` (also proves
+   the doc's stated login credentials are correct).
+3. `POST /graphql` `patchViewer(input: {currentPassword, newPassword})` using
+   the access token as `Authorization: Bearer` → succeeded
+   (`{"data":{"patchViewer":{"__typename":"UserMutationPayload"}}}`). Verified
+   the rotation took effect: a fresh `/auth/login` with the OLD password now
+   returns **401**; the NEW (locally-generated random 40-char, never
+   committed/logged) password returns **204**.
+4. Re-authenticated with the new password, then `POST /v1/system/api_keys`
+   `{"data":{"name":"tide-otlp-ingest","description":"TIDE manager/dashboard/reporter OTLP exporter auth (Phase 47-04 live proof)"}}`
+   using the fresh access token → **201**, returned a `CreatedApiKey` with
+   `id: U3lzdGVtQXBpS2V5OjE=`, `name: tide-otlp-ingest`,
+   `created_at: 2026-07-17T13:59:32Z`. The `key` field (105 chars) was written
+   directly to a `chmod 600` local temp file, never echoed to any log or
+   committed artifact, and used immediately below.
+
+Zero doc divergence found on this step — the documented Settings → API Keys
+UI path and the REST equivalent used here mint the identical
+admin-scoped-creation, system-owned API key artifact.
+
+### 3. `tide-otlp-headers` Secret created (`--from-literal`, key value never lands in any file or runlog)
+
+```bash
+kubectl create secret generic tide-otlp-headers -n tide-system \
+    --from-literal=OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${PHOENIX_API_KEY}"
+```
+
+`secret/tide-otlp-headers created`.
+
+### 4. `helm upgrade tide` with the tracing flags — local chart path substitution
+
+```bash
+helm upgrade tide ./charts/tide -n tide-system --reuse-values \
+  --set otel.exporter.endpoint=tide-phoenix-svc.phoenix.svc.cluster.local:4317 \
+  --set otel.exporter.headersSecretRef.name=tide-otlp-headers \
+  --set phoenix.baseURL=http://localhost:6006
+kubectl -n tide-system rollout status deploy/tide-controller-manager --timeout=3m
+kubectl -n tide-system rollout status deploy/tide-dashboard --timeout=3m
+```
+
+**Live D-10 both-ways NOTES evidence — the tracing-dark warning is now
+ABSENT** (compare against Task 1's captured output, which carried both
+warnings):
+
+```
+NOTES:
+TIDE 1.0.7 installed in tide-system.
+
+Dashboard:  kubectl -n tide-system port-forward svc/tide-dashboard 8080:80
+Docs:       https://github.com/jsquirrelz/tide/blob/main/docs/INSTALL.md
+
+WARNING: run telemetry beyond the budget tally is unavailable —
+prometheus.enabled is false.
+Token spend over time, dispatch counts, and per-level durations will be dark.
+Enable: see the "Enable telemetry" step in docs/INSTALL.md.
+```
+
+(Prometheus warning still present — expected, untouched by this task. The
+tracing warning block is gone.) Both Deployments rolled out successfully.
+
+### 5. No-spend connectivity checks (all before the first real-API dispatch)
+
+**(a) nc probe to Phoenix's OTLP gRPC port:**
+
+```bash
+kubectl --context kind-tide-phoenix-proof run otlp-nc -n tide-system --rm -i --restart=Never \
+  --image=busybox:1.36 -- nc -z -w5 tide-phoenix-svc.phoenix.svc.cluster.local 4317
+```
+
+Exit 0 — `nc -z` succeeded, `pod "otlp-nc" deleted from tide-system namespace`.
+
+**(b) Manager Deployment env shows the headers entry as `secretKeyRef`, zero literal (T-47-01 live check):**
+
+```
+$ kubectl get deploy -n tide-system -o yaml | grep -A4 OTEL_EXPORTER_OTLP_HEADERS
+          - name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                key: OTEL_EXPORTER_OTLP_HEADERS
+                name: tide-otlp-headers
+...
+          - name: OTEL_EXPORTER_OTLP_HEADERS
+            valueFrom:
+              secretKeyRef:
+                key: OTEL_EXPORTER_OTLP_HEADERS
+                name: tide-otlp-headers
+```
+
+Both the manager AND dashboard Deployments carry the entry, both Secret-sourced, zero literal `value:` field.
+
+**(c) Manager logs — zero OTLP export errors:**
+
+```
+$ kubectl logs -n tide-system deploy/tide-controller-manager | grep -ci 'export.*error\|otlp.*error'
+0
+```
+
+Manager log tail shows all 6 reconcilers restarted cleanly post-rollout, reservation store rederived at `totalReservedCents: 0`.
+
+### Task 2 verification
+
+```
+$ kubectl --context kind-tide-phoenix-proof -n phoenix get pods --no-headers | grep -c Running
+1
+$ kubectl --context kind-tide-phoenix-proof get deploy -n tide-system -o yaml | grep -c "OTEL_EXPORTER_OTLP_HEADERS"
+4
+```
+
+(4 = 2 env-name occurrences × 2 Deployments, i.e. both manager and dashboard wired.)
+
+**Zero divergences found in docs/INSTALL.md or docs/observability.md this task — no doc edit was needed.** The pipe is proven end-to-end (nc reachability + secretKeyRef shape + zero OTLP errors) without spending a cent.
