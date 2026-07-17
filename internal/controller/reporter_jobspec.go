@@ -111,6 +111,14 @@ type ReporterOptions struct {
 	// trace-only spawn can never block a later materialization spawn. Only
 	// consulted when TraceOnly is true.
 	TraceOnlyJobKey string
+
+	// SkipMessageSpans (ADAPT-01/Phase 45): set true when the manager's
+	// pkgdispatch.SelfInstruments(vendor) lookup reports the dispatching
+	// vendor emits OpenInference spans natively — the reporter skips
+	// tracesynth.go's events.jsonl-based synthesis entirely. Zero value
+	// (false) is the existing behavior, byte-identical pre-Phase-45: every
+	// vendor resolves false today (D-03 default-safe).
+	SkipMessageSpans bool
 }
 
 // BuildReporterJob constructs the K8s batchv1.Job that runs the in-namespace
@@ -212,6 +220,14 @@ func BuildReporterJob(
 	// 100% Args-based via stdlib flag; zero Env entries on the reporter container).
 	if opts.TraceParent != "" {
 		args = append(args, "--traceparent="+opts.TraceParent)
+	}
+	// Phase 45 ADAPT-01/D-04: bareword flag (not "=value" — matches
+	// --trace-only's shape), appended only when true so absence resolves to
+	// synthesize (D-03). Placed after the shape-selecting branch above, so
+	// it rides both the materialization and trace-only shapes uniformly
+	// (D-05).
+	if opts.SkipMessageSpans {
+		args = append(args, "--skip-message-spans")
 	}
 
 	// Phase 44 D-06/T-44-04: reporter container Env — empty unless the
