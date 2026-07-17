@@ -372,6 +372,15 @@ func Metadata(m map[string]string) (attribute.KeyValue, error) {
 	return attribute.String(semconv.Metadata, string(b)), nil
 }
 
+// MetadataJSON returns the metadata attribute with encoded stamped
+// verbatim, no re-marshaling — the pre-encoded twin of Metadata() for
+// transport paths where the JSON was authored upstream (the manager) and
+// must be stamped opaquely on a reporter-emitted span; the reporter never
+// parses or re-marshals it.
+func MetadataJSON(encoded string) attribute.KeyValue {
+	return attribute.String(semconv.Metadata, encoded)
+}
+
 // Tags returns the tag.tags attribute as a NATIVE OTel string list
 // (attribute.STRINGSLICE) — NO JSON marshaling. Per the OpenInference spec,
 // tag.tags carries low-cardinality categorical filterables as a native list,

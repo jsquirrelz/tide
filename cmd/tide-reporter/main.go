@@ -57,6 +57,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -363,7 +364,13 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 
 	tracer := otel.Tracer("tide.reporter")
 	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
-	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath); err != nil {
+	var tags []string
+	for _, tag := range strings.Split(cfg.TagsCSV, ",") {
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath, cfg.SessionID, cfg.MetadataJSON, tags); err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
 		return
 	}

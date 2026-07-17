@@ -387,6 +387,20 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
+// TestMetadataJSON — 46 OBS-03: the pre-encoded twin of Metadata() passes
+// the input string through verbatim (no re-marshal) under the same key.
+func TestMetadataJSON(t *testing.T) {
+	const encoded = `{"level":"task"}`
+	got := MetadataJSON(encoded)
+	want := attribute.String("metadata", encoded)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MetadataJSON(%q) = %v, want %v", encoded, got, want)
+	}
+	if got.Value.Type() != attribute.STRING {
+		t.Errorf("MetadataJSON().Value.Type() = %v, want attribute.STRING", got.Value.Type())
+	}
+}
+
 // TestTags — 46 OBS-03/D-06: tag.tags is a NATIVE string list
 // (attribute.STRINGSLICE), NOT JSON-encoded — a Tags() helper that
 // JSON-encodes is the exact Pitfall 4 regression this test guards against.
