@@ -275,8 +275,20 @@ Plans:
   3. Spans carry `metadata`/`tag.tags` enrichment (level kind + name, wave index, gate profile, failure-halt state), so an operator can filter Phoenix's DSL to "every span from Phase N" or "every conservative-profile run" without leaving Phoenix (OBS-03).
   4. Each Planning/Execution DAG node in the TIDE dashboard deep-links to its Phoenix trace (reading IDs from `.status.trace`) when a `phoenix.baseURL` chart value is configured, and renders no dead button when it isn't (OBS-04).
 
-**Plans**: TBD
+**Plans**: 5 plans (2 waves)
 **UI hint**: yes
+
+Plans:
+**Wave 1** *(parallel, independent)*
+
+- [ ] 46-01-PLAN.md — otelai SessionID/Metadata/Tags helpers + ReporterOptions/CLI transport + EmitSpans enrichment (reporter side)
+- [ ] 46-02-PLAN.md — Sampler default 0.1→1.0 (every surface) + phoenix.baseURL chart value + helm render gates + honest opt-down docs
+- [ ] 46-03-PLAN.md — Dashboard backend: PHOENIX_BASE_URL config chain + traceId/traceSpanId on projectDetail/childRef/taskDetail
+
+**Wave 2** *(46-04 blocked on 46-01; 46-05 blocked on 46-03)*
+
+- [ ] 46-04-PLAN.md — Manager-side enrichment on all five AGENT spans + D-03 token-count drop (all five levels, planner-corrected vs research's Task-only) + D-02 sampled-bit threading
+- [ ] 46-05-PLAN.md — SPA deep link: phoenixLink.ts + shared PhoenixTraceLink at both mount points (NodeDetailPanel + TaskDetailDrawer)
 
 ### Phase 47: Self-Hosted Phoenix Install + End-to-End Proof
 
@@ -311,5 +323,5 @@ Plans:
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
-| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/TBD | Not started | - |
+| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 0/5 | Not started | - |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |
