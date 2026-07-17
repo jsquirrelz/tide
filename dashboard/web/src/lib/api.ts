@@ -19,6 +19,20 @@ export type BudgetSummary = {
 };
 
 /**
+ * Mirrors cmd/dashboard/api/config.go::configResponse (plan 38-05 +
+ * plan 46-03's additive `phoenixBaseURL`). Both fields optional here:
+ * `telemetryEnabled` for legacy-payload safety (TelemetryView.tsx's
+ * existing inline-typed fetch predates this shared type and is untouched),
+ * `phoenixBaseURL` absent/"" when PHOENIX_BASE_URL is unset — App.tsx's
+ * one-shot fetch degrades to "" on any failure, which PhoenixTraceLink
+ * treats as hidden.
+ */
+export type DashboardConfig = {
+  telemetryEnabled?: boolean;
+  phoenixBaseURL?: string;
+};
+
+/**
  * Mirrors cmd/dashboard/api/projects.go::projectSummary.
  *
  * Plan 14-07: `blockingConditions` mirrors the new `blockingConditions` field
@@ -38,19 +52,37 @@ export type ProjectSummary = {
   blockingConditions?: ProjectBlockingCondition[];
 };
 
-/** Mirrors cmd/dashboard/api/projects.go::childRef. */
+/**
+ * Mirrors cmd/dashboard/api/projects.go::childRef.
+ *
+ * Plan 46-03/46-05: `traceSpanId` mirrors the additive `traceSpanId` field
+ * childRef gained (the milestone/phase/plan's own `{Level}TraceSpanID`
+ * status field) — optional/absent when the node's span hasn't been emitted
+ * yet (PhoenixTraceLink renders nothing in that case).
+ */
 export type ChildRef = {
   name: string;
   namespace: string;
   phase: string;
   parent: string;
+  traceSpanId?: string;
 };
 
-/** Mirrors cmd/dashboard/api/projects.go::projectDetail. */
+/**
+ * Mirrors cmd/dashboard/api/projects.go::projectDetail.
+ *
+ * Plan 46-03/46-05: `traceId`/`traceSpanId` mirror the additive trace-
+ * identity fields projectDetail gained — `traceId` is the deterministic
+ * run TraceID (derived from the Project's own UID), `traceSpanId` is the
+ * Project-level span. Both optional/absent when telemetry is off or the
+ * span hasn't emitted yet.
+ */
 export type ProjectDetail = ProjectSummary & {
   milestones: ChildRef[];
   phases: ChildRef[];
   plans: ChildRef[];
+  traceId?: string;
+  traceSpanId?: string;
 };
 
 type APIErrorBody = { error?: string };
@@ -143,6 +175,12 @@ export type TaskCondition = {
  * the typing of `status` (raw `string` here, `StatusValue` union there).
  * The `useTaskDetail()` hook in lib/tasks.ts performs the runtime
  * coercion via the canonical STATUS_TABLE from StatusBadge.
+ *
+ * Plan 46-03/46-05: `traceId`/`traceSpanId` mirror the additive trace-
+ * identity fields taskDetail gained. Both are coupled server-side — a
+ * broken Task->Plan->Phase->Milestone->Project resolution chain degrades
+ * both to absent together, since a spanId with no traceId to anchor it is
+ * not a usable Phoenix link.
  */
 export type TaskDetailJSON = {
   name: string;
@@ -159,6 +197,8 @@ export type TaskDetailJSON = {
   envelopePath: string;
   elapsedText: string;
   conditions: TaskCondition[];
+  traceId?: string;
+  traceSpanId?: string;
 };
 
 /**

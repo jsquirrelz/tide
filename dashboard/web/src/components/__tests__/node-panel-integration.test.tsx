@@ -1,5 +1,5 @@
 /*
- * node-panel-integration.test.tsx (plan 37-08 Task 3)
+ * node-panel-integration.test.tsx (plan 37-08 Task 3; extended plan 46-05)
  *
  *   App-level composition smoke: verifies the exact NodeDetailPanel + content
  *   assembly App.tsx mounts renders correctly with real content — the D9
@@ -12,6 +12,10 @@
  *                   + status strip render together).
  *     2. milestone (gate-parked) → NodeDetailPanel hosts ArtifactViewer with
  *                   the ApproveStrip pinned below it (D-08).
+ *
+ *   Plan 46-05 (OBS-04) adds the <PhoenixTraceLink> mount-1 render/hide
+ *   cases — App.tsx renders it as the first child inside NodeDetailPanel,
+ *   above ProjectSettingsPanel/ArtifactViewer (UI-SPEC §Mount points).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
@@ -28,6 +32,7 @@ import NodeDetailPanel from "../NodeDetailPanel";
 import ProjectSettingsPanel from "../ProjectSettingsPanel";
 import ArtifactViewer from "../ArtifactViewer";
 import ApproveStrip from "../ApproveStrip";
+import PhoenixTraceLink from "../PhoenixTraceLink";
 import { ToastProvider } from "../ToastContainer";
 import type { ProjectSettings } from "../../lib/api";
 
@@ -100,5 +105,84 @@ describe("NodeDetailPanel composition (37-08 App assembly)", () => {
     const strip = within(panel).getByTestId("approve-strip");
     expect(within(strip).getByText("Approve")).toBeInTheDocument();
     expect(within(strip).getByText("Reject")).toBeInTheDocument();
+  });
+
+  it("project node: PhoenixTraceLink renders with correct href/target/rel when baseURL+spanId present (OBS-04)", async () => {
+    mockSettings.mockResolvedValue(SETTINGS);
+    render(
+      <ToastProvider>
+        <NodeDetailPanel open kind="project" name="my-project" onClose={() => undefined}>
+          <PhoenixTraceLink
+            baseURL="http://phoenix:6006"
+            traceId="trace123"
+            spanId="span456"
+            edge="bottom"
+          />
+          <ProjectSettingsPanel
+            projectName="my-project"
+            statusPhase="Running"
+            budgetSpentCents={0}
+            budgetCapCents={10000}
+            conditions={[]}
+          />
+        </NodeDetailPanel>
+      </ToastProvider>,
+    );
+
+    const panel = await screen.findByTestId("node-detail-panel");
+    const link = within(panel).getByTestId("phoenix-trace-link");
+    expect(link).toHaveAttribute(
+      "href",
+      "http://phoenix:6006/redirects/spans/span456",
+    );
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(link).toHaveTextContent("View trace in Phoenix");
+  });
+
+  it("project node: PhoenixTraceLink renders nothing when baseURL is empty (OBS-04)", async () => {
+    mockSettings.mockResolvedValue(SETTINGS);
+    render(
+      <ToastProvider>
+        <NodeDetailPanel open kind="project" name="my-project" onClose={() => undefined}>
+          <PhoenixTraceLink baseURL="" traceId="trace123" spanId="span456" edge="bottom" />
+          <ProjectSettingsPanel
+            projectName="my-project"
+            statusPhase="Running"
+            budgetSpentCents={0}
+            budgetCapCents={10000}
+            conditions={[]}
+          />
+        </NodeDetailPanel>
+      </ToastProvider>,
+    );
+
+    const panel = await screen.findByTestId("node-detail-panel");
+    expect(within(panel).queryByTestId("phoenix-trace-link-row")).toBeNull();
+  });
+
+  it("project node: PhoenixTraceLink renders nothing when spanId is absent (OBS-04)", async () => {
+    mockSettings.mockResolvedValue(SETTINGS);
+    render(
+      <ToastProvider>
+        <NodeDetailPanel open kind="project" name="my-project" onClose={() => undefined}>
+          <PhoenixTraceLink
+            baseURL="http://phoenix:6006"
+            traceId="trace123"
+            edge="bottom"
+          />
+          <ProjectSettingsPanel
+            projectName="my-project"
+            statusPhase="Running"
+            budgetSpentCents={0}
+            budgetCapCents={10000}
+            conditions={[]}
+          />
+        </NodeDetailPanel>
+      </ToastProvider>,
+    );
+
+    const panel = await screen.findByTestId("node-detail-panel");
+    expect(within(panel).queryByTestId("phoenix-trace-link-row")).toBeNull();
   });
 });

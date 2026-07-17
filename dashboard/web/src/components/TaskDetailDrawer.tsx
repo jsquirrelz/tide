@@ -10,6 +10,7 @@ import { X } from "lucide-react";
 import { clsx } from "../lib/clsx";
 import StatusBadge, { type StatusValue, Hourglass } from "./StatusBadge";
 import ClipboardCopyAction from "./ClipboardCopyAction";
+import PhoenixTraceLink from "./PhoenixTraceLink";
 
 /**
  * <TaskDetailDrawer> (UI-SPEC §7).
@@ -59,6 +60,9 @@ export type TaskDetailData = {
   /** Pre-formatted elapsed string ("running for 4m 12s") for the chrono row. */
   elapsedText: string;
   conditions: TaskCondition[];
+  /** Plan 46-05: OBS-04 deep-link identity — absent hides <PhoenixTraceLink>. */
+  traceId?: string;
+  traceSpanId?: string;
 };
 
 export type TaskDetailDrawerProps = {
@@ -72,6 +76,12 @@ export type TaskDetailDrawerProps = {
    * component itself lands in plan 04-16.
    */
   onOpenLogStream: (taskName: string) => void;
+  /**
+   * Plan 46-05: raw phoenixBaseURL from App.tsx's one-shot GET
+   * /api/v1/config fetch. Defaults to "" (hidden link) so pre-46-05
+   * callers/tests are unaffected.
+   */
+  phoenixBaseURL?: string;
 };
 
 type ActionButton = {
@@ -173,6 +183,7 @@ export default function TaskDetailDrawer({
   task,
   onClose,
   onOpenLogStream,
+  phoenixBaseURL = "",
 }: TaskDetailDrawerProps) {
   const titleId = useId();
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -332,6 +343,17 @@ export default function TaskDetailDrawer({
             truncate
           />
         </dl>
+
+        {/* Phoenix deep link (UI-SPEC mount 2, OBS-04) — sits with the
+            metadata it relates to; border-t matches the section-separator
+            convention. Renders nothing when config or trace identity is
+            absent (owned by PhoenixTraceLink, not re-decided here). */}
+        <PhoenixTraceLink
+          baseURL={phoenixBaseURL}
+          traceId={task.traceId ?? ""}
+          spanId={task.traceSpanId}
+          edge="top"
+        />
 
         {/* Actions row */}
         <div

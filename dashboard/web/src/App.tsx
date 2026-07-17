@@ -26,10 +26,11 @@ import NodeDetailPanel, {
 import ProjectSettingsPanel from "./components/ProjectSettingsPanel";
 import ArtifactViewer from "./components/ArtifactViewer";
 import ApproveStrip from "./components/ApproveStrip";
+import PhoenixTraceLink from "./components/PhoenixTraceLink";
 import { ResizeHandle, usePersistedSize } from "./components/ResizeHandle";
 import { useProjects } from "./lib/projects";
 import { useTaskDetail, useTasks } from "./lib/tasks";
-import { fetchProject, type ProjectDetail } from "./lib/api";
+import { fetchProject, type ProjectDetail, type DashboardConfig } from "./lib/api";
 import type { SSEState } from "./lib/sse";
 import type { TideNodeKind } from "./components/TideNodeShell";
 import { STATUS_TABLE, type StatusValue } from "./components/StatusBadge";
@@ -209,6 +210,11 @@ export default function App() {
   // Plan 37-08: full project detail (milestone/phase/plan lifecycle strings)
   // used to derive a node's gate-parked state for ArtifactViewer + ApproveStrip.
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
+  // Plan 46-05 (OBS-04): one-shot GET /api/v1/config fetch for phoenixBaseURL,
+  // copying TelemetryView.tsx's fetch shape (TelemetryView's own fetch is
+  // untouched — this is a separate one-shot call). "" = unset or fetch
+  // failed; PhoenixTraceLink treats "" as hidden — no loading affordance.
+  const [phoenixBaseURL, setPhoenixBaseURL] = useState<string>("");
   // Plan 26-04 (D-07): global execution DAG pane state.
   const [showGlobalDAG, setShowGlobalDAG] = useState(false);
   const [globalExecutionDAG, setGlobalExecutionDAG] =
@@ -372,6 +378,29 @@ export default function App() {
       cancelled = true;
     };
   }, [selectedProject, selectedNamespace]);
+
+  // Plan 46-05 (OBS-04): one-shot fetch of GET /api/v1/config for
+  // phoenixBaseURL, passed down as a prop to both PhoenixTraceLink mounts.
+  // Per page load, not per component mount; any failure or missing field
+  // degrades to "" (observability never gates — no error surface).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/config");
+        if (!res.ok) return;
+        const body = (await res.json()) as DashboardConfig;
+        if (!cancelled && typeof body.phoenixBaseURL === "string") {
+          setPhoenixBaseURL(body.phoenixBaseURL);
+        }
+      } catch {
+        // Config surface unreachable — stay "" (hidden link).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // PlanNode click → swap right pane + update URL hash (deep-link). Used by
   // RunningWavesView (wave-card navigation) and as PlanningDAGView's fallback;
@@ -617,14 +646,24 @@ export default function App() {
     if (selectedNode.kind === "project") {
       const summary = projects.find((p) => p.name === selectedNode.name) ?? null;
       nodePanelContent = (
-        <ProjectSettingsPanel
-          projectName={selectedNode.name}
-          namespace={selectedNamespace ?? undefined}
-          statusPhase={summary?.phase ?? ""}
-          budgetSpentCents={summary?.budget.currentSpend ?? 0}
-          budgetCapCents={summary?.budget.capCents ?? 0}
-          conditions={summary?.blockingConditions ?? []}
-        />
+        <>
+          {/* Plan 46-05 (OBS-04), UI-SPEC mount 1: first child inside the
+              panel content, above ProjectSettingsPanel. */}
+          <PhoenixTraceLink
+            baseURL={phoenixBaseURL}
+            traceId={projectDetail?.traceId ?? ""}
+            spanId={projectDetail?.traceSpanId}
+            edge="bottom"
+          />
+          <ProjectSettingsPanel
+            projectName={selectedNode.name}
+            namespace={selectedNamespace ?? undefined}
+            statusPhase={summary?.phase ?? ""}
+            budgetSpentCents={summary?.budget.currentSpend ?? 0}
+            budgetCapCents={summary?.budget.capCents ?? 0}
+            conditions={summary?.blockingConditions ?? []}
+          />
+        </>
       );
     } else {
       // Derive the node's lifecycle string from the fetched project detail so
@@ -635,10 +674,18 @@ export default function App() {
           : selectedNode.kind === "phase"
             ? projectDetail?.phases
             : projectDetail?.plans;
-      const nodeStatus = refs?.find((r) => r.name === selectedNode.name)?.phase;
-      const gateParked = nodeStatus === "AwaitingApproval";
+      const nodeRef = refs?.find((r) => r.name === selectedNode.name);
+      const gateParked = nodeRef?.phase === "AwaitingApproval";
       nodePanelContent = (
         <>
+          {/* Plan 46-05 (OBS-04), UI-SPEC mount 1: first child inside the
+              panel content, above ArtifactViewer. */}
+          <PhoenixTraceLink
+            baseURL={phoenixBaseURL}
+            traceId={projectDetail?.traceId ?? ""}
+            spanId={nodeRef?.traceSpanId}
+            edge="bottom"
+          />
           <div className="min-h-0 flex-1">
             <ArtifactViewer
               kind={selectedNode.kind}
@@ -673,6 +720,7 @@ export default function App() {
           task={taskDetail}
           onClose={onCloseDrawer}
           onOpenLogStream={onOpenLogStream}
+          phoenixBaseURL={phoenixBaseURL}
         />
         {selectedNode && (
           <NodeDetailPanel
