@@ -317,7 +317,7 @@ Plans:
 
 **Wave 3** *(47-04 blocked on 47-03 — the recipe is proven by following it)*
 
-- [ ] 47-04-PLAN.md — Live proof: fresh tide-phoenix-proof cluster from the docs, no-spend pre-flight checks, medium-project driving run to Complete
+- [x] 47-04-PLAN.md — Live proof: fresh tide-phoenix-proof cluster from the docs, no-spend pre-flight checks, medium-project driving run to Complete
 
 **Wave 4** *(47-05 blocked on 47-04)*
 
@@ -342,4 +342,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 3/5 | In Progress|  |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 4/5 | In Progress|  |
