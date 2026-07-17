@@ -414,6 +414,14 @@ func ReconstructConversation(eventsPath, inJSONPath, workspaceRoot string) ([]Ca
 		return nil
 	})
 	if readErr != nil {
+		// D-11: a read error (e.g. bufio.ErrTooLong on one oversized line)
+		// still returns every call reconstructed so far — including the
+		// still-open one, flushed as Degraded — so the caller can emit the
+		// partial conversation alongside the error.
+		if pending != nil {
+			pending.degraded = true
+			closeCall()
+		}
 		return calls, fmt.Errorf("ReconstructConversation: read %q: %w", eventsPath, readErr)
 	}
 

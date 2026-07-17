@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel"
@@ -587,6 +588,45 @@ func TestRunTraceOnly_MissingEventsStillExitsZero(t *testing.T) {
 	}
 	if stderr.Len() == 0 {
 		t.Error("expected an error line on stderr for missing events.jsonl, got none")
+	}
+}
+
+// TestRunTraceOnly_PartialEventsStillEmitsSpans — D-11: an events.jsonl whose
+// tail line exceeds the 16 MB per-line budget (bufio.ErrTooLong; the scanner
+// cannot resume) still emits the calls reconstructed before the bad line —
+// partial telemetry over none — with the run exiting 0 (D-10) and stderr
+// citing the partial recovery.
+func TestRunTraceOnly_PartialEventsStillEmitsSpans(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir()
+	taskUID := "task-trace-only-partial"
+	writeTraceOnlyFixture(t, workspace, taskUID) // 2 complete calls
+	eventsPath := filepath.Join(workspace, "envelopes", taskUID, "events.jsonl")
+	f, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile: %v", err)
+	}
+	if _, err := f.WriteString(strings.Repeat("x", 17*1024*1024) + "\n"); err != nil {
+		t.Fatalf("append oversized line: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	cfg := reporterConfig{TraceOnly: true, TaskUID: taskUID, Workspace: workspace}
+
+	var stderr bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr, nil)
+	if code != exitSuccess {
+		t.Fatalf("runWithClient exit=%d, want exitSuccess (D-10); stderr=%q", code, stderr.String())
+	}
+	if got := len(exp.GetSpans()); got != 2 {
+		t.Errorf("got %d spans, want 2 (partial conversation emitted despite read error)", got)
+	}
+	if !strings.Contains(stderr.String(), "partial") {
+		t.Errorf("stderr = %q, want a partial-recovery log line", stderr.String())
 	}
 }
 

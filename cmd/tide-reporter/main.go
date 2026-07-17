@@ -315,7 +315,16 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 
 	calls, err := reporter.ReconstructConversation(eventsPath, inJSONPath, cfg.Workspace)
 	if err != nil {
-		fmt.Fprintf(stderr, "tide-reporter: reconstruct conversation: %v\n", err)
+		// D-11 tolerant posture: a read error (e.g. one oversized line
+		// tripping bufio.ErrTooLong) still yields the calls reconstructed
+		// before it — emit them with the tail call marked Degraded rather
+		// than discarding the whole conversation's telemetry.
+		fmt.Fprintf(stderr, "tide-reporter: reconstruct conversation (partial, %d calls recovered): %v\n", len(calls), err)
+		if n := len(calls); n > 0 {
+			calls[n-1].Degraded = true
+		}
+	}
+	if len(calls) == 0 {
 		return
 	}
 

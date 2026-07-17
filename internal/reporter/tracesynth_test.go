@@ -19,6 +19,8 @@ package reporter
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -171,6 +173,46 @@ func TestReconstructConversation_TolerantSkip(t *testing.T) {
 	}
 	if !calls[1].Degraded {
 		t.Errorf("calls[1].Degraded = false, want true (dangling call, no message_stop + garbage line)")
+	}
+}
+
+// TestReconstructConversation_OversizedLineReturnsPartial — D-05/D-11: one
+// line over common.ReadLines's 16 MB budget makes the scanner unable to
+// resume (bufio.ErrTooLong), but every call reconstructed BEFORE the bad
+// line is still returned alongside the error — including the still-open
+// pending call, flushed as Degraded — never a bare error with zero calls.
+func TestReconstructConversation_OversizedLineReturnsPartial(t *testing.T) {
+	dir := t.TempDir()
+	eventsPath := filepath.Join(dir, "events.jsonl")
+
+	var b strings.Builder
+	// Call 1: complete message_start..message_stop cycle.
+	b.WriteString(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":10}}}}` + "\n")
+	b.WriteString(`{"type":"assistant","message":{"id":"msg_1","content":[{"type":"text","text":"first"}]}}` + "\n")
+	b.WriteString(`{"type":"stream_event","event":{"type":"message_stop"}}` + "\n")
+	// Call 2: opened but never stopped — the oversized line kills the read.
+	b.WriteString(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_2","model":"claude-test"}}}` + "\n")
+	b.WriteString(`{"type":"assistant","message":{"id":"msg_2","content":[{"type":"text","text":"second"}]}}` + "\n")
+	b.WriteString(strings.Repeat("x", 17*1024*1024) + "\n") // > 16 MB line budget
+	if err := os.WriteFile(eventsPath, []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	calls, err := ReconstructConversation(eventsPath, "", "")
+	if err == nil {
+		t.Fatal("expected a read error for the oversized line, got nil")
+	}
+	if len(calls) != 2 {
+		t.Fatalf("got %d calls, want 2 (1 complete + 1 pending flushed on read error)", len(calls))
+	}
+	if calls[0].OutputMessages[0].Content != "first" {
+		t.Errorf("calls[0] output = %q, want %q", calls[0].OutputMessages[0].Content, "first")
+	}
+	if !calls[1].Degraded {
+		t.Errorf("calls[1].Degraded = false, want true (pending call flushed on read error)")
+	}
+	if calls[1].OutputMessages[0].Content != "second" {
+		t.Errorf("calls[1] output = %q, want %q (pending content preserved)", calls[1].OutputMessages[0].Content, "second")
 	}
 }
 
