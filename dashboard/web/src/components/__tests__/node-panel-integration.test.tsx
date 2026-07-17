@@ -35,6 +35,7 @@ import ApproveStrip from "../ApproveStrip";
 import PhoenixTraceLink from "../PhoenixTraceLink";
 import { ToastProvider } from "../ToastContainer";
 import type { ProjectSettings } from "../../lib/api";
+import { phoenixSpanURL } from "../../lib/phoenixLink";
 
 const SETTINGS: ProjectSettings = {
   outcomePrompt: "Ship the thing",
@@ -133,7 +134,7 @@ describe("NodeDetailPanel composition (37-08 App assembly)", () => {
     const link = within(panel).getByTestId("phoenix-trace-link");
     expect(link).toHaveAttribute(
       "href",
-      "http://phoenix:6006/redirects/spans/span456",
+      phoenixSpanURL("http://phoenix:6006", "span456"),
     );
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");

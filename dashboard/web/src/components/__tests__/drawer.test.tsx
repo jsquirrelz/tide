@@ -11,6 +11,7 @@ import TaskDetailDrawer, {
   type TaskDetailData,
 } from "../TaskDetailDrawer";
 import { ToastProvider } from "../ToastContainer";
+import { phoenixSpanURL } from "../../lib/phoenixLink";
 
 afterEach(() => {
   cleanup();
@@ -266,7 +267,7 @@ describe("TaskDetailDrawer — Test 10: PhoenixTraceLink deep link (plan 46-05, 
     const link = screen.getByTestId("phoenix-trace-link");
     expect(link).toHaveAttribute(
       "href",
-      "http://phoenix:6006/redirects/spans/span456",
+      phoenixSpanURL("http://phoenix:6006", "span456"),
     );
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
