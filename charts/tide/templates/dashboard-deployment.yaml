@@ -54,6 +54,15 @@ spec:
           value: {{ quote .Values.otel.tracesSamplerArg }}
         - name: OTEL_SERVICE_NAME
           value: "tide-dashboard"
+        {{- if .Values.otel.exporter.headersSecretRef.name }}
+        # Phase 47 PHX-02/D-08: OTLP auth header for auth-enabled collectors
+        # (self-hosted Phoenix). Secret-sourced only — never a literal value.
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.otel.exporter.headersSecretRef.name }}
+              key: {{ .Values.otel.exporter.headersSecretRef.key | default "OTEL_EXPORTER_OTLP_HEADERS" }}
+        {{- end }}
         {{- /* PromQL proxy target (Phase 04 plan 02). Read directly by the
         dashboard binary (cmd/dashboard/main.go) as the PROM_ENDPOINT env;
         drives the dashboard's /api/v1/query{,_range} proxy handlers. Emitted

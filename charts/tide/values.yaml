@@ -416,6 +416,16 @@ prometheus:
 otel:
   exporter:
     endpoint: ""
+    # Phase 47 PHX-02/D-08: OTLP auth header for auth-enabled collectors
+    # (e.g. a self-hosted Phoenix behind an API-key gate — see
+    # docs/observability.md's "Self-hosted Phoenix" section). Secret-sourced
+    # only — name empty means no OTEL_EXPORTER_OTLP_HEADERS env is rendered
+    # at all; setting it wires valueFrom.secretKeyRef on the manager and
+    # dashboard containers, and the manager forwards the same header pair
+    # onto reporter Jobs. Never a literal value in the chart.
+    headersSecretRef:
+      name: ""
+      key: "OTEL_EXPORTER_OTLP_HEADERS"
   tracesSampler: "parentbased_traceidratio"
   tracesSamplerArg: "1.0"
   serviceName: "tide-controller-manager"

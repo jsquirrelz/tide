@@ -271,6 +271,44 @@ fi
 echo "PASS [G]: NOTES warning present by default, absent with prometheus.enabled=true"
 
 # ---------------------------------------------------------------------------
+# Permutation I — NOTES.txt tracing-dark warning conditional (Phase 47 D-10)
+#
+# Extends Permutation G's tpl+ConfigMap NOTES probe mechanism (the
+# NOTES_PROBE_DIR chart copy + notes-probe.yaml ConfigMap set up above stay
+# in scope for the remainder of the script — not re-copied here). Orchestrator-
+# binding decision: this is the D-10 both-ways gate via the Phase 38
+# mechanism — do NOT add a raw-byte assertion or any live-cluster/
+# `--dry-run` path (RESEARCH.md Pitfall A's fallbacks are superseded).
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- Permutation I: NOTES.txt tracing-dark warning conditional (D-10) ---"
+
+TRACING_WARNING_TEXT="tracing is dark"
+
+if ! NOTES_TRACING_DEFAULT="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml 2>&1)"; then
+  die "[I] helm template notes-probe (default values) exited non-zero:
+${NOTES_TRACING_DEFAULT}"
+fi
+
+if ! echo "${NOTES_TRACING_DEFAULT}" | grep -qF "${TRACING_WARNING_TEXT}"; then
+  die "[I] Tracing-dark warning missing from NOTES with default values.
+otel.exporter.endpoint defaults to empty, so NOTES.txt must print:
+  '${TRACING_WARNING_TEXT}'"
+fi
+
+if ! NOTES_TRACING_ENABLED="$(helm template tide-notes "${NOTES_PROBE_DIR}/chart" --show-only templates/notes-probe.yaml --set otel.exporter.endpoint=tide-phoenix.phoenix.svc.cluster.local:4317 2>&1)"; then
+  die "[I] helm template notes-probe --set otel.exporter.endpoint=... exited non-zero:
+${NOTES_TRACING_ENABLED}"
+fi
+
+if echo "${NOTES_TRACING_ENABLED}" | grep -qF "${TRACING_WARNING_TEXT}"; then
+  die "[I] Tracing-dark warning leaked into NOTES with otel.exporter.endpoint set.
+The warning block must be gated on '{{ if not .Values.otel.exporter.endpoint }}'."
+fi
+
+echo "PASS [I]: NOTES tracing-dark warning present by default, absent with otel.exporter.endpoint set"
+
+# ---------------------------------------------------------------------------
 # Permutation H — OTEL_TRACES_SAMPLER_ARG default 1.0 (Phase 46 OBS-01)
 #
 # Default render must carry `name: OTEL_TRACES_SAMPLER_ARG` followed by
@@ -299,4 +337,4 @@ echo "PASS [H]: default render carries OTEL_TRACES_SAMPLER_ARG with value \"1.0\
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
-echo "PASS: all 8 permutations passed — EC-7 + OBS-01 render gates satisfied"
+echo "PASS: all 9 permutations passed — EC-7 + OBS-01 + D-10 render gates satisfied"

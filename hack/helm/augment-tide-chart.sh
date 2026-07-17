@@ -121,6 +121,14 @@ prometheus.enabled is false.
 Token spend over time, dispatch counts, and per-level durations will be dark.
 Enable: see the "Enable telemetry" step in docs/INSTALL.md.
 {{- end }}
+
+{{- if not .Values.otel.exporter.endpoint }}
+
+WARNING: tracing is dark — otel.exporter.endpoint is empty.
+Run trace trees (five levels, plus redacted LLM message spans) are not
+exported anywhere, and the dashboard's Phoenix deep links stay hidden.
+Enable: see the "Enable tracing" step in docs/INSTALL.md.
+{{- end }}
 EOF
 
 # Phase 2 additions (Plan 12):
@@ -403,6 +411,33 @@ if ENV4_MARKER not in content:
     content = re.sub(
         r'(        # phase3-env-injected\n)',
         r'\1' + ENV4_BLOCK,
+        content,
+        count=1,
+    )
+
+# ── 8f2: Phase 47 (PHX-02/D-08) — OTLP auth header env injection ────────────
+# Adds a guarded OTEL_EXPORTER_OTLP_HEADERS env var on the manager container,
+# Secret-sourced via valueFrom.secretKeyRef, never a literal value — emitted
+# IFF otel.exporter.headersSecretRef.name is non-empty (self-hosted Phoenix
+# with auth enabled). Mirrors the dashboard container's hand-edited twin in
+# templates/dashboard-deployment.yaml. Anchored immediately after the Phase 4
+# OTel block (same anchor idiom as the phase9 reporter-env section).
+ENV47_MARKER = "# phase47-otlp-headers-env-injected"
+ENV47_BLOCK = """        {{- if .Values.otel.exporter.headersSecretRef.name }}
+        # Phase 47 PHX-02/D-08: OTLP auth header for auth-enabled collectors
+        # (self-hosted Phoenix). Secret-sourced only — never a literal value.
+        - name: OTEL_EXPORTER_OTLP_HEADERS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.otel.exporter.headersSecretRef.name }}
+              key: {{ .Values.otel.exporter.headersSecretRef.key | default "OTEL_EXPORTER_OTLP_HEADERS" }}
+        {{- end }}
+        # phase47-otlp-headers-env-injected
+"""
+if ENV47_MARKER not in content:
+    content = re.sub(
+        r'(        # phase4-env-injected\n)',
+        r'\1' + ENV47_BLOCK,
         content,
         count=1,
     )
