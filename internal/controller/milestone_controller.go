@@ -654,6 +654,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		ReporterImage:    r.Deps.ReporterImage,
 		TraceParent:      traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
 		OTLPEndpoint:     r.Deps.OTLPEndpoint,
+		OTLPHeaders:      r.Deps.OTLPHeaders,
 		SkipMessageSpans: skipMessageSpans,
 		SessionID:        projectUID,
 		MetadataJSON:     enrichmentMD,

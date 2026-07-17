@@ -1922,6 +1922,7 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 					ReporterImage:    r.Deps.ReporterImage,
 					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
 					OTLPEndpoint:     r.Deps.OTLPEndpoint,
+					OTLPHeaders:      r.Deps.OTLPHeaders,
 					SessionID:        string(project.UID),
 					MetadataJSON:     enrichmentMD,
 					Tags:             enrichmentTags,

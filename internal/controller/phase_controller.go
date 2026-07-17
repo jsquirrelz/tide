@@ -607,6 +607,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		ReporterImage:    r.Deps.ReporterImage,
 		TraceParent:      traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
 		OTLPEndpoint:     r.Deps.OTLPEndpoint,
+		OTLPHeaders:      r.Deps.OTLPHeaders,
 		SkipMessageSpans: skipMessageSpans,
 		SessionID:        projectUID,
 		MetadataJSON:     enrichmentMD,

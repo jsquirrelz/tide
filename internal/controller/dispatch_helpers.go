@@ -221,6 +221,12 @@ type PlannerReconcilerDeps struct {
 	// collector (Phase 44 TRACE-03/D-06); empty = tracing dark, reporter env
 	// omitted.
 	OTLPEndpoint string
+
+	// OTLPHeaders is the manager's own OTEL_EXPORTER_OTLP_HEADERS, forwarded
+	// into reporter Job env so the reporter's TracerProvider authenticates to
+	// the same auth-enabled collector the manager uses (Phase 47 PHX-02/D-08);
+	// empty = no headers forwarded, mirrors OTLPEndpoint's dark-cluster default.
+	OTLPHeaders string
 }
 
 // levelOverrideKey maps a dispatch level (the 5-valued identity string

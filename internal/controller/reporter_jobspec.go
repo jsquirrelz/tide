@@ -96,6 +96,20 @@ type ReporterOptions struct {
 	// provider (materialization-mode posture, D-06).
 	OTLPEndpoint string
 
+	// OTLPHeaders is the manager's own OTEL_EXPORTER_OTLP_HEADERS value,
+	// forwarded so the reporter Job's own TracerProvider authenticates to
+	// the SAME auth-enabled collector the manager uses (Phase 47 PHX-02/
+	// D-08). Carried as Env (mirroring OTLPEndpoint) because the pinned
+	// otlptracegrpc v1.43.0 honors OTEL_EXPORTER_OTLP_HEADERS automatically
+	// when WithHeaders is not called — no reporter-binary change needed.
+	// Only emitted when OTLPEndpoint is also non-empty (headers without an
+	// endpoint are meaningless). The value is a literal on the Job spec in
+	// the project namespace — accepted per threat T-47-02: Job-read RBAC
+	// in a project namespace already implies access to tide-secrets'
+	// ANTHROPIC_API_KEY, a strictly more sensitive credential than an
+	// ingest-scoped Phoenix token.
+	OTLPHeaders string
+
 	// TraceOnly selects the Phase 44 trace-only Job shape (spawned by plan
 	// 44-05 for completed Task dispatch Jobs) instead of the materialization
 	// reporter shape: a distinct name keyed on TraceOnlyJobKey and a minimal
@@ -196,7 +210,9 @@ type ReporterOptions struct {
 //
 //   - Env: empty unless opts.OTLPEndpoint is set (Phase 44 D-06/T-44-04), in
 //     which case OTEL_EXPORTER_OTLP_ENDPOINT + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6
-//     are added — see the ReporterOptions.OTLPEndpoint doc comment.
+//     are added, plus OTEL_EXPORTER_OTLP_HEADERS when opts.OTLPHeaders is also
+//     set (Phase 47 PHX-02/D-08) — see the ReporterOptions.OTLPEndpoint and
+//     OTLPHeaders doc comments.
 //
 //   - SecurityContext: RunAsNonRoot + drop ALL capabilities (mirrors jobspec.go
 //     hardened subagent context — reporter is trusted write; least-privilege).
@@ -284,6 +300,9 @@ func BuildReporterJob(
 		env = []corev1.EnvVar{
 			{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: opts.OTLPEndpoint},
 			{Name: "OTEL_BSP_MAX_EXPORT_BATCH_SIZE", Value: "6"},
+		}
+		if opts.OTLPHeaders != "" {
+			env = append(env, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_HEADERS", Value: opts.OTLPHeaders})
 		}
 	}
 

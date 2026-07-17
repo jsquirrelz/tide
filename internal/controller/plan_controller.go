@@ -662,6 +662,7 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 					ReporterImage:    r.Deps.ReporterImage,
 					TraceParent:      traceparentForLevel(project, plan.Status.PlanTraceSpanID, sampled),
 					OTLPEndpoint:     r.Deps.OTLPEndpoint,
+					OTLPHeaders:      r.Deps.OTLPHeaders,
 					SkipMessageSpans: skipMessageSpans,
 					SessionID:        projectUID,
 					MetadataJSON:     enrichmentMD,
