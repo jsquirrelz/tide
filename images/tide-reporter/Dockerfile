@@ -16,11 +16,17 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 # Copy only what the binary needs.
-# cmd/tide-reporter imports: internal/reporter, internal/owner, api/v1alpha3, pkg/dispatch.
+# cmd/tide-reporter imports: internal/reporter, internal/owner, internal/otelinit,
+# internal/harness/redact, internal/subagent/common, api/v1alpha3, pkg/dispatch,
+# pkg/otelai (Phase 44-46 trace-synthesis + redaction additions).
 COPY api/ api/
 COPY internal/reporter/ internal/reporter/
 COPY internal/owner/ internal/owner/
+COPY internal/otelinit/ internal/otelinit/
+COPY internal/harness/redact/ internal/harness/redact/
+COPY internal/subagent/common/ internal/subagent/common/
 COPY pkg/dispatch/ pkg/dispatch/
+COPY pkg/otelai/ pkg/otelai/
 COPY cmd/tide-reporter/ cmd/tide-reporter/
 
 # Static binary: no CGO, stripped symbols for a smaller image. The reporter
