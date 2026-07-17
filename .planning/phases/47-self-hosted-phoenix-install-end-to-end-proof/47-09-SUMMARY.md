@@ -92,3 +92,11 @@ None - no external service configuration required.
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+- FOUND: examples/projects/medium/README.md
+- FOUND: examples/projects/medium/per-namespace-resources.yaml
+- FOUND: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-09-SUMMARY.md
+- FOUND: commit a916837 (Task 1)
+- FOUND: commit 9e5fef6 (SUMMARY.md)
