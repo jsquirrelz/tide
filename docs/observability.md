@@ -203,9 +203,14 @@ There is one coherent path within this limitation: each level's
 reporter-emitted LLM message spans (Phase 44) follow the `sampled` flag of
 the traceparent the manager hands that level's reporter Job. After this
 phase (Plan 46-04's D-02 fix), that flag carries the emitting span's real
-sampling decision, so a ratio-dropped Project root also drops its own
-reporter's LLM spans — no orphaned LLM-message fragment from the root
-level. The deeper cross-level cascade (a Milestone/Phase/Plan/Task AGENT
+sampling decision whenever the reporter spawn happens in the same reconcile
+as the span emission — the common path — so a ratio-dropped Project root
+also drops its own reporter's LLM spans: no orphaned LLM-message fragment
+from the root level. If the root's reporter spawn is retried on a later
+reconcile (a transient Job-create failure, or a crash between emission and
+spawn), the flag defaults to sampled and the root-level fragment can still
+appear — a bounded exception, root level only, inert at the default
+`tracesSamplerArg=1.0`. The deeper cross-level cascade (a Milestone/Phase/Plan/Task AGENT
 span whose *own* sampling state doesn't propagate coherently to its child
 level's reporter) remains a documented limitation, not a bug fix candidate:
 closing it would require persisting a sampled bit durably across

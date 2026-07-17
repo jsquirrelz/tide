@@ -1826,10 +1826,18 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// planning cost, but a span records that a Job ran in THIS cluster — an
 	// import with no real completed Job never reaches this point at all
 	// (the completedJob != nil gate above handles it naturally).
-	// D-02/Phase 46: default true — matches today's behavior (and RESEARCH's
-	// SDK read that every non-root span is AlwaysSample'd) when no emission
-	// runs this reconcile (marker already stamped by an earlier attempt);
-	// overwritten below with the real bit when this reconcile DOES emit.
+	// D-02/Phase 46: default true — overwritten below with the real bit when
+	// this reconcile DOES emit (the common path: emission and reporter spawn
+	// in one reconcile). Unlike the four non-root levels — whose
+	// reconstructed parent SpanContext hardcodes FlagsSampled, so ParentBased
+	// always samples them and their default can never diverge — Project is
+	// the trace ROOT: its span is ratio-gated and its real bit can be false.
+	// When the spawn runs on a LATER reconcile than the emission (transient
+	// reporter Create failure → requeue, or a crash between stamp and spawn),
+	// this default mislabels a ratio-dropped root's reporter traceparent as
+	// sampled and its LLM spans export as an orphaned fragment — a bounded
+	// degradation, inert at the default tracesSamplerArg=1.0 and documented
+	// in docs/observability.md (46-REVIEW WR-02).
 	sampled := true
 	if completedJob != nil && project.Status.PlannerSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
