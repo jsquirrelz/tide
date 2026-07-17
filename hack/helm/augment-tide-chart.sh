@@ -121,6 +121,14 @@ prometheus.enabled is false.
 Token spend over time, dispatch counts, and per-level durations will be dark.
 Enable: see the "Enable telemetry" step in docs/INSTALL.md.
 {{- end }}
+
+{{- if not .Values.otel.exporter.endpoint }}
+
+WARNING: tracing is dark — otel.exporter.endpoint is empty.
+Run trace trees (five levels, plus redacted LLM message spans) are not
+exported anywhere, and the dashboard's Phoenix deep links stay hidden.
+Enable: see the "Enable tracing" step in docs/INSTALL.md.
+{{- end }}
 EOF
 
 # Phase 2 additions (Plan 12):
