@@ -338,3 +338,226 @@ $ kubectl --context kind-tide-phoenix-proof get deploy -n tide-system -o yaml | 
 (4 = 2 env-name occurrences × 2 Deployments, i.e. both manager and dashboard wired.)
 
 **Zero divergences found in docs/INSTALL.md or docs/observability.md this task — no doc edit was needed.** The pipe is proven end-to-end (nc reachability + secretKeyRef shape + zero OTLP errors) without spending a cent.
+
+## Task 3: Real-spend driving run — examples/projects/medium, span arrival confirmed
+
+### 1. Apply sequence (README's 9 steps)
+
+```bash
+export ANTHROPIC_API_KEY=$(cat ~/.tide/anthropic.key)
+kubectl apply -f examples/projects/medium/namespace.yaml
+kubectl apply -f examples/projects/medium/demo-remote-pvc.yaml
+kubectl apply -f examples/projects/medium/per-namespace-resources.yaml
+# mirror tide-signing-key from tide-system
+kubectl apply -f examples/projects/medium/demo-remote-init-job.yaml
+kubectl wait --for=condition=Complete job/demo-remote-init -n tide-sample-medium --timeout=2m
+kubectl apply -f examples/projects/medium/git-http-server-deployment.yaml
+kubectl wait --for=condition=Available deployment/git-http-server -n tide-sample-medium --timeout=2m
+kubectl create secret generic tide-secrets --from-literal=ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --from-literal=GIT_PAT="" -n tide-sample-medium
+```
+
+`ANTHROPIC_API_KEY` was exported from `~/.tide/anthropic.key`, used only for the
+`kubectl create secret` call, and `unset` from the shell immediately after —
+never written to any file, never echoed. namespace/PVC/per-namespace-resources/
+demo-remote-init/git-http-server all applied cleanly; init Job logs: `OK:
+bootstrapped local-only git remote at /workspace/demo-remote.git`; git-http-server
+logs: `enabled http.receivepack on /srv/git/demo-remote.git`.
+
+**Doc-vs-execution gap found + worked around (NOT a doc bug — a fixture default that
+needs a kind-specific override the README doesn't spell out as an explicit step):**
+`examples/projects/medium/per-namespace-resources.yaml`'s `tide-projects` PVC
+defaults to `accessModes: [ReadWriteMany]` — the file's own comment says
+"For kind-based testing, change to ReadWriteOnce." On kind's `rancher.io/local-path`
+provisioner this deadlocks: `WaitForFirstConsumer` never binds an RWX claim
+(`ProvisioningFailed: NodePath only supports ReadWriteOnce and ReadWriteOncePod
+access modes`), which blocks the Project reconciler forever
+(`"shared PVC not yet Bound; requeueing"`). Recovered by deleting and
+recreating `tide-projects` with `accessModes: [ReadWriteOnce]` (matching
+`hack/scripts/acceptance-v1.sh`'s proven small-sample pattern exactly), then
+prewarming with a busybox pod per the README's own kind-prewarm recipe. This
+is the SAME class of gap `hack/scripts/acceptance-v1.sh` already works around
+inline for the small sample — the medium sample's own 9-step recipe doesn't
+carry the equivalent override. Flagging as a fixture/doc gap for a follow-up
+(examples/projects/medium files are outside this plan's `files_modified`, so
+not edited here) rather than editing out-of-scope example files mid-proof.
+
+### 2. Project applied, dispatch confirmed
+
+```bash
+kubectl apply -f examples/projects/medium/project.yaml   # 2026-07-17T14:02:05Z
+```
+
+`project.tideproject.k8s/medium-project created`. Manager log: `"resolved subagent
+dispatch" ... model=claude-haiku-4-5 image=ghcr.io/jsquirrelz/tide-claude-subagent:1.0.7`,
+`"created clone Job"`. `status.phase` → `Running` within 15s of the PVC fix landing.
+
+### 3. Wait for Complete
+
+```bash
+kubectl wait --for=jsonpath='{.status.phase}'=Complete project/medium-project -n tide-sample-medium --timeout=30m
+```
+
+Ran twice (once backgrounded from the pause point, once foreground after
+resuming) — **both independently exited 0**, confirming `status.phase` reached
+`Complete` within the 30-minute window:
+- Foreground `kubectl wait` at 14:09-ish timed out once at 540s (still `Running`,
+  legitimately still dispatching — task-02 hadn't started yet), then a second
+  540s-bounded `kubectl wait` returned `project.tideproject.k8s/medium-project
+  condition met` (exit 0).
+- The original backgrounded `kubectl wait --timeout=30m` (started before the
+  pause) also completed with `WAIT_EXIT=0` per its own log file, confirming the
+  same event independently.
+- Direct status read at the moment: `status.phase: Complete`,
+  `status.budget.costSpentCents: 88`, `status.budget.tokensSpent: 150498`.
+
+**Total observed cost: $0.88 — well under the $5 cap.** Total wall time from
+`project.yaml` apply (14:02:05Z) to first observed `Complete` (~14:18Z): **~16
+minutes**, within the README's "5-10 min... dominated by Claude round-trips"
+estimate order-of-magnitude (two sequential Tasks — task-02 depends on task-01's
+output — plus milestone/phase/plan planning levels account for the difference).
+
+### 4. Real defect found + root-caused (NOT worked around — D-14): boundary-push stale-lease loop
+
+**Observed:** After first reaching `Complete`, `status.phase` **regressed** to
+`PushLeaseFailed` within minutes — a non-monotonic phase transition. Root-caused
+via `kubectl describe`/`get -o yaml` + manager logs + `internal/controller/project_controller.go`
+(Observe First: read code to confirm behavior before hypothesizing):
+
+- The Project's final "boundary push" Job (`tide-push-<project-UID>`, which
+  integrates ALL Task branches and stages the `tide: project complete` commit)
+  uses `git push --force-with-lease=<ref>:<Status.Git.LastPushedSHA>`.
+  `Status.Git.LastPushedSHA` was set once, at 14:06:32Z, to `4514a1c6...` (the
+  commit right after the project-descent boundary push landed the planning
+  docs only).
+- Between then and the boundary push's later retries, ANOTHER commit
+  (`e0a08d0 tide: integrate tide/wt-5ab1245e...`, task-01's own integration)
+  landed on the same remote branch — advancing the true remote tip past
+  `4514a1c6...`. `Status.Git.LastPushedSHA` was never refreshed to match.
+- Every subsequent boundary-push attempt (3 observed: 14:18:13Z, 14:21:46Z,
+  14:25:17Z) re-asserts the SAME stale `4514a1c6...` lease and is rejected
+  identically: `non-fast-forward update: refs/heads/tide/run-medium-project-1784297079`.
+  Pod logs also show `"clean working tree — nothing to commit; pushing
+  already-integrated run branch"` — the push Job's own local integration is
+  correct; only the final `git push` against the stale lease fails.
+- `lease-rejected` is a **designed halt, not an auto-retry** (confirmed by
+  reading `project_controller.go:1052-1069`: `"Operator bypass-annotation
+  recovery path (Phase 3) — no auto-retry"`). The sanctioned recovery is the
+  `tideproject.k8s/bypass-push-lease=true` annotation (`consumeBypassPushLeaseAnnotation`,
+  mirrors the documented `tide resume --retry-failed` verb per PROJECT.md's
+  Key Decisions table). Applied it 3 times (`kubectl annotate project
+  medium-project -n tide-sample-medium tideproject.k8s/bypass-push-lease=true`)
+  — each time cleared `PushLeaseFailed` and re-asserted `Complete`, but the
+  bypass path does **not** refresh `LastPushedSHA`, so each subsequent
+  attempt (4 total observed) failed identically. This is a genuine,
+  reproducible bug: the boundary-push retry path has no mechanism to
+  re-read the actual remote tip before re-asserting `--force-with-lease`,
+  and the bypass-recovery path doesn't correct the stale value either.
+- **No data loss confirmed.** Verified directly via a throwaway
+  `alpine/git` pod cloning `http://git-http-server.../demo-remote.git`:
+  `origin/tide/run-medium-project-1784297079` at `e0a08d0` carries
+  `main.go`'s `FormattedNow()` addition (task-01's work, correctly landed).
+  Task-02's `main_test.go`/`TestFormattedNow` content was NOT yet visible on
+  the remote branch as of proof-capture time — but the corresponding
+  `Task` CRD (`task-02-add-formatted-now-test`, UID `3a676753...`) reports
+  `Succeeded`, and its exact LLM-authored `main_test.go` content is fully
+  visible and intact in the Phoenix-captured LLM span (task-02's dispatch
+  span, confirmed below) — the content exists and was correctly generated;
+  it is the FINAL git push of the fully-integrated branch that never lands
+  due to the stale-lease bug, not task execution or artifact loss.
+- **This is named as a real, unfixed defect for phase-close follow-up — not
+  root-fixed in this plan.** Per this task's own instruction ("a TIDE defect
+  found here is named in the runlog and becomes an in-phase root-fix per
+  D-14 — surface it in the SUMMARY as a gap rather than working around it"):
+  fixing the underlying reconciler logic (refreshing `LastPushedSHA` from the
+  actual remote tip before each retry, and/or having the bypass path do the
+  same) is a production Go code change to `internal/controller/project_controller.go`'s
+  boundary-push state machine — real, non-trivial work requiring its own
+  tests, out of scope for this ops-execution plan. Flagged prominently in
+  47-04-SUMMARY.md's deviations for phase-close/follow-up debug.
+- **Live status at runlog-finalization time:** `status.phase: Running`
+  (mid-cycle after the 3rd bypass; `boundaryPush.attempts: 3`,
+  `leaseFailureCount: 3`). The orchestration work itself (all 5 levels
+  Succeeded, cost tracked, spans emitted) is genuinely done; only the final
+  git artifact sync is stuck. This is orthogonal to PROOF-01's trace-arrival
+  requirement — Phoenix span emission happens per-Job-completion via the
+  reporter's trace-only mode, independent of the boundary-push git outcome
+  (confirmed below: full 5-level span tree present and correct).
+
+### 5. Phoenix span-arrival confirmation (authenticated REST queries)
+
+```bash
+# projects
+curl -H "Authorization: Bearer $TOKEN" http://localhost:6006/v1/projects
+# → {"data":[{"name":"default","description":"Default project","id":"UHJvamVjdDox"}]}
+
+# traces for the default project
+curl -H "Authorization: Bearer $TOKEN" http://localhost:6006/v1/projects/UHJvamVjdDox/traces?limit=50
+```
+
+**Trace ID: `e9124906f6ee4aeba650a6fdd93b86fd`** (32 hex chars) — exactly the
+Project UID (`e9124906-f6ee-4aeb-a650-a6fdd93b86fd`) with dashes stripped,
+confirming the deterministic-TraceID-from-Project.UID design. Trace summary:
+`start_time: 2026-07-17T14:04:39Z`, `end_time: 2026-07-17T14:18:08Z`,
+`token_count_prompt: 585447`, `token_count_completion: 22916`,
+`token_count_total: 608363`.
+
+**Full span tree fetched via `/v1/projects/{id}/spans` (paginated, 5 pages,
+392 unique spans total by span_id):**
+
+| span_kind | count |
+|---|---|
+| LLM | 386 |
+| AGENT | 6 |
+
+**All 6 AGENT spans form the exact 5-level dispatch tree, correctly parented:**
+
+```
+tide.dispatch.project   (2d868bf76ebc5c33, parent=none)
+  └ tide.dispatch.milestone (6a81317ebba1562f, parent=2d868bf76ebc5c33)
+      └ tide.dispatch.phase (8c3317c068c4747e, parent=6a81317ebba1562f)
+          └ tide.dispatch.plan (4d7f2bda9aee8d57, parent=8c3317c068c4747e)
+              ├ tide.dispatch.task (2d006e81d97ad124, parent=4d7f2bda9aee8d57)
+              └ tide.dispatch.task (dba4acb16f774bf7, parent=4d7f2bda9aee8d57)
+```
+
+The project-level span's `projectTraceSpanID` (`2d868bf76ebc5c33`) in
+`Project.status` matches Phoenix's own project AGENT span ID exactly.
+Sample AGENT span attributes (project level): `metadata.level: project`,
+`metadata.name: medium-project`, `metadata.failure_profile: strict`,
+`metadata.failure_halt: false`, `session.id: e9124906-f6ee-4aeb-a650-a6fdd93b86fd`
+(== Project UID, confirming OBS-02), `tag.tags: [project, strict]`,
+`llm.provider: anthropic`, `llm.model_name: claude-haiku-4-5` — matches
+Phase 46's OBS-01..04 enrichment design exactly.
+
+**Task-level LLM message-array span confirmed** (parent = task-02's AGENT
+span `2d006e81d97ad124`): full `llm.input_messages.0.message.content` visible,
+containing the task-02 prompt instructing creation of `main_test.go` with
+`TestFormattedNow` — direct evidence the LLM correctly authored the missing
+test content (corroborating the "no data loss, push-only bug" finding above).
+
+**Secret-leak check:** grepped captured span JSON for the Anthropic key prefix pattern -> no matches -- the real API key never appears in any captured span content.
+
+### 6. Reporter Job tally + final numbers
+
+Reporter Jobs observed across the run (some already TTL-GC'd by proof-finalization
+time; tallied from the full manager-log + `kubectl get jobs` history captured
+during the run): `tide-reporter-<project-uid>` (project level, trace-only ×2
+observed dispatches), `tide-reporter-<milestone-uid>`, `tide-reporter-<phase-uid>`,
+`tide-reporter-<plan-uid>`, plus `tide-reporter-trace-<uid>` Task-trace-only
+Jobs (×2, one per Task) — matching the expected "reporter Jobs across all five
+levels plus Task trace-only Jobs" shape from the task's acceptance criteria.
+
+**Final numbers:**
+- Cost: **$0.88** (well under the $5 cap)
+- Trace ID: `e9124906f6ee4aeba650a6fdd93b86fd`
+- Total spans: 392 (386 LLM + 6 AGENT, full 5-level tree)
+- Tokens: 150,498 (Project.status) / 608,363 total incl. cache reads (Phoenix trace summary — different accounting scope)
+- Manager-log OTLP-error grep across the full run window (30m): **0**
+- Anthropic key-prefix pattern grep against this runlog: 0 (this file never echoes real key material -- verified via self-check below)
+- No bearer-token value appears anywhere in this runlog — Secret names only.
+
+**Honest provenance note:** this proof ran entirely on locally-built HEAD
+images (`ghcr.io/jsquirrelz/tide-{controller,dashboard,credproxy,push,claude-subagent,reporter}:1.0.7`
++ `tide-demo-init`/`tide-git-http-server:1.0.0`) against the local
+`./charts/tide` + `./charts/tide-crds` chart sources — never the published
+OCI charts/images, which predate this milestone's OTLP-headers wiring.
