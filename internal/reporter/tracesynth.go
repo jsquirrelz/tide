@@ -19,6 +19,13 @@ limitations under the License.
 // call-1 prompt) and emits one redacted, size-bounded OpenInference LLM-kind
 // span per API call (D-01).
 //
+// This is specifically the anthropic-CLI runtime's trace adapter behind the
+// Phase 45 ADAPT-01 seam: it parses that runtime's events.jsonl stream
+// format and nothing else. pkg/dispatch.SelfInstruments is the routing
+// datum the manager consults to decide whether a dispatch's reporter Job
+// should invoke this parser at all — see cmd/tide-reporter/main.go's
+// synthesizeSpans skip guard, which is the sole point that honors it.
+//
 // Like materialize.go, this file is intentionally import-safe from cmd
 // binaries: its only dependencies are the standard library,
 // go.opentelemetry.io/otel, internal/harness/redact, internal/subagent/common,
@@ -611,8 +618,12 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 
 		span.SetAttributes(otelai.LLMSpanKind())
 		// D-07: provider is deliberately hardcoded "anthropic" — this
-		// synthesizer parses the Anthropic CLI stream format specifically;
-		// Phase 45's adapter seam is where runtime-neutral dispatch lands.
+		// synthesizer parses the Anthropic CLI stream format specifically.
+		// Runtime-neutral routing lives one level up, in
+		// pkg/dispatch.SelfInstruments plus the reporter's
+		// --skip-message-spans skip guard (Phase 45) — this hardcoded
+		// literal is correct because this function only ever runs for the
+		// anthropic-CLI adapter path.
 		span.SetAttributes(otelai.LLMIdentity("anthropic", call.Model)...)
 		span.SetAttributes(inputAttrs...)
 		span.SetAttributes(outputAttrs...)
