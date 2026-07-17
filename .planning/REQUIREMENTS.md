@@ -8,7 +8,7 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 - [x] **TRACE-01**: The manager emits retroactive OpenInference `AGENT` spans (`trace.WithTimestamp` start/end) at all five level-completion sites (Project/Milestone/Phase/Plan/Task), carrying model, cost, duration, and token attributes sourced from the same envelope/status data the budget tally already uses — never recomputed
 - [x] **TRACE-02**: One run renders as ONE navigable trace: the trace ID derives deterministically from the Project UID (128-bit ↔ OTel TraceID), and every level's span parents correctly under its parent level's span
-- [ ] **TRACE-03**: Every span-emitting one-shot binary (reporter; any Job-side emitter) carries the TracerProvider construction AND the deferred-Shutdown flush discipline — a short-lived process must not silently drop its batch
+- [x] **TRACE-03**: Every span-emitting one-shot binary (reporter; any Job-side emitter) carries the TracerProvider construction AND the deferred-Shutdown flush discipline — a short-lived process must not silently drop its batch
 
 ### OpenInference Attribute Completeness (ATTR)
 
@@ -23,7 +23,7 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### LLM Message-Array Spans (MSG)
 
-- [ ] **MSG-01**: The executor (Task) level gains an `events.jsonl` reader — a trace-only reporter mode (no child-CR materialization) — closing the gap where the richest LLM conversation currently has no in-namespace consumer at all
+- [x] **MSG-01**: The executor (Task) level gains an `events.jsonl` reader — a trace-only reporter mode (no child-CR materialization) — closing the gap where the richest LLM conversation currently has no in-namespace consumer at all
 - [x] **MSG-02**: `LLMInputMessages`/`LLMOutputMessages` are populated from `events.jsonl` ONLY after passing the existing `internal/harness/redact.SecretPatterns` pass — the file is written raw/unredacted by design and must never reach Phoenix unfiltered
 - [x] **MSG-03**: Message attributes are size-guarded under the OTLP 4 MB ceiling: per-message truncation with explicit truncation markers, plus `ArtifactPath(events.jsonl)` on the same span as the full-fidelity reference — and the D-O5 payload-boundary decision (inline-bounded + reference) is documented, with the `TestNoPayloadHelperOnPublicSurface` guard updated deliberately, not deleted
 
@@ -72,13 +72,13 @@ Deferred to later milestones:
 |-------------|-------|--------|
 | TRACE-01 | Phase 43 | Complete |
 | TRACE-02 | Phase 43 | Complete |
-| TRACE-03 | Phase 44 | Pending |
+| TRACE-03 | Phase 44 | Complete |
 | ATTR-01 | Phase 42 | Complete |
 | ATTR-02 | Phase 42 | Complete |
 | ATTR-03 | Phase 42 | Complete |
 | PROP-01 | Phase 43 | Complete |
 | PROP-02 | Phase 43 | Complete |
-| MSG-01 | Phase 44 | Pending |
+| MSG-01 | Phase 44 | Complete |
 | MSG-02 | Phase 44 | Complete |
 | MSG-03 | Phase 44 | Complete |
 | ADAPT-01 | Phase 45 | Pending |
