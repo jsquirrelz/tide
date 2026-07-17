@@ -135,3 +135,14 @@ None — no external service configuration required beyond what the plan itself 
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+- FOUND: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-PROOF-RUNLOG.md
+- FOUND: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-04-SUMMARY.md
+- FOUND: images/tide-reporter/Dockerfile
+- FOUND commit: 9f921ac (Task 1)
+- FOUND commit: 864641f (Task 2)
+- FOUND commit: 9c8959a (Task 3)
+- FOUND commit: ad4c63b (SUMMARY.md)
+- Secret scan on SUMMARY.md: 0 matches for key-prefix pattern
