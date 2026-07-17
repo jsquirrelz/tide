@@ -17,6 +17,7 @@ limitations under the License.
 package otelai
 
 import (
+	"encoding/json"
 	"fmt"
 
 	semconv "github.com/Arize-ai/openinference/go/openinference-semantic-conventions"
@@ -341,4 +342,42 @@ func TimingSynthetic() attribute.KeyValue {
 // marker-attribute convention.
 func ParseDegraded() attribute.KeyValue {
 	return attribute.Bool(keyParseDegraded, true)
+}
+
+// SessionID returns the session.id attribute (module-backed, ATTR-03)
+// identifying TIDE's own run — the Project UID. This is deliberately NOT
+// Claude Code's own session_id field inside events.jsonl (D-04 forbids
+// conflating the two): session.id here is TIDE's run identity, used so
+// Phoenix's ProjectSession view groups every span from one Project's run
+// together. Phoenix groups purely on this string matching exactly across
+// sibling spans (46 D-05) — callers must pass the identical value to every
+// level's AGENT span and every reporter-emitted LLM span for the same run.
+func SessionID(projectUID string) attribute.KeyValue {
+	return attribute.String(semconv.SessionID, projectUID)
+}
+
+// Metadata JSON-marshals m and returns the metadata attribute — a JSON
+// String per the OpenInference spec (Pitfall 4: metadata and Tags below
+// have DIFFERENT OTel encodings despite reading like siblings). This is the
+// ONLY helper in this package returning (attribute.KeyValue, error) — a
+// json.Marshal of a map[string]string cannot fail in practice, but the
+// signature surfaces the error rather than silently swallowing it. See
+// MetadataJSON for the passthrough twin used by transport paths where the
+// JSON was already encoded upstream.
+func Metadata(m map[string]string) (attribute.KeyValue, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return attribute.KeyValue{}, err
+	}
+	return attribute.String(semconv.Metadata, string(b)), nil
+}
+
+// Tags returns the tag.tags attribute as a NATIVE OTel string list
+// (attribute.STRINGSLICE) — NO JSON marshaling. Per the OpenInference spec,
+// tag.tags carries low-cardinality categorical filterables as a native list,
+// while Metadata (above) carries the full structured set as a JSON String;
+// a Tags() helper that JSON-encodes is the exact Pitfall 4 regression this
+// package must avoid.
+func Tags(tags ...string) attribute.KeyValue {
+	return attribute.StringSlice(semconv.TagTags, tags)
 }

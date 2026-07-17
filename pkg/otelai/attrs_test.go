@@ -30,6 +30,7 @@ limitations under the License.
 package otelai
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -350,6 +351,56 @@ func TestKeysUseSemconvModule(t *testing.T) {
 	forbidden := regexp.MustCompile(`"(llm\.|openinference\.|gen_ai\.|agent\.)`)
 	if m := forbidden.FindString(stripped); m != "" {
 		t.Errorf("ATTR-03 violation: pkg/otelai/attrs.go contains a hand-rolled spec-family string literal (%s...) outside a comment — every spec-backed key must resolve from the openinference-semantic-conventions module (semconv.* constants); only tide.* keys may be hand-rolled (D-05)", m)
+	}
+}
+
+// TestSessionID — 46 OBS-02: session.id keyed from the semconv module
+// (ATTR-03), value is TIDE's own run identity (Project UID) verbatim.
+func TestSessionID(t *testing.T) {
+	got := SessionID("uid-123")
+	want := attribute.String("session.id", "uid-123")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SessionID(\"uid-123\") = %v, want %v", got, want)
+	}
+}
+
+// TestMetadata — 46 OBS-03: metadata is a JSON-encoded STRING (Pitfall 4),
+// and round-trips via json.Unmarshal back into an equal map.
+func TestMetadata(t *testing.T) {
+	got, err := Metadata(map[string]string{"level": "task"})
+	if err != nil {
+		t.Fatalf("Metadata: %v", err)
+	}
+	if got.Key != "metadata" {
+		t.Errorf("Metadata key = %q, want %q", got.Key, "metadata")
+	}
+	if got.Value.Type() != attribute.STRING {
+		t.Errorf("Metadata().Value.Type() = %v, want attribute.STRING", got.Value.Type())
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(got.Value.AsString()), &decoded); err != nil {
+		t.Fatalf("Metadata value did not round-trip as JSON: %v", err)
+	}
+	want := map[string]string{"level": "task"}
+	if !reflect.DeepEqual(decoded, want) {
+		t.Errorf("Metadata value decoded = %v, want %v", decoded, want)
+	}
+}
+
+// TestTags — 46 OBS-03/D-06: tag.tags is a NATIVE string list
+// (attribute.STRINGSLICE), NOT JSON-encoded — a Tags() helper that
+// JSON-encodes is the exact Pitfall 4 regression this test guards against.
+func TestTags(t *testing.T) {
+	got := Tags("task", "approve")
+	if got.Key != "tag.tags" {
+		t.Errorf("Tags key = %q, want %q", got.Key, "tag.tags")
+	}
+	if got.Value.Type() != attribute.STRINGSLICE {
+		t.Errorf("Tags().Value.Type() = %v, want attribute.STRINGSLICE", got.Value.Type())
+	}
+	want := []string{"task", "approve"}
+	if gotSlice := got.Value.AsStringSlice(); !reflect.DeepEqual(gotSlice, want) {
+		t.Errorf("Tags().Value.AsStringSlice() = %v, want %v", gotSlice, want)
 	}
 }
 
