@@ -50,9 +50,11 @@ created: 2026-07-17
 
 ## Wave 0 Requirements
 
-- [ ] NOTES.txt render-gate test (both cases) — location and strategy (raw-byte assertion vs live-cluster `helm install --dry-run`) is an explicit planner decision per Research Pitfall A (`helm template` never renders NOTES.txt; `--dry-run=client` still needs a reachable cluster on Helm 3.16.3)
-- [ ] OTLP-headers wiring tests (Pitfall B option 1 chosen): new `ReporterOptions` field test + chart-render test confirming the Secret-sourced env entry appears only when the new values key is set
-- [ ] No framework gaps otherwise — Layer A envtest and `test/integration/kind` are fully wired and green
+> **Planning outcome (2026-07-17):** no separate Wave 0 plan is needed — both gaps below are covered inline by Wave 1 plans. Frontmatter `wave_0_complete`/`nyquist_compliant` and the sign-off close when 47-01/47-02 land.
+
+- [ ] NOTES.txt render-gate test (both cases) — **covered by Plan 47-02 Task 3**, extending the existing offline Permutation G `tpl`-probe in `hack/helm/assert-telemetry-render.sh` (PATTERNS.md correction superseded Research Pitfall A's raw-byte / live-cluster fallbacks)
+- [ ] OTLP-headers wiring tests (Pitfall B option 1 chosen): new `ReporterOptions` field test + chart-render test confirming the Secret-sourced env entry appears only when the new values key is set — **covered by Plan 47-01 Task 1 (TDD pair) + Plan 47-02 Tasks 1/3 (render gates)**
+- [x] No framework gaps otherwise — Layer A envtest and `test/integration/kind` are fully wired and green
 
 ---
 
