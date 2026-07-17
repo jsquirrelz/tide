@@ -240,7 +240,7 @@ Per 46-RESEARCH.md §Validation Architecture (Vitest, existing conventions in `d
 
 | Surface | Test | Asserts |
 |---------|------|---------|
-| `lib/__tests__/phoenixLink.test.ts` (new) | URL assembly | route shapes, trailing-slash normalization, `encodeURIComponent` behavior |
+| `lib/phoenixLink.test.ts` (new, co-located) | URL assembly | route shapes, trailing-slash normalization, `encodeURIComponent` behavior |
 | `components/__tests__/node-panel-integration.test.tsx` (extend) | panel mount | link renders with config+spanId; renders NOTHING when either is absent; `href`/`target`/`rel` correct |
 | TaskDetailDrawer test (new/extend — **required per Pitfall 1**) | drawer mount | same render/hide cases; placement after metadata grid |
 
