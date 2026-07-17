@@ -29,7 +29,7 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### Runtime-Neutral Adapter Seam (ADAPT)
 
-- [ ] **ADAPT-01**: The events.jsonl→spans synthesizer is a per-runtime adapter behind the Subagent seam: a self-instrumenting capability flag travels as data (via the manager's resolved `Provider.Vendor`), the reporter skips synthesis when set, and a contract test proves a self-instrumenting runtime produces no duplicate spans
+- [x] **ADAPT-01**: The events.jsonl→spans synthesizer is a per-runtime adapter behind the Subagent seam: a self-instrumenting capability flag travels as data (via the manager's resolved `Provider.Vendor`), the reporter skips synthesis when set, and a contract test proves a self-instrumenting runtime produces no duplicate spans
 
 ### Self-Hosted Phoenix Surface (PHX)
 
@@ -81,7 +81,7 @@ Deferred to later milestones:
 | MSG-01 | Phase 44 | Complete |
 | MSG-02 | Phase 44 | Complete |
 | MSG-03 | Phase 44 | Complete |
-| ADAPT-01 | Phase 45 | Pending |
+| ADAPT-01 | Phase 45 | Complete |
 | PHX-01 | Phase 47 | Pending |
 | PHX-02 | Phase 47 | Pending |
 | OBS-01 | Phase 46 | Pending |
