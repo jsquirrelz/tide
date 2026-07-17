@@ -860,6 +860,87 @@ func TestBuildReporterJob_NoOTLPEndpointNoEnv(t *testing.T) {
 	}
 }
 
+// TestBuildReporterJob_OTLPHeadersEnv asserts that setting opts.OTLPHeaders
+// alongside a non-empty opts.OTLPEndpoint stamps a third Env entry,
+// OTEL_EXPORTER_OTLP_HEADERS, carrying the forwarded manager value — the
+// reporter's own otlptracegrpc TracerProvider honors this env automatically
+// (Phase 47 PHX-02/D-08).
+func TestBuildReporterJob_OTLPHeadersEnv(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-o",
+			UID:       "project-uid-17",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-15",
+			Namespace: "ns-o",
+			UID:       "parent-uid-17",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{
+		ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		OTLPEndpoint:  "collector:4317",
+		OTLPHeaders:   "Authorization=Bearer test-token",
+	}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-17", "Milestone", opts, scheme)
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	want := map[string]string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT":    "collector:4317",
+		"OTEL_BSP_MAX_EXPORT_BATCH_SIZE": "6",
+		"OTEL_EXPORTER_OTLP_HEADERS":     "Authorization=Bearer test-token",
+	}
+	if len(env) != len(want) {
+		t.Fatalf("expected exactly %d Env entries, got %d: %v", len(want), len(env), env)
+	}
+	for _, e := range env {
+		wantVal, ok := want[e.Name]
+		if !ok {
+			t.Errorf("unexpected Env entry %q", e.Name)
+			continue
+		}
+		if e.Value != wantVal {
+			t.Errorf("expected Env %s=%q, got %q", e.Name, wantVal, e.Value)
+		}
+	}
+}
+
+// TestBuildReporterJob_OTLPHeadersWithoutEndpointNoEnv asserts that
+// OTLPHeaders alone (without OTLPEndpoint) never stamps any Env entry —
+// headers without an endpoint are meaningless, and the outer OTLPEndpoint
+// guard is preserved (Phase 47 PATTERNS open-question resolution).
+func TestBuildReporterJob_OTLPHeadersWithoutEndpointNoEnv(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "proj",
+			Namespace: "ns-p",
+			UID:       "project-uid-18",
+		},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ms-16",
+			Namespace: "ns-p",
+			UID:       "parent-uid-18",
+		},
+	}
+	scheme := newTestScheme()
+	opts := controller.ReporterOptions{
+		ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+		OTLPHeaders:   "Authorization=Bearer test-token",
+	}
+	job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-18", "Milestone", opts, scheme)
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	if len(env) != 0 {
+		t.Errorf("expected zero Env entries when OTLPEndpoint is empty even with OTLPHeaders set, got %v", env)
+	}
+}
+
 // TestBuildReporterJob_TraceOnly asserts the trace-only Job shape: a distinct
 // name keyed on the completed dispatch Job's UID (never colliding with the
 // materialization reporter's "tide-reporter-<parentUID>" name), minimal Args
