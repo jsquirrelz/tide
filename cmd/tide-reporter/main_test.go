@@ -630,6 +630,56 @@ func TestRunTraceOnly_PartialEventsStillEmitsSpans(t *testing.T) {
 	}
 }
 
+// TestRunCombined_RetryDoesNotReemitSpans — the combined shape's
+// BackoffLimit=2 retry loop: a failed planner Job (events.jsonl present,
+// out.json missing → exit 2 AFTER synth) re-runs the reporter pod. The
+// .spans-emitted sentinel written after the first successful EmitSpans must
+// make the second attempt skip synthesis — otherwise every retry re-emits
+// the full conversation and multi-counts llm.token_count.* costs in Phoenix.
+func TestRunCombined_RetryDoesNotReemitSpans(t *testing.T) {
+	exp := tracetest.NewInMemoryExporter()
+	installStubTracerProvider(t, exp)
+
+	workspace := t.TempDir()
+	taskUID := "task-combined-retry"
+	writeTraceOnlyFixture(t, workspace, taskUID) // events.jsonl present; out.json deliberately absent
+
+	c := buildFakeClient(t, &tidev1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "m-retry", Namespace: "default"},
+	})
+	cfg := reporterConfig{
+		Workspace: workspace, TaskUID: taskUID, ParentName: "m-retry",
+		ParentNamespace: "default", ParentKind: "Milestone",
+	}
+
+	var stderr1 bytes.Buffer
+	code := runWithClient(context.Background(), cfg, nil, &stderr1, c)
+	if code != exitInvariant {
+		t.Fatalf("first attempt exit=%d, want exitInvariant (missing out.json); stderr=%q", code, stderr1.String())
+	}
+	firstAttemptSpans := len(exp.GetSpans())
+	if firstAttemptSpans != 2 {
+		t.Fatalf("first attempt emitted %d spans, want 2", firstAttemptSpans)
+	}
+	sentinel := filepath.Join(workspace, "envelopes", taskUID, ".spans-emitted")
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("sentinel %q missing after successful emission: %v", sentinel, err)
+	}
+
+	// Simulated Job retry: same PVC state, fresh pod.
+	var stderr2 bytes.Buffer
+	code = runWithClient(context.Background(), cfg, nil, &stderr2, c)
+	if code != exitInvariant {
+		t.Fatalf("retry exit=%d, want exitInvariant; stderr=%q", code, stderr2.String())
+	}
+	if got := len(exp.GetSpans()); got != firstAttemptSpans {
+		t.Errorf("retry re-emitted spans: total = %d, want still %d", got, firstAttemptSpans)
+	}
+	if !strings.Contains(stderr2.String(), "idempotent skip") {
+		t.Errorf("retry stderr = %q, want an idempotent-skip log line", stderr2.String())
+	}
+}
+
 // Test 12: TestRunCombined_SynthFailureDoesNotChangeExit — D-10: a combined
 // (materialization) run with out.json present but events.jsonl ABSENT
 // synthesizes nothing, logs the failure, and still exits exactly like

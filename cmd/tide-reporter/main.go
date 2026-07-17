@@ -302,11 +302,27 @@ func runWithClient(
 // stderr and otherwise swallowed. Called from both the trace-only branch and
 // the combined-mode path (before the K8s client is built), so a failed
 // planner Job with no/partial out.json still gets its conversation spans
-// (D-05). Reporter-synthesized span IDs mint fresh per run, so a Job retry
-// re-running this step emits a duplicate span rather than failing the retry.
+// (D-05).
+//
+// Reporter-synthesized span IDs mint fresh per run, so a retried pod
+// (BackoffLimit=2 on the combined shape — e.g. a failed planner's missing
+// out.json exits 2 AFTER synth) would re-emit the whole conversation as
+// duplicate spans and multi-count llm.token_count.* costs in Phoenix. A
+// sentinel file next to the artifact (envelopes/<taskUID>/.spans-emitted,
+// written after a successful EmitSpans on the PVC the reporter already
+// mounts read-write) makes the step idempotent across attempts. Best-effort
+// per D-10: a failed sentinel read/write only logs — it never blocks
+// emission or the run.
 func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) {
 	eventsPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "events.jsonl")
 	inJSONPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, "in.json")
+	sentinelPath := filepath.Join(cfg.Workspace, "envelopes", cfg.TaskUID, ".spans-emitted")
+
+	if _, err := os.Stat(sentinelPath); err == nil {
+		fmt.Fprintf(stderr,
+			"tide-reporter: spans already emitted for task %s (sentinel present) — idempotent skip\n", cfg.TaskUID)
+		return
+	}
 
 	parentCtx := otelai.ExtractRemoteParent(ctx, cfg.TraceParent)
 	if cfg.TraceParent == "" {
@@ -332,6 +348,10 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
 	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath); err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
+		return
+	}
+	if werr := os.WriteFile(sentinelPath, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644); werr != nil {
+		fmt.Fprintf(stderr, "tide-reporter: write spans-emitted sentinel: %v\n", werr)
 	}
 }
 
