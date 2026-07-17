@@ -274,6 +274,19 @@ func synthesizePlannerSpan(
 // filter DSL and ProjectSession grouping require byte-identical values
 // across sibling spans (D-05).
 //
+// The byte-identical guarantee is SAME-RECONCILE scoped (46-REVIEW WR-03):
+// the AGENT-span call and the reporter-spawn call read the same in-memory
+// Project, and json.Marshal's sorted-key output makes equal inputs
+// byte-equal. A reporter spawn retried on a LATER reconcile (transient
+// Create failure → requeue, or a crash between emission and spawn)
+// re-fetches the Project, so the mutable inputs — failure_halt, an edited
+// Spec.FailureProfile or gate policy — can drift from what the sibling
+// AGENT span carried. Accepted as bounded drift, same window as the
+// sampled-bit limitation documented in docs/observability.md: session.id
+// (the immutable Project UID) is grouping-critical and immune;
+// metadata/tags are filter conveniences whose drift is confined to a
+// failed-spawn retry.
+//
 // Metadata keys (D-08 — plain names; the tide.* namespace governs only the
 // top-level attribute key, not this JSON payload's internal keys):
 //
