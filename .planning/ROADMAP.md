@@ -323,5 +323,5 @@ Plans:
 | 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
-| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete   | 2026-07-17 |
+| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 0/TBD | Not started | - |

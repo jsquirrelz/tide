@@ -38,10 +38,10 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### Observability Add-Ons (OBS)
 
-- [ ] **OBS-01**: The chart's trace-sampler default changes 0.1 → 1.0 (TIDE's dispatch volume is dozens-to-hundreds of spans per run, not web-service QPS; at 10% a demo run has a 90% chance any given span never reaches Phoenix), with the opt-down documented for high-volume installs
+- [x] **OBS-01**: The chart's trace-sampler default changes 0.1 → 1.0 (TIDE's dispatch volume is dozens-to-hundreds of spans per run, not web-service QPS; at 10% a demo run has a 90% chance any given span never reaches Phoenix), with the opt-down documented for high-volume installs
 - [x] **OBS-02**: Every span carries `session.id` = Project UID, so Phoenix's session view computes independent token/cost rollups — a free cross-check against TIDE's budget tally (the accounting-bug class hit twice before)
 - [x] **OBS-03**: Spans carry `metadata`/`tag.tags` enrichment (level kind + name, wave index, gate profile, failure-halt state) so operators can filter Phoenix's DSL by "every span from Phase N" or "every conservative-profile run" without leaving Phoenix
-- [ ] **OBS-04**: The TIDE dashboard deep-links each Planning/Execution DAG node to its Phoenix trace (`{phoenixBaseURL}/…/{trace_id}`), reading IDs from `.status.trace` (PROP-02) with a `phoenix.baseURL` chart value; absent config renders no link (no dead buttons)
+- [x] **OBS-04**: The TIDE dashboard deep-links each Planning/Execution DAG node to its Phoenix trace (`{phoenixBaseURL}/…/{trace_id}`), reading IDs from `.status.trace` (PROP-02) with a `phoenix.baseURL` chart value; absent config renders no link (no dead buttons)
 
 ### End-to-End Proof (PROOF)
 
@@ -84,8 +84,8 @@ Deferred to later milestones:
 | ADAPT-01 | Phase 45 | Complete |
 | PHX-01 | Phase 47 | Pending |
 | PHX-02 | Phase 47 | Pending |
-| OBS-01 | Phase 46 | Pending |
+| OBS-01 | Phase 46 | Complete |
 | OBS-02 | Phase 46 | Complete |
 | OBS-03 | Phase 46 | Complete |
-| OBS-04 | Phase 46 | Pending |
+| OBS-04 | Phase 46 | Complete |
 | PROOF-01 | Phase 47 | Pending |
