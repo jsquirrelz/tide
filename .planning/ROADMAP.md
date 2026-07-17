@@ -167,7 +167,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
   2. Each of those spans also carries `llm.token_count.total` alongside the existing prompt/completion/cache-split token attributes (ATTR-02).
   3. Every attribute key emitted by `pkg/otelai` resolves from the official `openinference-semantic-conventions` Go module rather than a hand-rolled string constant, so the same keys `openinference-instrumentation-langchain` will emit natively already match (ATTR-03).
 
-**Plans**: 5 plans (3 waves)
+**Plans**: 10 plans (5 executed + 5 gap-closure) (3 waves)
 
 Plans:
 **Wave 1**
@@ -322,6 +322,20 @@ Plans:
 **Wave 4** *(47-05 blocked on 47-04)*
 
 - [x] 47-05-PLAN.md — Evidence capture (tree / redacted-span / query / deep-link screenshots) + 47-EVIDENCE.md + human acceptance gate
+
+**Wave 5 — gap closure** *(47-06/47-08/47-09 parallel)*
+
+- [ ] 47-06-PLAN.md — CR-02 root-fix: reporter OTLP-headers via per-namespace tide-otlp-headers secretKeyRef + WR-03 doc correction
+- [ ] 47-08-PLAN.md — Boundary-push stale-lease root-fix: remote-tip re-read + ancestry-guarded lease refresh in tide-push
+- [ ] 47-09-PLAN.md — Medium-sample kind RWO PVC override step (apply-sequence step 3b)
+
+**Wave 6 — gap closure** *(47-07 after 47-06; shared controller files)*
+
+- [ ] 47-07-PLAN.md — CR-01: durable reporter-spawned status markers gating all five spawn sites
+
+**Wave 7 — gap closure** *(47-10 after 47-07)*
+
+- [ ] 47-10-PLAN.md — Envtest proof: TTL-GC'd reporter Job never re-created once the marker is set
 
 ## Progress
 
