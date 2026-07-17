@@ -162,9 +162,21 @@ exporter endpoint → no-op `TracerProvider` (zero overhead, default).
 | Env var                          | Helm value                       | Default                          |
 | -------------------------------- | -------------------------------- | -------------------------------- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`    | `otel.exporter.endpoint`         | `""` (→ no-op)                   |
+| `OTEL_EXPORTER_OTLP_HEADERS`     | `otel.exporter.headersSecretRef` | `""` (→ no headers sent)         |
 | `OTEL_TRACES_SAMPLER`            | `otel.tracesSampler`             | `parentbased_traceidratio`       |
 | `OTEL_TRACES_SAMPLER_ARG`        | `otel.tracesSamplerArg`          | `1.0`                            |
 | `OTEL_SERVICE_NAME`              | `otel.serviceName`               | `tide-controller-manager`        |
+
+`otel.exporter.headersSecretRef` is a `{name, key}` pair (Secret-sourced only —
+never a literal value in the chart, mirroring `providerSecretRef`/`GIT_PAT`).
+Setting `headersSecretRef.name` wires a `valueFrom: secretKeyRef` env entry
+onto both the manager and dashboard Deployment containers; the manager also
+forwards the same resolved header value onto every reporter Job it spawns
+(`ReporterOptions.OTLPHeaders`), so the reporter's own `TracerProvider`
+authenticates to the same auth-enabled collector — the value is a literal on
+the Job spec in the project namespace, accepted because Job-read RBAC there
+already implies access to the project's `tide-secrets`, a strictly more
+sensitive credential than an ingest-scoped Phoenix token.
 
 Enable a real exporter by pointing the chart at an OTLP collector:
 
@@ -176,6 +188,73 @@ helm upgrade tide ./charts/tide -n tide-system \
 The same env vars wire into the dashboard Deployment (with
 `OTEL_SERVICE_NAME=tide-dashboard` hardcoded so traces from the two
 processes are distinguishable in collectors).
+
+### Self-hosted Phoenix
+
+[Arize Phoenix](https://phoenix.arize.com/) is the concrete instance of the
+bare-`host:port` pattern above, not a new one — `otel.exporter.endpoint`
+targets Phoenix's OTLP gRPC port (`4317`) exactly like any other collector.
+It's a separate `helm install` of Phoenix's own official OCI chart
+(`oci://registry-1.docker.io/arizephoenix/phoenix-helm`) into its own
+namespace — TIDE never bundles it as a subchart (the same documented-install
+posture as the Prometheus ServiceMonitor: TIDE ships the wiring value, never
+the external system). [docs/INSTALL.md § Enable tracing
+(Phoenix)](INSTALL.md#enable-tracing-phoenix) is the copy-pasteable
+quickstart; this section is the reference depth behind it.
+
+**Storage — pick exactly one of the chart's own two strategies, never a
+third:**
+
+- **Quickstart (SQLite-on-PVC)** — `persistence.enabled=true`,
+  `postgresql.enabled=false`. The chart's own `server.maxSpansQueueSize`
+  comment gives a concrete sizing heuristic: ~50KiB/span, so 20,000 queued
+  spans ≈ 1GiB. A `persistence.size=2Gi` PVC with
+  `database.defaultRetentionPolicyDays=7` comfortably holds several
+  fixture-scale runs (dozens-to-low-hundreds of spans per five-level
+  dispatch tree) on the ~8 GiB dev VM — the chart's own defaults
+  (`persistence.size=20Gi`, `defaultRetentionPolicyDays=0` i.e. **never
+  expire**) are both being deliberately overridden down: infinite retention
+  of full (redacted, but still substantial) message-array content is not an
+  acceptable default. Fold Phoenix's own pod footprint (`resources.requests
+  1Gi`/`limits 2Gi`) into the existing one-heavy-workload-at-a-time VM
+  discipline — don't run Phoenix alongside another heavy `make test-int`
+  pass on the same box.
+- **Durable (bundled Postgres)** — `postgresql.enabled=true` is the
+  **chart's own default** (20Gi PVC via the bundled `groundhog2k/postgres`
+  subchart) — the chart's tested, production-shaped happy path. **Honesty
+  note:** this milestone's live end-to-end proof exercised the
+  SQLite-on-PVC path only; the Postgres path is documented, not
+  live-proven, on the constrained dev VM. Before using it, override
+  `PHOENIX_POSTGRES_PASSWORD` — the chart's own default is the literal
+  plaintext string `"postgres"` (set via `auth.secret[]`, alongside the
+  `admin` initial-admin-password fallback below) — both are values to
+  override, never accept as-shipped. The two storage strategies are
+  mutually exclusive and the chart enforces it itself: a
+  `phoenix.validatePersistence` `fail` guard refuses `helm install` /
+  `helm template` outright if both `persistence.enabled` and
+  `postgresql.enabled` are true (or any other conflicting combination) —
+  no TIDE-side hand-holding is needed to avoid the mistake.
+
+**Auth posture** — the chart defaults `auth.enableAuth=true`, the *opposite*
+of the raw Phoenix container image's default (which ships auth off); the
+recipe keeps it on. Credentials are entirely Secret-sourced by the chart
+itself (`auth.createSecret=true` autogenerates a `phoenix-secret` Secret with
+`randAlphaNum 32` values, except `PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD`,
+whose fallback is the weak literal `admin` — change it at first login). The
+flow from there: log in with that password → **Settings → API Keys** → mint
+a System API key → `Authorization: Bearer <key>` header, exactly the flow
+[docs/INSTALL.md](INSTALL.md#enable-tracing-phoenix) walks step-by-step. A
+dev-only `--set auth.enableAuth=false` override exists and may be reached
+for on a throwaway cluster, but only under the same exposure framing as
+everything else in this section: **port-forward-only access, never
+NodePort/LoadBalancer.** The chart's own `service.type` default is
+`NodePort` and `ingress.enabled` defaults to `true` with no host set —
+both more exposed than the recipe needs; override to
+`service.type=ClusterIP` and `ingress.enabled=false` and reach Phoenix the
+same way every other TIDE surface is reached, `kubectl port-forward`. A
+LAN-reachable, unauthenticated Phoenix holds full
+(redacted-but-substantial) prompt/completion history — nothing else in
+TIDE's threat model covers that exposure surface.
 
 ### Opting down from 100% sampling
 
@@ -236,8 +315,11 @@ LLM payload bytes as a top-level attribute value fails CI. See
 ### Dashboard deep link to Phoenix (`phoenix.baseURL`)
 
 `phoenix.baseURL` is the base URL of a self-hosted Arize Phoenix instance —
-install instructions land in Phase 47; this section covers only the config
-value and what it wires up. Set it and the dashboard's `GET
+see [§ Self-hosted Phoenix](#self-hosted-phoenix) above for the full install
+recipe and [docs/INSTALL.md § Enable tracing
+(Phoenix)](INSTALL.md#enable-tracing-phoenix) for the copy-pasteable
+quickstart; this section covers only the config value and what it wires up.
+Set it and the dashboard's `GET
 /api/v1/config` reports the value as `phoenixBaseURL`, which the SPA uses to
 render a deep-link affordance from a span/trace in the TIDE dashboard
 straight to its Phoenix view:
@@ -255,9 +337,9 @@ The deep link targets Phoenix's shareable-URL redirect routes,
 `/redirects/traces/{trace_id}` and `/redirects/spans/{span_id}`, which
 require **Phoenix >= 14.2.0**. These routes are project-agnostic — TIDE
 never needs to resolve or set a Phoenix project name for the deep link to
-work. (Phase 47's chart-pin re-check re-verifies the deployed chart's app
-version meets this floor before the install recipe ships as
-documented-working.)
+work. The § Self-hosted Phoenix recipe's pinned chart (`10.0.1`) ships
+`appVersion: 18.1.0` — freshly re-verified live at doc-authoring time —
+clearing this floor with room to spare.
 
 One related footnote: TIDE sets no `openinference.project.name` resource
 attribute on any span, so all TIDE traces land in Phoenix's default
