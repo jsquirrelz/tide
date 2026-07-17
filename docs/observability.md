@@ -170,13 +170,24 @@ exporter endpoint → no-op `TracerProvider` (zero overhead, default).
 `otel.exporter.headersSecretRef` is a `{name, key}` pair (Secret-sourced only —
 never a literal value in the chart, mirroring `providerSecretRef`/`GIT_PAT`).
 Setting `headersSecretRef.name` wires a `valueFrom: secretKeyRef` env entry
-onto both the manager and dashboard Deployment containers; the manager also
-forwards the same resolved header value onto every reporter Job it spawns
-(`ReporterOptions.OTLPHeaders`), so the reporter's own `TracerProvider`
-authenticates to the same auth-enabled collector — the value is a literal on
-the Job spec in the project namespace, accepted because Job-read RBAC there
-already implies access to the project's `tide-secrets`, a strictly more
-sensitive credential than an ingest-scoped Phoenix token.
+onto both the manager and dashboard Deployment containers, both in
+`tide-system`. Reporter Jobs, however, run in each **Project's namespace** —
+so they reference the headers via their own `valueFrom: secretKeyRef` against
+a Secret named `tide-otlp-headers` (key `OTEL_EXPORTER_OTLP_HEADERS`)
+mirrored into that namespace, the same fixed-name cross-namespace mirror
+convention as `tide-signing-key`. The manager itself never forwards the
+decoded value — it reads `OTEL_EXPORTER_OTLP_HEADERS` only to learn whether
+headers are configured, and threads the Secret NAME through
+`ReporterOptions.OTLPHeadersSecret`; the reporter Job resolves the value
+itself at runtime. This means the Job spec exposes only the Secret NAME —
+reading the token requires `get` on Secrets in that namespace, so Job-read
+RBAC alone never sees the credential.
+The `secretKeyRef` is Optional: if the per-namespace mirror is missing, the
+reporter runs without auth headers and an auth-ON Phoenix silently rejects
+its spans (dark traces, visible only in the reporter pod's own logs), while
+child-CRD materialization proceeds unaffected. See [docs/INSTALL.md § Enable
+tracing (Phoenix)](INSTALL.md#enable-tracing-phoenix) for the exact mirror
+command.
 
 Enable a real exporter by pointing the chart at an OTLP collector:
 
