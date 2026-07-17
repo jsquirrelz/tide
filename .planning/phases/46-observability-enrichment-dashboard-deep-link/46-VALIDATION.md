@@ -1,8 +1,8 @@
 ---
 phase: 46
 slug: observability-enrichment-dashboard-deep-link
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-07-17
 ---
@@ -47,9 +47,9 @@ created: 2026-07-17
 ## Wave 0 Requirements
 
 - [ ] `pkg/otelai/attrs_test.go` — extend with `TestSessionID`, `TestMetadata` (JSON-string encoding + `attribute.STRING` type), `TestTags` (`attribute.STRINGSLICE` type — Pitfall 4 regression guard)
-- [ ] `internal/controller/span_emission_test.go` — extend: `level=="task"` omits `TokenCount`; the four planner levels retain it (Pitfall 2 regression guard)
+- [ ] `internal/controller/span_emission_test.go` — extend: NO level's AGENT span carries `TokenCount` — all-five-level drop per 46-04-PLAN.md `<planner_correction>` (supersedes RESEARCH Pitfall 2's Task-only scope)
 - [ ] `internal/reporter/tracesynth_test.go` — extend `EmitSpans` tests: session/metadata/tags CLI-sourced values land on emitted LLM spans
-- [ ] `dashboard/web/src/lib/__tests__/phoenixLink.test.ts` — new file: `phoenixTraceURL`/`phoenixSpanURL` shape + trailing-slash normalization
+- [ ] `dashboard/web/src/lib/phoenixLink.test.ts` — new co-located file: `phoenixTraceURL`/`phoenixSpanURL` shape + trailing-slash normalization
 - [ ] `dashboard/web/src/components/__tests__/node-panel-integration.test.tsx` — extend: link render / hide-on-empty-config cases
 - [ ] `TaskDetailDrawer` link coverage (new/extended test) — required per RESEARCH.md Pitfall 1 correction (Task nodes render in TaskDetailDrawer, not NodeDetailPanel)
 
@@ -65,11 +65,11 @@ created: 2026-07-17
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 120s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 120s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-17

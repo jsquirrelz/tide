@@ -438,14 +438,15 @@ traceParent := traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled
 
 **If this table is empty:** N/A — two assumptions logged above, both low-risk with a stated verification path.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does Phoenix's session-level `tokenUsage`/`costSummary` GraphQL rollup (`ProjectSession`) use the exact same `SpanCost`-summed-by-`trace_rowid`-then-by-`session`-join path as the project-level `SpanCostSummaryByProjectDataLoader` shown in this research, or a separate session-specific aggregation query?**
+1. **RESOLVED: Does Phoenix's session-level `tokenUsage`/`costSummary` GraphQL rollup (`ProjectSession`) use the exact same `SpanCost`-summed-by-`trace_rowid`-then-by-`session`-join path as the project-level `SpanCostSummaryByProjectDataLoader` shown in this research, or a separate session-specific aggregation query?**
    - What we know: the project-level aggregation SQL (verified, shown in Summary/Architecture) sums `SpanCost.total_tokens` grouped by `trace.project_rowid`, with an optional `session_filter_condition` narrowing by `project_session_rowid` — this strongly implies the session view is the SAME per-span-cost-row aggregation, just grouped/filtered by session instead of (or in addition to) project.
    - What's unclear: the exact GraphQL resolver backing `ProjectSession.costSummary`/`tokenUsage` wasn't independently fetched — only its field shape (`sessions.md`).
    - Recommendation: treat as HIGH confidence given the shared `SpanCost` table is the only cost-storage mechanism Phoenix has (verified via `models.py`); the fix (don't create a duplicate `SpanCost` row for the Task AGENT span) is correct regardless of which specific query reads that table.
+   - Superseded at planning: the Task-only drop scope was widened to ALL FIVE levels per 46-04-PLAN.md `<planner_correction>` — the premise "only Task has a sibling LLM-span source" was disproven by `cmd/tide-reporter/main.go:229`'s combined-path `synthesizeSpans` call plus Phase 44 CONTEXT D-02's all-level coverage.
 
-2. **Is Phoenix's default project literally named `"default"`, and does that matter for anything in this phase?**
+2. **RESOLVED: Is Phoenix's default project literally named `"default"`, and does that matter for anything in this phase?**
    - What we know: "If a project is not specified, all traces are sent to a default project" (Phoenix docs, verified) and TIDE sets no `openinference.project.name` resource attribute today.
    - What's unclear: exact literal string Phoenix uses for the default project name.
    - Recommendation: irrelevant to this phase's implementation — the `/redirects/traces/{trace_id}` route needs no project name at all. Worth a one-line footnote in `docs/observability.md` for an operator who goes looking for their traces by browsing Phoenix's project list rather than following TIDE's deep link.
@@ -470,7 +471,7 @@ traceParent := traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled
 | OBS-01 | `values.yaml` default is `"1.0"`; docs/comment surfaces updated | unit / static grep | `helm template charts/tide \| grep -A1 OTEL_TRACES_SAMPLER_ARG` | ✅ chart renders today; assertion is new |
 | OBS-02 | `SessionID` attribute present on every span; Task-level TokenCount dropped | unit (Go) | `go test ./pkg/otelai/... -run TestSessionID` / `go test ./internal/controller/... -run TestSynthesizePlannerSpan_TaskDropsTokenCount` | ❌ Wave 0 — new test names, existing `span_emission_test.go`/`attrs_test.go` files to extend |
 | OBS-03 | `Metadata`/`Tags` helpers produce correctly-typed attributes (JSON string vs. string-slice) | unit (Go) | `go test ./pkg/otelai/... -run TestMetadata\|TestTags` | ❌ Wave 0 — extend `pkg/otelai/attrs_test.go` |
-| OBS-04 | Dashboard renders/hides the Phoenix link based on config; URL assembly correct | unit (frontend) | `npx vitest run src/lib/__tests__/phoenixLink.test.ts` + extend `node-panel-integration.test.tsx` | ❌ Wave 0 — new `phoenixLink.ts`/test; existing node-panel-integration test file to extend |
+| OBS-04 | Dashboard renders/hides the Phoenix link based on config; URL assembly correct | unit (frontend) | `npx vitest run src/lib/phoenixLink.test.ts` + extend `node-panel-integration.test.tsx` | ❌ Wave 0 — new `phoenixLink.ts`/test; existing node-panel-integration test file to extend |
 
 ### Sampling Rate
 - **Per task commit:** the scoped `go test ./pkg/otelai/... ./internal/controller/...` / `npx vitest run <file>` for the touched package.
@@ -481,7 +482,7 @@ traceParent := traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled
 - [ ] `pkg/otelai/attrs_test.go` — extend with `TestSessionID`, `TestMetadata` (asserts JSON-string encoding + `attribute.STRING` type), `TestTags` (asserts `attribute.STRINGSLICE` type — Pitfall 4's regression guard)
 - [ ] `internal/controller/span_emission_test.go` — extend with a case asserting `level=="task"` omits `TokenCount` while `level=="milestone"/"phase"/"plan"/"project"` retain it (Pitfall 2's regression guard)
 - [ ] `internal/reporter/tracesynth_test.go` — extend `EmitSpans` tests to assert the new session/metadata/tags CLI-sourced values land on emitted LLM spans
-- [ ] `dashboard/web/src/lib/__tests__/phoenixLink.test.ts` — new file, asserts `phoenixTraceURL`/`phoenixSpanURL` shape + trailing-slash normalization
+- [ ] `dashboard/web/src/lib/phoenixLink.test.ts` — new file, asserts `phoenixTraceURL`/`phoenixSpanURL` shape + trailing-slash normalization
 - [ ] `dashboard/web/src/components/__tests__/node-panel-integration.test.tsx` — extend for the NodeDetailPanel link render/hide-on-empty-config cases
 - [ ] A new/extended `TaskDetailDrawer.test.tsx` (or equivalent) covering the same link render/hide cases for Task nodes — **required per Pitfall 1's correction; absent from CONTEXT.md's file list**
 
