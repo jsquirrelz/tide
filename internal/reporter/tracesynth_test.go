@@ -379,6 +379,94 @@ func TestEmitSpans_RedactsBeforeTruncate(t *testing.T) {
 	}
 }
 
+// TestEmitSpans_SignatureRedactedTruncatedAndCounted — MSG-02/MSG-03: a
+// reasoning block's Signature passes the same redact-then-truncate pipeline
+// as every other content string and counts toward the whole-span budget —
+// it is stream-derived (subagent-writable) like Content and must not be the
+// one unbounded, unredacted string in the pipeline.
+func TestEmitSpans_SignatureRedactedTruncatedAndCounted(t *testing.T) {
+	t.Run("redacted", func(t *testing.T) {
+		exp := setupSpanExporter(t)
+		tracer := otel.Tracer("test")
+
+		calls := []CallSpan{{
+			Model: "claude-test",
+			OutputMessages: []otelai.Message{{
+				Role:     "assistant",
+				Contents: []otelai.MessageContent{{Type: "reasoning", Text: "thinking", Signature: "sig-" + testSecret}},
+			}},
+		}}
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+			t.Fatalf("EmitSpans: %v", err)
+		}
+		for _, span := range exp.GetSpans() {
+			for _, attr := range span.Attributes {
+				if v := attr.Value.Emit(); strings.Contains(v, "sk-ant-api03-") {
+					t.Errorf("attribute %q leaked secret via Signature: %q", attr.Key, v)
+				}
+			}
+		}
+	})
+
+	t.Run("truncated over per-message floor", func(t *testing.T) {
+		exp := setupSpanExporter(t)
+		tracer := otel.Tracer("test")
+
+		calls := []CallSpan{{
+			Model: "claude-test",
+			OutputMessages: []otelai.Message{{
+				Role:     "assistant",
+				Contents: []otelai.MessageContent{{Type: "reasoning", Text: "t", Signature: strings.Repeat("s", 40000)}},
+			}},
+		}}
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+			t.Fatalf("EmitSpans: %v", err)
+		}
+		spans := exp.GetSpans()
+		if len(spans) != 1 {
+			t.Fatalf("got %d spans, want 1", len(spans))
+		}
+		val, ok := attrValue(spans[0].Attributes, "llm.output_messages.0.message.contents.0.message_content.signature")
+		if !ok {
+			t.Fatal("span missing the signature attribute")
+		}
+		if got := val.AsString(); len(got) >= 40000 || !strings.Contains(got, "bytes truncated by TIDE") {
+			t.Errorf("signature not head+tail truncated: len=%d", len(got))
+		}
+	})
+
+	t.Run("counts toward whole-span budget", func(t *testing.T) {
+		exp := setupSpanExporter(t)
+		tracer := otel.Tracer("test")
+
+		// 20 reasoning blocks × 30 KB signatures = 600,000 B of signature
+		// bytes alone (each under the 32 KiB per-message floor) — over the
+		// 512 KiB joint budget only if signatures are counted.
+		contents := make([]otelai.MessageContent, 0, 20)
+		for range 20 {
+			contents = append(contents, otelai.MessageContent{Type: "reasoning", Text: "t", Signature: strings.Repeat("s", 30000)})
+		}
+		calls := []CallSpan{{
+			Model:          "claude-test",
+			OutputMessages: []otelai.Message{{Role: "assistant", Contents: contents}},
+		}}
+		if err := EmitSpans(context.Background(), tracer, calls, "envelopes/task-uid/events.jsonl"); err != nil {
+			t.Fatalf("EmitSpans: %v", err)
+		}
+		spans := exp.GetSpans()
+		if len(spans) != 1 {
+			t.Fatalf("got %d spans, want 1", len(spans))
+		}
+		if val, ok := attrValue(spans[0].Attributes, "llm.output_messages.0.message.contents.0.message_content.signature"); ok && val.AsString() != "" {
+			t.Errorf("signature attribute survived a budget degrade: %d bytes", len(val.AsString()))
+		}
+		degraded, ok := attrValue(spans[0].Attributes, "tide.trace.parse_degraded")
+		if !ok || !degraded.AsBool() {
+			t.Errorf("span missing tide.trace.parse_degraded=true (signature bytes must trip the budget)")
+		}
+	})
+}
+
 // TestEmitSpans_TruncatesOversizedMessage — MSG-03/D-08: a >32 KiB single
 // message emits head+marker+tail shaped content, the marker cites the
 // elided byte count, and the span carries tide.artifact_path.

@@ -465,10 +465,10 @@ func redactTruncate(s string) string {
 }
 
 // boundMessages applies the D-09 redact-then-truncate pipeline to every
-// message's Content, ToolCall.ArgumentsJSON, and reasoning Contents[].Text,
-// returning the bounded copies plus the attribute-value bytes they
-// contribute to the span (message content, tool-call ID/name/arguments, and
-// reasoning text all counted).
+// message's Content, ToolCall.ArgumentsJSON, and reasoning Contents[].Text
+// and .Signature, returning the bounded copies plus the attribute-value
+// bytes they contribute to the span (message content, tool-call
+// ID/name/arguments, reasoning text, and signature all counted).
 func boundMessages(msgs []otelai.Message) ([]otelai.Message, int) {
 	bounded := make([]otelai.Message, len(msgs))
 	total := 0
@@ -486,12 +486,15 @@ func boundMessages(msgs []otelai.Message) ([]otelai.Message, int) {
 			bm.ToolCalls = append(bm.ToolCalls, btc)
 		}
 		for _, c := range m.Contents {
+			// Signature rides the same subagent-writable stream as every
+			// other content string — it passes the identical MSG-02
+			// redact-then-truncate pipeline and counts toward the span budget.
 			bc := otelai.MessageContent{
 				Type:      c.Type,
 				Text:      redactTruncate(c.Text),
-				Signature: c.Signature,
+				Signature: redactTruncate(c.Signature),
 			}
-			total += len(bc.Text)
+			total += len(bc.Text) + len(bc.Signature)
 			bm.Contents = append(bm.Contents, bc)
 		}
 		bounded[i] = bm
