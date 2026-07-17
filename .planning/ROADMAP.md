@@ -325,7 +325,7 @@ Plans:
 
 **Wave 5 — gap closure** *(47-06/47-08/47-09 parallel)*
 
-- [ ] 47-06-PLAN.md — CR-02 root-fix: reporter OTLP-headers via per-namespace tide-otlp-headers secretKeyRef + WR-03 doc correction
+- [x] 47-06-PLAN.md — CR-02 root-fix: reporter OTLP-headers via per-namespace tide-otlp-headers secretKeyRef + WR-03 doc correction
 - [ ] 47-08-PLAN.md — Boundary-push stale-lease root-fix: remote-tip re-read + ancestry-guarded lease refresh in tide-push
 - [ ] 47-09-PLAN.md — Medium-sample kind RWO PVC override step (apply-sequence step 3b)
 
@@ -356,4 +356,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 5/5 | Complete   | 2026-07-17 |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 6/10 | In Progress|  |
