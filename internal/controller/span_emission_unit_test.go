@@ -766,16 +766,61 @@ func TestTraceparentForLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("trace.SpanIDFromHex: %v", err)
 	}
-	want := "00-" + traceID.String() + "-" + spanID.String() + "-01"
 
-	if got := traceparentForLevel(project, "0102030405060708"); got != want {
-		t.Errorf("traceparentForLevel(project, valid hex) = %q, want %q", got, want)
+	// D-02/Phase 46: the trailing flags byte tracks the sampled param exactly
+	// — "01" when true, "00" when false.
+	wantSampled := "00-" + traceID.String() + "-" + spanID.String() + "-01"
+	if got := traceparentForLevel(project, "0102030405060708", true); got != wantSampled {
+		t.Errorf("traceparentForLevel(project, valid hex, sampled=true) = %q, want %q", got, wantSampled)
 	}
-	if got := traceparentForLevel(nil, "0102030405060708"); got != "" {
+	wantUnsampled := "00-" + traceID.String() + "-" + spanID.String() + "-00"
+	if got := traceparentForLevel(project, "0102030405060708", false); got != wantUnsampled {
+		t.Errorf("traceparentForLevel(project, valid hex, sampled=false) = %q, want %q", got, wantUnsampled)
+	}
+
+	if got := traceparentForLevel(nil, "0102030405060708", true); got != "" {
 		t.Errorf("traceparentForLevel(nil project, valid hex) = %q, want %q", got, "")
 	}
-	if got := traceparentForLevel(project, ""); got != "" {
+	if got := traceparentForLevel(project, "", true); got != "" {
 		t.Errorf("traceparentForLevel(project, empty hex) = %q, want %q", got, "")
+	}
+}
+
+// TestTraceparentForLevelCarriesRealSampledBit — the Task-flow proof (D-02):
+// synthesizePlannerSpan's own real IsSampled() return threads straight
+// through to traceparentForLevel's flags byte, end to end, not just a
+// hand-supplied bool.
+func TestTraceparentForLevelCarriesRealSampledBit(t *testing.T) {
+	setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	gotID, gotSampled, gotOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	wantFlag := "00"
+	if gotSampled {
+		wantFlag = "01"
+	}
+	got := traceparentForLevel(project, gotID.String(), gotSampled)
+	if got == "" {
+		t.Fatalf("traceparentForLevel(project, emitted spanID, real sampled bit) = \"\", want a non-empty traceparent")
+	}
+	if got[len(got)-2:] != wantFlag {
+		t.Errorf("traceparentForLevel flags byte = %q, want %q (from synthesizePlannerSpan's real sampled=%v)", got[len(got)-2:], wantFlag, gotSampled)
 	}
 }
 

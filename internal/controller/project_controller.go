@@ -1826,6 +1826,11 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 	// planning cost, but a span records that a Job ran in THIS cluster — an
 	// import with no real completed Job never reaches this point at all
 	// (the completedJob != nil gate above handles it naturally).
+	// D-02/Phase 46: default true — matches today's behavior (and RESEARCH's
+	// SDK read that every non-root span is AlwaysSample'd) when no emission
+	// runs this reconcile (marker already stamped by an earlier attempt);
+	// overwritten below with the real bit when this reconcile DOES emit.
+	sampled := true
 	if completedJob != nil && project.Status.PlannerSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -1854,8 +1859,9 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 		} else if stamped {
 			// D-02: Project is the root of the trace — no parent span exists.
 			parentSpanID := trace.SpanID{}
-			thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "project", project.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			thisSpanID, gotSampled, emitted := synthesizePlannerSpan(ctx, "project", project.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 			if emitted {
+				sampled = gotSampled
 				// Mirror in-memory unconditionally so same-reconcile downstream
 				// logic reads it even if the persistence patch below fails.
 				project.Status.ProjectTraceSpanID = thisSpanID.String()
@@ -1899,11 +1905,18 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			}
 			isFirstCompletion = true
 			skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "project", r.Deps.HelmProviderDefaults).Vendor)
+			// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME
+			// inputs this level's AGENT span used above, so the reporter's LLM
+			// spans carry byte-identical session.id/metadata/tags.
+			enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "project", project.Name, "")
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
 				ReporterOptions{
 					ReporterImage:    r.Deps.ReporterImage,
-					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID),
+					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
 					OTLPEndpoint:     r.Deps.OTLPEndpoint,
+					SessionID:        string(project.UID),
+					MetadataJSON:     enrichmentMD,
+					Tags:             enrichmentTags,
 					SkipMessageSpans: skipMessageSpans,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {

@@ -358,7 +358,17 @@ func spanIDFromHexOrZero(hex string) trace.SpanID {
 // starting Wave 3). Returns "" when project is nil, TraceIDFromUID errors,
 // or spanIDHex is empty/invalid (FormatTraceparent already returns "" for an
 // invalid SpanContext, so an empty/malformed hex degrades gracefully).
-func traceparentForLevel(project *tideprojectv1alpha3.Project, spanIDHex string) string {
+//
+// sampled (D-02, Phase 46) is the traceparent's flags byte: real and
+// knowable at the five same-reconcile reporter-spawn sites (the level's own
+// span was just synthesized in this call — its IsSampled() bit is threaded
+// straight through); literal true at the four dispatch-time subagent-Job
+// sites, where the bit is NOT knowable — those sites read a PARENT level's
+// persisted span ID across a reconcile boundary, and the parent's sampled
+// bit is not itself persisted (RESEARCH Pitfall 3's rejected schema change:
+// no new {Level}TraceSampled status field). See docs/observability.md for
+// the documented limitation.
+func traceparentForLevel(project *tideprojectv1alpha3.Project, spanIDHex string, sampled bool) string {
 	if project == nil {
 		return ""
 	}
@@ -366,5 +376,5 @@ func traceparentForLevel(project *tideprojectv1alpha3.Project, spanIDHex string)
 	if err != nil {
 		return ""
 	}
-	return otelai.FormatTraceparent(traceID, spanIDFromHexOrZero(spanIDHex), true)
+	return otelai.FormatTraceparent(traceID, spanIDFromHexOrZero(spanIDHex), sampled)
 }

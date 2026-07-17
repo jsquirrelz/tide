@@ -859,7 +859,10 @@ func (r *TaskReconciler) createDispatchJob(ctx context.Context, task *tideprojec
 		ProjectUID:           string(project.UID),
 		EstimatedCostCents:   r.Deps.ReserveEstimateCents,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
-		TraceParent:          traceparentForLevel(project, parentPlanSpanHex),
+		// D-02/Phase 46: literal true — cross-reconcile dispatch-time site;
+		// the parent's sampled bit is not persisted (RESEARCH Pitfall 3's
+		// rejected schema change; see docs/observability.md).
+		TraceParent: traceparentForLevel(project, parentPlanSpanHex, true),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, task, r.Scheme); err != nil {
@@ -959,11 +962,19 @@ func (r *TaskReconciler) patchTaskAwaitingApproval(ctx context.Context, task *ti
 // (before the OutputValidationError/OutputPathsViolation/standard-result
 // branch divergence) with envReadOK=true — so every one of Task's four
 // terminal paths gets exactly one span.
-func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job, out pkgdispatch.EnvelopeOut, envReadOK bool) {
+//
+// Returns the sampled bit (D-02, Phase 46): the real value from
+// synthesizePlannerSpan when this call emitted a span, or true on every
+// early-return path (already-stamped marker, unresolvable Job, nil
+// project/completedJob, or a marker-patch failure) — matching the same
+// "default true" convention the four planner completion handlers use, so
+// spawnTaskTraceReporterIfNeeded's traceparentForLevel call always receives
+// a defined value.
+func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job, out pkgdispatch.EnvelopeOut, envReadOK bool) bool {
 	logger := logf.FromContext(ctx)
 
 	if completedJob == nil || project == nil || task.Status.TaskSpanEmittedUID == string(completedJob.UID) || !plannerSpanResolvable(completedJob) {
-		return
+		return true
 	}
 
 	stamped := false
@@ -984,10 +995,10 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 		return nil
 	}); mErr != nil {
 		logger.Error(mErr, "TaskSpanEmittedUID marker patch failed (non-fatal); span deferred to a later reconcile", "task", task.Name)
-		return
+		return true
 	}
 	if !stamped {
-		return
+		return true
 	}
 
 	// TRACE-02: Task's immediate parent is Plan — resolveProject's label
@@ -1003,9 +1014,9 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 		}
 	}
 
-	thisSpanID, _, emitted := synthesizePlannerSpan(ctx, "task", task.Name, task.Labels[owner.LabelWaveIndex], project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+	thisSpanID, sampled, emitted := synthesizePlannerSpan(ctx, "task", task.Name, task.Labels[owner.LabelWaveIndex], project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 	if !emitted {
-		return
+		return true
 	}
 	// Mirror in-memory unconditionally so same-reconcile downstream logic
 	// reads it even if the persistence patch below fails.
@@ -1024,6 +1035,7 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 		// synthesizePlannerSpan returns).
 		logger.Error(tErr, "TaskTraceSpanID patch failed (non-fatal); child parent-linkage degraded for this level", "task", task.Name)
 	}
+	return sampled
 }
 
 // spawnTaskTraceReporterIfNeeded idempotently spawns a Phase 44 MSG-01
@@ -1054,7 +1066,13 @@ func (r *TaskReconciler) emitTaskSpanOnce(ctx context.Context, task *tideproject
 // empty span ID degrades to traceparentForLevel returning "" — the Job omits
 // --traceparent and the reporter emits unparented spans (bounded
 // degradation, matching Phase 43's precedent).
-func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job) {
+//
+// sampled (D-02, Phase 46) is the bit emitTaskSpanOnce returned in the SAME
+// reconcile, immediately before this call — the real value when this
+// reconcile emitted Task's own AGENT span, or the default-true fallback on
+// every early-return path (mirrors the four planner completion handlers'
+// local-variable threading).
+func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, task *tideprojectv1alpha3.Task, project *tideprojectv1alpha3.Project, completedJob *batchv1.Job, sampled bool) {
 	logger := logf.FromContext(ctx)
 
 	if completedJob == nil || project == nil {
@@ -1077,14 +1095,22 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 	}
 
 	skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "task", r.Deps.HelmProviderDefaults).Vendor)
+	// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME inputs
+	// Task's own AGENT span used (emitTaskSpanOnce, called immediately
+	// above), so the trace-only reporter's LLM spans carry byte-identical
+	// session.id/metadata/tags — includes wave_index (D-07 Task-only).
+	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "task", task.Name, task.Labels[owner.LabelWaveIndex])
 	traceOnlyJob := BuildReporterJob(task, project, r.sharedPVCName(), string(task.UID), "Task",
 		ReporterOptions{
 			ReporterImage:    r.Deps.ReporterImage,
 			OTLPEndpoint:     r.Deps.OTLPEndpoint,
 			TraceOnly:        true,
 			TraceOnlyJobKey:  string(completedJob.UID),
-			TraceParent:      traceparentForLevel(project, task.Status.TaskTraceSpanID),
+			TraceParent:      traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled),
 			SkipMessageSpans: skipMessageSpans,
+			SessionID:        string(project.UID),
+			MetadataJSON:     enrichmentMD,
+			Tags:             enrichmentTags,
 		}, r.Scheme)
 	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {
@@ -1120,10 +1146,10 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 		// reachable with envReadOK=false — the degraded-envelope span (Option B,
 		// 43-05-PLAN.md call site 1). Emitted BEFORE the terminal status patch
 		// below (span-loss-averse ordering).
-		r.emitTaskSpanOnce(ctx, task, project, completedJob, pkgdispatch.EnvelopeOut{}, false)
+		sampled := r.emitTaskSpanOnce(ctx, task, project, completedJob, pkgdispatch.EnvelopeOut{}, false)
 		// MSG-01/D-05: failed Tasks are the highest-value debugging trace —
 		// spawn the trace-only reporter here too, not just on the success path.
-		r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob)
+		r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob, sampled)
 
 		patch := client.MergeFrom(task.DeepCopy())
 		task.Status.Phase = tideprojectv1alpha3.LevelPhaseFailed
@@ -1148,11 +1174,11 @@ func (r *TaskReconciler) handleJobCompletion(ctx context.Context, task *tideproj
 	// OutputPathsViolation/standard-result branch divergence (Option B,
 	// generalized — 43-05-PLAN.md) — one call covers all three post-read
 	// terminal paths uniformly with envReadOK=true.
-	r.emitTaskSpanOnce(ctx, task, project, completedJob, out, true)
+	sampled := r.emitTaskSpanOnce(ctx, task, project, completedJob, out, true)
 	// MSG-01: covers the three post-read terminal paths uniformly (standard
 	// result, OutputValidationError, OutputPathsViolation) — one call, same
 	// D-06-gated idempotent spawn as the EnvelopeReadFailed call site above.
-	r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob)
+	r.spawnTaskTraceReporterIfNeeded(ctx, task, project, completedJob, sampled)
 
 	// Output-path validation (Warning #5 — wires HARN-05 into dispatch chain).
 	// Performed controller-side in Phase 2 (RESEARCH.md Responsibility Map deviation).
