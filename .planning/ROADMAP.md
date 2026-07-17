@@ -257,7 +257,11 @@ Plans:
   2. When the flag is set for a Task's resolved provider, the reporter skips message-span synthesis entirely for that Task — no double-emission path exists.
   3. A contract test using a stub self-instrumenting runtime proves zero duplicate spans end-to-end (env-carrier extraction only — no LangGraph-specific span shape assumed).
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 45-01-PLAN.md — SelfInstruments capability table + ReporterOptions/BuildReporterJob transport + flag computation at all 5 reporter-spawn sites (manager side)
+- [ ] 45-02-PLAN.md — Reporter --skip-message-spans parse + synthesizeSpans sole skip point + D-09 stub-runtime contract test + tracesynth.go doc contract (reporter side)
 
 ### Phase 46: Observability Enrichment + Dashboard Deep Link
 
