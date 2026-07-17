@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
 
 // TasksHandler serves GET /api/v1/tasks/{name}. Clientset MAY be nil — if
@@ -84,6 +85,14 @@ type taskDetail struct {
 	EnvelopePath string          `json:"envelopePath"`
 	ElapsedText  string          `json:"elapsedText"`
 	Conditions   []taskCondition `json:"conditions"`
+	// TraceID/TraceSpanID (Phase 46 OBS-04 / D-11) carry the deep-link
+	// trace identity. TraceSpanID mirrors Status.TaskTraceSpanID directly;
+	// TraceID is derived from the resolved parent Project's UID. A broken
+	// Task→…→Project resolution chain — or any derivation failure —
+	// degrades BOTH fields to "" (never a 500; a partial trace identity
+	// with no traceId to anchor it is not a usable Phoenix link).
+	TraceID     string `json:"traceId,omitempty"`
+	TraceSpanID string `json:"traceSpanId,omitempty"`
 }
 
 // Get implements GET /api/v1/tasks/{name}[?namespace=foo]. Returns the
@@ -155,6 +164,12 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		status = tidev1alpha3.LevelPhasePending
 	}
 
+	// traceID/traceSpanID (D-11): needs the resolved Project's UID; any
+	// break in the chain (empty projectName, Get error, derive error)
+	// degrades both fields to "" — extends the existing graceful-
+	// degradation contract, never a 500.
+	traceID, traceSpanID := h.resolveTaskTraceIdentity(ctx, &tk, projectName)
+
 	writeJSON(w, http.StatusOK, taskDetail{
 		Name:         tk.Name,
 		ProjectName:  projectName,
@@ -170,7 +185,35 @@ func (h *TasksHandler) Get(w http.ResponseWriter, r *http.Request) {
 		EnvelopePath: fmt.Sprintf("/workspace/envelopes/%s/result.json", string(tk.UID)),
 		ElapsedText:  elapsedText,
 		Conditions:   conds,
+		TraceID:      traceID,
+		TraceSpanID:  traceSpanID,
 	})
+}
+
+// resolveTaskTraceIdentity derives the Task's deep-link trace identity
+// (Phase 46 OBS-04 / D-11). traceSpanId is the Task's own
+// Status.TaskTraceSpanID, but is only meaningful paired with a traceId to
+// anchor it — so any failure resolving traceId (empty projectName, Project
+// Get error, or a malformed UID that TraceIDFromUID rejects) degrades BOTH
+// fields to "". Mirrors resolveTaskParents' "resolution-chain breaks
+// degrade gracefully" contract: never a 500.
+func (h *TasksHandler) resolveTaskTraceIdentity(ctx context.Context, tk *tidev1alpha3.Task, projectName string) (string, string) {
+	if projectName == "" {
+		return "", ""
+	}
+	var proj tidev1alpha3.Project
+	if err := h.Client.Get(ctx, client.ObjectKey{Namespace: tk.Namespace, Name: projectName}, &proj); err != nil {
+		if !apierrors.IsNotFound(err) {
+			h.Log.V(1).Info("get project for task trace identity failed", "task", tk.Name, "project", projectName, "err", err)
+		}
+		return "", ""
+	}
+	traceID, err := otelai.TraceIDFromUID(string(proj.UID))
+	if err != nil {
+		h.Log.V(1).Info("derive trace id for task failed", "task", tk.Name, "project", projectName, "err", err)
+		return "", ""
+	}
+	return traceID.String(), tk.Status.TaskTraceSpanID
 }
 
 // resolveTaskParents walks Task → Plan → Phase → Milestone → Project via

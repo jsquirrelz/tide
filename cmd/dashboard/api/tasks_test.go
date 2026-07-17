@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
+	"github.com/jsquirrelz/tide/pkg/otelai"
 )
 
 // newTasksHandler returns a TasksHandler with a fake controller-runtime
@@ -259,6 +260,74 @@ func TestTasksHandlerResolutionChainBreak(t *testing.T) {
 	// AttemptMax defaults to 1 (no Caps set).
 	if body.AttemptMax != 1 {
 		t.Errorf("AttemptMax=%d want 1 (no Caps)", body.AttemptMax)
+	}
+	// D-11: a broken resolution chain degrades trace identity to empty
+	// strings too, never a 500.
+	if body.TraceID != "" {
+		t.Errorf("TraceID=%q want empty (chain break)", body.TraceID)
+	}
+	if body.TraceSpanID != "" {
+		t.Errorf("TraceSpanID=%q want empty (chain break)", body.TraceSpanID)
+	}
+}
+
+// TestTasksHandlerTraceIdentity covers Phase 46 OBS-04 / D-11: a full
+// resolution chain whose Project carries a UID and whose Task carries a
+// TaskTraceSpanID status yields both traceId (deterministic derivation
+// from the Project's UID via otelai.TraceIDFromUID) and traceSpanId in the
+// response — and re-fetching yields the identical traceId (same UID twice
+// → same hex).
+func TestTasksHandlerTraceIdentity(t *testing.T) {
+	objs := newFullChain()
+	prj, ok := objs[0].(*tidev1alpha3.Project)
+	if !ok {
+		t.Fatalf("objs[0] is not *Project")
+	}
+	prj.UID = types.UID("550e8400-e29b-41d4-a716-446655440000")
+	tk, ok := objs[4].(*tidev1alpha3.Task)
+	if !ok {
+		t.Fatalf("objs[4] is not *Task")
+	}
+	tk.Status.TaskTraceSpanID = "00f067aa0ba902b7"
+
+	_, router := newTasksHandler(t, nil, objs...)
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	wantTraceID, err := otelai.TraceIDFromUID(string(prj.UID))
+	if err != nil {
+		t.Fatalf("TraceIDFromUID: %v", err)
+	}
+
+	fetch := func() taskDetail {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/api/v1/tasks/task-007")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d want 200", resp.StatusCode)
+		}
+		var body taskDetail
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body
+	}
+
+	body := fetch()
+	if body.TraceID != wantTraceID.String() {
+		t.Errorf("TraceID=%q want %q", body.TraceID, wantTraceID.String())
+	}
+	if body.TraceSpanID != "00f067aa0ba902b7" {
+		t.Errorf("TraceSpanID=%q want 00f067aa0ba902b7", body.TraceSpanID)
+	}
+
+	// Deterministic derivation: same UID resolved twice yields the same hex.
+	body2 := fetch()
+	if body2.TraceID != body.TraceID {
+		t.Errorf("TraceID not deterministic: first=%q second=%q", body.TraceID, body2.TraceID)
 	}
 }
 
