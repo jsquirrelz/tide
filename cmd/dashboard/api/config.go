@@ -35,22 +35,36 @@ import (
 type ConfigHandler struct {
 	// TelemetryEnabled mirrors the chart's prometheus.enabled toggle (D-14).
 	TelemetryEnabled bool
+	// PhoenixBaseURL mirrors the operator-set PHOENIX_BASE_URL env (Phase 46
+	// OBS-04 / D-10, the telemetryEnabled precedent applied verbatim). Empty
+	// string IS the no-link sentinel — the SPA's deep-link mount points
+	// render nothing when this is "". The raw value is passed through
+	// unmodified; trailing-slash normalization happens exactly once,
+	// SPA-side in lib/phoenixLink.ts (D-11).
+	PhoenixBaseURL string
 	// Log is the structured logger for encode errors.
 	Log logr.Logger
 }
 
-// configResponse is the GET /api/v1/config body. The key name
-// "telemetryEnabled" is a locked wire contract consumed by
-// TelemetryView.tsx's banner derivation.
+// configResponse is the GET /api/v1/config body. The key names
+// "telemetryEnabled" and "phoenixBaseURL" are a locked wire contract:
+// telemetryEnabled is consumed by TelemetryView.tsx's banner derivation;
+// phoenixBaseURL is consumed by lib/phoenixLink.ts (Phase 46, additive-only).
 type configResponse struct {
-	TelemetryEnabled bool `json:"telemetryEnabled"`
+	TelemetryEnabled bool   `json:"telemetryEnabled"`
+	PhoenixBaseURL   string `json:"phoenixBaseURL"`
 }
 
-// Get handles GET /api/v1/config — returns {"telemetryEnabled": <bool>}.
+// Get handles GET /api/v1/config — returns
+// {"telemetryEnabled": <bool>, "phoenixBaseURL": <string>}.
 func (h *ConfigHandler) Get(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(configResponse{TelemetryEnabled: h.TelemetryEnabled}); err != nil {
+	resp := configResponse{
+		TelemetryEnabled: h.TelemetryEnabled,
+		PhoenixBaseURL:   h.PhoenixBaseURL,
+	}
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.Log.Error(err, "failed to encode config response")
 	}
 }

@@ -166,6 +166,7 @@ func main() {
 		PrometheusEndpoint: os.Getenv("PROM_ENDPOINT"),
 		Store:              artifactStore,
 		TelemetryEnabled:   telemetryEnabledFromEnv(),
+		PhoenixBaseURL:     phoenixBaseURLFromEnv(),
 	})
 
 	// 6. Register the HTTP server as a manager.Runnable. It shares the
@@ -256,6 +257,16 @@ func telemetryEnabledFromEnv() bool {
 	default:
 		return os.Getenv("PROM_ENDPOINT") != ""
 	}
+}
+
+// phoenixBaseURLFromEnv resolves the dashboard's Phoenix deep-link base URL
+// (Phase 46 OBS-04 / D-10). PHOENIX_BASE_URL absent or unset yields "" —
+// empty string IS the no-link sentinel the SPA's mount points check for.
+// The raw env value is passed through verbatim; trailing-slash
+// normalization happens exactly once, SPA-side in lib/phoenixLink.ts
+// (D-11) — the server never mutates it.
+func phoenixBaseURLFromEnv() string {
+	return os.Getenv("PHOENIX_BASE_URL")
 }
 
 // cacheSyncHealthz returns a healthz.Checker that returns nil once the
