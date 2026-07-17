@@ -624,7 +624,7 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 		// this level's AGENT span used above, so the reporter's LLM spans carry
 		// byte-identical session.id/metadata/tags.
 		enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "phase", ph.Name, "")
-		_, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
+		spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
 			ReporterImage:     r.Deps.ReporterImage,
 			TraceParent:       traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
 			OTLPEndpoint:      r.Deps.OTLPEndpoint,

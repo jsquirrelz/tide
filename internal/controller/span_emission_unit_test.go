@@ -25,6 +25,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"time"
 
@@ -894,12 +895,7 @@ func decodeMetadata(t *testing.T, encoded string) map[string]string {
 }
 
 func containsTag(tags []string, want string) bool {
-	for _, tg := range tags {
-		if tg == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tags, want)
 }
 
 // TestBuildLevelEnrichmentProjectOmitsGateProfile — Pitfall 5: Gates has no

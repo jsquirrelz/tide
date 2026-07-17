@@ -130,8 +130,10 @@ func parseFlags(args []string) (reporterConfig, error) {
 		"synthesize LLM message-array spans from events.jsonl only; no child-CR materialization (Phase 44 MSG-01)")
 	skipMessageSpans := fs.Bool("skip-message-spans", false,
 		"skip LLM message-array-span synthesis (self-instrumenting vendor; D-03 default-safe: absent = synthesize)")
-	sessionID := fs.String("session-id", "", "TIDE's own run identity (Project UID) stamped on every emitted LLM span (46 D-05/OBS-02)")
-	metadataJSON := fs.String("metadata", "", "manager-pre-JSON-encoded metadata map, stamped opaquely without re-marshaling (46 D-05/OBS-03)")
+	sessionID := fs.String("session-id", "",
+		"TIDE's own run identity (Project UID) stamped on every emitted LLM span (46 D-05/OBS-02)")
+	metadataJSON := fs.String("metadata", "",
+		"manager-pre-JSON-encoded metadata map, stamped opaquely without re-marshaling (46 D-05/OBS-03)")
 	tagsCSV := fs.String("tags", "", "comma-separated tags stamped as a native string list (46 D-05/OBS-03)")
 
 	if err := fs.Parse(args); err != nil {
@@ -313,7 +315,7 @@ func runWithClient(
 // can contain a comma (CRD enum validation enforces it upstream).
 func splitTags(csv string) []string {
 	var tags []string
-	for _, tag := range strings.Split(csv, ",") {
+	for tag := range strings.SplitSeq(csv, ",") {
 		if tag != "" {
 			tags = append(tags, tag)
 		}
@@ -379,7 +381,11 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 
 	tracer := otel.Tracer("tide.reporter")
 	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
-	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath, cfg.SessionID, cfg.MetadataJSON, splitTags(cfg.TagsCSV)); err != nil {
+	err = reporter.EmitSpans(
+		parentCtx, tracer, calls, artifactPath,
+		cfg.SessionID, cfg.MetadataJSON, splitTags(cfg.TagsCSV),
+	)
+	if err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
 		return
 	}

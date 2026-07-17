@@ -80,12 +80,10 @@ const (
 // spawnReporterIfNeeded idempotently spawns the tide-reporter reader Job for a
 // planner-level Job completion (Option C / T-09-13: AlreadyExists on Create is
 // success; a pre-existing reporter Job means this completion was already
-// observed). Returns isFirstCompletion=true when this is the initial
-// observation of the planner Job's terminal state: either the reporter Job was
-// newly spawned, or no ReporterImage is configured at all (stub/test path).
-// When ReporterImage is set but the parent Project is unresolved, no spawn
-// happens and isFirstCompletion stays false (mirrors the prior inline blocks
-// in milestone_controller.go / phase_controller.go).
+// observed). Returns a non-nil error only when the Get/Create against the API
+// fails; a missing ReporterImage (stub/test path) or an unresolved parent
+// Project is a no-op success (mirrors the prior inline blocks in
+// milestone_controller.go / phase_controller.go).
 //
 // pvcName is the caller's configured shared-PVC name (r.sharedPVCName()) so
 // the reporter mounts the same claim the planner Job wrote out.json to;
@@ -108,36 +106,36 @@ func spawnReporterIfNeeded(
 	parentKind string,
 	pvcName string,
 	opts ReporterOptions,
-) (bool, error) {
+) error {
 	logger := logf.FromContext(ctx)
 	if opts.ReporterImage == "" {
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured",
 			"parentKind", parentKind, "parent", parent.GetName())
-		return true, nil
+		return nil
 	}
 	if project == nil {
-		return false, nil
+		return nil
 	}
 	reporterJobName := fmt.Sprintf("tide-reporter-%s", parent.GetUID())
 	var existing batchv1.Job
 	if gErr := c.Get(ctx, types.NamespacedName{Name: reporterJobName, Namespace: parent.GetNamespace()}, &existing); gErr != nil {
 		if !apierrors.IsNotFound(gErr) {
-			return false, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
+			return fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 		}
 		// Not found — spawn it (first completion observation).
 		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind, opts, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
-				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
+				return fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
 			}
 		} else {
 			logger.Info("spawned reporter Job", "job", reporterJobName,
 				"parentKind", parentKind, "parent", parent.GetName())
 		}
-		return true, nil
+		return nil
 	}
 	logger.V(1).Info("reporter Job already exists; skipping spawn (T-09-13)", "job", reporterJobName)
-	return false, nil
+	return nil
 }
 
 // ProviderDefaults carries the Helm-chart-supplied defaults used as the

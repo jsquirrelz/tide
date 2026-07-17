@@ -668,7 +668,7 @@ func (r *MilestoneReconciler) handleJobCompletion(ctx context.Context, ms *tidep
 		// this level's AGENT span used above, so the reporter's LLM spans carry
 		// byte-identical session.id/metadata/tags.
 		enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "milestone", ms.Name, "")
-		_, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
+		spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ms, project, "Milestone", r.sharedPVCName(), ReporterOptions{
 			ReporterImage:     r.Deps.ReporterImage,
 			TraceParent:       traceparentForLevel(project, ms.Status.MilestoneTraceSpanID, sampled),
 			OTLPEndpoint:      r.Deps.OTLPEndpoint,

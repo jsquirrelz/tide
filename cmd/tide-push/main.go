@@ -1023,13 +1023,15 @@ func deriveEffectiveLease(
 
 	isAncestor, err := remoteTipCommit.IsAncestor(headCommit)
 	if err != nil {
-		fmt.Fprintf(stderr, "tide-push: ancestry check for observed remote tip %s failed, falling back to configured lease: %v\n",
+		fmt.Fprintf(stderr,
+			"tide-push: ancestry check for observed remote tip %s failed, falling back to configured lease: %v\n",
 			remoteTip, err)
 		return cfg.LastPushedSHA, false, 0
 	}
 	if !isAncestor {
 		fmt.Fprintf(stderr,
-			"tide-push: observed remote tip %s for %s is not an ancestor of local HEAD — external divergence, stale anchor %s rejected\n",
+			"tide-push: observed remote tip %s for %s is not an ancestor of local HEAD — "+
+				"external divergence, stale anchor %s rejected\n",
 			remoteTip, cfg.Branch, cfg.LastPushedSHA)
 		writePushEnvelope(cfg, newHash.String(), exitLeaseFailed, "lease-rejected", nil, 0, "")
 		return "", true, exitLeaseFailed

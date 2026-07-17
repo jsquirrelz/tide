@@ -130,6 +130,7 @@ func hmacSelfTest(signingKey []byte) error {
 	return nil
 }
 
+//nolint:gocyclo // manager entrypoint wires flags, TLS, otel, and all reconcilers; setup complexity is inherent
 func main() {
 	var configPath string
 	var leaderElect bool
