@@ -131,3 +131,7 @@ None - no external service configuration required.
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+All created/modified files verified present on disk (5 API types, 5 controllers, 5 CRD bases, 5 Helm CRD templates, this SUMMARY). All three commit hashes (`e0b0210`, `dfb4d8a`, `d33990a`) verified present in `git log --oneline --all`.
