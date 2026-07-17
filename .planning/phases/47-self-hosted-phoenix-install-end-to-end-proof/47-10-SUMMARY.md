@@ -95,3 +95,10 @@ None - no external service configuration required.
 ---
 *Phase: 47-self-hosted-phoenix-install-end-to-end-proof*
 *Completed: 2026-07-17*
+
+## Self-Check: PASSED
+
+- FOUND: internal/controller/reporter_spawn_idempotency_test.go
+- FOUND: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-10-SUMMARY.md
+- FOUND: commit 5bfd1a8 (test)
+- FOUND: commit 3de1e70 (docs: summary)
