@@ -265,6 +265,203 @@ func TestBuildReporterJob_SkipMessageSpansArg(t *testing.T) {
 	})
 }
 
+// TestBuildReporterJob_SessionIDArg asserts BuildReporterJob carries
+// --session-id=<value> in the container Args (not Env — 46 D-05) when
+// ReporterOptions.SessionID is set, in BOTH Job shapes, and omits it
+// entirely when empty.
+func TestBuildReporterJob_SessionIDArg(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "ns-p", UID: "project-uid-18"},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "ms-16", Namespace: "ns-p", UID: "parent-uid-18"},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when set (materialization shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			SessionID:     "project-uid-18",
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-18", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--session-id=project-uid-18"
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("present when set (trace-only shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage:   "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			TraceOnly:       true,
+			TraceOnlyJobKey: "job-uid-session-1",
+			SessionID:       "project-uid-18",
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-18", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--session-id=project-uid-18"
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("absent when empty", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-18", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if strings.HasPrefix(a, "--session-id") {
+				t.Errorf("did not expect a --session-id arg when SessionID is empty, got %v", args)
+			}
+		}
+	})
+}
+
+// TestBuildReporterJob_MetadataArg asserts BuildReporterJob carries
+// --metadata=<value> in the container Args, pre-JSON-encoded and passed
+// through verbatim (this file never marshals it), in BOTH Job shapes, and
+// omits it entirely when empty.
+func TestBuildReporterJob_MetadataArg(t *testing.T) {
+	const metadataJSON = `{"level":"task"}`
+
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "ns-q", UID: "project-uid-19"},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "ms-17", Namespace: "ns-q", UID: "parent-uid-19"},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when set (materialization shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			MetadataJSON:  metadataJSON,
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-19", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--metadata=" + metadataJSON
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("present when set (trace-only shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage:   "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			TraceOnly:       true,
+			TraceOnlyJobKey: "job-uid-metadata-1",
+			MetadataJSON:    metadataJSON,
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-19", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--metadata=" + metadataJSON
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("absent when empty", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-19", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if strings.HasPrefix(a, "--metadata") {
+				t.Errorf("did not expect a --metadata arg when MetadataJSON is empty, got %v", args)
+			}
+		}
+	})
+}
+
+// TestBuildReporterJob_TagsArg asserts BuildReporterJob carries
+// --tags=<comma-joined> in the container Args when ReporterOptions.Tags is
+// non-empty, in BOTH Job shapes, and omits it entirely when the slice is
+// empty (zero-valued).
+func TestBuildReporterJob_TagsArg(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "proj", Namespace: "ns-r", UID: "project-uid-20"},
+	}
+	parent := &tideprojectv1alpha3.Milestone{
+		ObjectMeta: metav1.ObjectMeta{Name: "ms-18", Namespace: "ns-r", UID: "parent-uid-20"},
+	}
+	scheme := newTestScheme()
+
+	t.Run("present when set (materialization shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			Tags:          []string{"task", "strict"},
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-20", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--tags=task,strict"
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("present when set (trace-only shape)", func(t *testing.T) {
+		opts := controller.ReporterOptions{
+			ReporterImage:   "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev",
+			TraceOnly:       true,
+			TraceOnlyJobKey: "job-uid-tags-1",
+			Tags:            []string{"task", "strict"},
+		}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-20", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		want := "--tags=task,strict"
+		var found bool
+		for _, a := range args {
+			if a == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected arg %q not present in %v", want, args)
+		}
+	})
+
+	t.Run("absent when empty", func(t *testing.T) {
+		opts := controller.ReporterOptions{ReporterImage: "ghcr.io/jsquirrelz/tide-reporter:v0.1.0-dev"}
+		job := controller.BuildReporterJob(parent, project, "tide-projects", "task-uid-20", "Milestone", opts, scheme)
+		args := job.Spec.Template.Spec.Containers[0].Args
+		for _, a := range args {
+			if strings.HasPrefix(a, "--tags") {
+				t.Errorf("did not expect a --tags arg when Tags is empty, got %v", args)
+			}
+		}
+	})
+}
+
 // TestBuildReporterJob_OwnerRef asserts owner ref is set to the parent (not necessarily the project).
 func TestBuildReporterJob_OwnerRef(t *testing.T) {
 	project := &tideprojectv1alpha3.Project{
