@@ -34,7 +34,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -179,10 +178,17 @@ type pendingCall struct {
 
 // seedPrompt resolves the call-1 seed turn per Pitfall 2: read inJSONPath's
 // .prompt directly, or follow .promptPath one hop (workspace-relative,
-// joined against workspaceRoot) to a children/task-NN.json artifact's
+// resolved INSIDE workspaceRoot) to a children/task-NN.json artifact's
 // .spec.prompt. Returns ("", false) for any missing/unreadable/empty case —
 // never an error; a missing seed degrades the first call (D-05) rather than
 // failing reconstruction.
+//
+// .promptPath comes from in.json on the subagent-writable PVC, so it is
+// attacker-populatable: resolution goes through os.Root, which confines the
+// read to workspaceRoot against both ".."/absolute-path traversal and
+// symlinks pointing outside the root. The reporter reads files the subagent
+// cannot — an unconfined read here would be a privilege step-up straight
+// into the trace stream.
 func seedPrompt(inJSONPath, workspaceRoot string) (string, bool) {
 	if inJSONPath == "" {
 		return "", false
@@ -201,10 +207,14 @@ func seedPrompt(inJSONPath, workspaceRoot string) (string, bool) {
 	if in.PromptPath == "" {
 		return "", false
 	}
-	full := filepath.Join(workspaceRoot, in.PromptPath)
-	pdata, err := os.ReadFile(full)
+	root, err := os.OpenRoot(workspaceRoot)
 	if err != nil {
 		return "", false
+	}
+	defer func() { _ = root.Close() }() // read-only handle; close error is non-actionable cleanup
+	pdata, err := root.ReadFile(in.PromptPath)
+	if err != nil {
+		return "", false // includes traversal/symlink escape attempts — degrade, don't read
 	}
 	var pa promptArtifact
 	if err := json.Unmarshal(pdata, &pa); err != nil {

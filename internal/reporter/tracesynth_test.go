@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -129,6 +130,83 @@ func TestReconstructConversation_SeedsPromptFromPromptPath(t *testing.T) {
 	want := "Fix the flaky test and open a PR."
 	if got := calls[0].InputMessages[0].Content; got != want {
 		t.Errorf("call1 InputMessages[0].Content = %q, want %q (children/task-01.json's .spec.prompt)", got, want)
+	}
+}
+
+// TestSeedPrompt_RejectsPromptPathOutsideWorkspace — promptPath comes from
+// the subagent-writable in.json, so a traversal or symlink pointing outside
+// workspaceRoot must degrade (no seed, first call Degraded) instead of
+// reading reporter-privileged files into the trace stream. An in-workspace
+// promptPath keeps working through the confined resolution.
+func TestSeedPrompt_RejectsPromptPathOutsideWorkspace(t *testing.T) {
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, "children"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	// A perfectly valid prompt artifact sitting OUTSIDE the workspace root.
+	const outsideArtifact = `{"spec":{"prompt":"stolen file contents"}}`
+	outsidePath := filepath.Join(base, "outside.json")
+	if err := os.WriteFile(outsidePath, []byte(outsideArtifact), 0o644); err != nil {
+		t.Fatalf("WriteFile outside.json: %v", err)
+	}
+	// And a valid one INSIDE it.
+	if err := os.WriteFile(filepath.Join(workspace, "children", "task-01.json"),
+		[]byte(`{"spec":{"prompt":"legit prompt"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile task-01.json: %v", err)
+	}
+	// A symlink INSIDE the workspace pointing OUTSIDE it.
+	if err := os.Symlink(outsidePath, filepath.Join(workspace, "children", "sneaky-link.json")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	writeInJSON := func(t *testing.T, promptPath string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "in.json")
+		if err := os.WriteFile(p, []byte(`{"promptPath":`+strconv.Quote(promptPath)+`}`), 0o644); err != nil {
+			t.Fatalf("WriteFile in.json: %v", err)
+		}
+		return p
+	}
+
+	cases := []struct {
+		name       string
+		promptPath string
+		wantOK     bool
+		wantPrompt string
+	}{
+		{"in-workspace path resolves", "children/task-01.json", true, "legit prompt"},
+		{"dot-dot traversal rejected", "../outside.json", false, ""},
+		{"absolute path rejected", outsidePath, false, ""},
+		{"symlink escape rejected", "children/sneaky-link.json", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt, ok := seedPrompt(writeInJSON(t, tc.promptPath), workspace)
+			if ok != tc.wantOK || prompt != tc.wantPrompt {
+				t.Errorf("seedPrompt = (%q, %v), want (%q, %v)", prompt, ok, tc.wantPrompt, tc.wantOK)
+			}
+		})
+	}
+
+	// End-to-end posture: a traversal promptPath degrades the first call
+	// (D-05 marker) rather than erroring the reconstruction.
+	inJSON := writeInJSON(t, "../outside.json")
+	calls, err := ReconstructConversation("testdata/events_sample.jsonl", inJSON, workspace)
+	if err != nil {
+		t.Fatalf("ReconstructConversation: %v", err)
+	}
+	if len(calls) == 0 {
+		t.Fatal("got 0 calls, want at least 1")
+	}
+	if !calls[0].Degraded {
+		t.Errorf("calls[0].Degraded = false, want true (rejected promptPath degrades the seed)")
+	}
+	for _, m := range calls[0].InputMessages {
+		if strings.Contains(m.Content, "stolen file contents") {
+			t.Errorf("out-of-workspace file contents leaked into the seed turn")
+		}
 	}
 }
 
