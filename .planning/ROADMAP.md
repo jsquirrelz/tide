@@ -303,7 +303,25 @@ Plans:
   2. The `otel.exporter.endpoint` wiring is documented end-to-end using the required bare `host:port` form (not scheme-prefixed, which `otlptracegrpc.WithEndpoint` silently rejects), and NOTES.txt nudges an operator toward the Phoenix step when tracing is dark (PHX-02).
   3. A live run's complete five-level trace tree — including redacted message arrays at the Task level — is visible and queryable in a self-hosted Phoenix, with screenshots and trace IDs captured as milestone-close evidence (PROOF-01).
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+Plans:
+**Wave 1** *(parallel, independent)*
+
+- [ ] 47-01-PLAN.md — Go-side OTLP-headers threading (ReporterOptions + Deps + all 5 spawn sites) + unit-test pair
+- [ ] 47-02-PLAN.md — Chart-side headersSecretRef wiring + NOTES.txt tracing-dark nudge (augment-script + tracked sites) + offline render gates
+
+**Wave 2** *(47-03 blocked on 47-01/47-02)*
+
+- [ ] 47-03-PLAN.md — Fresh chart-pin re-check + INSTALL.md "Enable tracing (Phoenix)" + observability.md reference recipe (both storage paths, auth-ON, headers chain)
+
+**Wave 3** *(47-04 blocked on 47-03 — the recipe is proven by following it)*
+
+- [ ] 47-04-PLAN.md — Live proof: fresh tide-phoenix-proof cluster from the docs, no-spend pre-flight checks, medium-project driving run to Complete
+
+**Wave 4** *(47-05 blocked on 47-04)*
+
+- [ ] 47-05-PLAN.md — Evidence capture (tree / redacted-span / query / deep-link screenshots) + 47-EVIDENCE.md + human acceptance gate
 
 ## Progress
 
