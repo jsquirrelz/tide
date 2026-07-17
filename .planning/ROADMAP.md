@@ -321,7 +321,7 @@ Plans:
 
 **Wave 4** *(47-05 blocked on 47-04)*
 
-- [ ] 47-05-PLAN.md — Evidence capture (tree / redacted-span / query / deep-link screenshots) + 47-EVIDENCE.md + human acceptance gate
+- [x] 47-05-PLAN.md — Evidence capture (tree / redacted-span / query / deep-link screenshots) + 47-EVIDENCE.md + human acceptance gate
 
 ## Progress
 
@@ -342,4 +342,4 @@ Plans:
 | 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
 | 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
 | 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 4/5 | In Progress|  |
+| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 5/5 | Complete   | 2026-07-17 |
