@@ -101,6 +101,45 @@ Everything the first external-repo run surfaced short of new subagent stages: th
 
 ---
 
+## Milestone: v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix
+
+**Completed:** 2026-07-17 (public tag/release pending)
+**Phases:** 6 (42–47) | **Plans:** 32 | **Tasks:** 67 | **Commits:** 240
+
+### What Was Built
+- Trace-context foundation + five-level AGENT span emission: pure `pkg/otelai/tracecontext.go` (deterministic TraceID from Project UID, W3C traceparent format/extract, retroactive timestamps) wired into all five level-completion handlers — attribute-complete spans (model/provider/token counts) for succeeded and failed Jobs alike.
+- One connected trace: correct parent-child nesting across Project→Milestone→Phase→Plan→Task, W3C `traceparent` propagated at both pod hops (subagent + reporter), per-level IDs persisted in `.status.trace`.
+- LLM message-array spans (the headline): the reporter's trace-only mode turns a Task's `events.jsonl` into redacted, size-bounded OpenInference LLM spans — redact-before-truncate at a single chokepoint, a D-O5 triple size guard, and TracerProvider `Shutdown` on every one-shot exit path.
+- Runtime-neutral adapter seam: fail-closed `SelfInstruments` capability flag + `--skip-message-spans` transport + a stub-runtime contract test (zero duplicate spans) — scaffolding for the LangGraph beachhead, byte-identical today.
+- Observability enrichment + dashboard deep link: sampler 1.0, `session.id` = Project UID, metadata/tags, and a `<PhoenixTraceLink>` from every DAG node.
+- Self-hosted Phoenix recipe (INSTALL.md / observability.md, both storage paths, auth-ON default, OTLP-headers `secretKeyRef` chain) proven by a live 392-span five-level trace tree.
+
+### What Worked
+- **The live proof caught what envtest couldn't.** Phase 47's real $0.88 run surfaced two defects the green envtest suite passed over — a boundary-push stale-lease status flap and ~⅓ enrichment coverage from reporter double-spawn. "A real imperfect test surfaces reality" held again.
+- **Root-fix over workaround.** Both live-run defects were root-caused and fixed (remote-tip re-read + ancestry-guarded lease; durable reporter-spawned markers gating all five spawn sites), not papered over — each with an envtest proof.
+- **Research on real fixtures overturned a naive framing.** Phase 44's D-O5 boundary: 58 real `events.jsonl` files showed the OTLP 4 MB risk was the *aggregate export batch*, not a single oversized span — the guard was designed to the real failure mode, not the assumed one.
+- **Semconv as source of truth.** Backing every attribute key with the official `openinference-semantic-conventions` module (not hand-rolled strings) makes TIDE's spans forward-compatible with LangChain's native emission for free.
+
+### What Was Inefficient
+- **The blocking human gate never fired.** Phase 47-05's `checkpoint:human-verify` auto-resolved via its named-gaps branch, so PROOF-01 sign-off stayed outstanding at close until surfaced manually — a gate that can auto-resolve isn't a gate.
+- **Gap-closure didn't re-run the paid proof.** Plans 47-06…47-10 fixed the two live-run defects but weren't scoped to re-capture, so the evidence PNGs still show the pre-fix state and the human sign-off had to reason about envtest-verified-but-not-re-proven fixes.
+- **Stale-artifact drift at close.** STATE.md frontmatter, REQUIREMENTS.md PHX-01/02 checkboxes, and the traceability table all lagged reality — reconciled at milestone close rather than at phase close.
+
+### Patterns Established
+- **Retroactive span synthesis gated on state-transition edges** (not in-memory idempotency): spans created and closed in `handleJobCompletion`, never held open across a `Reconcile()` return.
+- **Redact-before-truncate at a single chokepoint** — the sole emission point enforces redaction, so new call sites can't leak.
+- **Runtime-neutral trace contract** — manager-injected `traceparent` + a per-runtime adapter seam gated by a capability-flag-carried-as-data.
+
+### Key Lessons
+- **A gate that auto-resolves isn't a gate.** The blocking human-verify checkpoint's named-gaps branch let the milestone-acceptance sign-off slip; verify the gate actually fires — don't trust its presence.
+- **Envtest-green ≠ live-proven.** The two Phase 47 defects only appeared under a real run; a paid live proof remains the acceptance bar for a milestone whose value is "an operator sees it work."
+- **Reconcile artifacts at phase close, not milestone close.** The STATE / requirements / traceability drift was cheap to fix but read as false progress until reconciled.
+
+### Cost Observations
+- One paid live run all milestone: $0.88 for the `medium-project` proof (392 spans, `claude-haiku-4-5`).
+- Planner override `fable` was unavailable and fell back to Opus; verifier ran on Opus (independent envtest re-runs paid off — the verifier re-ran gates rather than trusting SUMMARY claims).
+- Proof cluster left running post-capture for human review, per the one-heavy-workload VM discipline.
+
 ## Cross-Milestone Trends
 
 ### Process Evolution

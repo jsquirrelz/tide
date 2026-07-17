@@ -11,23 +11,28 @@
 - ✅ **v1.0.5 — Resumable Import: Partial-Tree Resume** — Phase 30 (shipped 2026-06-27, tag `v1.0.5`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.5, verified anon). adopt-complete + re-plan-incomplete: fixes the v1.0.3 import defect dogfood run #2 surfaced (incomplete-envelope nodes materialized as `Running`-with-no-envelope zombies → stall). Unblocked deferred dogfood run #2. Full archive: [milestones/v1.0.5-ROADMAP.md](milestones/v1.0.5-ROADMAP.md) · [milestones/v1.0.5-REQUIREMENTS.md](milestones/v1.0.5-REQUIREMENTS.md).
 - ✅ **v1.0.6 — Adoption-Path Correctness & Dispatch Safety** — Phases 31–33 (shipped 2026-06-29, tag `v1.0.6`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon). Corrective patch closing the four code-level defects dogfood run #2b surfaced on the adoption path: D1+D2 lifecycle/cost seam (Phase 31), D3 dispatch concurrency cap (Phase 32), D4 planner failure semantics (Phase 33). Audit: tech_debt (13/13 reqs, 0 blockers). Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md).
 - ✅ **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–41 (shipped 2026-07-15, tag `v1.0.7`). Closed what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss, the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, agent identity, promptFile), dashboard blind spots (artifact view at approve gates, project view, log-drawer states), the Prometheus setup step, and the v1.0.6 audit tech-debt carry — plus the Phase 40 full API version-lifecycle crank (v1alpha3 sole version) and the Phase 41 12-item refactoring review. 44 requirements, 44 satisfied; audit tech_debt, 0 blockers. Full archive: [milestones/v1.0.7-ROADMAP.md](milestones/v1.0.7-ROADMAP.md) · [milestones/v1.0.7-REQUIREMENTS.md](milestones/v1.0.7-REQUIREMENTS.md) · [milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md).
-- 🚧 **v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix** — Phases 42–47 (in progress; started 2026-07-15). TIDE runs become observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenInference/OTel spans (dispatch-chain AGENT spans, full LLM message arrays, W3C traceparent propagation), a documented self-hosted Phoenix recipe wires the chart's existing OTLP endpoint end-to-end, and a runtime-neutral adapter seam keeps the trace contract stable ahead of the LangGraph beachhead.
+- ✅ **v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix** — Phases 42–47 (completed 2026-07-17; **tag/release pending** the rc-gated process). TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenInference/OTel spans (dispatch-chain AGENT spans, full LLM message arrays, W3C traceparent propagation), a documented self-hosted Phoenix recipe wires the chart’s existing OTLP endpoint end-to-end, and a runtime-neutral adapter seam keeps the trace contract stable ahead of the LangGraph beachhead. Live PROOF-01: a 392-span five-level trace tree, human-signed-off. Full archive: [milestones/v1.0.8-ROADMAP.md](milestones/v1.0.8-ROADMAP.md) · [milestones/v1.0.8-REQUIREMENTS.md](milestones/v1.0.8-REQUIREMENTS.md).
 - 📋 **vNext — Specialist Verify Tier + LangGraph Beachhead** — (scoped 2026-07-06 via /gsd:explore; picks up after v1.0.8) — plan-check / level-verify / integration-check stages on a read-only LangGraph specialist image; first rung of the evidence-gated successor-runtime ladder — [framing doc](milestones/vnext-specialist-verify-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **v1.x — LangGraph Authoring Migration (evidence-gated)** — (backlog; reframed 2026-07-06 from "Polyglot Subagent Runtimes: LangGraph Strategy") — planner roles migrate first, executor last, each rung gated on eval-harness evidence; endgame = CLI-deprecation decision + multi-provider via `init_chat_model`, dissolving the standalone OpenAI backend — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **vLater — Dogfood Run #2 (retarget pending)** — (original deliverable — TIDE builds the OpenAI backend — dissolved by multi-provider-via-LangGraph; new build target chosen at scoping; still gated on multi-node infrastructure) — archived Flood Tide phase details remain a starting point: [milestones/v1.0.7-floodtide-ROADMAP.md](milestones/v1.0.7-floodtide-ROADMAP.md)
 
 ## Phases
 
-### 🚧 v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (In Progress)
+<details>
+<summary>✅ v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (Phases 42–47) — COMPLETED 2026-07-17 (tag/release pending)</summary>
 
-**Milestone Goal:** TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenTelemetry spans with OpenInference attributes (including full LLM input/output message arrays), and a documented Phoenix self-host recipe wires the chart's existing OTLP endpoint to consume them natively.
+**Milestone Goal:** TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenTelemetry spans with OpenInference attributes (including full LLM input/output message arrays), and a documented Phoenix self-host recipe wires the chart’s existing OTLP endpoint to consume them natively.
 
-- [ ] **Phase 42: Trace-Context Foundation + Planner-Level Span Emission** - Pure trace-context helpers plus attribute-complete AGENT spans for the four planning-DAG levels (Project/Milestone/Phase/Plan)
-- [ ] **Phase 43: Task-Level Parity + Trace-Context Propagation** - The Task level gains its own dispatch span, W3C `traceparent` propagates into subagent and reporter Job envs, and per-level trace IDs persist in `.status.trace`
-- [ ] **Phase 44: LLM Message-Array Spans + D-O5 Redaction/Size Boundary** - The reporter's trace-only mode turns a Task's `events.jsonl` into redacted, size-bounded LLM message-array spans — the milestone's headline capability
-- [ ] **Phase 45: Runtime-Neutral Adapter Seam** - The message-span synthesizer becomes a per-runtime adapter behind the Subagent seam, proven by a self-instrumenting-stub contract test
-- [ ] **Phase 46: Observability Enrichment + Dashboard Deep Link** - Sampler default, `session.id`, metadata/tag enrichment, and a Phoenix deep link from the dashboard's DAG nodes
-- [ ] **Phase 47: Self-Hosted Phoenix Install + End-to-End Proof** - Documented Phoenix install (both storage paths, auth override, OTLP wiring) and a live run's trace tree captured as milestone-close evidence
+- [x] **Phase 42: Trace-Context Foundation + Planner-Level Span Emission** (5/5 plans) — completed 2026-07-16 — pure `pkg/otelai/tracecontext.go` + attribute-complete AGENT spans for the four planner levels
+- [x] **Phase 43: Task-Level Parity + Trace-Context Propagation** (5/5 plans) — completed 2026-07-16 — Task dispatch span, W3C `traceparent` at both pod hops, per-level IDs in `.status.trace`
+- [x] **Phase 44: LLM Message-Array Spans + D-O5 Redaction/Size Boundary** (5/5 plans) — completed 2026-07-17 — trace-only reporter turns `events.jsonl` into redacted, size-bounded LLM spans (the headline)
+- [x] **Phase 45: Runtime-Neutral Adapter Seam** (2/2 plans) — completed 2026-07-17 — `SelfInstruments` capability flag + skip-synthesis contract test, byte-identical today
+- [x] **Phase 46: Observability Enrichment + Dashboard Deep Link** (5/5 plans) — completed 2026-07-17 — sampler 1.0, `session.id`, metadata/tags, `<PhoenixTraceLink>` deep link
+- [x] **Phase 47: Self-Hosted Phoenix Install + End-to-End Proof** (10/10 plans) — completed 2026-07-17 — live 392-span five-level trace tree in self-hosted Phoenix; PROOF-01 human-signed-off
+
+Full archive: [milestones/v1.0.8-ROADMAP.md](milestones/v1.0.8-ROADMAP.md) · [milestones/v1.0.8-REQUIREMENTS.md](milestones/v1.0.8-REQUIREMENTS.md)
+
+</details>
 
 <details>
 <summary>✅ v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics (Phases 34–41) — SHIPPED 2026-07-15</summary>
@@ -154,192 +159,7 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 
 </details>
 
-## Phase Details
-
-### Phase 42: Trace-Context Foundation + Planner-Level Span Emission
-
-**Goal**: Lay the pure, K8s-independent trace-context primitives (deterministic TraceID from Project UID, W3C `traceparent` formatting/extraction, retroactive span timestamps) and wire them into the four *existing* planner-level Job-completion handlers (Project/Milestone/Phase/Plan) — real, attribute-complete AGENT spans appear for these levels before any propagation or Task-level work exists, using only data (model, cost, duration, token counts) the manager already holds.
-**Depends on**: Nothing (first phase of milestone)
-**Requirements**: ATTR-01, ATTR-02, ATTR-03
-**Success Criteria** (what must be TRUE):
-
-  1. An operator pointed at any OTLP-compatible backend sees a real AGENT-kind span for every completed Project/Milestone/Phase/Plan, and every one of those spans carries `llm.model_name` and `llm.provider` — the two attributes Phoenix needs to avoid rendering `$0.00`/blank cost (ATTR-01).
-  2. Each of those spans also carries `llm.token_count.total` alongside the existing prompt/completion/cache-split token attributes (ATTR-02).
-  3. Every attribute key emitted by `pkg/otelai` resolves from the official `openinference-semantic-conventions` Go module rather than a hand-rolled string constant, so the same keys `openinference-instrumentation-langchain` will emit natively already match (ATTR-03).
-
-**Plans**: 10 plans (5 executed + 5 gap-closure) (3 waves)
-
-Plans:
-**Wave 1**
-
-- [x] 42-01-PLAN.md — Adopt openinference-semantic-conventions v0.1.1 + rework pkg/otelai attrs (D-05/D-06/D-07/D-08; blocking legitimacy checkpoint)
-- [x] 42-02-PLAN.md — Pure trace-context primitives: TraceIDFromUID / FormatTraceparent / ExtractRemoteParent (Phase 43 seam; Option A independent roots)
-- [x] 42-03-PLAN.md — Span-emission idempotency marker fields on all four planner CRD statuses + manifest regen
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 42-04-PLAN.md — Shared retroactive span synthesizer + Milestone/Phase handler wiring + envtest specs
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 42-05-PLAN.md — Plan/Project handler wiring + envtest specs + full Layer A phase gate
-
-### Phase 43: Task-Level Parity + Trace-Context Propagation
-
-**Goal**: Close the last dispatch-chain gap (the Task/executor level has zero span emission today) and thread a W3C `traceparent` one hop at a time from the manager into both the subagent Job and the reporter Job, so a single Project run composes into ONE connected, navigable trace tree instead of five disconnected roots — with each level's IDs durably anchored in its own CRD status for later reads.
-**Depends on**: Phase 42 (reuses `pkg/otelai/tracecontext.go` and the attribute-complete span pattern)
-**Requirements**: TRACE-01, TRACE-02, PROP-01, PROP-02
-**Success Criteria** (what must be TRUE):
-
-  1. The manager emits a real AGENT dispatch span at Task Job completion, closing the "all five level-completion sites" gap — Task now has the same span-emission call-site pattern as the other four levels (TRACE-01).
-  2. A single Project run renders as one connected trace: the trace ID is deterministically derivable from the Project's UID, and every level's span (Project→Milestone→Phase→Plan→Task) parents correctly under its immediate parent's span (TRACE-02).
-  3. W3C `traceparent` is present as data in both the subagent Job's env and the reporter Job's env at dispatch time — the runtime-neutral contract applied at both pod hops, so a child process's own spans (synthesized today, self-instrumented in a future runtime) parent identically either way (PROP-01).
-  4. Each level's trace/span IDs persist in that level's `.status.trace` field after completion — a durable, re-readable parent-carrier surviving reconciler restarts (PROP-02).
-
-**Plans**: 5 plans
-
-**Wave 1** *(parallel, independent)*
-
-- [x] 43-01-PLAN.md — Durable `{Level}TraceSpanID` fields on all five CRD statuses + Task's `TaskSpanEmittedUID` marker + CRD manifest regen (PROP-02 surface)
-- [x] 43-02-PLAN.md — Traceparent carriers in both Job builders (BuildOptions/ReporterOptions) + tide-reporter `--traceparent` flag registration (crash-loop guard)
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 43-03-PLAN.md — Parenting retrofit: two-sided `synthesizePlannerSpan` signature, deterministic TraceID, immediate-parent fetches, second status patch at all four planner completion handlers + envtest linkage/persistence assertions
-
-**Wave 3** *(blocked on Wave 2; 04 ∥ 05)*
-
-- [x] 43-04-PLAN.md — Real traceparent values at both pod hops for the four planner levels (dispatch-prep TRACEPARENT env + reporter `--traceparent` Args) + envtest proof
-- [x] 43-05-PLAN.md — Task-level parity: `emitTaskSpanOnce` covering all four terminal paths (generalized Option B), `TaskTraceSpanID` persistence, Task dispatch hop + fifth envtest Describe block
-
-### Phase 44: LLM Message-Array Spans + D-O5 Redaction/Size Boundary
-
-> **Research flag**: needs a research pass before planning — the exact `events.jsonl` multi-turn schema and a concrete byte-threshold constant for the D-O5 inline-vs-`ArtifactPath` decision are unverified beyond the schema comment in `stream_parser.go`; pull real fixture files and pick a specific number, don't defer to "some threshold."
-
-**Goal**: Give the Task level's full LLM conversation — until now the richest data in the system with zero in-namespace observability consumer — its first path into Phoenix as message-array spans, safely: every message passes the existing secret-redaction machinery before emission, and payload size is explicitly bounded under OTLP's 4 MB ceiling rather than left as a silent drop risk. The milestone's headline, highest-risk phase.
-**Depends on**: Phase 43 (correct parenting requires propagation already wired)
-**Requirements**: MSG-01, MSG-02, MSG-03, TRACE-03
-**Success Criteria** (what must be TRUE):
-
-  1. The reporter Job gains a trace-only mode — no child-CR materialization — that reads a completed Task's `events.jsonl` and emits `LLMInputMessages`/`LLMOutputMessages` spans, closing the gap where the Task level has no in-namespace consumer of its own conversation today (MSG-01).
-  2. Every message attribute is populated only after passing `internal/harness/redact.SecretPatterns`; a secret planted in a fixture `events.jsonl` never reaches the emitted span, even though the source file is written raw/unredacted by design (MSG-02).
-  3. Message-array spans stay under the OTLP 4 MB ceiling: content above the documented byte threshold truncates with an explicit truncation marker and carries `ArtifactPath(events.jsonl)` on the same span for full-fidelity reference; `TestNoPayloadHelperOnPublicSurface` is updated deliberately to reflect the new bounded-payload surface, not deleted (MSG-03).
-  4. `tide-reporter` — a short-lived, `os.Exit`-driven one-shot binary — calls its TracerProvider's deferred Shutdown on every exit path, so killing the process mid-batch never silently drops spans (TRACE-03).
-
-**Plans**: 5 plans (4 waves)
-
-Plans:
-**Wave 1**
-
-- [x] 44-01-PLAN.md — redact.String + pkg/otelai tool-call/reasoning encoding, LLMSpanKind, markers, D-O5 doc/guard evolution
-- [x] 44-02-PLAN.md — ReporterOptions OTLP env forwarding + OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6 + trace-only Job shape + four planner spawn sites
-
-**Wave 2** *(blocked on 44-01)*
-
-- [x] 44-03-PLAN.md — internal/reporter/tracesynth.go: events.jsonl→LLM-span synthesizer, redact-before-truncate, triple size guard, batch-aggregate proof
-
-**Wave 3** *(blocked on 44-03)*
-
-- [x] 44-04-PLAN.md — tide-reporter --trace-only mode + TracerProvider lifecycle with shutdown-on-every-exit-path (TRACE-03) + combined-run synth step
-
-**Wave 4** *(blocked on 44-02 + 44-04)*
-
-- [x] 44-05-PLAN.md — Task trace-only reporter spawn (D-06 gated) + manager deps wiring + envtest proof
-
-### Phase 45: Runtime-Neutral Adapter Seam
-
-**Goal**: Turn the events.jsonl→spans synthesizer from Phase 44 into a per-runtime adapter behind the Subagent seam, so a future self-instrumenting runtime (the LangGraph beachhead) can skip synthesis without any TIDE call site caring which runtime is live. Pure forward-compatibility scaffolding — every vendor today returns "not self-instrumenting," so behavior is unchanged; the seam and its contract test exist now so this isn't discovered for the first time when LangGraph actually lands.
-**Depends on**: Phase 44 (adapts the tracesynth.go synthesizer just built)
-**Requirements**: ADAPT-01
-**Success Criteria** (what must be TRUE):
-
-  1. A self-instrumenting capability flag travels as data derived from the manager's resolved `Provider.Vendor` — never a hard-coded per-runtime branch in the reporter or manager.
-  2. When the flag is set for a Task's resolved provider, the reporter skips message-span synthesis entirely for that Task — no double-emission path exists.
-  3. A contract test using a stub self-instrumenting runtime proves zero duplicate spans end-to-end (env-carrier extraction only — no LangGraph-specific span shape assumed).
-
-**Plans**: 2 plans
-
-Plans:
-- [x] 45-01-PLAN.md — SelfInstruments capability table + ReporterOptions/BuildReporterJob transport + flag computation at all 5 reporter-spawn sites (manager side)
-- [x] 45-02-PLAN.md — Reporter --skip-message-spans parse + synthesizeSpans sole skip point + D-09 stub-runtime contract test + tracesynth.go doc contract (reporter side)
-
-### Phase 46: Observability Enrichment + Dashboard Deep Link
-
-**Goal**: Make the now-complete trace tree actually useful to an operator inside Phoenix and inside TIDE's own dashboard — a sane default sampler (so a demo run isn't a coin flip), a session identity that lets Phoenix compute an independent cost cross-check, filterable metadata/tags, and a one-click deep link from any DAG node straight to its trace.
-**Depends on**: Phase 44 (enriches both the dispatch-chain AGENT spans and the message-array spans, so both span families must already exist); Phase 43 (OBS-04 reads the `.status.trace` field PROP-02 introduced)
-**Requirements**: OBS-01, OBS-02, OBS-03, OBS-04
-**Success Criteria** (what must be TRUE):
-
-  1. The chart's trace-sampler default is 1.0 (up from 0.1), with the opt-down for high-volume installs documented — a demo run no longer has a 90% chance that any given span never reaches Phoenix (OBS-01).
-  2. Every span carries `session.id` = Project UID, so Phoenix's session view computes an independent per-run token/cost rollup an operator can cross-check against TIDE's own budget tally (OBS-02).
-  3. Spans carry `metadata`/`tag.tags` enrichment (level kind + name, wave index, gate profile, failure-halt state), so an operator can filter Phoenix's DSL to "every span from Phase N" or "every conservative-profile run" without leaving Phoenix (OBS-03).
-  4. Each Planning/Execution DAG node in the TIDE dashboard deep-links to its Phoenix trace (reading IDs from `.status.trace`) when a `phoenix.baseURL` chart value is configured, and renders no dead button when it isn't (OBS-04).
-
-**Plans**: 5 plans (2 waves)
-**UI hint**: yes
-
-Plans:
-**Wave 1** *(parallel, independent)*
-
-- [x] 46-01-PLAN.md — otelai SessionID/Metadata/Tags helpers + ReporterOptions/CLI transport + EmitSpans enrichment (reporter side)
-- [x] 46-02-PLAN.md — Sampler default 0.1→1.0 (every surface) + phoenix.baseURL chart value + helm render gates + honest opt-down docs
-- [x] 46-03-PLAN.md — Dashboard backend: PHOENIX_BASE_URL config chain + traceId/traceSpanId on projectDetail/childRef/taskDetail
-
-**Wave 2** *(46-04 blocked on 46-01; 46-05 blocked on 46-03)*
-
-- [x] 46-04-PLAN.md — Manager-side enrichment on all five AGENT spans + D-03 token-count drop (all five levels, planner-corrected vs research's Task-only) + D-02 sampled-bit threading
-- [x] 46-05-PLAN.md — SPA deep link: phoenixLink.ts + shared PhoenixTraceLink at both mount points (NodeDetailPanel + TaskDetailDrawer)
-
-### Phase 47: Self-Hosted Phoenix Install + End-to-End Proof
-
-> **Research flag**: re-fetch the Phoenix chart/appVersion pin fresh immediately before authoring INSTALL.md — the chart ships near-daily (9 versions in ~9 days at research time) and the number recorded in research/STACK.md (`10.0.0`/`18.0.0`) should not be trusted without a live check.
-
-**Goal**: An operator can stand up a self-hosted Phoenix from documented, non-default-safe overrides, point TIDE's existing `otel.exporter.endpoint` chart value at it, and see a real run's complete five-level trace tree — including redacted message arrays — rendered and queryable. This is the milestone's acceptance bar; PHX-01/PHX-02 documentation can be drafted in parallel with Phases 42–46, but the live proof gates on them.
-**Depends on**: Phase 46 (a live run needs the full enrichment + deep-link surface to be a meaningful proof)
-**Requirements**: PHX-01, PHX-02, PROOF-01
-**Success Criteria** (what must be TRUE):
-
-  1. INSTALL.md/observability.md walks an operator through a self-hosted Phoenix install covering both storage paths — PVC-backed SQLite for kind/dev matching TIDE's own posture, and bundled Postgres for durability — and explicitly calls out overriding the chart's `auth.enableAuth=true` default (PHX-01).
-  2. The `otel.exporter.endpoint` wiring is documented end-to-end using the required bare `host:port` form (not scheme-prefixed, which `otlptracegrpc.WithEndpoint` silently rejects), and NOTES.txt nudges an operator toward the Phoenix step when tracing is dark (PHX-02).
-  3. A live run's complete five-level trace tree — including redacted message arrays at the Task level — is visible and queryable in a self-hosted Phoenix, with screenshots and trace IDs captured as milestone-close evidence (PROOF-01).
-
-**Plans**: 5 plans
-
-Plans:
-**Wave 1** *(parallel, independent)*
-
-- [x] 47-01-PLAN.md — Go-side OTLP-headers threading (ReporterOptions + Deps + all 5 spawn sites) + unit-test pair
-- [x] 47-02-PLAN.md — Chart-side headersSecretRef wiring + NOTES.txt tracing-dark nudge (augment-script + tracked sites) + offline render gates
-
-**Wave 2** *(47-03 blocked on 47-01/47-02)*
-
-- [x] 47-03-PLAN.md — Fresh chart-pin re-check + INSTALL.md "Enable tracing (Phoenix)" + observability.md reference recipe (both storage paths, auth-ON, headers chain)
-
-**Wave 3** *(47-04 blocked on 47-03 — the recipe is proven by following it)*
-
-- [x] 47-04-PLAN.md — Live proof: fresh tide-phoenix-proof cluster from the docs, no-spend pre-flight checks, medium-project driving run to Complete
-
-**Wave 4** *(47-05 blocked on 47-04)*
-
-- [x] 47-05-PLAN.md — Evidence capture (tree / redacted-span / query / deep-link screenshots) + 47-EVIDENCE.md + human acceptance gate
-
-**Wave 5 — gap closure** *(47-06/47-08/47-09 parallel)*
-
-- [x] 47-06-PLAN.md — CR-02 root-fix: reporter OTLP-headers via per-namespace tide-otlp-headers secretKeyRef + WR-03 doc correction
-- [x] 47-08-PLAN.md — Boundary-push stale-lease root-fix: remote-tip re-read + ancestry-guarded lease refresh in tide-push
-- [x] 47-09-PLAN.md — Medium-sample kind RWO PVC override step (apply-sequence step 3b)
-
-**Wave 6 — gap closure** *(47-07 after 47-06; shared controller files)*
-
-- [x] 47-07-PLAN.md — CR-01: durable reporter-spawned status markers gating all five spawn sites
-
-**Wave 7 — gap closure** *(47-10 after 47-07)*
-
-- [x] 47-10-PLAN.md — Envtest proof: TTL-GC'd reporter Job never re-created once the marker is set
-
 ## Progress
-
-**Execution Order (v1.0.8):** 42 → 43 → 44 → 45 → 46 → 47. Strict dependency chain: 43 needs 42's helpers, 44 needs 43's propagation, 45 adapts 44's synthesizer, 46 enriches both 43's and 44's span families, 47's live proof gates on 46 (though PHX-01/PHX-02 docs may draft in parallel).
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -351,9 +171,4 @@ Plans:
 | 30 (see archive) | v1.0.5 | 3/3 | Complete | 2026-06-27 |
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
-| 42. Trace-Context Foundation + Planner-Level Span Emission | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 43. Task-Level Parity + Trace-Context Propagation | v1.0.8 | 5/5 | Complete    | 2026-07-16 |
-| 44. LLM Message-Array Spans + D-O5 Redaction/Size Boundary | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 45. Runtime-Neutral Adapter Seam | v1.0.8 | 2/2 | Complete    | 2026-07-17 |
-| 46. Observability Enrichment + Dashboard Deep Link | v1.0.8 | 5/5 | Complete    | 2026-07-17 |
-| 47. Self-Hosted Phoenix Install + End-to-End Proof | v1.0.8 | 10/10 | Complete   | 2026-07-17 |
+| 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |

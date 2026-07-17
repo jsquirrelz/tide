@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.0.8 Phoenix Rising — OpenInference Trace Emission + Self-Hosted Phoenix (Completed: 2026-07-17)
+
+**Phases completed:** 6 phases (42–47), 32 plans, 67 tasks
+**Timeline:** 2026-07-15 → 2026-07-17 · 240 commits · 229 files (+34.8k/−343)
+**Acceptance:** PROOF-01 human-signed-off at close — a live $0.88 `medium-project` run on a from-the-docs kind cluster produced a queryable **392-span, five-level** OpenInference trace tree (trace `e9124906…`) in an auth-ON self-hosted Phoenix. Phase 47 is the milestone's live E2E acceptance proof; no separate `/gsd:audit-milestone` was run.
+**Release status:** milestone complete and archived; **not yet released** — the public v1.0.8 tag + images/OCI charts follow the rc-gated release process (chart/appVersion bump first).
+**Known deferred items at close:** 30 acknowledged (see STATE.md Deferred Items) — carried-forward bookkeeping: 24 quick-task `status:`-field false-positives (work shipped), 2 stale debug files (a KB + an old PR9 flake), and 4 todos (incl. 2 dispatch-gate correctness notes + cache-F1/vNext).
+
+**Key accomplishments:**
+
+- **Five-level trace tree (the headline):** the Milestone→Phase→Plan→Task dispatch chain emits real OpenInference `AGENT` spans — deterministic TraceID from `Project.UID`, W3C `traceparent` propagated at both pod hops (subagent + reporter), correct parent-child nesting across all five levels, and each level's span IDs persisted in `.status.trace`. Pure `pkg/otelai/tracecontext.go` (zero K8s imports); attribute-complete (model / provider / token counts) for succeeded and failed Jobs alike.
+- **LLM message-array spans, safely (the highest-risk phase):** the reporter's new trace-only mode turns a Task's `events.jsonl` into redacted, size-bounded OpenInference LLM spans — redact-before-truncate (proven with a straddling-secret test), aggregate-batch DoS bounded (`OTEL_BSP_MAX_EXPORT_BATCH_SIZE=6` + a 32-span test), and the one-shot `tide-reporter`'s TracerProvider `Shutdown` proven to fire on every exit path.
+- **Attribute completeness via official semconv:** every `pkg/otelai` attribute key resolves from the `openinference-semantic-conventions` Go module (no hand-rolled strings), so TIDE's spans already match what `openinference-instrumentation-langchain` will emit natively — the runtime-migration survival lever.
+- **Runtime-neutral adapter seam:** a fail-closed `SelfInstruments` vendor-capability flag travels as data (from resolved `Provider.Vendor`) and lets the reporter skip synthesis for a self-instrumenting runtime, with a contract test proving zero duplicate spans — forward-compat scaffolding for the LangGraph beachhead, byte-identical behavior today.
+- **Operator observability + dashboard deep link:** sampler default 0.1→1.0, `session.id` = Project UID (an independent Phoenix cost cross-check against TIDE's budget tally), `metadata`/`tag.tags` enrichment for DSL filtering, and a shared `<PhoenixTraceLink>` deep link from every Planning/Execution DAG node (renders nothing when unconfigured — no dead buttons).
+- **Self-hosted Phoenix, documented and proven:** INSTALL.md / observability.md cover both storage paths (PVC-SQLite + bundled Postgres), the chart's auth-ON default, and the full OTLP-headers `secretKeyRef` forwarding chain; the live proof captured the trace tree as milestone-close evidence, and the two defects the run surfaced (boundary-push stale-lease; reporter double-spawn → partial enrichment) were root-fixed, not worked around.
+
+---
+
 ## v1.0.7 First-Run Paper Cuts: Run Integrity & Operator Ergonomics (Shipped: 2026-07-15)
 
 **Phases completed:** 8 phases (34–41, incl. folded-in 39), 51 plans

@@ -2,44 +2,43 @@
 gsd_state_version: 1.0
 milestone: v1.0.8
 milestone_name: Phoenix Rising — OpenInference Trace Emission + Self-Hosted Phoenix
-status: executing
-stopped_at: Phase 47 executed — verification gaps_found (4 defects + human evidence review outstanding)
-last_updated: "2026-07-17T17:55:46.475Z"
-last_activity: 2026-07-17 -- Phase 47 execution started
+status: Awaiting next milestone
+stopped_at: Milestone v1.0.8 complete — archived 2026-07-17; public tag/release pending the rc-gated process
+last_updated: "2026-07-17T22:29:21.967Z"
+last_activity: 2026-07-17 — Milestone v1.0.8 completed and archived
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 32
-  completed_plans: 27
-  percent: 83
+  completed_plans: 32
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-15)
+See: .planning/PROJECT.md (updated 2026-07-17)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 47 — self-hosted-phoenix-install-end-to-end-proof
+**Current focus:** Between milestones — v1.0.8 "Phoenix Rising" complete + archived; public tag/release (rc-gated) and next-milestone scoping pending.
 
 ## Current Position
 
-Phase: 47 (self-hosted-phoenix-install-end-to-end-proof) — EXECUTING
-Plan: 1 of 10
-Status: Executing Phase 47
-Last activity: 2026-07-17 -- Phase 47 execution started
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Milestone v1.0.8 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-17 — Milestone v1.0.8 completed and archived
 
 ## Performance Metrics
 
 **Velocity (recent milestones):**
 
+- v1.0.8: 32 plans across 6 phases in ~3 days (2026-07-15 → 2026-07-17) · 240 commits · +34.8k/−343 LOC
 - v1.0.7: 51 plans across 8 phases in ~12 days (2026-07-03 → 2026-07-15)
 - v1.0.6: 8 plans across 3 phases in ~2 days (2026-06-28 → 2026-06-29)
 - v1.0.5: 3 plans, 1 phase (2026-06-27)
-- Total plans completed v1.0.0–v1.0.7: ~350+
+- Total plans completed v1.0.0–v1.0.8: ~380+
 
 ## Accumulated Context
 
@@ -64,9 +63,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Blockers/Concerns
 
-- **Phase 44 research gap:** exact `events.jsonl` multi-turn schema and the D-O5 byte threshold are unverified beyond the schema comment in `stream_parser.go` — needs a research pass against real fixture files before planning, not just the comment.
-- **Phase 47 chart-pin freshness:** Phoenix Helm chart ships near-daily (9 versions in ~9 days at research time); re-fetch `Chart.yaml` fresh immediately before authoring INSTALL.md — do not trust the `10.0.0`/`18.0.0` pin recorded in research/STACK.md.
-- **Cross-pod clock skew (Pitfall 5):** only exercisable on a multi-node cluster; the dev/proof environment (kind, single-node) cannot surface this class of bug — document as a known limitation at Phase 47 close, not treated as fully verified.
+- **v1.0.8 not yet released.** The milestone is complete + archived, but the public `v1.0.8` git tag + images/OCI charts are NOT built. Follow the rc-gated release recipe — **bump chart/appVersion as step one** (else the rc dry-run reuses prior published images → version skew).
+- **Cross-pod clock skew (Pitfall 5) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; documented as a known limitation at Phase 47 close, revisit on a multi-node cluster.
+- (Resolved this milestone: Phase 44 `events.jsonl` schema + D-O5 byte threshold — researched and implemented; Phase 47 chart-pin — re-verified live at `10.0.1`/`18.1.0`.)
 
 ### Roadmap Evolution
 
@@ -75,23 +74,24 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ## Deferred Items
 
-Items acknowledged and carried forward from v1.0.7 close (2026-07-15) — full detail in [milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md):
+Items acknowledged and deferred at v1.0.8 close (2026-07-17) — 30 carried-forward, none blocking. Phase 47's two PROOF-01 human items were **resolved** (signed off), not deferred.
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| debug_sessions | 1 | layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green, so the repro is CI-specific |
-| quick_tasks | 24 | SUMMARY frontmatter `status:` field missing/unknown — audit-scanner bookkeeping only; the work itself shipped |
-| todos | 4 | signed-commits-verified-badge (GPG scope, Future Requirements) · project-dispatch-missing-failurehalt-gate + task-dispatch-gate-order-divergence (audit W-2, next-milestone candidates) · cache-f1-direct-sdk-cross-pod-caching (vNext+) |
-| uat_gaps | 1 | scanner false-positive: 37-UAT.md is status `passed` with 0 open scenarios |
+| quick_tasks | 24 | SUMMARY frontmatter `status:` field missing/unknown — audit-scanner bookkeeping only; the work itself shipped (same class carried since v1.0.7) |
+| todos | 4 | signed-commits-verified-badge (GPG scope, Future Requirements) · project-dispatch-missing-failurehalt-gate + task-dispatch-gate-order-divergence (audit W-2 dispatch-gate correctness, next-milestone candidates) · cache-f1-direct-sdk-cross-pod-caching (vNext+) |
+| debug_sessions | 2 | knowledge-base.md (a KB file, not a session) · layer-a-envtest-flakes-pr9 [investigating] — CI-side Layer A envtest flakes; local envtest runs green |
 
-Tech-debt carried into v1.0.8 window: W-2 FailureHalt/gate-order divergences (todos above), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
+**Resolved at close (not deferred):** `47-HUMAN-UAT.md` + `47-VERIFICATION.md` — both PROOF-01 human items signed off 2026-07-17 (the `audit-open` uat_gaps=1 line is a benign 0-open-scenario, status `passed` file).
+
+Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos above), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
 
 ## Session Continuity
 
-Last session: 2026-07-17T17:20:53.732Z
-Stopped at: Phase 47 executed — verification gaps_found (4 defects + human evidence review outstanding)
-Resume file: .planning/phases/47-self-hosted-phoenix-install-end-to-end-proof/47-VERIFICATION.md
+Last session: 2026-07-17T22:20:26Z
+Stopped at: v1.0.8 milestone complete + archived; public tag/release (rc-gated) pending
+Resume file: — (start the next milestone with /gsd:new-milestone, or run the rc-gated release for v1.0.8)
 
 ## Operator Next Steps
 
-- Run `/gsd:plan-phase 42` to begin planning the first v1.0.8 phase (Trace-Context Foundation + Planner-Level Span Emission).
+- Start the next milestone with /gsd-new-milestone
