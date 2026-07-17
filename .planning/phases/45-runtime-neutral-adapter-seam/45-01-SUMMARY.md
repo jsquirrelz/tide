@@ -127,3 +127,7 @@ The manager-side half of ADAPT-01 is complete: the capability flag travels as da
 ---
 *Phase: 45-runtime-neutral-adapter-seam*
 *Completed: 2026-07-16*
+
+## Self-Check: PASSED
+
+All created/modified files verified present on disk; all 6 commit hashes (00e6f06, 31cf7f0, 60c219b, 825bb82, d505fe2, 3b966b6) verified present in git log.
