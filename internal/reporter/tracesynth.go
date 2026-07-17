@@ -581,10 +581,17 @@ func boundedSpanAttrs(
 // otelai.ArtifactPath — a superset of MSG-03's truncation-time requirement;
 // the full-fidelity pointer is always useful.
 //
+// sessionID, metadataJSON, and tags are the 46 OBS-02/OBS-03 enrichment
+// triple, manager-computed and threaded in verbatim via cmd/tide-reporter's
+// synthesizeSpans. Each is conditional — empty/nil values stamp nothing,
+// never a fabricated empty attribute — and MUST be byte-identical to what
+// the same level's AGENT span carries (Phoenix's ProjectSession groups
+// purely on an exact session.id string match).
+//
 // Errors are reserved for programming-level failures; content-level
 // problems (oversized messages, degraded calls) degrade to marker
 // attributes rather than failing the run (D-10/D-11).
-func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artifactPath string) error {
+func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artifactPath string, sessionID string, metadataJSON string, tags []string) error {
 	for _, call := range calls {
 		spanName := call.Model
 		if spanName == "" {
@@ -638,6 +645,17 @@ func EmitSpans(ctx context.Context, tracer trace.Tracer, calls []CallSpan, artif
 		span.SetAttributes(otelai.TimingSynthetic())
 		if call.Degraded || inputDegraded || outputDegraded {
 			span.SetAttributes(otelai.ParseDegraded())
+		}
+		// 46 OBS-02/OBS-03: conditional enrichment triple — absent when
+		// empty, never a fabricated empty value.
+		if sessionID != "" {
+			span.SetAttributes(otelai.SessionID(sessionID))
+		}
+		if metadataJSON != "" {
+			span.SetAttributes(otelai.MetadataJSON(metadataJSON))
+		}
+		if len(tags) > 0 {
+			span.SetAttributes(otelai.Tags(tags...))
 		}
 		span.SetStatus(codes.Ok, "")
 		span.End(trace.WithTimestamp(endTime))

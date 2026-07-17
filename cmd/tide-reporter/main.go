@@ -57,6 +57,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -94,6 +95,9 @@ type reporterConfig struct {
 	TraceParent      string // W3C traceparent for this level's own span (consumed starting Phase 44)
 	TraceOnly        bool   // Phase 44 MSG-01: synthesize LLM message-array spans only, no materialization
 	SkipMessageSpans bool   // Phase 45 ADAPT-01/D-05: self-instrumenting vendor — skip synthesizeSpans entirely
+	SessionID        string // 46 D-05/OBS-02: TIDE's run identity (Project UID), stamped on every emitted LLM span
+	MetadataJSON     string // 46 D-05/OBS-03: manager-pre-JSON-encoded metadata, stamped opaquely (never re-marshaled)
+	TagsCSV          string // 46 D-05/OBS-03: comma-separated tags, split before threading into EmitSpans
 }
 
 const (
@@ -126,6 +130,9 @@ func parseFlags(args []string) (reporterConfig, error) {
 		"synthesize LLM message-array spans from events.jsonl only; no child-CR materialization (Phase 44 MSG-01)")
 	skipMessageSpans := fs.Bool("skip-message-spans", false,
 		"skip LLM message-array-span synthesis (self-instrumenting vendor; D-03 default-safe: absent = synthesize)")
+	sessionID := fs.String("session-id", "", "TIDE's own run identity (Project UID) stamped on every emitted LLM span (46 D-05/OBS-02)")
+	metadataJSON := fs.String("metadata", "", "manager-pre-JSON-encoded metadata map, stamped opaquely without re-marshaling (46 D-05/OBS-03)")
+	tagsCSV := fs.String("tags", "", "comma-separated tags stamped as a native string list (46 D-05/OBS-03)")
 
 	if err := fs.Parse(args); err != nil {
 		return reporterConfig{}, err
@@ -141,6 +148,9 @@ func parseFlags(args []string) (reporterConfig, error) {
 		TraceParent:      *traceParent,
 		TraceOnly:        *traceOnly,
 		SkipMessageSpans: *skipMessageSpans,
+		SessionID:        *sessionID,
+		MetadataJSON:     *metadataJSON,
+		TagsCSV:          *tagsCSV,
 	}, nil
 }
 
@@ -354,7 +364,13 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 
 	tracer := otel.Tracer("tide.reporter")
 	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
-	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath); err != nil {
+	var tags []string
+	for _, tag := range strings.Split(cfg.TagsCSV, ",") {
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath, cfg.SessionID, cfg.MetadataJSON, tags); err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
 		return
 	}

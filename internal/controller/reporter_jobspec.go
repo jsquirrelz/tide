@@ -35,6 +35,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -119,6 +120,29 @@ type ReporterOptions struct {
 	// (false) is the existing behavior, byte-identical pre-Phase-45: every
 	// vendor resolves false today (D-03 default-safe).
 	SkipMessageSpans bool
+
+	// SessionID (46 D-05/OBS-02) is TIDE's own run identity — the Project
+	// UID — stamped on every reporter-emitted LLM span via otelai.SessionID.
+	// MUST be byte-identical to what the same level's AGENT span carries:
+	// Phoenix's ProjectSession groups on an exact session.id string match.
+	// Carried as an Arg (--session-id=), not Env, matching TraceParent's
+	// precedent (Pitfall 3 — this file is 100% Args-based).
+	SessionID string
+
+	// MetadataJSON (46 D-05/OBS-03) is the manager-pre-JSON-encoded metadata
+	// map (level kind, gate profile, failure-halt state, etc.) stamped
+	// opaquely on every reporter-emitted LLM span via otelai.MetadataJSON —
+	// this file never marshals it; the manager owns the encoding. Empty
+	// string omits the Arg entirely (no attribute stamped, never a
+	// fabricated empty value).
+	MetadataJSON string
+
+	// Tags (46 D-05/OBS-03) are low-cardinality categorical values (e.g.
+	// level/gate/profile enums — no commas possible) rendered as a single
+	// comma-joined Arg (--tags=) and split on comma by the reporter. Stamped
+	// as a native attribute.STRINGSLICE via otelai.Tags, never JSON-encoded
+	// (Pitfall 4). Empty slice omits the Arg entirely.
+	Tags []string
 }
 
 // BuildReporterJob constructs the K8s batchv1.Job that runs the in-namespace
@@ -228,6 +252,21 @@ func BuildReporterJob(
 	// (D-05).
 	if opts.SkipMessageSpans {
 		args = append(args, "--skip-message-spans")
+	}
+	// 46 D-05: session/metadata/tags ride the same uniform-across-both-shapes
+	// placement as SkipMessageSpans above. All three are per-span attribute
+	// values, so they follow TraceParent's Args precedent, never Env.
+	if opts.SessionID != "" {
+		args = append(args, "--session-id="+opts.SessionID)
+	}
+	if opts.MetadataJSON != "" {
+		// Pre-JSON-encoded by the manager — this file never marshals it.
+		args = append(args, "--metadata="+opts.MetadataJSON)
+	}
+	if len(opts.Tags) > 0 {
+		// Reporter splits on comma; tag values are level/gate/profile enums
+		// — no commas possible in practice.
+		args = append(args, "--tags="+strings.Join(opts.Tags, ","))
 	}
 
 	// Phase 44 D-06/T-44-04: reporter container Env — empty unless the
