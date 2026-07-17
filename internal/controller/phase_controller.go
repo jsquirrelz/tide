@@ -438,7 +438,10 @@ func (r *PhaseReconciler) reconcilePlannerDispatch(ctx context.Context, ph *tide
 		ProjectUID:           projectUID,
 		Caps:                 plannerCaps,
 		PricingOverridesJSON: r.Deps.PricingOverridesJSON,
-		TraceParent:          traceparentForLevel(project, parentSpanIDHex),
+		// D-02/Phase 46: literal true — cross-reconcile dispatch-time site;
+		// the parent's sampled bit is not persisted (RESEARCH Pitfall 3's
+		// rejected schema change; see docs/observability.md).
+		TraceParent: traceparentForLevel(project, parentSpanIDHex, true),
 	}
 	job := podjob.BuildJobSpec(opts)
 	if err := owner.EnsureOwnerRef(job, ph, r.Scheme); err != nil {
@@ -523,6 +526,11 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// plannerSpanResolvable refuses a nil completedJob (already TTL-GC'd) or
 	// a Job with no resolvable timestamps — checked BEFORE stamping so a
 	// stamp is never wasted on an unemittable span.
+	// D-02/Phase 46: default true — matches today's behavior (and RESEARCH's
+	// SDK read that every non-root span is AlwaysSample'd) when no emission
+	// runs this reconcile (marker already stamped by an earlier attempt);
+	// overwritten below with the real bit when this reconcile DOES emit.
+	sampled := true
 	if completedJob != nil && project != nil && ph.Status.PhaseSpanEmittedUID != string(completedJob.UID) && plannerSpanResolvable(completedJob) {
 		stamped := false
 		if mErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -561,8 +569,9 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 					parentSpanID = spanIDFromHexOrZero(parentMs.Status.MilestoneTraceSpanID)
 				}
 			}
-			thisSpanID, emitted := synthesizePlannerSpan(ctx, "phase", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
+			thisSpanID, gotSampled, emitted := synthesizePlannerSpan(ctx, "phase", ph.Name, "", project, r.Deps.HelmProviderDefaults, completedJob, out, envReadOK, parentSpanID)
 			if emitted {
+				sampled = gotSampled
 				// Mirror in-memory unconditionally so same-reconcile downstream
 				// logic reads it even if the persistence patch below fails.
 				ph.Status.PhaseTraceSpanID = thisSpanID.String()
@@ -590,8 +599,19 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// T-09-13: idempotent — AlreadyExists on Create is success.
 	// isFirstCompletion: true when the reporter Job is newly spawned (plan 09-08).
 	skipMessageSpans := pkgdispatch.SelfInstruments(ResolveProvider(project, "phase", r.Deps.HelmProviderDefaults).Vendor)
-	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.Deps.ReporterImage, r.sharedPVCName(),
-		traceparentForLevel(project, ph.Status.PhaseTraceSpanID), r.Deps.OTLPEndpoint, skipMessageSpans)
+	// 46 D-05/OBS-02/OBS-03: enrichment values computed from the SAME inputs
+	// this level's AGENT span used above, so the reporter's LLM spans carry
+	// byte-identical session.id/metadata/tags.
+	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "phase", ph.Name, "")
+	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
+		ReporterImage:    r.Deps.ReporterImage,
+		TraceParent:      traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
+		OTLPEndpoint:     r.Deps.OTLPEndpoint,
+		SkipMessageSpans: skipMessageSpans,
+		SessionID:        projectUID,
+		MetadataJSON:     enrichmentMD,
+		Tags:             enrichmentTags,
+	})
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr
 	}

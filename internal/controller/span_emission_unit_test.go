@@ -24,6 +24,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -36,6 +37,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -217,7 +219,7 @@ func TestPlannerSpanResolvable(t *testing.T) {
 
 func TestSynthesizePlannerSpanNilJob(t *testing.T) {
 	exp := setupSpanExporter(t)
-	gotID, gotOK := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, nil, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	gotID, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", nil, ProviderDefaults{}, nil, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if gotOK {
 		t.Errorf("synthesizePlannerSpan(nil job) ok = true, want false")
 	}
@@ -231,7 +233,11 @@ func TestSynthesizePlannerSpanNilJob(t *testing.T) {
 
 // TestSynthesizePlannerSpanSucceededComplete — the ATTR-01/ATTR-02 happy
 // path: attribute-complete AGENT span, exact StartTime/EndTime from the
-// Job's own timestamps, prompt re-mapped to include cache subsets (D-08).
+// Job's own timestamps. 46 D-03: updated deliberately (not deleted, per the
+// MSG-03 precedent) — the llm.token_count.* want-attrs this test asserted
+// pre-Phase-46 are removed; TestSynthesizePlannerSpanOmitsTokenCount below is
+// the new regression guard proving their absence at every level. This test
+// now also proves the 46 D-05/OBS-02/OBS-03 enrichment triple.
 func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 	exp := setupSpanExporter(t)
 
@@ -256,7 +262,7 @@ func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 		},
 	}
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "test-milestone-1", "", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(succeeded) = false, want true")
 	}
@@ -287,6 +293,7 @@ func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 		"openinference.span.kind": "AGENT",
 		"tide.role":               "planner",
 		"tide.invocation.level":   "milestone",
+		"session.id":              testProjectUID,
 	}
 	for key, want := range wantStringAttrs {
 		val, ok := attrValue(span.Attributes, key)
@@ -299,19 +306,110 @@ func TestSynthesizePlannerSpanSucceededComplete(t *testing.T) {
 		}
 	}
 
-	wantIntAttrs := map[attribute.Key]int64{
-		"llm.token_count.prompt": 1000, // D-08: InputTokens+CacheReadTokens+CacheCreationTokens
-		"llm.token_count.total":  1300,
+	// 46 OBS-03: metadata is a JSON string containing level/name.
+	metaVal, ok := attrValue(span.Attributes, "metadata")
+	if !ok {
+		t.Fatalf("span missing attribute %q", "metadata")
 	}
-	for key, want := range wantIntAttrs {
-		val, ok := attrValue(span.Attributes, key)
-		if !ok {
-			t.Errorf("span missing attribute %q", key)
-			continue
+	var metaDecoded map[string]string
+	if err := json.Unmarshal([]byte(metaVal.AsString()), &metaDecoded); err != nil {
+		t.Fatalf("metadata attribute is not valid JSON: %v (value=%q)", err, metaVal.AsString())
+	}
+	if metaDecoded["level"] != "milestone" {
+		t.Errorf("metadata[level] = %q, want %q", metaDecoded["level"], "milestone")
+	}
+	if metaDecoded["name"] != "test-milestone-1" {
+		t.Errorf("metadata[name] = %q, want %q", metaDecoded["name"], "test-milestone-1")
+	}
+
+	// 46 OBS-03/Pitfall 4: tag.tags is a native STRINGSLICE containing the level.
+	tagsVal, ok := attrValue(span.Attributes, "tag.tags")
+	if !ok {
+		t.Fatalf("span missing attribute %q", "tag.tags")
+	}
+	if tagsVal.Type() != attribute.STRINGSLICE {
+		t.Errorf("tag.tags attribute Type() = %v, want %v", tagsVal.Type(), attribute.STRINGSLICE)
+	}
+	foundLevelTag := false
+	for _, tg := range tagsVal.AsStringSlice() {
+		if tg == "milestone" {
+			foundLevelTag = true
 		}
-		if val.AsInt64() != want {
-			t.Errorf("attribute %q = %d, want %d", key, val.AsInt64(), want)
+	}
+	if !foundLevelTag {
+		t.Errorf("tag.tags = %v, want to contain %q", tagsVal.AsStringSlice(), "milestone")
+	}
+
+	// 46 D-03: updated deliberately — AGENT spans no longer carry ANY
+	// llm.token_count.* attribute, even with envReadOK=true and a populated
+	// Usage. Per-call LLM spans (reporter tracesynth) are the sole source.
+	for _, key := range []attribute.Key{
+		"llm.token_count.prompt", "llm.token_count.completion",
+		"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+		"llm.token_count.total",
+	} {
+		if _, found := attrValue(span.Attributes, key); found {
+			t.Errorf("succeeded span unexpectedly carries token-count attribute %q (46 D-03)", key)
 		}
+	}
+}
+
+// TestSynthesizePlannerSpanOmitsTokenCount — 46 D-03 regression guard (the
+// planner_correction evidence chain in 46-04-PLAN.md): for EVERY level, the
+// emitted AGENT span carries NO llm.token_count.* attribute even with
+// envReadOK=true and a fully-populated Usage. Per-call LLM spans (the
+// reporter's synthesizeSpans, running on both the combined-mode path at all
+// four planner levels and the trace-only path at Task) are the sole
+// llm.token_count.* source — Phoenix creates a SpanCost row per span with no
+// span-kind gate, so a rolled-up total here would double-count every level.
+func TestSynthesizePlannerSpanOmitsTokenCount(t *testing.T) {
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+
+	for _, level := range []string{"project", "milestone", "phase", "plan", "task"} {
+		t.Run(level, func(t *testing.T) {
+			exp := setupSpanExporter(t)
+
+			job := &batchv1.Job{
+				Status: batchv1.JobStatus{
+					StartTime:      &metav1.Time{Time: start},
+					CompletionTime: &metav1.Time{Time: end},
+					Conditions: []batchv1.JobCondition{
+						{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+					},
+				},
+			}
+			project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+			out := pkgdispatch.EnvelopeOut{
+				Usage: pkgdispatch.Usage{
+					InputTokens:         700,
+					OutputTokens:        300,
+					CacheReadTokens:     200,
+					CacheCreationTokens: 100,
+				},
+			}
+
+			_, _, gotOK := synthesizePlannerSpan(context.Background(), level, "test-"+level, "", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+			if !gotOK {
+				t.Fatalf("synthesizePlannerSpan(%s, envReadOK=true) = false, want true", level)
+			}
+
+			spans := exp.GetSpans()
+			if len(spans) != 1 {
+				t.Fatalf("recorded %d spans, want exactly 1", len(spans))
+			}
+			span := spans[0]
+
+			for _, key := range []attribute.Key{
+				"llm.token_count.prompt", "llm.token_count.completion",
+				"llm.token_count.prompt_details.cache_read", "llm.token_count.prompt_details.cache_write",
+				"llm.token_count.total",
+			} {
+				if _, found := attrValue(span.Attributes, key); found {
+					t.Errorf("level %q: span unexpectedly carries token-count attribute %q", level, key)
+				}
+			}
+		})
 	}
 }
 
@@ -334,7 +432,7 @@ func TestSynthesizePlannerSpanFailed(t *testing.T) {
 	out := pkgdispatch.EnvelopeOut{ExitCode: 2, Reason: "cap-hit"}
 	project := spanEmissionFixtureProject(testProjectUID, "")
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", project, ProviderDefaults{}, job, out, true, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(failed) = false, want true")
 	}
@@ -385,7 +483,7 @@ func TestSynthesizePlannerSpanDegradedEnvelope(t *testing.T) {
 	}
 	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan(degraded) = false, want true")
 	}
@@ -436,7 +534,7 @@ func TestSynthesizePlannerSpanNilProjectSkipsEmission(t *testing.T) {
 		},
 	}
 
-	gotID, gotOK := synthesizePlannerSpan(context.Background(), "milestone", nil, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	gotID, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", nil, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if gotOK {
 		t.Errorf("synthesizePlannerSpan(nil project) ok = true, want false")
 	}
@@ -473,7 +571,7 @@ func TestSynthesizePlannerSpanDeterministicTraceID(t *testing.T) {
 		t.Fatalf("otelai.TraceIDFromUID(%q): %v", project.UID, err)
 	}
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "milestone", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "milestone", "ms-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
@@ -510,7 +608,7 @@ func TestSynthesizePlannerSpanParentLinkage(t *testing.T) {
 		t.Fatalf("trace.SpanIDFromHex: %v", err)
 	}
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "phase", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, parentSpanID)
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "phase", "ph-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, parentSpanID)
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
@@ -547,7 +645,7 @@ func TestSynthesizePlannerSpanRootWhenParentZero(t *testing.T) {
 		t.Fatalf("otelai.TraceIDFromUID(%q): %v", project.UID, err)
 	}
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "project", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "project", "proj-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
@@ -584,7 +682,7 @@ func TestSynthesizePlannerSpanReturnsOwnSpanID(t *testing.T) {
 	}
 	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
 
-	gotID, gotOK := synthesizePlannerSpan(context.Background(), "plan", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	gotID, _, gotOK := synthesizePlannerSpan(context.Background(), "plan", "plan-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
@@ -618,7 +716,7 @@ func TestSynthesizePlannerSpanTaskRoleExecutor(t *testing.T) {
 	}
 	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
 
-	_, gotOK := synthesizePlannerSpan(context.Background(), "task", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	_, _, gotOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
 	if !gotOK {
 		t.Fatalf("synthesizePlannerSpan = false, want true")
 	}
@@ -668,15 +766,196 @@ func TestTraceparentForLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("trace.SpanIDFromHex: %v", err)
 	}
-	want := "00-" + traceID.String() + "-" + spanID.String() + "-01"
 
-	if got := traceparentForLevel(project, "0102030405060708"); got != want {
-		t.Errorf("traceparentForLevel(project, valid hex) = %q, want %q", got, want)
+	// D-02/Phase 46: the trailing flags byte tracks the sampled param exactly
+	// — "01" when true, "00" when false.
+	wantSampled := "00-" + traceID.String() + "-" + spanID.String() + "-01"
+	if got := traceparentForLevel(project, "0102030405060708", true); got != wantSampled {
+		t.Errorf("traceparentForLevel(project, valid hex, sampled=true) = %q, want %q", got, wantSampled)
 	}
-	if got := traceparentForLevel(nil, "0102030405060708"); got != "" {
+	wantUnsampled := "00-" + traceID.String() + "-" + spanID.String() + "-00"
+	if got := traceparentForLevel(project, "0102030405060708", false); got != wantUnsampled {
+		t.Errorf("traceparentForLevel(project, valid hex, sampled=false) = %q, want %q", got, wantUnsampled)
+	}
+
+	if got := traceparentForLevel(nil, "0102030405060708", true); got != "" {
 		t.Errorf("traceparentForLevel(nil project, valid hex) = %q, want %q", got, "")
 	}
-	if got := traceparentForLevel(project, ""); got != "" {
+	if got := traceparentForLevel(project, "", true); got != "" {
 		t.Errorf("traceparentForLevel(project, empty hex) = %q, want %q", got, "")
+	}
+}
+
+// TestTraceparentForLevelCarriesRealSampledBit — the Task-flow proof (D-02):
+// synthesizePlannerSpan's own real IsSampled() return threads straight
+// through to traceparentForLevel's flags byte, end to end, not just a
+// hand-supplied bool.
+func TestTraceparentForLevelCarriesRealSampledBit(t *testing.T) {
+	setupSpanExporter(t)
+
+	start := mustTime(t, "2026-07-15T10:00:00Z")
+	end := mustTime(t, "2026-07-15T10:05:00Z")
+	job := &batchv1.Job{
+		Status: batchv1.JobStatus{
+			StartTime:      &metav1.Time{Time: start},
+			CompletionTime: &metav1.Time{Time: end},
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	project := spanEmissionFixtureProject(testProjectUID, "claude-test-model")
+
+	gotID, gotSampled, gotOK := synthesizePlannerSpan(context.Background(), "task", "task-1", "", project, ProviderDefaults{}, job, pkgdispatch.EnvelopeOut{}, false, trace.SpanID{})
+	if !gotOK {
+		t.Fatalf("synthesizePlannerSpan = false, want true")
+	}
+
+	wantFlag := "00"
+	if gotSampled {
+		wantFlag = "01"
+	}
+	got := traceparentForLevel(project, gotID.String(), gotSampled)
+	if got == "" {
+		t.Fatalf("traceparentForLevel(project, emitted spanID, real sampled bit) = \"\", want a non-empty traceparent")
+	}
+	if got[len(got)-2:] != wantFlag {
+		t.Errorf("traceparentForLevel flags byte = %q, want %q (from synthesizePlannerSpan's real sampled=%v)", got[len(got)-2:], wantFlag, gotSampled)
+	}
+}
+
+// ─── buildLevelEnrichment ───────────────────────────────────────────────────
+
+// decodeMetadata unmarshals a buildLevelEnrichment metadata JSON string,
+// failing the test on invalid JSON.
+func decodeMetadata(t *testing.T, encoded string) map[string]string {
+	t.Helper()
+	var m map[string]string
+	if err := json.Unmarshal([]byte(encoded), &m); err != nil {
+		t.Fatalf("metadata %q is not valid JSON: %v", encoded, err)
+	}
+	return m
+}
+
+func containsTag(tags []string, want string) bool {
+	for _, tg := range tags {
+		if tg == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildLevelEnrichmentProjectOmitsGateProfile — Pitfall 5: Gates has no
+// Project field, so level=="project" must never carry a gate_profile key,
+// even though the project has other Gates set for its child levels.
+func TestBuildLevelEnrichmentProjectOmitsGateProfile(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID(testProjectUID)},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Gates: tideprojectv1alpha3.Gates{Milestone: "auto", Phase: "approve"},
+		},
+	}
+
+	md, tags := buildLevelEnrichment(project, "project", "my-project", "")
+	decoded := decodeMetadata(t, md)
+	if _, ok := decoded["gate_profile"]; ok {
+		t.Errorf("metadata[gate_profile] present = %v, want absent for level=project", decoded["gate_profile"])
+	}
+	if decoded["level"] != "project" {
+		t.Errorf("metadata[level] = %q, want %q", decoded["level"], "project")
+	}
+	if decoded["name"] != "my-project" {
+		t.Errorf("metadata[name] = %q, want %q", decoded["name"], "my-project")
+	}
+	if containsTag(tags, "auto") || containsTag(tags, "approve") {
+		t.Errorf("tags = %v, must not carry a gate_profile-derived tag for level=project", tags)
+	}
+}
+
+// TestBuildLevelEnrichmentConservativeFailureHalt — a conservative-profile
+// project with ConditionFailureHalt=True yields failure_profile
+// "conservative", failure_halt "true", and the "failure-halt" tag.
+func TestBuildLevelEnrichmentConservativeFailureHalt(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID(testProjectUID)},
+		Spec: tideprojectv1alpha3.ProjectSpec{
+			Gates:          tideprojectv1alpha3.Gates{Task: "auto"},
+			FailureProfile: tideprojectv1alpha3.FailureProfileConservative,
+		},
+	}
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:               tideprojectv1alpha3.ConditionFailureHalt,
+		Status:             metav1.ConditionTrue,
+		Reason:             "TaskFailedHalt",
+		LastTransitionTime: metav1.Now(),
+	})
+
+	md, tags := buildLevelEnrichment(project, "task", "my-task", "3")
+	decoded := decodeMetadata(t, md)
+
+	if decoded["failure_profile"] != "conservative" {
+		t.Errorf("metadata[failure_profile] = %q, want %q", decoded["failure_profile"], "conservative")
+	}
+	if decoded["failure_halt"] != "true" {
+		t.Errorf("metadata[failure_halt] = %q, want %q", decoded["failure_halt"], "true")
+	}
+	if decoded["gate_profile"] != "auto" {
+		t.Errorf("metadata[gate_profile] = %q, want %q", decoded["gate_profile"], "auto")
+	}
+	if decoded["wave_index"] != "3" {
+		t.Errorf("metadata[wave_index] = %q, want %q", decoded["wave_index"], "3")
+	}
+	if !containsTag(tags, "failure-halt") {
+		t.Errorf("tags = %v, want to contain %q", tags, "failure-halt")
+	}
+	if !containsTag(tags, "conservative") {
+		t.Errorf("tags = %v, want to contain %q", tags, "conservative")
+	}
+}
+
+// TestBuildLevelEnrichmentStrictDefault — an empty Spec.FailureProfile
+// resolves to "strict" (the API default), failure_halt "false" (no
+// condition set), and no "failure-halt" tag.
+func TestBuildLevelEnrichmentStrictDefault(t *testing.T) {
+	project := &tideprojectv1alpha3.Project{
+		ObjectMeta: metav1.ObjectMeta{UID: types.UID(testProjectUID)},
+	}
+
+	md, tags := buildLevelEnrichment(project, "milestone", "my-milestone", "")
+	decoded := decodeMetadata(t, md)
+
+	if decoded["failure_profile"] != "strict" {
+		t.Errorf("metadata[failure_profile] = %q, want %q", decoded["failure_profile"], "strict")
+	}
+	if decoded["failure_halt"] != "false" {
+		t.Errorf("metadata[failure_halt] = %q, want %q", decoded["failure_halt"], "false")
+	}
+	if _, ok := decoded["wave_index"]; ok {
+		t.Errorf("metadata[wave_index] present = %v, want absent when waveIndex is empty", decoded["wave_index"])
+	}
+	if _, ok := decoded["gate_profile"]; ok {
+		t.Errorf("metadata[gate_profile] present = %v, want absent when the policy is unset", decoded["gate_profile"])
+	}
+	if containsTag(tags, "failure-halt") {
+		t.Errorf("tags = %v, must not contain %q when FailureHalt is unset", tags, "failure-halt")
+	}
+	if !containsTag(tags, "strict") {
+		t.Errorf("tags = %v, want to contain %q", tags, "strict")
+	}
+	if !containsTag(tags, "milestone") {
+		t.Errorf("tags = %v, want to contain the level %q", tags, "milestone")
+	}
+}
+
+// TestBuildLevelEnrichmentNilProject — nil-safe: matches ResolveProvider's
+// convention of returning a zero value rather than panicking.
+func TestBuildLevelEnrichmentNilProject(t *testing.T) {
+	md, tags := buildLevelEnrichment(nil, "task", "my-task", "1")
+	if md != "" {
+		t.Errorf("buildLevelEnrichment(nil project) metadata = %q, want empty", md)
+	}
+	if tags != nil {
+		t.Errorf("buildLevelEnrichment(nil project) tags = %v, want nil", tags)
 	}
 }

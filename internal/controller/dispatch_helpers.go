@@ -91,10 +91,14 @@ const (
 // the reporter mounts the same claim the planner Job wrote out.json to;
 // BuildReporterJob falls back to defaultSharedPVCName when empty.
 //
-// skipMessageSpans (Phase 45/ADAPT-01) is the caller's fresh vendor
-// capability lookup result (pkgdispatch.SelfInstruments on the level's
-// resolved ProviderSpec.Vendor) — threaded straight into
-// ReporterOptions.SkipMessageSpans (D-04).
+// opts is passed through to BuildReporterJob unmodified (46 D-05: the caller
+// constructs the full ReporterOptions — ReporterImage, TraceParent,
+// OTLPEndpoint, SkipMessageSpans (Phase 45/ADAPT-01 — the caller's fresh
+// vendor capability lookup), and the SessionID/MetadataJSON/Tags enrichment
+// triple — rather than this function taking six-plus trailing positional
+// params; the struct-parameter shape was adopted in Phase 46 to keep this
+// signature from growing unreadable as ReporterOptions gains fields).
+// opts.ReporterImage == "" is the skip signal, checked first.
 func spawnReporterIfNeeded(
 	ctx context.Context,
 	c client.Client,
@@ -102,14 +106,11 @@ func spawnReporterIfNeeded(
 	parent metav1.Object,
 	project *tideprojectv1alpha3.Project,
 	parentKind string,
-	reporterImage string,
 	pvcName string,
-	traceParent string,
-	otlpEndpoint string,
-	skipMessageSpans bool,
+	opts ReporterOptions,
 ) (bool, error) {
 	logger := logf.FromContext(ctx)
-	if reporterImage == "" {
+	if opts.ReporterImage == "" {
 		logger.V(1).Info("skipping reporter Job spawn: ReporterImage not configured",
 			"parentKind", parentKind, "parent", parent.GetName())
 		return true, nil
@@ -124,13 +125,7 @@ func spawnReporterIfNeeded(
 			return false, fmt.Errorf("get reporter job %s: %w", reporterJobName, gErr)
 		}
 		// Not found — spawn it (first completion observation).
-		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind,
-			ReporterOptions{
-				ReporterImage:    reporterImage,
-				TraceParent:      traceParent,
-				OTLPEndpoint:     otlpEndpoint,
-				SkipMessageSpans: skipMessageSpans,
-			}, scheme)
+		reporterJob := BuildReporterJob(parent, project, pvcName, string(parent.GetUID()), parentKind, opts, scheme)
 		if cErr := c.Create(ctx, reporterJob); cErr != nil {
 			if !apierrors.IsAlreadyExists(cErr) {
 				return false, fmt.Errorf("create reporter job %s: %w", reporterJobName, cErr)
