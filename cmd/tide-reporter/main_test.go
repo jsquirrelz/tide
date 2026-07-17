@@ -402,6 +402,89 @@ func TestParseFlagsSkipMessageSpans(t *testing.T) {
 	})
 }
 
+// Test 8c: TestParseFlagsEnrichmentTriple — 46 D-05/OBS-02/OBS-03
+// (46-REVIEW WR-04): the three enrichment flags BuildReporterJob emits
+// (--session-id/--metadata/--tags) parse verbatim onto the struct fields
+// (Pitfall 3: a registered-but-never-copied flag silently no-ops — a dropped
+// struct-copy line would strip enrichment from every reporter LLM span with
+// all producer-side TestBuildReporterJob_* tests still green); their absence
+// must parse to "" (enrichment degrades to absent, never gates).
+func TestParseFlagsEnrichmentTriple(t *testing.T) {
+	t.Run("present", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--session-id=uid-1",
+			`--metadata={"level":"task"}`,
+			"--tags=task,strict",
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if cfg.SessionID != "uid-1" {
+			t.Errorf("cfg.SessionID = %q, want %q", cfg.SessionID, "uid-1")
+		}
+		if cfg.MetadataJSON != `{"level":"task"}` {
+			t.Errorf("cfg.MetadataJSON = %q, want %q", cfg.MetadataJSON, `{"level":"task"}`)
+		}
+		if cfg.TagsCSV != "task,strict" {
+			t.Errorf("cfg.TagsCSV = %q, want %q", cfg.TagsCSV, "task,strict")
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		cfg, err := parseFlags([]string{
+			"--project-uid=x",
+			"--task-uid=t",
+			"--parent-name=p",
+			"--parent-namespace=ns",
+			"--parent-kind=Milestone",
+		})
+		if err != nil {
+			t.Fatalf("parseFlags: unexpected error: %v", err)
+		}
+		if cfg.SessionID != "" || cfg.MetadataJSON != "" || cfg.TagsCSV != "" {
+			t.Errorf("enrichment triple = (%q, %q, %q), want all empty when flags are absent",
+				cfg.SessionID, cfg.MetadataJSON, cfg.TagsCSV)
+		}
+	})
+}
+
+// TestSplitTags — the --tags CSV split feeding EmitSpans (46-REVIEW WR-04):
+// empty segments from doubled/trailing commas are transport artifacts, and
+// an empty CSV must yield nil, never [""] (an empty tag would pollute
+// Phoenix's tag.tags filter values).
+func TestSplitTags(t *testing.T) {
+	cases := []struct {
+		name string
+		csv  string
+		want []string
+	}{
+		{name: "empty", csv: "", want: nil},
+		{name: "single", csv: "task", want: []string{"task"}},
+		{name: "pair", csv: "task,strict", want: []string{"task", "strict"}},
+		{name: "doubled comma", csv: "a,,b", want: []string{"a", "b"}},
+		{name: "trailing comma", csv: "a,b,", want: []string{"a", "b"}},
+		{name: "only commas", csv: ",,", want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitTags(tc.csv)
+			if len(got) != len(tc.want) {
+				t.Fatalf("splitTags(%q) = %v, want %v", tc.csv, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("splitTags(%q)[%d] = %q, want %q", tc.csv, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 // ─── Phase 44 MSG-01/TRACE-03: trace-only mode + shutdown-on-every-path ────
 
 // shutdownRecorder captures whether the newTracerProvider seam's returned

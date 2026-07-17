@@ -306,6 +306,21 @@ func runWithClient(
 	return exitSuccess
 }
 
+// splitTags splits the --tags CSV (46 D-05/OBS-03 transport) into its
+// non-empty segments: "" yields nil, and empty segments from doubled or
+// trailing commas ("a,,b", "a,b,") are transport artifacts, never tags.
+// Tag values are manager-authored level/gate/profile enums, so no real tag
+// can contain a comma (CRD enum validation enforces it upstream).
+func splitTags(csv string) []string {
+	var tags []string
+	for _, tag := range strings.Split(csv, ",") {
+		if tag != "" {
+			tags = append(tags, tag)
+		}
+	}
+	return tags
+}
+
 // synthesizeSpans is the best-effort LLM message-array-span step (Phase 44
 // MSG-01). It reads events.jsonl (plus in.json for the call-1 seed prompt)
 // under cfg.Workspace/envelopes/cfg.TaskUID, extracts the remote parent from
@@ -364,13 +379,7 @@ func synthesizeSpans(ctx context.Context, cfg reporterConfig, stderr io.Writer) 
 
 	tracer := otel.Tracer("tide.reporter")
 	artifactPath := "envelopes/" + cfg.TaskUID + "/events.jsonl"
-	var tags []string
-	for _, tag := range strings.Split(cfg.TagsCSV, ",") {
-		if tag != "" {
-			tags = append(tags, tag)
-		}
-	}
-	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath, cfg.SessionID, cfg.MetadataJSON, tags); err != nil {
+	if err := reporter.EmitSpans(parentCtx, tracer, calls, artifactPath, cfg.SessionID, cfg.MetadataJSON, splitTags(cfg.TagsCSV)); err != nil {
 		fmt.Fprintf(stderr, "tide-reporter: emit spans: %v\n", err)
 		return
 	}
