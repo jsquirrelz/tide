@@ -45,7 +45,7 @@ Requirements for this milestone. Each maps to roadmap phases. Grounded in `.plan
 
 ### End-to-End Proof (PROOF)
 
-- [ ] **PROOF-01**: A live run's complete five-level trace tree — including redacted message arrays at the Task level — is visible and queryable in a self-hosted Phoenix, with evidence (screenshots + trace IDs) captured at milestone close; this is the milestone's acceptance bar
+- [x] **PROOF-01**: A live run's complete five-level trace tree — including redacted message arrays at the Task level — is visible and queryable in a self-hosted Phoenix, with evidence (screenshots + trace IDs) captured at milestone close; this is the milestone's acceptance bar
 
 ## Future Requirements
 
@@ -88,4 +88,4 @@ Deferred to later milestones:
 | OBS-02 | Phase 46 | Complete |
 | OBS-03 | Phase 46 | Complete |
 | OBS-04 | Phase 46 | Complete |
-| PROOF-01 | Phase 47 | Pending |
+| PROOF-01 | Phase 47 | Complete |
