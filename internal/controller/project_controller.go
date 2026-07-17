@@ -1919,14 +1919,14 @@ func (r *ProjectReconciler) handleProjectJobCompletion(ctx context.Context, proj
 			enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "project", project.Name, "")
 			reporterJob := BuildReporterJob(project, project, pvcName, string(project.UID), "Project",
 				ReporterOptions{
-					ReporterImage:    r.Deps.ReporterImage,
-					TraceParent:      traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
-					OTLPEndpoint:     r.Deps.OTLPEndpoint,
-					OTLPHeaders:      r.Deps.OTLPHeaders,
-					SessionID:        string(project.UID),
-					MetadataJSON:     enrichmentMD,
-					Tags:             enrichmentTags,
-					SkipMessageSpans: skipMessageSpans,
+					ReporterImage:     r.Deps.ReporterImage,
+					TraceParent:       traceparentForLevel(project, project.Status.ProjectTraceSpanID, sampled),
+					OTLPEndpoint:      r.Deps.OTLPEndpoint,
+					OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+					SessionID:         string(project.UID),
+					MetadataJSON:      enrichmentMD,
+					Tags:              enrichmentTags,
+					SkipMessageSpans:  skipMessageSpans,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

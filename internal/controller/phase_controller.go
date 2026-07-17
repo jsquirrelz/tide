@@ -604,14 +604,14 @@ func (r *PhaseReconciler) handleJobCompletion(ctx context.Context, ph *tideproje
 	// byte-identical session.id/metadata/tags.
 	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "phase", ph.Name, "")
 	isFirstCompletion, spawnErr := spawnReporterIfNeeded(ctx, r.Client, r.Scheme, ph, project, "Phase", r.sharedPVCName(), ReporterOptions{
-		ReporterImage:    r.Deps.ReporterImage,
-		TraceParent:      traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
-		OTLPEndpoint:     r.Deps.OTLPEndpoint,
-		OTLPHeaders:      r.Deps.OTLPHeaders,
-		SkipMessageSpans: skipMessageSpans,
-		SessionID:        projectUID,
-		MetadataJSON:     enrichmentMD,
-		Tags:             enrichmentTags,
+		ReporterImage:     r.Deps.ReporterImage,
+		TraceParent:       traceparentForLevel(project, ph.Status.PhaseTraceSpanID, sampled),
+		OTLPEndpoint:      r.Deps.OTLPEndpoint,
+		OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+		SkipMessageSpans:  skipMessageSpans,
+		SessionID:         projectUID,
+		MetadataJSON:      enrichmentMD,
+		Tags:              enrichmentTags,
 	})
 	if spawnErr != nil {
 		return ctrl.Result{}, spawnErr

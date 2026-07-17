@@ -659,14 +659,14 @@ func (r *PlanReconciler) handlePlannerJobCompletion(ctx context.Context, plan *t
 			enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "plan", plan.Name, "")
 			reporterJob := BuildReporterJob(plan, project, pvcName, string(plan.UID), "Plan",
 				ReporterOptions{
-					ReporterImage:    r.Deps.ReporterImage,
-					TraceParent:      traceparentForLevel(project, plan.Status.PlanTraceSpanID, sampled),
-					OTLPEndpoint:     r.Deps.OTLPEndpoint,
-					OTLPHeaders:      r.Deps.OTLPHeaders,
-					SkipMessageSpans: skipMessageSpans,
-					SessionID:        projectUID,
-					MetadataJSON:     enrichmentMD,
-					Tags:             enrichmentTags,
+					ReporterImage:     r.Deps.ReporterImage,
+					TraceParent:       traceparentForLevel(project, plan.Status.PlanTraceSpanID, sampled),
+					OTLPEndpoint:      r.Deps.OTLPEndpoint,
+					OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+					SkipMessageSpans:  skipMessageSpans,
+					SessionID:         projectUID,
+					MetadataJSON:      enrichmentMD,
+					Tags:              enrichmentTags,
 				}, r.Scheme)
 			if cErr := r.Create(ctx, reporterJob); cErr != nil {
 				if !apierrors.IsAlreadyExists(cErr) {

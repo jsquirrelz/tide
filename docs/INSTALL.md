@@ -252,6 +252,25 @@ kubectl create secret generic tide-otlp-headers -n tide-system \
     --from-literal=OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${PHOENIX_API_KEY}"
 ```
 
+Reporter Jobs — which export the Task-level LLM spans (message-array
+content, per-call attributes) — run in each **Project's namespace**, not
+`tide-system`. So the same Secret must also exist there, under the same
+name, mirroring the [signing-key mirror](#provider-secret-anthropic_api_key)
+convention the bundled samples already use. Repeat the create with
+`--namespace` while `PHOENIX_API_KEY` is still in your shell — **never paste
+the key into YAML**:
+
+```bash
+kubectl create secret generic tide-otlp-headers --namespace tide-sample-medium \
+    --from-literal=OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${PHOENIX_API_KEY}"
+```
+
+Omitting this mirror doesn't break anything structurally — the reporter's
+`secretKeyRef` is Optional — but its spans go out unauthenticated and an
+auth-ON Phoenix silently drops them (dark traces, visible only in the
+reporter pod's own logs; see [docs/observability.md](observability.md#tracing)
+for the full exposure-posture and degrade-behavior writeup).
+
 Wire TIDE at Phoenix's OTLP gRPC endpoint and the headers Secret:
 
 ```bash

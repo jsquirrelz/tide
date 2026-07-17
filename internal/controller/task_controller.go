@@ -129,11 +129,12 @@ type TaskReconcilerDeps struct {
 	// no trace-only spawns, zero Job churn on plain clusters.
 	OTLPEndpoint string
 
-	// OTLPHeaders is the manager's own OTEL_EXPORTER_OTLP_HEADERS, forwarded
-	// into the trace-only reporter Job env so its TracerProvider authenticates
-	// to the same auth-enabled collector the manager uses (Phase 47 PHX-02/
-	// D-08); empty = no headers forwarded, mirrors OTLPEndpoint.
-	OTLPHeaders string
+	// OTLPHeadersSecret carries the per-project-namespace headers-Secret NAME
+	// (never the decoded value) forwarded into the trace-only reporter Job
+	// env as a secretKeyRef, so its TracerProvider authenticates to the same
+	// auth-enabled collector the manager uses (Phase 47 PHX-02/D-08); empty =
+	// no headers env, mirrors OTLPEndpoint.
+	OTLPHeadersSecret string
 }
 
 // TaskReconciler reconciles a Task object at Standard depth (D-C1).
@@ -1108,16 +1109,16 @@ func (r *TaskReconciler) spawnTaskTraceReporterIfNeeded(ctx context.Context, tas
 	enrichmentMD, enrichmentTags := buildLevelEnrichment(project, "task", task.Name, task.Labels[owner.LabelWaveIndex])
 	traceOnlyJob := BuildReporterJob(task, project, r.sharedPVCName(), string(task.UID), "Task",
 		ReporterOptions{
-			ReporterImage:    r.Deps.ReporterImage,
-			OTLPEndpoint:     r.Deps.OTLPEndpoint,
-			OTLPHeaders:      r.Deps.OTLPHeaders,
-			TraceOnly:        true,
-			TraceOnlyJobKey:  string(completedJob.UID),
-			TraceParent:      traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled),
-			SkipMessageSpans: skipMessageSpans,
-			SessionID:        string(project.UID),
-			MetadataJSON:     enrichmentMD,
-			Tags:             enrichmentTags,
+			ReporterImage:     r.Deps.ReporterImage,
+			OTLPEndpoint:      r.Deps.OTLPEndpoint,
+			OTLPHeadersSecret: r.Deps.OTLPHeadersSecret,
+			TraceOnly:         true,
+			TraceOnlyJobKey:   string(completedJob.UID),
+			TraceParent:       traceparentForLevel(project, task.Status.TaskTraceSpanID, sampled),
+			SkipMessageSpans:  skipMessageSpans,
+			SessionID:         string(project.UID),
+			MetadataJSON:      enrichmentMD,
+			Tags:              enrichmentTags,
 		}, r.Scheme)
 	if cErr := r.Create(ctx, traceOnlyJob); cErr != nil {
 		if !apierrors.IsAlreadyExists(cErr) {

@@ -282,11 +282,18 @@ func main() {
 	// above so the reporter Job's own TracerProvider resolves the identical
 	// collector (forwarded via PlannerReconcilerDeps.OTLPEndpoint below).
 	// Empty = tracing dark; the reporter env block is omitted entirely.
-	// Phase 47 PHX-02/D-08: sibling read of OTEL_EXPORTER_OTLP_HEADERS so the
-	// reporter Job's TracerProvider can also authenticate to an auth-enabled
-	// collector (forwarded via PlannerReconcilerDeps.OTLPHeaders below).
+	// Phase 47 PHX-02/D-08: the manager reads OTEL_EXPORTER_OTLP_HEADERS only
+	// to learn WHETHER headers are configured — the decoded value never
+	// leaves the manager process. When set, reporter Jobs are threaded the
+	// FIXED headers-Secret NAME (controller.ReporterOTLPHeadersSecretName)
+	// instead, and resolve the value themselves at runtime from the Secret
+	// mirrored into their own project namespace via secretKeyRef (forwarded
+	// via PlannerReconcilerDeps.OTLPHeadersSecret below).
 	otlpEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	otlpHeaders := os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")
+	otlpHeadersSecret := ""
+	if os.Getenv("OTEL_EXPORTER_OTLP_HEADERS") != "" {
+		otlpHeadersSecret = controller.ReporterOTLPHeadersSecretName
+	}
 	defer func() {
 		// Bounded shutdown — the batch processor flushes outstanding
 		// spans to the collector before the process exits. Use
@@ -440,7 +447,7 @@ func main() {
 		HelmProviderDefaults: helmProviderDefaults,
 		PricingOverridesJSON: pricingOverridesJSON,
 		OTLPEndpoint:         otlpEndpoint,
-		OTLPHeaders:          otlpHeaders,
+		OTLPHeadersSecret:    otlpHeadersSecret,
 	}
 	if err := (&controller.ProjectReconciler{
 		Client:                  mgr.GetClient(),
@@ -550,9 +557,9 @@ func main() {
 			PricingOverridesJSON: pricingOverridesJSON,
 			// Phase 44 MSG-01/TRACE-03/D-06: trace-only reporter spawn deps —
 			// mirrors plannerDeps' ReporterImage/OTLPEndpoint above.
-			ReporterImage: reporterImage,
-			OTLPEndpoint:  otlpEndpoint,
-			OTLPHeaders:   otlpHeaders,
+			ReporterImage:     reporterImage,
+			OTLPEndpoint:      otlpEndpoint,
+			OTLPHeadersSecret: otlpHeadersSecret,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
