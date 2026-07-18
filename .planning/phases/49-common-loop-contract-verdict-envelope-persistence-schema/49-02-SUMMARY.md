@@ -89,6 +89,7 @@ Each task was committed atomically:
 
 - Reworded a doc comment in `verdict.go` that originally contained the literal string `(Verdict, error)` (explaining what the signature deliberately avoids) to `(no accompanying error value)`, so the acceptance-criteria grep for "no `(Verdict, error)` return in verdict.go" checks the actual function signature rather than false-positiving on the comment's own explanation of the anti-pattern it avoids. No behavioral change — cosmetic wording only.
 - Added `Verify *VerifyContext` to the shared `fullyPopulatedEnvelopeIn()` test fixture (mirroring how `Dispatch`/`Dev` are already populated there) rather than constructing it ad hoc only in a dedicated test, so the general `assertRoundTripIn` coverage and the `NilVerify` subtest-table case both exercise it for free.
+- **Did NOT mark EVAL-03/EVAL-05 complete in REQUIREMENTS.md** despite both appearing in this plan's `requirements:` frontmatter. Both requirements span multiple plans in this phase — EVAL-03 also requires the Pydantic mirror (Plan 49-03); EVAL-05 also requires the `collectStageEnvelopes`/`stageEnvelopeArtifacts` staging extension (Plan 49-04). Running `requirements.mark-complete` for this plan alone would have prematurely flipped both checkboxes to done in `.planning/REQUIREMENTS.md` before their full scope lands; reverted and left both `Pending` for the phase's later plans to close honestly.
 
 ## Deviations from Plan
 

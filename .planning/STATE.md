@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 49-01-PLAN.md
-last_updated: "2026-07-18T21:54:40.727Z"
+stopped_at: Completed 49-02-PLAN.md
+last_updated: "2026-07-18T22:03:30.793Z"
 last_activity: 2026-07-18
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 17
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 49 (Common Loop Contract + Verdict/Envelope/Persistence Schema) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-07-18
 
-Progress: [███████░░░] 67%
+Progress: [████████░░] 78%
 
 ## Performance Metrics
 
@@ -71,6 +71,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 48-05 Task 1]: verdict classification keys off the anthropic SDK's actual exception hierarchy (APIStatusError = TLS succeeded, APIConnectionError = TLS/connection failed, unwrap __cause__ for the error class) rather than string-matching error messages
 - [Phase 49]: LoopPolicy/LoopStatus/EvaluationSummary declared standalone in api/v1alpha3/loop_types.go (D-01 two-homes precedent); embedded in no Kind this phase, make manifests confirmed zero CRD-YAML diff
 - [Phase 49]: LOOP-03 (no iteration history in .status) enforced via a compile-time struct-literal guard (TestLoopStatus_NoForbiddenFields), not just a runtime shape assertion
+- [Phase 49-02]: ClassifyVerdict returns a bare Verdict (never (Verdict, error)) so unknown/malformed input cannot be mistakenly mapped to APPROVED by a forgetful caller
+- [Phase 49-02]: GateDecision/Finding live in pkg/dispatch (not api/v1alpha3) per D-01 — the verdict is a wire-format document crossing the file-envelope seam, not a CRD type
+- [Phase 49-02]: highSeverityFindingToken (blocker) is a package const rather than a call-site literal so Phase 51's severity rubric can retune it in one place
 
 ### Pending Todos
 
@@ -106,11 +109,12 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 48 P03 | 15min | 3 tasks | 7 files |
 | Phase 48 P04 | 45min | 2 tasks | 5 files |
 | Phase 49 P01 | 7min | 2 tasks | 3 files |
+| Phase 49 P02 | 5min | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-07-18T21:54:40.702Z
-Stopped at: Completed 49-01-PLAN.md
+Last session: 2026-07-18T22:03:30.776Z
+Stopped at: Completed 49-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
