@@ -12,154 +12,102 @@
 - ✅ **v1.0.6 — Adoption-Path Correctness & Dispatch Safety** — Phases 31–33 (shipped 2026-06-29, tag `v1.0.6`, published: 8 images + 2 OCI charts + 5 binaries @ 1.0.6, verified anon). Corrective patch closing the four code-level defects dogfood run #2b surfaced on the adoption path: D1+D2 lifecycle/cost seam (Phase 31), D3 dispatch concurrency cap (Phase 32), D4 planner failure semantics (Phase 33). Audit: tech_debt (13/13 reqs, 0 blockers). Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md).
 - ✅ **v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics** — Phases 34–41 (shipped 2026-07-15, tag `v1.0.7`). Closed what the first external-repo run (2026-07-03) surfaced short of new subagent stages: the silent wave-parallel integration miss, the 2.8× Claude-5 budget overcount, git ergonomics (baseRef, agent identity, promptFile), dashboard blind spots (artifact view at approve gates, project view, log-drawer states), the Prometheus setup step, and the v1.0.6 audit tech-debt carry — plus the Phase 40 full API version-lifecycle crank (v1alpha3 sole version) and the Phase 41 12-item refactoring review. 44 requirements, 44 satisfied; audit tech_debt, 0 blockers. Full archive: [milestones/v1.0.7-ROADMAP.md](milestones/v1.0.7-ROADMAP.md) · [milestones/v1.0.7-REQUIREMENTS.md](milestones/v1.0.7-REQUIREMENTS.md) · [milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md).
 - ✅ **v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix** — Phases 42–47 (shipped 2026-07-17, tag `v1.0.8`, published: 8 images + 2 OCI charts + 5 binaries, verified anon). TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenInference/OTel spans (dispatch-chain AGENT spans, full LLM message arrays, W3C traceparent propagation), a documented self-hosted Phoenix recipe wires the chart’s existing OTLP endpoint end-to-end, and a runtime-neutral adapter seam keeps the trace contract stable ahead of the LangGraph beachhead. Live PROOF-01: a 392-span five-level trace tree, human-signed-off. Full archive: [milestones/v1.0.8-ROADMAP.md](milestones/v1.0.8-ROADMAP.md) · [milestones/v1.0.8-REQUIREMENTS.md](milestones/v1.0.8-REQUIREMENTS.md).
-- 📋 **vNext — Specialist Verify Tier + LangGraph Beachhead** — (scoped 2026-07-06 via /gsd:explore; picks up after v1.0.8) — plan-check / level-verify / integration-check stages on a read-only LangGraph specialist image; first rung of the evidence-gated successor-runtime ladder — [framing doc](milestones/vnext-specialist-verify-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
+- 🚧 **v1.0.9 — Slack Tide: The Task Loop (Verification-Driven Quality Iteration)** — Phases 48–53 (roadmapped 2026-07-18) — TIDE closes its first real feedback loop: each Task's artifact is checked by an independent read-only LangGraph evaluator, and a repairable failure drives a fresh attempt with a compact evidence packet, bounded by a `LoopPolicy`, escalating to a human on exhaustion. Ships on a minimal common loop contract (`LoopPolicy`/`LoopStatus`) the wider [five-loop model](notes/five-loop-model.md) reuses, plus Execution-loop hardening and loop-native observability. Supersedes the "vNext — Specialist Verify Tier" framing below (reframed 2026-07-18 from a gate that halts to a loop that closes). See PROJECT.md "Current Milestone" for full detail.
+- ⊘ **vNext — Specialist Verify Tier + LangGraph Beachhead** — (scoped 2026-07-06 via /gsd:explore) — **SUPERSEDED by v1.0.9 "Slack Tide"** (reframed 2026-07-18: verification is not a gate that halts, it's the feedback signal that closes a loop; the plan-check/level-verify/integration-check three-stage framing collapsed into ONE loop contract parameterized per level). Framing preserved for reference — [framing doc](milestones/vnext-specialist-verify-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **v1.x — LangGraph Authoring Migration (evidence-gated)** — (backlog; reframed 2026-07-06 from "Polyglot Subagent Runtimes: LangGraph Strategy") — planner roles migrate first, executor last, each rung gated on eval-harness evidence; endgame = CLI-deprecation decision + multi-provider via `init_chat_model`, dissolving the standalone OpenAI backend — [framing doc](milestones/v1.x-polyglot-subagent-MILESTONE.md) · [strategy note](notes/langgraph-successor-runtime-strategy.md)
 - 📋 **vLater — Dogfood Run #2 (retarget pending)** — (original deliverable — TIDE builds the OpenAI backend — dissolved by multi-provider-via-LangGraph; new build target chosen at scoping; still gated on multi-node infrastructure) — archived Flood Tide phase details remain a starting point: [milestones/v1.0.7-floodtide-ROADMAP.md](milestones/v1.0.7-floodtide-ROADMAP.md)
 
 ## Phases
 
-<details>
-<summary>✅ v1.0.8 — Phoenix Rising: OpenInference Trace Emission + Self-Hosted Phoenix (Phases 42–47) — SHIPPED 2026-07-17, tag v1.0.8</summary>
+**Phase Numbering:**
+- Integer phases (48, 49, 50...): Planned milestone work
+- Decimal phases (48.1, 48.2): Urgent insertions (marked with INSERTED)
 
-**Milestone Goal:** TIDE runs are observable in a self-hosted Arize Phoenix — the Milestone→Phase→Plan→Task dispatch chain emits real OpenTelemetry spans with OpenInference attributes (including full LLM input/output message arrays), and a documented Phoenix self-host recipe wires the chart’s existing OTLP endpoint to consume them natively.
+Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phase 48.
 
-- [x] **Phase 42: Trace-Context Foundation + Planner-Level Span Emission** (5/5 plans) — completed 2026-07-16 — pure `pkg/otelai/tracecontext.go` + attribute-complete AGENT spans for the four planner levels
-- [x] **Phase 43: Task-Level Parity + Trace-Context Propagation** (5/5 plans) — completed 2026-07-16 — Task dispatch span, W3C `traceparent` at both pod hops, per-level IDs in `.status.trace`
-- [x] **Phase 44: LLM Message-Array Spans + D-O5 Redaction/Size Boundary** (5/5 plans) — completed 2026-07-17 — trace-only reporter turns `events.jsonl` into redacted, size-bounded LLM spans (the headline)
-- [x] **Phase 45: Runtime-Neutral Adapter Seam** (2/2 plans) — completed 2026-07-17 — `SelfInstruments` capability flag + skip-synthesis contract test, byte-identical today
-- [x] **Phase 46: Observability Enrichment + Dashboard Deep Link** (5/5 plans) — completed 2026-07-17 — sampler 1.0, `session.id`, metadata/tags, `<PhoenixTraceLink>` deep link
-- [x] **Phase 47: Self-Hosted Phoenix Install + End-to-End Proof** (10/10 plans) — completed 2026-07-17 — live 392-span five-level trace tree in self-hosted Phoenix; PROOF-01 human-signed-off
+- [ ] **Phase 48: LangGraph Evaluator Image + Credproxy-TLS Spike** - Read-only LangGraph image behind the unchanged Subagent seam; live TLS trust spike de-risks everything downstream
+- [ ] **Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema** - `LoopPolicy`/`LoopStatus` + `gate_decision` schema + findings size×locality persistence, locked before any consumer logic
+- [ ] **Phase 50: Execution-Loop Hardening + Loop-Native Observability** - `loopRunID`/terminal reasons/run-evidence envelope + `loop.*`/`evaluation.*` spans the Task loop will consume
+- [ ] **Phase 51: The Task Loop** - Independent-evaluator-driven verification contract, fresh-attempt-with-evidence-packet, three-tier escalation, concurrency/tracing safety wired at the same dispatch sites
+- [ ] **Phase 52: Per-Level LoopPolicy Parameterization** - The same verification contract runs at every level as a `LoopPolicy` parameterization — plan-check re-plan, Phase/Milestone/Project escalation
+- [ ] **Phase 53: Chart Config + Dashboard Provenance Surfacing** - Chart-first per-level defaults (safe on upgrade) + nested loop provenance on the dashboard
 
-Full archive: [milestones/v1.0.8-ROADMAP.md](milestones/v1.0.8-ROADMAP.md) · [milestones/v1.0.8-REQUIREMENTS.md](milestones/v1.0.8-REQUIREMENTS.md)
+## Phase Details
 
-</details>
+### Phase 48: LangGraph Evaluator Image + Credproxy-TLS Spike
+**Goal**: A minimal read-only Python/LangGraph evaluator image runs behind the unchanged `pkg/dispatch.Subagent` + envelope seam, and its credproxy TLS trust path is proven live — de-risking the new runtime's trust seam before any evaluation/verdict logic is built on top of it.
+**Depends on**: Phase 47 (v1.0.8, last shipped phase)
+**Requirements**: EVAL-01, EVAL-02
+**Success Criteria** (what must be TRUE):
+  1. A minimal read-only Python/LangGraph container dispatches through the unchanged `pkg/dispatch.Subagent` + envelope seam, with git-read + bash gate-command tools only (no file-edit/commit/push tools, no checkpointer).
+  2. A live pass/fail spike proves `SSL_CERT_FILE` alone (or the documented `http_client=`/`anthropic_client=` fallback) trusts credproxy's CA through the real `ChatAnthropic` construction path.
+  3. An adversarial test attempting `git commit`/push against a fixture worktree fails at the mount/credential layer (ReadOnly worktree mount + omitted git-write/push credentials) — not merely by prompt refusal.
+  4. Every Python dependency is patch-exact pinned, and a CI gate rejects any unpinned/range specifier.
+**Plans**: TBD
+**Research flag**: yes — the TLS spike outcome is genuinely unknown until executed live; if `SSL_CERT_FILE` alone doesn't suffice through `ChatAnthropic`'s construction path, plan the `http_client=`/`anthropic_client=` fallback as a real contingency, not a mid-build discovery.
 
-<details>
-<summary>✅ v1.0.7 — First-Run Paper Cuts: Run Integrity & Operator Ergonomics (Phases 34–41) — SHIPPED 2026-07-15</summary>
+### Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema
+**Goal**: The `LoopPolicy`/`LoopStatus` shared API types, the `gate_decision` verdict schema, and the findings size×locality persistence contract are locked as shared, reusable primitives — before any halt-condition or reconciler logic is written on top of them.
+**Depends on**: Phase 48
+**Requirements**: LOOP-01, LOOP-02, LOOP-03, EVAL-03, EVAL-05
+**Success Criteria** (what must be TRUE):
+  1. `LoopPolicy` (MaxIterations/MaxDuration/BudgetCents/Autonomy/EvaluatorRef/EscalationPolicy) and `LoopStatus` (Iteration/ParentRunID/LastEvaluation/ExitReason/CostCents/Conditions) exist as shared Go API types embeddable in any domain CRD, with type-level doc-comments applying the five-element loop test (goal/candidate/evaluator-feedback/repeat-policy/bounded-exit) — no generic `Loop` controller exists.
+  2. A `VerifyContext` pointer field on `EnvelopeIn` and a matched Go+Pydantic `GateDecision`/`Finding` pair (`APPROVED | REPAIRABLE | BLOCKED` + `findings[]` with dimension/severity/confidence/evidence/suggested_fix) round-trip through the envelope seam.
+  3. An unparseable, empty, or partially-validated verdict is classified fail-closed (never collapses to APPROVED), proven by a regression test covering empty-JSON, missing-verdict-field, and malformed shapes.
+  4. Findings persist under the size×locality rule — a ≤4KB summary on `TerminationStub`, a small per-CRD status summary, and the full findings artifact staged onto the run branch via the extended `collectStageEnvelopes` — never an etcd blob, never a new PVC path.
+  5. A size test proves `LoopStatus` on any consuming CRD carries only the current-iteration summary + exit reason, never an accumulating iteration history.
+**Plans**: TBD
 
-**Milestone Goal:** Make a second external-repo run trustworthy and reviewable — a pushed run branch provably contains every Succeeded task's work, the budget tally matches the provider console, git ergonomics (baseRef, agent identity, promptFile) work, the dashboard is a sufficient approve-gate review surface, telemetry setup is guided, and the v1.0.6 audit tech-debt is retired.
+### Phase 50: Execution-Loop Hardening + Loop-Native Observability
+**Goal**: The in-Job execution loop (a pipeline stage, not a loop) produces machine-checkable run evidence and emits the loop-native trace/metric attributes the Task loop will consume — before the Task loop is built on top of it.
+**Depends on**: Phase 49
+**Requirements**: EXEC-01, EXEC-02, EXEC-03, EXEC-04, OBS-01, OBS-02
+**Success Criteria** (what must be TRUE):
+  1. Every attempt carries a stable `loopRunID` + `attemptID` and emits a span per tool/action iteration.
+  2. The result envelope carries an explicit terminal reason (`completed | cap_exceeded | blocked | tool_failure | invalid_output`) — never a silent default.
+  3. The result envelope satisfies the run-evidence contract (`docs/templates/minimal-loop-project/evals/README.md`): Task+Spec IDs and locking commit, commands + evaluator versions executed, test/eval results, changed-file manifest, runtime/model/prompt version, cost/duration, terminal reason, bounded feedback — referenced, not re-derived.
+  4. The envelope's completion field reports only that the agent *believes* the attempt is complete — no field or code path lets the Execution loop stamp Task correctness.
+  5. Spans carry `loop.kind`/`loop.run_id`/`loop.parent_run_id`/`loop.iteration`/`loop.candidate_version`/`loop.exit_reason`/`evaluation.result`/`evaluation.version`/`human_intervention` plus cost/duration/token usage, and run IDs never appear in a Prometheus label — proven by a label-cardinality test.
+**Plans**: TBD
 
-- [x] **Phase 39: Pre-flight Tech-Debt Hardening** (2/2 plans) — completed 2026-07-04 — plannerConcurrency chart default 16→4 + project-level exactly-once cost rollup
-- [x] **Phase 34: Run Integrity — Integration-Miss Gate + lastPushedSHA** (6/6 plans) — completed 2026-07-08 — final-wave integration fixed, merges serialized (flock), boundary push gated on git-verified completeness, `lastPushedSHA` arms the force-with-lease fence
-- [x] **Phase 35: Git Base Ref** (4/4 plans) — completed 2026-07-08 — `spec.git.baseRef` (branch/tag/SHA), typed fail-fast on unresolvable refs, `status.git.baseSHA` stamped
-- [x] **Phase 36: Signed Commits + Bot Identity** (4/4 plans) — completed 2026-07-08 — *(descoped: identity only)* agent identity uniformly configurable at all 3 commit sites; GPG (SIGN-02/03/04) deferred to Future Requirements
-- [x] **Phase 37: Dashboard Surfaces — Artifact View, Project View, Log-Drawer States** (12/12 plans) — completed 2026-07-09 (verified 2026-07-15) — approve-gate artifact review via git-transport staged envelopes, project settings view, honest log-drawer states
-- [x] **Phase 38: Small Independents — Pricing, promptFile, Telemetry Nudge, Tech-Debt Carry** (7/7 plans) — completed 2026-07-11 — Claude 5 pricing verified live, `--prompt-file`, telemetry setup triple, DEBT-01..03 retired
-- [x] **Phase 40: Deprecate v1alpha1 API (Full Version-Lifecycle Turn)** (7/7 plans) — completed 2026-07-12 — v1alpha3 sole served+storage version, `subagent.levels` semantic rename, envelope contract decoupled, `verify-no-legacy-api-refs` CI gate
-- [x] **Phase 41: Refactoring Review — Non-Breaking Cleanup** (9/9 plans) — completed 2026-07-13 — 12 REFAC items: typed LevelPhase constants, checkDispatchHolds/PlannerDeps extractions, polarity fix, retry-driver unification, label/PVC-name centralization
+### Phase 51: The Task Loop
+**Goal**: `TaskReconciler` drives a real verification-driven quality loop — a locked, planner-authored verification contract dispatches an independent LangGraph evaluator against the real gate command, and a repairable failure produces a fresh, evidence-seeded attempt bounded by `maxIterations`, with concurrency/tracing/halt safety wired at the same dispatch sites (not deferred to a follow-up phase).
+**Depends on**: Phase 50
+**Requirements**: TASK-01, TASK-02, TASK-03, TASK-04, TASK-05, TASK-06, EVAL-04, ESC-02, ESC-03, ESC-04, OBS-03
+**Success Criteria** (what must be TRUE):
+  1. `TaskSpec.verification` (planner-authored `commands`, `requiredArtifacts`, `evaluator`, `maxIterations`, `onExhaustion`, plus the resolved `GateCommand` field location) is immutable once locked (Draft→Locked→Superseded + version), and `git show <locking-sha>` reproduces exactly what was dispatched.
+  2. A verification result classified REPAIRABLE creates a fresh attempt seeded with the original locked spec + a compact evidence packet (failures/diffs/test output) — never the prior agent's full context — while infra-retry (eviction/transient rerun of the same attempt) remains a distinct, preserved path.
+  3. The evaluator dispatch (the LangGraph image, with its `SelfInstruments` vendor sentinel registered in this same phase) runs as a logically independent process from the implementation agent; a deterministic command failure in its findings always dominates — a Task can never pass on an LLM-judge APPROVED over a red gate command.
+  4. The Task loop is bounded by `maxIterations` with `onExhaustion` routing to `ConditionVerifyHalt` (gating both planner and task tiers, mirroring `failure_halt.go` + the Phase 25 resume time-fence) as a halt class distinct from `Failed` wave semantics; its state is resumable across a controller restart; and a fresh attempt that edits fixtures/thresholds/the evaluator itself is flagged as a system escalation, never counted as a pass — the anti-gaming invariant is enforced, not documented.
+  5. Evaluator dispatches count against the concurrency gate (extended `plannerInFlightCount` or a new `verifierInFlightCount`) and `LoopPolicy.BudgetCents` bounds cost via the existing reservation store — verified by a kind-cluster concurrent-dispatch test that stays under the sized cap.
+**Plans**: TBD
+**Research flag**: yes — two genuinely open calls gate this phase's plan: (1) where the per-level `GateCommand` ("pass criterion command") is declared in the CRD schema — a new `Plan.Spec`/`Project.Spec` field vs. a convention-based lookup, a real requirements decision with no existing source; (2) whether the LangGraph runtime needs a new `Vendor` sentinel (e.g. `"langgraph"`) in `pkg/dispatch.SelfInstruments`/`ResolveProvider(...).Vendor` or can reuse `"anthropic"` with a runtime discriminator — must be locked before this phase's `SelfInstruments` wiring.
 
-Full archive: [milestones/v1.0.7-ROADMAP.md](milestones/v1.0.7-ROADMAP.md) · [milestones/v1.0.7-REQUIREMENTS.md](milestones/v1.0.7-REQUIREMENTS.md) · [milestones/v1.0.7-MILESTONE-AUDIT.md](milestones/v1.0.7-MILESTONE-AUDIT.md)
+### Phase 52: Per-Level LoopPolicy Parameterization
+**Goal**: The same verification contract runs at every level — Task, Plan/plan-check, Phase/Milestone/Project — purely as different `LoopPolicy` parameterizations, with gate policy resolved from loop level rather than hierarchy position. Falls out cleanly once the contract (Phase 49) and the Task loop (Phase 51) exist.
+**Depends on**: Phase 51
+**Requirements**: ESC-01
+**Success Criteria** (what must be TRUE):
+  1. Plan/plan-check runs with `maxIterations:1` (its own counter, default 1, never shared with the Task loop's counter) against a goal-backward rubric (goal alignment, file-touch plausibility, dependency correctness, verification derivability) and applies severity-weighted stall detection before escalating.
+  2. Phase/Milestone/Project run with `maxIterations:0` — any verify finding at these levels escalates straight to `requireApproval` rather than auto-repairing, because these levels close on their observable outcome, not task-completion.
+  3. Gate policy is resolved from the loop-level field on `LoopPolicy`, not from CRD kind/hierarchy position — one resolver function serves all levels.
+**Plans**: TBD
 
-</details>
-
-<details>
-<summary>✅ v1.0.0 — Self-Hosting MVP (Phases 1–11) — SHIPPED 2026-06-11</summary>
-
-14 phase directories (11 planned + 02.1/02.2/04.1/10/11 inserted) · 137 plans · 965 commits · ~66k LOC Go. Six CRDs + layered-Kahn waves + pluggable subagent dispatch + gates/observability/dashboard/CLI + Helm distribution; release published (binaries, 7 images, 2 OCI charts).
-
-Full archive: [milestones/v1.0.0-ROADMAP.md](milestones/v1.0.0-ROADMAP.md) · [milestones/v1.0.0-REQUIREMENTS.md](milestones/v1.0.0-REQUIREMENTS.md)
-
-</details>
-
-<details>
-<summary>✅ v1.0.1 — Orchestrator Trustworthiness + Telemetry Completion (Phases 12–17) — SHIPPED 2026-06-13</summary>
-
-- [x] Phase 12: Gate Semantics + Reject/Resume (5/5 plans) — completed 2026-06-11
-- [x] Phase 13: Dispatch Image Resolution + Provider Halt (7/7 plans) — completed 2026-06-11
-- [x] Phase 14: Budget Enforcement + Pricing (7/7 plans) — completed 2026-06-12
-- [x] Phase 15: Paper Cuts (7/7 plans) — completed 2026-06-12
-- [x] Phase 16: Telemetry Completion (8/8 plans) — completed 2026-06-12
-- [x] Phase 17: Tech Debt — Plan Label Backfill + Gate Hardening (4/4 plans) — completed 2026-06-13
-
-38 plans · 46 tasks · 28/28 requirements satisfied (milestone audit: passed).
-
-Full archive: [milestones/v1.0.1-ROADMAP.md](milestones/v1.0.1-ROADMAP.md) · [milestones/v1.0.1-REQUIREMENTS.md](milestones/v1.0.1-REQUIREMENTS.md) · [milestones/v1.0.1-MILESTONE-AUDIT.md](milestones/v1.0.1-MILESTONE-AUDIT.md)
-
-</details>
-
-<details>
-<summary>⊘ v1.0.2 — Ebb Tide: Token & Cost Optimization (Phases 18–21) — COMPLETED but SUPERSEDED, will not be released</summary>
-
-**Milestone Goal (as scoped):** Cut TIDE's per-run token spend without degrading output quality — the cost-reduction prep that makes a second TIDE-on-TIDE dogfood run affordable.
-
-- [x] **Phase 18: Eval Harness** — Freeze a v1.0.1 baseline and build the quality gate before any template change (3/3 plans) — completed 2026-06-15
-- [x] **Phase 19: Template Reorder + Token Minimization** — Reorder all five templates stable-prefix-first and trim non-essential boilerplate, gated by the harness (4/4 plans) — completed 2026-06-15
-- [x] **Phase 20: SharedContext Injection + Cache Verification Spike** — Spike cross-pod cache scoping, then add SharedContext to grow the cacheable shared prefix (reframed to token-minimization-only per CACHE-01 verdict) (5/5 plans) — completed 2026-06-16
-- [x] **Phase 21: Cost & Cache Observability** — Surface per-level token accounting and cache-hit metrics on the dashboard (2/2 plans) — Needs Review
-
-Superseded after dogfood run #2 surfaced the per-plan-waves architecture defect. Token/cost + observability work is preserved and folds forward where it still applies; the CACHE-01 decision record lives in PROJECT.md. The detailed phase breakdown for 18–21 is archived in git history (this ROADMAP, pre-Spring-Tide revision) and the per-phase directories under `.planning/phases/` (cleared at v1.0.7 start; recoverable from git history).
-
-</details>
-
-<details>
-<summary>✅ v1.0.2 — Spring Tide: Global Execution DAG (Phases 22–26) — COMPLETE, shipped within tag v1.0.3</summary>
-
-**Milestone Goal:** Re-architect execution so waves are derived from ONE global Execution DAG spanning the entire Project (all milestones/phases/plans), assembled after planning completes — making the Topologically-Indexed paradigm real.
-
-- [x] **Phase 22: Dashboard Embed Freshness Fix** (3/3 plans) — completed 2026-06-16
-- [x] **Phase 23: Schema Migration + Cross-Scope Dependency Model** (5/5 plans) — completed 2026-06-16
-- [x] **Phase 24: Global Wave Derivation Engine** (4/4 plans) — completed 2026-06-16
-- [x] **Phase 25: Global Dispatch, Failure Semantics, Gates & Resumption** (3/3 plans) — completed 2026-06-17
-- [x] **Phase 26: Multi-Milestone Drive + Spec Conformance** (4/4 plans) — completed 2026-06-17
-
-Full phase details archived in [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) (and [milestones/v1.0.5-ROADMAP.md](milestones/v1.0.5-ROADMAP.md)).
-
-</details>
-
-<details>
-<summary>✅ v1.0.3 — Planning Resumption & Cost Resilience (Phases 27–29) — SHIPPED 2026-06-25, tag v1.0.3</summary>
-
-**Milestone Goal:** Make interrupted or budget-halted TIDE runs cheaply resumable.
-
-- [x] **Phase 27: Budget-Bypass Resume Correctness** (4/4 plans) — completed 2026-06-18
-- [x] **Phase 28: Plan-Import Core** (5/5 plans) — completed 2026-06-18
-- [x] **Phase 29: Operator Tooling + E2E** (5/5 plans) — completed 2026-06-22
-
-Full phase details archived in [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · audit: [milestones/v1.0.3-MILESTONE-AUDIT.md](milestones/v1.0.3-MILESTONE-AUDIT.md)
-
-</details>
-
-<details>
-<summary>✅ v1.0.5 — Resumable Import: Partial-Tree Resume (Phase 30) — SHIPPED 2026-06-27, tag v1.0.5</summary>
-
-- [x] **Phase 30: Resumable Import — Partial-Tree Resume** (3/3 plans) — completed 2026-06-27 — adopt-complete + re-plan-incomplete driven by shared `IsEnvelopeComplete`; Tier-c kind E2E drives a mixed partial import to `Project=Complete`
-
-Full archive: [milestones/v1.0.5-ROADMAP.md](milestones/v1.0.5-ROADMAP.md) · [milestones/v1.0.5-REQUIREMENTS.md](milestones/v1.0.5-REQUIREMENTS.md)
-
-</details>
-
-<details>
-<summary>✅ v1.0.6 — Adoption-Path Correctness & Dispatch Safety (Phases 31–33) — SHIPPED 2026-06-29, tag v1.0.6</summary>
-
-**Milestone Goal:** Close the four code-level defects dogfood run #2b surfaced on the v1.0.5 import/adoption path — so a completing TIDE-on-TIDE run can be relaunched without spending blind or OOM'ing the node.
-
-- [x] **Phase 31: D2+D1 — Adoption Lifecycle Seam** (3/3 plans) — completed 2026-06-28
-- [x] **Phase 32: D3 — Dispatch Concurrency Cap** (2/2 plans) — completed 2026-06-29
-- [x] **Phase 33: D4 — Planner Failure Semantics** (3/3 plans) — completed 2026-06-29
-
-Full archive: [milestones/v1.0.6-ROADMAP.md](milestones/v1.0.6-ROADMAP.md) · [milestones/v1.0.6-REQUIREMENTS.md](milestones/v1.0.6-REQUIREMENTS.md) · [milestones/v1.0.6-MILESTONE-AUDIT.md](milestones/v1.0.6-MILESTONE-AUDIT.md)
-
-</details>
-
-<details>
-<summary>📋 vNext — Specialist Verify Tier + LangGraph Beachhead (Scoped)</summary>
-
-Scoped 2026-07-06 via /gsd:explore. Ships the verify tier of the lifecycle-subagent seed — plan-check (pre-dispatch, goal-backward), level-verify (gate command + deliverables + constraints), integration-check (cross-child E2E at milestone/project boundaries) — as a sixth template class dispatched on a **new read-only LangGraph specialist image** (envelope in/out, git read, bash, `with_structured_output` gate_decision; never commits or authors). plan-check REJECT drives a bounded re-plan loop (findings appended, ≤ N attempts) before `ConditionVerifyHalt`; post-execution BLOCKED halts for a human. The execution DAG stays static and derived — dynamism lives inside the pod and at lifecycle seams, never as runtime DAG mutation.
-
-See [milestones/vnext-specialist-verify-MILESTONE.md](milestones/vnext-specialist-verify-MILESTONE.md) and [notes/langgraph-successor-runtime-strategy.md](notes/langgraph-successor-runtime-strategy.md).
-
-</details>
-
-<details>
-<summary>📋 v1.x — LangGraph Authoring Migration, evidence-gated (Backlog; reframed from "Polyglot Subagent Runtimes")</summary>
-
-Reframed 2026-07-06: the Python/LangGraph image is no longer just a second strategy — it is the **candidate successor runtime**. After the specialist beachhead ships, authoring roles migrate planner-first / executor-last, each rung gated on eval-harness evidence; the endgame is a CLI-deprecation decision plus multi-provider via `init_chat_model`, which dissolves the standalone OpenAI-backend build (its remnant: credproxy route-allowlist extension + pricing rows). The original framing doc's parity inventory and contract-conformance table remain the reference for this migration.
-
-See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-subagent-MILESTONE.md) for parity inventory, contract-conformance table, and provider-firewall gap analysis; [notes/adk-v2-subagent-evaluation.md](notes/adk-v2-subagent-evaluation.md) for the ADK-Go rejection; [notes/langgraph-successor-runtime-strategy.md](notes/langgraph-successor-runtime-strategy.md) for the ladder.
-
-</details>
+### Phase 53: Chart Config + Dashboard Provenance Surfacing
+**Goal**: Operators configure the loop/verify tier through the existing chart-first precedence chain with a safe default posture, and the dashboard surfaces nested loop provenance plus a `VerifyHalt` state visually distinct from `Failed`.
+**Depends on**: Phase 52
+**Requirements**: CFG-01, CFG-02, OBS-04
+**Success Criteria** (what must be TRUE):
+  1. A chart-first config surface (evaluator image/model + per-level `LoopPolicy` defaults) follows the existing `subagent.levels`/`resolveImage` precedence chain, with `charts/tide/values.yaml` remaining the FIXED contract (binary catches up to chart).
+  2. A fresh install gets Task-loop auto-repair + Plan/Milestone/Project escalation enabled at milestone+project scope by default; an in-place `helm upgrade` on an existing install leaves the verify/loop tier off — proven by an upgrade-path test.
+  3. The dashboard shows nested loop provenance (Project run → Task iteration → Execution attempt/tool spans) and renders `VerifyHalt` as a visually distinct state from `Failed`, with staged findings browsable through the existing gitfetch/artifacts API (no new endpoint).
+**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -172,3 +120,9 @@ See [milestones/v1.x-polyglot-subagent-MILESTONE.md](milestones/v1.x-polyglot-su
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
+| 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 0/TBD | Not started | - |
+| 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 0/TBD | Not started | - |
+| 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 0/TBD | Not started | - |
+| 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
+| 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
+| 53. Chart Config + Dashboard Provenance Surfacing | v1.0.9 | 0/TBD | Not started | - |

@@ -96,44 +96,44 @@ Explicit exclusions — the research anti-features and the five-loop model's con
 
 ## Traceability
 
-Filled during roadmap creation. Suggested phase order from research + the loop cut: (1) LangGraph evaluator image + credproxy-TLS spike, (2) common loop contract + verdict/envelope/persistence schema, (3) Execution-loop hardening + loop-native observability, (4) the Task loop + `ConditionVerifyHalt` + concurrency accounting, (5) per-level `LoopPolicy` parameterization (plan-check re-plan + Phase/Milestone/Project escalation), (6) chart config + dashboard provenance surfacing.
+Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluator image + credproxy-TLS spike, Phase 49 common loop contract + verdict/envelope/persistence schema, Phase 50 Execution-loop hardening + loop-native observability, Phase 51 the Task loop (+ `ConditionVerifyHalt` + concurrency accounting), Phase 52 per-level `LoopPolicy` parameterization, Phase 53 chart config + dashboard provenance surfacing. Strict dependency chain 48→49→50→51→52→53 — matches the research-suggested order with no deviation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LOOP-01 | — | Pending |
-| LOOP-02 | — | Pending |
-| LOOP-03 | — | Pending |
-| EXEC-01 | — | Pending |
-| EXEC-02 | — | Pending |
-| EXEC-03 | — | Pending |
-| EXEC-04 | — | Pending |
-| TASK-01 | — | Pending |
-| TASK-02 | — | Pending |
-| TASK-03 | — | Pending |
-| TASK-04 | — | Pending |
-| TASK-05 | — | Pending |
-| TASK-06 | — | Pending |
-| EVAL-01 | — | Pending |
-| EVAL-02 | — | Pending |
-| EVAL-03 | — | Pending |
-| EVAL-04 | — | Pending |
-| EVAL-05 | — | Pending |
-| ESC-01 | — | Pending |
-| ESC-02 | — | Pending |
-| ESC-03 | — | Pending |
-| ESC-04 | — | Pending |
-| OBS-01 | — | Pending |
-| OBS-02 | — | Pending |
-| OBS-03 | — | Pending |
-| OBS-04 | — | Pending |
-| CFG-01 | — | Pending |
-| CFG-02 | — | Pending |
+| LOOP-01 | Phase 49 | Pending |
+| LOOP-02 | Phase 49 | Pending |
+| LOOP-03 | Phase 49 | Pending |
+| EXEC-01 | Phase 50 | Pending |
+| EXEC-02 | Phase 50 | Pending |
+| EXEC-03 | Phase 50 | Pending |
+| EXEC-04 | Phase 50 | Pending |
+| TASK-01 | Phase 51 | Pending |
+| TASK-02 | Phase 51 | Pending |
+| TASK-03 | Phase 51 | Pending |
+| TASK-04 | Phase 51 | Pending |
+| TASK-05 | Phase 51 | Pending |
+| TASK-06 | Phase 51 | Pending |
+| EVAL-01 | Phase 48 | Pending |
+| EVAL-02 | Phase 48 | Pending |
+| EVAL-03 | Phase 49 | Pending |
+| EVAL-04 | Phase 51 | Pending |
+| EVAL-05 | Phase 49 | Pending |
+| ESC-01 | Phase 52 | Pending |
+| ESC-02 | Phase 51 | Pending |
+| ESC-03 | Phase 51 | Pending |
+| ESC-04 | Phase 51 | Pending |
+| OBS-01 | Phase 50 | Pending |
+| OBS-02 | Phase 50 | Pending |
+| OBS-03 | Phase 51 | Pending |
+| OBS-04 | Phase 53 | Pending |
+| CFG-01 | Phase 53 | Pending |
+| CFG-02 | Phase 53 | Pending |
 
 **Coverage:**
 - v1.0.9 requirements: 28 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 28 ⚠️ (resolved at roadmap creation)
+- Mapped to phases: 28 (Phases 48–53) ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-07-18*
-*Last updated: 2026-07-18 after the Task-loop reframe*
+*Last updated: 2026-07-18 — traceability filled at roadmap creation (Phases 48–53, 28/28 mapped)*
