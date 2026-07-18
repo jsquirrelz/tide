@@ -32,6 +32,10 @@ FORBIDDEN_GIT_OPTIONS = ("-C", "--git-dir", "--work-tree")
 GIT_READ_TIMEOUT_SECONDS = 30
 GATE_COMMAND_TIMEOUT_SECONDS = 60
 
+# CR-01: the ONLY source `run_gate_command` ever reads its command from.
+# Never a model-supplied tool-call argument, never repo content.
+GATE_COMMAND_ENV = "TIDE_GATE_COMMAND"
+
 
 def _worktree_dir() -> str:
     """Resolve the already-materialized Task worktree directory.
@@ -98,17 +102,39 @@ def git_read(git_args: str) -> str:
 
 
 @tool
-def run_gate_command(command: str) -> str:
-    """Execute the declared gate command in the Task worktree and return its
-    exit code plus combined stdout/stderr.
+def run_gate_command(command: str | None = None) -> str:
+    """Run the orchestrator-declared gate command in the Task worktree and
+    return its exit code plus combined stdout/stderr.
 
-    SECURITY INVARIANT (T-48-05 / ASVS V5): `command` must originate ONLY
-    from the orchestrator-authored envelope — never from repo content or
-    model-generated text. The entrypoint (__main__.py) never routes model
-    output into this parameter.
+    SECURITY INVARIANT (T-48-05 / ASVS V5): the command actually executed
+    is read ONLY from the orchestrator-set TIDE_GATE_COMMAND environment
+    variable — never from a model tool-call argument or repo content. The
+    model may decide WHEN to invoke this tool; it can never choose WHAT
+    runs. `command` is accepted as a parameter for tool-call compatibility
+    but is always discarded, never executed — this holds even under
+    prompt injection from adversarial repo content, since there is no code
+    path from a tool-call argument to subprocess.
+
+    Forward-note (Phase 49 scope, not this phase's): the dispatch
+    entrypoint will set TIDE_GATE_COMMAND from the envelope's
+    (forthcoming) VerifyContext.GateCommand field before this process
+    starts. This phase only consumes the env var; it does not implement
+    that envelope field.
+
+    Fails closed: if TIDE_GATE_COMMAND is unset or empty, no subprocess is
+    spawned and an exit_code=1 result is returned.
     """
-    result = subprocess.run(  # noqa: S602 — command is orchestrator-authored, never model output
-        command,
+    del command  # SECURITY: model-supplied value, always discarded — never executed
+
+    gate_command = os.environ.get(GATE_COMMAND_ENV, "")
+    if not gate_command:
+        return (
+            "exit_code=1\nstdout:\nstderr:\n"
+            f"{GATE_COMMAND_ENV} is unset or empty; refusing to run a gate command"
+        )
+
+    result = subprocess.run(  # noqa: S602 — gate_command is read from the orchestrator-set TIDE_GATE_COMMAND env var, never a model-supplied tool argument
+        gate_command,
         shell=True,
         cwd=_worktree_dir(),
         capture_output=True,

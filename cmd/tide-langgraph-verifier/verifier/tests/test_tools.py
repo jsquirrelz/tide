@@ -68,16 +68,55 @@ def test_git_read_rejects_option_injection(monkeypatch, git_args: str) -> None:
     assert "not allowed" in output
 
 
-def test_run_gate_command_success() -> None:
-    output = tools.run_gate_command.invoke("true")
+def test_run_gate_command_success(monkeypatch) -> None:
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
+
+    output = tools.run_gate_command.invoke({})
 
     assert "exit_code=0" in output
 
 
-def test_run_gate_command_failure() -> None:
-    output = tools.run_gate_command.invoke("false")
+def test_run_gate_command_failure(monkeypatch) -> None:
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "false")
+
+    output = tools.run_gate_command.invoke({})
 
     assert "exit_code=1" in output
+
+
+def test_run_gate_command_fails_closed_when_env_unset(monkeypatch) -> None:
+    """CR-01: with no orchestrator-set TIDE_GATE_COMMAND, no subprocess is
+    ever spawned — the tool fails closed instead."""
+    monkeypatch.delenv("TIDE_GATE_COMMAND", raising=False)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("subprocess must never be spawned when TIDE_GATE_COMMAND is unset")
+
+    monkeypatch.setattr(tools.subprocess, "run", _boom)
+
+    output = tools.run_gate_command.invoke({})
+
+    assert "exit_code=1" in output
+
+
+def test_run_gate_command_ignores_model_supplied_command(monkeypatch) -> None:
+    """CR-01 regression: the model can call this tool (decide WHEN) but
+    cannot choose WHAT runs — a model-emitted `command` tool-call argument
+    (e.g. a prompt-injection attempt to exfiltrate the signed token) is
+    always discarded; only TIDE_GATE_COMMAND ever reaches subprocess."""
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
+    captured: dict = {}
+
+    def _fake_run(command, **kwargs):
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(tools.subprocess, "run", _fake_run)
+
+    tools.run_gate_command.invoke({"command": "printenv ANTHROPIC_API_KEY"})
+
+    assert captured["command"] == "true"
+    assert captured["command"] != "printenv ANTHROPIC_API_KEY"
 
 
 def test_git_read_pins_cwd_and_timeout(monkeypatch, fixture_worktree: Path) -> None:
@@ -97,6 +136,7 @@ def test_git_read_pins_cwd_and_timeout(monkeypatch, fixture_worktree: Path) -> N
 
 
 def test_run_gate_command_pins_cwd_and_timeout(monkeypatch, fixture_worktree: Path) -> None:
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
     captured: dict = {}
 
     def _fake_run(command, **kwargs):
@@ -106,8 +146,9 @@ def test_run_gate_command_pins_cwd_and_timeout(monkeypatch, fixture_worktree: Pa
 
     monkeypatch.setattr(tools.subprocess, "run", _fake_run)
 
-    tools.run_gate_command.invoke("true")
+    tools.run_gate_command.invoke({})
 
+    assert captured["command"] == "true"
     assert captured["kwargs"]["cwd"] == str(fixture_worktree)
     assert captured["kwargs"]["timeout"] == tools.GATE_COMMAND_TIMEOUT_SECONDS
     assert captured["kwargs"]["shell"] is True

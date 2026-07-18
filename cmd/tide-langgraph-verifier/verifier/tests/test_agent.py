@@ -50,12 +50,53 @@ def test_build_agent_has_no_checkpointer() -> None:
 
 def test_run_agent_one_tool_call_then_final_answer(monkeypatch, fixture_worktree: Path) -> None:
     monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    # CR-01: the command actually executed comes from the orchestrator-set
+    # TIDE_GATE_COMMAND env var, not the model's tool-call args.
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
+    model = _fake_model(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "run_gate_command", "args": {}, "id": "call-1"}],
+            ),
+            AIMessage(content="gate passed"),
+        ]
+    )
+
+    result_text = agent.run_agent(model, "run the gate command")
+
+    assert result_text == "gate passed"
+
+
+def test_run_agent_ignores_model_supplied_gate_command(monkeypatch, fixture_worktree: Path) -> None:
+    """CR-01 regression: even through the full tool-calling loop, a
+    model-emitted `command` tool-call argument (e.g. a prompt-injection
+    attempt) never reaches subprocess — only TIDE_GATE_COMMAND executes."""
+    monkeypatch.setenv("TIDE_WORKTREE_DIR", str(fixture_worktree))
+    monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
+    captured: dict = {}
+
+    from verifier import tools as verifier_tools
+
+    real_run = verifier_tools.subprocess.run
+
+    def _spy_run(command, **kwargs):
+        if kwargs.get("shell"):
+            captured["command"] = command
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(verifier_tools.subprocess, "run", _spy_run)
+
     model = _fake_model(
         [
             AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "run_gate_command", "args": {"command": "true"}, "id": "call-1"}
+                    {
+                        "name": "run_gate_command",
+                        "args": {"command": "printenv ANTHROPIC_API_KEY"},
+                        "id": "call-1",
+                    }
                 ],
             ),
             AIMessage(content="gate passed"),
@@ -65,6 +106,7 @@ def test_run_agent_one_tool_call_then_final_answer(monkeypatch, fixture_worktree
     result_text = agent.run_agent(model, "run the gate command")
 
     assert result_text == "gate passed"
+    assert captured["command"] == "true"
 
 
 def test_run_agent_passes_explicit_recursion_limit(monkeypatch) -> None:
