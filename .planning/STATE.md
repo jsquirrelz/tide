@@ -4,13 +4,13 @@ milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
 stopped_at: Completed 48-01-PLAN.md
-last_updated: "2026-07-18T18:21:26.912Z"
+last_updated: "2026-07-18T18:29:59.057Z"
 last_activity: 2026-07-18
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 48 (LangGraph Evaluator Image + Credproxy-TLS Spike) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-07-18
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - **A1 correction:** httpx honors `SSL_CERT_FILE` only (`REQUESTS_CA_BUNDLE` is dead); the credproxy-TLS path through `ChatAnthropic` is a genuine build spike (`langchain#35843`), scheduled first (Phase 48) with an `http_client=`/`anthropic_client=` fallback.
 - **Named future arc:** Product / System / Oversight loops are later milestones; `internal/eval` seeds the System loop, the existing gates seed Oversight enforcement (resolve gate policy from loop level/risk/confidence/history).
 - [Phase 48]: pytest==9.1.1 slopchecked [OK] before addition as the sole dev pin; verify-langgraph-pins loops per-file to avoid grep multi-file 'filename:' prefix breaking the comment/blank-line filter
+- [Phase 48]: D-08 implemented as single ReadOnly bool field on existing BuildOptions/BuildJobSpec (RESEARCH Pattern 2), not a forked buildVerifierJobSpec — git credential omission proven via regression test, not new logic
 
 ### Pending Todos
 
@@ -92,10 +93,11 @@ Items acknowledged and deferred at v1.0.8 close (2026-07-17) — 30 carried-forw
 
 Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos above — worth reviewing during Phase 51's `ConditionVerifyHalt` gate wiring), W-4 agentName/agentEmail CRD pattern locks not re-established post-crank, Phase 36 residual 'bot' vocabulary (7 comment/fixture refs), 37-REVIEW advisory warnings (secrets RBAC blast radius, gitfetch timeouts, settings-match determinism, Job-name coupling) + GIT_PAT fetch-path allowance.
 | Phase 48 P01 | 6min | 2 tasks | 13 files |
+| Phase 48 P02 | 8min | 2 tasks | 2 files |
 
 ## Session Continuity
 
-Last session: 2026-07-18T18:21:26.894Z
+Last session: 2026-07-18T18:28:09.465Z
 Stopped at: Completed 48-01-PLAN.md
 Resume file: None
 
