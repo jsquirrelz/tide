@@ -1,0 +1,20 @@
+{
+  "verdict": "REPAIRABLE",
+  "summary": "Two deviations found: a missing null check and a stale doc comment.",
+  "findings": [
+    {
+      "dimension": "correctness",
+      "severity": "blocker",
+      "confidence": "high",
+      "evidence": "pkg/example/handler.go:42 dereferences req.User without a prior nil check",
+      "suggestedFix": "Add `if req.User == nil { return ErrMissingUser }` before the dereference at line 42"
+    },
+    {
+      "dimension": "documentation",
+      "severity": "advisory",
+      "confidence": "medium",
+      "evidence": "pkg/example/handler.go:10 doc comment still references the removed Legacy field",
+      "suggestedFix": "Update the doc comment to describe the current field set"
+    }
+  ]
+}
