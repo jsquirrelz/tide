@@ -19,5 +19,15 @@ export default defineConfig({
     setupFiles: ["./src/__tests__/setup.ts"],
     globals: true,
     css: false,
+    // Raise the per-test / per-hook budget well above vitest's 5000ms default.
+    // The full suite runs 34 files in parallel; on a contended CI runner a
+    // render test with multiple sequential findBy* awaits (ArtifactViewer Test 1)
+    // can exceed 5s of wall-clock even though it completes in ~200ms in
+    // isolation. asyncUtilTimeout (setup.ts) governs how long a single findBy
+    // polls; testTimeout must exceed the cumulative so the test doesn't abort
+    // mid-await. 20s is ~100x the isolated runtime — generous headroom for CI
+    // contention without masking a genuine hang.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
