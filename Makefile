@@ -857,3 +857,13 @@ verify-chart-images-published: ## Assert every ghcr.io/jsquirrelz/* image the ch
 bump-version: ## Set chart version + appVersion across every version-bearing file (release STEP ONE). Usage: make bump-version VERSION=X.Y.Z
 	@if [ -z "$(VERSION)" ]; then echo "usage: make bump-version VERSION=X.Y.Z"; exit 2; fi
 	@bash hack/scripts/bump-version.sh $(VERSION)
+
+##@ LangGraph Verifier Test Infra (Phase 48 EVAL-01/02)
+
+.PHONY: test-langgraph-verifier
+test-langgraph-verifier: ## Idempotently create cmd/tide-langgraph-verifier/.venv, install both lockfiles, and run its pytest suite.
+	@echo "setting up cmd/tide-langgraph-verifier/.venv (uv, python3.13)..."
+	@cd cmd/tide-langgraph-verifier && \
+		uv venv --python 3.13 .venv --allow-existing && \
+		uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r requirements-dev.txt && \
+		.venv/bin/python -m pytest verifier/tests/ -x -q

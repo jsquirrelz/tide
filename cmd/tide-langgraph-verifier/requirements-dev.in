@@ -1,0 +1,6 @@
+# Dev-only dependencies for the tide-langgraph-verifier test suite (D-10).
+# Patch-exact pins only — `make verify-langgraph-pins` greps this file too
+# (both runtime and dev pin files must be patch-exact).
+#
+# pytest==9.1.1 slopchecked before adding (2026-07-18): [OK] "pytest" (pypi).
+pytest==9.1.1

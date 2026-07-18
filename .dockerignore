@@ -43,3 +43,8 @@
 !dashboard/web/tsconfig.app.json
 !dashboard/web/tsconfig.node.json
 !dashboard/web/.nvmrc
+
+# Re-include the tide-langgraph-verifier Python source tree (Phase 48).
+# Without this, the deny-by-default `**` above silently excludes the
+# entire image's source (requirements files, pyproject.toml, verifier/).
+!cmd/tide-langgraph-verifier/**

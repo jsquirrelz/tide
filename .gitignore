@@ -65,3 +65,7 @@ cmd/tide-demo-init/fixture/
 # Local secrets (real API keys) — never commit
 .secrets/
 *.key
+
+# Phase 48 — tide-langgraph-verifier's uv-managed virtualenv (make test-langgraph-verifier)
+cmd/tide-langgraph-verifier/.venv/
+cmd/tide-langgraph-verifier/**/__pycache__/
