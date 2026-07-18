@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Completed 48-01-PLAN.md
-last_updated: "2026-07-18T18:54:09.625Z"
+stopped_at: "48-05 Task 1 committed (3880852); Task 2 checkpoint:human-verify pending (live TLS spike)"
+last_updated: "2026-07-18T19:09:10.871Z"
 last_activity: 2026-07-18
 progress:
   total_phases: 6
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 
 Phase: 48 (LangGraph Evaluator Image + Credproxy-TLS Spike) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Task 1/2 committed (3880852) — Task 2 is a checkpoint:human-verify gate=blocking (live TLS spike, real Anthropic API spend) awaiting human execution via `make spike-langgraph-tls`. NOT complete until 48-TLS-SPIKE-VERDICT.md records PASS/FAIL.
 Last activity: 2026-07-18
 
 Progress: [████████░░] 80%
@@ -67,6 +67,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 48]: Added EnvelopeMissingError as an EnvelopeError subclass so the verifier entrypoint distinguishes envelope-missing from envelope-invalid TerminationStub reasons
 - [Phase 48]: Scoped Dockerfile COPY to explicit verifier/*.py files (not a blanket verifier/ COPY) so requirements-dev.txt/tests/ never enter the shipped image despite the .dockerignore re-include admitting the whole source tree
 - [Phase 48]: CI provisions Python via astral-sh/setup-uv only (no actions/setup-python) - mirrors make test-langgraph-verifier's local dev recipe exactly
+- [Phase 48-05 Task 1]: tls_spike.py reads ANTHROPIC_BASE_URL/SSL_CERT_FILE purely via ChatAnthropic's own env-resolution (never a constructor kwarg) for exact construction-fidelity with the shipped skeleton; hack/minttoken/main.go is committed (not /tmp-only) since the spike is a retained, re-runnable artifact re-run on every D-10 pin bump
+- [Phase 48-05 Task 1]: verdict classification keys off the anthropic SDK's actual exception hierarchy (APIStatusError = TLS succeeded, APIConnectionError = TLS/connection failed, unwrap __cause__ for the error class) rather than string-matching error messages
 
 ### Pending Todos
 
@@ -78,6 +80,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - **v1.0.8 RELEASED 2026-07-17** (tag `v1.0.8` at `6e5b8f8`; goreleaser 5 binaries + 8 images + 2 Helm OCI charts published to GHCR, all verified anon-pullable). **Release-cascade lesson carried into v1.0.9 planning:** GSD per-phase verification never runs the `ci.yaml`-only gates (`make lint`, `verify-dashboard-freshness`, kind `examples_image_pin_test`) — wire these into each phase's verification, don't wait for release pre-flight to catch them.
 - **Cross-pod clock skew (Pitfall 5) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; documented as a known limitation at Phase 47 close, revisit on a multi-node cluster.
 - **Two genuinely open calls gate Phase 51's plan** (not resolved by research): (1) `GateCommand` schema location — a new `Plan.Spec`/`Project.Spec` field vs. convention-based lookup; (2) LangGraph `Vendor` sentinel — new literal (e.g. `"langgraph"`) vs. reusing `"anthropic"` with a runtime discriminator. Both must be decided during `/gsd:plan-phase 51`, not discovered mid-execution.
+- **Phase 48 blocked on 48-05 Task 2 (human checkpoint)**: the retained TLS spike harness (`make spike-langgraph-tls`) is built and committed (`3880852`), but the live measurement — one real, billable `max_tokens=1` `ChatAnthropic.invoke()` through credproxy — has not been run. Requires the operator to run `make spike-langgraph-tls` (needs `~/.tide/anthropic.key`) and record PASS/FAIL in `48-TLS-SPIKE-VERDICT.md`. Phase 49 must not start until this verdict is no longer `PENDING`.
 
 ### Roadmap Evolution
 
@@ -103,9 +106,9 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 
 ## Session Continuity
 
-Last session: 2026-07-18T18:54:03.097Z
-Stopped at: Completed 48-01-PLAN.md
-Resume file: None
+Last session: 2026-07-18T19:09:10.855Z
+Stopped at: 48-05 Task 1 committed (3880852); Task 2 checkpoint:human-verify pending (live TLS spike)
+Resume file: .planning/phases/48-langgraph-evaluator-image-credproxy-tls-spike/48-05-PLAN.md
 
 ## Operator Next Steps
 
