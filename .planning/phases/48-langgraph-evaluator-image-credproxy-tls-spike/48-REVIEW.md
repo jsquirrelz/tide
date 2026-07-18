@@ -22,7 +22,8 @@ findings:
   warning: 2
   info: 7
   total: 11
-status: issues_found
+status: resolved
+resolution: "All 5 findings (CR-01, CR-02, WR-01, WR-02, IN pin-regex) fixed root-cause on main (commits 9f849e2, 72706dd, c43a00d, f45b1a5, e2761ca) with regression tests; full suite green (pytest 48, go podjob, verify-langgraph-pins, test-verifier-readonly). Resolved 2026-07-18."
 ---
 
 # Phase 48: Code Review Report
