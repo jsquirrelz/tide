@@ -68,6 +68,53 @@ def test_git_read_rejects_option_injection(monkeypatch, git_args: str) -> None:
     assert "not allowed" in output
 
 
+@pytest.mark.parametrize(
+    "git_args",
+    [
+        "diff --no-index /etc/hostname /dev/null",
+        "diff --output=/scratch/x HEAD~1",
+        "log -p --output=/scratch/x",
+        "diff -c core.fsmonitor=false HEAD~1",
+        "show --config=/tmp/evil HEAD",
+        "log --upload-pack=/tmp/evil",
+        "diff --exec-path=/tmp/evil HEAD~1",
+    ],
+)
+def test_git_read_rejects_confinement_escape_options(monkeypatch, git_args: str) -> None:
+    """CR-02 regression: these options let an allowlisted subcommand escape
+    the pinned worktree (arbitrary file read/write, external config/helper
+    execution) and must be rejected before subprocess is ever invoked."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("subprocess must never be spawned for a confinement-escape option")
+
+    monkeypatch.setattr(tools.subprocess, "run", _boom)
+
+    output = tools.git_read.invoke(git_args)
+
+    assert "not allowed" in output
+
+
+def test_git_read_allows_diff_copy_detection_after_subcommand(
+    monkeypatch, fixture_worktree: Path
+) -> None:
+    """CR-02: `-C` AFTER the subcommand is git's legitimate copy-detection
+    flag (e.g. `git diff -C`), not the dangerous global `-C <path>`
+    repository redirect — must not be blocked."""
+    captured: dict = {}
+
+    def _fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(tools.subprocess, "run", _fake_run)
+
+    output = tools.git_read.invoke("diff -C HEAD~1")
+
+    assert "not allowed" not in output
+    assert captured["args"] == ["git", "diff", "-C", "HEAD~1"]
+
+
 def test_run_gate_command_success(monkeypatch) -> None:
     monkeypatch.setenv("TIDE_GATE_COMMAND", "true")
 

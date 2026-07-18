@@ -23,11 +23,30 @@ ALLOWED_GIT_SUBCOMMANDS = frozenset(
     {"show", "diff", "log", "ls-tree", "cat-file", "rev-parse", "status", "ls-files"}
 )
 
-# Option-injection / path-traversal guard (ASVS V12): these tokens redirect
-# git to operate on a different repository/worktree than the pinned one and
-# must never reach subprocess, regardless of where they appear in the
-# argument list.
-FORBIDDEN_GIT_OPTIONS = ("-C", "--git-dir", "--work-tree")
+# Option-injection / confinement-escape guard (ASVS V12): these options let
+# an allowlisted subcommand escape the pinned worktree/repository entirely —
+# reading arbitrary container files (--no-index), writing arbitrary
+# container paths (--output), running arbitrary git config / external
+# helpers (-c/--config, --upload-pack, --exec-path), or redirecting to a
+# different repository (--git-dir/--work-tree). They must never reach
+# subprocess, regardless of where they appear AFTER the subcommand.
+#
+# `-C` is deliberately NOT on this list. `tokens[0]` must already be an
+# allowlisted subcommand (checked above; none of them start with "-"), so
+# `-C` can only ever appear at index >= 1 — that is always git's per-
+# subcommand copy-detection flag (e.g. "diff -C"), never the dangerous
+# global "git -C <path> <subcommand>" repository redirect, which would
+# require "-C" at tokens[0] and is already rejected by the subcommand check.
+FORBIDDEN_GIT_OPTIONS = (
+    "--no-index",
+    "--output",
+    "-c",
+    "--config",
+    "--git-dir",
+    "--work-tree",
+    "--upload-pack",
+    "--exec-path",
+)
 
 GIT_READ_TIMEOUT_SECONDS = 30
 GATE_COMMAND_TIMEOUT_SECONDS = 60
@@ -84,11 +103,13 @@ def git_read(git_args: str) -> str:
             f"{sorted(ALLOWED_GIT_SUBCOMMANDS)} may be run"
         )
 
-    for token in tokens:
+    # Only tokens[1:] are checked — tokens[0] is the already-validated
+    # subcommand and never matches a forbidden option anyway.
+    for token in tokens[1:]:
         if token in FORBIDDEN_GIT_OPTIONS or any(
             token.startswith(f"{opt}=") for opt in FORBIDDEN_GIT_OPTIONS
         ):
-            return f"git_read: {token!r} is not allowed (repository/worktree override)"
+            return f"git_read: {token!r} is not allowed (confinement escape / arbitrary file access)"
 
     result = subprocess.run(  # noqa: S603 — fixed argv, no shell, allowlisted subcommand
         ["git", *tokens],
