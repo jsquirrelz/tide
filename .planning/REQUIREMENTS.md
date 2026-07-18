@@ -16,9 +16,9 @@ Requirements for this milestone. Each maps to exactly one roadmap phase.
 
 ### Common Loop Contract (LOOP)
 
-- [ ] **LOOP-01**: `LoopPolicy` (MaxIterations, MaxDuration, BudgetCents, Autonomy, EvaluatorRef, EscalationPolicy) and `LoopStatus` (Iteration, ParentRunID, LastEvaluation, ExitReason, CostCents, Conditions) exist as **shared API types embedded in domain CRDs** — never a single generic `Loop` controller that owns every behavior
-- [ ] **LOOP-02**: A construct is treated as a loop only when it has all five elements — a goal/spec, a mutable candidate, evaluator/environment feedback, a repeat policy, and a bounded exit/escalation — anything missing an element is modeled (and named) as a pipeline stage, not a loop
-- [ ] **LOOP-03**: Detailed iteration history lives in trace/artifact storage; the CRD `.status` `LoopStatus` carries only the current-iteration summary + exit reason — etcd stays a state store, never an event database
+- [x] **LOOP-01**: `LoopPolicy` (MaxIterations, MaxDuration, BudgetCents, Autonomy, EvaluatorRef, EscalationPolicy) and `LoopStatus` (Iteration, ParentRunID, LastEvaluation, ExitReason, CostCents, Conditions) exist as **shared API types embedded in domain CRDs** — never a single generic `Loop` controller that owns every behavior
+- [x] **LOOP-02**: A construct is treated as a loop only when it has all five elements — a goal/spec, a mutable candidate, evaluator/environment feedback, a repeat policy, and a bounded exit/escalation — anything missing an element is modeled (and named) as a pipeline stage, not a loop
+- [x] **LOOP-03**: Detailed iteration history lives in trace/artifact storage; the CRD `.status` `LoopStatus` carries only the current-iteration summary + exit reason — etcd stays a state store, never an event database
 
 ### Execution Loop (EXEC) — inside the Job
 
@@ -100,9 +100,9 @@ Locked at roadmap creation 2026-07-18 (`ROADMAP.md`): Phase 48 LangGraph evaluat
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LOOP-01 | Phase 49 | Pending |
-| LOOP-02 | Phase 49 | Pending |
-| LOOP-03 | Phase 49 | Pending |
+| LOOP-01 | Phase 49 | Complete |
+| LOOP-02 | Phase 49 | Complete |
+| LOOP-03 | Phase 49 | Complete |
 | EXEC-01 | Phase 50 | Pending |
 | EXEC-02 | Phase 50 | Pending |
 | EXEC-03 | Phase 50 | Pending |

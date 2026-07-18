@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
-stopped_at: Phase 49 context gathered
-last_updated: "2026-07-18T21:43:35.913Z"
-last_activity: 2026-07-18 -- Phase 49 planning complete
+stopped_at: Completed 49-01-PLAN.md
+last_updated: "2026-07-18T21:54:40.727Z"
+last_activity: 2026-07-18
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 9
-  completed_plans: 5
+  completed_plans: 6
   percent: 17
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-18)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Phase 48 — LangGraph Evaluator Image + Credproxy-TLS Spike
+**Current focus:** Phase 49 — Common Loop Contract + Verdict/Envelope/Persistence Schema
 
 ## Current Position
 
-Phase: 48 (LangGraph Evaluator Image + Credproxy-TLS Spike) — EXECUTING
-Plan: 5 of 5
+Phase: 49 (Common Loop Contract + Verdict/Envelope/Persistence Schema) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-07-18 -- Phase 49 planning complete
+Last activity: 2026-07-18
 
-Progress: [████████░░] 80%
+Progress: [███████░░░] 67%
 
 ## Performance Metrics
 
@@ -69,6 +69,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 48]: CI provisions Python via astral-sh/setup-uv only (no actions/setup-python) - mirrors make test-langgraph-verifier's local dev recipe exactly
 - [Phase 48-05 Task 1]: tls_spike.py reads ANTHROPIC_BASE_URL/SSL_CERT_FILE purely via ChatAnthropic's own env-resolution (never a constructor kwarg) for exact construction-fidelity with the shipped skeleton; hack/minttoken/main.go is committed (not /tmp-only) since the spike is a retained, re-runnable artifact re-run on every D-10 pin bump
 - [Phase 48-05 Task 1]: verdict classification keys off the anthropic SDK's actual exception hierarchy (APIStatusError = TLS succeeded, APIConnectionError = TLS/connection failed, unwrap __cause__ for the error class) rather than string-matching error messages
+- [Phase 49]: LoopPolicy/LoopStatus/EvaluationSummary declared standalone in api/v1alpha3/loop_types.go (D-01 two-homes precedent); embedded in no Kind this phase, make manifests confirmed zero CRD-YAML diff
+- [Phase 49]: LOOP-03 (no iteration history in .status) enforced via a compile-time struct-literal guard (TestLoopStatus_NoForbiddenFields), not just a runtime shape assertion
 
 ### Pending Todos
 
@@ -103,12 +105,13 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 48 P02 | 8min | 2 tasks | 2 files |
 | Phase 48 P03 | 15min | 3 tasks | 7 files |
 | Phase 48 P04 | 45min | 2 tasks | 5 files |
+| Phase 49 P01 | 7min | 2 tasks | 3 files |
 
 ## Session Continuity
 
-Last session: 2026-07-18T21:00:36.083Z
-Stopped at: Phase 49 context gathered
-Resume file: .planning/phases/49-common-loop-contract-verdict-envelope-persistence-schema/49-CONTEXT.md
+Last session: 2026-07-18T21:54:40.702Z
+Stopped at: Completed 49-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 
