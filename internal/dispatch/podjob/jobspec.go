@@ -431,6 +431,15 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			Name:      VolumeVerifierScratch,
 			MountPath: "/scratch",
 		})
+		// WR-02 fix: /scratch is the SOLE writable path under
+		// ReadOnlyRootFilesystem — redirect TMPDIR/HOME there so
+		// httpx/anthropic/langchain (which routinely write to /tmp and
+		// $HOME/.cache for token caches, tmpfiles, etc.) don't hit EROFS at
+		// runtime once Phase 51 dispatches this variant.
+		subagentEnv = append(subagentEnv,
+			corev1.EnvVar{Name: "TMPDIR", Value: "/scratch"},
+			corev1.EnvVar{Name: "HOME", Value: "/scratch"},
+		)
 	}
 	// D-02: stamp TIDE_PRICING_OVERRIDES_JSON only when the operator has configured
 	// pricing overrides. Prices are public list rates (T-14-03: accept, not secret);

@@ -99,6 +99,25 @@ func TestBuildJobSpec_Verifier_ScratchEmptyDirMounted(t *testing.T) {
 	if mount.ReadOnly {
 		t.Errorf("volumeMount %q ReadOnly = true; want false (read-write scratch for incidental writes)", verifierScratchVolumeName)
 	}
+
+	// WR-02: TMPDIR/HOME must redirect to the sole writable path so
+	// httpx/anthropic/langchain don't hit EROFS under ReadOnlyRootFilesystem.
+	var tmpdir, home string
+	var foundTMPDIR, foundHOME bool
+	for _, e := range subagent.Env {
+		switch e.Name {
+		case "TMPDIR":
+			tmpdir, foundTMPDIR = e.Value, true
+		case "HOME":
+			home, foundHOME = e.Value, true
+		}
+	}
+	if !foundTMPDIR || tmpdir != "/scratch" {
+		t.Errorf("subagent env TMPDIR = %q (found=%v); want \"/scratch\" when opts.ReadOnly", tmpdir, foundTMPDIR)
+	}
+	if !foundHOME || home != "/scratch" {
+		t.Errorf("subagent env HOME = %q (found=%v); want \"/scratch\" when opts.ReadOnly", home, foundHOME)
+	}
 }
 
 // TestBuildJobSpec_Verifier_ReadOnlyRootFilesystem verifies D-08: with
@@ -191,6 +210,11 @@ func TestBuildJobSpec_Verifier_DefaultUnchanged(t *testing.T) {
 			for _, v := range spec.Volumes {
 				if v.Name == verifierScratchVolumeName {
 					t.Errorf("%s: unexpected %q volume present when ReadOnly=false", name, verifierScratchVolumeName)
+				}
+			}
+			for _, e := range subagent.Env {
+				if e.Name == "TMPDIR" || e.Name == "HOME" {
+					t.Errorf("%s: unexpected env var %q present when ReadOnly=false", name, e.Name)
 				}
 			}
 			if subagent.SecurityContext == nil || subagent.SecurityContext.ReadOnlyRootFilesystem == nil {
