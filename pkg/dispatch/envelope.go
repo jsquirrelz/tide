@@ -55,7 +55,8 @@ type EnvelopeIn struct {
 	// without scanning the PVC directory tree.
 	TaskUID string `json:"taskUID"`
 
-	// Role is the planner/executor selector: "planner" or "executor".
+	// Role is the planner/executor/verifier selector: "planner", "executor",
+	// or "verifier".
 	Role string `json:"role"`
 
 	// Level is the hierarchy level this task operates at:
@@ -151,6 +152,11 @@ type EnvelopeIn struct {
 	// so production envelopes are not polluted with "dev: null".
 	Dev *Dev `json:"dev,omitempty"`
 
+	// Verify carries verify-dispatch-specific input data. Populated only
+	// when Role=="verifier" (D-03); omitted from JSON otherwise, mirroring
+	// Dispatch/Dev.
+	Verify *VerifyContext `json:"verify,omitempty"`
+
 	// SharedContext is the wave-scoped shared context string emitted by the
 	// parent planner and stamped byte-identically onto all wave siblings by
 	// the controller at child dispatch time (Phase 20 CACHE-02/D-05). Grows
@@ -235,6 +241,12 @@ type EnvelopeOut struct {
 	// Empty for executor-level dispatches and genuine leaf planners (no
 	// children to annotate). omitempty keeps executor out.json documents small.
 	SharedContext string `json:"sharedContext,omitempty"`
+
+	// Verdict carries the verifier's gate_decision. Populated only by
+	// verifier dispatches (Phase 51) — schema/plumbing only this phase.
+	// Pointer + omitempty so non-verify dispatches don't serialize a
+	// "verdict: null" placeholder.
+	Verdict *GateDecision `json:"verdict,omitempty"`
 }
 
 // IsEnvelopeComplete reports whether env represents a fully-completed dispatch.
@@ -376,6 +388,31 @@ type Dev struct {
 	TestMode string `json:"testMode,omitempty"`
 }
 
+// VerifyContext carries the minimal data a verifier dispatch needs (D-03).
+// The pre-2026-07-18 three-Stage framing is dropped under the loop reframe —
+// grow this per consumer, never a speculative superset.
+type VerifyContext struct {
+	// GateCommand is the planner-authored pass-criterion command(s) to run
+	// for real (exit code parsed, never self-reported). Field name carried
+	// forward from research/ARCHITECTURE.md:146 to avoid Phase 51 template
+	// churn.
+	GateCommand string `json:"gateCommand,omitempty"`
+
+	// RequiredArtifacts lists workspace-relative paths the verifier confirms
+	// exist.
+	RequiredArtifacts []string `json:"requiredArtifacts,omitempty"`
+
+	// EvaluatorRef names the evaluator config this dispatch resolves against
+	// (same-namespace name ref, plain string — not corev1.LocalObjectReference).
+	EvaluatorRef string `json:"evaluatorRef,omitempty"`
+
+	// EvidencePacketPath is the PVC-relative path to the compact evidence
+	// packet a repair attempt receives (original spec + evidence, never the
+	// prior agent's full context — TASK-02). Empty on a fresh, non-repair
+	// attempt.
+	EvidencePacketPath string `json:"evidencePacketPath,omitempty"`
+}
+
 // TerminationStub is the tiny cross-namespace status carrier written to the
 // dispatch Job's 4 KB termination message (Pod.status.containerStatuses[].
 // state.terminated.message). It carries ONLY the fields the Manager needs to
@@ -415,25 +452,57 @@ type TerminationStub struct {
 	// cannot Succeed until observed owned children >= ChildCount (plan 09-08).
 	// Zero for executor-level dispatches and genuine leaf planners.
 	ChildCount int `json:"childCount"`
+
+	// GateDecision is the verdict enum string only (EVAL-05 / D-05a) — NEVER
+	// a free-text summary. Empty on any non-verify dispatch.
+	GateDecision string `json:"gateDecision,omitempty"`
+
+	// FindingsCount is len(EnvelopeOut.Verdict.Findings). Zero on any
+	// non-verify dispatch.
+	FindingsCount int `json:"findingsCount,omitempty"`
+
+	// HighSeverityCount is the count of findings whose Severity equals the
+	// high-severity token (currently "blocker" — see [Finding.Severity]).
+	// Zero on any non-verify dispatch.
+	HighSeverityCount int `json:"highSeverityCount,omitempty"`
 }
 
+// highSeverityFindingToken is the Finding.Severity value NewTerminationStub
+// counts as "high severity" for TerminationStub.HighSeverityCount. A small
+// package const (rather than a hardcoded literal at the call site) so
+// Phase 51's rubric work can retune it in one place.
+const highSeverityFindingToken = "blocker"
+
 // NewTerminationStub builds a TerminationStub from a full EnvelopeOut by
-// copying the tiny-status subset: ExitCode, Reason, Usage, Git.HeadSHA, and
-// ChildCount (= len(out.ChildCRDs)). ChildCRD payloads, Result, and Artifacts
-// are deliberately excluded. A nil out.Git is safe and produces an empty
-// HeadSHA. A nil or empty ChildCRDs slice produces ChildCount == 0.
+// copying the tiny-status subset: ExitCode, Reason, Usage, Git.HeadSHA,
+// ChildCount (= len(out.ChildCRDs)), and — when out.Verdict is non-nil — the
+// verdict enum string plus two bounded findings counts. ChildCRD payloads,
+// Result, Artifacts, and the full findings array are deliberately excluded.
+// A nil out.Git is safe and produces an empty HeadSHA. A nil or empty
+// ChildCRDs slice produces ChildCount == 0. A nil out.Verdict is safe and
+// produces an empty GateDecision + zero counts.
 func NewTerminationStub(out EnvelopeOut) TerminationStub {
 	headSHA := ""
 	if out.Git != nil {
 		headSHA = out.Git.HeadSHA
 	}
-	return TerminationStub{
+	stub := TerminationStub{
 		ExitCode:   out.ExitCode,
 		Reason:     out.Reason,
 		Usage:      out.Usage,
 		HeadSHA:    headSHA,
 		ChildCount: len(out.ChildCRDs),
 	}
+	if out.Verdict != nil {
+		stub.GateDecision = string(out.Verdict.Verdict)
+		stub.FindingsCount = len(out.Verdict.Findings)
+		for _, f := range out.Verdict.Findings {
+			if f.Severity == highSeverityFindingToken {
+				stub.HighSeverityCount++
+			}
+		}
+	}
+	return stub
 }
 
 // ValidateAPIVersionKind checks that apiVersion equals [APIVersionV1Alpha1]

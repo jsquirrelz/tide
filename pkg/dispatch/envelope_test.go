@@ -112,6 +112,27 @@ func assertRoundTripIn(t *testing.T, in EnvelopeIn) {
 	if in.Dev != nil && got.Dev != nil && *in.Dev != *got.Dev {
 		t.Errorf("Dev: got %+v, want %+v", *got.Dev, *in.Dev)
 	}
+	// Verify pointer comparison.
+	if in.Verify == nil && got.Verify != nil {
+		t.Errorf("Verify: got %+v, want nil", got.Verify)
+	}
+	if in.Verify != nil && got.Verify == nil {
+		t.Errorf("Verify: got nil, want %+v", in.Verify)
+	}
+	if in.Verify != nil && got.Verify != nil {
+		if in.Verify.GateCommand != got.Verify.GateCommand {
+			t.Errorf("Verify.GateCommand: got %q, want %q", got.Verify.GateCommand, in.Verify.GateCommand)
+		}
+		if !stringSlicesEqual(in.Verify.RequiredArtifacts, got.Verify.RequiredArtifacts) {
+			t.Errorf("Verify.RequiredArtifacts: got %v, want %v", got.Verify.RequiredArtifacts, in.Verify.RequiredArtifacts)
+		}
+		if in.Verify.EvaluatorRef != got.Verify.EvaluatorRef {
+			t.Errorf("Verify.EvaluatorRef: got %q, want %q", got.Verify.EvaluatorRef, in.Verify.EvaluatorRef)
+		}
+		if in.Verify.EvidencePacketPath != got.Verify.EvidencePacketPath {
+			t.Errorf("Verify.EvidencePacketPath: got %q, want %q", got.Verify.EvidencePacketPath, in.Verify.EvidencePacketPath)
+		}
+	}
 }
 
 // assertRoundTripOut is the equivalent helper for EnvelopeOut.
@@ -182,6 +203,21 @@ func assertRoundTripOut(t *testing.T, out EnvelopeOut) {
 	if out.Git != nil && got.Git != nil && out.Git.HeadSHA != got.Git.HeadSHA {
 		t.Errorf("Git.HeadSHA: got %q, want %q", got.Git.HeadSHA, out.Git.HeadSHA)
 	}
+	// Verdict pointer comparison.
+	if out.Verdict == nil && got.Verdict != nil {
+		t.Errorf("Verdict: got %+v, want nil", got.Verdict)
+	}
+	if out.Verdict != nil && got.Verdict == nil {
+		t.Errorf("Verdict: got nil, want %+v", out.Verdict)
+	}
+	if out.Verdict != nil && got.Verdict != nil {
+		if out.Verdict.Verdict != got.Verdict.Verdict {
+			t.Errorf("Verdict.Verdict: got %q, want %q", got.Verdict.Verdict, out.Verdict.Verdict)
+		}
+		if len(out.Verdict.Findings) != len(got.Verdict.Findings) {
+			t.Errorf("Verdict.Findings length: got %d, want %d", len(got.Verdict.Findings), len(out.Verdict.Findings))
+		}
+	}
 }
 
 // stringSlicesEqual compares two string slices treating nil and empty as equal.
@@ -231,6 +267,12 @@ func fullyPopulatedEnvelopeIn() EnvelopeIn {
 		},
 		Dev: &Dev{
 			TestMode: "success",
+		},
+		Verify: &VerifyContext{
+			GateCommand:        "go test ./...",
+			RequiredArtifacts:  []string{"pkg/foo/foo.go"},
+			EvaluatorRef:       "default-evaluator",
+			EvidencePacketPath: "envelopes/uid-alpha-0001/evidence.json",
 		},
 	}
 }
@@ -303,6 +345,38 @@ func TestEnvelopeIn_RoundTrip_OmitsDispatchWhenNil(t *testing.T) {
 	if strings.Contains(string(data), `"dispatch"`) {
 		t.Errorf("serialized JSON contains \"dispatch\" key but Dispatch was nil; got: %s", string(data))
 	}
+}
+
+// TestEnvelopeIn_RoundTrip_OmitsVerifyWhenNil asserts that the serialized JSON
+// does NOT contain the key "verify" when the Verify field is nil (omitempty
+// contract, mirroring Dispatch/Dev — non-verifier dispatches must not be
+// polluted with "verify: null").
+func TestEnvelopeIn_RoundTrip_OmitsVerifyWhenNil(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.Verify = nil
+
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"verify"`) {
+		t.Errorf("serialized JSON contains \"verify\" key but Verify was nil; got: %s", string(data))
+	}
+}
+
+// TestEnvelopeIn_Verify_RoundTrip asserts that a populated VerifyContext
+// (Role="verifier") preserves GateCommand/RequiredArtifacts/EvaluatorRef/
+// EvidencePacketPath through a json round trip (D-03).
+func TestEnvelopeIn_Verify_RoundTrip(t *testing.T) {
+	in := fullyPopulatedEnvelopeIn()
+	in.Role = "verifier"
+	in.Verify = &VerifyContext{
+		GateCommand:        "make test-int",
+		RequiredArtifacts:  []string{"pkg/dispatch/verdict.go", "pkg/dispatch/envelope.go"},
+		EvaluatorRef:       "langgraph-evaluator",
+		EvidencePacketPath: "envelopes/uid-beta-0002/evidence.json",
+	}
+	assertRoundTripIn(t, in)
 }
 
 // TestEnvelopeIn_RoundTrip_OmitsDependsOnWhenNil asserts that the serialized
@@ -450,6 +524,14 @@ func TestEnvelopeIn_SubtestTable(t *testing.T) {
 				return e
 			}(),
 		},
+		{
+			name: "NilVerify",
+			in: func() EnvelopeIn {
+				e := fullyPopulatedEnvelopeIn()
+				e.Verify = nil
+				return e
+			}(),
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -581,6 +663,38 @@ func TestEnvelopeOut_Git_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestEnvelopeOut_Verdict_RoundTrip asserts that an EnvelopeOut with
+// Verdict=&GateDecision{...} round-trips; nil Verdict omits the "verdict"
+// JSON field per the *GateDecision + omitempty contract (Phase 51 populates
+// this field — schema/plumbing only this phase).
+func TestEnvelopeOut_Verdict_RoundTrip(t *testing.T) {
+	out := fullyPopulatedEnvelopeOut()
+	out.Verdict = &GateDecision{
+		Verdict: VerdictRepairable,
+		Summary: "one deviation found",
+		Findings: []Finding{
+			{
+				Dimension:    "correctness",
+				Severity:     "blocker",
+				Confidence:   "high",
+				Evidence:     "pkg/foo/foo.go:10",
+				SuggestedFix: "add a nil check",
+			},
+		},
+	}
+	assertRoundTripOut(t, out)
+
+	// Nil Verdict → no "verdict" key in JSON.
+	out.Verdict = nil
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"verdict"`) {
+		t.Errorf(`serialized JSON contains "verdict" key but Verdict was nil; got: %s`, string(data))
+	}
+}
+
 // TestUsage_CacheTokens is plan-03-01 Task 2 Test 5: Usage.CacheReadTokens
 // and Usage.CacheCreationTokens round-trip via JSON. Field tags MUST be
 // `cacheReadTokens` and `cacheCreationTokens` per D-C5 (maps to Anthropic
@@ -684,6 +798,24 @@ func TestNewTerminationStub_StaysSmall(t *testing.T) {
 			Spec: runtime.RawExtension{Raw: []byte(`{"phaseRef":"stub-milestone-1"}`)},
 		}
 	}
+	// Worst-case verdict: 50 all-high-severity findings. Only the counts are
+	// copied into the stub, never the array — proves EVAL-05a's bound holds
+	// even under a large findings list.
+	findings := make([]Finding, 50)
+	for i := range findings {
+		findings[i] = Finding{
+			Dimension:    strings.Repeat("dimension-", 5),
+			Severity:     highSeverityFindingToken,
+			Confidence:   "high",
+			Evidence:     strings.Repeat("evidence-", 20),
+			SuggestedFix: strings.Repeat("fix-", 20),
+		}
+	}
+	out.Verdict = &GateDecision{
+		Verdict:  VerdictBlocked,
+		Summary:  strings.Repeat("summary-", 20),
+		Findings: findings,
+	}
 
 	stub := NewTerminationStub(out)
 	data, err := json.Marshal(stub)
@@ -692,6 +824,12 @@ func TestNewTerminationStub_StaysSmall(t *testing.T) {
 	}
 	if len(data) >= 4096 {
 		t.Errorf("TerminationStub JSON size = %d bytes, want < 4096 (termination-message budget)", len(data))
+	}
+	if stub.FindingsCount != 50 {
+		t.Errorf("FindingsCount: got %d, want 50", stub.FindingsCount)
+	}
+	if stub.HighSeverityCount != 50 {
+		t.Errorf("HighSeverityCount: got %d, want 50", stub.HighSeverityCount)
 	}
 }
 
@@ -705,11 +843,14 @@ func TestTerminationStub_NoForbiddenFields(t *testing.T) {
 	// If ChildCRDs / Result / Artifacts are added, this literal will fail to
 	// compile with "unknown field" — intentional.
 	_ = TerminationStub{
-		ExitCode:   0,
-		Reason:     "",
-		Usage:      Usage{},
-		HeadSHA:    "",
-		ChildCount: 0,
+		ExitCode:          0,
+		Reason:            "",
+		Usage:             Usage{},
+		HeadSHA:           "",
+		ChildCount:        0,
+		GateDecision:      "",
+		FindingsCount:     0,
+		HighSeverityCount: 0,
 	}
 	// Runtime assertion: marshalled JSON must not contain these keys.
 	stub := NewTerminationStub(fullyPopulatedEnvelopeOut())
