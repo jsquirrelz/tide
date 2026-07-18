@@ -25,11 +25,9 @@ import (
 	tidev1alpha3 "github.com/jsquirrelz/tide/api/v1alpha3"
 )
 
-// verifierScratchVolumeName mirrors the literal jobspec.go uses for the D-08
-// read-only variant's scratch emptyDir volume/mount name. Kept as a test-local
-// constant rather than exported from jobspec.go — Phase 51 decides whether it
-// needs to be a shared const when dispatch wiring lands.
-const verifierScratchVolumeName = "verifier-scratch"
+// verifierScratchVolumeName aliases jobspec.go's VolumeVerifierScratch const
+// (Phase 48 D-08) for readability in these assertions.
+const verifierScratchVolumeName = VolumeVerifierScratch
 
 // testGitCredsSecretName is a git-write/push credential secret name used only
 // to prove its absence from the built Job — never a real secret.

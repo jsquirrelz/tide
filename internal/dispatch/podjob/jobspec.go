@@ -61,6 +61,12 @@ const (
 	// minted by the sidecar at pod startup (D-C2).
 	VolumeCertShared = "cert-shared"
 
+	// VolumeVerifierScratch is the emptyDir volume mounted at /scratch on the
+	// subagent container when BuildOptions.ReadOnly is true (Phase 48 D-08).
+	// Read-write, for incidental writes the verifier makes while /workspace
+	// is mounted ReadOnly.
+	VolumeVerifierScratch = "verifier-scratch"
+
 	// ServiceAccountSubagent is the name of the ServiceAccount with zero K8s
 	// verbs used by subagent pods (D-A4). Plan 12's Helm chart creates the SA.
 	ServiceAccountSubagent = "tide-subagent"
@@ -178,6 +184,25 @@ type BuildOptions struct {
 	// operator-gated PricingOverridesJSON transport above.
 	AgentName  string
 	AgentEmail string
+
+	// ReadOnly marks this dispatch as a read-only verifier variant (Phase 48
+	// D-08). When true: the /workspace mount is ReadOnly, a separate
+	// verifier-scratch emptyDir is added at /scratch for incidental writes,
+	// and ReadOnlyRootFilesystem flips true on the subagent container.
+	// Git-write/push credentials are NEVER added to a Job built by
+	// BuildJobSpec regardless of this flag — they are already isolated to the
+	// separate tide-push Job (push_helpers.go), so no additional omission
+	// logic is needed here; TestBuildJobSpec_Verifier_NoGitCredsInAnyContainer
+	// pins this as a regression test so a future refactor cannot silently
+	// re-introduce them.
+	//
+	// Forward-note (Phase 51 dispatch-wiring scope, not this phase's): when
+	// dispatch wires this variant, the envelope write-back path
+	// (/workspace/envelopes/<uid>/out.json) will need a separate read-write
+	// envelopes/ subPath mount of the same volume — out.json cannot be
+	// written through a ReadOnly mount. Resolving that mount split is
+	// explicitly Phase 51's job; nothing dispatches this ReadOnly variant yet.
+	ReadOnly bool
 }
 
 // BuildJobSpec returns a complete *batchv1.Job for executor or planner dispatch
@@ -396,7 +421,16 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			Name:      VolumeProjectWorkspace,
 			MountPath: "/workspace",
 			SubPath:   subPath,
+			ReadOnly:  opts.ReadOnly, // Phase 48 D-08: verifier variant mounts /workspace read-only
 		},
+	}
+	if opts.ReadOnly {
+		// Phase 48 D-08: separate read-write scratch volume for incidental
+		// writes since /workspace is now ReadOnly for this variant.
+		subagentMounts = append(subagentMounts, corev1.VolumeMount{
+			Name:      VolumeVerifierScratch,
+			MountPath: "/scratch",
+		})
 	}
 	// D-02: stamp TIDE_PRICING_OVERRIDES_JSON only when the operator has configured
 	// pricing overrides. Prices are public list rates (T-14-03: accept, not secret);
@@ -447,8 +481,10 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 			RunAsGroup:               new(int64(1000)),
 			RunAsNonRoot:             new(true),
 			AllowPrivilegeEscalation: new(false),
-			// Note: ReadOnlyRootFilesystem is false for subagent — it writes to /workspace.
-			ReadOnlyRootFilesystem: new(false),
+			// ReadOnlyRootFilesystem is false by default — the subagent writes to
+			// /workspace. Phase 48 D-08: true for the ReadOnly verifier variant,
+			// which writes incidental output to /scratch instead.
+			ReadOnlyRootFilesystem: new(opts.ReadOnly),
 			Capabilities:           &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 		},
 	}
@@ -472,6 +508,16 @@ func BuildJobSpec(opts BuildOptions) *batchv1.Job {
 		initContainers = append(initContainers, credproxy)
 		volumes = append(volumes, corev1.Volume{
 			Name: VolumeCertShared,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+	}
+	if opts.ReadOnly {
+		// Phase 48 D-08: the /scratch emptyDir backing the subagent's
+		// verifier-scratch mount (added to subagentMounts above).
+		volumes = append(volumes, corev1.Volume{
+			Name: VolumeVerifierScratch,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
