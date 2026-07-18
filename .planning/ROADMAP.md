@@ -52,7 +52,7 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
 Plans:
 **Wave 1**
 
-- [ ] 48-01-PLAN.md — Python scaffolding: patch-exact pins + hash-locked lockfiles, pytest infra (Wave 0), `make verify-langgraph-pins` CI gate
+- [x] 48-01-PLAN.md — Python scaffolding: patch-exact pins + hash-locked lockfiles, pytest infra (Wave 0), `make verify-langgraph-pins` CI gate
 - [ ] 48-02-PLAN.md — Read-only jobspec variant: `ReadOnly bool` on BuildOptions + TestBuildJobSpec_Verifier_* static/credential-absence assertions (D-08/D-09a)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -158,7 +158,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 31–33 (see archive) | v1.0.6 | 8/8 | Complete | 2026-06-29 |
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
-| 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 0/TBD | Not started | - |
+| 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 1/5 | In Progress|  |
 | 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 0/TBD | Not started | - |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 0/TBD | Not started | - |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
