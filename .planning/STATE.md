@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0.8
 milestone_name: Phoenix Rising — OpenInference Trace Emission + Self-Hosted Phoenix
 status: Awaiting next milestone
-stopped_at: Milestone v1.0.8 complete — archived 2026-07-17; public tag/release pending the rc-gated process
+stopped_at: v1.0.8 RELEASED 2026-07-17 (tag v1.0.8; goreleaser 5 binaries + 8 images + 2 Helm OCI charts to GHCR, verified anon-public)
 last_updated: "2026-07-17T22:29:21.967Z"
 last_activity: 2026-07-17 — Milestone v1.0.8 completed and archived
 progress:
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-17)
 
 **Core value:** The five-level paradigm (Milestone → Phase → Plan → Task → Wave) runs as a real K8s orchestrator that can drive its own next milestone end-to-end.
-**Current focus:** Between milestones — v1.0.8 "Phoenix Rising" complete + archived; public tag/release (rc-gated) and next-milestone scoping pending.
+**Current focus:** Between milestones — v1.0.8 "Phoenix Rising" RELEASED 2026-07-17 (tag v1.0.8, published to GHCR); next-milestone scoping pending.
 
 ## Current Position
 
@@ -63,7 +63,7 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 ### Blockers/Concerns
 
-- **v1.0.8 not yet released.** The milestone is complete + archived, but the public `v1.0.8` git tag + images/OCI charts are NOT built. Follow the rc-gated release recipe — **bump chart/appVersion as step one** (else the rc dry-run reuses prior published images → version skew).
+- **v1.0.8 RELEASED 2026-07-17** (tag `v1.0.8` at `6e5b8f8`; goreleaser 5 binaries + 8 images + 2 Helm OCI charts published to GHCR, all verified anon-pullable). rc-gated via `v1.0.8-rc.3`. **Release-cascade lesson:** GSD per-phase verification ran `make test-int`/envtest but never the `ci.yaml`-only gates (`make lint`, `verify-dashboard-freshness`, kind `examples_image_pin_test`), so 5 issues accumulated undetected and surfaced only at release pre-flight (stale dashboard embed, 9 lint offenses, example subagent pin skew 1.0.7≠appVersion, dashboard test flake ×2). **Wire lint + dashboard-freshness into phase verification** to prevent recurrence. `make bump-version` covers only the 4 chart/hack files — example image pins are a manual step the kind pin test guards.
 - **Cross-pod clock skew (Pitfall 5) remains unverified** — single-node kind can't surface child-span-outside-parent-window rendering; documented as a known limitation at Phase 47 close, revisit on a multi-node cluster.
 - (Resolved this milestone: Phase 44 `events.jsonl` schema + D-O5 byte threshold — researched and implemented; Phase 47 chart-pin — re-verified live at `10.0.1`/`18.1.0`.)
 
@@ -89,7 +89,7 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 ## Session Continuity
 
 Last session: 2026-07-17T22:20:26Z
-Stopped at: v1.0.8 milestone complete + archived; public tag/release (rc-gated) pending
+Stopped at: v1.0.8 RELEASED 2026-07-17 (tag v1.0.8, published to GHCR); next milestone not yet scoped
 Resume file: — (start the next milestone with /gsd:new-milestone, or run the rc-gated release for v1.0.8)
 
 ## Operator Next Steps

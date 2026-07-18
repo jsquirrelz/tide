@@ -5,7 +5,7 @@
 **Phases completed:** 6 phases (42–47), 32 plans, 67 tasks
 **Timeline:** 2026-07-15 → 2026-07-17 · 240 commits · 229 files (+34.8k/−343)
 **Acceptance:** PROOF-01 human-signed-off at close — a live $0.88 `medium-project` run on a from-the-docs kind cluster produced a queryable **392-span, five-level** OpenInference trace tree (trace `e9124906…`) in an auth-ON self-hosted Phoenix. Phase 47 is the milestone's live E2E acceptance proof; no separate `/gsd:audit-milestone` was run.
-**Release status:** milestone complete and archived; **not yet released** — the public v1.0.8 tag + images/OCI charts follow the rc-gated release process (chart/appVersion bump first).
+**Release status:** **RELEASED 2026-07-17** — tag `v1.0.8` at `6e5b8f8`, rc-gated via `v1.0.8-rc.3`; goreleaser 5 platform binaries + 8 component images + 2 Helm OCI charts published to GHCR (all verified anon-pullable). Release pre-flight caught + fixed 5 latent `ci.yaml`-gate issues the phase verification missed (stale dashboard embed, 9 lint offenses, example subagent pin skew, dashboard test flake ×2).
 **Known deferred items at close:** 30 acknowledged (see STATE.md Deferred Items) — carried-forward bookkeeping: 24 quick-task `status:`-field false-positives (work shipped), 2 stale debug files (a KB + an old PR9 flake), and 4 todos (incl. 2 dispatch-gate correctness notes + cache-F1/vNext).
 
 **Key accomplishments:**
