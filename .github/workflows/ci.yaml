@@ -19,6 +19,9 @@
 #   Phase 40 invariants:
 #   - CRANK-07 (no legacy API-version refs)     — make verify-no-legacy-api-refs
 #
+#   Phase 48 invariants:
+#   - EVAL-02 (langgraph-verifier pins patch-exact) — make verify-langgraph-pins
+#
 # Per-push CI runs only fast gates (this workflow's test + helm-lint jobs). The
 # heavy Layer B kind integration suite (make test-int) and TIDE's real kind_e2e
 # e2e suite (make test-e2e-kind) moved OFF the per-push critical path to the
@@ -79,6 +82,9 @@ jobs:
 
       - name: Verify pkg/dispatch imports (SUB-01)
         run: make verify-dispatch-imports
+
+      - name: Verify tide-langgraph-verifier pins are patch-exact (EVAL-02)
+        run: make verify-langgraph-pins
 
       - name: Verify import firewall (SUB-05 — alias for tide-lint providerfirewall)
         run: make verify-import-firewall

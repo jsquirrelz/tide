@@ -867,3 +867,31 @@ test-langgraph-verifier: ## Idempotently create cmd/tide-langgraph-verifier/.ven
 		uv venv --python 3.13 .venv --allow-existing && \
 		uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r requirements-dev.txt && \
 		.venv/bin/python -m pytest verifier/tests/ -x -q
+
+##@ LangGraph Pin Gate (EVAL-02 / Pitfall 3)
+
+# PINS_GLOB is overridable so a negative self-test can point the gate at a
+# fixture file without touching the real pin files.
+PINS_GLOB ?= cmd/tide-langgraph-verifier/requirements*.in
+
+.PHONY: verify-langgraph-pins
+verify-langgraph-pins: ## Assert cmd/tide-langgraph-verifier/requirements*.in pins every direct dependency patch-exact (EVAL-02). Override glob: make verify-langgraph-pins PINS_GLOB=<path>.
+	@echo "verifying $(PINS_GLOB) has no range/unpinned specifiers..."
+	@FILES=$$(ls $(PINS_GLOB) 2>/dev/null); \
+	if [ -z "$$FILES" ]; then \
+		echo "no files matched $(PINS_GLOB) — gate misconfigured"; \
+		exit 1; \
+	fi; \
+	VIOLATIONS=""; \
+	for f in $$FILES; do \
+		V=$$(grep -vE '^\s*(#|$$)' "$$f" | grep -vE '^[A-Za-z0-9_.-]+==[0-9]' || true); \
+		if [ -n "$$V" ]; then \
+			VIOLATIONS=$$(printf '%s\n%s:\n%s\n' "$$VIOLATIONS" "$$f" "$$V"); \
+		fi; \
+	done; \
+	if [ -n "$$VIOLATIONS" ]; then \
+		echo "EVAL-02 violation: range/unpinned specifiers detected:"; \
+		echo "$$VIOLATIONS"; \
+		exit 1; \
+	fi
+	@echo "OK: all direct pins are patch-exact"
