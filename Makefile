@@ -874,6 +874,10 @@ test-langgraph-verifier: ## Idempotently create cmd/tide-langgraph-verifier/.ven
 		uv pip install --python .venv/bin/python --require-hashes -r requirements.txt -r requirements-dev.txt && \
 		.venv/bin/python -m pytest verifier/tests/ -x -q
 
+.PHONY: test-verifier-readonly
+test-verifier-readonly: ## Phase 48 EVAL-01 / D-09b — adversarial behavioral proof that git commit/push/writes fail at the mount/credential layer inside the real image (builds the image first unless IMG is set).
+	@bash hack/scripts/test-verifier-readonly.sh
+
 ##@ LangGraph Pin Gate (EVAL-02 / Pitfall 3)
 
 # PINS_GLOB is overridable so a negative self-test can point the gate at a

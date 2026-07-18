@@ -21,6 +21,9 @@
 #
 #   Phase 48 invariants:
 #   - EVAL-02 (langgraph-verifier pins patch-exact) — make verify-langgraph-pins
+#   - EVAL-01/EVAL-02 (Python suite + hash-enforced image build + adversarial
+#     read-only proof) — langgraph-verifier job: make test-langgraph-verifier,
+#     make docker-build-langgraph-verifier, make test-verifier-readonly
 #
 # Per-push CI runs only fast gates (this workflow's test + helm-lint jobs). The
 # heavy Layer B kind integration suite (make test-int) and TIDE's real kind_e2e
@@ -227,3 +230,30 @@ jobs:
 
       - name: Helm render gate assertions (TELEM-05 D-14)
         run: make helm-assert
+
+  langgraph-verifier:
+    name: LangGraph verifier Python suite + image + adversarial read-only test (EVAL-01/EVAL-02)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # uv manages its own pinned Python 3.13 interpreter download — no
+      # separate actions/setup-python step needed; mirrors
+      # `make test-langgraph-verifier`'s local dev recipe exactly.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Python suite (deferred from 48-01 — pytest against both lockfiles)
+        run: make test-langgraph-verifier
+
+      - name: Build tide-langgraph-verifier image (D-05/D-10)
+        run: make docker-build-langgraph-verifier
+
+      - name: Adversarial read-only behavioral test (EVAL-01 / D-09b)
+        run: make test-verifier-readonly
