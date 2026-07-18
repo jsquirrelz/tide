@@ -4,13 +4,13 @@ milestone: v1.0.9
 milestone_name: Slack Tide — The Task Loop (Verification-Driven Quality Iteration)
 status: executing
 stopped_at: Completed 48-01-PLAN.md
-last_updated: "2026-07-18T18:44:18.284Z"
+last_updated: "2026-07-18T18:54:09.625Z"
 last_activity: 2026-07-18
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-07-18)
 ## Current Position
 
 Phase: 48 (LangGraph Evaluator Image + Credproxy-TLS Spike) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-07-18
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -65,6 +65,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 48]: D-08 implemented as single ReadOnly bool field on existing BuildOptions/BuildJobSpec (RESEARCH Pattern 2), not a forked buildVerifierJobSpec — git credential omission proven via regression test, not new logic
 - [Phase 48]: git_read tool parameter named git_args, not args — langchain_core's @tool schema builder mis-derives the pydantic schema for a parameter literally named 'args'
 - [Phase 48]: Added EnvelopeMissingError as an EnvelopeError subclass so the verifier entrypoint distinguishes envelope-missing from envelope-invalid TerminationStub reasons
+- [Phase 48]: Scoped Dockerfile COPY to explicit verifier/*.py files (not a blanket verifier/ COPY) so requirements-dev.txt/tests/ never enter the shipped image despite the .dockerignore re-include admitting the whole source tree
+- [Phase 48]: CI provisions Python via astral-sh/setup-uv only (no actions/setup-python) - mirrors make test-langgraph-verifier's local dev recipe exactly
 
 ### Pending Todos
 
@@ -97,10 +99,11 @@ Tech-debt still carried forward: W-2 FailureHalt/gate-order divergences (todos a
 | Phase 48 P01 | 6min | 2 tasks | 13 files |
 | Phase 48 P02 | 8min | 2 tasks | 2 files |
 | Phase 48 P03 | 15min | 3 tasks | 7 files |
+| Phase 48 P04 | 45min | 2 tasks | 5 files |
 
 ## Session Continuity
 
-Last session: 2026-07-18T18:43:03.813Z
+Last session: 2026-07-18T18:54:03.097Z
 Stopped at: Completed 48-01-PLAN.md
 Resume file: None
 
