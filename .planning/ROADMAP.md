@@ -43,8 +43,15 @@ Phase numbering continues from v1.0.8 (last phase was 47); v1.0.9 starts at Phas
   2. A live pass/fail spike proves `SSL_CERT_FILE` alone (or the documented `http_client=`/`anthropic_client=` fallback) trusts credproxy's CA through the real `ChatAnthropic` construction path.
   3. An adversarial test attempting `git commit`/push against a fixture worktree fails at the mount/credential layer (ReadOnly worktree mount + omitted git-write/push credentials) — not merely by prompt refusal.
   4. Every Python dependency is patch-exact pinned, and a CI gate rejects any unpinned/range specifier.
-**Plans**: TBD
-**Research flag**: yes — the TLS spike outcome is genuinely unknown until executed live; if `SSL_CERT_FILE` alone doesn't suffice through `ChatAnthropic`'s construction path, plan the `http_client=`/`anthropic_client=` fallback as a real contingency, not a mid-build discovery.
+**Plans**: 5 plans
+
+Plans:
+- [ ] 48-01-PLAN.md — Python scaffolding: patch-exact pins + hash-locked lockfiles, pytest infra (Wave 0), `make verify-langgraph-pins` CI gate
+- [ ] 48-02-PLAN.md — Read-only jobspec variant: `ReadOnly bool` on BuildOptions + TestBuildJobSpec_Verifier_* static/credential-absence assertions (D-08/D-09a)
+- [ ] 48-03-PLAN.md — Verifier runtime: envelope wire-shape re-implementation, git_read + run_gate_command tools, create_agent loop + fail-closed entrypoint
+- [ ] 48-04-PLAN.md — Image build (digest-pinned, --require-hashes) + release-matrix wiring + D-09b adversarial behavioral test (`make test-verifier-readonly`)
+- [ ] 48-05-PLAN.md — Live credproxy-TLS spike (plain ChatAnthropic, SSL_CERT_FILE alone) + recorded verdict artifact gating Phase 49 (checkpoint)
+**Research flag**: yes — the TLS spike outcome is genuinely unknown until executed live; the fallback contingency is designed against the MEASURED error at the 48-05 checkpoint (D-07 revised post-research: the `http_client=`/`anthropic_client=` hook does not exist at the pinned version — RESEARCH Pitfall A).
 
 ### Phase 49: Common Loop Contract + Verdict/Envelope/Persistence Schema
 **Goal**: The `LoopPolicy`/`LoopStatus` shared API types, the `gate_decision` verdict schema, and the findings size×locality persistence contract are locked as shared, reusable primitives — before any halt-condition or reconciler logic is written on top of them.
