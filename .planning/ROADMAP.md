@@ -170,7 +170,7 @@ Phases execute in numeric order: 48 → 49 → 50 → 51 → 52 → 53
 | 34–41 (see archive) | v1.0.7 | 51/51 | Complete | 2026-07-15 |
 | 42–47 (see archive) | v1.0.8 | 32/32 | Complete | 2026-07-17 |
 | 48. LangGraph Evaluator Image + Credproxy-TLS Spike | v1.0.9 | 5/5 | Complete   | 2026-07-18 |
-| 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete   | 2026-07-18 |
+| 49. Common Loop Contract + Verdict/Envelope/Persistence Schema | v1.0.9 | 4/4 | Complete    | 2026-07-18 |
 | 50. Execution-Loop Hardening + Loop-Native Observability | v1.0.9 | 0/TBD | Not started | - |
 | 51. The Task Loop | v1.0.9 | 0/TBD | Not started | - |
 | 52. Per-Level LoopPolicy Parameterization | v1.0.9 | 0/TBD | Not started | - |
