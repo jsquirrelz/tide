@@ -273,6 +273,10 @@ spike: ## cross-pod cache prefix spike (online, requires TIDE_PROXY_ENDPOINT + T
 		-token "$(TIDE_SIGNED_TOKEN)" \
 		-model "$(or $(EVAL_MODEL),claude-sonnet-4-6)"
 
+.PHONY: spike-langgraph-tls
+spike-langgraph-tls: ## Phase 48 D-06/EVAL-02 — live credproxy-TLS spike (requires ~/.tide/anthropic.key; ~fractions of a cent). Stands up real credproxy + mints a throwaway token + runs one max_tokens=1 ChatAnthropic.invoke() through tide-langgraph-verifier trusting SSL_CERT_FILE alone. RE-RUN THIS on any of the 7 D-10 runtime pins bumping — the SSL_CERT_FILE-alone answer is a durable regression signal, not a one-time throwaway.
+	@bash hack/scripts/spike-langgraph-tls.sh
+
 .PHONY: lint
 lint: demo-fixture golangci-lint verify-dag-imports verify-dispatch-imports verify-import-firewall ## Run golangci-lint linter + import firewalls
 	"$(GOLANGCI_LINT)" run
