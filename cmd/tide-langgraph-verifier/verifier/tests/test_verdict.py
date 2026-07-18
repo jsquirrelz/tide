@@ -60,6 +60,16 @@ def test_gate_decision_dict_factory_produces_valid_decision(gate_decision_dict) 
         ('{"summary":"looks fine","findings":[]}', verdict.Verdict.BLOCKED),
         ("{not valid json", verdict.Verdict.BLOCKED),
         ('{"verdict":"APPROVED","summary":"ok","findings":[]}', verdict.Verdict.APPROVED),
+        # REPAIRABLE positive control — mirrors Go's ValidRepairable row (IN-03),
+        # proving the classifier returns each terminal, not only APPROVED/BLOCKED.
+        (
+            '{"verdict":"REPAIRABLE","summary":"needs a fix","findings":[]}',
+            verdict.Verdict.REPAIRABLE,
+        ),
+        # Recognized JSON, unknown verdict string → fails closed to BLOCKED via
+        # the classifier's ValueError branch; mirrors Go's
+        # TestClassifyVerdict_UnrecognizedVerdictField (IN-03).
+        ('{"verdict":"REJECTED","summary":"stale vocabulary"}', verdict.Verdict.BLOCKED),
     ],
 )
 def test_classify_verdict_fails_closed(raw: str, want: verdict.Verdict) -> None:
@@ -67,13 +77,16 @@ def test_classify_verdict_fails_closed(raw: str, want: verdict.Verdict) -> None:
 
 
 def test_verify_extraction_round_trips(tmp_path: Path, envelope_in_dict) -> None:
-    payload = envelope_in_dict(verify={"gateCommand": ["make", "test"]})
+    # gateCommand is a STRING on the Go wire contract (VerifyContext.GateCommand
+    # is `string`, envelope.go:399; Go tests use "go test ./..."), not an argv
+    # list — keep the Python fixture's encoded shape identical to Go (IN-02).
+    payload = envelope_in_dict(verify={"gateCommand": "make test"})
     in_path = tmp_path / "in.json"
     in_path.write_text(json.dumps(payload))
 
     env = envelope.read_envelope_in(in_path)
 
-    assert env.verify == {"gateCommand": ["make", "test"]}
+    assert env.verify == {"gateCommand": "make test"}
 
 
 def test_verify_missing_parses_fine(tmp_path: Path, envelope_in_dict) -> None:
