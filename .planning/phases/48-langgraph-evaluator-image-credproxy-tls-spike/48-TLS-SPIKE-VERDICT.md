@@ -1,6 +1,6 @@
 ---
-verdict: PENDING
-date:
+verdict: PASS
+date: 2026-07-18
 pins:
   langgraph: "1.2.9"
   langchain: "1.3.14"
@@ -26,17 +26,33 @@ throwaway HMAC signed token via `hack/minttoken`, and runs
 
 ## Evidence
 
-_(Paste the single `TLS-SPIKE: ...` verdict line + error class here. NEVER the
-signed token or the real API key.)_
+Operator ran `make spike-langgraph-tls` live on 2026-07-18 (durable key at
+`~/.tide/anthropic.key` confirmed present). Verbatim result:
+
+```
+tls_spike: token present: true
+tls_spike: proxy endpoint: https://127.0.0.1:8443
+tls_spike: model: claude-sonnet-4-6
+tls_spike: making one real max_tokens=1 .invoke() call...
+TLS-SPIKE: PASS
+  SSL_CERT_FILE alone trusted credproxy's CA through the real ChatAnthropic path.
+```
+
+(No signed token or API key printed — the harness never logs either.)
 
 ## Implication
 
-_(PASS → EVAL-02 discharged, zero defensive code needed in the shipped image;
-D-06/D-07's genuine unknown resolved positive.)_
+**PASS → EVAL-02 discharged.** `SSL_CERT_FILE` alone trusts credproxy's
+freshly-minted self-signed CA through the real `ChatAnthropic` construction
+path — the exact construction the shipped `tide-langgraph-verifier` skeleton
+uses (D-07 REVISED). The genuine unknown flagged by `langchain#35843` /
+`anthropic-sdk-python#923` resolved **positive** at the pinned versions: the
+Anthropic SDK's custom httpx transport honors `SSL_CERT_FILE`. **Zero
+defensive code** (no probe, no subclass) is needed in the shipped image, and
+no D-07 fallback fork is opened. Phase 49 is unblocked.
 
-_(FAIL → the measured error class routes to a human fix-shape decision per
-D-07 REVISED — the minimal fix is designed against the MEASURED error, not
-improvised defensively. Record the fork surfaced and the decision made.)_
+The spike harness is retained (`make spike-langgraph-tls`) — re-run on any pin
+bump to re-confirm this holds against a new transport version.
 
 ---
 *Phase: 48-langgraph-evaluator-image-credproxy-tls-spike*

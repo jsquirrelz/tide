@@ -2,7 +2,7 @@
 phase: 48-langgraph-evaluator-image-credproxy-tls-spike
 plan: 05
 subsystem: infra
-tags: [credproxy, tls, spike, langchain-anthropic, credproxy-tls, checkpoint-pending]
+tags: [credproxy, tls, spike, langchain-anthropic, credproxy-tls, checkpoint-resolved-pass]
 
 # Dependency graph
 requires:
@@ -12,7 +12,7 @@ provides:
   - cmd/tide-langgraph-verifier/spike/tls_spike.py — retained, re-runnable D-06/D-07 spike script (plain ChatAnthropic, binary verdict classification)
   - hack/minttoken/main.go — committed throwaway HMAC signed-token minting CLI (wraps internal/credproxy.Sign)
   - make spike-langgraph-tls (hack/scripts/spike-langgraph-tls.sh) — stands up real credproxy + mints token + runs the spike, guard-checked against ~/.tide/anthropic.key
-  - 48-TLS-SPIKE-VERDICT.md — PENDING decision-artifact template awaiting the live verdict (Task 2, not yet run)
+  - 48-TLS-SPIKE-VERDICT.md — verdict: PASS (operator ran make spike-langgraph-tls live 2026-07-18; SSL_CERT_FILE alone trusted credproxy's CA through real ChatAnthropic — EVAL-02 discharged, no D-07 fallback opened)
 affects: [49-loop-policy-gate-decision-schema]
 
 # Tech tracking
@@ -41,7 +41,7 @@ key-decisions:
 patterns-established:
   - "Bash-script-backs-Makefile-target pattern (hack/scripts/*.sh + a one-line @bash Makefile target) reused a third time (test-verifier-readonly.sh, spike-langgraph-tls.sh) for anything beyond simple go run/docker build invocations"
 
-requirements-completed: []
+requirements-completed: [EVAL-02]
 
 # Metrics
 duration: ~25min (Task 1 only — Task 2 is a checkpoint:human-verify gate, not yet run)
@@ -52,16 +52,16 @@ completed: 2026-07-18
 
 **Built the retained D-06/D-07 TLS spike harness — a bare-python plain-`ChatAnthropic` script, a committed HMAC token-mint helper, and a `make spike-langgraph-tls` driver that stands up real credproxy and guard-checks `~/.tide/anthropic.key` before any spend — but the live measurement itself (Task 2) has NOT been run.**
 
-## Status: 1/2 tasks complete — CHECKPOINT PENDING
+## Status: 2/2 tasks complete — CHECKPOINT RESOLVED (PASS)
 
-Task 1 (autonomous, the harness build) is complete and committed. Task 2
-(`checkpoint:human-verify`, `gate="blocking"`) — the actual live spike run
-that answers EVAL-02's genuine unknown and records the verdict in
-`48-TLS-SPIKE-VERDICT.md` — has deliberately **not** been executed by this
-agent. It spends real Anthropic API cents against the operator's durable key
-and requires human presence per the plan; the executor must not fabricate
-or self-approve this verdict. See the CHECKPOINT section returned alongside
-this summary for exact resume instructions.
+Task 1 (autonomous, the harness build) completed and committed. Task 2
+(`checkpoint:human-verify`, `gate="blocking"`) was resolved by the operator
+running `make spike-langgraph-tls` live on 2026-07-18 (durable key confirmed
+present). Result: **`TLS-SPIKE: PASS`** — `SSL_CERT_FILE` alone trusted
+credproxy's freshly-minted CA through the real `ChatAnthropic` construction
+path. EVAL-02 is discharged; the D-07-REVISED bet (plain construction, spike
+measures) held; no fallback fork opened. Verdict recorded in
+`48-TLS-SPIKE-VERDICT.md` (`verdict: PASS`). Phase 49 is unblocked.
 
 ## Performance
 
