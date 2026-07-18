@@ -10,6 +10,7 @@ test_envelope.py per this plan's files_modified scope.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,75 @@ def test_write_termination_stub_with_verdict_fields_stays_small(tmp_path: Path) 
     assert parsed["gateDecision"] == "REPAIRABLE"
     assert parsed["findingsCount"] == 3
     assert parsed["highSeverityCount"] == 1
+
+
+def _write_stub_with_timeout(timeout: float = 8.0, **kwargs) -> bool:
+    """Run write_termination_stub on a daemon thread and join with a timeout.
+
+    Returns True if it returned, False if it was still running at `timeout` —
+    the direct regression proof for WR-01 (a spinning truncation loop never
+    joins). No pytest-timeout plugin is in the lockfiles, so a bare hang would
+    stall the whole suite; the daemon thread lets a regression fail fast
+    instead (the abandoned thread dies with the interpreter)."""
+    done = threading.Event()
+
+    def _run() -> None:
+        envelope.write_termination_stub(**kwargs)
+        done.set()
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    return done.is_set()
+
+
+def test_write_termination_stub_does_not_hang_on_oversized_bounded_field(
+    tmp_path: Path,
+) -> None:
+    """WR-01 regression: when a NON-reason field (gateDecision) alone exceeds
+    the 4 KB cap, the truncation loop must not spin forever. reason is dropped
+    entirely once the "...(truncated)" marker can no longer fit, which trips
+    the `and reason` guard so the finalizer returns — a hung finalizer never
+    writes the termination message. The doc itself can still exceed the cap
+    here (gateDecision alone overflows — an upstream-misuse case K8s
+    truncates), so this asserts graceful termination + reason-drop, not the
+    <4096 bound."""
+    stub_path = tmp_path / "termination-log"
+
+    returned = _write_stub_with_timeout(
+        path=stub_path,
+        exit_code=1,
+        reason="short",
+        gate_decision="Z" * 5000,  # bounded enum by contract; oversized here to prove the guard
+        findings_count=1,
+        high_severity_count=1,
+    )
+
+    assert returned, "write_termination_stub hung (WR-01 infinite truncation loop)"
+    parsed = json.loads(stub_path.read_bytes())
+    assert parsed["reason"] == ""  # dropped entirely once the marker no longer fits
+
+
+def test_write_termination_stub_truncates_huge_reason_strictly_under_cap(
+    tmp_path: Path,
+) -> None:
+    """WR-02 parity + boundary: a huge reason with a bounded gateDecision is
+    truncated until the doc is STRICTLY < 4096 bytes — matching Go's
+    TestNewTerminationStub_StaysSmall (`len(data) < 4096`), never the exact
+    4096 the old `> 4096` condition permitted."""
+    stub_path = tmp_path / "termination-log"
+
+    returned = _write_stub_with_timeout(
+        path=stub_path,
+        exit_code=1,
+        reason="X" * 20_000,
+        gate_decision="REPAIRABLE",
+        findings_count=3,
+        high_severity_count=1,
+    )
+
+    assert returned, "write_termination_stub hung (WR-01/WR-02 truncation loop)"
+    data = stub_path.read_bytes()
+    # Strictly under, not <= : the one-byte parity fix with Go's < 4096.
+    assert len(data) < envelope.TERMINATION_STUB_MAX_BYTES
+    assert len(data) != envelope.TERMINATION_STUB_MAX_BYTES

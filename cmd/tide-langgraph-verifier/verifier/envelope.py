@@ -171,16 +171,19 @@ def write_termination_stub(
 ) -> None:
     """Write a TerminationStub (pkg/dispatch/envelope.go:394) to path.
 
-    Enforces the ≤4096-byte serialized-size invariant: if exitCode/reason
-    together would exceed the cap, reason is progressively truncated until
-    the document fits — this stub is written to the Job's termination
-    message, which is hard-capped by Kubernetes at 4 KB.
+    Enforces the strictly <4096-byte serialized-size invariant (matching Go's
+    TestNewTerminationStub_StaysSmall, which fails on `len(data) >= 4096`, not
+    `> 4096`): reason is progressively truncated — and dropped entirely once
+    even the truncation marker no longer fits — until the document is strictly
+    under the cap. This stub is written to the Job's termination message, which
+    is hard-capped by Kubernetes at 4 KB.
 
     gate_decision/findings_count/high_severity_count (EVAL-05/D-05a) mirror
     TerminationStub's bounded verdict summary — an enum string + two ints,
     joined into the dict unconditionally since they are bounded by
     construction. Only `reason` is unbounded free text and needs the
-    truncation loop.
+    truncation loop; the loop terminates by emptying `reason` (never spinning)
+    even if a caller mis-sizes a bounded field past the cap.
     """
     stub: dict[str, Any] = {
         "exitCode": exit_code,
@@ -191,10 +194,19 @@ def write_termination_stub(
     }
     data = json.dumps(stub).encode("utf-8")
 
-    while len(data) > TERMINATION_STUB_MAX_BYTES and reason:
-        overflow = len(data) - TERMINATION_STUB_MAX_BYTES
-        keep = max(0, len(reason) - overflow - len("...(truncated)"))
-        reason = reason[:keep] + "...(truncated)"
+    # Shrink until strictly under the cap (>=, matching Go's `< 4096`), never
+    # just to the cap. Each pass sheds at least one byte past the cap so the
+    # doc makes strict progress; when the "...(truncated)" marker can no longer
+    # fit, reason is dropped to "" — which both trips the `and reason` guard
+    # (terminating the loop) and, since gateDecision is a bounded enum + two
+    # ints by construction, leaves a doc that always fits.
+    while len(data) >= TERMINATION_STUB_MAX_BYTES and reason:
+        overflow = len(data) - TERMINATION_STUB_MAX_BYTES + 1
+        keep = len(reason) - overflow - len("...(truncated)")
+        if keep > 0:
+            reason = reason[:keep] + "...(truncated)"
+        else:
+            reason = ""
         stub["reason"] = reason
         data = json.dumps(stub).encode("utf-8")
 
