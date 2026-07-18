@@ -898,7 +898,7 @@ verify-langgraph-pins: ## Assert cmd/tide-langgraph-verifier/requirements*.in pi
 	fi; \
 	VIOLATIONS=""; \
 	for f in $$FILES; do \
-		V=$$(grep -vE '^\s*(#|$$)' "$$f" | grep -vE '^[A-Za-z0-9_.-]+==[0-9]' || true); \
+		V=$$(grep -vE '^\s*(#|$$)' "$$f" | grep -vE '^[A-Za-z0-9_.-]+==[0-9][0-9A-Za-z.-]*$$' || true); \
 		if [ -n "$$V" ]; then \
 			VIOLATIONS=$$(printf '%s\n%s:\n%s\n' "$$VIOLATIONS" "$$f" "$$V"); \
 		fi; \
