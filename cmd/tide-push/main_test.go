@@ -1411,6 +1411,50 @@ func TestStageEnvelopesEmptyDirFailsLoud(t *testing.T) {
 	}
 }
 
+// TestStageEnvelopesTaskFindingsOnly (Phase 49-04): a task/-kind envelope dir
+// carrying ONLY findings.json (no *.md, no children/) stages successfully —
+// proving the glob generalization is additive and a Task/verifier findings
+// dir (which a non-task kind, e.g. phase/, would still fail loud on per
+// TestStageEnvelopesEmptyDirFailsLoud) is now a legitimate shape.
+func TestStageEnvelopesTaskFindingsOnly(t *testing.T) {
+	base := t.TempDir()
+	bareSrc, _ := seedBareRepo(t, base)
+	branch := perRunBranch(t, "stage-task-findings")
+	ws := setupWorkspace(t, bareSrc, branch)
+
+	findings := []byte(`{"verdict":"APPROVED","summary":"ok","findings":[]}`)
+	writeEnvelopeFile(t, ws, "t1", "findings.json", findings)
+
+	cfg := pushConfig{
+		Mode:           "push",
+		Branch:         branch,
+		CommitMessage:  "tide: stage task findings envelope",
+		StageEnvelopes: "t1:task/t1",
+		Workspace:      ws,
+		ProjectUID:     "p-stage-task-findings",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	exit, stderr := stderrAndRun(t, ctx, cfg, "test-pat")
+	if exit != 0 {
+		t.Fatalf("exit=%d, want 0 for a findings-only task dir; stderr=%s", exit, stderr)
+	}
+
+	got := treePathsUnder(t, bareSrc, branch, ".tide/")
+	want := []string{".tide/planning/task/t1/findings.json"}
+	if len(got) != len(want) {
+		t.Fatalf("under .tide/ got %v, want %v", got, want)
+	}
+	if got[0] != want[0] {
+		t.Errorf(".tide path = %q, want %q", got[0], want[0])
+	}
+	gotBytes := treeFileBytes(t, bareSrc, branch, ".tide/planning/task/t1/findings.json")
+	if !bytes.Equal(gotBytes, findings) {
+		t.Errorf("findings.json bytes differ: got %q, want %q", gotBytes, findings)
+	}
+}
+
 // TestStageEnvelopesIdempotentRestage (Task 2 Test 4): pushing the same
 // cumulative map twice succeeds both times; the second push takes the clean-tree
 // path and adds no second commit (remote commit count unchanged).
