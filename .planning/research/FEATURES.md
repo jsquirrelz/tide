@@ -1,173 +1,259 @@
 # Feature Research
 
-**Domain:** LLM/agent trace observability integration (OpenInference spans → self-hosted Arize Phoenix) for a Kubernetes-native hierarchical agent orchestrator
-**Researched:** 2026-07-15
-**Confidence:** HIGH (Phoenix/OpenInference specifics grounded in Context7 + official docs; comparable-orchestrator landscape MEDIUM — thinner official documentation)
-
-## Context: what already exists in TIDE
-
-This is additive research — TIDE already has the seams this milestone needs to fill:
-
-- `pkg/otelai/attrs.go` — five OpenInference attribute helpers (`LLMInputMessages`, `LLMOutputMessages`, `TokenCount`, `AgentInvocation`, `ArtifactPath`) exist and are unit-tested, but have **zero production call sites** (confirmed: no `tracer.Start` outside `internal/otelinit`).
-- `internal/otelinit/provider.go` — env-driven `TracerProvider` construction; no-op when `otel.exporter.endpoint` is empty.
-- `charts/tide/values.yaml` (`otel:` block) — OTLP gRPC endpoint, `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG` (default `parentbased_traceidratio` @ 0.1), service name — all wired and chart-templated already. **Sampling controls are table stakes TIDE already ships**; this milestone doesn't need to build them.
-- Per-Task `events.jsonl` — the raw Claude Code stream-json capture (comment in `stream_parser.go` confirms `session_id`, `model_usage`, durations "ride through... untouched for Phase 4 OpenInference parsing"). This is the reporter's raw material for LLM message-array spans.
-- Dashboard Telemetry tab (`TelemetryView.tsx`) — Prometheus-backed cost/token/cache panels, polling every 60s, graceful degradation states. No trace/span awareness today — it queries `tide_*` counters, not OTel data.
-- `Project.Spec.Subagent.Levels.<level>.Model` — model identifier is already known per-level at dispatch time (manager holds it before every Job creation).
+**Domain:** In-cluster LLM verify tier for a K8s agentic-coding orchestrator (TIDE v1.0.9 "Slack Tide")
+**Researched:** 2026-07-18
+**Confidence:** MEDIUM-HIGH (GSD prior art read directly from source = HIGH; external LLM-as-judge/agentic-workflow grounding = MEDIUM, 3 web sources cross-checked; LangGraph-specific mechanics = MEDIUM, flagged for plan-phase re-verification per the milestone's own open questions)
 
 ## Feature Landscape
 
 ### Table Stakes (Users Expect These)
 
-An operator who deploys "OpenTelemetry + self-hosted Phoenix" for a hierarchical orchestrator expects Phoenix to look and behave like it does for any other agent framework. Missing any of these makes the integration feel broken or half-wired, even though "some spans exist."
+Any verify tier that closes the 2026-07-03 incident class ("Complete" stamped with a missing deliverable and an unexecuted pass criterion) must have these or the tier is theater.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Real parent/child span tree matching the M→P→P→T hierarchy | Phoenix's core UI *is* the nested trace tree (`AGENT → LLM/TOOL → ...`); a flat list of unrelated root spans is the single biggest "this doesn't work" complaint pattern for agent tracing | MEDIUM | W3C `traceparent` env-var propagation across pod boundaries (Job env / envelope) is a standard, well-established pattern — validates the milestone's locked design (manager creates dispatch span, injects `traceparent` into the Job env). Confirmed via OTel docs: env vars are the conventional carrier when processes, not in-proc calls, are the trust boundary. |
-| Correct `openinference.span.kind` per dispatch site | Phoenix renders/queries differently per span kind; `AGENT` vs generic spans changes icon, grouping, and detail-panel layout | LOW | Already coded: `AgentInvocation()` hardcodes `spanKindAgent = "AGENT"`. OpenInference's own definition of AGENT ("higher-level reasoning that acts on tools using LLM guidance") matches every TIDE dispatch level, since each level *is* an LLM-backed subagent authoring an artifact — not just a workflow step. Keep AGENT for all five levels; do not introduce CHAIN as a "grouping folder" span unless a level genuinely delegates without LLM reasoning (none currently do). |
-| `llm.model_name` + `llm.provider` attributes on every LLM/AGENT span | **Phoenix will not compute cost or populate its LLM detail view without these** — confirmed required alongside token counts (Context7: "Model information: `llm.model_name` ... `llm.provider`"). | LOW | **Gap found**: `pkg/otelai/attrs.go` emits `llm.system="anthropic"` (a different, non-cost-bearing attribute) but has no `llm.model_name`/`llm.provider` helper today. Must add before Phoenix's built-in cost rollup is usable — otherwise every span shows `$0.00`/blank cost, which reads as "broken," not "not configured." |
-| `llm.token_count.total` attribute | Phoenix's documented required-attribute list for cost tracking includes `total`, not just `prompt`/`completion` | LOW | `TokenCount()` currently emits `prompt`/`completion`/`cache_read`/`cache_write` but no `total`. Cheap addition (sum at the call site or in the helper) — same call site as the model_name/provider gap above. |
-| LLM input/output message arrays visible in Phoenix's trace detail view | This is the literal headline value proposition of the milestone ("real OpenTelemetry spans... including full LLM input/output message arrays") — an operator opening Phoenix and seeing empty/truncated message content is the single worst first impression | HIGH | Helpers exist (`LLMInputMessages`/`LLMOutputMessages`) but have zero call sites. The reporter Job is the only in-namespace place that can read `events.jsonl` off the PVC (manager cannot mount project PVCs — already an established TIDE constraint from the envelopes-as-artifacts decision). Requires the explicit D-O5 payload-boundary call named in the milestone: full message content as inline attribute VALUES is the whole point here, but very large multi-turn conversations (tool-heavy Claude Code sessions) can produce large attribute strings — this is an **OTLP-transport/Phoenix-render-time concern, not an etcd concern** (traces never touch CRD `.status`, so the project's own "keep CRDs small" persistence rule does not apply here — a different persistence path entirely). Recommend a pragmatic cap (e.g. truncate individual message content at some threshold with an explicit "truncated" marker) rather than an unbounded inline dump, to keep OTLP export batches and Phoenix's span-attribute table renderable. |
-| Self-hosted Phoenix reachable at the chart's existing `otel.exporter.endpoint` | The chart already exposes this env-driven hook; users expect a documented recipe, not a from-scratch integration exercise | LOW | Phoenix ships an **official OCI Helm chart** (`oci://registry-1.docker.io/arizephoenix/phoenix-helm`) — `helm install phoenix $CHART_URL`. Installed **separately** from TIDE's chart (no subchart dependency, matches the milestone's locked constraint). Exposes OTLP gRPC on 4317 / HTTP on 4318, web UI on 6006. |
-| Phoenix persistence that survives pod restarts | An operator who loses all traces on the first Phoenix pod restart will conclude self-hosting "doesn't work" | LOW–MEDIUM | Two supported paths: SQLite-on-PVC (fine for single-operator/dev, TIDE's kind/minikube posture) or Postgres (**bundled as part of Phoenix's own Helm chart** — this is Phoenix's subchart, not TIDE's, so it doesn't violate TIDE's "no subchart dependency" rule, which is about TIDE's *own* chart not vendoring Phoenix). Document both; default recommendation should match TIDE's existing dev-cluster posture (PVC-backed SQLite for kind, note Postgres for production). |
-| Model/cost/duration attributes sourced from data the manager already holds | Re-deriving cost/duration independently in the tracing path risks a second, disagreeing number | LOW | Manager already computes cost via v1.0.7's exact-ID pricing engine and holds `Model` per level at dispatch time — the span attributes should be populated from these same values, not recomputed. |
-| Trace context survives across the reporter Job (not just manager→executor) | The milestone explicitly requires LLM message-array spans to parent correctly under the manager's dispatch span — a disconnected reporter trace defeats the whole "one navigable tree" value prop | MEDIUM | Same `traceparent` carrier as the manager→Task Job hop, but now manager→reporter Job. Confirms as the same solved pattern, applied twice. |
+| Real command execution, not LLM self-report | The incident itself: "pytest green" was never run — only the model's/human's belief that it would pass. GSD's `verify-phase.md` calls this "behavioral_verification" and treats it as separate from static/structural checks | MEDIUM | Verifier pod runs the declared gate command via bash in a checked-out worktree of the run branch; parses the real exit code. Never asks the LLM "would this pass?" |
+| Deliverable-existence check against the actual run branch | Declared-deliverable-missing-from-pushed-branch is the exact incident. Must check the pushed/mergeable branch tip, not the ephemeral task PVC | LOW | `git ls-tree` / worktree file check at the run-branch HEAD, after Phase 34's `merge-base --is-ancestor` gate has already run |
+| `gate_decision` enforced by the reconciler, not merely logged | An advisory-only verdict a human might miss reproduces the exact governance gap (the only verifier in the loop was a human diffing `filesTouched` by hand) | MEDIUM | Reconciler reads `gate_decision` and drives state transitions / halt conditions directly — same pattern as existing gate-policy honoring |
+| Severity-tagged findings, persisted and reviewable | A blob of prose the operator has to re-parse doesn't scale past the first run | LOW | Small summary + counts in a `.status` condition; full findings list as an artifact per the envelopes-as-artifacts size×locality rule (never a blob in etcd) |
+| do-not-touch / constraint-violation detection | Declared as an explicit requirement in the milestone (level-verify "confirm 'do-not-touch' constraints held") | LOW-MEDIUM | `git diff` the run branch against `baseRef`, restricted to the declared constraint paths; any hit is a finding |
+| A first-class halt condition with resume discipline | Wave-boundary failure semantics require any new stop condition to be a real halt class, not a silent state flip — mirrors `ConditionBillingHalt`/`ConditionFailureHalt` | MEDIUM | `ConditionVerifyHalt`, project-level, following the same resume-ordering lessons Phase 25 already learned the hard way (clear the halt condition *and* reset the underlying resource correctly, or resume becomes a no-op) |
+| Read-only verifier — never edits, commits, or pushes | Table stakes for trust: a "verifier" that can silently rewrite the thing it's grading is not a verifier | LOW (as a constraint; enforced by container image capability, not prompt discipline alone) | No file-edit tools, no git-write creds, no child-CRD authoring in the image |
 
 ### Differentiators (Competitive Advantage)
 
-Not required for the milestone's stated Target Features, but exploit what TIDE already has (the dashboard, the CRD status model, the multi-level hierarchy) in ways most agent-tracing integrations don't bother with because most callers aren't Kubernetes orchestrators with a persistent control plane.
+Features that make TIDE's verify tier more trustworthy than the two most common alternatives observed in prior art: GSD's host-side Markdown verifier (thorough but non-enforcing) and generic AI code-review bots (enforcing but generation-time-filtered, which the research shows costs recall).
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Dashboard → Phoenix trace URL deep link | Click a Task/Plan row in TIDE's dashboard, land directly on that span's Phoenix trace (`{phoenix-url}/projects/{project}/traces/{trace_id}`) — closes the loop between "what happened" (dashboard) and "why" (trace detail with full message content) | MEDIUM | Requires: (1) persisting `trace_id`/`span_id` somewhere the dashboard's API can read — a new CRD `.status` field per level is the natural fit (16 bytes for a trace ID, well within the "keep per-Task CRDs small" rule); (2) a configured Phoenix base URL in chart values for the dashboard to build the link from. Not in this milestone's stated Target Features (which stop at emission + install docs + one live proof) — recommend as the natural v1.x follow-up, not scope creep into this milestone. |
-| `session.id` = Project UID for cross-trace/cross-resumption grouping | TIDE resumability means a single logical "run" can span multiple manager restarts or multiple root traces (e.g., if trace context isn't preserved across a manager crash/restart). Phoenix's `ProjectSession` concept rolls up token/cost/latency **across multiple traces** under one session — this is a close semantic match, and Phoenix's own session GraphQL API already computes `tokenUsage`/`costSummary` rollups for free. | LOW | `setSession()`/`session.id` attribute is a one-line addition once the AGENT span exists. Gives a second, independently-computed cost/token rollup (Phoenix's session view) that can cross-check TIDE's own Prometheus-based budget rollup — valuable for catching the class of accounting bugs the project has hit before (the Claude-5 budget overcount, the adoption-lifecycle rollup gap). |
-| `metadata` / `tag.tags` carrying TIDE identifiers (phase/plan/task name, wave index, gate profile, failure-halt state) | Phoenix's filter DSL queries on `metadata`/`tag.tags` — lets an operator filter Phoenix's UI by "show me every AGENT span from Phase 12" or "every span from a conservative-profile run" without leaving Phoenix | LOW | Cheap: these are strings/JSON the manager already has in scope at span-creation time. High leverage for an operator debugging one wave among many. |
-| Runtime-neutral adapter with self-instrumenting capability flag | Forward-compatible with the already-locked LangGraph beachhead: a future LangGraph subagent emits OpenInference spans natively (`openinference-instrumentation-langchain`), so the reporter's `events.jsonl` parser must be skippable per-runtime to avoid **double-emitting spans** for the same dispatch | MEDIUM | Already named as a locked constraint in `PROJECT.md`, not optional — listed here because it's a genuine differentiator versus bolt-on tracing integrations that don't anticipate a second, self-instrumenting runtime arriving later. The adapter boundary is what keeps this from becoming a rewrite when LangGraph lands. |
-| `graph.node.id` / `graph.node.parent_id` explicit DAG attributes | OpenInference's spec defines these specifically for representing multi-agent/execution-graph structure independent of the OTel span-parent relationship | LOW | Optional/nice-to-have — TIDE's dispatch hierarchy is already a strict tree (each level has exactly one parent), so standard OTel span nesting already gives Phoenix's trace-tree view everything it needs. These attributes matter more for graphs with genuine fan-in (multiple parents) or cross-links, which TIDE's Execution DAG has at the *task* level within a plan (siblings, dependents) but Phoenix's span tree doesn't natively render non-tree graphs — low priority, would need its own visualization work Phoenix doesn't provide out of the box. |
-| 100%-sample default (or an explicit low-volume override) instead of the chart's current 10% | TIDE's dispatch volume is nothing like a high-QPS web service — a single Milestone run might produce a few dozen to a few hundred spans total, not millions. At 10% `traceidratio` sampling, an operator watching one Milestone run has a 90% chance any given Phase/Plan/Task span never reaches Phoenix at all, which will read as "half the traces are missing," not "sampling is working as designed." | LOW | Not new code — this is a values.yaml default reconsideration, already fully wired. Flagging because "sampling controls" was explicitly named in the research question and the current default is tuned for the wrong traffic shape for this milestone's use case. |
+| Bounded plan-check re-plan loop with stall detection | Catches a bad plan before any task spends money — cheapest place in the pipeline to reject work — while a hard, config-driven bound (not "keep trying") prevents runaway re-planning cost | MEDIUM | Directly modeled on GSD's `revision-loop.md` Check-Revise-Escalate pattern: track BLOCKER+WARNING count per attempt; if it doesn't strictly decrease, stop early and halt rather than burn remaining attempts |
+| Coverage-not-conservatism finding generation, filtered downstream | Opus-family models are documented (repo `CLAUDE.md`) to honor "only report high-severity" literally and silently drop real lower-severity findings. Splitting "find everything, tag it" from "decide what blocks" into two separate steps (prompt-time vs. reconciler/gate-policy-time) avoids that failure mode entirely | LOW-MEDIUM | Prompt instructs the verifier to emit a finding for every deviation observed, tagged `severity` + `confidence`; gate policy (config, not the model) decides which severities force `BLOCKED`/`REJECT` |
+| Distinct integration-check tier (cross-level, not just cross-task) | Phase 34 already closed cross-*task* integration mechanically (git-verified merge). Cross-*phase*/cross-*milestone* composition — "do sibling outputs actually work together" — is a different failure class the mechanical gate structurally cannot see, and is exactly the class the 2026-07-03 wave-parallel-integration-miss bug belongs to, one level up | HIGH | Needs a full run-branch build/test, not a single level's slice — real infra cost (whole-suite runs), not just a grep-and-diff pass |
+| Goal-backward plan-check rubric | Verifies "will these tasks achieve the level objective," not "does the plan look well-formed" — catches plans that are internally consistent but don't actually serve the level's declared goal | MEDIUM | Rubric dimensions modeled on GSD's plan-checker: goal alignment, declared-vs-plausible file-touch sanity, dependency/wave correctness, and verifiability of each task's acceptance criterion |
+| Same `Subagent` seam, new runtime | The verifier ships on a Python/LangGraph image behind the *existing* `pkg/dispatch.Subagent` interface — zero controller change to add a second concrete subagent runtime, and it seeds the LangGraph successor-runtime ladder for free | MEDIUM-HIGH | New image + envelope-in/out + `with_structured_output` for the verdict; no five-template parity, no file-edit tools |
+| Fresh-evaluation discipline (no cached verdicts) | Mirrors the Phase 34 lesson verbatim: a cached completeness verdict can go stale; recomputing from git (and re-running the gate command) is the only thing that can't lie | LOW | `gate_decision` is always recomputed against current worktree state at verify time — never memoized in `.status` across reconciles |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
+Things a verify tier could plausibly grow into, given how naturally "verifier" invites "and also fix it" — explicitly rejected for Slack Tide.
+
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|------------------|-------------|
-| Bespoke trace-viewer UI inside TIDE's own dashboard | "Why make the operator leave the dashboard?" | Phoenix already *is* a purpose-built trace UI (tree view, message detail, session rollups, filter DSL) — reimplementing any meaningful subset is wasted effort competing with a tool this milestone exists specifically to adopt | Dashboard → Phoenix deep link (see Differentiators) — link out, don't rebuild |
-| An OTel Collector middle-tier (à la Argo Workflows' Collector+Tempo+Grafana+Prometheus stack) | "Best practice" pattern seen in generic K8s tracing writeups | Phoenix **already doubles as its own OTLP collector** (ingests gRPC/HTTP directly) — adding a Collector between the manager and Phoenix is an unnecessary hop for this milestone's scale, and tail-based sampling (the main reason to run a Collector) requires all spans of a trace to land on the same Collector instance, which is real operational complexity TIDE doesn't need yet | Point `otel.exporter.endpoint` straight at Phoenix's OTLP port; revisit a Collector only if trace volume across many concurrent Projects genuinely grows past what head-based sampling can manage |
-| Vendoring/subcharting Arize's Phoenix Helm chart into `charts/tide/` | "One `helm install` for everything" convenience | Couples TIDE's release cadence to Arize's chart versions, contradicts the pattern already used successfully for Prometheus/Grafana (`prometheus.enabled=false` default, documented-install posture per TELEM-01), and locks operators who already run Phoenix for other apps into a second, TIDE-owned instance | Documented separate install (`INSTALL.md`/`observability.md` recipe using Phoenix's own official chart), `otel.exporter.endpoint` as the only coupling point — this is already the locked decision in `PROJECT.md`, confirmed correct against how Phoenix actually ships |
-| Inlining full envelope/artifact PVC content into span attribute values | "More detail is always better" | Violates the already-code-enforced D-O5 boundary (`TestNoPayloadHelperOnPublicSurface` exists specifically to prevent this); large inlined payloads bloat OTLP export batches and make Phoenix's attribute table slow/unreadable; conflates two different persistence paths (artifact PVC vs span attribute) that TIDE deliberately kept separate | `ArtifactPath()` attribute (a reference) for large artifacts; reserve inline message-array attributes for the bounded conversational turns Phoenix's UI is actually built to render |
-| Treating Phoenix's own cost rollup as authoritative / reconciling it against TIDE's budget engine | "One number to trust" instinct once both surfaces show a dollar figure | Phoenix computes cost from its own pricing table (Settings > Models, independently maintained) against whatever `llm.model_name` string TIDE's spans happen to carry; TIDE's own budget engine uses exact-ID pricing wired directly into the manager (the thing that gates spend). These two numbers **will** drift on pricing-table lag or model-string mismatches, and reconciling them is real, ongoing maintenance work with no operator-facing payoff | Populate `llm.model_name`/`llm.provider` accurately so Phoenix's number is *directionally* useful for spot-checking, but keep TIDE's CRD-status budget/cost rollup as the sole gate-enforcement source of truth — never let Phoenix's number block or unblock spend |
+| Auto-fixing findings | "It already read the code, just have it patch the bug" | Collapses the verify/author boundary the milestone locks (Pillar 2: never commits, pushes, or authors); an auto-fixing verifier can no longer verify its own fix without a second, independent check | Emit findings only. A human, or the explicitly-deferred future debug-stage subagent, decides and authors the fix |
+| Verifier re-authors the rejected plan directly | Feels efficient — skip the round-trip through the planner | The verifier and the planner would then share authorship of the same artifact with no independent check between them, defeating the point of a *separate* checking stage (this is precisely GSD's plan-checker/planner separation) | `REJECT` + findings appended to the **existing planner template's** next dispatch prompt; the planner (already-built authoring surface) re-authors |
+| Unbounded / silent retry-until-pass on plan-check | "Just keep trying until it's good" | No stall detection means a stuck planner burns the full re-plan budget (and real $) on a plan that structurally can't pass; GSD's own revision-loop explicitly guards against this with issue-count-must-decrease | Bounded ≤N attempts (config), stall detection (non-decreasing BLOCKER+WARNING count halts early), then `ConditionVerifyHalt` for a human — never loop indefinitely |
+| Auto-clearing a BLOCKED level-verify/integration-check to keep the run moving | Feels like it preserves throughput | Post-execution rework discards *paid* work — Pillar 3 is explicit that this decision belongs to the operator, not an auto-retry | `BLOCKED` halts immediately via `ConditionVerifyHalt`; only an explicit human action (the `tide resume`-style verb, following the `BillingHalt`/`FailureHalt` recovery discipline) clears it |
+| Flake-tolerant gate-command execution (retry the test run N times, accept first green) | Real CI suites do have flaky tests | Repo doctrine (v1.0.7) is explicit: **no flake tolerance** anywhere in the verification path — a non-deterministic gate command is a bug to root-cause, and masking it with retries is exactly the failure mode that hid a real regression for days | Run the gate command once; a failure is a real finding. Flakiness itself becomes a `WARNING`/`BLOCKER` finding for the operator to root-cause, not something the verifier smooths over |
+| Trusting the model's textual claim about test outcome instead of executing it | Cheaper (no bash execution, no worktree checkout) | This is the literal incident being fixed — the whole value of the tier is that it *runs* the declared command | Bash execution is a first-class, mandatory capability of the verifier image; `with_structured_output` reports the *parsed result* of a real run, never a self-reported guess |
+| Scope creep into code-review / security-audit / general critique | "While it's reading the diff anyway, have it comment on style/security too" | Explicitly deferred per the seed's staged sequencing (verify tier first, quality tier — research/review/debug — second, compounding tier — learnings — third, cost-multiplier tier — tournament — last); conflating them muddies what `gate_decision` even means | Stay strictly inside plan-check / level-verify / integration-check for this milestone; code-review is its own future stage with its own report-only-by-default posture |
+| Full authoring-parity image (file edits, commits, child-CRD emission) "since we're building a new subagent runtime anyway" | Efficient reuse of the new LangGraph image for future authoring roles | Directly contradicts Pillar 2's locked scope and reopens the "read-only" trust boundary that makes a verifier's verdict meaningful | Ship the minimal read-only surface now (envelope + git-read + bash + structured-output); authoring parity is an explicit later rung on the same successor-runtime ladder, gated by its own eval-harness evidence |
+
+## Verdict Shape (all three stages share one schema)
+
+Modeled directly on GSD's plan-checker/verifier YAML issue blocks (`references/few-shot-examples/plan-checker.md`, `templates/verification-report.md`) and on the LLM-as-judge literature's convention of a `{verdict, confidence, evidence, reason}` tuple, extended with TIDE's severity taxonomy:
+
+```yaml
+gate_decision: APPROVED | REJECT | BLOCKED   # REJECT = plan-check only (routes to re-plan); BLOCKED = level-verify/integration-check (terminal, human-gated)
+stage: plan-check | level-verify | integration-check
+level: milestone | phase | plan | project
+findings:
+  - id: F1
+    dimension: goal_alignment | file_touch_plausibility | dependency_correctness
+             | deliverable_existence | gate_command_result | constraint_violation
+             | cross_level_composition
+    severity: BLOCKER | WARNING | INFO
+    confidence: HIGH | MEDIUM | LOW
+    finding: "what was observed"
+    evidence: "grep output / exit code / file diff / command transcript"
+    affected_field: "which declared artifact/constraint/task this concerns"
+    suggested_fix: "actionable next step (not auto-applied)"
+summary: "N blockers, M warnings, K info"
+```
+
+**Enforcement split (the coverage-not-conservatism mechanism):** the verifier's prompt instructs it to emit a `finding` entry for *every* deviation it observes, tagged with severity + confidence — it never decides on its own to omit a low-severity finding. Gate *policy* (config, read by the reconciler) is what decides which severities force `REJECT`/`BLOCKED`. This is the explicit fix for the documented failure mode: Opus-family models told "only flag high-severity issues" comply literally and quietly drop real findings; splitting "observe and tag everything" from "decide what blocks" into two different actors (model vs. reconciler config) removes the model's ability to under-report by instruction-following too well.
+
+## Stage Behaviors
+
+### 1. plan-check — goal-backward, pre-dispatch
+
+| Aspect | Behavior |
+|---|---|
+| Trigger | After a level's planner authors its plan/child-spec artifact; before any child (task/phase/etc.) is dispatched |
+| Reads | Level objective (from the parent CRD's outcome/goal), the authored plan artifact, declared file-touch list, read-only worktree of the target repo |
+| Rubric (adapted from GSD's plan-checker dimensions) | goal_alignment ("will these declared tasks actually achieve the level objective, goal-backward"), file_touch_plausibility (declared files vs. what's plausible given the objective and existing repo structure), dependency_correctness (wave/depends-on sanity — no same-wave file collisions without a declared dependency), verification_derivability (does every child have a checkable, non-trivial acceptance criterion — GSD's own negative example flags `echo "done"`-style unfalsifiable verify commands as a BLOCKER) |
+| Verdict | `APPROVED` → proceed to dispatch. `REJECT` → bounded re-plan loop (below) |
+| Cost posture | Cheapest place in the pipeline to reject — no task has spent yet |
+
+**Bounded re-plan loop (concrete mechanism, adapted from GSD's Check-Revise-Escalate):**
+
+```
+attempt = 0
+prev_blocker_warning_count = ∞
+
+LOOP:
+  run plan-check verifier → gate_decision, findings
+  if gate_decision == APPROVED: proceed to dispatch, exit loop
+  attempt += 1
+  if attempt > N (config; default 1–2 per open question — recommend 2):
+     → ConditionVerifyHalt (human must intervene; the loop does NOT silently
+        proceed with an unvetted plan, unlike GSD's "proceed anyway" option —
+        there is no live human prompt mid-reconcile, so the safe default is halt)
+  count = count(findings where severity in {BLOCKER, WARNING})
+  if count >= prev_blocker_warning_count:
+     → ConditionVerifyHalt immediately ("re-plan loop stalled — issue count
+        not decreasing"), do not consume remaining attempts
+  prev_blocker_warning_count = count
+  re-dispatch the SAME planner template (no new template) with findings
+     appended verbatim to its prompt
+  go to LOOP
+```
+
+Own counter, not shared with `maxAttemptsPerTask`: a rejected *plan* and a failed *task execution* are different failure classes (authoring quality vs. runtime flakiness) and should not share a budget or the two failure modes will mask each other in telemetry.
+
+### 2. level-verify — post-execution, pre-Succeeded/pre-push
+
+| Aspect | Behavior |
+|---|---|
+| Trigger | After all of a level's children report Succeeded; before the level itself stamps `Succeeded` and before its boundary push. Runs **alongside/after** Phase 34's mechanical `merge-base --is-ancestor` completeness gate — that gate is structural (is the work actually merged), this stage is semantic (does the merged work actually satisfy the level) |
+| Reads | Level's declared deliverables list, declared "do-not-touch" constraint paths, the declared gate command (e.g. `pytest -q`, `make test`), a checked-out worktree at the run-branch tip |
+| Executes | The declared gate command for real via bash in the worktree; parses the actual exit code and output — this is the direct fix for the incident ("pytest green" was declared as a pass criterion but never run in-cluster) |
+| Checks | Every declared deliverable exists on the run branch (not just the task PVC); `git diff` against `baseRef` restricted to constraint paths shows no unauthorized touches |
+| Verdict | `APPROVED` → level stamps `Succeeded`, boundary push proceeds. `BLOCKED` → terminal, no auto-retry |
+| Failure semantics | `BLOCKED` fires `ConditionVerifyHalt` immediately for a human — Pillar 3 is explicit that post-execution rework discards already-paid-for work, so that call belongs to the operator, not an automatic loop |
+
+### 3. integration-check — milestone/project boundary
+
+| Aspect | Behavior |
+|---|---|
+| Trigger | At milestone/project boundaries — one level up from level-verify's per-level scope |
+| Reads | The *entire* run branch, all sibling levels' declared deliverables collectively, cross-level composition claims (does phase A's output actually get consumed/exercised by phase B) |
+| Executes | Build/test the full run branch as a whole (not one level's slice) — mirrors GSD's `gsd-integration-checker`, which is spawned separately from the per-phase verifier specifically to check cross-phase wiring and E2E flows that a single phase's own verification cannot see |
+| Verdict | `APPROVED` / `BLOCKED`, same terminal halt semantics as level-verify |
+| Distinct failure class it catches | The 2026-07-03 wave-parallel-integration-miss bug's *class*, one level up: siblings can each individually satisfy their own level-verify while still not composing (e.g., phase A's declared API shape silently drifts from what phase B actually calls) |
+| Open design question (flagged in the milestone doc, not resolved here) | Whether this is a genuinely distinct template/rubric or `level-verify` parameterized at milestone/project scope. GSD's own precedent argues for **distinct**: `gsd-integration-checker` is a separate agent from `gsd-verifier` with different inputs (phase exports, API routes, milestone-wide requirement IDs) and a different question ("do these compose?" vs. "does this one thing exist and pass?"). Recommend: share the verifier image/dispatch machinery, but give integration-check its own rubric (cross-component wiring, E2E flow tracing) rather than reusing level-verify's per-deliverable checklist unmodified |
 
 ## Feature Dependencies
 
 ```
-[Manager dispatch-chain span emission]
-    └──requires──> [W3C traceparent propagation into Job env] (shared pattern, used twice)
-                       └──requires──> [envelope/env carrier field already exists as a plumbing point on the Job spec]
+ConditionVerifyHalt
+    └──requires──> BillingHalt/FailureHalt halt-and-resume pattern (Phase 13/25 precedent)
+                       └──requires──> Phase 25's resume-ordering lesson: clear the halt
+                                       condition AND reset the underlying resource state
+                                       together, or resume becomes a no-op
 
-[LLM message-array spans (reporter)]
-    └──requires──> [events.jsonl capture] (already exists)
-    └──requires──> [D-O5 payload-boundary decision: inline vs. truncate vs. ArtifactPath] (explicit open call this milestone must make)
-    └──requires──> [W3C traceparent propagation into reporter Job env] (same mechanism as manager→Task)
+level-verify gate-command execution
+    └──requires──> read-only worktree checkout of the run branch
+                       └──requires──> git-as-artifact-store surface (Phase 37) — the
+                                       run branch is already the durable source of truth
 
-[Phoenix built-in cost/token rollup]
-    └──requires──> [llm.model_name attribute] (GAP — not in pkg/otelai today)
-    └──requires──> [llm.provider attribute] (GAP — not in pkg/otelai today)
-    └──requires──> [llm.token_count.total attribute] (GAP — TokenCount() omits it today)
+level-verify deliverable-existence check
+    └──requires──> Phase 34's mechanical `merge-base --is-ancestor` completeness gate
+                       (structural prerequisite — level-verify checks semantics of what
+                       that gate already proved is actually merged)
 
-[Self-hosted Phoenix surface]
-    └──requires──> [chart otel.exporter.endpoint wiring] (already exists)
-    └──requires──> [Phoenix official Helm chart / manifests, installed separately]
+plan-check bounded re-plan loop
+    └──requires──> existing 4 planner templates (re-dispatch target; no new authoring
+                       template) + per-level stage-dispatch config surface
 
-[Dashboard → Phoenix trace URL deep link] (differentiator, not this milestone's core scope)
-    └──requires──> [trace_id/span_id persisted to CRD .status per level] (new field, small)
-    └──requires──> [Phoenix base URL configured in chart values]
-    └──enhances──> [Manager dispatch-chain span emission]
+integration-check
+    └──enhances──> level-verify (catches a class level-verify structurally cannot see:
+                       cross-level composition, not single-level deliverable existence)
 
-[session.id = Project UID grouping] (differentiator)
-    └──enhances──> [Manager dispatch-chain span emission]
-    └──conflicts with nothing──> additive attribute only
+gate_decision persistence
+    └──requires──> envelopes-as-artifacts size×locality rule — small summary in a
+                       `.status` condition, full findings list as an artifact, never a
+                       blob in etcd
 
-[Runtime-neutral adapter / self-instrumenting capability flag]
-    └──requires──> [Subagent interface seam already exists]
-    └──enhances──> [LLM message-array spans] (prevents double-emission once LangGraph lands)
+Per-level verify stage config (on/off, model tier, gate policy severities)
+    └──requires──> existing per-level gate/model config pattern on the Project CRD
+                       (same mechanism, new leaf)
+
+Read-only LangGraph specialist image
+    └──requires──> pkg/dispatch.Subagent interface (UNCHANGED) + credproxy gating
+                       (existing mechanism, second concrete runtime)
+
+Coverage-not-conservatism prompting + severity/confidence tagging
+    └──conflicts with──> naive "only report high-severity" prompting (documented
+                       Opus-family failure mode: literal instruction-following silently
+                       drops real lower-severity findings — CLAUDE.md subagent-tuning note)
 ```
 
 ### Dependency Notes
 
-- **Phoenix cost/token rollup requires attribute additions TIDE doesn't have today** — this is the single most important dependency to surface for the roadmap: the milestone's plain-language goal ("traces are observable... with real spans") is achievable without touching `pkg/otelai/attrs.go`'s public surface, but Phoenix's *cost display specifically* silently fails (renders blank/zero) without `llm.model_name`/`llm.provider`/`llm.token_count.total`. Any phase that claims "cost is visible in Phoenix" as a deliverable needs this addition explicitly in scope, not assumed to fall out of `TokenCount()`/`AgentInvocation()` as they exist today.
-- **The D-O5 payload-boundary decision is genuinely open, not a rubber stamp** — the existing `pkg/otelai` code enforces "no inline payload helper" as a hard invariant (a test fails the build if one is added), but this milestone's headline feature is precisely "full LLM input/output message arrays" in spans. Squaring these two requires either (a) a scoped exception for message-array content specifically (distinct from generic "payload"), or (b) a size-bounded inline strategy (truncate + reference ArtifactPath for overflow). This is a real design decision for the roadmap to schedule deliberately, not a mechanical wiring task.
-- **Dashboard deep-linking depends on a new CRD status field** — small, but it's a schema change (v1alpha3 is the sole served version per v1.0.7's API lifecycle crank), so it should land in the same phase as any other v1alpha3 field additions this milestone might need, not as an afterthought bolted onto a later phase.
-- **Self-hosted Phoenix has no dependency on TIDE code changes at all** — it's purely a docs + `otel.exporter.endpoint` values.yaml default deliverable, and can be authored/verified in parallel with the Go-side span emission work.
+- **`ConditionVerifyHalt` requires the BillingHalt/FailureHalt pattern:** this milestone is explicitly told to mirror that pattern "including its resume/recovery discipline" — Phase 25 already paid the cost of learning that a resume verb must reset the underlying resource, not just clear the condition flag, or the verb becomes a silent no-op.
+- **level-verify requires Phase 34's mechanical gate as a prerequisite, not a replacement:** Phase 34 proves the level's work is actually merged onto the run branch (structural). level-verify then checks whether that merged work is *semantically* sufficient (deliverables present, gate command green, constraints held). Running level-verify without Phase 34 first would let it "verify" a level whose work was never actually integrated.
+- **integration-check enhances rather than duplicates level-verify:** the two must stay distinct in the rubric even if they share dispatch machinery, because siblings can each pass their own level-verify while still failing to compose — that gap is exactly what the incident's bug class demonstrated one level down.
+- **gate_decision persistence conflicts with any "cache in .status" instinct:** the same size×locality rule that already governs planning artifacts applies here; a verify verdict must never be treated as a derivable aggregate stored wholesale in etcd.
 
 ## MVP Definition
 
-### Launch With (v1.0.8 — matches PROJECT.md's stated Target Features exactly)
+### Launch With (v1 — this milestone, Slack Tide)
 
-- [ ] Dispatch-chain span emission (manager) at all five hierarchy levels — AGENT span kind, `agent.invocation.level`, cost/duration/token attributes sourced from data the manager already holds — *essential: this is the milestone's core value proposition, and the helper functions already exist, just unused*
-- [ ] `llm.model_name` + `llm.provider` + `llm.token_count.total` attribute additions to `pkg/otelai` — *essential: without these, Phoenix's cost/LLM-detail view silently renders blank, which will read as "broken" not "working as designed"*
-- [ ] W3C `traceparent` propagation into Task Job env AND reporter Job env — *essential: this is what makes the five-level hierarchy render as one navigable tree instead of disconnected root spans*
-- [ ] LLM message-array spans (reporter, from `events.jsonl`) with an explicit, documented payload-boundary decision (inline-bounded vs. reference) — *essential: named explicitly in the milestone's Target Features as the headline capability*
-- [ ] Self-hosted Phoenix install recipe (INSTALL.md/observability.md) using Phoenix's official OCI chart, `otel.exporter.endpoint` wiring, NOTES.txt nudge — *essential: stated Target Feature, zero TIDE code dependency, can run in parallel*
-- [ ] Live end-to-end proof: one real run's trace tree visible and queryable in Phoenix — *essential: stated Target Feature, the acceptance bar for the milestone*
+- [ ] **level-verify** — closes the headline gap (declared pass criterion never executed in-cluster); highest-value single feature in this milestone
+- [ ] **plan-check with bounded re-plan loop** — cheapest place to reject bad work, before any spend
+- [ ] **`ConditionVerifyHalt` + resume discipline** — required so a `BLOCKED`/exhausted-re-plan verdict actually stops the run rather than silently degrading
+- [ ] **`gate_decision` schema with severity+confidence findings** — the machine-readable contract every stage and the reconciler share
+- [ ] **Read-only LangGraph specialist image behind the unchanged `Subagent` seam** — the only way any of the above ships without breaking the "no vendor lock-in / pluggable runtime" constraint
+- [ ] **Per-level stage-dispatch config (on/off + gate-policy severities)** — gate policy stays in config, per repo-wide principle; needed from day one so cost is controllable, not bolted on later
+- [ ] **integration-check** — locked in scope by the milestone (Pillar 1 names all three stages); ships alongside the other two even though it is the highest-complexity item, because the incident's bug class is precisely a cross-level composition miss
 
 ### Add After Validation (v1.x)
 
-- [ ] Dashboard → Phoenix trace URL deep link — *trigger: once trace_id is flowing and stable, and once the dashboard's existing CRD-status read path has a natural field to extend*
-- [ ] `session.id` = Project UID grouping for cross-trace/cross-resumption cost rollup — *trigger: once multi-restart resumption scenarios are actually exercised in dogfooding and the "does trace context survive a manager restart" question has a concrete answer*
-- [ ] `metadata`/`tag.tags` enrichment (phase/plan/wave/gate-profile) for Phoenix filter-DSL queries — *trigger: cheap, could plausibly land in this milestone if time allows, but not load-bearing for the acceptance bar*
-- [ ] Sampling default reconsideration (10% → 100% or a TIDE-appropriate default) — *trigger: after the first live proof run, to confirm the "half my spans are missing" failure mode is real at TIDE's actual dispatch volume*
+- [ ] Broaden default stage-dispatch posture from milestone/project-only toward phase/plan-level, once level-verify has run against real cost and false-positive data — *trigger: at least one full external-repo run with the verify tier active and a false-positive rate low enough to justify wider default coverage*
+- [ ] Per-stage model-tier tuning distinct from planner-tier defaults (cheap-model verify vs. planner-tier verify) — *trigger: cost data from the first runs shows verify-tier spend is a meaningful fraction of total run cost*
+- [ ] Findings-artifact dashboard surfacing (beyond the `.status` condition summary) — *trigger: operators start needing to browse findings across runs, not just react to the current halt*
 
-### Future Consideration (v2+)
+### Future Consideration (v2+ — explicitly deferred per the seed's staged sequencing)
 
-- [ ] Native LangGraph self-instrumentation + adapter skip-if-native flag — *defer: blocked on the LangGraph specialist beachhead itself, which is explicitly sequenced after this milestone; the adapter *seam* must exist now (already locked as a constraint) but the actual flag-flip logic has nothing to activate until LangGraph subagents exist*
-- [ ] Direct-SDK subagent backend trace refinement (ties to CACHE-F1) — *defer: CACHE-F1 itself is an unscheduled follow-up; tracing refinements on a backend that doesn't exist yet are premature*
-- [ ] OTel Collector middle-tier / tail-based sampling — *defer: no evidence TIDE's dispatch volume needs this; revisit only if many concurrent Projects genuinely produce trace volume head-based sampling can't manage*
-- [ ] `graph.node.id`/`graph.node.parent_id` explicit DAG attributes for non-tree Execution DAG structure — *defer: Phoenix has no first-class visualization for this beyond standard span nesting; would require bespoke work on a tool this milestone is deliberately not trying to extend*
+- [ ] Debug-level subagent (diagnosis on task failure, replacing blind `maxAttemptsPerTask` retry) — *defer: quality tier, sequenced after the safety tier this milestone ships*
+- [ ] Code-review stage (severity-tagged diff review, report-only by default) — *defer: quality tier; reuses this milestone's coverage-not-conservatism posture verbatim when it lands*
+- [ ] Research/grounding stage (pre-planning dispatch producing a shared grounding artifact) — *defer: quality tier; inline planner grounding is "working well" per the seed, so this is lower urgency than verify*
+- [ ] Extract-learnings stage (project-scoped + cluster-wide persistence) — *defer: compounding tier; only valuable once debug/verify/research exist as consumers of the learnings it would produce*
+- [ ] Tournament-style candidate-plan judging — *defer: cost-multiplier tier, strictly config-gated (default N=1/off); most plausible at the plan level once verify-tier evidence justifies the extra spend*
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
-|---------|------------|----------------------|----------|
-| Dispatch-chain AGENT span emission (5 levels) | HIGH | MEDIUM | P1 |
-| `llm.model_name`/`llm.provider`/`token_count.total` attrs | HIGH | LOW | P1 |
-| `traceparent` propagation (Task + reporter Jobs) | HIGH | MEDIUM | P1 |
-| LLM message-array spans + payload-boundary decision | HIGH | HIGH | P1 |
-| Self-hosted Phoenix install docs | HIGH | LOW | P1 |
-| Live e2e trace-tree proof | HIGH | LOW (proof, not build) | P1 |
-| Dashboard → Phoenix trace URL deep link | MEDIUM | MEDIUM | P2 |
-| `session.id` = Project UID grouping | MEDIUM | LOW | P2 |
-| `metadata`/`tag.tags` enrichment | LOW–MEDIUM | LOW | P2 |
-| Sampling default reconsideration | MEDIUM | LOW | P2 |
-| Native LangGraph self-instrumentation adapter flag | HIGH (future) | MEDIUM | P3 |
-| OTel Collector / tail-based sampling | LOW (now) | HIGH | P3 |
-| `graph.node.*` DAG attributes | LOW | MEDIUM | P3 |
+|---------|------------|---------------------|----------|
+| level-verify (gate command execution + deliverable check) | HIGH | MEDIUM | P1 |
+| plan-check (goal-backward rubric) | HIGH | MEDIUM | P1 |
+| Bounded re-plan loop + stall detection | HIGH | LOW-MEDIUM | P1 |
+| `ConditionVerifyHalt` + resume discipline | HIGH | MEDIUM (mirrors existing pattern) | P1 |
+| `gate_decision` schema + severity/confidence tagging | HIGH | LOW | P1 |
+| Read-only LangGraph specialist image | HIGH (unblocks everything above + seeds the ladder) | MEDIUM-HIGH (new runtime, new image, SSL/CA-bundle question open) | P1 |
+| Per-level stage-dispatch config + gate policy | MEDIUM-HIGH | LOW | P1 |
+| integration-check (cross-level composition) | HIGH | HIGH (whole-branch build/test, distinct rubric) | P1 (locked in scope) |
+| Findings-artifact dashboard view | MEDIUM | MEDIUM | P2 |
+| Per-stage model-tier tuning | MEDIUM | LOW | P2 |
+| Wider default stage-dispatch posture (all levels) | MEDIUM | LOW (config only, once evidence exists) | P2 |
+| Debug / code-review / research / learnings / tournament stages | deferred by design | — | P3 (out of this milestone) |
 
-## Competitor / Comparable-Orchestrator Feature Analysis
+## Prior-Art Comparison
 
-| Capability | LangGraph Platform (LangSmith) | Argo Workflows | Dagster | TIDE's Approach |
-|------------|--------------------------------|-----------------|---------|------------------|
-| Native LLM/agent tracing | Yes — purpose-built, LangSmith SDK is the primary path (lower overhead than OTel per LangChain's own docs); **added full end-to-end OpenTelemetry support** as a secondary, standards-based path (send to LangSmith or any OTel backend) | No — Argo's own OTel support instruments the **workflow-controller and argoexec** (generic K8s workflow-step spans: DAG structure, step timing), not LLM-specific attributes; ships its own Collector+Tempo+Prometheus+Grafana stack for this | Thin — surfaces token/credit usage as **asset metadata** via its OpenAI integration, not OpenInference/GenAI-semconv spans; no first-class agent trace tree found in current docs | OpenInference-on-OTel spans emitted natively from the orchestrator's own dispatch/reconcile path — closer to LangGraph Platform's "standards-based OTel" posture than to Argo's generic-workflow-spans or Dagster's asset-metadata posture |
-| Session/conversation grouping | Yes — LangSmith threads/sessions native | No — no session concept, workflows are the unit | No — assets are the unit, no session concept | Phoenix's `session.id`/`ProjectSession` is available and a strong semantic match for TIDE's own Project-as-a-run concept (differentiator, not yet built) |
-| Self-hosted OSS trace backend | LangSmith is not self-hostable OSS at this tier; OTel path lets you point at any backend (Phoenix, Jaeger, etc.) instead | Self-hosted by construction (it's a K8s controller); ships its own observability stack as part of its OTel getting-started guide | Self-hosted by construction; observability story is thinner for LLM-specific data | Matches: OTel-standard emission + a documented, separately-installed self-hosted Phoenix — no vendor lock to a hosted SaaS trace backend |
-| Hierarchical multi-agent trace tree | Yes — LangGraph's graph structure maps naturally to nested spans in LangSmith | Partial — DAG structure is visible as workflow steps, but not as LLM-aware AGENT/LLM/TOOL spans | No — asset lineage graph exists but isn't a trace/span concept | TIDE's five-level hierarchy (Milestone→Phase→Plan→Task→Wave) maps directly onto nested AGENT spans — this is the milestone's core bet, and it's a stronger structural fit than any of the three comparables, none of which have a fixed hierarchical-agent-dispatch model to begin with |
-
-**Takeaway:** TIDE's problem shape (a fixed five-level agent-dispatch hierarchy, each level itself an LLM-backed subagent, running as isolated K8s Jobs) doesn't have a close analog among these three. LangGraph Platform is the closest in spirit (standards-based OTel emission, session grouping, self-hostable trace backend of choice) but its unit of work is an in-process graph, not cross-pod K8s Jobs — so its OTel support doesn't have to solve the `traceparent`-across-process-boundary problem TIDE's Job-per-dispatch model requires. Argo and Dagster's observability stories are generic-workflow or asset-lineage flavored, not agent/LLM-native — confirming that OpenInference-on-OTel is a genuine differentiator for a K8s-native orchestrator, not table stakes the ecosystem already provides for free.
+| Aspect | GSD (bootstrap host, Markdown-based) | Generic AI code-review agents (e.g. Cloudflare's multi-agent reviewer) | TIDE Slack Tide |
+|---|---|---|---|
+| Verdict | `PASSED / gaps_found / human_needed` (verifier); `PASSED / ISSUES FOUND` (plan-checker) — a human-read report | approve / request-changes + inline PR comments | `APPROVED / BLOCKED` (level-verify, integration-check); `APPROVED / REJECT` (plan-check) — machine-enforced by the reconciler, not just a report a human might skip |
+| Bounded revision loop | max 3 iterations, issue-count-must-decrease stall detection, escalate to a live human prompt after 3 | typically none — single-pass, human merges or doesn't | plan-check only, ≤N (config, default 1–2), same stall-detection principle, escalates to `ConditionVerifyHalt` (no live mid-reconcile human prompt exists, so halt is the safe default rather than GSD's "proceed anyway?") |
+| Finding-generation vs. filtering split | Checker both finds and judges in one pass; no documented separate coverage/filter step | Exclusion-at-generation (tell the reviewer up front what NOT to flag) *plus* a downstream "reasonableness filter" that drops speculative/false-positive findings | Coverage-at-generation (tag severity + confidence on everything observed, suppress nothing) *plus* downstream filtering entirely in gate-policy config — chosen specifically because Opus-family models are documented to under-report when told "only flag high severity" at generation time |
+| Execution vs. self-report | Runs the real test suite and real CLI commands ("behavioral_verification") — does not trust static claims | Typically static diff review only; no execution step | Runs the declared gate command for real in a worktree — the direct fix for the incident that motivated this milestone |
+| Persistence | Markdown files in the repo, human-reviewed manually | Inline PR comments, ephemeral to the review tool | `gate_decision` status condition (small, structured) + findings artifact via git-as-artifact-store (large), both consumed by the reconciler automatically |
+| Distinct integration tier | Yes — `gsd-integration-checker` is a separate agent from the per-phase verifier, spawned by `audit-milestone`, with cross-phase-specific inputs (phase exports, API routes, milestone requirement IDs) | Not applicable — no cross-repo/cross-phase composition concept | Locked as its own stage, one level up from level-verify, following GSD's own precedent that this needs a distinct rubric even when it shares dispatch machinery |
 
 ## Sources
 
-- Context7 `/arize-ai/phoenix` — span kinds, common attributes (`session.id`, `user.id`, `metadata`, `tag.tags`), session GraphQL rollups, cost-tracking required attributes, project-routing resource attributes (all HIGH confidence, official docs)
-- [OpenInference Semantic Conventions spec](https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md) — span kind definitions (LLM/TOOL/AGENT/CHAIN/etc.), `graph.node.id`/`graph.node.parent_id` — HIGH confidence, canonical spec
-- [Phoenix Self-Hosting — Kubernetes/Helm](https://arize.com/docs/phoenix/self-hosting/deployment-options/kubernetes-helm) — OCI chart reference, install commands, Postgres bundling — MEDIUM confidence (WebFetch summary; port/resource details not fully confirmed in fetched content)
-- [Phoenix Cost Tracking docs](https://arize.com/docs/phoenix/tracing/how-to-tracing/cost-tracking) — required attributes for cost calc (`llm.model_name`, `llm.provider`, `llm.token_count.*`) — HIGH confidence via Context7
-- [Phoenix Authentication docs](https://arize.com/docs/phoenix/self-hosting/features/authentication) — OSS self-hosted has no auth by default, opt-in via `PHOENIX_ENABLE_AUTH` — MEDIUM confidence (WebSearch summary)
-- [Phoenix Sessions tutorial](https://github.com/arize-ai/phoenix/blob/main/docs/phoenix/tracing/tutorial/sessions.mdx) — `session.id` propagation pattern (Python `using_session`, TS `setSession`) — HIGH confidence via Context7
-- TIDE repo ground-truth: `pkg/otelai/attrs.go`, `pkg/otelai/attrs_test.go`, `internal/otelinit/provider.go`, `charts/tide/values.yaml` (otel block), `internal/subagent/anthropic/stream_parser.go`, `dashboard/web/src/components/TelemetryView.tsx`, `.planning/PROJECT.md` — direct repo inspection, HIGH confidence
-- [Red Hat: Distributed tracing for agentic workflows with OpenTelemetry](https://developers.redhat.com/articles/2026/04/06/distributed-tracing-agentic-workflows-opentelemetry) — general agent-tracing pattern context — MEDIUM confidence (single-source WebSearch summary)
-- [Argo Workflows OpenTelemetry getting-started](https://argo-workflows.readthedocs.io/en/latest/telemetry-getting-started/) — Argo's Collector+Tempo+Prometheus+Grafana pattern, workflow-controller/argoexec span scope — MEDIUM confidence (WebSearch summary)
-- [LangChain: Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry) / [LangSmith OTel blog post](https://blog.langchain.com/end-to-end-opentelemetry-langsmith/) — LangSmith native vs. OTel tracing tradeoffs — MEDIUM confidence (WebSearch summary)
-- [Dagster: Building AI Products That Scale](https://dagster.io/blog/building-ai-products-that-scale) — Dagster's asset-metadata approach to LLM cost/token visibility — LOW-MEDIUM confidence (thin official documentation found; no dedicated OpenLLMetry integration confirmed)
-- [OneUpTime: Environment Variables as Context Propagation Carriers](https://oneuptime.com/blog/post/2026-02-06-environment-variables-context-propagation-carriers/view) — `TRACEPARENT`/`TRACESTATE` env-var carrier pattern for cross-process K8s workloads — MEDIUM confidence (WebSearch summary, pattern is well-established/uncontroversial)
+- `.planning/PROJECT.md` — v1.0.9 "Slack Tide" scope, prior Key Decisions (BillingHalt/FailureHalt pattern, Phase 34 mechanical completeness gate, git-as-artifact-store, resume-ordering lessons from Phase 25)
+- `.planning/seeds/verify-level-subagent.md` — the stage inventory, gap maps, and staged-sequencing rationale this milestone implements
+- `.planning/milestones/vnext-specialist-verify-MILESTONE.md` — locked architecture pillars (verify-tier-only scope, read-only LangGraph image, failure semantics, open questions)
+- `~/.claude/get-shit-done/workflows/verify-phase.md` — GSD's goal-backward post-execution verifier (level-verify analog): must-haves derivation, behavioral_verification (real test/CLI execution), anti-pattern scanning, test-quality audit, status decision tree, deferred-item filtering against later phases
+- `~/.claude/get-shit-done/workflows/audit-milestone.md` and `references/agent-contracts.md` — GSD's integration-checker (integration-check analog): distinct agent from the per-phase verifier, spawned separately with cross-phase inputs; 3-source requirement cross-reference; orphan detection
+- `~/.claude/get-shit-done/references/revision-loop.md` — the Check-Revise-Escalate bounded-loop pattern (max 3, issue-count-must-decrease stall detection, escalate-after-N) this milestone's plan-check re-plan loop is modeled on
+- `~/.claude/get-shit-done/references/few-shot-examples/plan-checker.md` and `few-shot-examples/verifier.md` — concrete positive/negative calibration examples for the goal-backward and file-touch/dependency rubrics, and for what a lazy/insufficient verifier looks like
+- `~/.claude/get-shit-done/templates/verification-report.md` — the verdict/evidence/severity table shape (`✓ VERIFIED / ✗ FAILED / ? UNCERTAIN`, `🛑 Blocker / ⚠️ Warning / ℹ️ Info`) this milestone's `gate_decision` schema generalizes into a machine-readable form
+- Anthropic, ["Building Effective AI Agents"](https://www.anthropic.com/research/building-effective-agents) — the evaluator-optimizer workflow pattern (one call generates, another evaluates and feeds back in a loop) that plan-check/level-verify/integration-check all instantiate
+- Cloudflare Engineering, ["Orchestrating AI Code Review at scale"](https://blog.cloudflare.com/ai-code-review/) — three-tier severity taxonomy (critical/warning/suggestion) driving structured, machine-parsed findings; the "reasonableness filter" downstream-filtering precedent; explicit confirmation that this class of tool does NOT commonly use a confidence field, and typically filters at generation time rather than at policy time (the point of divergence TIDE's coverage-not-conservatism posture deliberately corrects)
+- LLM-as-judge survey sources (evidentlyai.com, futureagi.com, Weights & Biases) — confirms `{verdict, confidence, evidence, reason}` as the common structured-judge schema shape, and that self-reported LLM confidence is known to correlate weakly with correctness (informs treating `confidence` as a routing/triage signal, not a certainty guarantee)
+- LangGraph/LangChain structured-output documentation search — confirms `.with_structured_output()` + Pydantic validation with automatic retry-on-validation-failure is the standard mechanism for a reliable `gate_decision` verdict; version-pin re-verification explicitly deferred to plan-phase per the milestone doc
 
 ---
-*Feature research for: LLM/agent trace observability (OpenInference + self-hosted Phoenix) on TIDE, a Kubernetes-native hierarchical agent orchestrator*
-*Researched: 2026-07-15*
-
+*Feature research for: TIDE v1.0.9 "Slack Tide" — in-cluster verify tier*
+*Researched: 2026-07-18*
