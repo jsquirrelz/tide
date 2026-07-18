@@ -120,3 +120,7 @@ None - no external service configuration required.
 ---
 *Phase: 49-common-loop-contract-verdict-envelope-persistence-schema*
 *Completed: 2026-07-18*
+
+## Self-Check: PASSED
+
+All created/modified files verified present on disk (`verdict.py`, `test_verdict.py`, `envelope.py`, `conftest.py`, this SUMMARY); all task commits (`f99f0833`, `bc0efdc3`, `fa88b342`, `1262e34b`) and the SUMMARY commit (`250a733c`) verified present in `git log`.
