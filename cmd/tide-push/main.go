@@ -138,7 +138,10 @@ type pushConfig struct {
 // dispatch/reporter path writes under envelopes/<uid>/) to the human-readable
 // destination prefix it lands at on the run branch: .tide/planning/<DestPrefix>/
 // (DASH-02, D-02). DestPrefix is `<kind>/<name>` with kind ∈
-// {project, milestone, phase, plan}.
+// {project, milestone, phase, plan, task}. kind=="task" stages a single
+// findings.json (no *.md, no children/) — see stageEnvelopeArtifacts
+// (EVAL-05c, Phase 49-04). Nothing produces a "task" entry yet; that is
+// Phase 51's job (collectStageEnvelopes is untouched this phase).
 type EnvelopeStage struct {
 	UID        string
 	DestPrefix string
@@ -1166,40 +1169,65 @@ func stageEnvelopeArtifacts(
 			return exitGenericFail
 		}
 
-		mdMatches, gerr := filepath.Glob(filepath.Join(srcDir, "*.md"))
-		if gerr != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob *.md in %s: %v\n", srcDir, gerr)
-			return exitGenericFail
-		}
-		if len(mdMatches) == 0 {
-			// A planner-completed level always emits at least one planning *.md;
-			// an empty set means the envelope is incomplete — fail loudly (D-03).
-			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr,
-				"tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n",
-				srcDir)
-			return exitGenericFail
-		}
-		childMatches, gerr := filepath.Glob(filepath.Join(srcDir, "children", "*.json"))
-		if gerr != nil {
-			writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
-			fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob children/*.json in %s: %v\n", srcDir, gerr)
-			return exitGenericFail
-		}
+		// kind is the first DestPrefix path segment ("task", "phase", "plan",
+		// "milestone", "project"). Only "task" bypasses the *.md requirement
+		// below — a Task/verifier envelope has no *.md and no children/
+		// subdir, just a single findings.json (EVAL-05c). Every other kind
+		// (incl. the empty/unknown default) keeps the existing planner-*.md
+		// behavior byte-identical (RESEARCH Pitfall 1).
+		kind, _, _ := strings.Cut(es.DestPrefix, "/")
 
-		// rel is the worktree-relative destination; the children/ subdirectory is
-		// preserved so plan/task JSON lands under .tide/planning/<destPrefix>/children/.
-		rels := make([]struct{ src, rel string }, 0, len(mdMatches)+len(childMatches))
-		for _, m := range mdMatches {
+		var rels []struct{ src, rel string }
+		if kind == "task" {
+			// An absent findings.json is still a real bug — fail closed exactly
+			// like the *.md-empty guard below, never silently skip (T-49-04-02).
+			findingsPath := filepath.Join(srcDir, "findings.json")
+			if _, statErr := os.Stat(findingsPath); statErr != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr,
+					"tide-push: stage-envelopes: no findings.json under %s (a verifier-completed task must have one)\n",
+					srcDir)
+				return exitGenericFail
+			}
 			rels = append(rels, struct{ src, rel string }{
-				m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m)),
+				findingsPath, filepath.Join(".tide", "planning", es.DestPrefix, "findings.json"),
 			})
-		}
-		for _, m := range childMatches {
-			rels = append(rels, struct{ src, rel string }{
-				m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m)),
-			})
+		} else {
+			mdMatches, gerr := filepath.Glob(filepath.Join(srcDir, "*.md"))
+			if gerr != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob *.md in %s: %v\n", srcDir, gerr)
+				return exitGenericFail
+			}
+			if len(mdMatches) == 0 {
+				// A planner-completed level always emits at least one planning *.md;
+				// an empty set means the envelope is incomplete — fail loudly (D-03).
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr,
+					"tide-push: stage-envelopes: no *.md under %s (a planner-completed level must have at least one)\n",
+					srcDir)
+				return exitGenericFail
+			}
+			childMatches, gerr := filepath.Glob(filepath.Join(srcDir, "children", "*.json"))
+			if gerr != nil {
+				writePushEnvelope(cfg, "", exitGenericFail, "artifact-stage-failed", nil, 0, "")
+				fmt.Fprintf(stderr, "tide-push: stage-envelopes: glob children/*.json in %s: %v\n", srcDir, gerr)
+				return exitGenericFail
+			}
+
+			// rel is the worktree-relative destination; the children/ subdirectory is
+			// preserved so plan/task JSON lands under .tide/planning/<destPrefix>/children/.
+			rels = make([]struct{ src, rel string }, 0, len(mdMatches)+len(childMatches))
+			for _, m := range mdMatches {
+				rels = append(rels, struct{ src, rel string }{
+					m, filepath.Join(".tide", "planning", es.DestPrefix, filepath.Base(m)),
+				})
+			}
+			for _, m := range childMatches {
+				rels = append(rels, struct{ src, rel string }{
+					m, filepath.Join(".tide", "planning", es.DestPrefix, "children", filepath.Base(m)),
+				})
+			}
 		}
 
 		for _, r := range rels {
