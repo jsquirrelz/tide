@@ -112,3 +112,13 @@ None - no external service configuration required.
 ---
 *Phase: 49-common-loop-contract-verdict-envelope-persistence-schema*
 *Completed: 2026-07-18*
+
+## Self-Check: PASSED
+
+- FOUND: api/v1alpha3/loop_types.go
+- FOUND: api/v1alpha3/loop_types_test.go
+- FOUND: api/v1alpha3/zz_generated.deepcopy.go
+- FOUND: .planning/phases/49-common-loop-contract-verdict-envelope-persistence-schema/49-01-SUMMARY.md
+- FOUND commit: 7366d70 (Task 1)
+- FOUND commit: a73d772 (Task 2)
+- FOUND commit: 368d1d6 (SUMMARY.md)
